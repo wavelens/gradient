@@ -20,6 +20,7 @@ mod log;
 mod metrics;
 mod nar;
 mod oidc;
+mod options;
 mod permissions;
 mod proto;
 mod pull_requests;
@@ -47,6 +48,7 @@ pub use log::LogArgs;
 pub use metrics::MetricsArgs;
 pub use nar::NarArgs;
 pub use oidc::OidcArgs;
+pub use options::{OptionSpec, options_json};
 pub use permissions::{CreatePermission, PermissionsArgs};
 pub use proto::ProtoArgs;
 pub use pull_requests::PullRequestsArgs;
@@ -61,12 +63,6 @@ pub use ssh::SshArgs;
 pub use state::StateArgs;
 pub use upload::UploadArgs;
 
-fn clap_defaults<T: clap::Args + clap::FromArgMatches>() -> T {
-    let command = T::augment_args(clap::Command::new("defaults")).mut_args(|arg| arg.env(None));
-    T::from_arg_matches(&command.get_matches_from(["defaults"]))
-        .expect("every option of the group has a default")
-}
-
 #[cfg(test)]
 mod tests {
     use crate::Cli;
@@ -75,24 +71,5 @@ mod tests {
     #[test]
     fn arguments_are_unique() {
         Cli::command().debug_assert();
-    }
-
-    #[test]
-    fn every_env_is_the_prefixed_flag() {
-        let mismatched: Vec<String> = Cli::command()
-            .get_arguments()
-            .filter_map(|arg| {
-                let long = arg.get_long()?;
-                if matches!(long, "help" | "version" | "state-validate") {
-                    return None;
-                }
-
-                let expected = format!("GRADIENT_{}", long.to_uppercase().replace('-', "_"));
-                let env = arg.get_env().map(|e| e.to_string_lossy().into_owned());
-                (env.as_deref() != Some(expected.as_str())).then(|| format!("--{long}: {env:?}"))
-            })
-            .collect();
-
-        assert!(mismatched.is_empty(), "{mismatched:#?}");
     }
 }

@@ -5,25 +5,18 @@
  */
 
 use clap::Args;
+use gradient_derive::config_group;
 
-#[derive(Args, Debug, Clone, Default)]
+#[config_group("github_app")]
+#[derive(Args, Debug, Clone)]
 pub struct GitHubAppArgs {
     /// GitHub App ID. Required to enable GitHub App webhook and CI reporting.
-    #[arg(long = "github-app-id", env = "GRADIENT_GITHUB_APP_ID")]
     pub id: Option<u64>,
     /// Path to the GitHub App RS256 private key PEM file.
-    #[arg(
-        long = "github-app-private-key-file",
-        env = "GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE"
-    )]
     pub private_key_file: Option<String>,
     /// Path to a file containing the shared secret used to verify incoming
     /// GitHub App webhook payloads (`X-Hub-Signature-256`). The file's
     /// contents must match the value configured on the GitHub App's webhook
     /// settings page.
-    #[arg(
-        long = "github-app-webhook-secret-file",
-        env = "GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE"
-    )]
     pub webhook_secret_file: Option<String>,
 }

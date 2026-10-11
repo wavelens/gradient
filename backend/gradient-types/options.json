@@ -1,0 +1,1437 @@
+[
+  {
+    "group": "",
+    "field": "listen_addr",
+    "flag": "listen-addr",
+    "env": "GRADIENT_LISTEN_ADDR",
+    "type": "String",
+    "description": "",
+    "default": "127.0.0.1",
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "port",
+    "flag": "port",
+    "env": "GRADIENT_PORT",
+    "type": "u16",
+    "description": "",
+    "default": "3000",
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "serve_url",
+    "flag": "serve-url",
+    "env": "GRADIENT_SERVE_URL",
+    "type": "String",
+    "description": "",
+    "default": "http://127.0.0.1:8000",
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "frontend_url",
+    "flag": "frontend-url",
+    "env": "GRADIENT_FRONTEND_URL",
+    "type": "String",
+    "description": "Public URL of the Gradient frontend, used for links in CI status reports.",
+    "default": "http://127.0.0.1:8000",
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "frontend_logo_url",
+    "flag": "frontend-logo-url",
+    "env": "GRADIENT_FRONTEND_LOGO_URL",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "use_tls",
+    "flag": "use-tls",
+    "env": "GRADIENT_USE_TLS",
+    "type": "bool",
+    "description": "Whether the server is served over TLS (HTTPS). It is controlling the `Secure` flag on\nsession cookies. Set it to `false` for plain HTTP deployments.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "",
+    "field": "use_quic",
+    "flag": "use-quic",
+    "env": "GRADIENT_USE_QUIC",
+    "type": "bool",
+    "description": "Advertise HTTP/3 (QUIC) support to connecting clients. Enabling this is NOT changing the\nbackend transport. Configure nginx with `listen 443 quic` and set the `Alt-Svc` header\nthere. `GET /api/v1/config` is surfacing this flag for clients choosing whether to attempt\nan HTTP/3 upgrade.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "",
+    "field": "base_dir",
+    "flag": "base-dir",
+    "env": "GRADIENT_BASE_DIR",
+    "type": "String",
+    "description": "",
+    "default": ".",
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "store_path",
+    "flag": "store-path",
+    "env": "GRADIENT_STORE_PATH",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "public_stats",
+    "flag": "public-stats",
+    "env": "GRADIENT_PUBLIC_STATS",
+    "type": "bool",
+    "description": "Expose `GET /api/v1/workers` and worker stats without authentication. Only superusers can\naccess those endpoints with `false` (default).",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "",
+    "field": "retention_days",
+    "flag": "retention-days",
+    "env": "GRADIENT_RETENTION_DAYS",
+    "type": "i64",
+    "description": "Days to keep job assignment records, finished deliveries, worker connection history, webhook\nand task action deliveries, expired sessions and CLI logins. The same limit is covering\nfinished admin tasks, the audit log, per-build resource samples and finished cluster jobs.\nPruned resource samples are no longer feeding build predictions. A finished cluster job\nwithout remaining members is going on the next hourly pass. The pruning is sparing the\nnewest finished admin task of each kind and active cluster jobs. An open worker connection\nis kept until the same worker is connecting again. `0` is keeping every record forever.",
+    "default": "90",
+    "values": []
+  },
+  {
+    "group": "secrets",
+    "field": "crypt_file",
+    "flag": "secrets-crypt-file",
+    "env": "GRADIENT_SECRETS_CRYPT_FILE",
+    "type": "String",
+    "description": "",
+    "default": "",
+    "values": []
+  },
+  {
+    "group": "secrets",
+    "field": "jwt_file",
+    "flag": "secrets-jwt-file",
+    "env": "GRADIENT_SECRETS_JWT_FILE",
+    "type": "String",
+    "description": "",
+    "default": "",
+    "values": []
+  },
+  {
+    "group": "state",
+    "field": "file",
+    "flag": "state-file",
+    "env": "GRADIENT_STATE_FILE",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "state",
+    "field": "validate",
+    "flag": "state-validate",
+    "env": null,
+    "type": "bool",
+    "description": "Validate `--state-file` and exit, checking schema and cross-references without database\naccess. The exit code is zero when valid and non-zero on the first batch of errors. It is\nintended for build-time and CI checks like the NixOS `state.validate` option. It\ndeliberately has no env var to never trip a live server.",
+    "default": null,
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "state",
+    "field": "delete",
+    "flag": "state-delete",
+    "env": "GRADIENT_STATE_DELETE",
+    "type": "bool",
+    "description": "",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "permissions",
+    "field": "create_project",
+    "flag": "permissions-create-project",
+    "env": "GRADIENT_PERMISSIONS_CREATE_PROJECT",
+    "type": "CreatePermission",
+    "description": "Who may create projects through the API: `none` (only the declarative state), `superusers`,\nor `everyone` (any authenticated user).",
+    "default": "everyone",
+    "values": [
+      "none",
+      "superusers",
+      "everyone"
+    ]
+  },
+  {
+    "group": "permissions",
+    "field": "create_cache",
+    "flag": "permissions-create-cache",
+    "env": "GRADIENT_PERMISSIONS_CREATE_CACHE",
+    "type": "CreatePermission",
+    "description": "Who may create caches through the API: `none` (only the declarative state), `superusers`,\nor `everyone` (any authenticated user).",
+    "default": "everyone",
+    "values": [
+      "none",
+      "superusers",
+      "everyone"
+    ]
+  },
+  {
+    "group": "permissions",
+    "field": "create_team",
+    "flag": "permissions-create-team",
+    "env": "GRADIENT_PERMISSIONS_CREATE_TEAM",
+    "type": "CreatePermission",
+    "description": "",
+    "default": "everyone",
+    "values": [
+      "none",
+      "superusers",
+      "everyone"
+    ]
+  },
+  {
+    "group": "registration",
+    "field": "enable",
+    "flag": "registration-enable",
+    "env": "GRADIENT_REGISTRATION_ENABLE",
+    "type": "bool",
+    "description": "",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "gradient_ci",
+    "field": "enable",
+    "flag": "gradient-ci-enable",
+    "env": "GRADIENT_GRADIENT_CI_ENABLE",
+    "type": "bool",
+    "description": "",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "gradient_ci",
+    "field": "url",
+    "flag": "gradient-ci-url",
+    "env": "GRADIENT_GRADIENT_CI_URL",
+    "type": "String",
+    "description": "",
+    "default": "https://servers.gradient.ci",
+    "values": []
+  },
+  {
+    "group": "sentry",
+    "field": "enable",
+    "flag": "sentry-enable",
+    "env": "GRADIENT_SENTRY_ENABLE",
+    "type": "bool",
+    "description": "",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "sentry",
+    "field": "dsn",
+    "flag": "sentry-dsn",
+    "env": "GRADIENT_SENTRY_DSN",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "pull_requests",
+    "field": "commit_name",
+    "flag": "pull-requests-commit-name",
+    "env": "GRADIENT_PULL_REQUESTS_COMMIT_NAME",
+    "type": "Option<String>",
+    "description": "Author/committer name for commits pushed by the `OpenPr` action. Leaving it unset (the\ndefault) is letting each Git host choose. GitHub is crediting the App bot and marking the\ncommit verified. Gitea, Forgejo and GitLab are using the token owner.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "pull_requests",
+    "field": "commit_email",
+    "flag": "pull-requests-commit-email",
+    "env": "GRADIENT_PULL_REQUESTS_COMMIT_EMAIL",
+    "type": "Option<String>",
+    "description": "Author/committer email for `OpenPr` commits. See `commit_name`.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "database",
+    "field": "url",
+    "flag": "database-url",
+    "env": "GRADIENT_DATABASE_URL",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "database",
+    "field": "url_file",
+    "flag": "database-url-file",
+    "env": "GRADIENT_DATABASE_URL_FILE",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "database",
+    "field": "max_connections",
+    "flag": "database-max-connections",
+    "env": "GRADIENT_DATABASE_MAX_CONNECTIONS",
+    "type": "u32",
+    "description": "Maximum connections the scheduler / worker pool may open.\nTotal Postgres connections per gradient-server process is\n`max_connections + web_max_connections + cache_max_connections`.",
+    "default": "32",
+    "values": []
+  },
+  {
+    "group": "database",
+    "field": "min_connections",
+    "flag": "database-min-connections",
+    "env": "GRADIENT_DATABASE_MIN_CONNECTIONS",
+    "type": "u32",
+    "description": "Minimum connections kept warm in the scheduler / worker pool.",
+    "default": "2",
+    "values": []
+  },
+  {
+    "group": "database",
+    "field": "cache_max_connections",
+    "flag": "database-cache-max-connections",
+    "env": "GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS",
+    "type": "u32",
+    "description": "Maximum connections the cache-query pool may open. A dedicated pool is keeping a large\neval's worker prefetch storm from starving the scheduler/worker pool and stalling dispatch.\nThe storm is one `CacheQuery` per in-flight build.",
+    "default": "32",
+    "values": []
+  },
+  {
+    "group": "database",
+    "field": "cache_min_connections",
+    "flag": "database-cache-min-connections",
+    "env": "GRADIENT_DATABASE_CACHE_MIN_CONNECTIONS",
+    "type": "u32",
+    "description": "Minimum connections kept warm in the cache-query pool.",
+    "default": "2",
+    "values": []
+  },
+  {
+    "group": "database",
+    "field": "web_max_connections",
+    "flag": "database-web-max-connections",
+    "env": "GRADIENT_DATABASE_WEB_MAX_CONNECTIONS",
+    "type": "u32",
+    "description": "Maximum connections the axum HTTP pool may open.",
+    "default": "16",
+    "values": []
+  },
+  {
+    "group": "database",
+    "field": "web_min_connections",
+    "flag": "database-web-min-connections",
+    "env": "GRADIENT_DATABASE_WEB_MIN_CONNECTIONS",
+    "type": "u32",
+    "description": "Minimum connections kept warm in the axum HTTP pool.",
+    "default": "1",
+    "values": []
+  },
+  {
+    "group": "http",
+    "field": "max_request_size",
+    "flag": "http-max-request-size",
+    "env": "GRADIENT_HTTP_MAX_REQUEST_SIZE",
+    "type": "usize",
+    "description": "Maximum size in bytes of an HTTP request body for most endpoints (default 2 MiB).",
+    "default": "2097152",
+    "values": []
+  },
+  {
+    "group": "http",
+    "field": "max_source_upload_size",
+    "flag": "http-max-source-upload-size",
+    "env": "GRADIENT_HTTP_MAX_SOURCE_UPLOAD_SIZE",
+    "type": "usize",
+    "description": "Maximum size in bytes of a source upload to `POST /build-requests/source`\n(single-shot NAR) and the chunked manifest total (default 512 MiB).",
+    "default": "536870912",
+    "values": []
+  },
+  {
+    "group": "http",
+    "field": "trusted_proxies",
+    "flag": "http-trusted-proxies",
+    "env": "GRADIENT_HTTP_TRUSTED_PROXIES",
+    "type": "String",
+    "description": "Comma-separated CIDR allowlist of peers permitted to set `X-Forwarded-For`. The default is\nloopback, covering reverse proxies running on the same host.",
+    "default": "127.0.0.1/32,::1/128",
+    "values": []
+  },
+  {
+    "group": "http",
+    "field": "local_ips",
+    "flag": "http-local-ips",
+    "env": "GRADIENT_HTTP_LOCAL_IPS",
+    "type": "String",
+    "description": "Comma-separated CIDR allowlist whose resolved client IPs receive a cache's `local_priority`\n(when set and non-zero). The default is the RFC1918 10/8 block.",
+    "default": "10.0.0.0/8",
+    "values": []
+  },
+  {
+    "group": "proto",
+    "field": "discoverable",
+    "flag": "proto-discoverable",
+    "env": "GRADIENT_PROTO_DISCOVERABLE",
+    "type": "bool",
+    "description": "Accept incoming connections on `/proto` (workers and federated servers). It is enabled by\ndefault. Disable it to reject all `/proto` connections.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "proto",
+    "field": "federate",
+    "flag": "proto-federate",
+    "env": "GRADIENT_PROTO_FEDERATE",
+    "type": "bool",
+    "description": "Accept federated connections from other Gradient servers on `/proto`. `discoverable` must be\nenabled.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "proto",
+    "field": "max_connections",
+    "flag": "proto-max-connections",
+    "env": "GRADIENT_PROTO_MAX_CONNECTIONS",
+    "type": "usize",
+    "description": "Maximum number of simultaneous proto WebSocket connections.",
+    "default": "256",
+    "values": []
+  },
+  {
+    "group": "proto",
+    "field": "worker_heartbeat_timeout_secs",
+    "flag": "proto-worker-heartbeat-timeout-secs",
+    "env": "GRADIENT_PROTO_WORKER_HEARTBEAT_TIMEOUT_SECS",
+    "type": "u64",
+    "description": "Seconds a connected worker may go silent before the server is declaring it dead and\nre-queuing its in-flight jobs. The worker is sending a heartbeat every 10 s. The default of\n120 s is tolerating twelve missed beats. The connection reader is stamping `last_seen` on\nevery received frame. It is measuring the connection rather than handler duration. A server\nbriefly stalled on slow DB acquires cannot falsely declare a healthy worker dead. Requeued\nin-flight builds would cost far more. This is the only detector for a worker dying without a\nclean TCP close, like a hard OOM-kill, a frozen host or a network partition. A graceful\ndisconnect is handled immediately regardless. Set to 0 to disable the liveness watchdog.",
+    "default": "120",
+    "values": []
+  },
+  {
+    "group": "proto",
+    "field": "anonymous_cache_enable",
+    "flag": "proto-anonymous-cache-enable",
+    "env": "GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE",
+    "type": "bool",
+    "description": "Allow anonymous (unauthenticated) clients on `GET /cache/{cache}/proto` for public caches. A\n`false` value is rejecting anonymous handshakes with 403. Private caches always require an\nAPI key regardless of this flag.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "proto",
+    "field": "anonymous_cache_max_connections_per_ip",
+    "flag": "proto-anonymous-cache-max-connections-per-ip",
+    "env": "GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP",
+    "type": "usize",
+    "description": "Maximum simultaneous anonymous `/proto` connections per client IP.",
+    "default": "32",
+    "values": []
+  },
+  {
+    "group": "upload",
+    "field": "concurrency",
+    "flag": "upload-concurrency",
+    "env": "GRADIENT_UPLOAD_CONCURRENCY",
+    "type": "usize",
+    "description": "Uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all workers and REST\nclients. Smaller uploads have a window of 128 of their own. An upload is holding its permit\nuntil the object is in storage. Further uploads are waiting for a permit.",
+    "default": "8",
+    "values": []
+  },
+  {
+    "group": "upload",
+    "field": "bytes_budget",
+    "flag": "upload-bytes-budget",
+    "env": "GRADIENT_UPLOAD_BYTES_BUDGET",
+    "type": "u64",
+    "description": "Total size in bytes of admitted uploads. An upload not fitting the remaining budget is\nwaiting. An upload larger than the whole budget is running alone once nothing else is in\nflight.",
+    "default": "8589934592",
+    "values": []
+  },
+  {
+    "group": "upload",
+    "field": "lease_idle_secs",
+    "flag": "upload-lease-idle-secs",
+    "env": "GRADIENT_UPLOAD_LEASE_IDLE_SECS",
+    "type": "u64",
+    "description": "Seconds a granted worker upload may go without data before the server is reclaiming its\npermit and telling the worker to retry.",
+    "default": "300",
+    "values": []
+  },
+  {
+    "group": "upload",
+    "field": "rest_wait_secs",
+    "flag": "upload-rest-wait-secs",
+    "env": "GRADIENT_UPLOAD_REST_WAIT_SECS",
+    "type": "u64",
+    "description": "Seconds a NAR upload to the cache upload endpoint is waiting for a permit before the server\nis answering with 503 and `Retry-After`.",
+    "default": "30",
+    "values": []
+  },
+  {
+    "group": "nar",
+    "field": "max_upload_size",
+    "flag": "nar-max-upload-size",
+    "env": "GRADIENT_NAR_MAX_UPLOAD_SIZE",
+    "type": "usize",
+    "description": "Maximum size in bytes of a NAR upload to `POST /caches/{cache}/nars` (default 512 MiB).",
+    "default": "536870912",
+    "values": []
+  },
+  {
+    "group": "nar",
+    "field": "small_bytes",
+    "flag": "nar-small-bytes",
+    "env": "GRADIENT_NAR_SMALL_BYTES",
+    "type": "u64",
+    "description": "Size in bytes up to which the server is serving a NAR download itself instead of a presigned\nS3 URL. NARs up to this size also stay in the in-memory cache. Uploads do not depend on this\nvalue.",
+    "default": "1048576",
+    "values": []
+  },
+  {
+    "group": "nar",
+    "field": "hot_cache_bytes",
+    "flag": "nar-hot-cache-bytes",
+    "env": "GRADIENT_NAR_HOT_CACHE_BYTES",
+    "type": "u64",
+    "description": "Weighted capacity of the in-memory NAR cache in bytes. `0` is disabling it. The default is\n512 MiB.",
+    "default": "536870912",
+    "values": []
+  },
+  {
+    "group": "nar",
+    "field": "verify_digest",
+    "flag": "nar-verify-digest",
+    "env": "GRADIENT_NAR_VERIFY_DIGEST",
+    "type": "bool",
+    "description": "This flag is making the S3 presigned NAR commit path fetch the uploaded object and hash it\nagain before marking it cached. It is catching same-length corruption at the cost of a full\nobject read. It is off by default because the presigned path is still checking the size with\nHEAD. Granted worker and REST uploads are always verifying content because they already hold\nthe bytes in memory.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "nar",
+    "field": "storage_open_timeout_secs",
+    "flag": "nar-storage-open-timeout-secs",
+    "env": "GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS",
+    "type": "u64",
+    "description": "Seconds to wait for a NAR object stream from storage (for example an S3 GET) before\nanswering the worker with `NarAbort`. The worker is retrying after a `NarAbort`.",
+    "default": "60",
+    "values": []
+  },
+  {
+    "group": "nar",
+    "field": "send_chunk_timeout_secs",
+    "flag": "nar-send-chunk-timeout-secs",
+    "env": "GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS",
+    "type": "u64",
+    "description": "Maximum time a single outbound `NarPush` chunk may sit in the writer queue waiting for the\nWebSocket sink to make progress. Hitting this timeout is indicating a stalled peer or TCP\nback-pressure. The transfer is then aborted with `NarAbort`.",
+    "default": "30",
+    "values": []
+  },
+  {
+    "group": "nar",
+    "field": "chunk_bytes",
+    "flag": "nar-chunk-bytes",
+    "env": "GRADIENT_NAR_CHUNK_BYTES",
+    "type": "u64",
+    "description": "Size in bytes of each outbound `NarPush` chunk, from 4 KiB to 4 MiB. Smaller chunks are\nhelping slow or high-latency links like Tailscale over DERP.",
+    "default": "524288",
+    "values": []
+  },
+  {
+    "group": "nar",
+    "field": "max_concurrent_serves",
+    "flag": "nar-max-concurrent-serves",
+    "env": "GRADIENT_NAR_MAX_CONCURRENT_SERVES",
+    "type": "usize",
+    "description": "Maximum number of NAR-serving tasks that may run concurrently per worker connection. The\nlimit is bounding memory and storage-backend fan-out for a worker requesting many paths in a\nsingle batch.",
+    "default": "8",
+    "values": []
+  },
+  {
+    "group": "nar",
+    "field": "max_concurrent_downloads",
+    "flag": "nar-max-concurrent-downloads",
+    "env": "GRADIENT_NAR_MAX_CONCURRENT_DOWNLOADS",
+    "type": "usize",
+    "description": "NAR downloads from storage that may run at once across all connections, keeping the storage\nnear its best total throughput.",
+    "default": "16",
+    "values": []
+  },
+  {
+    "group": "nar",
+    "field": "partial_ttl_secs",
+    "flag": "nar-partial-ttl-secs",
+    "env": "GRADIENT_NAR_PARTIAL_TTL_SECS",
+    "type": "u64",
+    "description": "Seconds since the last write of an unfinished upload staged under `<base_dir>`, after which\nthe next deep GC is removing the upload. `0` is keeping every unfinished upload.",
+    "default": "86400",
+    "values": []
+  },
+  {
+    "group": "cache",
+    "field": "upstream_query_concurrency",
+    "flag": "cache-upstream-query-concurrency",
+    "env": "GRADIENT_CACHE_UPSTREAM_QUERY_CONCURRENCY",
+    "type": "usize",
+    "description": "Maximum simultaneous outbound upstream narinfo requests across the whole server. Eval-time\nsubstitutability probes and worker cache-query probes are sharing this pool. A huge\nevaluation is never fanning out one request per derivation times every upstream at once.",
+    "default": "32",
+    "values": []
+  },
+  {
+    "group": "cache",
+    "field": "max_storage_gb",
+    "flag": "cache-max-storage-gb",
+    "env": "GRADIENT_CACHE_MAX_STORAGE_GB",
+    "type": "i32",
+    "description": "Instance-wide cap on total cached NAR bytes, in gigabytes. New evaluations are parking in\n`Waiting` once every writable cache for a project has less than 10 MiB of headroom under it.\n`0` (default) is disabling the instance-wide limit. Per-cache limits are still applying.",
+    "default": "0",
+    "values": []
+  },
+  {
+    "group": "cache",
+    "field": "sign_sweep_interval_secs",
+    "flag": "cache-sign-sweep-interval-secs",
+    "env": "GRADIENT_CACHE_SIGN_SWEEP_INTERVAL_SECS",
+    "type": "u64",
+    "description": "Interval in seconds between NAR signature backfill sweeps. The upload handler is signing a\nfreshly uploaded NAR in place. This tick is only a fallback for subscription placeholders\nand any row left unsigned. The default is 3600.",
+    "default": "3600",
+    "values": []
+  },
+  {
+    "group": "cache",
+    "field": "debug_index_interval_secs",
+    "flag": "cache-debug-index-interval-secs",
+    "env": "GRADIENT_CACHE_DEBUG_INDEX_INTERVAL_SECS",
+    "type": "u64",
+    "description": "Interval in seconds between DWARF build-id index backfill passes. Uploads are indexing their\nown NAR in place. This tick is only catching paths cached before the index existed and walks\nlost to a restart. The default is 300.",
+    "default": "300",
+    "values": []
+  },
+  {
+    "group": "gc",
+    "field": "interval_secs",
+    "flag": "gc-interval-secs",
+    "env": "GRADIENT_GC_INTERVAL_SECS",
+    "type": "u64",
+    "description": "Interval in seconds between cache maintenance GC passes. The default is 3600.",
+    "default": "3600",
+    "values": []
+  },
+  {
+    "group": "gc",
+    "field": "nar_ttl_hours",
+    "flag": "gc-nar-ttl-hours",
+    "env": "GRADIENT_GC_NAR_TTL_HOURS",
+    "type": "u64",
+    "description": "Hours to keep a cached path outside the live closure of retained evaluations after its last\nfetch, or its upload if never fetched. `--gc-nar-upload-grace-hours` is always applying on\ntop. `0` is keeping nothing beyond that grace.",
+    "default": "336",
+    "values": []
+  },
+  {
+    "group": "gc",
+    "field": "nar_upload_grace_hours",
+    "flag": "gc-nar-upload-grace-hours",
+    "env": "GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS",
+    "type": "i64",
+    "description": "Grace period in hours before the orphan-files pass is reclaiming a NAR object without a\nreferencing database row. The grace is covering the upload window where a NAR is on disk\nbefore its `derivation`/`cached_path` rows commit. Set to 0 to reclaim immediately (tests\nonly).",
+    "default": "24",
+    "values": []
+  },
+  {
+    "group": "gc",
+    "field": "orphan_derivation_hours",
+    "flag": "gc-orphan-derivation-hours",
+    "env": "GRADIENT_GC_ORPHAN_DERIVATION_HOURS",
+    "type": "i64",
+    "description": "Grace period in hours before the GC pass is deleting a `derivation` row outside the build\nclosure of every retained evaluation. Rapid re-evaluations can reuse a freshly orphaned\nderivation within the grace without re-inserting it. Set to 0 to GC immediately.",
+    "default": "24",
+    "values": []
+  },
+  {
+    "group": "gc",
+    "field": "wedged_eval_hours",
+    "flag": "gc-wedged-eval-hours",
+    "env": "GRADIENT_GC_WEDGED_EVAL_HOURS",
+    "type": "i64",
+    "description": "Hours after which an untouched \"active\" evaluation is presumed wedged and is no longer\nblocking the per-task evaluation GC. The wedged evaluation itself is never deleted. A value\nof 0 is letting a wedged evaluation block GC forever.",
+    "default": "24",
+    "values": []
+  },
+  {
+    "group": "gc",
+    "field": "deep_interval_secs",
+    "flag": "gc-deep-interval-secs",
+    "env": "GRADIENT_GC_DEEP_INTERVAL_SECS",
+    "type": "u64",
+    "description": "Seconds from the end of one background deep garbage collection round to the start of the\nnext. `0` is running a round only on request.",
+    "default": "3600",
+    "values": []
+  },
+  {
+    "group": "gc",
+    "field": "deep_pace_ms",
+    "flag": "gc-deep-pace-ms",
+    "env": "GRADIENT_GC_DEEP_PACE_MS",
+    "type": "u64",
+    "description": "Milliseconds between two units of a storage migration or a background\ndeep garbage collection round. A requested round is running its units without a pause.",
+    "default": "1000",
+    "values": []
+  },
+  {
+    "group": "eval",
+    "field": "max_keep",
+    "flag": "eval-max-keep",
+    "env": "GRADIENT_EVAL_MAX_KEEP",
+    "type": "usize",
+    "description": "Instance-wide maximum for a task's `keep_evaluations`. New tasks start at the lower of\n[`DEFAULT_KEEP_EVALUATIONS`] and this. `0` is disabling the cap.",
+    "default": "30",
+    "values": []
+  },
+  {
+    "group": "eval",
+    "field": "cache_max_total_bytes",
+    "flag": "eval-cache-max-total-bytes",
+    "env": "GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES",
+    "type": "u64",
+    "description": "Total byte cap for the fleet-shared eval-cache blobs. The periodic eviction sweep is\ndropping the oldest-`updated_at` rows until the surviving total is at or under this. The\ndefault is 10 GiB.",
+    "default": "10737418240",
+    "values": []
+  },
+  {
+    "group": "eval",
+    "field": "cache_max_age_days",
+    "flag": "eval-cache-max-age-days",
+    "env": "GRADIENT_EVAL_CACHE_MAX_AGE_DAYS",
+    "type": "u64",
+    "description": "Max age in days for an eval-cache blob. The sweep is evicting older blobs regardless of the\nsize cap. The default is 30.",
+    "default": "30",
+    "values": []
+  },
+  {
+    "group": "eval",
+    "field": "cache_sweep_interval_secs",
+    "flag": "eval-cache-sweep-interval-secs",
+    "env": "GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS",
+    "type": "u64",
+    "description": "Interval in seconds between eval-cache eviction sweeps. The default is 3600.",
+    "default": "3600",
+    "values": []
+  },
+  {
+    "group": "build",
+    "field": "max_attempts",
+    "flag": "build-max-attempts",
+    "env": "GRADIENT_BUILD_MAX_ATTEMPTS",
+    "type": "u32",
+    "description": "",
+    "default": "3",
+    "values": []
+  },
+  {
+    "group": "build",
+    "field": "substitute_miss_escalation_threshold",
+    "flag": "build-substitute-miss-escalation-threshold",
+    "env": "GRADIENT_BUILD_SUBSTITUTE_MISS_ESCALATION_THRESHOLD",
+    "type": "u32",
+    "description": "Free re-queues of a derivation available in a cache within one evaluation, before Gradient\nis building the derivation like any other. A re-queue is not counting as a build attempt.\nThis threshold is the only bound on that loop.",
+    "default": "2",
+    "values": []
+  },
+  {
+    "group": "build",
+    "field": "inputs_unavailable_max_loops",
+    "flag": "build-inputs-unavailable-max-loops",
+    "env": "GRADIENT_BUILD_INPUTS_UNAVAILABLE_MAX_LOOPS",
+    "type": "u32",
+    "description": "Max `InputsUnavailable` self-heal loops per build. The circuit breaker is opening after this\nmany loops and the build is failing fast instead of churning the cache.",
+    "default": "3",
+    "values": []
+  },
+  {
+    "group": "build",
+    "field": "retry_backoff_secs",
+    "flag": "build-retry-backoff-secs",
+    "env": "GRADIENT_BUILD_RETRY_BACKOFF_SECS",
+    "type": "u64",
+    "description": "",
+    "default": "30",
+    "values": []
+  },
+  {
+    "group": "build",
+    "field": "default_timeout_secs",
+    "flag": "build-default-timeout-secs",
+    "env": "GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS",
+    "type": "u64",
+    "description": "",
+    "default": "14400",
+    "values": []
+  },
+  {
+    "group": "build",
+    "field": "default_max_silent_secs",
+    "flag": "build-default-max-silent-secs",
+    "env": "GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS",
+    "type": "u64",
+    "description": "",
+    "default": "3600",
+    "values": []
+  },
+  {
+    "group": "scheduler",
+    "field": "scoring_policy",
+    "flag": "scheduler-scoring-policy",
+    "env": "GRADIENT_SCHEDULER_SCORING_POLICY",
+    "type": "String",
+    "description": "Name of the scheduler scoring policy (`simple`, `resource-aware`).\nUnknown names fall back to `resource-aware`.",
+    "default": "resource-aware",
+    "values": []
+  },
+  {
+    "group": "scheduler",
+    "field": "cluster_prepare_timeout_secs",
+    "flag": "scheduler-cluster-prepare-timeout-secs",
+    "env": "GRADIENT_SCHEDULER_CLUSTER_PREPARE_TIMEOUT_SECS",
+    "type": "u64",
+    "description": "Seconds for every member of a cluster job attempt to accept its assignment. An attempt not\naccepted by all members in time is aborted, and the cluster job is queued again.",
+    "default": "30",
+    "values": []
+  },
+  {
+    "group": "scheduler",
+    "field": "cluster_reserve_after_secs",
+    "flag": "scheduler-cluster-reserve-after-secs",
+    "env": "GRADIENT_SCHEDULER_CLUSTER_RESERVE_AFTER_SECS",
+    "type": "u64",
+    "description": "Seconds a cluster job that can start is waiting for enough simultaneously idle workers\nbefore reserving a placement. Reserved workers are receiving no new single jobs until the\ncluster job is starting or the reservation is expiring.",
+    "default": "600",
+    "values": []
+  },
+  {
+    "group": "scheduler",
+    "field": "cluster_reserve_timeout_secs",
+    "flag": "scheduler-cluster-reserve-timeout-secs",
+    "env": "GRADIENT_SCHEDULER_CLUSTER_RESERVE_TIMEOUT_SECS",
+    "type": "u64",
+    "description": "Seconds to hold a cluster job reservation before the scheduler is releasing the reservation\nand planning the cluster job again.",
+    "default": "1800",
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "token_file",
+    "flag": "metrics-token-file",
+    "env": "GRADIENT_METRICS_TOKEN_FILE",
+    "type": "Option<String>",
+    "description": "Path to a file containing the bearer token required to scrape `/metrics`. An unset path is\ndisabling the metrics endpoint with 404. The server is reading the file once at startup.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "rollup_interval_secs",
+    "flag": "metrics-rollup-interval-secs",
+    "env": "GRADIENT_METRICS_ROLLUP_INTERVAL_SECS",
+    "type": "u64",
+    "description": "Interval in seconds between metric rollup-aggregator passes.",
+    "default": "60",
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "retention_raw_days",
+    "flag": "metrics-retention-raw-days",
+    "env": "GRADIENT_METRICS_RETENTION_RAW_DAYS",
+    "type": "i64",
+    "description": "Days to keep raw phase and worker samples and the per-minute cache and upstream traffic\ncounters. `0` is keeping them forever.",
+    "default": "14",
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "retention_rollup_days",
+    "flag": "metrics-retention-rollup-days",
+    "env": "GRADIENT_METRICS_RETENTION_ROLLUP_DAYS",
+    "type": "i64",
+    "description": "Days to keep minute and hour rollups. Day and week rollups are staying forever. `0` is\nkeeping every rollup forever.",
+    "default": "400",
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "label_topn",
+    "flag": "metrics-label-topn",
+    "env": "GRADIENT_METRICS_LABEL_TOPN",
+    "type": "u32",
+    "description": "Per-dimension cardinality cap for rollup scope labels (top-N by activity).",
+    "default": "20",
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "cache_flush_interval_secs",
+    "flag": "metrics-cache-flush-interval-secs",
+    "env": "GRADIENT_METRICS_CACHE_FLUSH_INTERVAL_SECS",
+    "type": "u64",
+    "description": "Interval in seconds between flushes of the in-memory cache-traffic accumulator into\n`cache_metric`. A failing flush is losing at most this much traffic telemetry.",
+    "default": "10",
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "worker_sample_interval_secs",
+    "flag": "metrics-worker-sample-interval-secs",
+    "env": "GRADIENT_METRICS_WORKER_SAMPLE_INTERVAL_SECS",
+    "type": "u64",
+    "description": "Interval in seconds between worker live-metric samples written to `worker_sample`.",
+    "default": "15",
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "instance_interval_secs",
+    "flag": "metrics-instance-interval-secs",
+    "env": "GRADIENT_METRICS_INSTANCE_INTERVAL_SECS",
+    "type": "u64",
+    "description": "Interval in seconds between InstanceContext window recomputations.",
+    "default": "30",
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "graph_consistency_interval_secs",
+    "flag": "metrics-graph-consistency-interval-secs",
+    "env": "GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS",
+    "type": "u64",
+    "description": "Seconds between build graph consistency checks. The check is also repairing the NAR\nreference counter. `0` is disabling both.",
+    "default": "300",
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "otlp_endpoint",
+    "flag": "metrics-otlp-endpoint",
+    "env": "GRADIENT_METRICS_OTLP_ENDPOINT",
+    "type": "Option<String>",
+    "description": "OTLP collector endpoint for metric push export. An unset endpoint is disabling OTLP.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "otlp_push_interval_secs",
+    "flag": "metrics-otlp-push-interval-secs",
+    "env": "GRADIENT_METRICS_OTLP_PUSH_INTERVAL_SECS",
+    "type": "u64",
+    "description": "Interval in seconds between OTLP metric push exports.",
+    "default": "30",
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "level_default",
+    "flag": "log-level-default",
+    "env": "GRADIENT_LOG_LEVEL_DEFAULT",
+    "type": "String",
+    "description": "Default log level for the whole binary. Per-component overrides are `--log-level-web`,\n`--log-level-cache`, `--log-level-proto` and `--log-level-scheduler`. `RUST_LOG` is\noverriding everything.",
+    "default": "info",
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "level_web",
+    "flag": "log-level-web",
+    "env": "GRADIENT_LOG_LEVEL_WEB",
+    "type": "Option<String>",
+    "description": "Log level for the `gradient_web` target. The default is `--log-level-default`.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "level_cache",
+    "flag": "log-level-cache",
+    "env": "GRADIENT_LOG_LEVEL_CACHE",
+    "type": "Option<String>",
+    "description": "Log level for the `gradient_cache` target. The default is `--log-level-default`.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "level_proto",
+    "flag": "log-level-proto",
+    "env": "GRADIENT_LOG_LEVEL_PROTO",
+    "type": "Option<String>",
+    "description": "Log level for the `gradient_proto` target. The default is `--log-level-default`.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "level_scheduler",
+    "flag": "log-level-scheduler",
+    "env": "GRADIENT_LOG_LEVEL_SCHEDULER",
+    "type": "Option<String>",
+    "description": "Log level for the `gradient_scheduler` target. The default is `--log-level-default`.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "chunk_bytes",
+    "flag": "log-chunk-bytes",
+    "env": "GRADIENT_LOG_CHUNK_BYTES",
+    "type": "usize",
+    "description": "Target uncompressed size in bytes for each zstd log chunk written on build finalization.\nChunks are splitting on line boundaries. An over-long line may exceed this. The default is\n262144 (256 KiB).",
+    "default": "262144",
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "trace_dir",
+    "flag": "log-trace-dir",
+    "env": "GRADIENT_LOG_TRACE_DIR",
+    "type": "Option<PathBuf>",
+    "description": "Directory receiving every closed stage span of the server as JSON lines, one file per\nprocess. An unset value is disabling span tracing.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "oidc",
+    "field": "enable",
+    "flag": "oidc-enable",
+    "env": "GRADIENT_OIDC_ENABLE",
+    "type": "bool",
+    "description": "",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "oidc",
+    "field": "required",
+    "flag": "oidc-required",
+    "env": "GRADIENT_OIDC_REQUIRED",
+    "type": "bool",
+    "description": "",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "oidc",
+    "field": "client_id",
+    "flag": "oidc-client-id",
+    "env": "GRADIENT_OIDC_CLIENT_ID",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "oidc",
+    "field": "client_secret_file",
+    "flag": "oidc-client-secret-file",
+    "env": "GRADIENT_OIDC_CLIENT_SECRET_FILE",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "oidc",
+    "field": "scopes",
+    "flag": "oidc-scopes",
+    "env": "GRADIENT_OIDC_SCOPES",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "oidc",
+    "field": "discovery_url",
+    "flag": "oidc-discovery-url",
+    "env": "GRADIENT_OIDC_DISCOVERY_URL",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "scim",
+    "field": "enable",
+    "flag": "scim-enable",
+    "env": "GRADIENT_SCIM_ENABLE",
+    "type": "bool",
+    "description": "",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "scim",
+    "field": "token_file",
+    "flag": "scim-token-file",
+    "env": "GRADIENT_SCIM_TOKEN_FILE",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "scim",
+    "field": "hard_delete",
+    "flag": "scim-hard-delete",
+    "env": "GRADIENT_SCIM_HARD_DELETE",
+    "type": "bool",
+    "description": "",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "email",
+    "field": "enable",
+    "flag": "email-enable",
+    "env": "GRADIENT_EMAIL_ENABLE",
+    "type": "bool",
+    "description": "",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "email",
+    "field": "require_verification",
+    "flag": "email-require-verification",
+    "env": "GRADIENT_EMAIL_REQUIRE_VERIFICATION",
+    "type": "bool",
+    "description": "",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "email",
+    "field": "smtp_host",
+    "flag": "email-smtp-host",
+    "env": "GRADIENT_EMAIL_SMTP_HOST",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "email",
+    "field": "smtp_port",
+    "flag": "email-smtp-port",
+    "env": "GRADIENT_EMAIL_SMTP_PORT",
+    "type": "u16",
+    "description": "",
+    "default": "587",
+    "values": []
+  },
+  {
+    "group": "email",
+    "field": "smtp_username",
+    "flag": "email-smtp-username",
+    "env": "GRADIENT_EMAIL_SMTP_USERNAME",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "email",
+    "field": "smtp_password_file",
+    "flag": "email-smtp-password-file",
+    "env": "GRADIENT_EMAIL_SMTP_PASSWORD_FILE",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "email",
+    "field": "smtp_use_tls",
+    "flag": "email-smtp-use-tls",
+    "env": "GRADIENT_EMAIL_SMTP_USE_TLS",
+    "type": "bool",
+    "description": "",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "email",
+    "field": "from_address",
+    "flag": "email-from-address",
+    "env": "GRADIENT_EMAIL_FROM_ADDRESS",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "email",
+    "field": "from_name",
+    "flag": "email-from-name",
+    "env": "GRADIENT_EMAIL_FROM_NAME",
+    "type": "String",
+    "description": "",
+    "default": "Gradient",
+    "values": []
+  },
+  {
+    "group": "s3",
+    "field": "bucket",
+    "flag": "s3-bucket",
+    "env": "GRADIENT_S3_BUCKET",
+    "type": "Option<String>",
+    "description": "S3 bucket name. NARs are stored in S3 instead of local disk with a bucket set.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "s3",
+    "field": "region",
+    "flag": "s3-region",
+    "env": "GRADIENT_S3_REGION",
+    "type": "String",
+    "description": "AWS region for the S3 bucket.",
+    "default": "us-east-1",
+    "values": []
+  },
+  {
+    "group": "s3",
+    "field": "endpoint",
+    "flag": "s3-endpoint",
+    "env": "GRADIENT_S3_ENDPOINT",
+    "type": "Option<String>",
+    "description": "Custom S3-compatible endpoint URL (MinIO, Cloudflare R2, …).",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "s3",
+    "field": "access_key_id",
+    "flag": "s3-access-key-id",
+    "env": "GRADIENT_S3_ACCESS_KEY_ID",
+    "type": "Option<String>",
+    "description": "AWS access key ID. An absent ID is falling back to instance credentials.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "s3",
+    "field": "secret_access_key_file",
+    "flag": "s3-secret-access-key-file",
+    "env": "GRADIENT_S3_SECRET_ACCESS_KEY_FILE",
+    "type": "Option<String>",
+    "description": "File containing the AWS secret access key.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "s3",
+    "field": "prefix",
+    "flag": "s3-prefix",
+    "env": "GRADIENT_S3_PREFIX",
+    "type": "String",
+    "description": "Key prefix within the S3 bucket (e.g. \"gradient/\").",
+    "default": "",
+    "values": []
+  },
+  {
+    "group": "s3",
+    "field": "virtual_hosted_style",
+    "flag": "s3-virtual-hosted-style",
+    "env": "GRADIENT_S3_VIRTUAL_HOSTED_STYLE",
+    "type": "bool",
+    "description": "Use virtual-hosted-style requests (`https://<bucket>.<endpoint>/key`) with a custom\nendpoint. The `false` default is keeping URLs path-style\n(`https://<endpoint>/<bucket>/key`). MinIO, Garage and most self-hosted S3-compatible\nbackends are requiring path style. Set it to `true` for providers needing virtual-hosted\naddressing, like Cloudflare R2 with a custom domain or some Backblaze B2 setups. AWS direct\nwithout an endpoint is ignoring this flag.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "s3",
+    "field": "read_timeout_secs",
+    "flag": "s3-read-timeout-secs",
+    "env": "GRADIENT_S3_READ_TIMEOUT_SECS",
+    "type": "u64",
+    "description": "Seconds a single S3 response may stall before the request is failed. This inactivity timer\nis resetting on every successful read and is not capping the transfer. A multi-GB NAR is\nstreaming for as long as it keeps making progress. It is replacing the object-store default\nof a flat 30s total request timeout. That default was cancelling any slower download and\nburning the whole retry budget on doomed re-runs.",
+    "default": "60",
+    "values": []
+  },
+  {
+    "group": "s3",
+    "field": "max_retries",
+    "flag": "s3-max-retries",
+    "env": "GRADIENT_S3_MAX_RETRIES",
+    "type": "usize",
+    "description": "How many times a failed S3 request is retried.",
+    "default": "3",
+    "values": []
+  },
+  {
+    "group": "s3",
+    "field": "retry_timeout_secs",
+    "flag": "s3-retry-timeout-secs",
+    "env": "GRADIENT_S3_RETRY_TIMEOUT_SECS",
+    "type": "u64",
+    "description": "Total seconds from the first attempt after which no further S3 retry is started. Keep it\nabove `(max_retries + 1) * read_timeout_secs`. Requests dying on the read timeout are\notherwise never retried because the budget is already spent. Only the error path is\nconsulting it. It is never interrupting a progressing download. Stay under 5 minutes because\nretries are reusing the original credentials and payload.",
+    "default": "250",
+    "values": []
+  },
+  {
+    "group": "github_app",
+    "field": "id",
+    "flag": "github-app-id",
+    "env": "GRADIENT_GITHUB_APP_ID",
+    "type": "Option<u64>",
+    "description": "GitHub App ID. Required to enable GitHub App webhook and CI reporting.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "github_app",
+    "field": "private_key_file",
+    "flag": "github-app-private-key-file",
+    "env": "GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE",
+    "type": "Option<String>",
+    "description": "Path to the GitHub App RS256 private key PEM file.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "github_app",
+    "field": "webhook_secret_file",
+    "flag": "github-app-webhook-secret-file",
+    "env": "GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE",
+    "type": "Option<String>",
+    "description": "Path to a file containing the shared secret used to verify incoming\nGitHub App webhook payloads (`X-Hub-Signature-256`). The file's\ncontents must match the value configured on the GitHub App's webhook\nsettings page.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "ssh",
+    "field": "enable",
+    "flag": "ssh-enable",
+    "env": "GRADIENT_SSH_ENABLE",
+    "type": "bool",
+    "description": "",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "ssh",
+    "field": "listen_address",
+    "flag": "ssh-listen-address",
+    "env": "GRADIENT_SSH_LISTEN_ADDRESS",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "ssh",
+    "field": "port",
+    "flag": "ssh-port",
+    "env": "GRADIENT_SSH_PORT",
+    "type": "u16",
+    "description": "",
+    "default": "2222",
+    "values": []
+  },
+  {
+    "group": "ssh",
+    "field": "host_key_file",
+    "flag": "ssh-host-key-file",
+    "env": "GRADIENT_SSH_HOST_KEY_FILE",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  }
+]

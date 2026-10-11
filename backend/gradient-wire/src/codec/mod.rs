@@ -9,7 +9,7 @@ mod primitives;
 
 pub use bytes;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-pub use gradient_wire_derive::Proto;
+pub use gradient_derive::Proto;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EncodeError {

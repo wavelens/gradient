@@ -9,6 +9,18 @@ use quote::{format_ident, quote};
 use syn::parse::ParseStream;
 use syn::{Attribute, Data, DeriveInput, Fields, LitInt, Token, Type, parse_macro_input};
 
+mod config_group;
+
+#[proc_macro_attribute]
+pub fn config_group(
+    args: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    config_group::expand(args.into(), input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
 #[proc_macro_derive(Proto, attributes(proto))]
 pub fn derive_proto(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

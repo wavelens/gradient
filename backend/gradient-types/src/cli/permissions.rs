@@ -5,6 +5,7 @@
  */
 
 use clap::{Args, ValueEnum};
+use gradient_derive::config_group;
 use serde::{Deserialize, Serialize};
 
 #[derive(ValueEnum, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -20,22 +21,21 @@ pub enum CreatePermission {
     Everyone,
 }
 
-#[derive(Args, Debug, Clone, Default)]
+#[config_group("permissions")]
+#[derive(Args, Debug, Clone)]
 pub struct PermissionsArgs {
     /// Who may create projects through the API: `none` (only the declarative state), `superusers`,
     /// or `everyone` (any authenticated user).
-    #[arg(long = "permissions-create-project", value_enum, env = "GRADIENT_PERMISSIONS_CREATE_PROJECT", default_value_t = CreatePermission::Everyone)]
+    #[arg(value_enum, default_value_t = CreatePermission::Everyone)]
     pub create_project: CreatePermission,
     /// Who may create caches through the API: `none` (only the declarative state), `superusers`,
     /// or `everyone` (any authenticated user).
-    #[arg(long = "permissions-create-cache", value_enum, env = "GRADIENT_PERMISSIONS_CREATE_CACHE", default_value_t = CreatePermission::Everyone)]
+    #[arg(value_enum, default_value_t = CreatePermission::Everyone)]
     pub create_cache: CreatePermission,
     #[arg(
-        long = "permissions-create-team",
         value_enum,
-        env = "GRADIENT_PERMISSIONS_CREATE_TEAM",
         default_value_t = CreatePermission::Everyone,
-        help = "Who may create teams through the API: `none` (only the declarative state), `superusers`, or `everyone` (any authenticated user)."
+        help = "Who may create teams through the API: `none` (only the declarative state), `superusers`, or `everyone` (any authenticated user).",
     )]
     pub create_team: CreatePermission,
 }

@@ -22,6 +22,7 @@ workspace = true
 gradient-eval = { path = "../gradient-eval" }
 gradient-sources = { workspace = true }
 gradient-derivation = { workspace = true }
+gradient-derive = { workspace = true }
 gradient-util = { workspace = true }
 gradient-types = { workspace = true }
 gradient-wire = { workspace = true }

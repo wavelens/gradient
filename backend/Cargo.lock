@@ -2664,6 +2664,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-derive"
+version = "2.0.0-rc.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
+]
+
+[[package]]
 name = "gradient-effects"
 version = "2.0.0-rc.1"
 dependencies = [
@@ -3100,6 +3109,7 @@ dependencies = [
  "chrono",
  "clap",
  "cron",
+ "gradient-derive",
  "gradient-entity",
  "hex",
  "ipnet",
@@ -3225,8 +3235,8 @@ dependencies = [
  "axum",
  "bytes",
  "futures",
+ "gradient-derive",
  "gradient-util",
- "gradient-wire-derive",
  "hex",
  "password-auth",
  "serde",
@@ -3237,15 +3247,6 @@ dependencies = [
  "tokio-tungstenite 0.30.0",
  "tracing",
  "uuid",
-]
-
-[[package]]
-name = "gradient-wire-derive"
-version = "2.0.0-rc.1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.6",
 ]
 
 [[package]]
@@ -3260,6 +3261,7 @@ dependencies = [
  "futures",
  "git2",
  "gradient-derivation",
+ "gradient-derive",
  "gradient-eval",
  "gradient-sources",
  "gradient-storage",

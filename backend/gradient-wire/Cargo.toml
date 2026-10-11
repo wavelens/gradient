@@ -15,7 +15,7 @@ testing = []
 
 [dependencies]
 gradient-util        = { workspace = true }
-gradient-wire-derive = { workspace = true }
+gradient-derive = { workspace = true }
 
 anyhow            = { workspace = true }
 async-trait       = { workspace = true }

@@ -5,6 +5,7 @@
  */
 
 use clap::{Args, Parser};
+use gradient_derive::config_group;
 use gradient_wire::types::GradientCapabilities;
 
 /// The pool is capped at 16 workers because each one may hold `eval.max_rss` resident.
@@ -15,12 +16,12 @@ fn default_fork_workers() -> usize {
 }
 
 /// CLI arguments and environment variables for `gradient-worker`.
+#[config_group(env = "worker", no_default)]
 #[derive(Parser, Debug, Clone)]
 #[command(name = "gradient-worker", about = "Gradient build worker")]
 pub struct WorkerConfig {
     /// WebSocket URL of the Gradient server's `/proto` endpoint.
     /// An example is `wss://gradient.example.com/proto`.
-    #[arg(long = "server-url", env = "GRADIENT_WORKER_SERVER_URL")]
     pub server_url: String,
 
     /// Peer-to-token mappings for challenge-response authentication.
@@ -28,106 +29,71 @@ pub struct WorkerConfig {
     /// A `*:token` line is answering every challenged peer UUID with `token`.
     /// Each named peer is a project, cache, or proxy UUID.
     /// This option is mutually exclusive with `--peers-file`.
-    #[arg(long = "peers", env = "GRADIENT_WORKER_PEERS")]
     pub peers: Option<String>,
 
     /// Path to a file with peer-to-token pairs in the `--peers` format.
     /// This file is taking precedence over `--peers`.
-    #[arg(long = "peers-file", env = "GRADIENT_WORKER_PEERS_FILE")]
     pub peers_file: Option<String>,
 
     /// Directory for persistent worker state like the worker ID file.
     /// The directory must be writable.
-    #[arg(
-        long = "base-dir",
-        env = "GRADIENT_WORKER_BASE_DIR",
-        default_value = "/var/lib/gradient-worker"
-    )]
+    #[arg(default_value = "/var/lib/gradient-worker")]
     pub base_dir: String,
 
     /// Worker UUID used in place of the one stored in `{base_dir}/worker-id`.
     /// Declarative deployments can know the ID before the first worker start.
     /// The value must be a valid UUID.
-    #[arg(long = "id", env = "GRADIENT_WORKER_ID")]
     pub id: Option<String>,
 
     /// Locality label advertised to the scheduler.
     /// Cluster jobs asking for one zone are placing all members on workers sharing a label.
     /// Workers without a label are forming a zone of their own.
-    #[arg(long = "zone", env = "GRADIENT_WORKER_ZONE")]
     pub zone: Option<String>,
 
     /// Address other members of a cluster job are reaching this worker at.
     /// The cluster roster is carrying it verbatim.
-    #[arg(long = "endpoint", env = "GRADIENT_WORKER_ENDPOINT")]
     pub endpoint: Option<String>,
 
     /// Path to the `nix` binary, resolved via `PATH` by default.
-    #[arg(
-        long = "nix-bin",
-        env = "GRADIENT_WORKER_NIX_BIN",
-        default_value = "nix"
-    )]
+    #[arg(default_value = "nix")]
     pub nix_bin: String,
 
     /// Path to the `ssh` binary, resolved via `PATH` by default.
     /// Nix is using it as `GIT_SSH_COMMAND` for private flake inputs.
-    #[arg(
-        long = "ssh-bin",
-        env = "GRADIENT_WORKER_SSH_BIN",
-        default_value = "ssh"
-    )]
+    #[arg(default_value = "ssh")]
     pub ssh_bin: String,
 
     /// Directory for worker-held indirect GC roots.
     /// One symlink per active build is pinning its inputs and outputs while it is running.
     /// An empty string is disabling GC root pinning.
     /// A concurrent `nix-collect-garbage` can then race the build.
-    #[arg(
-        long = "gcroots-dir",
-        env = "GRADIENT_WORKER_GCROOTS_DIR",
-        default_value = "/nix/var/nix/gcroots/gradient"
-    )]
+    #[arg(default_value = "/nix/var/nix/gcroots/gradient")]
     pub gcroots_dir: String,
 
     /// Accept incoming `/proto` connections from the server (reverse-proxy mode).
-    #[arg(
-        long = "discoverable",
-        env = "GRADIENT_WORKER_DISCOVERABLE",
-        default_value = "false"
-    )]
+    #[arg(default_value = "false")]
     pub discoverable: bool,
 
     /// IP address for incoming server connections in discoverable mode.
-    #[arg(
-        long = "listen-addr",
-        env = "GRADIENT_WORKER_LISTEN_ADDR",
-        default_value = "127.0.0.1"
-    )]
+    #[arg(default_value = "127.0.0.1")]
     pub listen_addr: String,
 
     /// Port for incoming server connections in discoverable mode.
-    #[arg(long = "port", env = "GRADIENT_WORKER_PORT", default_value_t = 3100)]
+    #[arg(default_value_t = 3100)]
     pub port: u16,
 
     #[arg(
-        long = "accepted-server-tokens-file",
-        env = "GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE",
         help = "File of `peer_id:hash` lines a dialing server's tokens must match in discoverable mode; without it every server is accepted"
     )]
     pub accepted_server_tokens_file: Option<String>,
 
     /// Re-exec as a Nix evaluator subprocess (internal - do not set manually).
-    #[arg(
-        long = "eval-subprocess",
-        env = "GRADIENT_WORKER_EVAL_SUBPROCESS",
-        hide = true
-    )]
+    #[arg(hide = true)]
     pub eval_subprocess: bool,
 
     /// Drive one eval subprocess over the production rkyv transport from a JSONL request file.
     /// This internal harness is serving the NixOS VM integration test.
-    #[arg(long = "eval-driver", env = "GRADIENT_WORKER_EVAL_DRIVER", hide = true)]
+    #[arg(hide = true)]
     pub eval_driver: Option<String>,
 
     #[command(flatten)]
@@ -176,72 +142,46 @@ impl Default for WorkerConfig {
     }
 }
 
-#[derive(Args, Debug, Clone, Default)]
+#[config_group("capabilities", env = "worker_capabilities")]
+#[derive(Args, Debug, Clone)]
 pub struct CapabilitiesArgs {
     /// Forward work and NAR traffic between workers and servers (federation).
     /// `--discoverable` is required.
-    #[arg(
-        long = "capabilities-federate",
-        env = "GRADIENT_WORKER_CAPABILITIES_FEDERATE",
-        default_value = "false"
-    )]
+    #[arg(default_value = "false")]
     pub federate: bool,
 
     /// Prefetch flake inputs and sources.
-    #[arg(
-        long = "capabilities-fetch",
-        env = "GRADIENT_WORKER_CAPABILITIES_FETCH",
-        default_value = "false"
-    )]
+    #[arg(default_value = "false")]
     pub fetch: bool,
 
     /// Run Nix flake evaluations.
-    #[arg(
-        long = "capabilities-eval",
-        env = "GRADIENT_WORKER_CAPABILITIES_EVAL",
-        default_value = "false"
-    )]
+    #[arg(default_value = "false")]
     pub eval: bool,
 
     /// Execute Nix store builds locally.
-    #[arg(
-        long = "capabilities-build",
-        env = "GRADIENT_WORKER_CAPABILITIES_BUILD",
-        default_value = "false"
-    )]
+    #[arg(default_value = "false")]
     pub build: bool,
 }
 
-#[derive(Args, Debug, Clone, Default)]
+#[config_group("system", env = "worker_system")]
+#[derive(Args, Debug, Clone)]
 pub struct SystemArgs {
     /// Comma-separated Nix system strings this worker can build for.
     /// The default is the host system, for example `x86_64-linux`.
     /// A binfmt host can add emulated targets like `x86_64-linux,aarch64-linux`.
     /// The server's dispatcher is gating build assignment on this list.
-    #[arg(
-        long = "system-architectures",
-        env = "GRADIENT_WORKER_SYSTEM_ARCHITECTURES",
-        value_delimiter = ','
-    )]
+    #[arg(value_delimiter = ',')]
     pub architectures: Option<Vec<String>>,
 
     /// Comma-separated Nix system features this worker is advertising, like `kvm,big-parallel`.
     /// Builds requiring other features are never assigned to this worker.
     /// The default is the daemon's `nix config show system-features` set.
     /// That set is including CPU-derived `gccarch-*` levels.
-    #[arg(
-        long = "system-features",
-        env = "GRADIENT_WORKER_SYSTEM_FEATURES",
-        value_delimiter = ','
-    )]
+    #[arg(value_delimiter = ',')]
     pub features: Option<Vec<String>>,
 
     /// Single-core speed score advertised to the scheduler.
     /// The worker is running a deterministic micro-benchmark at startup without it.
-    #[arg(
-        long = "system-cpu-core-score",
-        env = "GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE"
-    )]
     pub cpu_core_score: Option<u32>,
 
     /// Free-RAM safety margin in MiB for the eval-subprocess reaper.
@@ -249,213 +189,112 @@ pub struct SystemArgs {
     /// The victim is the one holding enough memory to restore the margin.
     /// Nothing is killed when no eval is that large.
     /// A value of `0` is selecting 10% of total RAM, clamped to [128 MiB, 1 GiB].
-    #[arg(
-        long = "system-min-free-ram-mb",
-        env = "GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB",
-        default_value_t = 0
-    )]
+    #[arg(default_value_t = 0)]
     pub min_free_ram_mb: u64,
 }
 
+#[config_group("nix_daemon", env = "worker_nix_daemon")]
 #[derive(Args, Debug, Clone)]
 pub struct NixDaemonArgs {
     /// Maximum number of simultaneous connections in the local nix-daemon pool.
     /// Each in-flight prefetch NAR import is holding one connection for the whole upload.
     /// The pool must fit `build.max_concurrent * PREFETCH_CONCURRENCY` plus headroom.
-    #[arg(
-        long = "nix-daemon-max-connections",
-        env = "GRADIENT_WORKER_NIX_DAEMON_MAX_CONNECTIONS",
-        default_value_t = 32
-    )]
+    #[arg(default_value_t = 32)]
     pub max_connections: usize,
 }
 
-impl Default for NixDaemonArgs {
-    fn default() -> Self {
-        Self {
-            max_connections: 32,
-        }
-    }
-}
-
+#[config_group("eval", env = "worker_eval")]
 #[derive(Args, Debug, Clone)]
 pub struct EvalArgs {
     /// Maximum number of simultaneous evaluations.
-    #[arg(
-        id = "eval-max-concurrent",
-        long = "eval-max-concurrent",
-        env = "GRADIENT_WORKER_EVAL_MAX_CONCURRENT",
-        default_value_t = 1
-    )]
+    #[arg(id = "eval-max-concurrent", default_value_t = 1)]
     pub max_concurrent: u32,
 
     /// Number of parallel eval subprocesses in the pool.
-    #[arg(long = "eval-fork-workers", env = "GRADIENT_WORKER_EVAL_FORK_WORKERS", default_value_t = default_fork_workers())]
+    #[arg(default_value_t = default_fork_workers())]
     pub fork_workers: usize,
 
     /// Resident memory in bytes for an idle eval subprocess. Larger subprocesses restart after their call.
     /// Keep the limit above a typical eval's Boehm-GC heap for warm workers.
-    #[arg(long = "eval-max-rss", env = "GRADIENT_WORKER_EVAL_MAX_RSS", default_value_t = 8 * 1024 * 1024 * 1024)]
+    #[arg(default_value_t = 8 * 1024 * 1024 * 1024)]
     pub max_rss: u64,
 
     /// Directory for the Nix eval cache, exported to eval workers as `NIX_CACHE_HOME`.
     /// The default is `{base_dir}/eval-cache`.
-    #[arg(long = "eval-cache-dir", env = "GRADIENT_WORKER_EVAL_CACHE_DIR")]
     pub cache_dir: Option<String>,
 
     /// Master switch for sharing `<fingerprint>.sqlite` eval-cache blobs across workers.
-    #[arg(
-        long = "eval-cache-share",
-        env = "GRADIENT_WORKER_EVAL_CACHE_SHARE",
-        default_value_t = true
-    )]
+    #[arg(default_value_t = true)]
     pub cache_share: bool,
 }
 
-impl Default for EvalArgs {
-    fn default() -> Self {
-        Self {
-            max_concurrent: 1,
-            fork_workers: default_fork_workers(),
-            max_rss: 8 * 1024 * 1024 * 1024,
-            cache_dir: None,
-            cache_share: true,
-        }
-    }
-}
-
+#[config_group("build", env = "worker_build")]
 #[derive(Args, Debug, Clone)]
 pub struct BuildArgs {
     /// Maximum number of simultaneous builds.
-    #[arg(
-        id = "build-max-concurrent",
-        long = "build-max-concurrent",
-        env = "GRADIENT_WORKER_BUILD_MAX_CONCURRENT",
-        default_value_t = 1
-    )]
+    #[arg(id = "build-max-concurrent", default_value_t = 1)]
     pub max_concurrent: u32,
 
     /// Cap on CPU cores a single build may use (nix `--cores` / `NIX_BUILD_CORES`).
     /// The default is all available cores.
-    #[arg(long = "build-max-cores", env = "GRADIENT_WORKER_BUILD_MAX_CORES")]
     pub max_cores: Option<u32>,
 
     /// Cgroup directory of the Nix daemon, the parent of the build cgroups. The worker reports
     /// the peak memory of running builds from it.
-    #[arg(long = "build-cgroup", env = "GRADIENT_WORKER_BUILD_CGROUP")]
     pub cgroup: Option<std::path::PathBuf>,
 }
 
-impl Default for BuildArgs {
-    fn default() -> Self {
-        Self {
-            max_concurrent: 1,
-            max_cores: None,
-            cgroup: None,
-        }
-    }
-}
-
+#[config_group("nar", env = "worker_nar")]
 #[derive(Args, Debug, Clone)]
 pub struct NarArgs {
     /// Upload requests this worker is keeping open at once, queued or transferring.
     /// Each presigned PUT is holding its compressed NAR in memory.
-    #[arg(long = "nar-max-concurrent-uploads", env = "GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS", default_value_t = 16, value_parser = clap::value_parser!(u32).range(1..))]
+    #[arg(default_value_t = 16, value_parser = clap::value_parser!(u32).range(1..))]
     pub max_concurrent_uploads: u32,
 
     /// TTL in seconds for partial NAR downloads under `<base_dir>/nar-partial`.
     /// A periodic sweep is deleting partials with an older last write.
     /// A value of 0 is disabling the sweep.
-    #[arg(
-        long = "nar-partial-ttl-secs",
-        env = "GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS",
-        default_value_t = 86400
-    )]
+    #[arg(default_value_t = 86400)]
     pub partial_ttl_secs: u64,
 
     /// Size in bytes of each outbound NAR upload chunk, from 4 KiB to 4 MiB.
     /// Smaller chunks are helping slow or high-latency links like Tailscale over DERP.
     #[arg(
-        long = "nar-chunk-bytes",
-        env = "GRADIENT_WORKER_NAR_CHUNK_BYTES",
         value_parser = clap::value_parser!(u64).range(gradient_types::NAR_CHUNK_BYTES_RANGE),
-        default_value_t = 512 * 1024
+        default_value_t = 512 * 1024,
     )]
     pub chunk_bytes: u64,
 }
 
-impl Default for NarArgs {
-    fn default() -> Self {
-        Self {
-            max_concurrent_uploads: 16,
-            partial_ttl_secs: 86400,
-            chunk_bytes: 512 * 1024,
-        }
-    }
-}
-
+#[config_group("log", env = "worker_log")]
 #[derive(Args, Debug, Clone)]
 pub struct LogArgs {
-    #[arg(
-        long = "log-level-default",
-        env = "GRADIENT_WORKER_LOG_LEVEL_DEFAULT",
-        default_value = "info"
-    )]
+    #[arg(default_value = "info")]
     pub level_default: String,
 
-    #[arg(long = "log-level-eval", env = "GRADIENT_WORKER_LOG_LEVEL_EVAL")]
     pub level_eval: Option<String>,
 
-    #[arg(long = "log-level-build", env = "GRADIENT_WORKER_LOG_LEVEL_BUILD")]
     pub level_build: Option<String>,
 
-    #[arg(long = "log-level-proto", env = "GRADIENT_WORKER_LOG_LEVEL_PROTO")]
     pub level_proto: Option<String>,
 
     /// Maximum log bytes forwarded per build in any 1-minute window.
     /// The worker is dropping further log output of a tripped build. The build is still running.
-    #[arg(
-        long = "log-burst-bytes-per-min",
-        env = "GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN",
-        default_value_t = 8 * 1024 * 1024
-    )]
+    #[arg(default_value_t = 8 * 1024 * 1024)]
     pub burst_bytes_per_min: u64,
 
     /// Maximum log bytes forwarded per build in any 1-hour window.
-    #[arg(
-        long = "log-sustained-bytes-per-hour",
-        env = "GRADIENT_WORKER_LOG_SUSTAINED_BYTES_PER_HOUR",
-        default_value_t = 64 * 1024 * 1024
-    )]
+    #[arg(default_value_t = 64 * 1024 * 1024)]
     pub sustained_bytes_per_hour: u64,
 
     /// Forward the existing nix-store build log of a derivation with locally built outputs.
-    #[arg(
-        long = "log-fetch-from-store",
-        env = "GRADIENT_WORKER_LOG_FETCH_FROM_STORE",
-        default_value = "true"
-    )]
+    #[arg(default_value = "true")]
     pub fetch_from_store: bool,
 
     /// Directory receiving every closed stage span as JSON lines, one file per process.
     /// Span tracing is off without it.
-    #[arg(long = "log-trace-dir", env = "GRADIENT_WORKER_LOG_TRACE_DIR")]
     pub trace_dir: Option<std::path::PathBuf>,
-}
-
-impl Default for LogArgs {
-    fn default() -> Self {
-        Self {
-            level_default: "info".to_owned(),
-            level_eval: None,
-            level_build: None,
-            level_proto: None,
-            burst_bytes_per_min: 8 * 1024 * 1024,
-            sustained_bytes_per_hour: 64 * 1024 * 1024,
-            fetch_from_store: true,
-            trace_dir: None,
-        }
-    }
 }
 
 pub fn host_system() -> String {

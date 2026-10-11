@@ -5,20 +5,16 @@
  */
 
 use clap::Args;
+use gradient_derive::config_group;
 
 pub const DEFAULT_SENTRY_DSN: &str =
     "https://5895e5a5d35f4dbebbcc47d5a722c402@reports.wavelens.io/1";
 
-#[derive(Args, Debug, Clone, Default)]
+#[config_group("sentry")]
+#[derive(Args, Debug, Clone)]
 pub struct SentryArgs {
-    #[arg(
-        id = "sentry-enable",
-        long = "sentry-enable",
-        env = "GRADIENT_SENTRY_ENABLE",
-        default_value = "false"
-    )]
+    #[arg(id = "sentry-enable", default_value = "false")]
     pub enable: bool,
-    #[arg(long = "sentry-dsn", env = "GRADIENT_SENTRY_DSN")]
     pub dsn: Option<String>,
 }
 
