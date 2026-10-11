@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::invite_policy::invitation_expiry;
@@ -123,11 +123,9 @@ pub async fn get_cache_members(
 }
 
 pub async fn post_cache_member(
-    CacheScope {
-        cache, user, db, ..
-    }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
+    CacheScope { cache, user, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Json(body): Json<AddCacheMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target_user = find_user_by_username(&state.web_db, &body.user).await?;
@@ -171,21 +169,7 @@ pub async fn post_cache_member(
         .insert(&state.web_db)
         .await?;
 
-        audit_record(
-            &db,
-            Some(user.id),
-            Action::CacheMemberCreate,
-            EventOwner {
-                cache: Some(cache.id),
-                ..Default::default()
-            },
-            &info,
-            Some(serde_json::json!({
-                "cache_id": cache.id.to_string(),
-                "target_user_id": target_user.id.to_string(),
-                "role": role.name,
-            })),
-        )
+        audit.write(Action::CacheMemberCreate, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "target_user_id": target_user.id.to_string(), "role": role.name, }))
         .await;
 
         return Ok(ok_json("User added".to_string()));
@@ -230,31 +214,15 @@ pub async fn post_cache_member(
         tracing::warn!(error = %e, "Failed to send cache invitation email");
     }
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheInvitationCreate,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "cache_id": cache.id.to_string(),
-            "target_user_id": target_user.id.to_string(),
-            "role": role.name,
-        })),
-    )
+    audit.write(Action::CacheInvitationCreate, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "target_user_id": target_user.id.to_string(), "role": role.name, }))
     .await;
 
     Ok(ok_json("Invitation sent".to_string()))
 }
 
 pub async fn patch_cache_member(
-    CacheScope {
-        cache, user, db, ..
-    }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
-    info: RequestInfo,
+    CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
+    audit: Audit,
     Json(body): Json<AddCacheMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target_user = find_user_by_username(&db.web_db, &body.user).await?;
@@ -282,32 +250,15 @@ pub async fn patch_cache_member(
     active.role = Set(role.id);
     active.update(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheMemberUpdate,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "cache_id": cache.id.to_string(),
-            "target_user_id": target_user.id.to_string(),
-            "previous_role_id": previous_role_id.to_string(),
-            "new_role": role.name,
-        })),
-    )
+    audit.write(Action::CacheMemberUpdate, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "target_user_id": target_user.id.to_string(), "previous_role_id": previous_role_id.to_string(), "new_role": role.name, }))
     .await;
 
     Ok(ok_json("User role updated".to_string()))
 }
 
 pub async fn delete_cache_member(
-    CacheScope {
-        cache, user, db, ..
-    }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
-    info: RequestInfo,
+    CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
+    audit: Audit,
     Json(body): Json<RemoveCacheMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target_user = find_user_by_username(&db.web_db, &body.user).await?;
@@ -330,20 +281,7 @@ pub async fn delete_cache_member(
     let active: ACacheUser = membership.into();
     active.delete(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheMemberDelete,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "cache_id": cache.id.to_string(),
-            "target_user_id": target_user.id.to_string(),
-        })),
-    )
+    audit.write(Action::CacheMemberDelete, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "target_user_id": target_user.id.to_string(), }))
     .await;
 
     Ok(ok_json("User removed".to_string()))

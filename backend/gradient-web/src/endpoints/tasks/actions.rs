@@ -5,7 +5,7 @@
  */
 
 use super::refusal::TaskRefusal;
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
@@ -18,7 +18,7 @@ use chrono::Utc;
 use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
-use gradient_db::{DbContext, WebDb};
+use gradient_db::WebDb;
 use gradient_types::actions::{ActionConfig, ActionType, is_matrix_room_id};
 use gradient_types::events::audit::Action;
 use gradient_types::events::{EventOwner, names};
@@ -192,11 +192,10 @@ pub async fn create_action(
         project,
         task: proj,
         user,
-        db,
         ..
     }: TaskScope<Requires<can::ManageActions>>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Json(body): Json<CreateActionRequest>,
 ) -> WebResult<Json<BaseResponse<CreateActionResponse>>> {
     match &body.config {
@@ -295,7 +294,7 @@ pub async fn create_action(
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
 
-    record_action_event(&db, &user, &info, Action::TaskActionCreate, project.id, &m).await;
+    record_action_event(&audit, Action::TaskActionCreate, project.id, &m).await;
 
     Ok(ok_json(CreateActionResponse {
         action: m.into(),
@@ -335,13 +334,11 @@ pub async fn update_action(
     TaskScope {
         project,
         task: proj,
-        user,
-        db,
         params,
         ..
     }: TaskScope<Requires<can::ManageActions>>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Json(body): Json<UpdateActionRequest>,
 ) -> WebResult<Json<BaseResponse<ActionResponse>>> {
     let id: TaskActionId = params.param("id")?;
@@ -431,38 +428,19 @@ pub async fn update_action(
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
 
-    record_action_event(
-        &db,
-        &user,
-        &info,
-        Action::TaskActionUpdate,
-        project.id,
-        &updated,
-    )
-    .await;
+    record_action_event(&audit, Action::TaskActionUpdate, project.id, &updated).await;
 
     Ok(ok_json(ActionResponse::from(updated)))
 }
 
-async fn record_action_event(
-    db: &DbContext,
-    user: &MUser,
-    info: &RequestInfo,
-    action: Action,
-    project: ProjectId,
-    row: &MTaskAction,
-) {
-    let owner = EventOwner {
-        project: Some(project),
-        task: Some(row.task),
-        ..Default::default()
-    };
+async fn record_action_event(audit: &Audit, action: Action, project: ProjectId, row: &MTaskAction) {
+    let owner = EventOwner::task(project, row.task);
     let metadata = serde_json::json!({
         "action_id": row.id.to_string(),
         "name": row.name,
         "action_type": row.action_type,
     });
-    audit_record(db, Some(user.id), action, owner, info, Some(metadata)).await;
+    audit.write(action, owner, metadata).await;
 }
 
 #[derive(Serialize, Debug)]
@@ -474,12 +452,11 @@ pub async fn delete_action(
     TaskScope {
         project,
         task: proj,
-        user,
         db,
         params,
         ..
     }: TaskScope<Requires<can::ManageActions>>,
-    info: RequestInfo,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
     let id: TaskActionId = params.param("id")?;
 
@@ -493,15 +470,7 @@ pub async fn delete_action(
     let active: ATaskAction = row.clone().into();
     active.delete(&db.web_db).await?;
 
-    record_action_event(
-        &db,
-        &user,
-        &info,
-        Action::TaskActionDelete,
-        project.id,
-        &row,
-    )
-    .await;
+    record_action_event(&audit, Action::TaskActionDelete, project.id, &row).await;
 
     Ok(ok_json(DeletedResponse { deleted: true }))
 }

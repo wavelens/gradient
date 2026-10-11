@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
@@ -78,10 +78,8 @@ pub async fn get_cache_invitations(
 }
 
 pub async fn delete_cache_invitation(
-    CacheScope {
-        cache, user, db, ..
-    }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
-    info: RequestInfo,
+    CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
+    audit: Audit,
     Json(body): Json<RevokeCacheInvitationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target_user = EUser::find()
@@ -102,20 +100,7 @@ pub async fn delete_cache_invitation(
 
     invitation.into_active_model().delete(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheInvitationRevoke,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "cache_id": cache.id.to_string(),
-            "target_user_id": target_user.id.to_string(),
-        })),
-    )
+    audit.write(Action::CacheInvitationRevoke, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "target_user_id": target_user.id.to_string(), }))
     .await;
 
     Ok(ok_json("Invitation revoked".to_string()))

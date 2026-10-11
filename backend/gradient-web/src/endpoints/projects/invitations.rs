@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json, role_names};
 use crate::refusal::SharedRefusal;
@@ -72,10 +72,8 @@ pub async fn get_project_invitations(
 }
 
 pub async fn delete_project_invitation(
-    ProjectScope {
-        project, user, db, ..
-    }: ProjectScope<RequiresUnmanaged<can::ManageMembers>>,
-    info: RequestInfo,
+    ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageMembers>>,
+    audit: Audit,
     Json(body): Json<RevokeInvitationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target_user = EUser::find()
@@ -96,20 +94,7 @@ pub async fn delete_project_invitation(
 
     invitation.into_active_model().delete(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::ProjectInvitationRevoke,
-        EventOwner {
-            project: Some(project.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "project_id": project.id.to_string(),
-            "target_user_id": target_user.id.to_string(),
-        })),
-    )
+    audit.write(Action::ProjectInvitationRevoke, EventOwner::project(project.id), serde_json::json!({ "project_id": project.id.to_string(), "target_user_id": target_user.id.to_string(), }))
     .await;
 
     Ok(ok_json("Invitation revoked".to_string()))

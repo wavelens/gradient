@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::endpoints::teams::members::role_label;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{ok_json, role_names};
@@ -259,7 +259,7 @@ async fn claim_invitation(db: &WebDb, user: &MUser, token: &str) -> WebResult<In
 
 pub async fn post_accept_invite(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Json(body): Json<InviteTokenRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -298,10 +298,7 @@ pub async fn post_accept_invite(
 
             (
                 Action::ProjectInvitationAccept,
-                EventOwner {
-                    project: Some(project),
-                    ..Default::default()
-                },
+                EventOwner::project(project),
                 payload,
             )
         }
@@ -336,10 +333,7 @@ pub async fn post_accept_invite(
 
             (
                 Action::CacheInvitationAccept,
-                EventOwner {
-                    cache: Some(cache),
-                    ..Default::default()
-                },
+                EventOwner::cache(cache),
                 payload,
             )
         }
@@ -373,22 +367,14 @@ pub async fn post_accept_invite(
     };
 
     tx.commit().await?;
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        action,
-        owner,
-        &info,
-        Some(payload),
-    )
-    .await;
+    audit.write(action, owner, payload).await;
 
     Ok(ok_json("Invitation accepted".to_string()))
 }
 
 pub async fn post_decline_invite(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Json(body): Json<InviteTokenRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -396,19 +382,13 @@ pub async fn post_decline_invite(
 
     let (action, owner, payload) = match invitation {
         Invitation::Project(inv) => {
-            let owner = EventOwner {
-                project: Some(inv.project),
-                ..Default::default()
-            };
+            let owner = EventOwner::project(inv.project);
             let payload = serde_json::json!({ "project_id": inv.project.to_string() });
             inv.into_active_model().delete(&state.web_db).await?;
             (Action::ProjectInvitationDecline, owner, payload)
         }
         Invitation::Cache(inv) => {
-            let owner = EventOwner {
-                cache: Some(inv.cache),
-                ..Default::default()
-            };
+            let owner = EventOwner::cache(inv.cache);
             let payload = serde_json::json!({ "cache_id": inv.cache.to_string() });
             inv.into_active_model().delete(&state.web_db).await?;
             (Action::CacheInvitationDecline, owner, payload)
@@ -424,15 +404,7 @@ pub async fn post_decline_invite(
         }
     };
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        action,
-        owner,
-        &info,
-        Some(payload),
-    )
-    .await;
+    audit.write(action, owner, payload).await;
 
     Ok(ok_json("Invitation declined".to_string()))
 }

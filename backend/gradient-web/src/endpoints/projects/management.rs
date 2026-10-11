@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, changed_fields, record as audit_record};
+use crate::audit::{Audit, changed_fields};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{ok_json, paginate};
 use crate::json_body::JsonBody;
@@ -183,7 +183,7 @@ pub async fn get(
 
 pub async fn put(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     JsonBody(body): JsonBody<MakeProjectRequest>,
@@ -240,21 +240,13 @@ pub async fn put(
 
     tx.commit().await?;
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::ProjectCreate,
-        EventOwner {
-            project: Some(project.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "project_id": project.id.to_string(),
-            "name": project.name,
-        })),
-    )
-    .await;
+    audit
+        .write(
+            Action::ProjectCreate,
+            EventOwner::project(project.id),
+            serde_json::json!({ "project_id": project.id.to_string(), "name": project.name, }),
+        )
+        .await;
 
     // A connected worker is learning about the new project only when it re-auths.
     for team in granted_teams {
@@ -351,10 +343,8 @@ async fn github_app_install_url(
 }
 
 pub async fn patch_project(
-    ProjectScope {
-        project, user, db, ..
-    }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
-    info: RequestInfo,
+    ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
+    audit: Audit,
     JsonBody(body): JsonBody<PatchProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let fields = changed_fields([
@@ -394,18 +384,13 @@ pub async fn patch_project(
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::ProjectName))?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::ProjectUpdate,
-        EventOwner {
-            project: Some(project.id),
-            ..Default::default()
-        },
-        &info,
-        Some(fields),
-    )
-    .await;
+    audit
+        .write(
+            Action::ProjectUpdate,
+            EventOwner::project(project.id),
+            fields,
+        )
+        .await;
 
     let res = BaseResponse {
         error: false,
@@ -416,30 +401,15 @@ pub async fn patch_project(
 }
 
 pub async fn delete_project(
-    ProjectScope {
-        project, user, db, ..
-    }: ProjectScope<RequiresUnmanaged<can::DeleteProject>>,
-    info: RequestInfo,
+    ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::DeleteProject>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project_id = project.id;
     let project_name = project.name.clone();
     let aproject: AProject = project.into();
     aproject.delete(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::ProjectDelete,
-        EventOwner {
-            project: Some(project_id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "project_id": project_id.to_string(),
-            "project_name": project_name,
-        })),
-    )
+    audit.write(Action::ProjectDelete, EventOwner::project(project_id), serde_json::json!({ "project_id": project_id.to_string(), "project_name": project_name, }))
     .await;
 
     let res = BaseResponse {

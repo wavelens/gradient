@@ -5,7 +5,7 @@
  */
 
 use super::refusal::TeamRefusal;
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::invite_policy::invitation_expiry;
@@ -121,9 +121,9 @@ pub async fn get_team_members(
 }
 
 pub async fn post_team_members(
-    TeamScope { team, user, db, .. }: TeamScope<Admin>,
+    TeamScope { team, user, .. }: TeamScope<Admin>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Json(body): Json<TeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user(&state.web_db, &body.user).await?;
@@ -161,15 +161,9 @@ pub async fn post_team_members(
         .into_active_model()
         .insert(&state.web_db)
         .await?;
-        audit_record(
-            &db,
-            Some(user.id),
-            Action::TeamMemberAdd,
-            EventOwner::default(),
-            &info,
-            Some(payload),
-        )
-        .await;
+        audit
+            .write(Action::TeamMemberAdd, EventOwner::default(), payload)
+            .await;
         return Ok(ok_json("User added".to_string()));
     }
 
@@ -211,21 +205,15 @@ pub async fn post_team_members(
         tracing::warn!(error = %e, "Failed to send team invitation email");
     }
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamInvitationCreate,
-        EventOwner::default(),
-        &info,
-        Some(payload),
-    )
-    .await;
+    audit
+        .write(Action::TeamInvitationCreate, EventOwner::default(), payload)
+        .await;
     Ok(ok_json("Invitation sent".to_string()))
 }
 
 pub async fn patch_team_members(
-    TeamScope { team, user, db, .. }: TeamScope<Admin>,
-    info: RequestInfo,
+    TeamScope { team, db, .. }: TeamScope<Admin>,
+    audit: Audit,
     Json(body): Json<TeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user(&db.web_db, &body.user).await?;
@@ -245,26 +233,15 @@ pub async fn patch_team_members(
     }
     active.update(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamMemberRoleChange,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({
-            "team_id": team.id.to_string(),
-            "target_user_id": target.id.to_string(),
-            "role": role_label(body.role),
-        })),
-    )
+    audit.write(Action::TeamMemberRoleChange, EventOwner::default(), serde_json::json!({ "team_id": team.id.to_string(), "target_user_id": target.id.to_string(), "role": role_label(body.role), }))
     .await;
 
     Ok(ok_json("User role updated".to_string()))
 }
 
 pub async fn delete_team_members(
-    TeamScope { team, user, db, .. }: TeamScope<Admin>,
-    info: RequestInfo,
+    TeamScope { team, db, .. }: TeamScope<Admin>,
+    audit: Audit,
     Json(body): Json<RemoveTeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user(&db.web_db, &body.user).await?;
@@ -276,17 +253,7 @@ pub async fn delete_team_members(
     ensure_not_last_admin(&db.web_db, team.id, &membership).await?;
     membership.into_active_model().delete(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamMemberRemove,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({
-            "team_id": team.id.to_string(),
-            "target_user_id": target.id.to_string(),
-        })),
-    )
+    audit.write(Action::TeamMemberRemove, EventOwner::default(), serde_json::json!({ "team_id": team.id.to_string(), "target_user_id": target.id.to_string(), }))
     .await;
 
     Ok(ok_json("User removed".to_string()))

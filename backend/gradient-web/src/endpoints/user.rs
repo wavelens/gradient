@@ -5,7 +5,7 @@
  */
 
 use crate::access::{CacheAccess, Caller, effective_cache_mask, load_cache};
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key, session_claims};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
@@ -269,7 +269,7 @@ pub async fn get(
 
 pub async fn delete(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Json(body): Json<DeleteUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -289,19 +289,12 @@ pub async fn delete(
         }
     }
 
-    let user_id = user.id;
     let auser: AUser = user.into();
     auser.delete(&state.web_db).await?;
 
-    audit_record(
-        &state.db(),
-        Some(user_id),
-        Action::UserDelete,
-        EventOwner::default(),
-        &info,
-        None,
-    )
-    .await;
+    audit
+        .write(Action::UserDelete, EventOwner::default(), None)
+        .await;
 
     let res = BaseResponse {
         error: false,
@@ -439,7 +432,7 @@ pub async fn get_keys(
 
 pub async fn post_keys(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(api_key_caller): Extension<MaybeApiKey>,
     Json(body): Json<CreateApiKeyRequest>,
@@ -516,21 +509,7 @@ pub async fn post_keys(
 
     let inserted = api_key.insert(&state.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::ApiKeyCreate,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({
-            "api_key_id": inserted.id.to_string(),
-            "name": body.name,
-            "expires_in_days": body.expires_in_days,
-            "permissions_mask": mask,
-            "project_id": project_pin.map(|id| id.to_string()),
-            "cache_id": cache_pin.map(|id| id.to_string()),
-        })),
-    )
+    audit.write(Action::ApiKeyCreate, EventOwner::default(), serde_json::json!({ "api_key_id": inserted.id.to_string(), "name": body.name, "expires_in_days": body.expires_in_days, "permissions_mask": mask, "project_id": project_pin.map(|id| id.to_string()), "cache_id": cache_pin.map(|id| id.to_string()), }))
     .await;
 
     Ok(Json(BaseResponse {
@@ -541,7 +520,7 @@ pub async fn post_keys(
 
 pub async fn patch_key(
     state: State<Arc<ServerState>>,
-    request_info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(api_key_caller): Extension<MaybeApiKey>,
     Path(api_id): Path<ApiId>,
@@ -599,22 +578,7 @@ pub async fn patch_key(
 
     let updated = active.update(&state.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::ApiKeyUpdate,
-        EventOwner::default(),
-        &request_info,
-        Some(serde_json::json!({
-            "api_key_id": api_id.to_string(),
-            "previous_name": previous_name,
-            "new_name": updated.name,
-            "previous_permissions_mask": previous_mask,
-            "new_permissions_mask": new_mask,
-            "previous_project_id": previous_project.map(|i| i.to_string()),
-            "new_project_id": new_project.map(|i| i.to_string()),
-        })),
-    )
+    audit.write(Action::ApiKeyUpdate, EventOwner::default(), serde_json::json!({ "api_key_id": api_id.to_string(), "previous_name": previous_name, "new_name": updated.name, "previous_permissions_mask": previous_mask, "new_permissions_mask": new_mask, "previous_project_id": previous_project.map(|i| i.to_string()), "new_project_id": new_project.map(|i| i.to_string()), }))
     .await;
 
     let pinned: Vec<ProjectId> = updated.project.iter().copied().collect();
@@ -624,7 +588,7 @@ pub async fn patch_key(
 
 pub async fn delete_keys(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(api_key_caller): Extension<MaybeApiKey>,
     Json(body): Json<ApiKeyRequest>,
@@ -648,18 +612,13 @@ pub async fn delete_keys(
     let aapi_key: AApi = api_key.into();
     aapi_key.delete(&state.web_db).await?;
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::ApiKeyDelete,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({
-            "api_key_id": api_key_id.to_string(),
-            "name": body.name,
-        })),
-    )
-    .await;
+    audit
+        .write(
+            Action::ApiKeyDelete,
+            EventOwner::default(),
+            serde_json::json!({ "api_key_id": api_key_id.to_string(), "name": body.name, }),
+        )
+        .await;
 
     let res = BaseResponse {
         error: false,
@@ -671,7 +630,7 @@ pub async fn delete_keys(
 
 pub async fn post_key_revoke(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(api_key_caller): Extension<MaybeApiKey>,
     Path(api_id): Path<ApiId>,
@@ -693,15 +652,13 @@ pub async fn post_key_revoke(
     active.revoked_at = Set(Some(gradient_types::now()));
     active.update(&state.web_db).await?;
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::ApiKeyRevoke,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "api_key_id": api_id.to_string() })),
-    )
-    .await;
+    audit
+        .write(
+            Action::ApiKeyRevoke,
+            EventOwner::default(),
+            serde_json::json!({ "api_key_id": api_id.to_string() }),
+        )
+        .await;
 
     Ok(ok_json("API-Key revoked".to_string()))
 }
@@ -741,7 +698,7 @@ pub async fn get_sessions(
 
 pub async fn delete_session(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Path(session_id): Path<SessionId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -758,15 +715,13 @@ pub async fn delete_session(
     active.revoked_at = Set(Some(gradient_types::now()));
     active.update(&state.web_db).await?;
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::SessionRevoke,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "session_id": session_id.to_string() })),
-    )
-    .await;
+    audit
+        .write(
+            Action::SessionRevoke,
+            EventOwner::default(),
+            serde_json::json!({ "session_id": session_id.to_string() }),
+        )
+        .await;
 
     Ok(ok_json("Session revoked".to_string()))
 }

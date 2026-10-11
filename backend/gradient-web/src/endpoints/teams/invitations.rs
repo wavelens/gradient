@@ -5,7 +5,7 @@
  */
 
 use super::members::role_label;
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::endpoints::projects::invitations::{PendingInvitationItem, RevokeInvitationRequest};
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
@@ -52,8 +52,8 @@ pub async fn get_team_invitations(
 }
 
 pub async fn delete_team_invitation(
-    TeamScope { team, user, db, .. }: TeamScope<Admin>,
-    info: RequestInfo,
+    TeamScope { team, db, .. }: TeamScope<Admin>,
+    audit: Audit,
     Json(body): Json<RevokeInvitationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target_user = EUser::find()
@@ -71,17 +71,7 @@ pub async fn delete_team_invitation(
 
     invitation.into_active_model().delete(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamInvitationRevoke,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({
-            "team_id": team.id.to_string(),
-            "target_user_id": target_user.id.to_string(),
-        })),
-    )
+    audit.write(Action::TeamInvitationRevoke, EventOwner::default(), serde_json::json!({ "team_id": team.id.to_string(), "target_user_id": target_user.id.to_string(), }))
     .await;
 
     Ok(ok_json("Invitation revoked".to_string()))

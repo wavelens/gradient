@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::user::forbid_via_api_key;
 use crate::error::{WebError, WebResult};
@@ -99,7 +99,7 @@ pub async fn get_ssh_keys(
 
 pub async fn post_ssh_key(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Json(body): Json<CreateSshKeyRequest>,
@@ -135,17 +135,7 @@ pub async fn post_ssh_key(
     .insert(&state.web_db)
     .await?;
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::SshKeyCreate,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({
-            "ssh_key_id": inserted.id.to_string(),
-            "fingerprint": inserted.fingerprint,
-        })),
-    )
+    audit.write(Action::SshKeyCreate, EventOwner::default(), serde_json::json!({ "ssh_key_id": inserted.id.to_string(), "fingerprint": inserted.fingerprint, }))
     .await;
 
     Ok(ok_json(inserted.into()))
@@ -153,7 +143,7 @@ pub async fn post_ssh_key(
 
 pub async fn delete_ssh_key(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(ssh_key_id): Path<UserSshKeyId>,
@@ -167,15 +157,13 @@ pub async fn delete_ssh_key(
 
     let key_id = key.id;
     key.delete(&state.web_db).await?;
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::SshKeyDelete,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "ssh_key_id": key_id.to_string() })),
-    )
-    .await;
+    audit
+        .write(
+            Action::SshKeyDelete,
+            EventOwner::default(),
+            serde_json::json!({ "ssh_key_id": key_id.to_string() }),
+        )
+        .await;
 
     Ok(ok_json("SSH key deleted".to_string()))
 }

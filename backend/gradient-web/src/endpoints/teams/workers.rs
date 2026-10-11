@@ -5,7 +5,7 @@
  */
 
 use super::refusal::TeamRefusal;
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::endpoints::projects::workers::{
     PatchWorkerRequest, RegisterWorkerRequest, WorkerConnection, encrypt_for_dialing, live_workers,
     patch_edits_managed_fields, worker_connection,
@@ -134,7 +134,7 @@ pub async fn get_team_workers(
 pub async fn post_team_worker(
     TeamScope { team, user, .. }: TeamScope<Admin>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<RegisteredTeamWorker>>> {
@@ -185,15 +185,13 @@ pub async fn post_team_worker(
         }
     }
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::TeamWorkerCreate,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "team_id": team.id.to_string(), "worker_id": worker_id })),
-    )
-    .await;
+    audit
+        .write(
+            Action::TeamWorkerCreate,
+            EventOwner::default(),
+            serde_json::json!({ "team_id": team.id.to_string(), "worker_id": worker_id }),
+        )
+        .await;
 
     Ok(ok_json(RegisteredTeamWorker {
         team: team.id,
@@ -203,13 +201,9 @@ pub async fn post_team_worker(
 
 pub async fn patch_team_worker(
     TeamScope {
-        team,
-        user,
-        db,
-        params,
-        ..
+        team, db, params, ..
     }: TeamScope<Admin>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -250,28 +244,22 @@ pub async fn patch_team_worker(
         reauth_team_workers(&scheduler, &workers).await;
     }
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamWorkerUpdate,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "team_id": team.id.to_string(), "worker_id": worker_id })),
-    )
-    .await;
+    audit
+        .write(
+            Action::TeamWorkerUpdate,
+            EventOwner::default(),
+            serde_json::json!({ "team_id": team.id.to_string(), "worker_id": worker_id }),
+        )
+        .await;
 
     Ok(ok_json("ok".to_string()))
 }
 
 pub async fn delete_team_worker(
     TeamScope {
-        team,
-        user,
-        db,
-        params,
-        ..
+        team, db, params, ..
     }: TeamScope<Admin>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let worker_id: String = params.param("worker_id")?;
@@ -286,15 +274,13 @@ pub async fn delete_team_worker(
     withdraw_team_workers(&scheduler, std::slice::from_ref(&worker_id), &projects).await;
     scheduler.connection_failures.clear(&worker_id);
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamWorkerDelete,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "team_id": team.id.to_string(), "worker_id": worker_id })),
-    )
-    .await;
+    audit
+        .write(
+            Action::TeamWorkerDelete,
+            EventOwner::default(),
+            serde_json::json!({ "team_id": team.id.to_string(), "worker_id": worker_id }),
+        )
+        .await;
 
     Ok(ok_json(format!("worker '{}' unregistered", worker_id)))
 }

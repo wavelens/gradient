@@ -11,8 +11,8 @@ use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
 use axum::middleware::Next;
 use axum::response::Response;
+use gradient_db::WebDb;
 use gradient_db::lookup::by_id;
-use gradient_db::{DbContext, WebDb};
 use gradient_util::debounce::Debounce;
 use uuid::Uuid;
 
@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use super::api_key::MaybeApiKey;
 use super::jwt::{bearer_token, decode_jwt, extract_bearer_or_cookie, session_cookie_token};
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::{Audit, RequestInfo};
 use crate::client_ip::{ClientIp, resolve_client_ip};
 use crate::error::{WebError, WebResult};
 use crate::ip_allowlist::is_allowed as ip_allowed;
@@ -65,26 +65,24 @@ fn presented_token(headers: &HeaderMap) -> Result<&str, Denial> {
 }
 
 async fn deny(
-    db: &DbContext,
+    audit: &Audit,
     user_id: Option<UserId>,
-    info: RequestInfo,
     method: String,
     path: String,
     denial: impl Refusal,
 ) -> WebError {
-    audit_record(
-        db,
-        user_id,
-        Action::AuthDeny,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({
-            "reason": denial.to_string(),
-            "method": method,
-            "path": path,
-        })),
-    )
-    .await;
+    audit
+        .write_as(
+            user_id,
+            Action::AuthDeny,
+            EventOwner::default(),
+            serde_json::json!({
+                "reason": denial.to_string(),
+                "method": method,
+                "path": path,
+            }),
+        )
+        .await;
 
     denial.into()
 }
@@ -94,7 +92,6 @@ pub async fn authorize(
     mut req: Request,
     next: Next,
 ) -> WebResult<Response<Body>> {
-    let db = state.db();
     let peer = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -103,6 +100,7 @@ pub async fn authorize(
 
     let info =
         RequestInfo::from_request(req.headers(), peer, &state.config.network.trusted_proxies);
+    let audit = Audit::new(state.db(), info);
 
     let method = req.method().as_str().to_string();
     let path = req.uri().path().to_string();
@@ -110,7 +108,7 @@ pub async fn authorize(
     let presented = presented_token(req.headers()).map(str::to_owned);
     let token_str = match presented {
         Ok(token) => token,
-        Err(denial) => return Err(deny(&db, None, info, method, path, denial).await),
+        Err(denial) => return Err(deny(&audit, None, method, path, denial).await),
     };
 
     let Ok(decoded) = decode_jwt(
@@ -121,7 +119,7 @@ pub async fn authorize(
     )
     .await
     else {
-        return Err(deny(&db, None, info, method, path, Denial::UndecodableToken).await);
+        return Err(deny(&audit, None, method, path, Denial::UndecodableToken).await);
     };
 
     let user_id = decoded.user_id();
@@ -129,18 +127,18 @@ pub async fn authorize(
     let api_key_context = decoded.api_key_context();
     if api_key_context.is_some_and(|context| !ip_allowed(client_ip, &context.allowed_ips)) {
         let denial = SharedRefusal::SourceIpNotAllowed;
-        return Err(deny(&db, Some(user_id), info, method, path, denial).await);
+        return Err(deny(&audit, Some(user_id), method, path, denial).await);
     }
 
     let api_key_extension = MaybeApiKey::from(&decoded);
     let Some(current_user) = by_id::<EUser, _>(&state.web_db, user_id).await? else {
         let denial = Denial::UnknownUser;
-        return Err(deny(&db, Some(user_id), info, method, path, denial).await);
+        return Err(deny(&audit, Some(user_id), method, path, denial).await);
     };
 
     if !current_user.active {
         let denial = SharedRefusal::AccountDeactivated;
-        return Err(deny(&db, Some(user_id), info, method, path, denial).await);
+        return Err(deny(&audit, Some(user_id), method, path, denial).await);
     }
 
     req.extensions_mut().insert(current_user);

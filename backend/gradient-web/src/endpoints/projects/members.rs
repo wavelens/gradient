@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, role_names};
 use crate::invite_policy::invitation_expiry;
@@ -116,11 +116,9 @@ pub async fn get_project_users(
 }
 
 pub async fn post_project_users(
-    ProjectScope {
-        project, user, db, ..
-    }: ProjectScope<RequiresUnmanaged<can::ManageMembers>>,
+    ProjectScope { project, user, .. }: ProjectScope<RequiresUnmanaged<can::ManageMembers>>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Json(body): Json<AddUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target_user = find_user_by_username(&state.web_db, &body.user).await?;
@@ -162,21 +160,7 @@ pub async fn post_project_users(
         .insert(&state.web_db)
         .await?;
 
-        audit_record(
-            &db,
-            Some(user.id),
-            Action::ProjectMemberAdd,
-            EventOwner {
-                project: Some(project.id),
-                ..Default::default()
-            },
-            &info,
-            Some(serde_json::json!({
-                "project_id": project.id.to_string(),
-                "target_user_id": target_user.id.to_string(),
-                "role": role.name,
-            })),
-        )
+        audit.write(Action::ProjectMemberAdd, EventOwner::project(project.id), serde_json::json!({ "project_id": project.id.to_string(), "target_user_id": target_user.id.to_string(), "role": role.name, }))
         .await;
 
         return Ok(ok_json("User added".to_string()));
@@ -221,31 +205,15 @@ pub async fn post_project_users(
         tracing::warn!(error = %e, "Failed to send project invitation email");
     }
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::ProjectInvitationCreate,
-        EventOwner {
-            project: Some(project.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "project_id": project.id.to_string(),
-            "target_user_id": target_user.id.to_string(),
-            "role": role.name,
-        })),
-    )
+    audit.write(Action::ProjectInvitationCreate, EventOwner::project(project.id), serde_json::json!({ "project_id": project.id.to_string(), "target_user_id": target_user.id.to_string(), "role": role.name, }))
     .await;
 
     Ok(ok_json("Invitation sent".to_string()))
 }
 
 pub async fn patch_project_users(
-    ProjectScope {
-        project, user, db, ..
-    }: ProjectScope<RequiresUnmanaged<can::ManageMembers>>,
-    info: RequestInfo,
+    ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageMembers>>,
+    audit: Audit,
     Json(body): Json<AddUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target_user = find_user_by_username(&db.web_db, &body.user).await?;
@@ -271,32 +239,15 @@ pub async fn patch_project_users(
     active.role = Set(role.id);
     active.update(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::ProjectMemberRoleChange,
-        EventOwner {
-            project: Some(project.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "project_id": project.id.to_string(),
-            "target_user_id": target_user.id.to_string(),
-            "previous_role_id": previous_role_id.to_string(),
-            "new_role": role.name,
-        })),
-    )
+    audit.write(Action::ProjectMemberRoleChange, EventOwner::project(project.id), serde_json::json!({ "project_id": project.id.to_string(), "target_user_id": target_user.id.to_string(), "previous_role_id": previous_role_id.to_string(), "new_role": role.name, }))
     .await;
 
     Ok(ok_json("User role updated".to_string()))
 }
 
 pub async fn delete_project_users(
-    ProjectScope {
-        project, user, db, ..
-    }: ProjectScope<RequiresUnmanaged<can::ManageMembers>>,
-    info: RequestInfo,
+    ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageMembers>>,
+    audit: Audit,
     Json(body): Json<RemoveUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target_user = find_user_by_username(&db.web_db, &body.user).await?;
@@ -308,20 +259,7 @@ pub async fn delete_project_users(
     let active: AProjectUser = membership.into();
     active.delete(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::ProjectMemberRemove,
-        EventOwner {
-            project: Some(project.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "project_id": project.id.to_string(),
-            "target_user_id": target_user.id.to_string(),
-        })),
-    )
+    audit.write(Action::ProjectMemberRemove, EventOwner::project(project.id), serde_json::json!({ "project_id": project.id.to_string(), "target_user_id": target_user.id.to_string(), }))
     .await;
 
     Ok(ok_json("User kicked".to_string()))
