@@ -41,25 +41,9 @@ async fn team_for_group(db: &WebDb, group: &str) -> ScimResult<MTeam> {
 }
 
 async fn group_resource(db: &WebDb, team: &MTeam) -> ScimResult<GroupResource> {
-    let group = team.scim_group.clone().unwrap_or_default();
-    let members = gradient_db::teams::members::memberships_of(db.inner(), team.id)
-        .await?
-        .into_iter()
-        .map(|membership| GroupMember {
-            value: membership.user.to_string(),
-            display: None,
-        })
-        .collect();
+    let memberships = gradient_db::teams::members::memberships_of(db.inner(), team.id).await?;
 
-    Ok(GroupResource {
-        schemas: [GROUP_SCHEMA],
-        id: group.clone(),
-        display_name: group,
-        members,
-        meta: Meta {
-            resource_type: "Group",
-        },
-    })
+    Ok(GroupResource::new(team, memberships))
 }
 
 #[derive(serde::Deserialize)]

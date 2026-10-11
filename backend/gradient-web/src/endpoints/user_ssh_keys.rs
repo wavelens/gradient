@@ -48,12 +48,6 @@ pub struct SshKeyInfo {
     pub last_used_at: Option<NaiveDateTime>,
 }
 
-#[derive(Deserialize)]
-pub struct CreateSshKeyRequest {
-    pub name: String,
-    pub public_key: String,
-}
-
 impl From<MUserSshKey> for SshKeyInfo {
     fn from(key: MUserSshKey) -> Self {
         Self {
@@ -64,6 +58,12 @@ impl From<MUserSshKey> for SshKeyInfo {
             last_used_at: key.last_used_at,
         }
     }
+}
+
+#[derive(Deserialize)]
+pub struct CreateSshKeyRequest {
+    pub name: String,
+    pub public_key: String,
 }
 
 pub fn fingerprint(public_key: &str) -> Result<String, ssh_key::Error> {

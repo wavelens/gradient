@@ -39,6 +39,16 @@ pub struct SeriesPoint {
     pub sum: f64,
 }
 
+impl From<series::BucketTotal> for SeriesPoint {
+    fn from(total: series::BucketTotal) -> Self {
+        Self {
+            bucket_start: total.bucket_start.and_utc().to_rfc3339(),
+            count: total.count,
+            sum: total.sum,
+        }
+    }
+}
+
 async fn infra_series(
     db: &impl ConnectionTrait,
     metric: &str,
@@ -46,14 +56,7 @@ async fn infra_series(
 ) -> WebResult<Vec<SeriesPoint>> {
     let rows = series::hourly_totals(db, metric, window_hours).await?;
 
-    Ok(rows
-        .into_iter()
-        .map(|r| SeriesPoint {
-            bucket_start: r.bucket_start.and_utc().to_rfc3339(),
-            count: r.count,
-            sum: r.sum,
-        })
-        .collect())
+    Ok(rows.into_iter().map(SeriesPoint::from).collect())
 }
 
 #[derive(Serialize)]
@@ -96,7 +99,7 @@ pub struct BoardUpstreamCache {
     pub hit_rate_series: Vec<SeriesPoint>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 pub struct BoardUpstreamCacheStats {
     pub upstream_caches: Vec<BoardUpstreamCache>,
 }
@@ -205,9 +208,7 @@ pub async fn get_board_upstream_caches(
 
     if let Some(list) = scope.project_in_list() {
         if list.is_empty() {
-            return Ok(ok_json(BoardUpstreamCacheStats {
-                upstream_caches: vec![],
-            }));
+            return Ok(ok_json(BoardUpstreamCacheStats::default()));
         }
 
         let allowed =
@@ -279,17 +280,10 @@ pub async fn get_board_network(
     let nar_egress = infra_series(&state.web_db, metric::CACHE_BYTES_SENT, window).await?;
 
     let project_filter = scope.project_in_list();
-    if let Some(list) = &project_filter
-        && list.is_empty()
-    {
-        return Ok(ok_json(BoardNetworkStats {
-            nar_egress,
-            workers: vec![],
-            http: vec![],
-        }));
-    }
-
-    let workers = worker_samples::latest_speeds(&state.web_db, project_filter.as_deref()).await?;
+    let workers = match &project_filter {
+        Some(list) if list.is_empty() => vec![],
+        _ => worker_samples::latest_speeds(&state.web_db, project_filter.as_deref()).await?,
+    };
 
     let http = if scope.is_all() {
         http_snapshot()
@@ -313,6 +307,19 @@ pub struct BoardFleetPoint {
     pub build: i64,
 }
 
+impl From<worker_samples::FleetCount> for BoardFleetPoint {
+    fn from(fleet: worker_samples::FleetCount) -> Self {
+        Self {
+            bucket_start: fleet.hour.and_utc().to_rfc3339(),
+            connected: fleet.connected,
+            draining: fleet.draining,
+            eval: fleet.eval,
+            fetch: fleet.fetch,
+            build: fleet.build,
+        }
+    }
+}
+
 pub async fn get_board_fleet(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -331,14 +338,7 @@ pub async fn get_board_fleet(
     let out = worker_samples::fleet_per_hour(&state.web_db, window, project_filter.as_deref())
         .await?
         .into_iter()
-        .map(|r| BoardFleetPoint {
-            bucket_start: r.hour.and_utc().to_rfc3339(),
-            connected: r.connected,
-            draining: r.draining,
-            eval: r.eval,
-            fetch: r.fetch,
-            build: r.build,
-        })
+        .map(BoardFleetPoint::from)
         .collect();
 
     Ok(ok_json(out))
@@ -354,7 +354,7 @@ pub struct HeatmapBand {
     pub counts: Vec<i64>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 pub struct DurationsHeatmap {
     pub times: Vec<String>,
     pub bands: Vec<HeatmapBand>,
@@ -372,10 +372,7 @@ pub async fn get_board_durations_heatmap(
     if let Some(list) = &project_filter
         && list.is_empty()
     {
-        return Ok(ok_json(DurationsHeatmap {
-            times: vec![],
-            bands: vec![],
-        }));
+        return Ok(ok_json(DurationsHeatmap::default()));
     }
 
     let rows =

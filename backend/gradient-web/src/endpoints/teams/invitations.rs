@@ -24,15 +24,14 @@ pub async fn get_team_invitations(
 
     let items: Vec<PendingInvitationItem> = rows
         .iter()
-        .map(|(inv, invitee)| PendingInvitationItem {
-            user: invitee
-                .as_ref()
-                .map(|u| u.username.clone())
-                .unwrap_or_else(|| inv.user.to_string()),
-            name: invitee.as_ref().map(|u| u.name.clone()).unwrap_or_default(),
-            role: role_label(inv.role).to_string(),
-            created_at: inv.created_at,
-            expires_at: inv.expires_at,
+        .map(|(inv, invitee)| {
+            PendingInvitationItem::new(
+                inv.user,
+                invitee.as_ref(),
+                role_label(inv.role).to_string(),
+                inv.created_at,
+                inv.expires_at,
+            )
         })
         .collect();
 

@@ -62,6 +62,25 @@ pub struct ProjectSummary {
     pub role: Option<String>,
 }
 
+impl ProjectSummary {
+    fn new(project: MProject, running_evaluations: i64, role: Option<String>) -> Self {
+        Self {
+            id: project.id,
+            name: project.name,
+            display_name: project.display_name,
+            description: project.description,
+            public_key: Some(project.public_key),
+            public: project.public,
+            hide_build_requests: project.hide_build_requests,
+            managed: project.managed,
+            created_by: project.created_by,
+            created_at: project.created_at,
+            running_evaluations,
+            role,
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct ProjectResponse {
     pub id: ProjectId,
@@ -77,6 +96,31 @@ pub struct ProjectResponse {
     pub github_app_available: bool,
     pub github_app_install_url: Option<String>,
     pub role: Option<String>,
+}
+
+impl ProjectResponse {
+    fn new(
+        project: MProject,
+        role: Option<String>,
+        github_app_available: bool,
+        github_app_install_url: Option<String>,
+    ) -> Self {
+        Self {
+            id: project.id,
+            name: project.name,
+            display_name: project.display_name,
+            description: project.description,
+            public_key: Some(project.public_key),
+            public: project.public,
+            hide_build_requests: project.hide_build_requests,
+            managed: project.managed,
+            created_by: project.created_by,
+            created_at: project.created_at,
+            github_app_available,
+            github_app_install_url,
+            role,
+        }
+    }
 }
 
 pub async fn get_project_name_available(
@@ -112,19 +156,10 @@ pub async fn get(
     let project_role_map =
         gradient_db::access::project_role_names(&state.web_db, user.id, project_ids).await?;
 
-    let listing = listing.map(|o| ProjectSummary {
-        running_evaluations: *running_per_project.get(&o.id).unwrap_or(&0),
-        role: project_role_map.get(&o.id).cloned(),
-        id: o.id,
-        name: o.name,
-        display_name: o.display_name,
-        description: o.description,
-        public_key: Some(o.public_key),
-        public: o.public,
-        hide_build_requests: o.hide_build_requests,
-        managed: o.managed,
-        created_by: o.created_by,
-        created_at: o.created_at,
+    let listing = listing.map(|project| {
+        let running_evaluations = *running_per_project.get(&project.id).unwrap_or(&0);
+        let role = project_role_map.get(&project.id).cloned();
+        ProjectSummary::new(project, running_evaluations, role)
     });
 
     Ok(ok_json(listing))
@@ -235,26 +270,19 @@ pub async fn get_project(
         None => None,
     };
 
-    Ok(ok_json(ProjectResponse {
-        id: project.id,
-        name: project.name,
-        display_name: project.display_name,
-        description: project.description,
-        public_key: Some(project.public_key),
-        public: project.public,
-        hide_build_requests: project.hide_build_requests,
-        managed: project.managed,
-        created_by: project.created_by,
-        created_at: project.created_at,
-        github_app_available: state.config.github_app.is_some(),
-        github_app_install_url: github_app_install_url(
-            &state.config,
-            &state.http,
-            &state.memory.github_app_install_url,
-        )
-        .await,
+    let install_url = github_app_install_url(
+        &state.config,
+        &state.http,
+        &state.memory.github_app_install_url,
+    )
+    .await;
+
+    Ok(ok_json(ProjectResponse::new(
+        project,
         role,
-    }))
+        state.config.github_app.is_some(),
+        install_url,
+    )))
 }
 
 const GITHUB_APP_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);

@@ -148,29 +148,7 @@ pub async fn get(
         let last_evaluation_status = p
             .last_evaluation
             .and_then(|id| eval_status_map.get(&id).cloned());
-        TaskResponse {
-            id: p.id,
-            project: p.project,
-            name: p.name,
-            active: p.active,
-            display_name: p.display_name,
-            description: p.description,
-            repository: p.repository,
-            wildcard: p.wildcard,
-            last_evaluation: p.last_evaluation,
-            last_evaluation_status,
-            force_evaluation: p.force_evaluation,
-            keep_evaluations: p.keep_evaluations,
-            concurrency: p.concurrency,
-            created_by: p.created_by,
-            created_at: p.created_at,
-            managed: p.managed,
-            sign_cache: p.sign_cache,
-            wait_for_workers: p.wait_for_workers,
-            retry_failed_builds: p.retry_failed_builds,
-            can_edit,
-            can_trigger,
-        }
+        TaskResponse::new(p, last_evaluation_status, can_edit, can_trigger)
     });
 
     Ok(ok_json(listing))
@@ -323,29 +301,12 @@ pub async fn get_task(
         None
     };
 
-    Ok(ok_json(TaskResponse {
-        id: task.id,
-        project: task.project,
-        name: task.name,
-        active: task.active,
-        display_name: task.display_name,
-        description: task.description,
-        repository: task.repository,
-        wildcard: task.wildcard,
-        last_evaluation: task.last_evaluation,
+    Ok(ok_json(TaskResponse::new(
+        task,
         last_evaluation_status,
-        force_evaluation: task.force_evaluation,
-        created_by: task.created_by,
-        created_at: task.created_at,
-        managed: task.managed,
-        keep_evaluations: task.keep_evaluations,
-        concurrency: task.concurrency,
-        sign_cache: task.sign_cache,
-        wait_for_workers: task.wait_for_workers,
-        retry_failed_builds: task.retry_failed_builds,
         can_edit,
         can_trigger,
-    }))
+    )))
 }
 
 pub async fn patch_task(

@@ -37,6 +37,15 @@ pub struct DependencyEdge {
     pub target: DerivationId,
 }
 
+impl From<MDerivationDependency> for DependencyEdge {
+    fn from(edge: MDerivationDependency) -> Self {
+        Self {
+            source: edge.dependency,
+            target: edge.derivation,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BuildGraph {
     pub root: DerivationId,
@@ -81,10 +90,7 @@ async fn walk_dependencies<C: ConnectionTrait>(
             }
 
             if seen.contains(&row.dependency) {
-                edges.push(DependencyEdge {
-                    source: row.dependency,
-                    target: row.derivation,
-                });
+                edges.push(DependencyEdge::from(row));
             }
         }
     }

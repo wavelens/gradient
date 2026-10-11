@@ -110,76 +110,66 @@ pub async fn get_user_invites(
     .map(|(id, r)| (id, r.name))
     .collect();
 
-    let project_items: Vec<InviteItem> = project_rows
-        .iter()
-        .filter_map(|r| {
-            let project = projects.get(&r.project)?;
+    let role_name = |roles: &HashMap<RoleId, String>, role: RoleId| {
+        roles
+            .get(&role)
+            .cloned()
+            .unwrap_or_else(|| role.to_string())
+    };
+
+    let items = project_rows
+        .into_iter()
+        .map(Invitation::Project)
+        .chain(cache_rows.into_iter().map(Invitation::Cache))
+        .chain(team_rows.into_iter().map(Invitation::Team))
+        .filter_map(|invitation| {
+            let (kind, scope, scope_display_name, role) = match &invitation {
+                Invitation::Project(i) => {
+                    let project = projects.get(&i.project)?;
+                    (
+                        InviteKind::Project,
+                        &project.name,
+                        &project.display_name,
+                        role_name(&project_roles, i.role),
+                    )
+                }
+                Invitation::Cache(i) => {
+                    let cache = caches.get(&i.cache)?;
+                    (
+                        InviteKind::Cache,
+                        &cache.name,
+                        &cache.display_name,
+                        role_name(&cache_roles, i.role),
+                    )
+                }
+                Invitation::Team(i) => {
+                    let team = teams.get(&i.team)?;
+                    (
+                        InviteKind::Team,
+                        &team.name,
+                        &team.display_name,
+                        role_label(i.role).to_string(),
+                    )
+                }
+            };
+            let invited_by = invitation.invited_by();
             Some(InviteItem {
-                kind: InviteKind::Project,
-                token: r.token.clone(),
-                scope: project.name.clone(),
-                scope_display_name: project.display_name.clone(),
-                role: project_roles
-                    .get(&r.role)
-                    .cloned()
-                    .unwrap_or_else(|| r.role.to_string()),
+                kind,
+                token: invitation.token().to_string(),
+                scope: scope.clone(),
+                scope_display_name: scope_display_name.clone(),
+                role,
                 invited_by: inviters
-                    .get(&r.invited_by)
+                    .get(&invited_by)
                     .cloned()
-                    .unwrap_or_else(|| r.invited_by.to_string()),
-                created_at: r.created_at,
-                expires_at: r.expires_at,
+                    .unwrap_or_else(|| invited_by.to_string()),
+                created_at: invitation.created_at(),
+                expires_at: invitation.expires_at(),
             })
         })
         .collect();
 
-    let cache_items: Vec<InviteItem> = cache_rows
-        .iter()
-        .filter_map(|r| {
-            let cache = caches.get(&r.cache)?;
-            Some(InviteItem {
-                kind: InviteKind::Cache,
-                token: r.token.clone(),
-                scope: cache.name.clone(),
-                scope_display_name: cache.display_name.clone(),
-                role: cache_roles
-                    .get(&r.role)
-                    .cloned()
-                    .unwrap_or_else(|| r.role.to_string()),
-                invited_by: inviters
-                    .get(&r.invited_by)
-                    .cloned()
-                    .unwrap_or_else(|| r.invited_by.to_string()),
-                created_at: r.created_at,
-                expires_at: r.expires_at,
-            })
-        })
-        .collect();
-
-    let team_items = team_rows.iter().filter_map(|r| {
-        let team = teams.get(&r.team)?;
-        Some(InviteItem {
-            kind: InviteKind::Team,
-            token: r.token.clone(),
-            scope: team.name.clone(),
-            scope_display_name: team.display_name.clone(),
-            role: role_label(r.role).to_string(),
-            invited_by: inviters
-                .get(&r.invited_by)
-                .cloned()
-                .unwrap_or_else(|| r.invited_by.to_string()),
-            created_at: r.created_at,
-            expires_at: r.expires_at,
-        })
-    });
-
-    Ok(ok_json(merge_invites(
-        project_items
-            .into_iter()
-            .chain(cache_items)
-            .chain(team_items)
-            .collect(),
-    )))
+    Ok(ok_json(merge_invites(items)))
 }
 
 enum Invitation {
@@ -194,6 +184,30 @@ impl Invitation {
             Self::Project(i) => i.user,
             Self::Cache(i) => i.user,
             Self::Team(i) => i.user,
+        }
+    }
+
+    fn invited_by(&self) -> UserId {
+        match self {
+            Self::Project(i) => i.invited_by,
+            Self::Cache(i) => i.invited_by,
+            Self::Team(i) => i.invited_by,
+        }
+    }
+
+    fn token(&self) -> &str {
+        match self {
+            Self::Project(i) => &i.token,
+            Self::Cache(i) => &i.token,
+            Self::Team(i) => &i.token,
+        }
+    }
+
+    fn created_at(&self) -> chrono::NaiveDateTime {
+        match self {
+            Self::Project(i) => i.created_at,
+            Self::Cache(i) => i.created_at,
+            Self::Team(i) => i.created_at,
         }
     }
 

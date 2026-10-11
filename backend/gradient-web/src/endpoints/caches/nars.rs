@@ -17,7 +17,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
-use gradient_db::cached_paths::{NarFilter, NarOrder, NarSummary};
+use gradient_db::cached_paths::{CacheTotals, NarFilter, NarOrder, NarSummary};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
@@ -54,6 +54,27 @@ pub struct NarDetail {
     pub signed: bool,
 }
 
+impl NarDetail {
+    fn new(path: MCachedPath, signature: MCachedPathSignature, references: Vec<String>) -> Self {
+        Self {
+            store_path: path.as_store_path().base(),
+            hash: path.hash,
+            package: path.package,
+            nar_size: path.nar_size,
+            file_size: path.file_size,
+            file_hash: path.file_hash,
+            nar_hash: path.nar_hash,
+            references,
+            deriver: path.deriver,
+            ca: path.ca,
+            created_at: path.created_at,
+            last_fetched_at: signature.last_fetched_at,
+            fetch_count: signature.fetch_count,
+            signed: signature.signature.is_some(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct NarStats {
     pub total_nars: i64,
@@ -61,6 +82,18 @@ pub struct NarStats {
     pub total_file_size: i64,
     pub last_uploaded_at: Option<NaiveDateTime>,
     pub oldest_fetched_at: Option<NaiveDateTime>,
+}
+
+impl From<CacheTotals> for NarStats {
+    fn from(totals: CacheTotals) -> Self {
+        Self {
+            total_nars: totals.total_nars,
+            total_nar_size: totals.total_nar_size.unwrap_or(0),
+            total_file_size: totals.total_file_size.unwrap_or(0),
+            last_uploaded_at: totals.last_uploaded_at,
+            oldest_fetched_at: totals.oldest_fetched_at,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -122,25 +155,9 @@ pub async fn show(
     let sig = gradient_db::cached_paths::signature_in_cache(&db.web_db, cp.id, cache.id)
         .await?
         .or_not_found(Resource::Signature)?;
-    let store_path = cp.as_store_path().base();
     let references =
         gradient_db::graph::runtime_closure::references_for_hash(&db.web_db, &hash).await?;
-    Ok(ok_json(NarDetail {
-        hash: cp.hash,
-        store_path,
-        package: cp.package,
-        nar_size: cp.nar_size,
-        file_size: cp.file_size,
-        file_hash: cp.file_hash,
-        nar_hash: cp.nar_hash,
-        references,
-        deriver: cp.deriver,
-        ca: cp.ca,
-        created_at: cp.created_at,
-        last_fetched_at: sig.last_fetched_at,
-        fetch_count: sig.fetch_count,
-        signed: sig.signature.is_some(),
-    }))
+    Ok(ok_json(NarDetail::new(cp, sig, references)))
 }
 
 pub async fn stats(
@@ -150,13 +167,7 @@ pub async fn stats(
         .await?
         .context("stats query returned no row")?;
 
-    Ok(ok_json(NarStats {
-        total_nars: row.total_nars,
-        total_nar_size: row.total_nar_size.unwrap_or(0),
-        total_file_size: row.total_file_size.unwrap_or(0),
-        last_uploaded_at: row.last_uploaded_at,
-        oldest_fetched_at: row.oldest_fetched_at,
-    }))
+    Ok(ok_json(NarStats::from(row)))
 }
 
 pub async fn available(

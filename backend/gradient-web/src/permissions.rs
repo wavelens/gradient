@@ -40,14 +40,29 @@ pub struct PermissionEntry {
     pub mutating: bool,
 }
 
+impl From<Permission> for PermissionEntry {
+    fn from(permission: Permission) -> Self {
+        Self {
+            id: permission.as_wire_name(),
+            mutating: is_mutating(permission),
+        }
+    }
+}
+
+impl From<CachePermission> for PermissionEntry {
+    fn from(permission: CachePermission) -> Self {
+        Self {
+            id: permission.as_wire_name(),
+            mutating: is_cache_mutating(permission),
+        }
+    }
+}
+
 pub fn available_permissions() -> Vec<PermissionEntry> {
     Permission::ALL
         .iter()
         .copied()
-        .map(|p| PermissionEntry {
-            id: p.as_wire_name(),
-            mutating: is_mutating(p),
-        })
+        .map(PermissionEntry::from)
         .collect()
 }
 
@@ -70,10 +85,7 @@ pub fn available_cache_permissions() -> Vec<PermissionEntry> {
     CachePermission::ALL
         .iter()
         .copied()
-        .map(|p| PermissionEntry {
-            id: p.as_wire_name(),
-            mutating: is_cache_mutating(p),
-        })
+        .map(PermissionEntry::from)
         .collect()
 }
 

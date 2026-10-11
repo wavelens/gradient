@@ -17,12 +17,12 @@ use serde::Serialize;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct WorkerLoad {
+pub struct OnlineWorkerLoad {
     pub online: usize,
     pub busy_pct: u8,
 }
 
-impl WorkerLoad {
+impl OnlineWorkerLoad {
     pub fn from_slots(slots: &[(i64, i64)]) -> Self {
         let (assigned, capacity) = slots.iter().fold((0, 0), |(a, c), (x, y)| (a + x, c + y));
         let busy_pct = if capacity > 0 {
@@ -30,7 +30,7 @@ impl WorkerLoad {
         } else {
             0
         };
-        WorkerLoad {
+        OnlineWorkerLoad {
             online: slots.len(),
             busy_pct,
         }
@@ -43,7 +43,7 @@ pub struct DashboardStats {
     pub cpu_time_ms_7d: i64,
     pub builds_completed: i64,
     pub cache_size_bytes: i64,
-    pub workers: WorkerLoad,
+    pub workers: OnlineWorkerLoad,
     pub queue_wait_p50_ms: i64,
 }
 
@@ -74,7 +74,7 @@ pub async fn get_stats(
         cpu_time_ms_7d: totals.cpu_time_ms_7d,
         builds_completed: totals.builds_completed,
         cache_size_bytes: cache_size(&state.web_db, user.id, user.superuser).await?,
-        workers: WorkerLoad::from_slots(&visible_slots(&scheduler, &scope).await),
+        workers: OnlineWorkerLoad::from_slots(&visible_slots(&scheduler, &scope).await),
         queue_wait_p50_ms: totals.queue_wait_p50_ms,
     }))
 }
@@ -86,8 +86,8 @@ mod tests {
     #[test]
     fn busy_is_assigned_over_capacity() {
         assert_eq!(
-            WorkerLoad::from_slots(&[(3, 4), (1, 4)]),
-            WorkerLoad {
+            OnlineWorkerLoad::from_slots(&[(3, 4), (1, 4)]),
+            OnlineWorkerLoad {
                 online: 2,
                 busy_pct: 50
             }
@@ -97,15 +97,15 @@ mod tests {
     #[test]
     fn no_workers_is_idle_not_a_division_by_zero() {
         assert_eq!(
-            WorkerLoad::from_slots(&[]),
-            WorkerLoad {
+            OnlineWorkerLoad::from_slots(&[]),
+            OnlineWorkerLoad {
                 online: 0,
                 busy_pct: 0
             }
         );
         assert_eq!(
-            WorkerLoad::from_slots(&[(0, 0)]),
-            WorkerLoad {
+            OnlineWorkerLoad::from_slots(&[(0, 0)]),
+            OnlineWorkerLoad {
                 online: 1,
                 busy_pct: 0
             }
@@ -114,6 +114,6 @@ mod tests {
 
     #[test]
     fn overbooked_caps_at_full() {
-        assert_eq!(WorkerLoad::from_slots(&[(9, 4)]).busy_pct, 100);
+        assert_eq!(OnlineWorkerLoad::from_slots(&[(9, 4)]).busy_pct, 100);
     }
 }

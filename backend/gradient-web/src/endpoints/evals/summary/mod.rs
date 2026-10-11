@@ -67,6 +67,16 @@ pub struct FailedAttributeReport {
     pub newly_failing: bool,
 }
 
+impl FailedAttributeReport {
+    fn new(failed: FailedAttribute, newly_failing: bool) -> Self {
+        Self {
+            attr: failed.attr,
+            message: failed.message,
+            newly_failing,
+        }
+    }
+}
+
 struct LoadedEvaluation {
     graph: EvaluationGraph,
     build_jobs: HashMap<DerivationId, BuildJobId>,
@@ -207,10 +217,9 @@ fn failed_attribute_reports(
 ) -> Vec<FailedAttributeReport> {
     failed
         .into_iter()
-        .map(|f| FailedAttributeReport {
-            newly_failing: baseline.is_some_and(|before| !before.broken.contains(&f.attr)),
-            attr: f.attr,
-            message: f.message,
+        .map(|f| {
+            let newly_failing = baseline.is_some_and(|before| !before.broken.contains(&f.attr));
+            FailedAttributeReport::new(f, newly_failing)
         })
         .collect()
 }

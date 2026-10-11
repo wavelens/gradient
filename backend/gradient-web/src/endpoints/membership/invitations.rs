@@ -24,6 +24,26 @@ pub struct PendingInvitationItem {
     pub expires_at: NaiveDateTime,
 }
 
+impl PendingInvitationItem {
+    pub fn new(
+        invitee_id: UserId,
+        invitee: Option<&MUser>,
+        role: String,
+        created_at: NaiveDateTime,
+        expires_at: NaiveDateTime,
+    ) -> Self {
+        Self {
+            user: invitee
+                .map(|u| u.username.clone())
+                .unwrap_or_else(|| invitee_id.to_string()),
+            name: invitee.map(|u| u.name.clone()).unwrap_or_default(),
+            role,
+            created_at,
+            expires_at,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RevokeInvitationRequest {
     pub user: String,
@@ -66,19 +86,17 @@ pub async fn list<O: Owner>(
         .iter()
         .map(|(inv, invitee)| {
             let fields = <O::Invitations as InvitationTable>::fields(inv);
-            PendingInvitationItem {
-                user: invitee
-                    .as_ref()
-                    .map(|u| u.username.clone())
-                    .unwrap_or_else(|| fields.user.to_string()),
-                name: invitee.as_ref().map(|u| u.name.clone()).unwrap_or_default(),
-                role: role_map
-                    .get(&fields.role)
-                    .cloned()
-                    .unwrap_or_else(|| fields.role.to_string()),
-                created_at: fields.created_at,
-                expires_at: fields.expires_at,
-            }
+            let role = role_map
+                .get(&fields.role)
+                .cloned()
+                .unwrap_or_else(|| fields.role.to_string());
+            PendingInvitationItem::new(
+                fields.user,
+                invitee.as_ref(),
+                role,
+                fields.created_at,
+                fields.expires_at,
+            )
         })
         .collect();
 

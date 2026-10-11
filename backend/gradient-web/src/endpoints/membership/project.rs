@@ -30,6 +30,12 @@ pub struct ProjectRoleOwner {
     project: Option<ProjectId>,
 }
 
+impl From<Option<ProjectId>> for ProjectRoleOwner {
+    fn from(project: Option<ProjectId>) -> Self {
+        Self { project }
+    }
+}
+
 impl Table for EProjectUser {
     type Row = MProjectUser;
     type Active = AProjectUser;
@@ -149,10 +155,6 @@ impl RoleTable for ERole {
             permission: row.permission,
             managed: row.managed,
         }
-    }
-
-    fn owner_field(owner: Option<ProjectId>) -> ProjectRoleOwner {
-        ProjectRoleOwner { project: owner }
     }
 
     fn new(id: RoleId, name: String, owner: ProjectId, permission: PermissionMask) -> MRole {

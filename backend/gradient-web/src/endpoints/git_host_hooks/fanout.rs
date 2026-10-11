@@ -372,12 +372,9 @@ async fn apply_and_record(
                 "Git host webhook trigger fired"
             );
             db.record_evaluation_created(&eval).await;
-            outcome.queued.push(QueuedEvaluation {
-                task_id: task.id,
-                task_name: task.name.clone(),
-                project: project_name,
-                evaluation_id: eval.id,
-            });
+            outcome
+                .queued
+                .push(QueuedEvaluation::new(task, project_name, eval.id));
         }
         Ok(ApplyOutcome::SkippedSameCommit) => {
             push_skipped(outcome, task, project_name, "same_commit")
@@ -414,12 +411,9 @@ fn push_skipped(
     project_name: String,
     reason: &str,
 ) {
-    outcome.skipped.push(SkippedTask {
-        task_id: task.id,
-        task_name: task.name.clone(),
-        project: project_name,
-        reason: reason.into(),
-    });
+    outcome
+        .skipped
+        .push(SkippedTask::new(task, project_name, reason));
 }
 
 /// The gate is failing closed. A possibly-fork PR is gated unless it is same-repo or the actor is a

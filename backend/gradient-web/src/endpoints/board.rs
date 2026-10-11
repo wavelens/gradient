@@ -26,7 +26,7 @@ use gradient_db::metrics::resource_usage::{
     self, ExpensiveEval, ExpensiveResource, ResourceMetric,
 };
 use gradient_entity::dispatched_job::DispatchedJobKind;
-use gradient_entity::{build_attempt, flake_output_node};
+use gradient_entity::{build_attempt, dispatched_job, dispatched_job_phase, flake_output_node};
 use gradient_scheduler::Scheduler;
 use gradient_types::events::{Envelope, Event, EventRx, names, worker};
 use gradient_types::ids::DispatchedJobId;
@@ -50,6 +50,28 @@ pub struct DispatchedJobSummary {
     pub build_id: Option<Uuid>,
     pub evaluation_id: Uuid,
     pub subject: Option<String>,
+}
+
+impl DispatchedJobSummary {
+    fn new(
+        job: dispatched_job::Model,
+        worker_name: Option<String>,
+        shared_build: Option<DerivationBuildId>,
+        subject: Option<String>,
+    ) -> Self {
+        Self {
+            id: job.id.into(),
+            kind: i16::from(job.kind),
+            project: job.project.into(),
+            worker_id: job.worker_id,
+            worker_name,
+            score: job.score,
+            dispatched_at: job.dispatched_at.and_utc().to_rfc3339(),
+            build_id: shared_build.map(Into::into),
+            evaluation_id: job.evaluation_id.into(),
+            subject,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -153,24 +175,16 @@ pub async fn get_dispatched_jobs(
     )
     .await?;
 
-    let mut jobs = Vec::with_capacity(visible.len());
-    for j in visible {
-        let attempt = attempts.get(&j.id);
-        let subject = subjects.subject(attempt.map(|a| a.derivation_build), j.evaluation_id);
+    let jobs = visible
+        .into_iter()
+        .map(|j| {
+            let shared_build = attempts.get(&j.id).map(|a| a.derivation_build);
+            let subject = subjects.subject(shared_build, j.evaluation_id);
+            let worker_name = worker_names.name(&j.worker_id);
 
-        jobs.push(DispatchedJobSummary {
-            id: j.id.into(),
-            kind: i16::from(j.kind),
-            project: j.project.into(),
-            worker_name: worker_names.name(&j.worker_id),
-            worker_id: j.worker_id,
-            score: j.score,
-            dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
-            build_id: attempt.map(|a| a.derivation_build.into()),
-            evaluation_id: j.evaluation_id.into(),
-            subject,
-        });
-    }
+            DispatchedJobSummary::new(j, worker_name, shared_build, subject)
+        })
+        .collect();
 
     Ok(ok_json(DispatchedJobsResponse {
         jobs,
@@ -265,6 +279,19 @@ pub struct AttemptSummary {
     pub created_at: String,
 }
 
+impl From<build_attempt::Model> for AttemptSummary {
+    fn from(attempt: build_attempt::Model) -> Self {
+        Self {
+            dispatched_job_id: attempt.dispatched_job.map(Into::into),
+            substitute: attempt.substitute,
+            outcome: i32::from(attempt.outcome),
+            reason: attempt.reason.map(i32::from),
+            failure_message: attempt.failure_message,
+            created_at: attempt.created_at.and_utc().to_rfc3339(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct JobPhaseView {
     pub seq: i32,
@@ -276,20 +303,26 @@ pub struct JobPhaseView {
     pub bytes: i64,
 }
 
+impl From<dispatched_job_phase::Model> for JobPhaseView {
+    fn from(phase: dispatched_job_phase::Model) -> Self {
+        Self {
+            seq: phase.seq,
+            parent_seq: phase.parent_seq,
+            phase: gradient_wire::types::JobPhase::name_of(phase.phase).into_owned(),
+            start_ms: phase.start_ms,
+            end_ms: phase.end_ms,
+            paths: phase.paths,
+            bytes: phase.bytes,
+        }
+    }
+}
+
 async fn job_phases<C: ConnectionTrait>(db: &C, job: DispatchedJobId) -> Vec<JobPhaseView> {
     gradient_db::worker_registrations::phases_of_dispatched_job(db, job)
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|p| JobPhaseView {
-            seq: p.seq,
-            parent_seq: p.parent_seq,
-            phase: gradient_wire::types::JobPhase::name_of(p.phase).into_owned(),
-            start_ms: p.start_ms,
-            end_ms: p.end_ms,
-            paths: p.paths,
-            bytes: p.bytes,
-        })
+        .map(JobPhaseView::from)
         .collect()
 }
 
@@ -545,14 +578,7 @@ pub async fn get_dispatched_job(
                 .await
                 .unwrap_or_default()
                 .into_iter()
-                .map(|a| AttemptSummary {
-                    dispatched_job_id: a.dispatched_job.map(Into::into),
-                    substitute: a.substitute,
-                    outcome: i32::from(a.outcome),
-                    reason: a.reason.map(i32::from),
-                    failure_message: a.failure_message,
-                    created_at: a.created_at.and_utc().to_rfc3339(),
-                })
+                .map(AttemptSummary::from)
                 .collect()
         }
         None => Vec::new(),
@@ -710,6 +736,17 @@ pub struct LoadBucket {
     pub workers: u32,
 }
 
+impl From<(String, (u32, u32, u32))> for LoadBucket {
+    fn from((key, (in_flight, capacity, workers)): (String, (u32, u32, u32))) -> Self {
+        Self {
+            key,
+            in_flight,
+            capacity,
+            workers,
+        }
+    }
+}
+
 #[derive(Serialize, Debug, PartialEq)]
 pub struct WorkerLoad {
     pub by_capability: Vec<LoadBucket>,
@@ -730,15 +767,7 @@ fn bump_in_flight(acc: &mut LoadAcc, key: &str) {
 }
 
 fn buckets_sorted(acc: LoadAcc) -> Vec<LoadBucket> {
-    let mut out: Vec<LoadBucket> = acc
-        .into_iter()
-        .map(|(key, (in_flight, capacity, workers))| LoadBucket {
-            key,
-            in_flight,
-            capacity,
-            workers,
-        })
-        .collect();
+    let mut out: Vec<LoadBucket> = acc.into_iter().map(LoadBucket::from).collect();
     out.sort_by(|a, b| a.key.cmp(&b.key));
     out
 }
@@ -796,15 +825,7 @@ fn aggregate_worker_load(
 
     let by_capability = ["eval", "fetch", "build"]
         .into_iter()
-        .map(|k| {
-            let (in_flight, capacity, workers) = cap.get(k).copied().unwrap_or_default();
-            LoadBucket {
-                key: k.to_owned(),
-                in_flight,
-                capacity,
-                workers,
-            }
-        })
+        .map(|k| LoadBucket::from((k.to_owned(), cap.get(k).copied().unwrap_or_default())))
         .collect();
 
     WorkerLoad {

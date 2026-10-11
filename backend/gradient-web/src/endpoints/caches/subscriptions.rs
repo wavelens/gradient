@@ -39,6 +39,18 @@ pub struct SubscriptionRequestItem {
     pub created_at: NaiveDateTime,
 }
 
+impl SubscriptionRequestItem {
+    fn new(request: &MCacheSubscriptionRequest, project: &MProject, requested_by: String) -> Self {
+        Self {
+            project: project.name.clone(),
+            project_display_name: project.display_name.clone(),
+            mode: request.mode.clone(),
+            requested_by,
+            created_at: request.created_at,
+        }
+    }
+}
+
 pub async fn get_cache_subscription_requests(
     CacheScope { cache, db, .. }: CacheScope<Requires<can::ManageCacheSubscriptions>>,
 ) -> WebResult<Json<BaseResponse<Vec<SubscriptionRequestItem>>>> {
@@ -65,16 +77,11 @@ pub async fn get_cache_subscription_requests(
         .iter()
         .filter_map(|r| {
             let project = projects.get(&r.project)?;
-            Some(SubscriptionRequestItem {
-                project: project.name.clone(),
-                project_display_name: project.display_name.clone(),
-                mode: r.mode.clone(),
-                requested_by: requesters
-                    .get(&r.requested_by)
-                    .cloned()
-                    .unwrap_or_else(|| r.requested_by.to_string()),
-                created_at: r.created_at,
-            })
+            let requested_by = requesters
+                .get(&r.requested_by)
+                .cloned()
+                .unwrap_or_else(|| r.requested_by.to_string());
+            Some(SubscriptionRequestItem::new(r, project, requested_by))
         })
         .collect();
 

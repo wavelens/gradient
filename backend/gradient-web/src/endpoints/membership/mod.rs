@@ -88,13 +88,12 @@ pub trait RoleTable:
     Table + HasResource + EntityTrait<PrimaryKey: PrimaryKeyTrait<ValueType = RoleId>>
 {
     type Id: OwnerId;
-    type OwnerField: Serialize + Send + 'static;
+    type OwnerField: From<Option<Self::Id>> + Serialize + Send + 'static;
 
     fn id_column() -> Self::Column;
     fn name_column() -> Self::Column;
     fn owner_column() -> Self::Column;
     fn fields(row: &Self::Row) -> RoleFields<Self::Id>;
-    fn owner_field(owner: Option<Self::Id>) -> Self::OwnerField;
     fn new(id: RoleId, name: String, owner: Self::Id, permission: PermissionMask) -> Self::Row;
     fn rename(active: &mut Self::Active, name: String);
     fn set_permission(active: &mut Self::Active, permission: PermissionMask);

@@ -34,6 +34,16 @@ pub struct TeamSummary {
     pub role: TeamRole,
 }
 
+impl TeamSummary {
+    fn new(team: MTeam, role: TeamRole) -> Self {
+        Self {
+            name: team.name,
+            display_name: team.display_name,
+            role,
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct TeamResponse {
     pub id: TeamId,
@@ -46,6 +56,26 @@ pub struct TeamResponse {
     pub new_project_users: bool,
     pub new_project_workers: bool,
     pub new_project_role: Option<String>,
+}
+
+impl TeamResponse {
+    fn new(team: MTeam, role: Option<TeamRole>) -> Self {
+        Self {
+            new_project_role: team
+                .new_project_role
+                .and_then(builtin_role_name)
+                .map(str::to_string),
+            id: team.id,
+            name: team.name,
+            display_name: team.display_name,
+            managed: team.managed,
+            role,
+            oidc_group: team.oidc_group,
+            scim_group: team.scim_group,
+            new_project_users: team.new_project_users,
+            new_project_workers: team.new_project_workers,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -84,24 +114,6 @@ fn blank_to_none(value: String) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-fn team_response(team: MTeam, role: Option<TeamRole>) -> TeamResponse {
-    TeamResponse {
-        new_project_role: team
-            .new_project_role
-            .and_then(builtin_role_name)
-            .map(str::to_string),
-        id: team.id,
-        name: team.name,
-        display_name: team.display_name,
-        managed: team.managed,
-        role,
-        oidc_group: team.oidc_group,
-        scim_group: team.scim_group,
-        new_project_users: team.new_project_users,
-        new_project_workers: team.new_project_workers,
-    }
-}
-
 pub async fn get_teams(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -110,13 +122,7 @@ pub async fn get_teams(
 
     let mut items: Vec<TeamSummary> = rows
         .into_iter()
-        .filter_map(|(membership, team)| {
-            team.map(|team| TeamSummary {
-                name: team.name,
-                display_name: team.display_name,
-                role: membership.role,
-            })
-        })
+        .filter_map(|(membership, team)| team.map(|team| TeamSummary::new(team, membership.role)))
         .collect();
     items.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -194,7 +200,7 @@ pub async fn put_team(
 pub async fn get_team(
     TeamScope { team, role, .. }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<TeamResponse>>> {
-    Ok(ok_json(team_response(team, role)))
+    Ok(ok_json(TeamResponse::new(team, role)))
 }
 
 pub async fn get_team_evaluations(

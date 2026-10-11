@@ -121,10 +121,9 @@ pub(super) async fn evaluations_to_summaries(
             .unwrap_or(0);
 
         let trigger = evaluation.trigger.and_then(|tid| {
-            triggers.get(&tid).map(|&tt| EvaluationTriggerSummary {
-                id: tid,
-                trigger_type: tt,
-            })
+            triggers
+                .get(&tid)
+                .map(|&tt| EvaluationTriggerSummary::new(tid, tt))
         });
         let triggered_by = evaluation
             .started_by
@@ -171,10 +170,6 @@ pub(super) async fn evaluations_to_summaries(
         });
     }
     Ok(out)
-}
-
-fn checked_at(t: chrono::NaiveDateTime) -> Option<chrono::NaiveDateTime> {
-    (t != *gradient_types::NULL_TIME).then_some(t)
 }
 
 fn first_line_truncated(s: &str, max: usize) -> Option<String> {
@@ -394,23 +389,13 @@ pub async fn get_task_details(
         None => (false, false),
     };
 
-    let task_details = TaskDetailsResponse {
-        id: task.id,
-        name: task.name,
-        display_name: task.display_name,
-        description: task.description,
-        repository: task.repository,
-        wildcard: task.wildcard,
-        active: task.active,
-        created_at: task.created_at,
-        keep_evaluations: task.keep_evaluations,
-        last_check_at: checked_at(task.last_check_at),
-        queue: QueueSummary { building, queued },
-        last_evaluations: evaluation_summaries,
+    let task_details = TaskDetailsResponse::new(
+        task,
+        QueueSummary { building, queued },
+        evaluation_summaries,
         can_edit,
         can_trigger,
-        managed: task.managed,
-    };
+    );
 
     let res = BaseResponse {
         error: false,
@@ -499,10 +484,7 @@ pub async fn get_task_entry_points(
         gradient_db::evaluations::failed_attributes::failed_attributes(&db.web_db, eval_id)
             .await?
             .into_iter()
-            .map(|f| FailedAttributeSummary {
-                eval: f.attr,
-                message: f.message,
-            })
+            .map(FailedAttributeSummary::from)
             .collect();
     let (limit, offset) = page_bounds(params.limit, params.offset);
     let search = params.search.as_deref();
@@ -510,18 +492,16 @@ pub async fn get_task_entry_points(
     let entry_points =
         gradient_db::entry_points::built_page(&db.web_db, eval_id, search, offset, limit).await?;
 
-    if entry_points.is_empty() {
-        return Ok(ok_json(PaginatedEntryPoints {
-            entry_points: Vec::new(),
-            total,
-            failed_attributes,
-        }));
-    }
-
-    let data = EntryPointRelatedData::load(&db.web_db, &evaluation, &entry_points).await?;
+    let entry_points = if entry_points.is_empty() {
+        Vec::new()
+    } else {
+        EntryPointRelatedData::load(&db.web_db, &evaluation, &entry_points)
+            .await?
+            .build_summaries(&entry_points)
+    };
 
     Ok(ok_json(PaginatedEntryPoints {
-        entry_points: data.build_summaries(&entry_points),
+        entry_points,
         total,
         failed_attributes,
     }))
@@ -879,16 +859,6 @@ pub async fn get_entry_point_download(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn checked_at_maps_null_time_sentinel_to_none() {
-        assert_eq!(super::checked_at(*gradient_types::NULL_TIME), None);
-        let t = chrono::NaiveDate::from_ymd_opt(2026, 6, 13)
-            .unwrap()
-            .and_hms_opt(12, 0, 0)
-            .unwrap();
-        assert_eq!(super::checked_at(t), Some(t));
-    }
-
     #[test]
     fn first_line_truncated_takes_first_line_and_caps_length() {
         assert_eq!(super::first_line_truncated("", 100), None);

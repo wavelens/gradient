@@ -50,24 +50,27 @@ pub struct IntegrationResponse {
     pub managed: bool,
 }
 
-impl From<MIntegration> for IntegrationResponse {
-    fn from(m: MIntegration) -> Self {
+impl IntegrationResponse {
+    fn new(
+        integration: MIntegration,
+        installation: Option<gradient_entity::github_installation::Model>,
+    ) -> Self {
         Self {
-            id: m.id,
-            project: m.project,
-            name: m.name,
-            display_name: m.display_name,
-            kind: kind_to_str(m.kind).to_string(),
-            git_host_type: m.git_host_type.as_path_segment().to_string(),
-            endpoint_url: m.endpoint_url,
-            has_secret: m.secret.is_some(),
-            has_access_token: m.access_token.is_some(),
-            allowed_ips: m.allowed_ips.unwrap_or_default(),
-            installation_id: None,
-            account_login: None,
-            created_by: m.created_by,
-            created_at: m.created_at,
-            managed: m.managed,
+            id: integration.id,
+            project: integration.project,
+            name: integration.name,
+            display_name: integration.display_name,
+            kind: kind_to_str(integration.kind).to_string(),
+            git_host_type: integration.git_host_type.as_path_segment().to_string(),
+            endpoint_url: integration.endpoint_url,
+            has_secret: integration.secret.is_some(),
+            has_access_token: integration.access_token.is_some(),
+            allowed_ips: integration.allowed_ips.unwrap_or_default(),
+            installation_id: installation.as_ref().map(|i| i.installation_id),
+            account_login: installation.and_then(|i| i.account_login),
+            created_by: integration.created_by,
+            created_at: integration.created_at,
+            managed: integration.managed,
         }
     }
 }
@@ -80,11 +83,7 @@ async fn integration_response(
         Some(fk) => by_id::<gradient_entity::github_installation::Entity, _>(db, fk).await?,
         None => None,
     };
-    Ok(IntegrationResponse {
-        installation_id: install.as_ref().map(|i| i.installation_id),
-        account_login: install.and_then(|i| i.account_login),
-        ..IntegrationResponse::from(m)
-    })
+    Ok(IntegrationResponse::new(m, install))
 }
 
 fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>, WebError> {

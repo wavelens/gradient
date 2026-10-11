@@ -33,6 +33,17 @@ pub struct TeamMemberItem {
     pub source: TeamMemberSource,
 }
 
+impl TeamMemberItem {
+    fn new(member: MUser, membership: MTeamUser) -> Self {
+        Self {
+            user: member.username,
+            name: member.name,
+            role: membership.role,
+            source: membership.source,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct TeamMemberRequest {
     pub user: String,
@@ -82,12 +93,7 @@ pub async fn get_team_members(
     Ok(ok_json(
         rows.into_iter()
             .filter_map(|(membership, member)| {
-                member.map(|member| TeamMemberItem {
-                    user: member.username,
-                    name: member.name,
-                    role: membership.role,
-                    source: membership.source,
-                })
+                member.map(|member| TeamMemberItem::new(member, membership))
             })
             .collect(),
     ))

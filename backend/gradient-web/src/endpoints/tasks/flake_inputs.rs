@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::DeletedResponse;
 use super::refusal::TaskRefusal;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -66,11 +67,6 @@ where
     D: serde::Deserializer<'de>,
 {
     Ok(Some(Option::<String>::deserialize(d)?))
-}
-
-#[derive(Serialize, Debug)]
-pub struct DeletedResponse {
-    pub deleted: bool,
 }
 
 fn validate_input_name(name: &str) -> WebResult<()> {
@@ -237,5 +233,5 @@ pub async fn delete_one(
 
     gradient_db::flake_input_overrides::delete(&db.web_db, row).await?;
 
-    Ok(ok_json(DeletedResponse { deleted: true }))
+    Ok(ok_json(DeletedResponse::deleted()))
 }

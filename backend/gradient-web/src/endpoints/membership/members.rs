@@ -6,8 +6,9 @@
 
 use super::invitations::find_invitation;
 use super::{
-    ActingScope, InvitationTable, MemberTable, NewInvitation, Owner, OwnerScope, RoleFields,
-    RoleTable, delete_row, find_user_by_username, insert_unique_row, role_names, update_row,
+    ActingScope, InvitationTable, MemberFields, MemberTable, NewInvitation, Owner, OwnerScope,
+    RoleFields, RoleTable, delete_row, find_user_by_username, insert_unique_row, role_names,
+    update_row,
 };
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
@@ -23,12 +24,27 @@ use gradient_notify::{InvitationMail, generate_token};
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemberItem {
     pub id: String,
     pub name: String,
+}
+
+impl MemberItem {
+    fn new(member: MemberFields, user: Option<&MUser>, roles: &HashMap<RoleId, String>) -> Self {
+        Self {
+            id: user
+                .map(|u| u.username.clone())
+                .unwrap_or_else(|| member.user.to_string()),
+            name: roles
+                .get(&member.role)
+                .cloned()
+                .unwrap_or_else(|| member.role.to_string()),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -98,17 +114,11 @@ pub async fn list<O: Owner>(
     let items: Vec<MemberItem> = members
         .iter()
         .map(|(member, user)| {
-            let fields = <O::Members as MemberTable>::fields(member);
-            MemberItem {
-                id: user
-                    .as_ref()
-                    .map(|u| u.username.clone())
-                    .unwrap_or_else(|| fields.user.to_string()),
-                name: role_map
-                    .get(&fields.role)
-                    .cloned()
-                    .unwrap_or_else(|| fields.role.to_string()),
-            }
+            MemberItem::new(
+                <O::Members as MemberTable>::fields(member),
+                user.as_ref(),
+                &role_map,
+            )
         })
         .collect();
 

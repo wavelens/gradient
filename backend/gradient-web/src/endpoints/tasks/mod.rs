@@ -27,10 +27,11 @@ pub use self::metrics::{EntryPointMetricsQuery, get_entry_point_metrics, get_tas
 
 use gradient_types::ids::*;
 
+use gradient_db::evaluations::failed_attributes::FailedAttribute;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::triggers::ConcurrencyPolicy;
-use gradient_types::{EvaluationProgress, TaskTriggerId, TriggerType};
+use gradient_types::{EvaluationProgress, MTask, TaskTriggerId, TriggerType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -58,6 +59,39 @@ pub struct TaskResponse {
     pub can_trigger: bool,
 }
 
+impl TaskResponse {
+    pub fn new(
+        task: MTask,
+        last_evaluation_status: Option<EvaluationStatus>,
+        can_edit: bool,
+        can_trigger: bool,
+    ) -> Self {
+        Self {
+            id: task.id,
+            project: task.project,
+            name: task.name,
+            active: task.active,
+            display_name: task.display_name,
+            description: task.description,
+            repository: task.repository,
+            wildcard: task.wildcard,
+            last_evaluation: task.last_evaluation,
+            last_evaluation_status,
+            force_evaluation: task.force_evaluation,
+            created_by: task.created_by,
+            created_at: task.created_at,
+            managed: task.managed,
+            keep_evaluations: task.keep_evaluations,
+            concurrency: task.concurrency,
+            sign_cache: task.sign_cache,
+            wait_for_workers: task.wait_for_workers,
+            retry_failed_builds: task.retry_failed_builds,
+            can_edit,
+            can_trigger,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EntryPointSummary {
     pub id: EntryPointId,
@@ -83,6 +117,15 @@ pub struct FailedAttributeSummary {
     pub message: String,
 }
 
+impl From<FailedAttribute> for FailedAttributeSummary {
+    fn from(failed: FailedAttribute) -> Self {
+        Self {
+            eval: failed.attr,
+            message: failed.message,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct PaginatedEntryPoints {
     pub entry_points: Vec<EntryPointSummary>,
@@ -95,6 +138,23 @@ pub struct EvaluationTriggerSummary {
     pub id: TaskTriggerId,
     #[serde(rename = "type")]
     pub trigger_type: TriggerType,
+}
+
+impl EvaluationTriggerSummary {
+    pub fn new(id: TaskTriggerId, trigger_type: TriggerType) -> Self {
+        Self { id, trigger_type }
+    }
+}
+
+#[derive(Serialize, Debug)]
+pub struct DeletedResponse {
+    pub deleted: bool,
+}
+
+impl DeletedResponse {
+    pub fn deleted() -> Self {
+        Self { deleted: true }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -140,6 +200,38 @@ pub struct TaskDetailsResponse {
     pub can_edit: bool,
     pub can_trigger: bool,
     pub managed: bool,
+}
+
+impl TaskDetailsResponse {
+    pub fn new(
+        task: MTask,
+        queue: QueueSummary,
+        last_evaluations: Vec<EvaluationSummary>,
+        can_edit: bool,
+        can_trigger: bool,
+    ) -> Self {
+        Self {
+            id: task.id,
+            name: task.name,
+            display_name: task.display_name,
+            description: task.description,
+            repository: task.repository,
+            wildcard: task.wildcard,
+            active: task.active,
+            created_at: task.created_at,
+            keep_evaluations: task.keep_evaluations,
+            last_check_at: checked_at(task.last_check_at),
+            queue,
+            last_evaluations,
+            can_edit,
+            can_trigger,
+            managed: task.managed,
+        }
+    }
+}
+
+fn checked_at(t: chrono::NaiveDateTime) -> Option<chrono::NaiveDateTime> {
+    (t != *gradient_types::NULL_TIME).then_some(t)
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -286,5 +378,15 @@ mod summary_tests {
         let idle = summary(None);
         assert!(idle.get("progress").is_none());
         assert!(idle.get("expected_thunks").is_none());
+    }
+
+    #[test]
+    fn checked_at_maps_null_time_sentinel_to_none() {
+        assert_eq!(checked_at(*gradient_types::NULL_TIME), None);
+        let t = chrono::NaiveDate::from_ymd_opt(2026, 6, 13)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap();
+        assert_eq!(checked_at(t), Some(t));
     }
 }

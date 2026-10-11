@@ -155,6 +155,26 @@ pub struct ApiKeyInfo {
     pub allowed_ips: Vec<String>,
 }
 
+impl ApiKeyInfo {
+    fn new(key: MApi, project_names: &HashMap<ProjectId, String>) -> Self {
+        Self {
+            id: key.id.to_string(),
+            name: key.name,
+            managed: key.managed,
+            permissions: mask_to_vec(key.permission)
+                .into_iter()
+                .map(|p| p.as_wire_name())
+                .collect(),
+            project: key.project.and_then(|id| project_names.get(&id).cloned()),
+            created_at: fmt_dt(key.created_at),
+            last_used_at: last_used_or_none(key.last_used_at),
+            expires_at: fmt_opt_dt(key.expires_at),
+            revoked_at: fmt_opt_dt(key.revoked_at),
+            allowed_ips: key.allowed_ips.unwrap_or_default(),
+        }
+    }
+}
+
 #[derive(Serialize, Debug)]
 pub struct ApiKeyPermissionsResponse {
     pub available_permissions: Vec<PermissionEntry>,
@@ -182,6 +202,21 @@ pub struct SessionInfo {
     pub current: bool,
 }
 
+impl SessionInfo {
+    fn new(session: MSession, current_session: Option<SessionId>) -> Self {
+        Self {
+            id: session.id.to_string(),
+            user_agent: session.user_agent,
+            ip: session.ip,
+            created_at: fmt_dt(session.created_at),
+            last_used_at: fmt_dt(session.last_used_at),
+            expires_at: fmt_dt(session.expires_at),
+            remember_me: session.remember_me,
+            current: Some(session.id) == current_session,
+        }
+    }
+}
+
 #[derive(Serialize, Debug)]
 pub struct AuditLogEntry {
     pub id: String,
@@ -190,6 +225,19 @@ pub struct AuditLogEntry {
     pub user_agent: Option<String>,
     pub metadata: Option<serde_json::Value>,
     pub created_at: String,
+}
+
+impl From<MAuditLog> for AuditLogEntry {
+    fn from(entry: MAuditLog) -> Self {
+        Self {
+            id: entry.id.to_string(),
+            event: entry.event,
+            ip: entry.ip,
+            user_agent: entry.user_agent,
+            metadata: entry.metadata,
+            created_at: fmt_dt(entry.created_at),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -227,6 +275,16 @@ pub struct UserSearchResult {
     pub name: String,
 }
 
+impl From<MUser> for UserSearchResult {
+    fn from(user: MUser) -> Self {
+        Self {
+            id: user.id.to_string(),
+            username: user.username,
+            name: user.name,
+        }
+    }
+}
+
 pub async fn get_search(
     state: State<Arc<ServerState>>,
     Query(params): Query<HashMap<String, String>>,
@@ -235,14 +293,7 @@ pub async fn get_search(
 
     let users = gradient_db::users::search_by_username(&state.web_db, &q, 10).await?;
 
-    let results = users
-        .into_iter()
-        .map(|u| UserSearchResult {
-            id: u.id.to_string(),
-            username: u.username,
-            name: u.name,
-        })
-        .collect();
+    let results = users.into_iter().map(UserSearchResult::from).collect();
 
     Ok(ok_json(results))
 }
@@ -347,33 +398,12 @@ pub(crate) fn forbid_via_api_key(api_key: &MaybeApiKey) -> WebResult<()> {
 async fn project_name_lookup(
     db: &WebDb,
     project_ids: &[ProjectId],
-) -> WebResult<std::collections::HashMap<ProjectId, String>> {
+) -> WebResult<HashMap<ProjectId, String>> {
     Ok(by_ids::<EProject, _>(db, project_ids)
         .await?
         .into_iter()
         .map(|(id, project)| (id, project.name))
         .collect())
-}
-
-fn api_key_info(
-    key: gradient_entity::api::Model,
-    project_names: &std::collections::HashMap<ProjectId, String>,
-) -> ApiKeyInfo {
-    ApiKeyInfo {
-        id: key.id.to_string(),
-        name: key.name,
-        managed: key.managed,
-        permissions: mask_to_vec(key.permission)
-            .into_iter()
-            .map(|p| p.as_wire_name())
-            .collect(),
-        project: key.project.and_then(|id| project_names.get(&id).cloned()),
-        created_at: fmt_dt(key.created_at),
-        last_used_at: last_used_or_none(key.last_used_at),
-        expires_at: fmt_opt_dt(key.expires_at),
-        revoked_at: fmt_opt_dt(key.revoked_at),
-        allowed_ips: key.allowed_ips.unwrap_or_default(),
-    }
 }
 
 fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>, WebError> {
@@ -412,7 +442,7 @@ pub async fn get_keys(
 
     let infos: Vec<ApiKeyInfo> = api_keys
         .into_iter()
-        .map(|k| api_key_info(k, &project_names))
+        .map(|k| ApiKeyInfo::new(k, &project_names))
         .collect();
 
     Ok(ok_json(infos))
@@ -558,7 +588,7 @@ pub async fn patch_key(
 
     let pinned: Vec<ProjectId> = updated.project.iter().copied().collect();
     let project_names = project_name_lookup(&state.web_db, &pinned).await?;
-    Ok(ok_json(api_key_info(updated, &project_names)))
+    Ok(ok_json(ApiKeyInfo::new(updated, &project_names)))
 }
 
 pub async fn delete_keys(
@@ -642,16 +672,7 @@ pub async fn get_sessions(
     let sessions: Vec<SessionInfo> = sessions
         .into_iter()
         .filter(|s| s.expires_at >= now)
-        .map(|s| SessionInfo {
-            id: s.id.to_string(),
-            user_agent: s.user_agent,
-            ip: s.ip,
-            created_at: fmt_dt(s.created_at),
-            last_used_at: fmt_dt(s.last_used_at),
-            expires_at: fmt_dt(s.expires_at),
-            remember_me: s.remember_me,
-            current: Some(s.id) == current_session_id,
-        })
+        .map(|s| SessionInfo::new(s, current_session_id))
         .collect();
 
     Ok(ok_json(sessions))
@@ -696,14 +717,7 @@ pub async fn get_audit_log(
         &params,
     )
     .await?
-    .map(|r| AuditLogEntry {
-        id: r.id.to_string(),
-        event: r.event,
-        ip: r.ip,
-        user_agent: r.user_agent,
-        metadata: r.metadata,
-        created_at: fmt_dt(r.created_at),
-    });
+    .map(AuditLogEntry::from);
 
     Ok(ok_json(listing))
 }

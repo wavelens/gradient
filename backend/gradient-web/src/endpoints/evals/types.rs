@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::endpoints::tasks::EvaluationTriggerSummary;
 use gradient_types::ids::*;
-use gradient_types::triggers::TriggerType;
-use gradient_types::{EvaluationProgress, WaitingReason};
+use gradient_types::{EvaluationProgress, MEntryPoint, MEvaluationMessage, WaitingReason};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -75,17 +75,23 @@ pub struct EvaluationResponse {
 }
 
 #[derive(Serialize, Debug)]
-pub struct EvaluationTriggerSummary {
-    pub id: TaskTriggerId,
-    #[serde(rename = "type")]
-    pub trigger_type: TriggerType,
-}
-
-#[derive(Serialize, Debug)]
 pub struct EntryPointBrief {
     pub id: EntryPointId,
     pub eval: String,
     pub build_status: gradient_entity::build::BuildStatus,
+}
+
+impl EntryPointBrief {
+    pub fn new(
+        entry_point: MEntryPoint,
+        build_status: gradient_entity::build::BuildStatus,
+    ) -> Self {
+        Self {
+            id: entry_point.id,
+            eval: entry_point.eval,
+            build_status,
+        }
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -96,6 +102,19 @@ pub struct EvaluationMessageResponse {
     pub source: Option<String>,
     pub created_at: chrono::NaiveDateTime,
     pub entry_points: Vec<EntryPointId>,
+}
+
+impl EvaluationMessageResponse {
+    pub fn new(message: MEvaluationMessage, entry_points: Vec<EntryPointId>) -> Self {
+        Self {
+            id: message.id,
+            level: message.level,
+            message: message.message,
+            source: message.source,
+            created_at: message.created_at,
+            entry_points,
+        }
+    }
 }
 
 #[cfg(test)]

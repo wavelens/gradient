@@ -33,11 +33,33 @@ pub struct TeamProjectGrant {
     pub workers: bool,
 }
 
+impl TeamProjectGrant {
+    fn new(grant: &MTeamProject, project: &MProject, role: Option<String>) -> Self {
+        Self {
+            project: project.name.clone(),
+            display_name: project.display_name.clone(),
+            role,
+            users: grant.includes_users,
+            workers: grant.includes_workers,
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct TeamCacheGrant {
     pub cache: String,
     pub display_name: String,
     pub role: Option<String>,
+}
+
+impl TeamCacheGrant {
+    fn new(cache: &MCache, role: Option<String>) -> Self {
+        Self {
+            cache: cache.name.clone(),
+            display_name: cache.display_name.clone(),
+            role,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -64,6 +86,46 @@ pub struct TeamRequestItem {
     pub workers: bool,
     pub requested_by: Option<String>,
     pub created_at: NaiveDateTime,
+}
+
+impl TeamRequestItem {
+    fn for_project(
+        request: &MTeamProjectRequest,
+        project: &MProject,
+        role: Option<String>,
+        requested_by: Option<String>,
+    ) -> Self {
+        Self {
+            id: request.id.into_inner(),
+            kind: RequestKind::Project,
+            target: project.name.clone(),
+            display_name: project.display_name.clone(),
+            role,
+            users: request.includes_users,
+            workers: request.includes_workers,
+            requested_by,
+            created_at: request.created_at,
+        }
+    }
+
+    fn for_cache(
+        request: &MTeamCacheRequest,
+        cache: &MCache,
+        role: Option<String>,
+        requested_by: Option<String>,
+    ) -> Self {
+        Self {
+            id: request.id.into_inner(),
+            kind: RequestKind::Cache,
+            target: cache.name.clone(),
+            display_name: cache.display_name.clone(),
+            role,
+            users: true,
+            workers: false,
+            requested_by,
+            created_at: request.created_at,
+        }
+    }
 }
 
 async fn cache_role_names(db: &WebDb, ids: Vec<RoleId>) -> WebResult<HashMap<RoleId, String>> {
@@ -104,13 +166,8 @@ pub async fn get_team_grants(
         .iter()
         .filter_map(|g| {
             let project = projects.get(&g.project)?;
-            Some(TeamProjectGrant {
-                project: project.name.clone(),
-                display_name: project.display_name.clone(),
-                role: g.role.and_then(|role| project_roles.get(&role).cloned()),
-                users: g.includes_users,
-                workers: g.includes_workers,
-            })
+            let role = g.role.and_then(|role| project_roles.get(&role).cloned());
+            Some(TeamProjectGrant::new(g, project, role))
         })
         .collect();
     project_items.sort_by(|a, b| a.project.cmp(&b.project));
@@ -119,11 +176,10 @@ pub async fn get_team_grants(
         .iter()
         .filter_map(|g| {
             let cache = caches.get(&g.cache)?;
-            Some(TeamCacheGrant {
-                cache: cache.name.clone(),
-                display_name: cache.display_name.clone(),
-                role: cache_roles.get(&g.role).cloned(),
-            })
+            Some(TeamCacheGrant::new(
+                cache,
+                cache_roles.get(&g.role).cloned(),
+            ))
         })
         .collect();
     cache_items.sort_by(|a, b| a.cache.cmp(&b.cache));
@@ -178,31 +234,22 @@ pub async fn get_team_requests(
         .iter()
         .filter_map(|r| {
             let project = projects.get(&r.project)?;
-            Some(TeamRequestItem {
-                id: r.id.into_inner(),
-                kind: RequestKind::Project,
-                target: project.name.clone(),
-                display_name: project.display_name.clone(),
-                role: r.role.and_then(|role| project_roles.get(&role).cloned()),
-                users: r.includes_users,
-                workers: r.includes_workers,
-                requested_by: requester(r.requested_by),
-                created_at: r.created_at,
-            })
+            let role = r.role.and_then(|role| project_roles.get(&role).cloned());
+            Some(TeamRequestItem::for_project(
+                r,
+                project,
+                role,
+                requester(r.requested_by),
+            ))
         })
         .chain(cache_requests.iter().filter_map(|r| {
             let cache = caches.get(&r.cache)?;
-            Some(TeamRequestItem {
-                id: r.id.into_inner(),
-                kind: RequestKind::Cache,
-                target: cache.name.clone(),
-                display_name: cache.display_name.clone(),
-                role: cache_roles.get(&r.role).cloned(),
-                users: true,
-                workers: false,
-                requested_by: requester(r.requested_by),
-                created_at: r.created_at,
-            })
+            Some(TeamRequestItem::for_cache(
+                r,
+                cache,
+                cache_roles.get(&r.role).cloned(),
+                requester(r.requested_by),
+            ))
         }))
         .collect();
     items.sort_by_key(|item| std::cmp::Reverse(item.created_at));

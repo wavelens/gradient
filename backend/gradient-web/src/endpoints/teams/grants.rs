@@ -39,6 +39,19 @@ pub struct TeamGrantEntry {
     pub pending: bool,
 }
 
+impl TeamGrantEntry {
+    fn new(team: &MTeam, role: Option<String>, users: bool, workers: bool, pending: bool) -> Self {
+        Self {
+            team: team.name.clone(),
+            display_name: team.display_name.clone(),
+            role,
+            users,
+            workers,
+            pending,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct GrantProjectRequest {
     pub team: String,
@@ -170,13 +183,14 @@ pub async fn get_project_teams(
     let roles = crate::helpers::role_names(&db.web_db, role_ids).await?;
 
     let entry = |team: TeamId, role, users, workers, pending| {
-        teams.get(&team).map(|team| TeamGrantEntry {
-            team: team.name.clone(),
-            display_name: team.display_name.clone(),
-            role: project_role_name(&roles, role),
-            users,
-            workers,
-            pending,
+        teams.get(&team).map(|team| {
+            TeamGrantEntry::new(
+                team,
+                project_role_name(&roles, role),
+                users,
+                workers,
+                pending,
+            )
         })
     };
     let items = grants
@@ -450,13 +464,8 @@ pub async fn get_cache_teams(
         .collect();
 
     let entry = |team: TeamId, role, pending| {
-        teams.get(&team).map(|team| TeamGrantEntry {
-            team: team.name.clone(),
-            display_name: team.display_name.clone(),
-            role: cache_role_name(&roles, role),
-            users: true,
-            workers: false,
-            pending,
+        teams.get(&team).map(|team| {
+            TeamGrantEntry::new(team, cache_role_name(&roles, role), true, false, pending)
         })
     };
     let items = grants

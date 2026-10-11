@@ -20,9 +20,10 @@ use std::time::Instant;
 
 use super::types::{
     BuildItem, BuildsQuery, EntryPointBrief, EvaluationMessageResponse, EvaluationResponse,
-    EvaluationTriggerSummary, PaginatedBuilds,
+    PaginatedBuilds,
 };
 use super::{EvalAccessContext, live_progress, live_progress_status};
+use crate::endpoints::tasks::EvaluationTriggerSummary;
 use gradient_entity::build::BuildStatus;
 
 pub async fn get_evaluation(
@@ -83,11 +84,7 @@ pub async fn get_evaluation(
                     .cloned()
                     .unwrap_or(gradient_entity::build::BuildStatus::Queued)
                     .for_api();
-                EntryPointBrief {
-                    id: ep.id,
-                    eval: ep.eval,
-                    build_status,
-                }
+                EntryPointBrief::new(ep, build_status)
             })
             .collect()
     };
@@ -112,10 +109,7 @@ pub async fn get_evaluation(
     let trigger = if let Some(trigger_id) = evaluation.trigger {
         by_id::<ETaskTrigger, _>(&state.web_db, trigger_id)
             .await?
-            .map(|t| EvaluationTriggerSummary {
-                id: trigger_id,
-                trigger_type: t.trigger_type,
-            })
+            .map(|t| EvaluationTriggerSummary::new(trigger_id, t.trigger_type))
     } else {
         None
     };
@@ -380,14 +374,7 @@ pub async fn get_evaluation_messages(
         .into_iter()
         .map(|m| {
             let entry_points = ep_map.get(&m.id).cloned().unwrap_or_default();
-            EvaluationMessageResponse {
-                id: m.id,
-                level: m.level,
-                message: m.message,
-                source: m.source,
-                created_at: m.created_at,
-                entry_points,
-            }
+            EvaluationMessageResponse::new(m, entry_points)
         })
         .collect();
 
