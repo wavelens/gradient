@@ -9,8 +9,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_core::ServerState;
+use gradient_db::WorkerDb;
 use gradient_scheduler::Scheduler;
+use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
 use gradient_wire::Rejection;
 use gradient_wire::messages::{FailedPeer, GradientCapabilities, ServerMessage};
@@ -41,14 +42,15 @@ impl DialTarget {
 }
 
 pub(super) struct DialedWorkerAuthority {
-    pub state: Arc<ServerState>,
+    pub db: WorkerDb,
+    pub config: Arc<RuntimeConfig>,
     pub session: DialedSession,
 }
 
 #[async_trait]
 impl DialerAuthority for DialedWorkerAuthority {
     async fn admit(&self, worker_id: &str) -> Result<AuthOutcome> {
-        Ok(admit_dialed(&self.state, worker_id, &self.session).await?)
+        Ok(admit_dialed(&self.db, worker_id, &self.session).await?)
     }
 
     async fn negotiate(
@@ -56,17 +58,17 @@ impl DialerAuthority for DialedWorkerAuthority {
         worker_id: &str,
         client: GradientCapabilities,
     ) -> Result<GradientCapabilities> {
-        let enabled = aggregate_enabled_caps(&self.state, worker_id).await;
-        Ok(negotiate_capabilities(&self.state, client, enabled))
+        let enabled = aggregate_enabled_caps(&self.db, worker_id).await;
+        Ok(negotiate_capabilities(&self.config, client, enabled))
     }
 }
 
 async fn admit_dialed(
-    state: &ServerState,
+    db: &WorkerDb,
     worker_id: &str,
     session: &DialedSession,
 ) -> Result<AuthOutcome, sea_orm::DbErr> {
-    Ok(match dialable(state, worker_id, &session.url).await? {
+    Ok(match dialable(db, worker_id, &session.url).await? {
         Dialable::Projects {
             projects: current, ..
         } => {
@@ -75,7 +77,7 @@ async fn admit_dialed(
                 .filter(|p| session.token_projects.contains(p))
                 .collect();
 
-            outcome_for(state, accepted).await
+            outcome_for(db, accepted).await
         }
         Dialable::Refused(rejection) => AuthOutcome::Reject(rejection),
     })
@@ -83,12 +85,12 @@ async fn admit_dialed(
 
 pub(super) async fn refresh_dialed_peers(
     writer: &ProtoWriter,
-    state: &ServerState,
+    db: &WorkerDb,
     scheduler: &Scheduler,
     worker_id: &str,
     session: &DialedSession,
 ) -> bool {
-    let outcome = match dialable(state, worker_id, &session.url).await {
+    let outcome = match dialable(db, worker_id, &session.url).await {
         Ok(Dialable::Projects {
             projects: current, ..
         }) => {
@@ -100,7 +102,7 @@ pub(super) async fn refresh_dialed_peers(
                 return false;
             }
 
-            outcome_for(state, current).await
+            outcome_for(db, current).await
         }
         Ok(Dialable::Refused(rejection)) => AuthOutcome::Reject(rejection),
         Err(e) => {
@@ -137,8 +139,8 @@ pub(super) async fn refresh_dialed_peers(
     }
 }
 
-async fn outcome_for(state: &ServerState, projects: Vec<String>) -> AuthOutcome {
-    let (authorized, demoted) = filter_project_peers_without_cache(state, projects).await;
+async fn outcome_for(db: &WorkerDb, projects: Vec<String>) -> AuthOutcome {
+    let (authorized, demoted) = filter_project_peers_without_cache(db, projects).await;
     dialed_decision(authorized, demoted)
 }
 
@@ -246,7 +248,7 @@ mod tests {
         let state = gradient_test_support::prelude::test_state(db.into_connection());
 
         assert_eq!(
-            admit_dialed(&state, "w1", &session(&[sent_for]))
+            admit_dialed(&state.worker_db, "w1", &session(&[sent_for]))
                 .await
                 .unwrap(),
             AuthOutcome::Accept {
@@ -263,7 +265,7 @@ mod tests {
         let state = gradient_test_support::prelude::test_state(db.into_connection());
 
         assert!(matches!(
-            admit_dialed(&state, "w1", &session(&[project]))
+            admit_dialed(&state.worker_db, "w1", &session(&[project]))
                 .await
                 .unwrap(),
             AuthOutcome::Reject(Rejection::NoStoredToken)
@@ -281,8 +283,14 @@ mod tests {
         let scheduler = Scheduler::new(Arc::clone(&state));
         let (writer, mut rx) = ProtoWriter::spy(Duration::from_secs(1));
 
-        let kept =
-            refresh_dialed_peers(&writer, &state, &scheduler, "w1", &session(&[owner])).await;
+        let kept = refresh_dialed_peers(
+            &writer,
+            &state.worker_db,
+            &scheduler,
+            "w1",
+            &session(&[owner]),
+        )
+        .await;
 
         assert!(!kept);
         assert!(rx.try_recv().is_err(), "no AuthUpdate may reach the worker");
@@ -335,7 +343,8 @@ mod tests {
             ..session(&[running])
         };
 
-        let kept = refresh_dialed_peers(&writer, &state, &scheduler, "w1", &team_session).await;
+        let kept =
+            refresh_dialed_peers(&writer, &state.worker_db, &scheduler, "w1", &team_session).await;
 
         assert!(kept);
         assert_eq!(
@@ -370,7 +379,9 @@ mod tests {
             ..session(&[ProjectId::now_v7()])
         };
 
-        assert!(!refresh_dialed_peers(&writer, &state, &scheduler, "w1", &team_session).await);
+        assert!(
+            !refresh_dialed_peers(&writer, &state.worker_db, &scheduler, "w1", &team_session).await
+        );
     }
 
     #[tokio::test]
@@ -382,8 +393,14 @@ mod tests {
         scheduler.spawn_core(None).await.unwrap();
         let (writer, mut rx) = ProtoWriter::spy(Duration::from_secs(1));
 
-        let kept =
-            refresh_dialed_peers(&writer, &state, &scheduler, "w1", &session(&[stays, left])).await;
+        let kept = refresh_dialed_peers(
+            &writer,
+            &state.worker_db,
+            &scheduler,
+            "w1",
+            &session(&[stays, left]),
+        )
+        .await;
 
         assert!(kept);
         assert_eq!(
@@ -402,7 +419,8 @@ mod tests {
         let scheduler = Scheduler::new(Arc::clone(&state));
         let (writer, mut rx) = ProtoWriter::spy(Duration::from_secs(1));
 
-        let kept = refresh_dialed_peers(&writer, &state, &scheduler, "w1", &session(&[])).await;
+        let kept =
+            refresh_dialed_peers(&writer, &state.worker_db, &scheduler, "w1", &session(&[])).await;
 
         assert!(!kept);
         assert_eq!(

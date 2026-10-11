@@ -9,13 +9,13 @@ mod passes;
 use crate::units::{Step, next_unit};
 use anyhow::Result;
 use chrono::NaiveDateTime;
-use gradient_core::ServerState;
 use gradient_db::maintenance::admin_tasks::{self, InsertPendingError};
+use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::ids::AdminTaskId;
+use gradient_graph::Graph;
 use gradient_types::events::gc::DeepFinished;
 use gradient_types::*;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tracing::{info, warn};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -50,8 +50,8 @@ struct Round {
     requested: bool,
 }
 
-pub(super) async fn step(state: &Arc<ServerState>) -> Result<Step> {
-    let Some(round) = current_round(state).await? else {
+pub(super) async fn step(db: &DbContext, graph: &Graph) -> Result<Step> {
+    let Some(round) = current_round(&db.worker_db, &db.config).await? else {
         return Ok(Step::Idle);
     };
     let units = passes::units();
@@ -59,9 +59,9 @@ pub(super) async fn step(state: &Arc<ServerState>) -> Result<Step> {
 
     match next_unit(&units, round.checkpoint.as_deref()) {
         Some(unit) => {
-            passes::run(state, unit, &mut report).await?;
+            passes::run(db, graph, unit, &mut report).await?;
             let saved = admin_tasks::save_checkpoint(
-                &state.worker_db,
+                &db.worker_db,
                 round.id,
                 round.started_at,
                 unit,
@@ -72,7 +72,7 @@ pub(super) async fn step(state: &Arc<ServerState>) -> Result<Step> {
                 info!(task_id = %round.id, "deep_gc: round restarted during {unit}");
             }
         }
-        None => finish(state, round.id, round.started_at, report).await?,
+        None => finish(db, round.id, round.started_at, report).await?,
     }
 
     Ok(if round.requested {
@@ -82,11 +82,10 @@ pub(super) async fn step(state: &Arc<ServerState>) -> Result<Step> {
     })
 }
 
-async fn current_round(state: &Arc<ServerState>) -> Result<Option<Round>> {
-    let db = &state.worker_db;
+async fn current_round(db: &WorkerDb, config: &RuntimeConfig) -> Result<Option<Round>> {
     let task = match admin_tasks::find_active(db, AdminTaskKind::DeepGc).await? {
         Some(task) => task,
-        None if background_round_due(state).await? => {
+        None if background_round_due(db, config).await? => {
             match admin_tasks::insert_pending(db, AdminTaskKind::DeepGc, None).await {
                 Ok(task) => task,
                 Err(InsertPendingError::AlreadyActive(_)) => return Ok(None),
@@ -116,32 +115,31 @@ async fn current_round(state: &Arc<ServerState>) -> Result<Option<Round>> {
     }))
 }
 
-async fn background_round_due(state: &ServerState) -> Result<bool> {
-    let interval = state.config.gc.deep_interval_secs;
+async fn background_round_due(db: &WorkerDb, config: &RuntimeConfig) -> Result<bool> {
+    let interval = config.gc.deep_interval_secs;
     if interval == 0 {
         return Ok(false);
     }
 
-    let last = admin_tasks::last_finished_at(&state.worker_db, AdminTaskKind::DeepGc).await?;
+    let last = admin_tasks::last_finished_at(db, AdminTaskKind::DeepGc).await?;
     Ok(last.is_none_or(|at| (now() - at).num_seconds() >= interval as i64))
 }
 
 async fn finish(
-    state: &Arc<ServerState>,
+    db: &DbContext,
     id: AdminTaskId,
     started_at: NaiveDateTime,
     report: DeepGcReport,
 ) -> Result<()> {
-    if !admin_tasks::complete(&state.worker_db, id, started_at, report.to_json()).await? {
+    if !admin_tasks::complete(&db.worker_db, id, started_at, report.to_json()).await? {
         return Ok(());
     }
 
     info!(?report, task_id = %id, "deep_gc completed");
-    state
-        .record(DeepFinished {
-            report: report.to_json(),
-        })
-        .await;
+    db.record(DeepFinished {
+        report: report.to_json(),
+    })
+    .await;
     Ok(())
 }
 
@@ -149,10 +147,16 @@ async fn finish(
 mod tests {
     use super::*;
     use crate::test_support::test_server_state;
+    use gradient_core::ServerState;
     use gradient_entity::ids::UserId;
     use gradient_fixtures::mock::mock_db;
     use gradient_storage::NarStore;
     use sea_orm::{MockDatabase, MockExecResult};
+    use std::sync::Arc;
+
+    async fn step_of(state: &ServerState) -> Result<Step> {
+        step(&state.db(), &state.graph).await
+    }
 
     fn state(db: MockDatabase, deep_interval_secs: u64) -> Arc<ServerState> {
         let tmp = tempfile::tempdir().unwrap();
@@ -166,7 +170,7 @@ mod tests {
     async fn no_background_round_starts_when_the_interval_is_zero() {
         let db = mock_db().append_query_results([Vec::<MAdminTask>::new()]);
 
-        assert_eq!(step(&state(db, 0)).await.unwrap(), Step::Idle);
+        assert_eq!(step_of(&state(db, 0)).await.unwrap(), Step::Idle);
     }
 
     #[tokio::test]
@@ -187,6 +191,6 @@ mod tests {
                 rows_affected: 1,
             }]);
 
-        assert_eq!(step(&state(db, 3600)).await.unwrap(), Step::Requested);
+        assert_eq!(step_of(&state(db, 3600)).await.unwrap(), Step::Requested);
     }
 }

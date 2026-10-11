@@ -62,15 +62,16 @@ impl DrvSource for CacheDrvSource<'_> {
     async fn read(&self, drv_path: &str) -> anyhow::Result<Option<Derivation>> {
         let base = strip_nix_store_prefix(drv_path);
         let hash = base.split('-').next().unwrap_or_default();
-        let state = &self.session.state;
-        if gradient_db::cache_paths::served_path(&state.web_db, &self.session.caches, hash)
+        let handles = &self.session.handles;
+        if gradient_db::cache_paths::served_path(&handles.db.web_db, &self.session.caches, hash)
             .await?
             .is_none()
         {
             return Ok(None);
         }
 
-        let Some(reader) = crate::nar::open_raw(state, hash).await? else {
+        let Some(reader) = crate::nar::open_raw(&handles.db.storage.nar_storage, hash).await?
+        else {
             return Ok(None);
         };
 
@@ -182,17 +183,17 @@ async fn add_to_user_evaluation(
 
 async fn evaluation_for(session: &Session, drv_paths: &[String]) -> anyhow::Result<Target> {
     let _lookup = EVALUATION_LOOKUP.lock().await;
-    let state = &session.state;
+    let handles = &session.handles;
     let task = ensure_build_request_task(
-        &state.web_db,
+        &handles.db.web_db,
         session.project.id,
         session.user.id,
-        state.config.eval.default_keep_evaluations(),
+        handles.db.config.eval.default_keep_evaluations(),
     )
     .await?;
 
     let running = running_evaluation(task.id, session.user.id)
-        .one(&state.web_db)
+        .one(&handles.db.web_db)
         .await?;
     let evaluation = match running {
         Some(running) => running.id,
@@ -202,7 +203,7 @@ async fn evaluation_for(session: &Session, drv_paths: &[String]) -> anyhow::Resu
     Ok(Target {
         task: task.id,
         evaluation,
-        hold: state.memory.db.held_evaluations.hold(evaluation).await,
+        hold: handles.db.memory.held_evaluations.hold(evaluation).await,
     })
 }
 
@@ -220,10 +221,10 @@ async fn create_evaluation(
     task: TaskId,
     drv_paths: &[String],
 ) -> anyhow::Result<EvaluationId> {
-    let state = &session.state;
+    let handles = &session.handles;
 
     let names: Vec<&str> = drv_paths.iter().map(|p| drv_name(p)).collect();
-    let tx = state.web_db.inner().begin().await?;
+    let tx = handles.db.web_db.inner().begin().await?;
     let commit = MCommit {
         id: CommitId::now_v7(),
         message: format!("SSH build of {}", names.join(" ")),
@@ -279,7 +280,7 @@ async fn add(
 
     if !matches!(added, Ok(Added::EvaluationEnded)) {
         session
-            .state
+            .handles
             .graph
             .transition(Transition::EvalStreamCompleted { evaluation })
             .await?;
@@ -289,7 +290,7 @@ async fn add(
 
 async fn ended(session: &Session, evaluation: EvaluationId) -> anyhow::Result<bool> {
     Ok(EEvaluation::find_by_id(evaluation)
-        .one(&session.state.web_db)
+        .one(&session.handles.db.web_db)
         .await?
         .is_none_or(|e| EvaluationStatus::TERMINAL.contains(&e.status)))
 }
@@ -301,7 +302,7 @@ async fn add_batches(
     closure: &[(String, Derivation)],
     drv_paths: &[String],
 ) -> anyhow::Result<Added> {
-    let state = &session.state;
+    let handles = &session.handles;
     let requested: HashSet<&str> = drv_paths.iter().map(String::as_str).collect();
     let derivations: Vec<DiscoveredDerivation> = closure
         .iter()
@@ -320,8 +321,8 @@ async fn add_batches(
 
     for batch in derivations.chunks(RECORD_BATCH_SIZE) {
         let truly_substituted =
-            gradient_scheduler::eval::assess_cached(&state.worker_db, batch).await;
-        let report = state
+            gradient_scheduler::eval::assess_cached(&handles.db.worker_db, batch).await;
+        let report = handles
             .graph
             .record(RecordBatch {
                 evaluation,
@@ -356,6 +357,7 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::SshHandles;
     use gradient_derivation::DerivationOutput;
     use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_test_support::state::TestState;
@@ -441,7 +443,7 @@ mod tests {
     async fn building_without_trigger_evaluation_is_refused() {
         let db = empty_db();
         let session = Session {
-            state: TestState::new().web_db(db.clone()).build(),
+            handles: SshHandles::from_state(&TestState::new().web_db(db.clone()).build()),
             user: gradient_fixtures::rows::user(),
             project: gradient_fixtures::rows::project(),
             permissions: 0,
@@ -456,7 +458,7 @@ mod tests {
 
     fn session(db: sea_orm::DatabaseConnection) -> Session {
         Session {
-            state: TestState::new().web_db(db).build(),
+            handles: SshHandles::from_state(&TestState::new().web_db(db).build()),
             user: gradient_fixtures::rows::user(),
             project: gradient_fixtures::rows::project(),
             permissions: 0,
@@ -510,9 +512,9 @@ mod tests {
         assert_eq!(target.evaluation, running.id);
         assert!(
             session
-                .state
-                .memory
+                .handles
                 .db
+                .memory
                 .held_evaluations
                 .holds(running.id)
                 .await
@@ -520,9 +522,9 @@ mod tests {
         drop(target);
         assert!(
             !session
-                .state
-                .memory
+                .handles
                 .db
+                .memory
                 .held_evaluations
                 .holds(running.id)
                 .await
@@ -548,9 +550,9 @@ mod tests {
         assert_eq!(target.evaluation, created.id);
         assert!(
             session
-                .state
-                .memory
+                .handles
                 .db
+                .memory
                 .held_evaluations
                 .holds(created.id)
                 .await

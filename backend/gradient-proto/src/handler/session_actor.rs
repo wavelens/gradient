@@ -13,15 +13,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use gradient_core::ServerState;
 use gradient_pool::session_port::{SessionPort, SessionSignal};
 use gradient_scheduler::Scheduler;
+use gradient_storage::admission::UploadAdmission;
+use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
+use gradient_util::shutdown::Shutdown;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tokio::sync::{Semaphore, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
+use super::SessionHandles;
 use super::dialed::{DialedSession, refresh_dialed_peers};
 use super::inbound::{ActiveJobs, InboundContext, RpcContext};
 use super::job_events::{JobEvents, SchedulerJobEvents};
@@ -55,7 +58,7 @@ impl SessionPort for SessionRef {
 
 pub struct SessionArgs {
     pub peer_id: String,
-    pub state: Arc<ServerState>,
+    pub handles: SessionHandles,
     pub scheduler: Arc<Scheduler>,
     pub socket: ProtoSocket,
     pub capabilities: GradientCapabilities,
@@ -65,7 +68,7 @@ pub struct SessionArgs {
 
 pub struct SessionState {
     peer_id: String,
-    state: Arc<ServerState>,
+    handles: SessionHandles,
     scheduler: Arc<Scheduler>,
     writer: ProtoWriter,
     capabilities: GradientCapabilities,
@@ -94,15 +97,21 @@ impl Actor for SessionActor {
     ) -> Result<Self::State, ActorProcessingErr> {
         let SessionArgs {
             peer_id,
-            state,
+            handles,
             scheduler,
             mut socket,
             capabilities,
             authorized_peers,
             dialed,
         } = args;
-        let uploads = open_uploads(&state, &peer_id, &myself)
-            .map_err(|e| ActorProcessingErr::from(format!("{e:#}")))?;
+        let uploads = open_uploads(
+            &handles.upload_admission,
+            &handles.db.config,
+            &handles.db.shutdown,
+            &peer_id,
+            &myself,
+        )
+        .map_err(|e| ActorProcessingErr::from(format!("{e:#}")))?;
         let port: Arc<dyn SessionPort> = Arc::new(SessionRef(myself.clone()));
         let registered = match scheduler
             .register_worker(
@@ -121,25 +130,25 @@ impl Actor for SessionActor {
             }
         };
 
-        let nar_cfg = &state.config.nar;
+        let nar_cfg = &handles.db.config.nar;
         let send_chunk_timeout = Duration::from_secs(nar_cfg.send_chunk_timeout_secs.get());
         let max_serves = nar_cfg.max_concurrent_serves.get();
-        let (reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
+        let (reader, writer) = socket.split(send_chunk_timeout, &handles.db.shutdown);
         let tap = Arc::new(super::tap::ProtoTap {
-            bus: state.events.clone(),
+            bus: handles.db.events.clone(),
             worker_id: peer_id.clone(),
         });
         let reader = reader.with_observer(tap.clone());
         let writer = writer.with_observer(tap);
         let active = ActiveJobs::default();
         let rpc = RpcContext::new(
-            Arc::clone(&state),
+            handles.clone(),
             Arc::clone(&scheduler),
             writer.clone(),
             peer_id.clone(),
             active.clone(),
         );
-        let reader = state.shutdown.spawn(read_loop(
+        let reader = handles.db.shutdown.spawn(read_loop(
             reader,
             myself,
             registered.last_seen,
@@ -147,7 +156,7 @@ impl Actor for SessionActor {
             move |msg| rpc.serve(msg),
         ));
         let job_events = JobEvents::spawn(
-            &state.shutdown,
+            &handles.db.shutdown,
             &peer_id,
             SchedulerJobEvents {
                 scheduler: Arc::clone(&scheduler),
@@ -156,11 +165,15 @@ impl Actor for SessionActor {
             },
         );
 
-        let logs = LogLane::to_storage(&state.shutdown, Arc::clone(&state));
+        let logs = LogLane::to_storage(
+            &handles.db.shutdown,
+            handles.db.worker_db.clone(),
+            Arc::clone(&handles.db.storage.log_storage),
+        );
 
         Ok(SessionState {
             peer_id,
-            state,
+            handles,
             scheduler,
             writer,
             capabilities,
@@ -187,7 +200,7 @@ impl Actor for SessionActor {
                 let keep = {
                     let mut ctx = InboundContext {
                         writer: &st.writer,
-                        state: &st.state,
+                        handles: &st.handles,
                         scheduler: &st.scheduler,
                         peer_id: &st.peer_id,
                         nar_serve_semaphore: &st.nar_serve_semaphore,
@@ -223,14 +236,16 @@ impl Actor for SessionActor {
                     Some(dialed) => {
                         refresh_dialed_peers(
                             &st.writer,
-                            &st.state,
+                            &st.handles.db.worker_db,
                             &st.scheduler,
                             &st.peer_id,
                             dialed,
                         )
                         .await
                     }
-                    None => on_reauth_notify(&st.writer, &st.state, &st.peer_id).await,
+                    None => {
+                        on_reauth_notify(&st.writer, &st.handles.db.worker_db, &st.peer_id).await
+                    }
                 };
                 if !kept {
                     myself.stop(Some("deactivated".into()));
@@ -349,10 +364,11 @@ impl Actor for SessionActor {
     ) -> Result<(), ActorProcessingErr> {
         st.reader.abort();
         for granted in st.uploads.table.drain_granted() {
-            let state = Arc::clone(&st.state);
-            st.state
+            let nar_storage = st.handles.db.storage.nar_storage.clone();
+            st.handles
+                .db
                 .shutdown
-                .spawn(async move { abandon_transfer(&state, granted).await });
+                .spawn(async move { abandon_transfer(&nar_storage, granted).await });
         }
         st.job_events.finish().await;
         st.scheduler.unregister_worker(&st.peer_id).await;
@@ -434,20 +450,22 @@ async fn read_loop(
 }
 
 fn open_uploads(
-    state: &Arc<ServerState>,
+    upload_admission: &Arc<UploadAdmission>,
+    config: &RuntimeConfig,
+    shutdown: &Shutdown,
     peer_id: &str,
     myself: &ActorRef<SessionMsg>,
 ) -> anyhow::Result<UploadSession> {
-    let (admission, mut admitted) = state.memory.upload_admission.open_session(peer_id);
+    let (admission, mut admitted) = upload_admission.open_session(peer_id);
     let uploads = UploadSession {
         admission,
         table: UploadTable::default(),
-        partials: gradient_storage::PartialStore::new(state.config.server.nar_partial_dir())?,
-        retain_up_to: state.config.nar.small_bytes,
-        idle_lease: Duration::from_secs(state.config.upload.lease_idle_secs.get()),
+        partials: gradient_storage::PartialStore::new(config.server.nar_partial_dir())?,
+        retain_up_to: config.nar.small_bytes,
+        idle_lease: Duration::from_secs(config.upload.lease_idle_secs.get()),
     };
     let forward = myself.clone();
-    state.shutdown.spawn(async move {
+    shutdown.spawn(async move {
         while let Some(a) = admitted.recv().await {
             if forward.send_message(SessionMsg::Admitted(a)).is_err() {
                 break;
@@ -455,7 +473,7 @@ fn open_uploads(
         }
     });
     let sweep = myself.clone();
-    state.shutdown.spawn(async move {
+    shutdown.spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(30));
         loop {
             tick.tick().await;
@@ -471,7 +489,7 @@ fn split_uploads(st: &mut SessionState) -> (InboundContext<'_>, &mut UploadSessi
     (
         InboundContext {
             writer: &st.writer,
-            state: &st.state,
+            handles: &st.handles,
             scheduler: &st.scheduler,
             peer_id: &st.peer_id,
             nar_serve_semaphore: &st.nar_serve_semaphore,
@@ -595,7 +613,7 @@ mod tests {
             SessionActor,
             SessionArgs {
                 peer_id: "w1".into(),
-                state: Arc::clone(&state),
+                handles: SessionHandles::from_state(&state),
                 scheduler: Arc::clone(&scheduler),
                 socket,
                 capabilities: GradientCapabilities::default(),
@@ -648,7 +666,7 @@ mod tests {
         .unwrap();
         let args = SessionArgs {
             peer_id: "w1".into(),
-            state: Arc::clone(&state),
+            handles: SessionHandles::from_state(&state),
             scheduler: Arc::clone(&scheduler),
             socket,
             capabilities: GradientCapabilities::default(),

@@ -8,7 +8,7 @@ use super::StorageMigration;
 use anyhow::{Context, Result};
 use futures::future::BoxFuture;
 use futures::{StreamExt as _, TryStreamExt as _};
-use gradient_core::ServerState;
+use gradient_db::{DbContext, WorkerDb};
 use gradient_storage::log_shard;
 use gradient_types::ids::BuildAttemptId;
 use object_store::{ObjectStore, path::Path as ObjectPath};
@@ -29,20 +29,21 @@ impl StorageMigration for Migration {
         vec!["local".to_owned(), "s3".to_owned()]
     }
 
-    fn migrate<'a>(&'a self, state: &'a ServerState, unit: &'a str) -> BoxFuture<'a, Result<()>> {
+    fn migrate<'a>(&'a self, db: &'a DbContext, unit: &'a str) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             match unit {
                 "local" => {
-                    let logs = state.config.server.base_dir.join("logs");
+                    let logs = db.config.server.base_dir.join("logs");
                     let relocated = relocate_flat_entries(&logs).await?;
                     info!(relocated, "moved flat build logs into their shard");
                 }
-                _ if state.nar_storage.local_base().is_some() => {}
+                _ if db.storage.nar_storage.local_base().is_some() => {}
                 _ => {
-                    let store = state.nar_storage.inner();
-                    let root = ObjectPath::from(format!("{}logs", state.nar_storage.prefix()));
+                    let nar_storage = &db.storage.nar_storage;
+                    let store = nar_storage.inner();
+                    let root = ObjectPath::from(format!("{}logs", nar_storage.prefix()));
                     let deleted = delete_flat_objects(store.as_ref(), &root).await?;
-                    drop_chunk_index(state, &deleted).await?;
+                    drop_chunk_index(&db.worker_db, &deleted).await?;
                     info!(deleted = deleted.len(), "deleted flat build logs from S3");
                 }
             }
@@ -130,11 +131,11 @@ async fn delete_flat_objects(
     Ok(deleted.into_iter().collect())
 }
 
-async fn drop_chunk_index(state: &ServerState, deleted: &[BuildAttemptId]) -> Result<()> {
+async fn drop_chunk_index(db: &WorkerDb, deleted: &[BuildAttemptId]) -> Result<()> {
     gradient_db::for_each_chunk(deleted, |chunk| {
         gradient_entity::build_log_chunk::Entity::delete_many()
             .filter(gradient_entity::build_log_chunk::Column::BuildAttempt.is_in(chunk))
-            .exec(&state.worker_db)
+            .exec(db)
     })
     .await
     .context("drop the chunk index of deleted legacy logs")

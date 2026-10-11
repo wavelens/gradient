@@ -8,7 +8,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
-use gradient_core::ServerState;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_types::events::{build, evaluation};
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId, TaskId};
@@ -29,6 +28,7 @@ use gradient_wire::types::{
     EvalProgress as WireEvalProgress,
 };
 
+use super::SessionHandles;
 use super::auth::{challenge_for, resolve_authorized};
 use super::cache::handle_cache_query;
 use super::dialed::{DialedSession, refresh_dialed_peers};
@@ -133,7 +133,7 @@ pub(super) fn assignment_matches(current: Option<DispatchedJobId>, reported: &st
 
 pub(super) struct InboundContext<'a> {
     pub writer: &'a ProtoWriter,
-    pub state: &'a Arc<ServerState>,
+    pub handles: &'a SessionHandles,
     pub scheduler: &'a Arc<Scheduler>,
     pub peer_id: &'a str,
     pub nar_serve_semaphore: &'a Arc<Semaphore>,
@@ -446,7 +446,7 @@ impl<'a> InboundContext<'a> {
 
     fn rpc(&self) -> RpcContext {
         RpcContext {
-            state: Arc::clone(self.state),
+            handles: self.handles.clone(),
             scheduler: Arc::clone(self.scheduler),
             writer: self.writer.clone(),
             peer_id: self.peer_id.to_owned(),
@@ -456,13 +456,20 @@ impl<'a> InboundContext<'a> {
 
     fn spawn_worker_metrics(&self, metrics: WorkerMetrics) {
         let rpc = self.rpc();
-        self.state.shutdown.spawn(async move {
+        self.handles.db.shutdown.spawn(async move {
             rpc.on_worker_metrics(metrics).await;
         });
     }
 
     async fn on_eval_cache_pull(&mut self, job_id: String, fingerprint: String) {
-        handle_eval_cache_pull(self.state, self.writer, job_id, fingerprint).await;
+        handle_eval_cache_pull(
+            &self.handles.db.worker_db,
+            &self.handles.db.storage.nar_storage,
+            self.writer,
+            job_id,
+            fingerprint,
+        )
+        .await;
     }
 
     async fn on_eval_message(
@@ -487,7 +494,7 @@ impl<'a> InboundContext<'a> {
         if let Some(dialed) = self.dialed {
             return refresh_dialed_peers(
                 self.writer,
-                self.state,
+                &self.handles.db.worker_db,
                 self.scheduler,
                 self.peer_id,
                 dialed,
@@ -495,7 +502,7 @@ impl<'a> InboundContext<'a> {
             .await;
         }
 
-        let (_, registered_peers) = challenge_for(self.state, self.peer_id).await;
+        let (_, registered_peers) = challenge_for(&self.handles.db.worker_db, self.peer_id).await;
         send_server_msg(
             self.writer,
             &ServerMessage::AuthChallenge {
@@ -507,8 +514,9 @@ impl<'a> InboundContext<'a> {
     }
 
     async fn on_auth_response(&mut self, tokens: Vec<(String, String)>) -> bool {
-        let (team, registered_peers) = challenge_for(self.state, self.peer_id).await;
-        let resolved = resolve_authorized(self.state, &team, &registered_peers, &tokens).await;
+        let db = &self.handles.db.worker_db;
+        let (team, registered_peers) = challenge_for(db, self.peer_id).await;
+        let resolved = resolve_authorized(db, &team, &registered_peers, &tokens).await;
 
         if resolved.authorized.is_empty() {
             info!(peer_id = %self.peer_id, "no project authorizes this worker any more - disconnecting");
@@ -612,7 +620,7 @@ impl<'a> InboundContext<'a> {
         );
         send_credentials_for_job(
             self.writer,
-            self.state,
+            &self.handles.db,
             self.scheduler,
             self.peer_id,
             &assignment.job,
@@ -666,7 +674,7 @@ impl<'a> InboundContext<'a> {
         };
 
         if let Err(e) = gradient_db::scheduling::assignment_record::abandon_open_assignment(
-            &self.state.worker_db,
+            &self.handles.db.worker_db,
             active.assignment_id,
         )
         .await
@@ -695,11 +703,10 @@ impl<'a> InboundContext<'a> {
             warn!(peer_id = %self.peer_id, %build_id, "invalid derivation_build in BuildProgress");
             return;
         };
-        self.state
-            .memory
+        self.handles
             .build_progress
             .set(shared_build, progress, Instant::now());
-        self.state.events.publish(build::Progress {
+        self.handles.db.events.publish(build::Progress {
             derivation_build: shared_build,
             progress,
         });
@@ -710,11 +717,10 @@ impl<'a> InboundContext<'a> {
             return;
         };
         let progress = evaluation_progress(progress);
-        self.state
-            .memory
+        self.handles
             .eval_progress
             .set(evaluation_id, progress.clone(), Instant::now());
-        self.state.events.publish(evaluation::Activity {
+        self.handles.db.events.publish(evaluation::Activity {
             evaluation_id,
             task,
             progress,
@@ -723,21 +729,21 @@ impl<'a> InboundContext<'a> {
 
     async fn on_nar_request(&mut self, job_id: String, paths: Vec<String>) {
         debug!(peer_id = %self.peer_id, %job_id, count = paths.len(), "NarRequest");
-        let shutdown = self.state.shutdown.clone();
+        let shutdown = self.handles.db.shutdown.clone();
         for store_path in paths {
-            let state = Arc::clone(self.state);
+            let handles = self.handles.clone();
             let writer = self.writer.clone();
             let permit = Arc::clone(self.nar_serve_semaphore);
             let peer_id = self.peer_id.to_owned();
             let job_id = job_id.clone();
             shutdown.spawn(async move {
-                let server = Arc::clone(&state.memory.nar_downloads);
+                let server = Arc::clone(&handles.nar_downloads);
                 let Some(_slot) = ServeSlot::acquire(permit, server).await else {
                     return;
                 };
 
                 if let Err(e) =
-                    serve_nar_request(&state, &writer, &job_id, &store_path, 0, None).await
+                    serve_nar_request(&handles, &writer, &job_id, &store_path, 0, None).await
                 {
                     warn!(%peer_id, %job_id, %store_path, error = %e, "NarRequest serve failed");
                 }
@@ -753,19 +759,19 @@ impl<'a> InboundContext<'a> {
         stream_token: String,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, received_bytes, "NarRequestResume");
-        let state = Arc::clone(self.state);
+        let handles = self.handles.clone();
         let writer = self.writer.clone();
         let permit = Arc::clone(self.nar_serve_semaphore);
         let peer_id = self.peer_id.to_owned();
-        let shutdown = self.state.shutdown.clone();
+        let shutdown = handles.db.shutdown.clone();
         shutdown.spawn(async move {
-            let server = Arc::clone(&state.memory.nar_downloads);
+            let server = Arc::clone(&handles.nar_downloads);
             let Some(_slot) = ServeSlot::acquire(permit, server).await else {
                 return;
             };
 
             if let Err(e) = serve_nar_request(
-                &state,
+                &handles,
                 &writer,
                 &job_id,
                 &store_path,
@@ -782,7 +788,7 @@ impl<'a> InboundContext<'a> {
 
 #[derive(Clone)]
 pub(super) struct RpcContext {
-    state: Arc<ServerState>,
+    handles: SessionHandles,
     scheduler: Arc<Scheduler>,
     writer: ProtoWriter,
     peer_id: String,
@@ -791,14 +797,14 @@ pub(super) struct RpcContext {
 
 impl RpcContext {
     pub(super) fn new(
-        state: Arc<ServerState>,
+        handles: SessionHandles,
         scheduler: Arc<Scheduler>,
         writer: ProtoWriter,
         peer_id: String,
         active: ActiveJobs,
     ) -> Self {
         Self {
-            state,
+            handles,
             scheduler,
             writer,
             peer_id,
@@ -817,7 +823,7 @@ impl RpcContext {
                 mode,
                 external,
             } => {
-                self.state.shutdown.spawn(async move {
+                self.handles.db.shutdown.spawn(async move {
                     rpc.on_cache_query(job_id, query_id, paths, nar_sizes, mode, external)
                         .await
                 });
@@ -828,7 +834,7 @@ impl RpcContext {
                 query_id,
                 drv_paths,
             } => {
-                self.state.shutdown.spawn(async move {
+                self.handles.db.shutdown.spawn(async move {
                     rpc.on_query_known_derivations(job_id, query_id, drv_paths)
                         .await
                 });
@@ -857,7 +863,15 @@ impl RpcContext {
                 Some(project_id) => Some(project_id),
                 None => self.scheduler.project_for_job(&job_id).await,
             };
-            handle_cache_query(&self.state, project_id, &paths, &nar_sizes, mode, external).await
+            handle_cache_query(
+                &self.handles,
+                project_id,
+                &paths,
+                &nar_sizes,
+                mode,
+                external,
+            )
+            .await
         };
 
         // A DB error or an over-budget handler is indeterminate, never "absent". `CacheError` is
@@ -908,7 +922,7 @@ impl RpcContext {
             .collect();
         let known = match self.scheduler.active_job(&job_id).await {
             Some(job) if job.prunes_walk() => {
-                match self.state.graph.known_derivations(hashes).await {
+                match self.handles.graph.known_derivations(hashes).await {
                     Ok(known) => known,
                     Err(e) => {
                         warn!(peer_id = %self.peer_id, %job_id, error = %e, "QueryKnownDerivations degraded; pruning nothing");
@@ -980,6 +994,7 @@ pub(in crate::handler) mod fixture {
     use crate::handler::job_events::SchedulerJobEvents;
     use crate::handler::upload::{UploadSession, UploadTable};
     use bytes::Bytes;
+    use gradient_core::ServerState;
     use gradient_scheduler::jobs::PendingEvalJob;
     use gradient_storage::admission::Admitted;
     use gradient_types::ids::{CommitId, EvaluationId};
@@ -1039,7 +1054,7 @@ pub(in crate::handler) mod fixture {
 
     pub(in crate::handler) struct TestSession {
         pub writer: ProtoWriter,
-        pub state: Arc<ServerState>,
+        pub handles: SessionHandles,
         pub scheduler: Arc<Scheduler>,
         pub semaphore: Arc<Semaphore>,
         pub job_events: JobEvents,
@@ -1089,7 +1104,7 @@ pub(in crate::handler) mod fixture {
             };
             let session = Self {
                 writer,
-                state: Arc::clone(state),
+                handles: SessionHandles::from_state(state),
                 scheduler,
                 semaphore: Arc::new(Semaphore::new(1)),
                 job_events,
@@ -1104,7 +1119,7 @@ pub(in crate::handler) mod fixture {
             (
                 InboundContext {
                     writer: &self.writer,
-                    state: &self.state,
+                    handles: &self.handles,
                     scheduler: &self.scheduler,
                     peer_id: "w1",
                     nar_serve_semaphore: &self.semaphore,
@@ -1193,7 +1208,7 @@ mod assignment_response_tests {
 
         let mut ctx = InboundContext {
             writer: &writer,
-            state: &state,
+            handles: &SessionHandles::from_state(&state),
             scheduler: &scheduler,
             peer_id: "w1",
             nar_serve_semaphore: &semaphore,
@@ -1253,7 +1268,7 @@ mod assignment_response_tests {
 
         let mut ctx = InboundContext {
             writer: &writer,
-            state: &state,
+            handles: &SessionHandles::from_state(&state),
             scheduler: &scheduler,
             peer_id: "w1",
             nar_serve_semaphore: &semaphore,
@@ -1298,7 +1313,7 @@ mod assignment_response_tests {
 
         let ctx = InboundContext {
             writer: &writer,
-            state: &state,
+            handles: &SessionHandles::from_state(&state),
             scheduler: &scheduler,
             peer_id: "w1",
             nar_serve_semaphore: &semaphore,
@@ -1361,7 +1376,7 @@ mod assignment_response_tests {
 
         let ctx = InboundContext {
             writer: &writer,
-            state: &state,
+            handles: &SessionHandles::from_state(&state),
             scheduler: &scheduler,
             peer_id: "w1",
             nar_serve_semaphore: &semaphore,
@@ -1419,7 +1434,7 @@ mod assignment_response_tests {
 
         let ctx = InboundContext {
             writer: &writer,
-            state: &state,
+            handles: &SessionHandles::from_state(&state),
             scheduler: &scheduler,
             peer_id: "w1",
             nar_serve_semaphore: &semaphore,

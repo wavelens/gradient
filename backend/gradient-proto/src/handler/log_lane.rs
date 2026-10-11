@@ -7,7 +7,8 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use gradient_core::ServerState;
+use gradient_db::WorkerDb;
+use gradient_storage::LogStorage;
 use gradient_types::ids::DerivationBuildId;
 use gradient_util::shutdown::Shutdown;
 use tokio::sync::{mpsc, oneshot};
@@ -47,10 +48,15 @@ impl LogLane {
         Self { tx }
     }
 
-    pub(super) fn to_storage(shutdown: &Shutdown, state: Arc<ServerState>) -> Self {
+    pub(super) fn to_storage(
+        shutdown: &Shutdown,
+        db: WorkerDb,
+        log_storage: Arc<dyn LogStorage>,
+    ) -> Self {
         Self::spawn(shutdown, move |build, data| {
-            let state = Arc::clone(&state);
-            async move { append_to_storage(&state, build, &data).await }
+            let db = db.clone();
+            let log_storage = Arc::clone(&log_storage);
+            async move { append_to_storage(&db, log_storage.as_ref(), build, &data).await }
         })
     }
 
@@ -67,18 +73,21 @@ impl LogLane {
     }
 }
 
-async fn append_to_storage(state: &ServerState, build: DerivationBuildId, data: &[u8]) {
-    let Some(attempt) =
-        gradient_db::scheduling::build_attempt::latest_attempt_id(&state.worker_db, build)
-            .await
-            .unwrap_or(None)
+async fn append_to_storage(
+    db: &WorkerDb,
+    log_storage: &dyn LogStorage,
+    build: DerivationBuildId,
+    data: &[u8],
+) {
+    let Some(attempt) = gradient_db::scheduling::build_attempt::latest_attempt_id(db, build)
+        .await
+        .unwrap_or(None)
     else {
         debug!(%build, bytes = data.len(), "log chunk dropped: no open attempt for the shared build");
         return;
     };
 
-    if let Err(e) = state
-        .log_storage
+    if let Err(e) = log_storage
         .append(attempt, &String::from_utf8_lossy(data))
         .await
     {

@@ -5,15 +5,15 @@
  */
 
 use anyhow::{Context, Result};
-use gradient_core::ServerState;
+use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::build::BuildStatus;
-use gradient_graph::GcRequest;
+use gradient_graph::{GcRequest, Graph};
+use gradient_storage::NarStore;
 use gradient_types::events::gc::{Pass, Swept};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
 use std::collections::HashSet;
-use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Default, Clone, Copy, Serialize)]
@@ -47,8 +47,9 @@ gradient_db::sql! {
         tier = Sweep;
 }
 
-pub async fn repair_nar_shard(state: Arc<ServerState>, shard: &str) -> Result<CleanupReport> {
-    let on_disk = state
+pub async fn repair_nar_shard(db: &DbContext, graph: &Graph, shard: &str) -> Result<CleanupReport> {
+    let on_disk = db
+        .storage
         .nar_storage
         .list_shard(shard)
         .await
@@ -59,10 +60,10 @@ pub async fn repair_nar_shard(state: Arc<ServerState>, shard: &str) -> Result<Cl
         orphan_nars_scanned: on_disk.len() as u64,
         ..Default::default()
     };
-    let candidates = past_upload_grace(&state, &on_disk);
+    let candidates = past_upload_grace(&db.config, &on_disk);
     for chunk in candidates.chunks(UNREFERENCED_PROBE_BATCH) {
-        for hash in unreferenced_hashes(&state, chunk).await? {
-            if remove_orphan_nar(&state, &hash).await {
+        for hash in unreferenced_hashes(&db.worker_db, chunk).await? {
+            if remove_orphan_nar(&db.storage.nar_storage, &hash).await {
                 report.orphan_nars_removed += 1;
             }
         }
@@ -73,16 +74,21 @@ pub async fn repair_nar_shard(state: Arc<ServerState>, shard: &str) -> Result<Cl
             count = report.orphan_nars_removed,
             "Removed orphaned NAR files"
         );
-        state
-            .record(Swept {
-                pass: Pass::OrphanNars,
-                removed: report.orphan_nars_removed,
-            })
-            .await;
+        db.record(Swept {
+            pass: Pass::OrphanNars,
+            removed: report.orphan_nars_removed,
+        })
+        .await;
     }
 
-    report.zombie_cached_paths_purged =
-        purge_zombie_cached_paths(&state, shard, &on_disk_set).await?;
+    report.zombie_cached_paths_purged = purge_zombie_cached_paths(
+        &db.worker_db,
+        &db.storage.nar_storage,
+        graph,
+        shard,
+        &on_disk_set,
+    )
+    .await?;
     Ok(report)
 }
 
@@ -98,12 +104,13 @@ fn zombie_candidates(shard: &str) -> sea_orm::Select<ECachedPath> {
 /// listing yet present in storage. Dropping its row would leave the producer `Completed` with no
 /// backing output. Storage is the judge, and a probe error is preserving the row.
 async fn zombie_hashes(
-    state: &Arc<ServerState>,
+    db: &WorkerDb,
+    nar_storage: &NarStore,
     shard: &str,
     on_disk: &HashSet<String>,
 ) -> Result<Vec<String>> {
     let rows = zombie_candidates(shard)
-        .all(&state.worker_db)
+        .all(db)
         .await
         .context("load cached_path rows for zombie purge")?;
 
@@ -113,7 +120,7 @@ async fn zombie_hashes(
             continue;
         }
 
-        match state.nar_storage.exists(&row.hash).await {
+        match nar_storage.exists(&row.hash).await {
             Ok(false) => zombies.push(row.hash),
             Ok(true) => {
                 debug!(hash = %row.hash, "zombie purge: the object landed after the listing")
@@ -128,11 +135,13 @@ async fn zombie_hashes(
 }
 
 async fn purge_zombie_cached_paths(
-    state: &Arc<ServerState>,
+    db: &WorkerDb,
+    nar_storage: &NarStore,
+    graph: &Graph,
     shard: &str,
     on_disk: &HashSet<String>,
 ) -> Result<u64> {
-    let zombies = zombie_hashes(state, shard, on_disk).await?;
+    let zombies = zombie_hashes(db, nar_storage, shard, on_disk).await?;
     if zombies.is_empty() {
         return Ok(0);
     }
@@ -141,8 +150,7 @@ async fn purge_zombie_cached_paths(
     let scanned_at = now();
     let mut purged = 0u64;
     for chunk in zombies.chunks(ZOMBIE_DELETE_BATCH) {
-        match state
-            .graph
+        match graph
             .gc(GcRequest::Paths {
                 hashes: chunk.to_vec(),
                 scanned_at,
@@ -171,8 +179,8 @@ const UNREFERENCED_PROBE_BATCH: usize = 5000;
 /// A fresh NAR is on disk before the evaluation committed its `derivation` and `cached_path` rows.
 /// Reclaiming it would strand a zombie `cached_path` that the dispatch gate is trusting. A grace of
 /// `<= 0` is for tests only.
-fn past_upload_grace(state: &ServerState, on_disk: &[(String, i64)]) -> Vec<String> {
-    let grace_secs = i64::from(state.config.gc.nar_upload_grace_hours) * 3600;
+fn past_upload_grace(config: &RuntimeConfig, on_disk: &[(String, i64)]) -> Vec<String> {
+    let grace_secs = i64::from(config.gc.nar_upload_grace_hours) * 3600;
     let cutoff = if grace_secs > 0 {
         now().and_utc().timestamp() - grace_secs
     } else {
@@ -185,9 +193,8 @@ fn past_upload_grace(state: &ServerState, on_disk: &[(String, i64)]) -> Vec<Stri
         .collect()
 }
 
-async fn unreferenced_hashes(state: &ServerState, candidates: &[String]) -> Result<Vec<String>> {
-    let rows = state
-        .worker_db
+async fn unreferenced_hashes(db: &WorkerDb, candidates: &[String]) -> Result<Vec<String>> {
+    let rows = db
         .query_all_raw(UNREFERENCED_HASHES.bind([
             candidates.to_vec().into(),
             sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),
@@ -203,8 +210,8 @@ async fn unreferenced_hashes(state: &ServerState, candidates: &[String]) -> Resu
         .collect()
 }
 
-async fn remove_orphan_nar(state: &ServerState, hash: &str) -> bool {
-    match state.nar_storage.delete(hash).await {
+async fn remove_orphan_nar(nar_storage: &NarStore, hash: &str) -> bool {
+    match nar_storage.delete(hash).await {
         Ok(()) => {
             debug!(hash, "Removed orphaned NAR");
             true
@@ -220,11 +227,13 @@ async fn remove_orphan_nar(state: &ServerState, hash: &str) -> bool {
 mod tests {
     use super::*;
     use crate::test_support::test_server_state;
+    use gradient_core::ServerState;
     use gradient_fixtures::mock::mock_db;
     use gradient_storage::NarStore;
     use sea_orm::{DatabaseBackend, Value};
     use std::collections::BTreeMap;
     use std::path::Path;
+    use std::sync::Arc;
 
     fn write_nar_file(base: &Path, hash: &str) {
         let dir = base.join("nars").join(&hash[..2]);
@@ -265,7 +274,9 @@ mod tests {
         write_nar_file(tmp.path(), orphan);
 
         let state = make_state(tmp.path(), vec![orphan]);
-        let report = repair_nar_shard(state, "aa").await.unwrap();
+        let report = repair_nar_shard(&state.db(), &state.graph, "aa")
+            .await
+            .unwrap();
 
         assert!(nar_file_exists(tmp.path(), active));
         assert!(!nar_file_exists(tmp.path(), orphan));
@@ -312,7 +323,9 @@ mod tests {
         write_nar_file(tmp.path(), drv);
 
         let state = make_state(tmp.path(), vec![]);
-        repair_nar_shard(state, "dd").await.unwrap();
+        repair_nar_shard(&state.db(), &state.graph, "dd")
+            .await
+            .unwrap();
 
         assert!(nar_file_exists(tmp.path(), drv));
     }
@@ -326,7 +339,9 @@ mod tests {
         write_nar_file(tmp.path(), h2);
 
         let state = make_state(tmp.path(), vec![h1, h2]);
-        repair_nar_shard(state, "11").await.unwrap();
+        repair_nar_shard(&state.db(), &state.graph, "11")
+            .await
+            .unwrap();
 
         assert!(!nar_file_exists(tmp.path(), h1));
         assert!(!nar_file_exists(tmp.path(), h2));
@@ -345,7 +360,10 @@ mod tests {
             ("fresh".to_owned(), fresh),
         ];
 
-        assert_eq!(past_upload_grace(&state, &listed), vec!["old".to_owned()]);
+        assert_eq!(
+            past_upload_grace(&state.config, &listed),
+            vec!["old".to_owned()]
+        );
     }
 
     #[tokio::test]
@@ -362,7 +380,7 @@ mod tests {
             config.gc.nar_upload_grace_hours = 24;
         });
 
-        repair_nar_shard(state, "dd")
+        repair_nar_shard(&state.db(), &state.graph, "dd")
             .await
             .expect("a pass with no candidate issues no probe");
         assert!(
@@ -391,7 +409,9 @@ mod tests {
         let nar_storage = NarStore::local(tmp.path()).unwrap();
         let state = test_server_state(nar_storage, db, |_| {});
 
-        let zombies = zombie_hashes(&state, "cc", &HashSet::new()).await.unwrap();
+        let zombies = zombie_hashes(&state.worker_db, &state.nar_storage, "cc", &HashSet::new())
+            .await
+            .unwrap();
 
         assert!(zombies.is_empty(), "storage decides, not the stale listing");
         assert!(nar_file_exists(tmp.path(), fresh));
@@ -426,7 +446,9 @@ mod tests {
 
         let state = test_server_state(nar_storage, db, |_| {});
 
-        let zombies = zombie_hashes(&state, "", &HashSet::new()).await.unwrap();
+        let zombies = zombie_hashes(&state.worker_db, &state.nar_storage, "", &HashSet::new())
+            .await
+            .unwrap();
 
         assert_eq!(zombies, vec![zombie_hash.to_owned()]);
         assert!(nar_file_exists(tmp.path(), live), "live NAR must survive");

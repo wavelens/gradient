@@ -10,7 +10,7 @@ use async_compression::Level;
 use async_compression::tokio::write::ZstdEncoder;
 use gradient_graph::NarCommit;
 use gradient_proto::import::{ImportInput, SignTargets, import_nar_reader, stored_path};
-use gradient_storage::admission::{Admission, HeldPermit, ObjectKey};
+use gradient_storage::admission::{Admission, HeldPermit, ObjectKey, UploadAdmission};
 use gradient_types::events::cache::NarSigned;
 use gradient_types::permissions::Permission;
 use gradient_types::*;
@@ -19,6 +19,7 @@ use harmonia_protocol::valid_path_info::ValidPathInfo;
 use harmonia_store_path_info::NarHash;
 use harmonia_utils_hash::{Algorithm, Context, HashFormat as _, Sha256};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tracing::debug;
@@ -58,10 +59,16 @@ pub async fn stage(
         session.project.name
     );
 
-    let state = &session.state;
+    let handles = &session.handles;
     let hash = info.path.hash().to_string();
-    let claim = claim_path(state, &hash, info.info.nar_size).await?;
-    if let Some(known) = stored_path(&state.web_db, &hash).await? {
+    let claim = claim_path(
+        &handles.db.config,
+        &handles.upload_admission,
+        &hash,
+        info.info.nar_size,
+    )
+    .await?;
+    if let Some(known) = stored_path(&handles.db.web_db, &hash).await? {
         if let Some(claim) = claim {
             claim.committed();
         }
@@ -82,7 +89,7 @@ pub async fn stage(
             info.path
         )
     })?;
-    let dir = state.config.server.nar_upload_partial_dir();
+    let dir = handles.db.config.server.nar_upload_partial_dir();
     tokio::fs::create_dir_all(&dir).await?;
     let file = tempfile::NamedTempFile::new_in(&dir)?;
     let (nar_hash, nar_size, file_hash, file_size) =
@@ -113,11 +120,11 @@ pub async fn commit(
     info: &ValidPathInfo,
     pending: Pending,
 ) -> anyhow::Result<()> {
-    let state = &session.state;
+    let handles = &session.handles;
     let targets = SignTargets::ProjectCaches(session.project.id);
     let signed = match pending {
         Pending::Known(known) => {
-            state
+            handles
                 .graph
                 .commit_nar(NarCommit::from_stored_row(&known, targets))
                 .await?
@@ -136,9 +143,9 @@ pub async fn commit(
             let ca = info.info.ca.as_ref().map(|c| c.to_string());
             let nar_hash = staged.nar_hash.as_sri().to_string();
             let committed = import_nar_reader(
-                &state.web_db,
-                &state.nar_storage,
-                &state.graph,
+                &handles.db.web_db,
+                &handles.db.storage.nar_storage,
+                &handles.graph,
                 tokio::fs::File::open(staged.file.path()).await?,
                 ImportInput {
                     store_path: &store_path,
@@ -159,7 +166,7 @@ pub async fn commit(
     };
 
     for cache in signed {
-        state.events.publish(NarSigned {
+        handles.db.events.publish(NarSigned {
             cache,
             hash: info.path.hash().to_string(),
         });
@@ -169,14 +176,13 @@ pub async fn commit(
 }
 
 async fn claim_path(
-    state: &gradient_core::ServerState,
+    config: &RuntimeConfig,
+    admission: &Arc<UploadAdmission>,
     hash: &str,
     size: u64,
 ) -> anyhow::Result<Option<HeldPermit>> {
-    let wait = Duration::from_secs(state.config.upload.rest_wait_secs.get());
-    match state
-        .memory
-        .upload_admission
+    let wait = Duration::from_secs(config.upload.rest_wait_secs.get());
+    match admission
         .admit("ssh", ObjectKey::Nar(hash.to_owned()), size, wait)
         .await
     {
@@ -236,6 +242,7 @@ async fn compress_into(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::SshHandles;
     use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_storage::admission::Admitted;
     use gradient_test_support::state::TestState;
@@ -250,7 +257,7 @@ mod tests {
 
     fn session(db: DatabaseConnection, permissions: i64) -> Arc<Session> {
         Arc::new(Session {
-            state: TestState::new().web_db(db).build(),
+            handles: SshHandles::from_state(&TestState::new().web_db(db).build()),
             user: gradient_fixtures::rows::user(),
             project: gradient_fixtures::rows::project(),
             permissions,
@@ -373,7 +380,7 @@ mod tests {
             .into_connection();
         let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
         let info = info(NAR);
-        let (holder, mut admitted) = session.state.memory.upload_admission.open_session("holder");
+        let (holder, mut admitted) = session.handles.upload_admission.open_session("holder");
         holder.request(1, ObjectKey::Nar(info.path.hash().to_string()), 1, false);
         let Some(Admitted::Granted { permit, .. }) = admitted.recv().await else {
             panic!("the holder leads the path");

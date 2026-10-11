@@ -66,6 +66,7 @@ pub async fn cache_proto(
         .max_frame_size(SAFE_INFLIGHT_MESSAGE_SIZE);
 
     let shutdown = state.shutdown.clone();
+    let handles = gradient_proto::handler::SessionHandles::from_state(&state);
     Ok(upgrade.on_upgrade(move |sock| async move {
         let _ = shutdown
             .spawn(async move {
@@ -73,7 +74,7 @@ pub async fn cache_proto(
                 let _ip_permit = ip_permit;
                 gradient_proto::handler::handle_cache_socket(
                     gradient_wire::server::accept_axum(sock),
-                    state,
+                    handles,
                     cache_id,
                 )
                 .await;

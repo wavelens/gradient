@@ -151,9 +151,10 @@ impl BuildLogs {
         build: DerivationBuildId,
         log: &(impl Fn(LogMessage) + Send + Sync),
     ) -> anyhow::Result<()> {
-        let state = &session.state;
+        let handles = &session.handles;
         let Some(attempt) =
-            gradient_db::scheduling::build_attempt::latest_attempt_id(&state.web_db, build).await?
+            gradient_db::scheduling::build_attempt::latest_attempt_id(&handles.db.web_db, build)
+                .await?
         else {
             return Ok(());
         };
@@ -167,7 +168,11 @@ impl BuildLogs {
 
         let appended = match activity
             .tail
-            .appended(&state.web_db, state.log_storage.as_ref(), attempt)
+            .appended(
+                &handles.db.web_db,
+                handles.db.storage.log_storage.as_ref(),
+                attempt,
+            )
             .await
         {
             Ok(appended) => appended,
@@ -222,7 +227,7 @@ async fn builds(
     Ok(gradient_db::fetch_in_chunks(ids, |chunk| async {
         EDerivationBuild::find()
             .filter(CDerivationBuild::Id.is_in(chunk))
-            .all(&session.state.web_db)
+            .all(&session.handles.db.web_db)
             .await
     })
     .await?)
@@ -231,6 +236,7 @@ async fn builds(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::SshHandles;
     use gradient_fixtures::mock::mock_db;
     use gradient_test_support::state::TestState;
     use std::sync::Mutex;
@@ -321,7 +327,7 @@ mod tests {
             .append_query_results([Vec::<gradient_entity::build_log_chunk::Model>::new()])
             .into_connection();
         let session = Session {
-            state: TestState::new().web_db(db).build(),
+            handles: SshHandles::from_state(&TestState::new().web_db(db).build()),
             user: gradient_fixtures::rows::user(),
             project: gradient_fixtures::rows::project(),
             permissions: 0,

@@ -8,7 +8,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use gradient_core::ServerState;
+use gradient_db::WorkerDb;
+use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, instrument, warn};
@@ -24,6 +25,7 @@ use gradient_wire::session::handshake as handshake_fsm;
 use gradient_wire::session::handshake::{HandshakeResult, Rejected};
 use gradient_wire::traits::{AuthOutcome, PeerAuthority};
 
+use super::SessionHandles;
 use super::auth::{
     TeamWorkerChallenge, aggregate_enabled_caps, challenge_for, has_any_registrations,
     negotiate_capabilities, resolve_authorized,
@@ -60,16 +62,16 @@ pub(super) struct Authenticated {
 
 pub(super) struct ProtoSession<S> {
     pub socket: ProtoSocket,
-    pub state: Arc<ServerState>,
+    pub handles: SessionHandles,
     pub scheduler: Arc<Scheduler>,
     pub session_state: S,
 }
 
 impl ProtoSession<Opening> {
-    pub fn new(socket: ProtoSocket, state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> Self {
+    pub fn new(socket: ProtoSocket, handles: SessionHandles, scheduler: Arc<Scheduler>) -> Self {
         Self {
             socket,
-            state,
+            handles,
             scheduler,
             session_state: Opening,
         }
@@ -94,7 +96,7 @@ impl ProtoSession<Opening> {
         info!(peer_id = %result.peer_id, authorized = result.authorized_peers.len(), "handshake complete");
         Some(ProtoSession {
             socket: self.socket,
-            state: self.state,
+            handles: self.handles,
             scheduler: self.scheduler,
             session_state: Authenticated {
                 peer_id: result.peer_id,
@@ -106,7 +108,7 @@ impl ProtoSession<Opening> {
     }
 
     async fn accept_worker(&mut self) -> Result<HandshakeResult> {
-        if !self.state.config.proto.discoverable {
+        if !self.handles.db.config.proto.discoverable {
             self.socket
                 .send_reject(Rejection::NotAcceptingConnections)
                 .await;
@@ -114,7 +116,8 @@ impl ProtoSession<Opening> {
         }
 
         let authority = ServerAuthority {
-            state: Arc::clone(&self.state),
+            db: self.handles.db.worker_db.clone(),
+            config: Arc::clone(&self.handles.db.config),
             proven: AtomicBool::new(false),
         };
         let outcome = handshake_fsm::as_authority(&mut self.socket, &authority).await;
@@ -123,7 +126,7 @@ impl ProtoSession<Opening> {
         {
             let before_auth = !authority.proven.load(Ordering::Relaxed);
             let failures = &self.scheduler.connection_failures;
-            record_inbound(&self.state, failures, rejected, before_auth).await;
+            record_inbound(&self.handles.db.worker_db, failures, rejected, before_auth).await;
         }
 
         outcome
@@ -131,7 +134,8 @@ impl ProtoSession<Opening> {
 
     async fn dial_worker(&mut self, target: &DialTarget) -> Result<HandshakeResult> {
         let authority = DialedWorkerAuthority {
-            state: Arc::clone(&self.state),
+            db: self.handles.db.worker_db.clone(),
+            config: Arc::clone(&self.handles.db.config),
             session: target.session(),
         };
         let outcome =
@@ -149,7 +153,8 @@ impl ProtoSession<Opening> {
 }
 
 struct ServerAuthority {
-    state: Arc<ServerState>,
+    db: WorkerDb,
+    config: Arc<RuntimeConfig>,
     proven: AtomicBool,
 }
 
@@ -163,7 +168,7 @@ impl PeerAuthority for ServerAuthority {
     type Challenge = ServerChallenge;
 
     async fn challenge(&self, claimed: &str) -> Result<(ServerChallenge, Vec<String>)> {
-        let (team, registered_peers) = challenge_for(&self.state, claimed).await;
+        let (team, registered_peers) = challenge_for(&self.db, claimed).await;
         let names = registered_peers.iter().map(|(id, _)| id.clone()).collect();
         Ok((
             ServerChallenge {
@@ -184,11 +189,10 @@ impl PeerAuthority for ServerAuthority {
             team,
             registered_peers,
         } = challenge;
-        let resolved = resolve_authorized(&self.state, &team, &registered_peers, tokens).await;
+        let resolved = resolve_authorized(&self.db, &team, &registered_peers, tokens).await;
         self.proven.store(resolved.proven, Ordering::Relaxed);
 
-        let has_any =
-            registered_peers.is_empty() && has_any_registrations(&self.state, claimed).await;
+        let has_any = registered_peers.is_empty() && has_any_registrations(&self.db, claimed).await;
         match decide_auth(
             registered_peers.is_empty(),
             has_any,
@@ -209,8 +213,8 @@ impl PeerAuthority for ServerAuthority {
         claimed: &str,
         client: GradientCapabilities,
     ) -> Result<GradientCapabilities> {
-        let enabled = aggregate_enabled_caps(&self.state, claimed).await;
-        Ok(negotiate_capabilities(&self.state, client, enabled))
+        let enabled = aggregate_enabled_caps(&self.db, claimed).await;
+        Ok(negotiate_capabilities(&self.config, client, enabled))
     }
 }
 
@@ -218,7 +222,7 @@ impl ProtoSession<Authenticated> {
     pub async fn attach(self, sessions: &SessionsHandle) -> Option<JoinHandle<()>> {
         let ProtoSession {
             mut socket,
-            state,
+            handles,
             scheduler,
             session_state:
                 Authenticated {
@@ -242,7 +246,7 @@ impl ProtoSession<Authenticated> {
             .collect();
         let args = SessionArgs {
             peer_id: peer_id.clone(),
-            state,
+            handles,
             scheduler,
             socket,
             capabilities: negotiated,
@@ -263,15 +267,10 @@ impl ProtoSession<Authenticated> {
     }
 }
 
-pub(super) async fn on_reauth_notify(
-    writer: &ProtoWriter,
-    state: &ServerState,
-    peer_id: &str,
-) -> bool {
+pub(super) async fn on_reauth_notify(writer: &ProtoWriter, db: &WorkerDb, peer_id: &str) -> bool {
     debug!(%peer_id, "server-initiated reauth");
-    let (team, registered_peers) = challenge_for(state, peer_id).await;
-    if team.is_none() && registered_peers.is_empty() && has_any_registrations(state, peer_id).await
-    {
+    let (team, registered_peers) = challenge_for(db, peer_id).await;
+    if team.is_none() && registered_peers.is_empty() && has_any_registrations(db, peer_id).await {
         info!(%peer_id, "all registrations deactivated - disconnecting worker");
         let _ = send_server_msg(writer, &ServerMessage::from(Rejection::WorkerDeactivated)).await;
         return false;
@@ -289,14 +288,14 @@ pub(super) async fn on_reauth_notify(
 #[instrument(skip_all)]
 pub(crate) async fn handle_socket(
     socket: ProtoSocket,
-    state: Arc<ServerState>,
+    handles: SessionHandles,
     scheduler: Arc<Scheduler>,
     sessions: Arc<SessionsHandle>,
     origin: SessionOrigin,
 ) {
     let dialed_by_server = matches!(origin, SessionOrigin::ServerDialed(_));
     info!(dialed_by_server, "WebSocket connection opened");
-    let session = ProtoSession::new(socket, state, Arc::clone(&scheduler));
+    let session = ProtoSession::new(socket, handles, Arc::clone(&scheduler));
     let session = match tokio::time::timeout(HANDSHAKE_TIMEOUT, session.handshake(&origin)).await {
         Ok(Some(s)) => s,
         Ok(None) => return,
@@ -451,8 +450,10 @@ mod authority_tests {
                 ..Default::default()
             }]])
             .append_query_results([Vec::<ProjectCacheModel>::new()]);
+        let state = gradient_test_support::prelude::test_state(db.into_connection());
         let authority = ServerAuthority {
-            state: gradient_test_support::prelude::test_state(db.into_connection()),
+            db: state.worker_db.clone(),
+            config: Arc::clone(&state.config),
             proven: AtomicBool::new(false),
         };
         let challenge = ServerChallenge {

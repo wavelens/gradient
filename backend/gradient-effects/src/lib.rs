@@ -56,7 +56,7 @@ async fn spawn(
     scheduler: Arc<Scheduler>,
     child: ChildCtx,
 ) -> Result<ActorCell, SpawnErr> {
-    let ctx = EffectsCtx::new(Arc::clone(&state), scheduler);
+    let ctx = EffectsCtx::new(state.ci(), scheduler);
     let (factory, _) = Actor::spawn_linked(
         Some("effects-workers".to_owned()),
         EffectsFactory::default(),

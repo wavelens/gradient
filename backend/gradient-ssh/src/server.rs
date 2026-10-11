@@ -6,8 +6,7 @@
 
 use crate::auth::{authorize, fingerprint};
 use crate::roots::Roots;
-use crate::session::Session;
-use gradient_core::ServerState;
+use crate::session::{Session, SshHandles};
 use russh::keys::{PrivateKey, PublicKey};
 use russh::server::{Auth, ChannelOpenHandle, Msg, Session as SshSession};
 use russh::{Channel, ChannelId, MethodKind, MethodSet};
@@ -27,13 +26,13 @@ pub fn config(host_key: PrivateKey) -> russh::server::Config {
 }
 
 pub struct SshServer {
-    state: Arc<ServerState>,
+    handles: SshHandles,
     roots: Arc<Roots>,
 }
 
 impl SshServer {
-    pub fn new(state: Arc<ServerState>, roots: Arc<Roots>) -> Self {
-        Self { state, roots }
+    pub fn new(handles: SshHandles, roots: Arc<Roots>) -> Self {
+        Self { handles, roots }
     }
 }
 
@@ -42,7 +41,7 @@ impl russh::server::Server for SshServer {
 
     fn new_client(&mut self, _peer: Option<std::net::SocketAddr>) -> Connection {
         Connection {
-            state: self.state.clone(),
+            handles: self.handles.clone(),
             roots: self.roots.clone(),
             session: None,
             channels: HashMap::new(),
@@ -51,7 +50,7 @@ impl russh::server::Server for SshServer {
 }
 
 pub struct Connection {
-    state: Arc<ServerState>,
+    handles: SshHandles,
     roots: Arc<Roots>,
     session: Option<Arc<Session>>,
     channels: HashMap<ChannelId, Channel<Msg>>,
@@ -69,7 +68,7 @@ impl russh::server::Handler for Connection {
     type Error = russh::Error;
 
     async fn auth_publickey(&mut self, user: &str, key: &PublicKey) -> Result<Auth, Self::Error> {
-        match authorize(&self.state, user, &fingerprint(key)).await {
+        match authorize(&self.handles, user, &fingerprint(key)).await {
             Ok(session) => {
                 self.session = Some(session);
                 Ok(Auth::Accept)
@@ -106,7 +105,7 @@ impl russh::server::Handler for Connection {
         let roots = self.roots.clone();
         match crate::commands::parse(&line) {
             Ok(command) => {
-                self.state.shutdown.spawn(crate::exec::run(
+                self.handles.db.shutdown.spawn(crate::exec::run(
                     command,
                     channel,
                     handle,
@@ -115,7 +114,8 @@ impl russh::server::Handler for Connection {
                 ));
             }
             Err(error) => {
-                self.state
+                self.handles
+                    .db
                     .shutdown
                     .spawn(crate::exec::refuse(handle, id, error.to_string()));
             }

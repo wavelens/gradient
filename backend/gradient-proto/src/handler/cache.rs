@@ -5,20 +5,25 @@
  */
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
-use gradient_core::ServerState;
+use gradient_db::CacheDb;
+use gradient_storage::NarStore;
 use gradient_types::ids::{CacheId, CachedPathId, ProjectId};
 use gradient_types::*;
 use gradient_wire::transport::{
     Transport, external_arity_ok, may_consult_upstream_caches, pull_transport,
 };
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use tokio::sync::Semaphore;
 use tracing::warn;
+
+use super::SessionHandles;
 
 /// A DB error must propagate as unknown cache state, never as absent. The worker would take a fully
 /// cached input as a terminal `InputsUnavailable` and fail the eval.
 async fn build_local_cache_map(
-    state: &ServerState,
+    db: &CacheDb,
     hashes: &[&str],
     cached_paths: &[gradient_entity::cached_path::Model],
 ) -> Result<HashMap<String, (Option<i64>, Option<i64>)>, DbErr> {
@@ -28,7 +33,7 @@ async fn build_local_cache_map(
                 .add(CDerivationOutput::IsCached.eq(true))
                 .add(CDerivationOutput::Hash.is_in(hashes.to_vec())),
         )
-        .all(&state.cache_db)
+        .all(db)
         .await?;
 
     let sizes: HashMap<&str, (Option<i64>, Option<i64>)> = cached_paths
@@ -44,12 +49,12 @@ async fn build_local_cache_map(
 }
 
 async fn load_cached_path_rows(
-    state: &ServerState,
+    db: &CacheDb,
     hashes: &[&str],
 ) -> Result<Vec<gradient_entity::cached_path::Model>, DbErr> {
     ECachedPath::find()
         .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-        .all(&state.cache_db)
+        .all(db)
         .await
 }
 
@@ -69,7 +74,7 @@ gradient_db::sql! {
 }
 
 async fn ensure_push_signatures(
-    state: &ServerState,
+    db: &CacheDb,
     project_id: ProjectId,
     cached_path_rows: &[gradient_entity::cached_path::Model],
 ) {
@@ -79,7 +84,7 @@ async fn ensure_push_signatures(
 
     let project_caches = EProjectCache::find()
         .filter(CProjectCache::Project.eq(project_id))
-        .all(&state.cache_db)
+        .all(db)
         .await
         .unwrap_or_default();
     if project_caches.is_empty() {
@@ -98,8 +103,7 @@ async fn ensure_push_signatures(
     const SIGNATURE_PATH_BATCH: usize = 8000;
 
     for chunk in path_ids.chunks(SIGNATURE_PATH_BATCH) {
-        let result = state
-            .cache_db
+        let result = db
             .execute_raw(
                 INSERT_PUSH_SIGNATURE_PLACEHOLDERS
                     .bind([chunk.to_vec().into(), cache_ids.clone().into()]),
@@ -125,7 +129,8 @@ struct PullMetadata {
 
 impl PullMetadata {
     async fn load(
-        state: &ServerState,
+        db: &CacheDb,
+        config: &RuntimeConfig,
         rows: &[gradient_entity::cached_path::Model],
     ) -> Result<Self, DbErr> {
         if rows.is_empty() {
@@ -133,16 +138,15 @@ impl PullMetadata {
         }
 
         let hashes: Vec<String> = rows.iter().map(|r| r.hash.clone()).collect();
-        let references =
-            gradient_db::graph::runtime_closure::references_for_hashes(&state.cache_db, &hashes)
-                .await
-                .unwrap_or_default();
+        let references = gradient_db::graph::runtime_closure::references_for_hashes(db, &hashes)
+            .await
+            .unwrap_or_default();
 
         let ids: Vec<CachedPathId> = rows.iter().map(|r| r.id).collect();
         let signature_rows = gradient_db::fetch_in_chunks(&ids, |chunk| async move {
             ECachedPathSignature::find()
                 .filter(CCachedPathSignature::CachedPath.is_in(chunk))
-                .all(&state.cache_db)
+                .all(db)
                 .await
         })
         .await
@@ -153,10 +157,7 @@ impl PullMetadata {
             HashMap::new()
         } else {
             gradient_db::fetch_in_chunks(&cache_ids, |chunk| async move {
-                ECache::find()
-                    .filter(CCache::Id.is_in(chunk))
-                    .all(&state.cache_db)
-                    .await
+                ECache::find().filter(CCache::Id.is_in(chunk)).all(db).await
             })
             .await
             .unwrap_or_default()
@@ -165,7 +166,7 @@ impl PullMetadata {
             .collect()
         };
 
-        let serve_url = &state.config.server.serve_url;
+        let serve_url = &config.server.serve_url;
         let mut signatures: HashMap<CachedPathId, Vec<String>> = HashMap::new();
         for row in signature_rows {
             let (Some(stored), Some(cache_name)) = (row.signature, cache_names.get(&row.cache))
@@ -226,7 +227,8 @@ fn pull_fields(
     reason = "one wire entry; splitting it would only move the arguments"
 )]
 async fn build_cached_entry(
-    state: &ServerState,
+    config: &RuntimeConfig,
+    nar_storage: &NarStore,
     hash: &str,
     path: &str,
     file_size: &Option<i64>,
@@ -261,20 +263,18 @@ async fn build_cached_entry(
             let transport = pull_transport(
                 confirmed,
                 size,
-                state.config.nar.small_bytes,
-                state.nar_storage.presigner_available(),
+                config.nar.small_bytes,
+                nar_storage.presigner_available(),
             );
             let url = match transport {
                 Transport::Passthrough => None,
-                Transport::Presigned => {
-                    match state.nar_storage.presigned_get_url(hash, expire).await {
-                        Ok(u) => u,
-                        Err(e) => {
-                            warn!(%hash, error = %e, "failed to generate presigned GET URL");
-                            None
-                        }
+                Transport::Presigned => match nar_storage.presigned_get_url(hash, expire).await {
+                    Ok(u) => u,
+                    Err(e) => {
+                        warn!(%hash, error = %e, "failed to generate presigned GET URL");
+                        None
                     }
-                }
+                },
             };
             (url, pull_fields(row, meta))
         }
@@ -313,7 +313,7 @@ fn uncached_push_entry(path: &str) -> gradient_wire::types::CachedPath {
 }
 
 async fn extend_with_persisted_upstream(
-    state: &ServerState,
+    db: &CacheDb,
     uncached_pairs: &[(String, String)],
     result: &mut Vec<gradient_wire::types::CachedPath>,
 ) -> HashSet<String> {
@@ -326,7 +326,7 @@ async fn extend_with_persisted_upstream(
     let rows = match EDerivationOutput::find()
         .filter(CDerivationOutput::Hash.is_in(hashes))
         .filter(CDerivationOutput::ExternalUrl.is_not_null())
-        .all(&state.cache_db)
+        .all(db)
         .await
     {
         Ok(r) => r,
@@ -366,7 +366,8 @@ async fn extend_with_persisted_upstream(
 }
 
 async fn extend_with_upstream_results(
-    state: &ServerState,
+    db: &CacheDb,
+    upstream_query: &Arc<Semaphore>,
     project_id: ProjectId,
     uncached_pairs: Vec<(String, String)>,
     result: &mut Vec<gradient_wire::types::CachedPath>,
@@ -374,7 +375,7 @@ async fn extend_with_upstream_results(
     const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
     let endpoints = match gradient_db::caches::upstream::upstream_endpoints_for_project(
-        &state.cache_db,
+        db,
         project_id,
         UPSTREAM_WINDOW_MINUTES,
     )
@@ -392,12 +393,9 @@ async fn extend_with_upstream_results(
 
     let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
 
-    let batch = gradient_core::upstream::probe_batch(
-        endpoints,
-        std::sync::Arc::clone(&state.memory.upstream_query),
-        uncached_pairs,
-    )
-    .await;
+    let batch =
+        gradient_core::upstream::probe_batch(endpoints, Arc::clone(upstream_query), uncached_pairs)
+            .await;
 
     result.extend(batch.found.into_values());
 
@@ -416,23 +414,22 @@ async fn extend_with_upstream_results(
             .unwrap_or(now)
     };
     if let Err(e) =
-        gradient_db::caches::upstream::upsert_upstream_metrics(&state.cache_db, bucket, &by_url)
-            .await
+        gradient_db::caches::upstream::upsert_upstream_metrics(db, bucket, &by_url).await
     {
         warn!(error = %e, "failed to flush upstream metrics");
     }
 }
 
 async fn extend_with_gradient_proto_results(
-    state: &ServerState,
+    db: &CacheDb,
+    config: &RuntimeConfig,
     project_id: ProjectId,
     uncached_pairs: &[(String, String)],
     result: &mut Vec<gradient_wire::types::CachedPath>,
 ) {
     let upstream_caches =
         match gradient_db::caches::upstream::gradient_proto_upstream_caches_for_project(
-            &state.cache_db,
-            project_id,
+            db, project_id,
         )
         .await
         {
@@ -457,9 +454,10 @@ async fn extend_with_gradient_proto_results(
     }
 
     for up in upstream_caches {
-        let api_key = up.api_key_enc.as_deref().and_then(|enc| {
-            gradient_sources::decrypt_secret(&state.config.secrets.crypt_file, enc).ok()
-        });
+        let api_key = up
+            .api_key_enc
+            .as_deref()
+            .and_then(|enc| gradient_sources::decrypt_secret(&config.secrets.crypt_file, enc).ok());
         let found =
             super::cache_consumer::pull_paths(&up.url, &up.remote_cache, api_key.as_deref(), &want)
                 .await;
@@ -472,7 +470,7 @@ async fn extend_with_gradient_proto_results(
 }
 
 async fn query(
-    state: &ServerState,
+    handles: &SessionHandles,
     project_id: Option<ProjectId>,
     paths: &[String],
     nar_sizes: &[Option<u64>],
@@ -514,8 +512,9 @@ async fn query(
 
     let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
 
-    let cached_path_rows = load_cached_path_rows(state, &hashes).await?;
-    let mut cached_map = build_local_cache_map(state, &hashes, &cached_path_rows).await?;
+    let cached_path_rows = load_cached_path_rows(&handles.cache_db, &hashes).await?;
+    let mut cached_map =
+        build_local_cache_map(&handles.cache_db, &hashes, &cached_path_rows).await?;
 
     for cp in &cached_path_rows {
         if cp.is_fully_cached() {
@@ -528,7 +527,7 @@ async fn query(
     if matches!(mode, QueryMode::Push)
         && let Some(oid) = project_id
     {
-        ensure_push_signatures(state, oid, &cached_path_rows).await;
+        ensure_push_signatures(&handles.cache_db, oid, &cached_path_rows).await;
     }
 
     let rows_by_hash: HashMap<&str, &gradient_entity::cached_path::Model> = cached_path_rows
@@ -536,7 +535,9 @@ async fn query(
         .map(|r| (r.hash.as_str(), r))
         .collect();
     let meta = match mode {
-        QueryMode::Pull => PullMetadata::load(state, &cached_path_rows).await?,
+        QueryMode::Pull => {
+            PullMetadata::load(&handles.cache_db, &handles.db.config, &cached_path_rows).await?
+        }
         _ => PullMetadata::default(),
     };
 
@@ -547,7 +548,8 @@ async fn query(
         if let Some((file_size, nar_size)) = cached_map.get(*hash) {
             result.push(
                 build_cached_entry(
-                    state,
+                    &handles.db.config,
+                    &handles.db.storage.nar_storage,
                     hash,
                     path,
                     file_size,
@@ -576,7 +578,8 @@ async fn query(
         .map(|(h, p)| (h.to_string(), p.to_string()))
         .collect();
 
-    let resolved = extend_with_persisted_upstream(state, &uncached_pairs, &mut result).await;
+    let resolved =
+        extend_with_persisted_upstream(&handles.cache_db, &uncached_pairs, &mut result).await;
     let uncached_pairs: Vec<(String, String)> = uncached_pairs
         .into_iter()
         .filter(|(h, _)| !resolved.contains(h))
@@ -585,25 +588,35 @@ async fn query(
     if !uncached_pairs.is_empty()
         && let Some(oid) = project_id
     {
-        extend_with_upstream_results(state, oid, uncached_pairs.clone(), &mut result).await;
-        extend_with_gradient_proto_results(state, oid, &uncached_pairs, &mut result).await;
+        extend_with_upstream_results(
+            &handles.cache_db,
+            &handles.upstream_query,
+            oid,
+            uncached_pairs.clone(),
+            &mut result,
+        )
+        .await;
+        extend_with_gradient_proto_results(
+            &handles.cache_db,
+            &handles.db.config,
+            oid,
+            &uncached_pairs,
+            &mut result,
+        )
+        .await;
     }
 
     Ok(result)
 }
 
-async fn hashes_in_cache(
-    state: &ServerState,
-    cache_id: CacheId,
-    hashes: &[&str],
-) -> HashSet<String> {
+async fn hashes_in_cache(db: &CacheDb, cache_id: CacheId, hashes: &[&str]) -> HashSet<String> {
     if hashes.is_empty() {
         return HashSet::new();
     }
 
     let cached_paths = match ECachedPath::find()
         .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-        .all(&state.cache_db)
+        .all(db)
         .await
     {
         Ok(rows) => rows,
@@ -628,7 +641,7 @@ async fn hashes_in_cache(
                 .add(CCachedPathSignature::Cache.eq(cache_id))
                 .add(CCachedPathSignature::CachedPath.is_in(ids)),
         )
-        .all(&state.cache_db)
+        .all(db)
         .await
     {
         Ok(rows) => rows,
@@ -645,7 +658,7 @@ async fn hashes_in_cache(
 }
 
 pub(super) async fn query_for_cache(
-    state: &ServerState,
+    handles: &SessionHandles,
     cache_id: CacheId,
     paths: &[String],
     mode: gradient_wire::types::QueryMode,
@@ -675,11 +688,11 @@ pub(super) async fn query_for_cache(
 
     let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
 
-    let in_cache = hashes_in_cache(state, cache_id, &hashes).await;
-    let cached_path_rows = load_cached_path_rows(state, &hashes)
+    let in_cache = hashes_in_cache(&handles.cache_db, cache_id, &hashes).await;
+    let cached_path_rows = load_cached_path_rows(&handles.cache_db, &hashes)
         .await
         .unwrap_or_default();
-    let cached_map = build_local_cache_map(state, &hashes, &cached_path_rows)
+    let cached_map = build_local_cache_map(&handles.cache_db, &hashes, &cached_path_rows)
         .await
         .unwrap_or_else(|e| {
             warn!(error = %e, "cache-serve local lookup failed; treating as miss");
@@ -691,9 +704,11 @@ pub(super) async fn query_for_cache(
         .map(|r| (r.hash.as_str(), r))
         .collect();
     let meta = match mode {
-        QueryMode::Pull => PullMetadata::load(state, &cached_path_rows)
-            .await
-            .unwrap_or_default(),
+        QueryMode::Pull => {
+            PullMetadata::load(&handles.cache_db, &handles.db.config, &cached_path_rows)
+                .await
+                .unwrap_or_default()
+        }
         _ => PullMetadata::default(),
     };
 
@@ -707,7 +722,8 @@ pub(super) async fn query_for_cache(
         if let Some((file_size, nar_size)) = cached_map.get(*hash) {
             result.push(
                 build_cached_entry(
-                    state,
+                    &handles.db.config,
+                    &handles.db.storage.nar_storage,
                     hash,
                     path,
                     file_size,
@@ -725,11 +741,7 @@ pub(super) async fn query_for_cache(
     result
 }
 
-pub(super) async fn path_in_cache(
-    state: &ServerState,
-    cache_id: CacheId,
-    store_path: &str,
-) -> bool {
+pub(super) async fn path_in_cache(db: &CacheDb, cache_id: CacheId, store_path: &str) -> bool {
     let base = store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
     let Some(hash) = base.split('-').next() else {
         return false;
@@ -737,18 +749,18 @@ pub(super) async fn path_in_cache(
     if hash.len() != 32 {
         return false;
     }
-    !hashes_in_cache(state, cache_id, &[hash]).await.is_empty()
+    !hashes_in_cache(db, cache_id, &[hash]).await.is_empty()
 }
 
 pub(super) async fn handle_cache_query(
-    state: &ServerState,
+    handles: &SessionHandles,
     project_id: Option<ProjectId>,
     paths: &[String],
     nar_sizes: &[Option<u64>],
     mode: gradient_wire::types::QueryMode,
     external: bool,
 ) -> Result<Vec<gradient_wire::types::CachedPath>, DbErr> {
-    query(state, project_id, paths, nar_sizes, mode, external).await
+    query(handles, project_id, paths, nar_sizes, mode, external).await
 }
 
 fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
@@ -768,6 +780,7 @@ fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_core::ServerState;
     use gradient_fixtures::mock::mock_db;
     use gradient_test_support::state::TestState;
     use gradient_wire::types::QueryMode;
@@ -792,9 +805,16 @@ mod tests {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         assert!(
-            query(&state, None, &paths, &[], QueryMode::Push, false)
-                .await
-                .is_err(),
+            query(
+                &SessionHandles::from_state(&state),
+                None,
+                &paths,
+                &[],
+                QueryMode::Push,
+                false
+            )
+            .await
+            .is_err(),
             "a Push query must carry one size per path"
         );
     }
@@ -822,9 +842,16 @@ mod tests {
             format!("/nix/store/{}-large", "b".repeat(32)),
         ];
         let sizes = [Some(1024), Some(8 * 1024 * 1024 * 1024)];
-        let result = query(&state, None, &paths, &sizes, QueryMode::Push, false)
-            .await
-            .unwrap();
+        let result = query(
+            &SessionHandles::from_state(&state),
+            None,
+            &paths,
+            &sizes,
+            QueryMode::Push,
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(result.len(), 2);
         assert!(result.iter().all(|c| !c.cached && c.url.is_none()));
     }
@@ -840,9 +867,16 @@ mod tests {
         let state = TestState::new().cache_db(db).build();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         assert!(
-            query(&state, None, &paths, &[], QueryMode::Pull, false)
-                .await
-                .is_err(),
+            query(
+                &SessionHandles::from_state(&state),
+                None,
+                &paths,
+                &[],
+                QueryMode::Pull,
+                false
+            )
+            .await
+            .is_err(),
             "DB error must propagate as Err, not a confident uncached result"
         );
     }
@@ -851,7 +885,7 @@ mod tests {
     async fn the_handler_refuses_a_two_path_external_query() {
         let state = make_state();
         let err = handle_cache_query(
-            &state,
+            &SessionHandles::from_state(&state),
             None,
             &["/nix/store/a-a".to_owned(), "/nix/store/b-b".to_owned()],
             &[],
@@ -868,22 +902,43 @@ mod tests {
         let state = make_state();
 
         assert!(
-            query(&state, None, &[], &[], QueryMode::Normal, false)
-                .await
-                .unwrap()
-                .is_empty()
+            query(
+                &SessionHandles::from_state(&state),
+                None,
+                &[],
+                &[],
+                QueryMode::Normal,
+                false
+            )
+            .await
+            .unwrap()
+            .is_empty()
         );
         assert!(
-            query(&state, None, &[], &[], QueryMode::Push, false)
-                .await
-                .unwrap()
-                .is_empty()
+            query(
+                &SessionHandles::from_state(&state),
+                None,
+                &[],
+                &[],
+                QueryMode::Push,
+                false
+            )
+            .await
+            .unwrap()
+            .is_empty()
         );
         assert!(
-            query(&state, None, &[], &[], QueryMode::Pull, false)
-                .await
-                .unwrap()
-                .is_empty()
+            query(
+                &SessionHandles::from_state(&state),
+                None,
+                &[],
+                &[],
+                QueryMode::Pull,
+                false
+            )
+            .await
+            .unwrap()
+            .is_empty()
         );
     }
 
@@ -896,22 +951,43 @@ mod tests {
             "/nix/store/short-name".to_string(),
         ];
         assert!(
-            query(&state, None, &paths, &[], QueryMode::Normal, false)
-                .await
-                .unwrap()
-                .is_empty()
+            query(
+                &SessionHandles::from_state(&state),
+                None,
+                &paths,
+                &[],
+                QueryMode::Normal,
+                false
+            )
+            .await
+            .unwrap()
+            .is_empty()
         );
         assert!(
-            query(&state, None, &paths, &[None; 2], QueryMode::Push, false)
-                .await
-                .unwrap()
-                .is_empty()
+            query(
+                &SessionHandles::from_state(&state),
+                None,
+                &paths,
+                &[None; 2],
+                QueryMode::Push,
+                false
+            )
+            .await
+            .unwrap()
+            .is_empty()
         );
         assert!(
-            query(&state, None, &paths, &[], QueryMode::Pull, false)
-                .await
-                .unwrap()
-                .is_empty()
+            query(
+                &SessionHandles::from_state(&state),
+                None,
+                &paths,
+                &[],
+                QueryMode::Pull,
+                false
+            )
+            .await
+            .unwrap()
+            .is_empty()
         );
     }
 
@@ -919,9 +995,16 @@ mod tests {
     async fn cache_query_normal_uncached_returns_empty() {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
-        let result = query(&state, None, &paths, &[], QueryMode::Normal, false)
-            .await
-            .unwrap();
+        let result = query(
+            &SessionHandles::from_state(&state),
+            None,
+            &paths,
+            &[],
+            QueryMode::Normal,
+            false,
+        )
+        .await
+        .unwrap();
         assert!(
             result.is_empty(),
             "Normal mode should not return uncached paths"
@@ -936,9 +1019,16 @@ mod tests {
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
         ];
 
-        let result = query(&state, None, &paths, &[], QueryMode::Pull, false)
-            .await
-            .unwrap();
+        let result = query(
+            &SessionHandles::from_state(&state),
+            None,
+            &paths,
+            &[],
+            QueryMode::Pull,
+            false,
+        )
+        .await
+        .unwrap();
 
         assert!(
             result.is_empty(),
@@ -953,9 +1043,16 @@ mod tests {
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
         ];
-        let result = query(&state, None, &paths, &[None; 2], QueryMode::Push, false)
-            .await
-            .unwrap();
+        let result = query(
+            &SessionHandles::from_state(&state),
+            None,
+            &paths,
+            &[None; 2],
+            QueryMode::Push,
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(result.len(), 2, "Push should return all queried paths");
         for cp in &result {
             assert!(!cp.cached, "all should be uncached (empty DB): {}", cp.path);
@@ -983,9 +1080,16 @@ mod tests {
             } else {
                 &[]
             };
-            let result = query(&state, None, &paths, sizes, mode, false)
-                .await
-                .unwrap();
+            let result = query(
+                &SessionHandles::from_state(&state),
+                None,
+                &paths,
+                sizes,
+                mode,
+                false,
+            )
+            .await
+            .unwrap();
             assert!(result.is_empty(), "33-char hash must be filtered out");
         }
     }
@@ -996,9 +1100,14 @@ mod tests {
         let cache = CacheId::new(uuid::Uuid::now_v7());
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         assert!(
-            query_for_cache(&state, cache, &paths, QueryMode::Push)
-                .await
-                .is_empty()
+            query_for_cache(
+                &SessionHandles::from_state(&state),
+                cache,
+                &paths,
+                QueryMode::Push
+            )
+            .await
+            .is_empty()
         );
     }
 
@@ -1007,9 +1116,14 @@ mod tests {
         let state = make_state();
         let cache = CacheId::new(uuid::Uuid::now_v7());
         assert!(
-            query_for_cache(&state, cache, &[], QueryMode::Normal)
-                .await
-                .is_empty()
+            query_for_cache(
+                &SessionHandles::from_state(&state),
+                cache,
+                &[],
+                QueryMode::Normal
+            )
+            .await
+            .is_empty()
         );
     }
 

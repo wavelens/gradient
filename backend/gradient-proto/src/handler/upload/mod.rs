@@ -10,9 +10,8 @@ mod table;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gradient_core::ServerState;
 use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey};
-use gradient_storage::{PartialStore, StorageTarget, upload_lease};
+use gradient_storage::{NarStore, PartialStore, StorageTarget, upload_lease};
 use gradient_wire::messages::{ServerMessage, is_small_upload};
 use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
@@ -77,7 +76,7 @@ impl InboundContext<'_> {
                 .await;
         }
         if let UploadObject::EvalCache { fingerprint } = &object
-            && !super::eval_cache::accepts_push(self.state, fingerprint, size).await
+            && !super::eval_cache::accepts_push(&self.handles.db.worker_db, fingerprint, size).await
         {
             return self.grant(request_id, GrantTarget::Skip).await;
         }
@@ -175,7 +174,7 @@ impl InboundContext<'_> {
             return Ok(false);
         }
 
-        Ok(crate::import::stored_path(&self.state.worker_db, hash)
+        Ok(crate::import::stored_path(&self.handles.db.worker_db, hash)
             .await?
             .is_some())
     }
@@ -187,7 +186,13 @@ impl InboundContext<'_> {
         size: u64,
         uploads: &UploadSession,
     ) -> anyhow::Result<(GrantTarget, Transfer, Lease)> {
-        let target = self.state.nar_storage.upload_target(key, size).await?;
+        let target = self
+            .handles
+            .db
+            .storage
+            .nar_storage
+            .upload_target(key, size)
+            .await?;
         let now = Instant::now();
         let lease = match upload_lease(&target, size) {
             Some(ttl) => Lease::Until(now + ttl),
@@ -307,22 +312,19 @@ impl InboundContext<'_> {
         };
         let project = {
             let scheduler = Arc::clone(self.scheduler);
-            let state = Arc::clone(self.state);
+            let db = self.handles.db.worker_db.clone();
             let peer_id = self.peer_id.to_owned();
             let job_id = granted.job_id.clone();
             Box::pin(async move {
                 match scheduler.project_for_job(&job_id).await {
                     Some(id) => Some(id),
-                    None => {
-                        super::nar::project_for_dispatched_job(&state.worker_db, &peer_id, &job_id)
-                            .await
-                    }
+                    None => super::nar::project_for_dispatched_job(&db, &peer_id, &job_id).await,
                 }
             })
         };
         let c = commit::Commit {
             writer: self.writer.clone(),
-            state: Arc::clone(self.state),
+            handles: self.handles.clone(),
             peer_id: self.peer_id.to_owned(),
             request_id,
             project,
@@ -331,7 +333,7 @@ impl InboundContext<'_> {
             metadata,
             permit: granted.permit,
         };
-        self.state.shutdown.spawn(commit::run(c));
+        self.handles.db.shutdown.spawn(commit::run(c));
     }
 
     pub(super) async fn on_upload_cancel(&mut self, request_id: u64, uploads: &mut UploadSession) {
@@ -364,15 +366,15 @@ impl InboundContext<'_> {
     }
 
     async fn abandon(&self, granted: Granted) {
-        abandon_transfer(self.state, granted).await;
+        abandon_transfer(&self.handles.db.storage.nar_storage, granted).await;
     }
 }
 
-pub(super) async fn abandon_transfer(state: &ServerState, granted: Granted) {
+pub(super) async fn abandon_transfer(nar_storage: &NarStore, granted: Granted) {
     if let (Transfer::Multipart { upload_id }, Some(ObjectKey::Nar(hash))) =
         (&granted.transfer, object_key(&granted.object))
     {
-        state.nar_storage.abort_multipart(&hash, upload_id).await;
+        nar_storage.abort_multipart(&hash, upload_id).await;
     }
 }
 

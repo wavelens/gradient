@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::ServerState;
+use gradient_db::WorkerDb;
+use gradient_db::metrics::cache_traffic::CacheTraffic;
 use gradient_entity::dispatched_job::{Column as CDispatchedJob, Entity as EDispatchedJob};
-use gradient_graph::{NarCommit, SignTargets};
+use gradient_graph::{Graph, NarCommit, SignTargets};
 use gradient_types::events::cache::NarSigned;
 use gradient_types::ids::ProjectId;
 use gradient_types::*;
@@ -25,7 +26,8 @@ pub(super) struct NarUploadRecord<'a> {
 }
 
 pub(super) async fn record_nar_push_metric(
-    state: &ServerState,
+    db: &WorkerDb,
+    cache_traffic: &CacheTraffic,
     project_id: Option<ProjectId>,
     bytes: i64,
 ) -> anyhow::Result<()> {
@@ -35,21 +37,19 @@ pub(super) async fn record_nar_push_metric(
 
     let project_cache = EProjectCache::find()
         .filter(CProjectCache::Project.eq(project_id))
-        .one(&state.worker_db)
+        .one(db)
         .await?
         .ok_or_else(|| anyhow::anyhow!("no cache for project {}", project_id))?;
 
     let bucket = gradient_db::metrics::cache_traffic::minute_bucket(gradient_types::now());
-    state
-        .memory
-        .cache_traffic
-        .record(project_cache.cache, bucket, bytes);
+    cache_traffic.record(project_cache.cache, bucket, bytes);
 
     Ok(())
 }
 
 pub(super) async fn mark_nar_stored(
-    state: &ServerState,
+    graph: &Graph,
+    events: &EventBus,
     project_id: Option<ProjectId>,
     store_path: &str,
     record: &NarUploadRecord<'_>,
@@ -65,8 +65,7 @@ pub(super) async fn mark_nar_stored(
         Some(project_id) => SignTargets::ProjectCaches(project_id),
         None => SignTargets::None,
     };
-    let committed = state
-        .graph
+    let committed = graph
         .commit_nar(NarCommit {
             store_path: store_path.to_owned(),
             file_hash: record.file_hash.to_owned(),
@@ -83,7 +82,7 @@ pub(super) async fn mark_nar_stored(
         .await?;
 
     for cache in committed.signed {
-        state.events.publish(NarSigned {
+        events.publish(NarSigned {
             cache,
             hash: hash.to_owned(),
         });

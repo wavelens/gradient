@@ -5,15 +5,14 @@
  */
 
 use anyhow::{Context, Result};
-use gradient_core::ServerState;
+use gradient_db::DbContext;
 use gradient_types::events::gc::{Pass, Swept};
 use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
-use std::sync::Arc;
 use tracing::{info, warn};
 
-pub async fn cleanup_unused_build_request_blobs(state: Arc<ServerState>) -> Result<()> {
-    let ttl_hours = state.config.gc.nar_ttl_hours;
+pub async fn cleanup_unused_build_request_blobs(db: &DbContext) -> Result<()> {
+    let ttl_hours = db.config.gc.nar_ttl_hours;
     if ttl_hours == 0 {
         return Ok(());
     }
@@ -21,7 +20,7 @@ pub async fn cleanup_unused_build_request_blobs(state: Arc<ServerState>) -> Resu
     let cutoff = now() - chrono::Duration::hours(ttl_hours as i64);
     let stale = EBuildRequestBlob::find()
         .filter(CBuildRequestBlob::LastUsedAt.lt(cutoff))
-        .all(&state.worker_db)
+        .all(&db.worker_db)
         .await
         .context("query stale build_request_blob rows")?;
 
@@ -35,11 +34,12 @@ pub async fn cleanup_unused_build_request_blobs(state: Arc<ServerState>) -> Resu
         hash.copy_from_slice(&blob.hash);
         let blob_id = blob.id;
         let project_id = blob.project;
-        if let Err(e) = blob.into_active_model().delete(&state.worker_db).await {
+        if let Err(e) = blob.into_active_model().delete(&db.worker_db).await {
             warn!(error = %e, %blob_id, "failed to delete build_request_blob row");
             continue;
         }
-        if let Err(e) = state
+        if let Err(e) = db
+            .storage
             .nar_storage
             .delete_blob(project_id.into_inner(), &hash)
             .await
@@ -51,32 +51,30 @@ pub async fn cleanup_unused_build_request_blobs(state: Arc<ServerState>) -> Resu
 
     if removed > 0 {
         info!(count = removed, "Removed stale build-request blobs");
-        state
-            .record(Swept {
-                pass: Pass::BuildRequestBlobs,
-                removed,
-            })
-            .await;
+        db.record(Swept {
+            pass: Pass::BuildRequestBlobs,
+            removed,
+        })
+        .await;
     }
     Ok(())
 }
 
-pub(crate) async fn cleanup_expired_upload_sessions(state: Arc<ServerState>) -> Result<()> {
+pub(crate) async fn cleanup_expired_upload_sessions(db: &DbContext) -> Result<()> {
     let res = EUploadSession::delete_many()
         .filter(CUploadSession::ExpiresAt.lt(now()))
         .filter(CUploadSession::DispatchedAt.is_null())
-        .exec(&state.worker_db)
+        .exec(&db.worker_db)
         .await
         .context("delete expired upload_session rows")?;
 
     if res.rows_affected > 0 {
         info!(count = res.rows_affected, "Removed expired upload sessions");
-        state
-            .record(Swept {
-                pass: Pass::UploadSessions,
-                removed: res.rows_affected,
-            })
-            .await;
+        db.record(Swept {
+            pass: Pass::UploadSessions,
+            removed: res.rows_affected,
+        })
+        .await;
     }
     Ok(())
 }
@@ -85,9 +83,11 @@ pub(crate) async fn cleanup_expired_upload_sessions(state: Arc<ServerState>) -> 
 mod tests {
     use super::*;
     use crate::test_support::test_server_state;
+    use gradient_core::ServerState;
     use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_storage::NarStore;
     use std::path::Path;
+    use std::sync::Arc;
 
     fn state_with_worker_db(base: &Path, db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
         let nar_storage = NarStore::local(base).unwrap();
@@ -127,7 +127,7 @@ mod tests {
             .await
             .unwrap();
 
-        cleanup_unused_build_request_blobs(Arc::clone(&state))
+        cleanup_unused_build_request_blobs(&state.db())
             .await
             .unwrap();
 
@@ -151,7 +151,9 @@ mod tests {
             config.gc.nar_ttl_hours = 0;
         });
 
-        cleanup_unused_build_request_blobs(state).await.unwrap();
+        cleanup_unused_build_request_blobs(&state.db())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -172,7 +174,9 @@ mod tests {
             .into_connection();
         let state = state_with_worker_db(tmp.path(), db);
 
-        cleanup_unused_build_request_blobs(state).await.unwrap();
+        cleanup_unused_build_request_blobs(&state.db())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -186,6 +190,6 @@ mod tests {
             .into_connection();
         let state = state_with_worker_db(tmp.path(), db);
 
-        cleanup_expired_upload_sessions(state).await.unwrap();
+        cleanup_expired_upload_sessions(&state.db()).await.unwrap();
     }
 }
