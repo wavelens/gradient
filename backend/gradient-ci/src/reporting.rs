@@ -7,6 +7,7 @@
 use crate::CiStatus;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
+use gradient_types::events::names;
 
 pub fn eval_kind_str(kind: EvaluationKind) -> &'static str {
     match kind {
@@ -48,16 +49,20 @@ pub enum CheckContextKind {
 
 pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
     match event {
-        "evaluation.action_required" => Some(CheckContextKind::Approval),
-        "evaluation.approval_granted" => Some(CheckContextKind::Approval),
-        "evaluation.queued"
-        | "evaluation.started"
-        | "evaluation.building"
-        | "evaluation.completed"
-        | "evaluation.failed"
-        | "evaluation.aborted" => Some(CheckContextKind::Evaluation),
-        "build.created" | "build.queued" | "build.started" | "build.completed" | "build.failed"
-        | "build.substituted" => Some(CheckContextKind::Build),
+        names::EVALUATION_ACTION_REQUIRED => Some(CheckContextKind::Approval),
+        names::EVALUATION_APPROVAL_GRANTED => Some(CheckContextKind::Approval),
+        names::EVALUATION_QUEUED
+        | names::EVALUATION_STARTED
+        | names::EVALUATION_BUILDING
+        | names::EVALUATION_COMPLETED
+        | names::EVALUATION_FAILED
+        | names::EVALUATION_ABORTED => Some(CheckContextKind::Evaluation),
+        names::BUILD_CREATED
+        | names::BUILD_QUEUED
+        | names::BUILD_STARTED
+        | names::BUILD_COMPLETED
+        | names::BUILD_FAILED
+        | names::BUILD_SUBSTITUTED => Some(CheckContextKind::Build),
         _ => None,
     }
 }

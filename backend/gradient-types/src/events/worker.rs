@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::firehose;
+use super::{firehose, names};
 use crate::ids::{DerivationBuildId, EvaluationId, ProjectId};
 use serde::{Deserialize, Serialize};
 
@@ -14,14 +14,14 @@ pub struct Connected {
     pub projects: Vec<ProjectId>,
 }
 
-firehose!(Connected, "worker.connected");
+firehose!(Connected, names::WORKER_CONNECTED);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Disconnected {
     pub worker_id: String,
 }
 
-firehose!(Disconnected, "worker.disconnected");
+firehose!(Disconnected, names::WORKER_DISCONNECTED);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct JobDispatched {
@@ -32,7 +32,7 @@ pub struct JobDispatched {
     pub build_id: Option<DerivationBuildId>,
     pub evaluation_id: EvaluationId,
 }
-firehose!(JobDispatched, "worker.job_dispatched");
+firehose!(JobDispatched, names::WORKER_JOB_DISPATCHED);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QueueDepth {
@@ -40,4 +40,4 @@ pub struct QueueDepth {
     pub pending: usize,
     pub active: usize,
 }
-firehose!(QueueDepth, "worker.queue_depth");
+firehose!(QueueDepth, names::WORKER_QUEUE_DEPTH);

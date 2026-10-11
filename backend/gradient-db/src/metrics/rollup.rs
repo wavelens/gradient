@@ -9,6 +9,7 @@ use std::time::Duration;
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_util::supervision::ChildSpec;
+use gradient_util::telemetry::metric;
 use gradient_wire::types::JobPhase;
 use sea_orm::ConnectionTrait;
 use tracing::{debug, warn};
@@ -25,19 +26,19 @@ fn build_counts() -> Vec<BuildCount> {
     use gradient_entity::build::BuildStatus;
     vec![
         BuildCount {
-            name: "builds.created",
+            name: metric::BUILDS_CREATED,
             time_col: "created_at",
             filter: "TRUE".into(),
         },
         BuildCount {
-            name: "builds.dispatched",
+            name: metric::BUILDS_DISPATCHED,
             time_col: "dispatched_at",
             filter: "TRUE".into(),
         },
         // `build.updated_at` is set on every status transition.
         // It is serving as the terminal timestamp, also for builds with no attempt row.
         BuildCount {
-            name: "builds.completed",
+            name: metric::BUILDS_COMPLETED,
             time_col: "updated_at",
             filter: format!(
                 "b.status = {}",
@@ -45,7 +46,7 @@ fn build_counts() -> Vec<BuildCount> {
             ),
         },
         BuildCount {
-            name: "builds.substituted",
+            name: metric::BUILDS_SUBSTITUTED,
             time_col: "updated_at",
             filter: format!(
                 "b.status = {}",
@@ -53,7 +54,7 @@ fn build_counts() -> Vec<BuildCount> {
             ),
         },
         BuildCount {
-            name: "builds.failed",
+            name: metric::BUILDS_FAILED,
             time_col: "updated_at",
             filter: format!(
                 "b.status IN ({})",
@@ -71,7 +72,7 @@ struct BuildDuration {
 }
 
 const BUILD_DURATIONS: &[BuildDuration] = &[BuildDuration {
-    name: "deps.wait_ms",
+    name: metric::DEPS_WAIT_MS,
     start_col: "queued_at",
     end_col: "ready_at",
     filter: "TRUE",
@@ -86,14 +87,14 @@ fn eval_counts() -> Vec<EvalCount> {
     use gradient_entity::evaluation::EvaluationStatus;
     vec![
         EvalCount {
-            name: "evals.completed",
+            name: metric::EVALS_COMPLETED,
             filter: format!(
                 "e.status = {}",
                 crate::sql::status::eval(EvaluationStatus::Completed)
             ),
         },
         EvalCount {
-            name: "evals.failed",
+            name: metric::EVALS_FAILED,
             filter: format!(
                 "e.status IN ({})",
                 crate::sql::status::eval_in(&[EvaluationStatus::Failed, EvaluationStatus::Aborted])
@@ -227,11 +228,11 @@ async fn run_rollup(ctx: &DbContext) {
     }
 
     if let Err(e) = db.execute_unprepared(&build_duration_attempt_sql()).await {
-        warn!(metric = "builds.duration_ms", error = %e, "rollup build-duration failed");
+        warn!(metric = metric::BUILDS_DURATION_MS, error = %e, "rollup build-duration failed");
     }
 
     if let Err(e) = db.execute_unprepared(&dispatch_wait_sql()).await {
-        warn!(metric = "dispatch.wait_ms", error = %e, "rollup dispatch-wait failed");
+        warn!(metric = metric::DISPATCH_WAIT_MS, error = %e, "rollup dispatch-wait failed");
     }
 
     if let Err(e) = db.execute_unprepared(&phase_duration_sql()).await {
@@ -257,9 +258,9 @@ async fn run_rollup(ctx: &DbContext) {
     }
 
     for (sql, label) in [
-        (upstream_latency_sql(), "upstream.latency_ms"),
-        (upstream_hits_sql(), "upstream.narinfo_hits"),
-        (upstream_misses_sql(), "upstream.narinfo_misses"),
+        (upstream_latency_sql(), metric::UPSTREAM_LATENCY_MS),
+        (upstream_hits_sql(), metric::UPSTREAM_NARINFO_HITS),
+        (upstream_misses_sql(), metric::UPSTREAM_NARINFO_MISSES),
     ] {
         if let Err(e) = db.execute_unprepared(&sql).await {
             warn!(metric = label, error = %e, "rollup upstream metric failed");

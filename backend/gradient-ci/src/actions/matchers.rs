@@ -5,23 +5,24 @@
  */
 
 use gradient_git_host::reporter::{APPROVAL_ACTION_ID, CiStatus, RequestedAction};
+use gradient_types::events::names;
 use gradient_types::{ActionConfig, ActionType, MTaskAction, VerifyGate};
 
 pub const GIT_HOST_STATUS_EVENTS: &[&str] = &[
-    "build.created",
-    "build.queued",
-    "build.started",
-    "build.completed",
-    "build.failed",
-    "build.substituted",
-    "evaluation.queued",
-    "evaluation.started",
-    "evaluation.building",
-    "evaluation.completed",
-    "evaluation.failed",
-    "evaluation.aborted",
-    "evaluation.action_required",
-    "evaluation.approval_granted",
+    names::BUILD_CREATED,
+    names::BUILD_QUEUED,
+    names::BUILD_STARTED,
+    names::BUILD_COMPLETED,
+    names::BUILD_FAILED,
+    names::BUILD_SUBSTITUTED,
+    names::EVALUATION_QUEUED,
+    names::EVALUATION_STARTED,
+    names::EVALUATION_BUILDING,
+    names::EVALUATION_COMPLETED,
+    names::EVALUATION_FAILED,
+    names::EVALUATION_ABORTED,
+    names::EVALUATION_ACTION_REQUIRED,
+    names::EVALUATION_APPROVAL_GRANTED,
 ];
 
 pub fn matches_event(action: &MTaskAction, event: &str) -> bool {
@@ -42,8 +43,8 @@ pub fn matches_event(action: &MTaskAction, event: &str) -> bool {
 /// leaving the evaluation `Failed` without an event. `Eval` and `None` are opening at
 /// `evaluation.building`.
 pub fn open_pr_gate_events(action: &MTaskAction) -> Option<&'static [&'static str]> {
-    const BUILD_GATE: &[&str] = &["evaluation.completed"];
-    const EVAL_GATE: &[&str] = &["evaluation.building"];
+    const BUILD_GATE: &[&str] = &[names::EVALUATION_COMPLETED];
+    const EVAL_GATE: &[&str] = &[names::EVALUATION_BUILDING];
 
     let cfg: ActionConfig = serde_json::from_value(action.config.clone()).ok()?;
     let ActionConfig::OpenPr { verify_gate, .. } = cfg else {
@@ -58,20 +59,20 @@ pub fn open_pr_gate_events(action: &MTaskAction) -> Option<&'static [&'static st
 
 pub fn git_host_status_for_event(event: &str) -> Option<CiStatus> {
     match event {
-        "build.created" => Some(CiStatus::Pending),
-        "build.queued" => Some(CiStatus::Pending),
-        "build.started" => Some(CiStatus::Running),
-        "build.completed" => Some(CiStatus::Success),
-        "build.failed" => Some(CiStatus::Failure),
-        "build.substituted" => Some(CiStatus::Success),
-        "evaluation.queued" => Some(CiStatus::Pending),
-        "evaluation.started" => Some(CiStatus::Running),
-        "evaluation.building" => Some(CiStatus::Success),
-        "evaluation.completed" => Some(CiStatus::Success),
-        "evaluation.failed" => Some(CiStatus::Failure),
-        "evaluation.aborted" => Some(CiStatus::Error),
-        "evaluation.action_required" => Some(CiStatus::ActionRequired),
-        "evaluation.approval_granted" => Some(CiStatus::Success),
+        names::BUILD_CREATED => Some(CiStatus::Pending),
+        names::BUILD_QUEUED => Some(CiStatus::Pending),
+        names::BUILD_STARTED => Some(CiStatus::Running),
+        names::BUILD_COMPLETED => Some(CiStatus::Success),
+        names::BUILD_FAILED => Some(CiStatus::Failure),
+        names::BUILD_SUBSTITUTED => Some(CiStatus::Success),
+        names::EVALUATION_QUEUED => Some(CiStatus::Pending),
+        names::EVALUATION_STARTED => Some(CiStatus::Running),
+        names::EVALUATION_BUILDING => Some(CiStatus::Success),
+        names::EVALUATION_COMPLETED => Some(CiStatus::Success),
+        names::EVALUATION_FAILED => Some(CiStatus::Failure),
+        names::EVALUATION_ABORTED => Some(CiStatus::Error),
+        names::EVALUATION_ACTION_REQUIRED => Some(CiStatus::ActionRequired),
+        names::EVALUATION_APPROVAL_GRANTED => Some(CiStatus::Success),
         _ => None,
     }
 }

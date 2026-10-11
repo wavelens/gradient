@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{EventKind, EventOwner, firehose};
+use super::{EventKind, EventOwner, firehose, names};
 use crate::ids::{EvaluationId, ProjectId, TaskId};
 use crate::waiting_reason::WaitingReason;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -29,15 +29,15 @@ pub enum Phase {
 impl Phase {
     pub const fn name(self) -> &'static str {
         match self {
-            Phase::Queued => "evaluation.queued",
-            Phase::Started => "evaluation.started",
-            Phase::Building => "evaluation.building",
-            Phase::Waiting => "evaluation.waiting",
-            Phase::Completed => "evaluation.completed",
-            Phase::Failed => "evaluation.failed",
-            Phase::Aborted => "evaluation.aborted",
-            Phase::ActionRequired => "evaluation.action_required",
-            Phase::ApprovalGranted => "evaluation.approval_granted",
+            Phase::Queued => names::EVALUATION_QUEUED,
+            Phase::Started => names::EVALUATION_STARTED,
+            Phase::Building => names::EVALUATION_BUILDING,
+            Phase::Waiting => names::EVALUATION_WAITING,
+            Phase::Completed => names::EVALUATION_COMPLETED,
+            Phase::Failed => names::EVALUATION_FAILED,
+            Phase::Aborted => names::EVALUATION_ABORTED,
+            Phase::ActionRequired => names::EVALUATION_ACTION_REQUIRED,
+            Phase::ApprovalGranted => names::EVALUATION_APPROVAL_GRANTED,
         }
     }
 
@@ -105,15 +105,15 @@ impl EventKind for Reported {
     const NAME: &'static str = "evaluation.<phase>";
     const DURABLE: bool = true;
     const NAMES: &'static [&'static str] = &[
-        "evaluation.queued",
-        "evaluation.started",
-        "evaluation.building",
-        "evaluation.waiting",
-        "evaluation.completed",
-        "evaluation.failed",
-        "evaluation.aborted",
-        "evaluation.action_required",
-        "evaluation.approval_granted",
+        names::EVALUATION_QUEUED,
+        names::EVALUATION_STARTED,
+        names::EVALUATION_BUILDING,
+        names::EVALUATION_WAITING,
+        names::EVALUATION_COMPLETED,
+        names::EVALUATION_FAILED,
+        names::EVALUATION_ABORTED,
+        names::EVALUATION_ACTION_REQUIRED,
+        names::EVALUATION_APPROVAL_GRANTED,
     ];
 
     fn name(&self) -> Cow<'static, str> {
@@ -143,7 +143,7 @@ pub struct Progress {
     pub evaluation_id: EvaluationId,
     pub task: Option<TaskId>,
 }
-firehose!(Progress, "evaluation.progress");
+firehose!(Progress, names::EVALUATION_PROGRESS);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -174,7 +174,7 @@ pub struct Activity {
     pub task: Option<TaskId>,
     pub progress: EvaluationProgress,
 }
-firehose!(Activity, "evaluation.activity");
+firehose!(Activity, names::EVALUATION_ACTIVITY);
 
 #[cfg(test)]
 mod tests {

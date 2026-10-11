@@ -22,7 +22,7 @@ use gradient_core::ServerState;
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::{build_attempt, flake_output_node};
 use gradient_scheduler::Scheduler;
-use gradient_types::events::{Envelope, Event, EventRx, worker};
+use gradient_types::events::{Envelope, Event, EventRx, names, worker};
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::*;
 use gradient_util::shutdown::CancellationToken;
@@ -1432,7 +1432,7 @@ fn mask_event(env: &Envelope, scope: &MetricsScope) -> Option<String> {
         Event::WorkerConnected(w) if w.projects.iter().any(|p| scope.allows(&p.into_inner())) => {
             Some(
                 serde_json::json!({
-                    "event": "worker.connected",
+                    "event": names::WORKER_CONNECTED,
                     "at": env.at,
                     "content": { "worker_id": w.worker_id },
                 })
