@@ -1,0 +1,466 @@
+[
+  {
+    "group": "",
+    "field": "server_url",
+    "flag": "server-url",
+    "env": "GRADIENT_WORKER_SERVER_URL",
+    "type": "String",
+    "description": "WebSocket URL of the Gradient server's `/proto` endpoint. `null` leaves the worker\nwaiting for the server to connect.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "peers",
+    "flag": "peers",
+    "env": "GRADIENT_WORKER_PEERS",
+    "type": "Option<String>",
+    "description": "Peer-to-token mappings for challenge-response authentication.\nEach line is holding one `peer_id:token` pair.\nA `*:token` line is answering every challenged peer UUID with `token`.\nEach named peer is a project, cache, or proxy UUID.\nThis option is mutually exclusive with `--peers-file`.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "peers_file",
+    "flag": "peers-file",
+    "env": "GRADIENT_WORKER_PEERS_FILE",
+    "type": "Option<String>",
+    "description": "File of peer tokens for challenge-response authentication with the server, one\n`peer_id:token` per line. Lines starting with `#` are ignored.\n\n```\n<uuid>:<token>\n*:<token>\n```\n\nThe peer ID `*` matches any UUID in the server's challenge. Each token is a 48 byte\nrandom secret, for example from {command}`openssl rand -base64 48`, registered through\n`POST /api/v1/projects/{project}/workers`. Pin a project UUID with\n{option}`services.gradient.state.projects.<name>.id` to reference it here.\n\n`null` connects in open mode, where the server accepts the worker without a token.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "base_dir",
+    "flag": "base-dir",
+    "env": "GRADIENT_WORKER_BASE_DIR",
+    "type": "String",
+    "description": "Directory holding the worker's state.",
+    "default": "/var/lib/gradient-worker",
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "id",
+    "flag": "id",
+    "env": "GRADIENT_WORKER_ID",
+    "type": "Option<String>",
+    "description": "Worker UUID. `null` generates one on first start and stores it in\n{file}`<services.gradient.worker.baseDir>/worker-id`. Set it when the UUID must be known in\nadvance, for example to register the worker in {option}`services.gradient.state.workers`.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "zone",
+    "flag": "zone",
+    "env": "GRADIENT_WORKER_ZONE",
+    "type": "Option<String>",
+    "description": "Locality label advertised to the scheduler. A cluster job asking for one zone places\nevery member on workers with the same label. `null` puts the worker in the zone of\nall unlabelled workers.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "endpoint",
+    "flag": "endpoint",
+    "env": "GRADIENT_WORKER_ENDPOINT",
+    "type": "Option<String>",
+    "description": "Address at which other members of a cluster job reach this worker, passed through\nverbatim in the cluster roster. `null` advertises none.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "nix_bin",
+    "flag": "nix-bin",
+    "env": "GRADIENT_WORKER_NIX_BIN",
+    "type": "String",
+    "description": "Path to the `nix` binary, resolved via `PATH` by default.",
+    "default": "nix",
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "ssh_bin",
+    "flag": "ssh-bin",
+    "env": "GRADIENT_WORKER_SSH_BIN",
+    "type": "String",
+    "description": "Path to the `ssh` binary, resolved via `PATH` by default.\nNix is using it as `GIT_SSH_COMMAND` for private flake inputs.",
+    "default": "ssh",
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "gcroots_dir",
+    "flag": "gcroots-dir",
+    "env": "GRADIENT_WORKER_GCROOTS_DIR",
+    "type": "String",
+    "description": "Directory for the indirect GC roots pinning each running build's inputs and outputs against\na concurrent {command}`nix-collect-garbage`. An empty string disables pinning.",
+    "default": "/nix/var/nix/gcroots/gradient",
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "discoverable",
+    "flag": "discoverable",
+    "env": "GRADIENT_WORKER_DISCOVERABLE",
+    "type": "bool",
+    "description": "Whether to enable incoming server connections on `/proto`.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "",
+    "field": "listen_addr",
+    "flag": "listen-addr",
+    "env": "GRADIENT_WORKER_LISTEN_ADDR",
+    "type": "String",
+    "description": "IP address the worker listens on for incoming server connections.",
+    "default": "127.0.0.1",
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "port",
+    "flag": "port",
+    "env": "GRADIENT_WORKER_PORT",
+    "type": "u16",
+    "description": "Port the worker listens on for incoming server connections.",
+    "default": "3100",
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "accepted_server_tokens_file",
+    "flag": "accepted-server-tokens-file",
+    "env": "GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE",
+    "type": "Option<String>",
+    "description": "File of token hashes a server must present when it connects to this worker, one\n`peer_id:hash` per line. Lines starting with `#` are ignored. A hash is an argon2 PHC\nstring or the lowercase SHA-256 hex digest of the token, for example from\n{command}`printf %s \"$TOKEN\" | sha256sum`. The peer ID `*` matches any peer. The file\nis only read with {option}`services.gradient.worker.discoverable`.\n\n`null` accepts every server, and the worker logs a warning at start.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "eval_subprocess",
+    "flag": "eval-subprocess",
+    "env": "GRADIENT_WORKER_EVAL_SUBPROCESS",
+    "type": "bool",
+    "description": "Re-exec as a Nix evaluator subprocess (internal - do not set manually).",
+    "default": null,
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "",
+    "field": "eval_driver",
+    "flag": "eval-driver",
+    "env": "GRADIENT_WORKER_EVAL_DRIVER",
+    "type": "Option<String>",
+    "description": "Drive one eval subprocess over the production rkyv transport from a JSONL request file.\nThis internal harness is serving the NixOS VM integration test.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "capabilities",
+    "field": "federate",
+    "flag": "capabilities-federate",
+    "env": "GRADIENT_WORKER_CAPABILITIES_FEDERATE",
+    "type": "bool",
+    "description": "Whether to enable forwarding work and NARs between workers and servers (requiring `discoverable`).",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "capabilities",
+    "field": "fetch",
+    "flag": "capabilities-fetch",
+    "env": "GRADIENT_WORKER_CAPABILITIES_FETCH",
+    "type": "bool",
+    "description": "Whether to enable prefetching flake inputs and sources.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "capabilities",
+    "field": "eval",
+    "flag": "capabilities-eval",
+    "env": "GRADIENT_WORKER_CAPABILITIES_EVAL",
+    "type": "bool",
+    "description": "Whether to enable Nix flake evaluations.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "capabilities",
+    "field": "build",
+    "flag": "capabilities-build",
+    "env": "GRADIENT_WORKER_CAPABILITIES_BUILD",
+    "type": "bool",
+    "description": "Whether to enable Nix builds.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "system",
+    "field": "architectures",
+    "flag": "system-architectures",
+    "env": "GRADIENT_WORKER_SYSTEM_ARCHITECTURES",
+    "type": "Option<Vec<String>>",
+    "description": "Nix system types this worker builds for.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "system",
+    "field": "features",
+    "flag": "system-features",
+    "env": "GRADIENT_WORKER_SYSTEM_FEATURES",
+    "type": "Option<Vec<String>>",
+    "description": "Nix system features this worker advertises. An empty list detects them at runtime from\n{command}`nix config show system-features`, including CPU-derived `gccarch-*` levels.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "system",
+    "field": "cpu_core_score",
+    "flag": "system-cpu-core-score",
+    "env": "GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE",
+    "type": "Option<u32>",
+    "description": "Single-core speed score advertised to the scheduler, higher is faster. `null`\nbenchmarks the host at startup.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "system",
+    "field": "min_free_ram_mb",
+    "flag": "system-min-free-ram-mb",
+    "env": "GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB",
+    "type": "u64",
+    "description": "Free memory in MiB below which the worker kills the one evaluation subprocess large\nenough to restore the margin. The worker reports that evaluation as failed instead of\nletting the host freeze. `0` uses 10% of total memory, clamped to 128 MiB to 1 GiB.\n{option}`services.gradient.worker.eval.maxRss` still bounds steady-state memory.",
+    "default": "0",
+    "values": []
+  },
+  {
+    "group": "nix_daemon",
+    "field": "max_connections",
+    "flag": "nix-daemon-max-connections",
+    "env": "GRADIENT_WORKER_NIX_DAEMON_MAX_CONNECTIONS",
+    "type": "usize",
+    "description": "Maximum connections to the local Nix daemon. Each build holds one for its whole run\nplus up to 8 for parallel NAR imports. The rest is headroom for path checks.",
+    "default": "32",
+    "values": []
+  },
+  {
+    "group": "eval",
+    "field": "max_concurrent",
+    "flag": "eval-max-concurrent",
+    "env": "GRADIENT_WORKER_EVAL_MAX_CONCURRENT",
+    "type": "u32",
+    "description": "Maximum simultaneous evaluations.",
+    "default": "1",
+    "values": []
+  },
+  {
+    "group": "eval",
+    "field": "fork_workers",
+    "flag": "eval-fork-workers",
+    "env": "GRADIENT_WORKER_EVAL_FORK_WORKERS",
+    "type": "usize",
+    "description": "Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` sizes\nthe pool to the host's core count, capped at 16.",
+    "default": "16",
+    "values": []
+  },
+  {
+    "group": "eval",
+    "field": "max_rss",
+    "flag": "eval-max-rss",
+    "env": "GRADIENT_WORKER_EVAL_MAX_RSS",
+    "type": "u64",
+    "description": "Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit\nrestart after their call and free the Nix heap. A call may grow past the limit, with\n{option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.\nKeep it above a typical evaluation's heap.",
+    "default": "8589934592",
+    "values": []
+  },
+  {
+    "group": "eval",
+    "field": "cache_dir",
+    "flag": "eval-cache-dir",
+    "env": "GRADIENT_WORKER_EVAL_CACHE_DIR",
+    "type": "Option<String>",
+    "description": "Eval cache directory, exported to evaluation subprocesses as {env}`NIX_CACHE_HOME`.\n`null` uses {file}`<services.gradient.worker.baseDir>/eval-cache`.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "eval",
+    "field": "cache_share",
+    "flag": "eval-cache-share",
+    "env": "GRADIENT_WORKER_EVAL_CACHE_SHARE",
+    "type": "bool",
+    "description": "Whether to share eval cache blobs with other workers through the server.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "build",
+    "field": "max_concurrent",
+    "flag": "build-max-concurrent",
+    "env": "GRADIENT_WORKER_BUILD_MAX_CONCURRENT",
+    "type": "u32",
+    "description": "Maximum simultaneous builds.",
+    "default": "1",
+    "values": []
+  },
+  {
+    "group": "build",
+    "field": "max_cores",
+    "flag": "build-max-cores",
+    "env": "GRADIENT_WORKER_BUILD_MAX_CORES",
+    "type": "Option<u32>",
+    "description": "CPU cores a single build can use, passed as `--cores`. `null` uses all cores.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "build",
+    "field": "cgroup",
+    "flag": "build-cgroup",
+    "env": "GRADIENT_WORKER_BUILD_CGROUP",
+    "type": "Option<std::path::PathBuf>",
+    "description": "Cgroup directory of {file}`nix-daemon.service`, the parent of the build cgroups. The worker\nis reading the peak memory of each running build from it and sending the values with its\nheartbeat. The scheduler is reserving the larger of the predicted and the reported peak.\nThe build cgroups need {option}`services.gradient.worker.build.metrics` and Gradient's\nNix fork on the daemon. `null` reports nothing.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "nar",
+    "field": "max_concurrent_uploads",
+    "flag": "nar-max-concurrent-uploads",
+    "env": "GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS",
+    "type": "u32",
+    "description": "Upload requests over 1 MiB the worker keeps open at once, waiting for a server grant or\ntransferring. One job holds at most half. Smaller uploads have a window of 128 of their\nown. The server's upload budget decides how many run. This limit bounds worker memory.",
+    "default": "16",
+    "values": []
+  },
+  {
+    "group": "nar",
+    "field": "partial_ttl_secs",
+    "flag": "nar-partial-ttl-secs",
+    "env": "GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS",
+    "type": "u64",
+    "description": "Seconds after its last write before the deletion of an unfinished NAR download under\n{file}`<services.gradient.worker.baseDir>/nar-partial`. `0` disables the cleanup.",
+    "default": "86400",
+    "values": []
+  },
+  {
+    "group": "nar",
+    "field": "chunk_bytes",
+    "flag": "nar-chunk-bytes",
+    "env": "GRADIENT_WORKER_NAR_CHUNK_BYTES",
+    "type": "u64",
+    "description": "Size in bytes of each outbound NAR upload chunk, from 4 KiB to 4 MiB.\nSmaller chunks can help slow or high-latency links like Tailscale over DERP.",
+    "default": "524288",
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "level_default",
+    "flag": "log-level-default",
+    "env": "GRADIENT_WORKER_LOG_LEVEL_DEFAULT",
+    "type": "String",
+    "description": "",
+    "default": "info",
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "level_eval",
+    "flag": "log-level-eval",
+    "env": "GRADIENT_WORKER_LOG_LEVEL_EVAL",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "level_build",
+    "flag": "log-level-build",
+    "env": "GRADIENT_WORKER_LOG_LEVEL_BUILD",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "level_proto",
+    "flag": "log-level-proto",
+    "env": "GRADIENT_WORKER_LOG_LEVEL_PROTO",
+    "type": "Option<String>",
+    "description": "",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "burst_bytes_per_min",
+    "flag": "log-burst-bytes-per-min",
+    "env": "GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN",
+    "type": "u64",
+    "description": "Build log bytes forwarded per build within any minute. The worker stops forwarding\na build's log past this limit. The build itself continues.",
+    "default": "8388608",
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "sustained_bytes_per_hour",
+    "flag": "log-sustained-bytes-per-hour",
+    "env": "GRADIENT_WORKER_LOG_SUSTAINED_BYTES_PER_HOUR",
+    "type": "u64",
+    "description": "Build log bytes forwarded per build within any hour.",
+    "default": "67108864",
+    "values": []
+  },
+  {
+    "group": "log",
+    "field": "fetch_from_store",
+    "flag": "log-fetch-from-store",
+    "env": "GRADIENT_WORKER_LOG_FETCH_FROM_STORE",
+    "type": "bool",
+    "description": "Whether to forward the stored build log of a derivation already built locally and\ntherefore producing no new log.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "log",
+    "field": "trace_dir",
+    "flag": "log-trace-dir",
+    "env": "GRADIENT_WORKER_LOG_TRACE_DIR",
+    "type": "Option<std::path::PathBuf>",
+    "description": "Directory receiving every closed stage span of the worker and its eval subprocesses as\nJSON lines, one file per process. `null` disables span tracing.",
+    "default": null,
+    "values": []
+  }
+]
