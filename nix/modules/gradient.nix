@@ -6,6 +6,7 @@
 
 { lib, pkgs, config, ... }: let
   cfg = config.services.gradient;
+  serverOptions = import ./server-options.nix { inherit lib; };
   logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
   environmentValue = value: if lib.isBool value then lib.boolToString value else lib.mapNullable toString value;
 
@@ -79,6 +80,7 @@ in {
   imports = [
     ./gradient-state.nix
     ./gradient-worker.nix
+    { options.services.gradient = serverOptions.options; }
     (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "uploadConcurrency" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
     (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "commitConcurrency" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
     (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "maxBufferBytes" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
@@ -124,40 +126,10 @@ in {
         '';
       };
 
-      listenAddr = lib.mkOption {
-        type = lib.types.str;
-        default = "127.0.0.1";
-        description = "IP address for the Gradient server to listen on.";
-      };
-
-      port = lib.mkOption {
-        type = lib.types.port;
-        default = 3000;
-        description = "Port for the Gradient server to listen on.";
-      };
-
       baseDir = lib.mkOption {
         type = lib.types.path;
         default = "/var/lib/gradient";
         description = "Directory holding Gradient's state, NAR files and caches.";
-      };
-
-      useTls = lib.mkEnableOption "TLS" // { default = true; };
-
-      useQuic = lib.mkEnableOption "advertising HTTP/3 (QUIC) to clients";
-
-      retentionDays = lib.mkOption {
-        type = lib.types.ints.unsigned;
-        default = 90;
-        description = ''
-          Days to keep job assignment records, finished deliveries, worker connection history,
-          webhook and task action deliveries, expired sessions and CLI logins. Finished admin
-          tasks, the audit log, per-build resource samples and finished cluster jobs share the same
-          limit. Removed resource samples no longer feed build predictions. Finished cluster jobs
-          without remaining members go on the next hourly pass. Active cluster jobs and the newest
-          finished admin task of each kind stay exempt. Open worker connections stay until the
-          next connection of the same worker. Set it to `0` to keep every record forever.
-        '';
       };
 
       localWorker = lib.mkOption {
@@ -229,15 +201,6 @@ in {
           description = "Public URL of the Gradient frontend, used for links in CI status reports.";
         };
 
-        logoUrl = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          example = "https://example.com/logo.svg";
-          description = ''
-            URL of an image to display instead of the Gradient logo on the sign-in pages, in its
-            original colors. Set it to `null` to keep the Gradient logo.
-          '';
-        };
       };
 
       secrets = {
@@ -330,315 +293,13 @@ in {
           '';
         };
 
-        maxConnections = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 16;
-          description = ''
-            Maximum connections of the scheduler and worker pool. Server processes each open up to
-            the sum of {option}`services.gradient.database.maxConnections`,
-            {option}`services.gradient.database.cache.maxConnections` and
-            {option}`services.gradient.database.web.maxConnections`. PostgreSQL's `max_connections`
-            must accommodate that sum.
-          '';
-        };
-
-        minConnections = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 2;
-          description = "Minimum connections kept open in the scheduler and worker pool.";
-        };
-
-        cache = {
-          maxConnections = lib.mkOption {
-            type = lib.types.ints.positive;
-            default = 32;
-            description = ''
-              Maximum connections of the cache query pool. It is separate from the scheduler pool to
-              keep a large evaluation's prefetch traffic from starving job assignment.
-            '';
-          };
-
-          minConnections = lib.mkOption {
-            type = lib.types.ints.unsigned;
-            default = 2;
-            description = "Minimum connections kept open in the cache query pool.";
-          };
-        };
-
-        web = {
-          maxConnections = lib.mkOption {
-            type = lib.types.ints.positive;
-            default = 8;
-            description = "Maximum connections of the HTTP API pool.";
-          };
-
-          minConnections = lib.mkOption {
-            type = lib.types.ints.unsigned;
-            default = 1;
-            description = "Minimum connections kept open in the HTTP API pool.";
-          };
-        };
-      };
-
-      registration = {
-        enable = lib.mkEnableOption "self-service user registration" // { default = true; };
-      };
-
-      gradientCi = {
-        enable = lib.mkEnableOption "the Gradient.CI Servers offer on the workers pages" // { default = true; };
-
-        url = lib.mkOption {
-          type = lib.types.str;
-          default = "https://servers.gradient.ci";
-          example = "http://localhost:3200";
-          description = ''
-            Address of Gradient.CI Servers. "Connect" links to `<url>/connect`. New connections go
-            to the host and port of this address at `/proto`, over `wss://` for `https://` and
-            `ws://` for `http://`.
-          '';
-        };
-      };
-
-      sentry = {
-        enable = lib.mkEnableOption "error reporting to Sentry";
-
-        dsn = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          example = "https://your-key@your-sentry.example.com/1";
-          description = ''
-            Sentry DSN to use with {option}`services.gradient.sentry.enable` set. Set it to `null`
-            to send reports to the upstream Wavelens instance at `reports.wavelens.io`.
-          '';
-        };
-      };
-
-      pullRequests = {
-        commitName = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          description = ''
-            Git author and committer name for commits of the `open_pr` action. Set it to `null` to
-            use the default of the Git host.
-
-            - GitHub: the App bot, with the commit marked as verified.
-            - Gitea, Forgejo and GitLab: the token owner, with
-              `Gradient <gradient@users.noreply.HOST>` as fallback. Grant the token the `read:user`
-              or `read_user` scope for the owner lookup.
-          '';
-        };
-
-        commitEmail = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          description = ''
-            Git author and committer email for commits of the `open_pr` action. Set it to `null` to
-            use the default of the Git host, as listed for
-            {option}`services.gradient.pullRequests.commitName`.
-          '';
-        };
-      };
-
-      permissions = {
-        createProject = lib.mkOption {
-          type = lib.types.enum [ "none" "superusers" "everyone" ];
-          default = "everyone";
-          description = ''
-            Who can create projects through the API: `none` (only the declarative state),
-            `superusers`, or `everyone` (any authenticated user).
-          '';
-        };
-
-        createCache = lib.mkOption {
-          type = lib.types.enum [ "none" "superusers" "everyone" ];
-          default = "everyone";
-          description = ''
-            Who can create caches through the API: `none` (only the declarative state),
-            `superusers`, or `everyone` (any authenticated user).
-          '';
-        };
-
-        createTeam = lib.mkOption {
-          type = lib.types.enum [ "none" "superusers" "everyone" ];
-          default = "everyone";
-          description = ''
-            Who can create teams through the API: `none` (only the declarative state),
-            `superusers`, or `everyone` (any authenticated user).
-          '';
-        };
-      };
-
-      http = {
-        maxRequestSize = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 2 * 1024 * 1024;
-          description = ''
-            Maximum HTTP request body size in bytes for most endpoints, to keep an unbounded body
-            from exhausting server memory. Build request blob uploads use a fixed 20 MiB cap.
-          '';
-        };
-
-        maxSourceUploadSize = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 512 * 1024 * 1024;
-          description = ''
-            Maximum size in bytes of a source upload to `POST /build-requests/source` (as sent by
-            `gradient build`) and of a chunked manifest in total. The built-in reverse proxies raise
-            their body size limit to fit it.
-          '';
-        };
-
-        trustedProxies = lib.mkOption {
-          type = lib.types.listOf lib.types.str;
-          default = [ "127.0.0.1/8" "::1/128" ];
-          description = ''
-            CIDR ranges of peers allowed to set `X-Forwarded-For`. The defaults trust a reverse
-            proxy on the same host.
-          '';
-        };
-
-        localIps = lib.mkOption {
-          type = lib.types.listOf lib.types.str;
-          default = [ "192.168.0.0/16" "172.16.0.0/12" "100.64.0.0/10" "10.0.0.0/8" "fc00::/7" ];
-          description = ''
-            Clients in these CIDR ranges receive a cache's `local_priority`, if set and non-zero.
-          '';
-        };
       };
 
       proto = {
         public = lib.mkEnableOption "exposing `/proto` through the reverse proxy for remote workers and federation";
-        federate = lib.mkEnableOption "federation with other Gradient servers over `/proto`";
-        discoverable = lib.mkEnableOption "incoming worker and federation connections on `/proto`" // { default = true; };
-
-        maxConnections = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 256;
-          description = "Maximum simultaneous `/proto` WebSocket connections.";
-        };
-
-        workerHeartbeatTimeoutSecs = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 120;
-          description = ''
-            Seconds a connected worker can stay silent before counting as dead, with its jobs
-            re-queued. Workers heartbeat every 10 seconds, giving the default a tolerance of twelve
-            missed beats. The timeout is the only detection for a worker lost without a clean TCP
-            close (OOM kill, frozen host, network partition). Set it to `0` to disable the watchdog.
-          '';
-        };
-
-        anonymousCache = {
-          enable = lib.mkOption {
-            type = lib.types.bool;
-            default = true;
-            description = ''
-              Whether unauthenticated clients can use `GET /cache/{cache}/proto` for public caches.
-              Private caches always require an API key.
-            '';
-          };
-
-          maxConnectionsPerIp = lib.mkOption {
-            type = lib.types.ints.positive;
-            default = 32;
-            description = ''
-              Maximum simultaneous anonymous `/cache/proto` connections per client IP.
-            '';
-          };
-        };
-      };
-
-      upload = {
-        concurrency = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 8;
-          description = ''
-            Number of uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all
-            workers and REST clients. Smaller uploads have a window of 128 of their own. Uploads
-            hold their permit until the object is in storage. Other uploads wait for a permit in
-            the meantime.
-          '';
-        };
-
-        bytesBudget = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 8589934592;
-          description = ''
-            Total size in bytes of admitted uploads. Uploads that exceed the remaining budget wait.
-            An upload larger than the whole budget can run alone once nothing else is in flight.
-          '';
-        };
-
-        leaseIdleSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 300;
-          description = ''
-            Seconds granted worker uploads can go without data before they lose their permit and
-            their workers receive a request to retry.
-          '';
-        };
-
-        restWaitSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 30;
-          description = ''
-            Seconds NAR uploads to the cache upload endpoint wait for a permit before getting a 503
-            answer with `Retry-After`.
-          '';
-        };
       };
 
       nar = {
-        maxUploadSize = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 512 * 1024 * 1024;
-          description = "Maximum size in bytes of a NAR uploaded to the cache upload endpoint.";
-        };
-
-        smallBytes = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 1024 * 1024;
-          description = ''
-            Size in bytes up to which NAR downloads come from the server itself instead of a
-            presigned S3 URL. NARs up to this size also stay in the in-memory cache. Uploads do not
-            depend on this value.
-          '';
-        };
-
-        hotCacheBytes = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 512 * 1024 * 1024;
-          description = "Capacity in bytes of the in-memory NAR cache. Set it to `0` to disable the cache.";
-        };
-
-        verifyDigest = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-          description = ''
-            Whether to download NARs committed through presigned S3 uploads and verify their hash,
-            catching same-length corruption at the cost of a full object read. Size checks run
-            either way. Passthrough and REST uploads always go through verification.
-          '';
-        };
-
-        storageOpenTimeoutSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 60;
-          description = ''
-            Seconds to wait for a NAR object stream from storage (for example an S3 GET) before
-            answering the worker with `NarAbort`. Workers retry after a `NarAbort`.
-          '';
-        };
-
-        sendChunkTimeoutSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 30;
-          description = ''
-            Seconds an outbound `NarPush` chunk can wait for the WebSocket to drain before an abort
-            of the transfer with `NarAbort`.
-          '';
-        };
-
         chunkBytes = lib.mkOption {
           type = lib.types.ints.between 4096 4194304;
           default = 524288;
@@ -648,267 +309,6 @@ in {
           '';
         };
 
-        maxConcurrentServes = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 8;
-          description = ''
-            NAR serving tasks that can run at once per worker connection, bounding memory and
-            storage fan-out for large batches.
-          '';
-        };
-
-        maxConcurrentDownloads = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 16;
-          description = ''
-            NAR downloads from storage that can run at once across all connections, keeping the
-            storage near its best total throughput.
-          '';
-        };
-
-        partialTtlSecs = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 86400;
-          description = ''
-            Maximum age in seconds of an unfinished upload staged under
-            {file}`<services.gradient.baseDir>`, counted from its last write. Older uploads disappear
-            in the next deep GC. Set it to `0` to keep every unfinished upload.
-          '';
-        };
-      };
-
-      cache = {
-        upstreamQueryConcurrency = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 32;
-          description = ''
-            Maximum simultaneous narinfo requests to upstream caches across the server.
-          '';
-        };
-
-        maxStorageGb = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 0;
-          description = ''
-            Instance-wide limit on cached NAR storage in GB. New evaluations wait while every
-            writable cache of a project has less than 10 MiB left. Set it to `0` to disable the
-            limit. Per-cache limits still apply.
-          '';
-        };
-
-        signSweepIntervalSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 3600;
-          description = ''
-            Seconds between NAR signature backfill passes. Uploads receive their signature
-            immediately. Only subscription placeholders and unsigned leftovers need the pass.
-          '';
-        };
-
-        debugIndexIntervalSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 300;
-          description = ''
-            Seconds between passes of the DWARF build ID index backfill. Uploads enter the index
-            immediately. Only paths cached before the index existed or interrupted by a restart need
-            the pass.
-          '';
-        };
-      };
-
-      gc = {
-        intervalSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 3600;
-          description = "Seconds between garbage collection passes.";
-        };
-
-        narTtlHours = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 336;
-          description = ''
-            Hours to keep a cached path outside the live closure of retained evaluations after its
-            last fetch, or its upload if never fetched. These hours always come on top of
-            {option}`services.gradient.gc.narUploadGraceHours`. Set it to `0` to keep nothing
-            beyond that grace.
-          '';
-        };
-
-        narUploadGraceHours = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 24;
-          description = ''
-            Hours before the deletion of an unreferenced NAR object, covering the window between its
-            upload and the commit of its database rows.
-          '';
-        };
-
-        orphanDerivationHours = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 24;
-          description = ''
-            Hours before the deletion of a derivation outside the build closure of every retained
-            evaluation. Quick re-evaluations can reuse the derivation during this grace. Set it to
-            `0` to delete such derivations on the next run.
-          '';
-        };
-
-        wedgedEvalHours = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 24;
-          description = ''
-            Hours an evaluation can stay in one phase before counting as stuck. Stuck evaluations no
-            longer block evaluation garbage collection. Set it to `0` to treat no evaluation as
-            stuck.
-          '';
-        };
-
-        deepIntervalSecs = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 3600;
-          description = ''
-            Seconds from the end of one background deep garbage collection round to the start of the
-            next. Set it to `0` to run rounds only on request.
-          '';
-        };
-
-        deepPaceMs = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 1000;
-          description = ''
-            Milliseconds between two units of a storage migration or a background deep garbage
-            collection round. Requested rounds run their units without a pause.
-          '';
-        };
-      };
-
-      eval = {
-        maxKeep = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 30;
-          description = ''
-            Maximum number of evaluations kept per task. It is the cap for the per-task setting, and
-            new tasks start at the lower of 30 and this value. Set it to `0` to disable the limit.
-          '';
-        };
-
-        cache = {
-          maxTotalBytes = lib.mkOption {
-            type = lib.types.ints.unsigned;
-            default = 10 * 1024 * 1024 * 1024;
-            description = ''
-              Total size in bytes of shared eval cache blobs. Older blobs leave the cache until the
-              total is within this size.
-            '';
-          };
-
-          maxAgeDays = lib.mkOption {
-            type = lib.types.ints.unsigned;
-            default = 30;
-            description = ''
-              Days after which eval cache blobs leave the cache, regardless of the size limit.
-            '';
-          };
-
-          sweepIntervalSecs = lib.mkOption {
-            type = lib.types.ints.positive;
-            default = 3600;
-            description = "Seconds between eval cache eviction passes.";
-          };
-        };
-      };
-
-      build = {
-        maxAttempts = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 3;
-          description = "Build or eval job attempts before a transient failure is permanent.";
-        };
-
-        substituteMissEscalationThreshold = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 2;
-          description = ''
-            Free re-queues of a derivation available in a cache within one evaluation, before
-            building the derivation like any other. A re-queue does not count as a build attempt.
-            This threshold is the only bound on that loop.
-          '';
-        };
-
-        inputsUnavailableMaxLoops = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 3;
-          description = ''
-            Times a build can retry after missing inputs before failing instead of retrying again.
-          '';
-        };
-
-        retryBackoffSecs = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 30;
-          description = ''
-            Seconds before retrying a transient build failure, doubled for every previous attempt.
-          '';
-        };
-
-        defaultTimeoutSecs = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 14400;
-          description = ''
-            Build timeout in seconds for derivations without `timeout`. Set it to `0` to disable
-            the timeout.
-          '';
-        };
-
-        defaultMaxSilentSecs = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 3600;
-          description = ''
-            Timeout in seconds without build output for derivations without `maxSilent`. Set it to
-            `0` to disable the timeout.
-          '';
-        };
-      };
-
-      scheduler = {
-        clusterPrepareTimeoutSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 30;
-          description = ''
-            Seconds for every member of a cluster job attempt to accept its assignment. Attempts not
-            accepted by all members in time abort, and their cluster jobs return to the queue.
-          '';
-        };
-
-        clusterReserveAfterSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 600;
-          description = ''
-            Seconds cluster jobs that can start wait for enough simultaneously idle workers before
-            reserving a placement. Reserved workers receive no new single jobs until the cluster
-            job's start or the reservation's expiry.
-          '';
-        };
-
-        clusterReserveTimeoutSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 1800;
-          description = ''
-            Seconds to hold a cluster job reservation before releasing it and planning the cluster
-            job again.
-          '';
-        };
-
-        scoringPolicy = lib.mkOption {
-          type = lib.types.enum [ "simple" "resource-aware" ];
-          default = "resource-aware";
-          description = ''
-            Policy ranking queued jobs for a requesting worker. Factors of `simple`: path
-            availability, NAR size, dependency count, waiting time, builtins and fetch worker
-            reservation. Factors of `resource-aware`: the same plus memory fit, worker saturation,
-            CPU, disk and network affinity and `preferLocalBuild`.
-          '';
-        };
       };
 
       metrics = {
@@ -921,80 +321,6 @@ in {
           '';
         };
 
-        rollupIntervalSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 60;
-          description = "Seconds between metric rollup passes.";
-        };
-
-        retention = {
-          rawDays = lib.mkOption {
-            type = lib.types.ints.unsigned;
-            default = 14;
-            description = ''
-              Days to keep raw phase and worker samples and the per-minute cache and upstream traffic
-              counters. Set it to `0` to keep them forever.
-            '';
-          };
-
-          rollupDays = lib.mkOption {
-            type = lib.types.ints.unsigned;
-            default = 400;
-            description = ''
-              Days to keep minute and hour rollups. Day and week rollups stay forever. Set it to `0`
-              to keep every rollup forever.
-            '';
-          };
-        };
-
-        labelTopn = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 20;
-          description = "Maximum distinct label values per rollup dimension, by activity.";
-        };
-
-        cacheFlushIntervalSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 10;
-          description = "Seconds between flushes of cache traffic counters to the database.";
-        };
-
-        workerSampleIntervalSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 15;
-          description = "Seconds between worker metric samples.";
-        };
-
-        instanceIntervalSecs = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 30;
-          description = "Seconds between updates of the instance-wide metric window.";
-        };
-
-        graphConsistencyIntervalSecs = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 300;
-          description = ''
-            Seconds between build graph consistency checks. These checks also repair the NAR
-            reference counter. Set it to `0` to disable both.
-          '';
-        };
-
-        otlp = {
-          endpoint = lib.mkOption {
-            type = lib.types.nullOr lib.types.str;
-            default = null;
-            description = ''
-              OTLP collector endpoint to push metrics to. Set it to `null` to disable OTLP export.
-            '';
-          };
-
-          pushIntervalSecs = lib.mkOption {
-            type = lib.types.ints.positive;
-            default = 30;
-            description = "Seconds between OTLP metric pushes.";
-          };
-        };
       };
 
       log = {
@@ -1048,29 +374,9 @@ in {
           description = "Log levels per component, overridden at runtime by {env}`RUST_LOG`.";
         };
 
-        chunkBytes = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 262144;
-          description = ''
-            Target uncompressed size in bytes of a stored build log chunk. Chunks split on line
-            boundaries, and a long line can exceed the target.
-          '';
-        };
-
-        traceDir = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          example = "/var/lib/gradient/trace";
-          description = ''
-            Directory receiving every closed stage span of the server as JSON lines, one file per
-            process. Set it to `null` to disable span tracing.
-          '';
-        };
       };
 
       oidc = {
-        enable = lib.mkEnableOption "OIDC";
-        required = lib.mkEnableOption "OIDC as the only login method";
         clientId = lib.mkOption {
           type = lib.types.str;
           description = "OIDC client ID.";
@@ -1081,12 +387,6 @@ in {
           description = "File containing the OIDC client secret.";
         };
 
-        scopes = lib.mkOption {
-          type = lib.types.listOf lib.types.str;
-          default = ["openid" "email" "profile"];
-          description = "OIDC scopes to request.";
-        };
-
         discoveryUrl = lib.mkOption {
           type = lib.types.str;
           description = "OIDC discovery URL.";
@@ -1094,28 +394,17 @@ in {
       };
 
       scim = {
-        enable = lib.mkEnableOption "SCIM provisioning";
         tokenFile = lib.mkOption {
           type = lib.types.path;
           description = "File containing the SCIM bearer token.";
         };
-        hardDelete = lib.mkEnableOption "deleting users on SCIM `DELETE` instead of disabling them";
       };
 
       email = {
-        enable = lib.mkEnableOption "sending email";
-        requireVerification = lib.mkEnableOption "email verification for new accounts";
-
         smtp = {
           host = lib.mkOption {
             type = lib.types.str;
             description = "SMTP server host name.";
-          };
-
-          port = lib.mkOption {
-            type = lib.types.port;
-            default = 587;
-            description = "SMTP server port.";
           };
 
           username = lib.mkOption {
@@ -1137,11 +426,6 @@ in {
             description = "Sender email address.";
           };
 
-          name = lib.mkOption {
-            type = lib.types.str;
-            default = "Gradient";
-            description = "Sender display name.";
-          };
         };
       };
 
@@ -1179,12 +463,6 @@ in {
           '';
         };
 
-        port = lib.mkOption {
-          type = lib.types.port;
-          default = 2222;
-          description = "Port for the SSH server to listen on.";
-        };
-
         hostKeyFile = lib.mkOption {
           type = lib.types.nullOr lib.types.path;
           default = null;
@@ -1209,27 +487,6 @@ in {
           '';
         };
 
-        region = lib.mkOption {
-          type = lib.types.str;
-          default = "us-east-1";
-          description = "Region of the S3 bucket.";
-        };
-
-        endpoint = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          description = ''
-            Endpoint of an S3-compatible service such as MinIO or Cloudflare R2. Set it to `null` to
-            use AWS.
-          '';
-        };
-
-        accessKeyId = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          description = "AWS access key ID. Set it to `null` to use instance credentials or the environment.";
-        };
-
         secretAccessKeyFile = lib.mkOption {
           type = lib.types.nullOr lib.types.path;
           default = null;
@@ -1238,50 +495,6 @@ in {
           '';
         };
 
-        prefix = lib.mkOption {
-          type = lib.types.str;
-          default = "";
-          description = ''
-            Key prefix inside the bucket, such as `gradient/`. Leave it empty to store at the bucket
-            root.
-          '';
-        };
-
-        virtualHostedStyle = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-          description = ''
-            Whether to address a custom {option}`services.gradient.s3.endpoint` virtual-hosted style
-            (`https://<bucket>.<endpoint>/key`) instead of path style
-            (`https://<endpoint>/<bucket>/key`). MinIO, Garage and most self-hosted services need
-            path style. It has no effect without a custom endpoint.
-          '';
-        };
-
-        readTimeoutSecs = lib.mkOption {
-          type = lib.types.int;
-          default = 60;
-          description = ''
-            Seconds an S3 response can stall before failing the request. Received chunks reset the
-            timer, and large NARs keep streaming as long as they make progress.
-          '';
-        };
-
-        maxRetries = lib.mkOption {
-          type = lib.types.int;
-          default = 3;
-          description = "Retries of a failed S3 request.";
-        };
-
-        retryTimeoutSecs = lib.mkOption {
-          type = lib.types.int;
-          default = 250;
-          description = ''
-            Seconds after the first attempt past which no S3 retries start. Keep it above
-            `(maxRetries + 1) * readTimeoutSecs` to still retry requests that fail on the read
-            timeout. Keep it below 5 minutes as well, since retries reuse the original credentials.
-          '';
-        };
       };
     };
   };
@@ -1428,161 +641,28 @@ in {
       environment = {
         NIX_REMOTE = "daemon";
         XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
-        GRADIENT_LISTEN_ADDR = cfg.listenAddr;
-        GRADIENT_PORT = toString cfg.port;
-        GRADIENT_SERVE_URL = cfg.serveUrl;
-        GRADIENT_FRONTEND_URL = cfg.frontend.url;
-        GRADIENT_BASE_DIR = cfg.baseDir;
-        GRADIENT_USE_TLS = lib.boolToString cfg.useTls;
-        GRADIENT_USE_QUIC = lib.boolToString cfg.useQuic;
-        GRADIENT_RETENTION_DAYS = toString cfg.retentionDays;
         GRADIENT_SECRETS_CRYPT_FILE = "%d/gradient_crypt_secret";
         GRADIENT_SECRETS_JWT_FILE = "%d/gradient_jwt_secret";
         GRADIENT_STATE_FILE = "%d/gradient_state";
         GRADIENT_STATE_DELETE = lib.boolToString cfg.state.delete;
         GRADIENT_CREDENTIALS_DIR = "%d";
-        GRADIENT_PERMISSIONS_CREATE_PROJECT = cfg.permissions.createProject;
-        GRADIENT_PERMISSIONS_CREATE_CACHE = cfg.permissions.createCache;
-        GRADIENT_PERMISSIONS_CREATE_TEAM = cfg.permissions.createTeam;
-        GRADIENT_REGISTRATION_ENABLE = lib.boolToString cfg.registration.enable;
-        GRADIENT_GRADIENT_CI_ENABLE = lib.boolToString cfg.gradientCi.enable;
-        GRADIENT_GRADIENT_CI_URL = cfg.gradientCi.url;
-        GRADIENT_SENTRY_ENABLE = lib.boolToString cfg.sentry.enable;
         GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
-        GRADIENT_DATABASE_MAX_CONNECTIONS = toString cfg.database.maxConnections;
-        GRADIENT_DATABASE_MIN_CONNECTIONS = toString cfg.database.minConnections;
-        GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS = toString cfg.database.cache.maxConnections;
-        GRADIENT_DATABASE_CACHE_MIN_CONNECTIONS = toString cfg.database.cache.minConnections;
-        GRADIENT_DATABASE_WEB_MAX_CONNECTIONS = toString cfg.database.web.maxConnections;
-        GRADIENT_DATABASE_WEB_MIN_CONNECTIONS = toString cfg.database.web.minConnections;
-        GRADIENT_HTTP_MAX_REQUEST_SIZE = toString cfg.http.maxRequestSize;
-        GRADIENT_HTTP_MAX_SOURCE_UPLOAD_SIZE = toString cfg.http.maxSourceUploadSize;
-        GRADIENT_HTTP_TRUSTED_PROXIES = builtins.concatStringsSep "," cfg.http.trustedProxies;
-        GRADIENT_HTTP_LOCAL_IPS = builtins.concatStringsSep "," cfg.http.localIps;
-        GRADIENT_PROTO_DISCOVERABLE = lib.boolToString cfg.proto.discoverable;
-        GRADIENT_PROTO_FEDERATE = lib.boolToString cfg.proto.federate;
-        GRADIENT_PROTO_MAX_CONNECTIONS = toString cfg.proto.maxConnections;
-        GRADIENT_PROTO_WORKER_HEARTBEAT_TIMEOUT_SECS = toString cfg.proto.workerHeartbeatTimeoutSecs;
-        GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE = lib.boolToString cfg.proto.anonymousCache.enable;
-        GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP = toString cfg.proto.anonymousCache.maxConnectionsPerIp;
-        GRADIENT_UPLOAD_CONCURRENCY = toString cfg.upload.concurrency;
-        GRADIENT_UPLOAD_BYTES_BUDGET = toString cfg.upload.bytesBudget;
-        GRADIENT_UPLOAD_LEASE_IDLE_SECS = toString cfg.upload.leaseIdleSecs;
-        GRADIENT_UPLOAD_REST_WAIT_SECS = toString cfg.upload.restWaitSecs;
-        GRADIENT_NAR_MAX_UPLOAD_SIZE = toString cfg.nar.maxUploadSize;
-        GRADIENT_NAR_SMALL_BYTES = toString cfg.nar.smallBytes;
-        GRADIENT_NAR_HOT_CACHE_BYTES = toString cfg.nar.hotCacheBytes;
-        GRADIENT_NAR_VERIFY_DIGEST = lib.boolToString cfg.nar.verifyDigest;
-        GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS = toString cfg.nar.storageOpenTimeoutSecs;
-        GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS = toString cfg.nar.sendChunkTimeoutSecs;
-        GRADIENT_NAR_CHUNK_BYTES = toString cfg.nar.chunkBytes;
-        GRADIENT_NAR_MAX_CONCURRENT_SERVES = toString cfg.nar.maxConcurrentServes;
-        GRADIENT_NAR_MAX_CONCURRENT_DOWNLOADS = toString cfg.nar.maxConcurrentDownloads;
-        GRADIENT_NAR_PARTIAL_TTL_SECS = toString cfg.nar.partialTtlSecs;
-        GRADIENT_CACHE_UPSTREAM_QUERY_CONCURRENCY = toString cfg.cache.upstreamQueryConcurrency;
-        GRADIENT_CACHE_MAX_STORAGE_GB = toString cfg.cache.maxStorageGb;
-        GRADIENT_CACHE_SIGN_SWEEP_INTERVAL_SECS = toString cfg.cache.signSweepIntervalSecs;
-        GRADIENT_CACHE_DEBUG_INDEX_INTERVAL_SECS = toString cfg.cache.debugIndexIntervalSecs;
-        GRADIENT_GC_INTERVAL_SECS = toString cfg.gc.intervalSecs;
-        GRADIENT_GC_NAR_TTL_HOURS = toString cfg.gc.narTtlHours;
-        GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS = toString cfg.gc.narUploadGraceHours;
-        GRADIENT_GC_ORPHAN_DERIVATION_HOURS = toString cfg.gc.orphanDerivationHours;
-        GRADIENT_GC_WEDGED_EVAL_HOURS = toString cfg.gc.wedgedEvalHours;
-        GRADIENT_GC_DEEP_INTERVAL_SECS = toString cfg.gc.deepIntervalSecs;
-        GRADIENT_GC_DEEP_PACE_MS = toString cfg.gc.deepPaceMs;
-        GRADIENT_EVAL_MAX_KEEP = toString cfg.eval.maxKeep;
-        GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES = toString cfg.eval.cache.maxTotalBytes;
-        GRADIENT_EVAL_CACHE_MAX_AGE_DAYS = toString cfg.eval.cache.maxAgeDays;
-        GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS = toString cfg.eval.cache.sweepIntervalSecs;
-        GRADIENT_BUILD_MAX_ATTEMPTS = toString cfg.build.maxAttempts;
-        GRADIENT_BUILD_SUBSTITUTE_MISS_ESCALATION_THRESHOLD = toString cfg.build.substituteMissEscalationThreshold;
-        GRADIENT_BUILD_INPUTS_UNAVAILABLE_MAX_LOOPS = toString cfg.build.inputsUnavailableMaxLoops;
-        GRADIENT_BUILD_RETRY_BACKOFF_SECS = toString cfg.build.retryBackoffSecs;
-        GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS = toString cfg.build.defaultTimeoutSecs;
-        GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS = toString cfg.build.defaultMaxSilentSecs;
-        GRADIENT_SCHEDULER_CLUSTER_PREPARE_TIMEOUT_SECS = toString cfg.scheduler.clusterPrepareTimeoutSecs;
-        GRADIENT_SCHEDULER_CLUSTER_RESERVE_AFTER_SECS = toString cfg.scheduler.clusterReserveAfterSecs;
-        GRADIENT_SCHEDULER_CLUSTER_RESERVE_TIMEOUT_SECS = toString cfg.scheduler.clusterReserveTimeoutSecs;
-        GRADIENT_SCHEDULER_SCORING_POLICY = cfg.scheduler.scoringPolicy;
-        GRADIENT_METRICS_ROLLUP_INTERVAL_SECS = toString cfg.metrics.rollupIntervalSecs;
-        GRADIENT_METRICS_RETENTION_RAW_DAYS = toString cfg.metrics.retention.rawDays;
-        GRADIENT_METRICS_RETENTION_ROLLUP_DAYS = toString cfg.metrics.retention.rollupDays;
-        GRADIENT_METRICS_LABEL_TOPN = toString cfg.metrics.labelTopn;
-        GRADIENT_METRICS_CACHE_FLUSH_INTERVAL_SECS = toString cfg.metrics.cacheFlushIntervalSecs;
-        GRADIENT_METRICS_WORKER_SAMPLE_INTERVAL_SECS = toString cfg.metrics.workerSampleIntervalSecs;
-        GRADIENT_METRICS_INSTANCE_INTERVAL_SECS = toString cfg.metrics.instanceIntervalSecs;
-        GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS = toString cfg.metrics.graphConsistencyIntervalSecs;
-        GRADIENT_METRICS_OTLP_PUSH_INTERVAL_SECS = toString cfg.metrics.otlp.pushIntervalSecs;
-        GRADIENT_LOG_LEVEL_DEFAULT = cfg.log.level.default;
-        GRADIENT_LOG_CHUNK_BYTES = toString cfg.log.chunkBytes;
-        GRADIENT_OIDC_ENABLE = lib.boolToString cfg.oidc.enable;
-        GRADIENT_SCIM_ENABLE = lib.boolToString cfg.scim.enable;
-      } // lib.optionalAttrs (cfg.frontend.logoUrl != null) {
-        GRADIENT_FRONTEND_LOGO_URL = cfg.frontend.logoUrl;
-      } // lib.optionalAttrs (cfg.pullRequests.commitName != null) {
-        GRADIENT_PULL_REQUESTS_COMMIT_NAME = cfg.pullRequests.commitName;
-      } // lib.optionalAttrs (cfg.pullRequests.commitEmail != null) {
-        GRADIENT_PULL_REQUESTS_COMMIT_EMAIL = cfg.pullRequests.commitEmail;
-      } // lib.optionalAttrs (cfg.sentry.dsn != null) {
-        GRADIENT_SENTRY_DSN = cfg.sentry.dsn;
-      } // lib.optionalAttrs (cfg.log.traceDir != null) {
-        GRADIENT_LOG_TRACE_DIR = cfg.log.traceDir;
-      } // lib.optionalAttrs (cfg.log.level.cache != null) {
-        GRADIENT_LOG_LEVEL_CACHE = cfg.log.level.cache;
-      } // lib.optionalAttrs (cfg.log.level.web != null) {
-        GRADIENT_LOG_LEVEL_WEB = cfg.log.level.web;
-      } // lib.optionalAttrs (cfg.log.level.proto != null) {
-        GRADIENT_LOG_LEVEL_PROTO = cfg.log.level.proto;
-      } // lib.optionalAttrs (cfg.log.level.scheduler != null) {
-        GRADIENT_LOG_LEVEL_SCHEDULER = cfg.log.level.scheduler;
       } // lib.optionalAttrs cfg.oidc.enable {
-        GRADIENT_OIDC_CLIENT_ID = cfg.oidc.clientId;
         GRADIENT_OIDC_CLIENT_SECRET_FILE = "%d/gradient_oidc_client_secret";
-        GRADIENT_OIDC_SCOPES = builtins.concatStringsSep " " cfg.oidc.scopes;
-        GRADIENT_OIDC_DISCOVERY_URL = cfg.oidc.discoveryUrl;
-        GRADIENT_OIDC_REQUIRED = lib.boolToString cfg.oidc.required;
       } // lib.optionalAttrs cfg.scim.enable {
         GRADIENT_SCIM_TOKEN_FILE = "%d/gradient_scim_token";
-        GRADIENT_SCIM_HARD_DELETE = lib.boolToString cfg.scim.hardDelete;
       } // lib.optionalAttrs cfg.email.enable {
-        GRADIENT_EMAIL_ENABLE = lib.boolToString cfg.email.enable;
-        GRADIENT_EMAIL_REQUIRE_VERIFICATION = lib.boolToString cfg.email.requireVerification;
-        GRADIENT_EMAIL_SMTP_HOST = cfg.email.smtp.host;
-        GRADIENT_EMAIL_SMTP_PORT = toString cfg.email.smtp.port;
-        GRADIENT_EMAIL_SMTP_USERNAME = cfg.email.smtp.username;
         GRADIENT_EMAIL_SMTP_PASSWORD_FILE = "%d/gradient_email_smtp_password";
-        GRADIENT_EMAIL_SMTP_USE_TLS = lib.boolToString cfg.email.smtp.useTls;
-        GRADIENT_EMAIL_FROM_ADDRESS = cfg.email.from.address;
-        GRADIENT_EMAIL_FROM_NAME = cfg.email.from.name;
-      } // lib.optionalAttrs cfg.s3.enable {
-        GRADIENT_S3_BUCKET = cfg.s3.bucket;
-        GRADIENT_S3_REGION = cfg.s3.region;
-        GRADIENT_S3_PREFIX = cfg.s3.prefix;
-        GRADIENT_S3_VIRTUAL_HOSTED_STYLE = lib.boolToString cfg.s3.virtualHostedStyle;
-        GRADIENT_S3_READ_TIMEOUT_SECS = toString cfg.s3.readTimeoutSecs;
-        GRADIENT_S3_MAX_RETRIES = toString cfg.s3.maxRetries;
-        GRADIENT_S3_RETRY_TIMEOUT_SECS = toString cfg.s3.retryTimeoutSecs;
-      } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.endpoint != null) {
-        GRADIENT_S3_ENDPOINT = cfg.s3.endpoint;
-      } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.accessKeyId != null) {
-        GRADIENT_S3_ACCESS_KEY_ID = cfg.s3.accessKeyId;
       } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) {
         GRADIENT_S3_SECRET_ACCESS_KEY_FILE = "%d/gradient_s3_secret_access_key";
       } // lib.optionalAttrs cfg.githubApp.enable {
-        GRADIENT_GITHUB_APP_ID = toString cfg.githubApp.id;
         GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE = "%d/gradient_github_app_private_key";
         GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE = "%d/gradient_github_app_webhook_secret";
-      } // lib.optionalAttrs cfg.ssh.enable {
-        GRADIENT_SSH_ENABLE = "true";
-        GRADIENT_SSH_LISTEN_ADDRESS = cfg.ssh.listenAddress;
-        GRADIENT_SSH_PORT = toString cfg.ssh.port;
       } // lib.optionalAttrs (cfg.ssh.enable && cfg.ssh.hostKeyFile != null) {
         GRADIENT_SSH_HOST_KEY_FILE = "%d/gradient_ssh_host_key";
       } // lib.optionalAttrs (cfg.metrics.tokenFile != null) {
         GRADIENT_METRICS_TOKEN_FILE = "%d/gradient_metrics_token";
-      } // lib.optionalAttrs (cfg.metrics.otlp.endpoint != null) {
-        GRADIENT_METRICS_OTLP_ENDPOINT = cfg.metrics.otlp.endpoint;
-      } // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
+      } // serverOptions.environment cfg // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
     };
 
     services = {
