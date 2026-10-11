@@ -345,7 +345,7 @@
 | `worker.eval.forkWorkers` | null or (positive int) | `null` | `GRADIENT_WORKER_EVAL_FORK_WORKERS` | Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` sizes the pool to the host's core count, capped at 16. |
 | `worker.eval.maxConcurrent` | positive int | `1` | `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` | Maximum simultaneous evaluations. |
 | `worker.eval.maxRss` | positive int | `2147483648` | `GRADIENT_WORKER_EVAL_MAX_RSS` | Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit restart after their call and free the Nix heap. A call may grow past the limit, with `worker.system.minFreeRamMb` as the host's guard. Keep it above a typical evaluation's heap. |
-| `worker.eval.metrics` | bool | `true` | - | Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots, flake graph). Disabling it removes their overhead. |
+| `worker.eval.metrics` | bool | `true` | `GRADIENT_WORKER_EVAL_METRICS` | Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots, flake graph). Disabling it removes their overhead. |
 
 ## `worker.log`
 

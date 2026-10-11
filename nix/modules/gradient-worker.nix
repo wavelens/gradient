@@ -11,6 +11,14 @@
     specs = builtins.fromJSON (builtins.readFile ../../backend/gradient-worker/options.json);
     subGroups = { eval = [ "cache" ]; log = [ "level" ]; };
     emptyListIsUnset = true;
+
+    examples = {
+      endpoint = "10.0.0.7:7000";
+      id = "550e8400-e29b-41d4-a716-446655440001";
+      zone = "fra1";
+      log.traceDir = "/var/lib/gradient-worker/trace";
+    };
+
     withoutEnvironment = [ [ "peers" ] [ "nixBin" ] [ "sshBin" ] [ "evalSubprocess" ] [ "evalDriver" ] ];
 
     writtenByHand = [
@@ -196,18 +204,6 @@ in {
       };
     };
 
-    eval = {
-      metrics = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = ''
-          Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots,
-          flake graph). Disabling it removes their overhead.
-        '';
-      };
-
-    };
-
     build = {
       metrics = lib.mkOption {
         type = lib.types.bool;
@@ -387,7 +383,6 @@ in {
           RUST_LOG = cfg.log.level.default;
           GRADIENT_WORKER_NIX_BIN = lib.getExe' cfg.packages.nix "nix";
           GRADIENT_WORKER_SSH_BIN = lib.getExe' cfg.packages.ssh "ssh";
-          GRADIENT_WORKER_EVAL_METRICS = lib.boolToString cfg.eval.metrics;
         } // lib.optionalAttrs (cfg.peersFile != null) {
           GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
         } // lib.optionalAttrs (cfg.acceptedServerTokensFile != null) {
