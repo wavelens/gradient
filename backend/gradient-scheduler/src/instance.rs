@@ -676,7 +676,8 @@ pub async fn compute_eval_history(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::Value;
     use std::collections::BTreeMap;
 
     #[tokio::test]
@@ -735,7 +736,7 @@ mod tests {
             .collect();
         let compression: BTreeMap<String, Value> = [f("ratio", 0.4)].into_iter().collect();
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![metric]])
             .append_query_results([vec![assignment_id]])
             .append_query_results([vec![storage]])
@@ -844,7 +845,7 @@ mod tests {
         .into_iter()
         .collect();
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();

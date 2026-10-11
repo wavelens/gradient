@@ -3,18 +3,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::cli::test_cli;
-use crate::fakes::email::InMemoryEmailSender;
 use crate::log_storage::{InMemoryLogStorage, NoopLogStorage};
+use crate::state::TestState;
 use futures::TryStreamExt as _;
 use gradient_core::ServerState;
-use gradient_db::{WebDb, WorkerDb};
-use gradient_notify::EmailSender;
-use gradient_storage::NarStore;
+use gradient_fixtures::mock::mock_db;
 use gradient_types::ids::*;
-use gradient_types::{RuntimeConfig, SecretString};
 use harmonia_file_nar::NarByteStream;
-use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -112,7 +107,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         ..Default::default()
     };
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row]])
         .append_query_results([vec![drv_output_row]])
         .append_query_results([vec![cached_path_row]])
@@ -120,49 +115,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .into_connection();
 
-    let cli = test_cli();
-    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
-
-    Arc::new(ServerState {
-        web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(
-            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-        ),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config,
-        log_storage: Arc::new(NoopLogStorage),
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http client"),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-    })
+    TestState::new().web_db(db).build()
 }
 
 pub async fn public_cache_state() -> Arc<ServerState> {
@@ -180,53 +133,11 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         ..Default::default()
     };
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row]])
         .into_connection();
 
-    let cli = test_cli();
-    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
-
-    Arc::new(ServerState {
-        web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(
-            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-        ),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config,
-        log_storage: Arc::new(NoopLogStorage),
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http client"),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-    })
+    TestState::new().web_db(db).build()
 }
 
 pub async fn public_cache_with_nar() -> Arc<ServerState> {
@@ -252,55 +163,13 @@ async fn public_cache_storing_nar(served: bool) -> Arc<ServerState> {
         ..Default::default()
     };
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row]])
         .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .append_query_results([served_gate(served)])
         .into_connection();
 
-    let cli = test_cli();
-    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
-
-    let state = Arc::new(ServerState {
-        web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(
-            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-        ),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config,
-        log_storage: Arc::new(NoopLogStorage),
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http client"),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-    });
+    let state = TestState::new().web_db(db).build();
 
     let compressed = synthetic_nar_zst().await;
     state
@@ -382,48 +251,7 @@ fn make_state(
     db: sea_orm::DatabaseConnection,
     log_storage: Arc<dyn gradient_storage::LogStorage>,
 ) -> Arc<ServerState> {
-    let cli = test_cli();
-    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
-    Arc::new(ServerState {
-        web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(
-            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-        ),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config,
-        log_storage,
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http client"),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-    })
+    TestState::new().web_db(db).log_storage(log_storage).build()
 }
 
 pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String) {
@@ -432,7 +260,7 @@ pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String)
     let log_storage = Arc::new(InMemoryLogStorage::new());
     log_storage.seed(attempt_id(), log_body.clone());
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
         .append_query_results([vec![shared_build_row(
@@ -445,7 +273,7 @@ pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String)
 }
 
 pub async fn cache_with_completed_build_not_in_cache() -> Arc<ServerState> {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([Vec::<gradient_entity::derivation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::cache_upstream::Model>::new()])
@@ -455,7 +283,7 @@ pub async fn cache_with_completed_build_not_in_cache() -> Arc<ServerState> {
 }
 
 pub async fn cache_with_failed_build_only() -> Arc<ServerState> {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
         .append_query_results([Vec::<gradient_entity::derivation_build::Model>::new()])
@@ -466,57 +294,15 @@ pub async fn cache_with_failed_build_only() -> Arc<ServerState> {
 }
 
 pub async fn private_cache_state() -> Arc<ServerState> {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row_with_visibility(false)]])
         .into_connection();
 
-    let cli = test_cli();
-    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
-
-    Arc::new(ServerState {
-        web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(
-            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-        ),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config,
-        log_storage: Arc::new(NoopLogStorage),
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http client"),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-    })
+    TestState::new().web_db(db).build()
 }
 
 pub async fn cache_with_unknown_derivation() -> Arc<ServerState> {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([Vec::<gradient_entity::derivation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::cache_upstream::Model>::new()])
@@ -530,7 +316,7 @@ pub async fn cache_with_two_completed_builds() -> (Arc<ServerState>, String) {
     let log_storage = Arc::new(InMemoryLogStorage::new());
     log_storage.seed(attempt_id(), newer_log.clone());
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
         .append_query_results([vec![shared_build_row(
@@ -543,54 +329,12 @@ pub async fn cache_with_two_completed_builds() -> (Arc<ServerState>, String) {
 }
 
 pub async fn private_cache_with_nar() -> Arc<ServerState> {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row_with_visibility(false)]])
         .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .into_connection();
 
-    let cli = test_cli();
-    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
-
-    let state = Arc::new(ServerState {
-        web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(
-            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-        ),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config,
-        log_storage: Arc::new(NoopLogStorage),
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http client"),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-    });
+    let state = TestState::new().web_db(db).build();
 
     let compressed = synthetic_nar_zst().await;
     state
@@ -638,7 +382,7 @@ pub async fn public_cache_empty_nars() -> Arc<ServerState> {
     let mut count_row: BTreeMap<&'static str, Value> = BTreeMap::new();
     count_row.insert("total", Value::BigInt(Some(0)));
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![count_row]])
         .append_query_results([Vec::<BTreeMap<&'static str, Value>>::new()])
@@ -647,14 +391,14 @@ pub async fn public_cache_empty_nars() -> Arc<ServerState> {
 }
 
 pub async fn private_cache_for_nars() -> Arc<ServerState> {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row_with_visibility(false)]])
         .into_connection();
     make_state(db, Arc::new(NoopLogStorage))
 }
 
 pub async fn public_cache_with_one_nar() -> Arc<ServerState> {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![cached_path_row_fixture()]])
         .append_query_results([vec![cached_path_sig_row_fixture()]])
@@ -682,7 +426,7 @@ pub async fn public_cache_list_one_signed_nar() -> Arc<ServerState> {
     nar_row.insert("created_at", Value::ChronoDateTime(Some(test_date())));
     nar_row.insert("last_fetched_at", Value::ChronoDateTime(Some(test_date())));
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![count_row]])
         .append_query_results([vec![nar_row]])
@@ -691,7 +435,7 @@ pub async fn public_cache_list_one_signed_nar() -> Arc<ServerState> {
 }
 
 pub async fn public_cache_with_path_no_signature() -> Arc<ServerState> {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![cached_path_row_fixture()]])
         .append_query_results([Vec::<gradient_entity::cached_path_signature::Model>::new()])
@@ -700,7 +444,7 @@ pub async fn public_cache_with_path_no_signature() -> Arc<ServerState> {
 }
 
 pub async fn public_cache_available_true() -> Arc<ServerState> {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![cached_path_row_fixture()]])
         .append_query_results([vec![cached_path_sig_row_fixture()]])
@@ -709,7 +453,7 @@ pub async fn public_cache_available_true() -> Arc<ServerState> {
 }
 
 pub async fn public_cache_available_false() -> Arc<ServerState> {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .into_connection();
@@ -717,7 +461,7 @@ pub async fn public_cache_available_false() -> Arc<ServerState> {
 }
 
 pub async fn private_cache_with_completed_build_in_cache() -> Arc<ServerState> {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row_with_visibility(false)]])
         .into_connection();
 

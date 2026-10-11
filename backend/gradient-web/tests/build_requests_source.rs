@@ -4,24 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
-)]
-
 use axum::http::StatusCode;
 use axum_test::multipart::{MultipartForm, Part};
 use chrono::Utc;
 use gradient_entity::ids::*;
 use gradient_entity::role;
-use gradient_test_support::fixtures::{project_id, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_fixtures::ids::{project_id, user_id};
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::project_member;
+use gradient_test_support::web::{make_test_server, make_token, with_auth};
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
 use gradient_types::permissions::PermissionMask;
 use gradient_types::{ConcurrencyPolicy, SessionId};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::Value;
-use uuid::Uuid;
 
 fn write_role_row() -> role::Model {
     role::Model {
@@ -32,25 +28,9 @@ fn write_role_row() -> role::Model {
     }
 }
 
-fn membership() -> gradient_entity::project_user::Model {
-    gradient_entity::project_user::Model {
-        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap()),
-        project: project_id(),
-        user: user_id(),
-        role: BASE_ROLE_WRITE_ID,
-    }
-}
-
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
 fn with_project_access(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([vec![gradient_test_support::fixtures::project()]])
-        .append_query_results([vec![membership()]])
+    db.append_query_results([vec![gradient_fixtures::rows::project()]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role_row()]])
 }
 
@@ -114,27 +94,24 @@ async fn source_upload_creates_queued_eval() {
     let commit_model = commit_row();
     let eval_model = eval_row(task_id, commit_model.id);
 
-    let db = with_project_access(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([Vec::<gradient_entity::task::Model>::new()])
-    .append_query_results([vec![task_model.clone()]])
-    .append_exec_results([MockExecResult {
-        last_insert_id: 0,
-        rows_affected: 1,
-    }])
-    .append_query_results([vec![commit_model.clone()]])
-    .append_exec_results([MockExecResult {
-        last_insert_id: 0,
-        rows_affected: 1,
-    }])
-    .append_query_results([vec![eval_model.clone()]])
-    .append_exec_results([MockExecResult {
-        last_insert_id: 0,
-        rows_affected: 1,
-    }])
-    .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()]);
+    let db = with_project_access(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<gradient_entity::task::Model>::new()])
+        .append_query_results([vec![task_model.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([vec![commit_model.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([vec![eval_model.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()]);
 
     let server = make_test_server(db.into_connection());
 
@@ -164,10 +141,7 @@ async fn source_upload_missing_nar_is_400() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_project_access(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ));
+    let db = with_project_access(with_auth(mock_db(), session_id));
 
     let server = make_test_server(db.into_connection());
 

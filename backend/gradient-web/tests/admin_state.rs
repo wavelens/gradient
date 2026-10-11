@@ -5,10 +5,11 @@
  */
 
 use axum::http::{Method, StatusCode};
-use gradient_test_support::fixtures::user;
-use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::{live_session, user};
+use gradient_test_support::web::{make_test_server, make_token};
 use gradient_types::SessionId;
-use sea_orm::{DatabaseBackend, MockDatabase};
+use sea_orm::MockDatabase;
 use serde_json::Value;
 
 fn superuser() -> gradient_entity::user::Model {
@@ -69,11 +70,7 @@ async fn admin_routes_reject_non_superuser() {
 
     for (method, route) in routes {
         let session_id = SessionId::now_v7();
-        let db = with_user(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-            user(),
-        );
+        let db = with_user(mock_db(), session_id, user());
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -92,11 +89,7 @@ async fn admin_routes_reject_non_superuser() {
 async fn export_state_rejects_unknown_format() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
-    let db = with_user(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-        superuser(),
-    );
+    let db = with_user(mock_db(), session_id, superuser());
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -111,11 +104,7 @@ async fn export_state_rejects_unknown_format() {
 async fn export_state_json_returns_empty_shape() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
-    let db = with_empty_export(with_user(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-        superuser(),
-    ));
+    let db = with_empty_export(with_user(mock_db(), session_id, superuser()));
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -148,11 +137,7 @@ async fn export_state_json_returns_empty_shape() {
 async fn export_state_defaults_to_nix() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
-    let db = with_empty_export(with_user(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-        superuser(),
-    ));
+    let db = with_empty_export(with_user(mock_db(), session_id, superuser()));
 
     let server = make_test_server(db.into_connection());
     let res = server

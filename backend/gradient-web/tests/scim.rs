@@ -6,21 +6,14 @@
 
 use axum::http::StatusCode;
 use axum_test::TestServer;
-use gradient_core::ServerState;
-use gradient_db::{WebDb, WorkerDb};
 use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 use gradient_entity::{team, team_user, user};
-use gradient_notify::EmailSender;
-use gradient_storage::NarStore;
-use gradient_test_support::cli::test_cli;
-use gradient_test_support::fakes::email::InMemoryEmailSender;
-use gradient_test_support::log_storage::NoopLogStorage;
-use gradient_types::{RuntimeConfig, TeamId, TeamUserId, UserId};
-use gradient_web::create_router;
-use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult};
+use gradient_fixtures::mock::{all_statements, empty_db, mock_db};
+use gradient_test_support::state::TestState;
+use gradient_types::{TeamId, TeamUserId, UserId};
+use sea_orm::{DatabaseConnection, MockExecResult};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use uuid::Uuid;
 
 const SCIM_TOKEN: &str = "test-scim-token";
@@ -43,60 +36,20 @@ fn build_server(db: DatabaseConnection, hard_delete: bool) -> TestServer {
     let jwt_path = std::env::temp_dir().join(format!("gradient-scim-jwt-{}", Uuid::now_v7()));
     std::fs::write(&jwt_path, "test-jwt-secret").expect("write jwt secret file");
 
-    let mut cli = test_cli();
-    cli.secrets.jwt_file = jwt_path.to_string_lossy().into_owned();
-    cli.scim.enable = true;
-    cli.scim.token_file = Some(write_token());
-    cli.scim.hard_delete = hard_delete;
-
-    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
-    let state = Arc::new(ServerState {
-        web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(
-            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-        ),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config,
-        log_storage: Arc::new(NoopLogStorage),
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http client"),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-    });
-
-    TestServer::new(create_router(state).expect("router"))
+    TestState::new()
+        .web_db(db)
+        .cli(|cli| {
+            cli.secrets.jwt_file = jwt_path.to_string_lossy().into_owned();
+            cli.scim.enable = true;
+            cli.scim.token_file = Some(write_token());
+            cli.scim.hard_delete = hard_delete;
+        })
+        .server()
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn scim_missing_token_returns_401() {
-    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+    let db = empty_db();
     let s = scim_server(db);
     let res = s.get("/scim/v2/Users").await;
     res.assert_status_unauthorized();
@@ -109,7 +62,7 @@ async fn scim_missing_token_returns_401() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn scim_wrong_token_returns_401() {
-    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+    let db = empty_db();
     let s = scim_server(db);
     let res = s
         .get("/scim/v2/Users")
@@ -144,7 +97,7 @@ fn count_row(num: i64) -> BTreeMap<&'static str, sea_orm::Value> {
 #[tokio::test(flavor = "multi_thread")]
 async fn scim_create_user_returns_201() {
     let created = scim_user("alice@example.com", true);
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<user::Model>::new()])
         .append_query_results([vec![created.clone()]])
         .into_connection();
@@ -170,7 +123,7 @@ async fn scim_create_user_returns_201() {
 #[tokio::test(flavor = "multi_thread")]
 async fn scim_get_user_returns_resource() {
     let u = scim_user("bob@example.com", true);
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![u.clone()]])
         .into_connection();
     let s = scim_server(db);
@@ -188,7 +141,7 @@ async fn scim_get_user_returns_resource() {
 #[tokio::test(flavor = "multi_thread")]
 async fn scim_list_users_with_username_filter() {
     let u = scim_user("carol@example.com", true);
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![count_row(1)]])
         .append_query_results([vec![u.clone()]])
         .into_connection();
@@ -212,7 +165,7 @@ async fn scim_patch_user_active_false() {
         active: false,
         ..u.clone()
     };
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![u.clone()]])
         .append_query_results([vec![disabled]])
         .into_connection();
@@ -236,7 +189,7 @@ async fn scim_delete_user_soft_disables() {
     let u = scim_user("erin@example.com", true);
     // Soft delete is issuing an UPDATE (RETURNING) and never a DELETE exec. Only a query result
     // is staged, and a stray DELETE would fail with no exec staged.
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![u.clone()]])
         .append_query_results([vec![user::Model {
             active: false,
@@ -255,7 +208,7 @@ async fn scim_delete_user_soft_disables() {
 #[tokio::test(flavor = "multi_thread")]
 async fn scim_delete_user_hard_deletes() {
     let u = scim_user("frank@example.com", true);
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![u.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -293,7 +246,7 @@ fn team_member(team: TeamId, user: UserId) -> team_user::Model {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn scim_unknown_group_returns_404() {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<team::Model>::new()])
         .into_connection();
     let res = scim_server(db)
@@ -307,7 +260,7 @@ async fn scim_unknown_group_returns_404() {
 async fn scim_get_group_lists_the_team_members() {
     let team = scim_team();
     let member = UserId::now_v7();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![team.clone()]])
         .append_query_results([vec![team_member(team.id, member)]])
         .into_connection();
@@ -324,7 +277,7 @@ async fn scim_get_group_lists_the_team_members() {
 async fn scim_patch_group_add_member_joins_the_team() {
     let team = scim_team();
     let member = UserId::now_v7();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![team.clone()]])
         .append_query_results([Vec::<team_user::Model>::new()])
         .append_query_results([vec![team_member(team.id, member)]])
@@ -351,7 +304,7 @@ async fn scim_patch_group_add_member_joins_the_team() {
 async fn scim_patch_group_remove_member_leaves_the_team() {
     let team = scim_team();
     let member = UserId::now_v7();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![team.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -372,10 +325,8 @@ async fn scim_patch_group_remove_member_leaves_the_team() {
     let body: Value = res.json();
     assert_eq!(body["members"].as_array().map(Vec::len), Some(0));
     drop(server);
-    let only_group_rows = db
-        .into_transaction_log()
-        .iter()
-        .flat_map(|t| t.statements().to_vec())
+    let only_group_rows = all_statements(db.into_transaction_log())
+        .into_iter()
         .any(|s| s.sql.starts_with("DELETE FROM \"team_user\"") && s.sql.contains("\"source\""));
     assert!(
         only_group_rows,
@@ -398,7 +349,7 @@ async fn inactive_user_session_returns_403() {
         ip: None,
         remember_me: false,
     };
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![session.clone()]])
         .append_query_results([vec![session.clone()]])
         .append_query_results([vec![user.clone()]])

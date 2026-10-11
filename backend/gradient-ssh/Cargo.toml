@@ -54,5 +54,6 @@ tracing                        = { workspace = true }
 uuid                           = { workspace = true }
 
 [dev-dependencies]
+gradient-fixtures = { workspace = true }
 gradient-test-support = { workspace = true }
 harmonia-store-remote = { workspace = true }

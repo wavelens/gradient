@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_fixtures::mock::{empty_db, mock_db};
 use gradient_types::{ActionType, MTaskAction, TaskId};
 use serde_json::json;
 use uuid::Uuid;
@@ -33,9 +34,7 @@ pub fn run<F: std::future::Future>(fut: F) -> F::Output {
 }
 
 pub fn make_ctx() -> crate::CiContext {
-    make_ctx_with(sea_orm::MockDatabase::new(
-        sea_orm::DatabaseBackend::Postgres,
-    ))
+    make_ctx_with(mock_db())
 }
 
 pub fn make_ctx_with(worker: sea_orm::MockDatabase) -> crate::CiContext {
@@ -45,7 +44,6 @@ pub fn make_ctx_with(worker: sea_orm::MockDatabase) -> crate::CiContext {
     use gradient_notify::EmailSender;
     use gradient_storage::{LogStorage, NarStore, StorageCtx};
     use gradient_types::RuntimeConfig;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     #[derive(Debug)]
     struct NoopLog;
@@ -166,7 +164,7 @@ pub fn make_ctx_with(worker: sea_orm::MockDatabase) -> crate::CiContext {
     let nar_storage = NarStore::local(&config.server.base_dir).expect("nar store");
     let db = DbContext {
         worker_db: WorkerDb::new(worker.into_connection()),
-        web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        web_db: WebDb::new(empty_db()),
         config,
         storage: StorageCtx {
             nar_storage,

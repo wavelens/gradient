@@ -1221,7 +1221,8 @@ async fn ready(
 mod tests {
     use super::*;
     use crate::test_ctx::ctx;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::MockExecResult;
 
     #[tokio::test]
     async fn a_canceled_eval_job_puts_its_evaluation_back_in_the_queue() {
@@ -1230,7 +1231,7 @@ mod tests {
             status: EvaluationStatus::EvaluatingFlake,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![evaluating.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -1275,7 +1276,7 @@ mod tests {
             status: BuildStatus::Building,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![building.clone()]])
             .append_query_results([
                 Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
@@ -1356,7 +1357,7 @@ mod tests {
             derivation_build: queued.id,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![queued.clone()]])
             .append_query_results([Vec::<MBuildAttempt>::new()])
             .append_query_results([vec![queued.clone()]])
@@ -1405,7 +1406,7 @@ mod tests {
             status: BuildStatus::Building,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![building.clone()]])
             .into_connection();
         let log_db = db.clone();
@@ -1432,7 +1433,7 @@ mod tests {
     #[tokio::test]
     async fn an_import_requeue_thaws_the_failed_closure_of_the_imported_derivations() {
         let imported = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,

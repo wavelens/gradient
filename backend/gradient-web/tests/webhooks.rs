@@ -11,10 +11,15 @@
 
 use gradient_entity::webhook::WebhookScope;
 use gradient_entity::{ids::*, project_user, role, webhook};
-use gradient_test_support::fixtures::{project, project_id, test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server_with, make_token};
+use gradient_fixtures::ids::{project_id, user_id};
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::project;
+use gradient_fixtures::test_date;
+use gradient_test_support::state::TestState;
+use gradient_test_support::web::{bearer, make_test_server};
+use gradient_test_support::web::{signed_in, with_auth};
 use gradient_types::SessionId;
-use sea_orm::{DatabaseBackend, MockDatabase};
+use sea_orm::MockDatabase;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -60,17 +65,9 @@ fn role_row(id: RoleId, permission: i64) -> role::Model {
     }
 }
 
-fn with_auth(session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
 fn as_project_admin(session_id: SessionId) -> MockDatabase {
     let admin = gradient_types::consts::BASE_ROLE_ADMIN_ID;
-    with_auth(session_id)
+    with_auth(mock_db(), session_id)
         .append_query_results([vec![project()]])
         .append_query_results([vec![membership(admin)]])
         .append_query_results([vec![role_row(
@@ -85,17 +82,16 @@ fn temp_crypt_secret_file() -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn bearer(session_id: SessionId) -> String {
-    format!("Bearer {}", make_token(session_id))
-}
-
 #[tokio::test]
 async fn create_returns_the_secret_once() {
     let session_id = SessionId::now_v7();
     let db = as_project_admin(session_id)
         .append_query_results([Vec::<webhook::Model>::new()])
         .append_query_results([vec![webhook_row()]]);
-    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.secrets.crypt_file = temp_crypt_secret_file())
+        .server();
 
     let res = server
         .post(PROJECT_URL)
@@ -119,7 +115,7 @@ async fn create_returns_the_secret_once() {
 async fn read_webhook_never_returns_the_secret() {
     let session_id = SessionId::now_v7();
     let db = as_project_admin(session_id).append_query_results([vec![webhook_row()]]);
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
 
     let res = server
         .get(&format!("{PROJECT_URL}/{}", webhook_id()))
@@ -135,7 +131,7 @@ async fn read_webhook_never_returns_the_secret() {
 #[tokio::test]
 async fn create_rejects_a_private_url() {
     let session_id = SessionId::now_v7();
-    let server = make_test_server_with(as_project_admin(session_id).into_connection(), None);
+    let server = make_test_server(as_project_admin(session_id).into_connection());
 
     let res = server
         .post(PROJECT_URL)
@@ -149,7 +145,7 @@ async fn create_rejects_a_private_url() {
 #[tokio::test]
 async fn create_rejects_an_unbounded_event_pattern() {
     let session_id = SessionId::now_v7();
-    let server = make_test_server_with(as_project_admin(session_id).into_connection(), None);
+    let server = make_test_server(as_project_admin(session_id).into_connection());
 
     let res = server
         .post(PROJECT_URL)
@@ -162,20 +158,20 @@ async fn create_rejects_an_unbounded_event_pattern() {
 
 #[tokio::test]
 async fn a_view_role_cannot_manage_webhooks() {
-    let session_id = SessionId::now_v7();
+    let (db, auth) = signed_in();
     let view = gradient_types::consts::BASE_ROLE_VIEW_ID;
-    let db = with_auth(session_id)
+    let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![membership(view)]])
         .append_query_results([vec![role_row(
             view,
             gradient_types::permissions::view_mask(),
         )]]);
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
 
     let res = server
         .get(PROJECT_URL)
-        .add_header("authorization", bearer(session_id))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status(axum::http::StatusCode::FORBIDDEN);
@@ -184,7 +180,7 @@ async fn a_view_role_cannot_manage_webhooks() {
 #[tokio::test]
 async fn instance_webhooks_require_a_superuser() {
     let session_id = SessionId::now_v7();
-    let server = make_test_server_with(with_auth(session_id).into_connection(), None);
+    let server = make_test_server(with_auth(mock_db(), session_id).into_connection());
 
     let res = server
         .get("/api/v1/admin/webhooks")

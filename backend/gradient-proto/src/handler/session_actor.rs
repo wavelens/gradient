@@ -489,11 +489,11 @@ mod tests {
     use super::super::sessions::{Sessions, SessionsArgs, SessionsMsg};
     use super::*;
     use futures::{SinkExt, StreamExt};
+    use gradient_fixtures::mock::empty_db;
     use gradient_test_support::prelude::*;
     use gradient_wire::PROTO_VERSIONS;
     use gradient_wire::codec::{from_bytes, to_bytes};
     use ractor::rpc::CallResult;
-    use sea_orm::{DatabaseBackend, MockDatabase};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::Notify;
     use tokio_tungstenite::tungstenite::Message;
@@ -587,7 +587,7 @@ mod tests {
     #[tokio::test]
     async fn an_abort_cluster_signal_reaches_the_worker() {
         let (socket, mut client) = connected_pair().await;
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
         scheduler.spawn_core(None).await.unwrap();
         let (actor, _join) = Actor::spawn(
@@ -633,7 +633,7 @@ mod tests {
     #[tokio::test]
     async fn stopping_the_sessions_closes_every_socket_without_a_draining_frame() {
         let (socket, mut client) = connected_pair().await;
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
         scheduler.spawn_core(None).await.unwrap();
         let (sessions, sessions_join) = Actor::spawn(
@@ -684,7 +684,7 @@ mod tests {
     #[tokio::test]
     async fn the_reader_stamps_liveness_on_receipt() {
         let (socket, mut client) = connected_pair().await;
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let (reader, _writer) = socket.split(Duration::from_secs(5), &state.shutdown);
         let (session, join) = Actor::spawn(None, DecliningSession, ()).await.unwrap();
         let last_seen = Arc::new(AtomicI64::new(0));
@@ -715,7 +715,7 @@ mod tests {
     #[tokio::test]
     async fn the_reader_keeps_stamping_while_a_frame_is_in_flight() {
         let (socket, mut client) = connected_pair().await;
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let (reader, _writer) = socket.split(Duration::from_secs(5), &state.shutdown);
         let received = Arc::new(Notify::new());
         let (session, join) = Actor::spawn(None, HoldingSession, Arc::clone(&received))
@@ -755,7 +755,7 @@ mod tests {
     #[tokio::test]
     async fn a_cache_query_is_served_while_an_earlier_frame_is_held() {
         let (socket, mut client) = connected_pair().await;
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let (reader, _writer) = socket.split(Duration::from_secs(5), &state.shutdown);
         let received = Arc::new(Notify::new());
         let (session, join) = Actor::spawn(None, HoldingSession, Arc::clone(&received))

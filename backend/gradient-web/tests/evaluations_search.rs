@@ -6,10 +6,12 @@
 
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::{commit, evaluation, ids::*, project, task};
-use gradient_test_support::fixtures::{commit_id, project_id, task_id, test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_fixtures::ids::{commit_id, project_id, task_id, user_id};
+use gradient_fixtures::mock::{all_statements, mock_db};
+use gradient_fixtures::test_date;
+use gradient_test_support::web::{make_test_server, make_token, with_auth};
 use gradient_types::{ConcurrencyPolicy, SessionId};
-use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, Statement};
+use sea_orm::MockDatabase;
 use serde_json::Value;
 
 const COMMIT_HEX: &str = "1111111111111111111111111111111111111111";
@@ -70,13 +72,6 @@ fn eval_row(id: EvaluationId, wildcard: &str, status: EvaluationStatus) -> evalu
     }
 }
 
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
 fn with_task(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![public_project()]])
         .append_query_results([vec![task_row()]])
@@ -90,10 +85,7 @@ fn with_summary_rollups(db: MockDatabase) -> MockDatabase {
 }
 
 fn base_db(session_id: SessionId) -> MockDatabase {
-    with_task(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
+    with_task(with_auth(mock_db(), session_id))
 }
 
 const URL: &str = "/api/v1/tasks/test-project/test-task/evaluations";
@@ -223,13 +215,6 @@ async fn attr_filter_matches_queued_evaluation() {
     assert_eq!(rows[0]["commit"], COMMIT_HEX);
 }
 
-fn statements(db: DatabaseConnection) -> Vec<Statement> {
-    db.into_transaction_log()
-        .iter()
-        .flat_map(|t| t.statements().to_vec())
-        .collect()
-}
-
 #[tokio::test]
 async fn before_an_evaluation_of_another_task_is_not_found() {
     let session_id = SessionId::now_v7();
@@ -267,7 +252,9 @@ async fn before_pages_to_evaluations_older_than_the_cursor() {
 
     res.assert_status_ok();
     drop(server);
-    let page = statements(db).pop().expect("page query");
+    let page = all_statements(db.into_transaction_log())
+        .pop()
+        .expect("page query");
     assert!(
         page.sql.contains(r#""evaluation"."created_at" < $"#),
         "page must stop at the cursor: {}",

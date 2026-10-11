@@ -132,8 +132,8 @@ pub enum WriteNeeded {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_types::ids::{CacheId, CachedPathId};
-    use sea_orm::{DatabaseBackend, MockDatabase};
     use uuid::Uuid;
 
     fn temp_store() -> NarStore {
@@ -172,7 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_store_path_bails_before_any_io() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let store = temp_store();
         let err = import_nar_reader(
             &db,
@@ -202,7 +202,7 @@ mod tests {
     async fn an_identical_stored_nar_is_not_written_again() {
         let store = temp_store();
         store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row_with_file_hash("sha256:abc")]])
             .into_connection();
 
@@ -213,7 +213,7 @@ mod tests {
     #[tokio::test]
     async fn a_path_without_a_row_is_written() {
         let store = temp_store();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
 
@@ -225,7 +225,7 @@ mod tests {
     async fn a_stored_path_with_other_content_is_never_overwritten() {
         let store = temp_store();
         store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row_with_file_hash("sha256:different")]])
             .into_connection();
 
@@ -236,7 +236,7 @@ mod tests {
     #[tokio::test]
     async fn an_identical_row_whose_object_is_gone_is_written_again() {
         let store = temp_store();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row_with_file_hash("sha256:abc")]])
             .into_connection();
 
@@ -249,7 +249,7 @@ mod tests {
         use sea_orm::{DbErr, RuntimeErr};
         let store = temp_store();
         store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_errors(vec![DbErr::Conn(RuntimeErr::Internal(
                 "Connection pool timed out".to_string(),
             ))])

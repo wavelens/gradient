@@ -259,10 +259,11 @@ pub(crate) async fn abandon_open<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Statement};
+    use gradient_fixtures::mock::{empty_db, mock_db};
+    use sea_orm::{MockDatabase, MockExecResult, Statement};
 
     fn closed_rows(rows_affected: u64) -> MockDatabase {
-        MockDatabase::new(DatabaseBackend::Postgres).append_exec_results([MockExecResult {
+        mock_db().append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected,
         }])
@@ -376,7 +377,7 @@ mod tests {
                 ("id", sea_orm::Value::from(job.into_inner())),
             ])
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row(older), row(newer)]])
             .into_connection();
 
@@ -453,7 +454,7 @@ mod tests {
 
     #[tokio::test]
     async fn startup_recovery_closes_a_backlog_one_chunk_per_statement() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([
                 MockExecResult {
                     last_insert_id: 0,
@@ -507,7 +508,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_assignments_means_no_statement() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
 
         let closed = abandon_open_assignments(&db, &[]).await.expect("no-op");
 
@@ -572,7 +573,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_job_keys_means_no_statement() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
 
         let closed = abandon_open_assignments_for_jobs(&db, &[])
             .await

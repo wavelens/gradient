@@ -207,8 +207,8 @@ pub async fn unwalk_derivations(
 mod tests {
     use super::*;
     use crate::graph::can_start::test_rows::{exec, norm, transition_row};
-    use crate::pool::statements;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use gradient_fixtures::mock::{mock_db, raw_statements, statements};
+    use sea_orm::Value;
     use std::collections::BTreeMap;
 
     #[test]
@@ -263,7 +263,7 @@ mod tests {
     #[tokio::test]
     async fn unpromote_ungated_moves_queued_rows_back_to_created() {
         let d = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![transition_row(
                 d,
                 i32::from(BuildStatus::Queued),
@@ -309,7 +309,7 @@ mod tests {
     #[tokio::test]
     async fn an_unwalk_moves_the_counter_before_it_reaches_the_shared_builds() {
         let gone = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(1), exec(0)])
             .append_query_results([vec![BTreeMap::from([(
                 "id".to_owned(),
@@ -323,7 +323,7 @@ mod tests {
         unwalk_derivations(&ctx, &[gone]).await.unwrap();
         drop(ctx);
 
-        let log = crate::pool::raw_statements(pool.into_transaction_log());
+        let log = raw_statements(pool.into_transaction_log());
         let at = |needle: &str| {
             log.iter()
                 .position(|s| s.sql.contains(needle))

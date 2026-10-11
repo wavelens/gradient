@@ -7,9 +7,10 @@
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_entity::{cache, cache_upstream, ids::*};
-use gradient_test_support::fixtures::{test_date, user_id};
+use gradient_fixtures::ids::user_id;
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::test_date;
 use gradient_test_support::web::make_test_server;
-use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::Value;
 
 const NIXOS_KEY: &str = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=";
@@ -46,7 +47,7 @@ fn upstream_row(cache_id: CacheId) -> cache_upstream::Model {
 async fn anonymous_lists_public_cache_upstream_keys() {
     let cache = cache_row(true);
     let upstream = upstream_row(cache.id);
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache]])
         .append_query_results([vec![upstream]]);
 
@@ -62,7 +63,7 @@ async fn anonymous_lists_public_cache_upstream_keys() {
 #[tokio::test]
 async fn anonymous_cannot_list_private_upstream_caches() {
     let cache = cache_row(false);
-    let db = MockDatabase::new(DatabaseBackend::Postgres).append_query_results([vec![cache]]);
+    let db = mock_db().append_query_results([vec![cache]]);
 
     let server = make_test_server(db.into_connection());
     let res = server.get("/api/v1/caches/main/upstream-caches").await;

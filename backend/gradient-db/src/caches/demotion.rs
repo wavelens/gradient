@@ -205,6 +205,7 @@ async fn parents_of_hash<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::{mock_db, statements};
 
     fn present_nar(hash: &str) -> (tempfile::TempDir, std::path::PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
@@ -217,12 +218,10 @@ mod tests {
 
     #[tokio::test]
     async fn demote_preserves_a_present_producerless_object() {
-        use sea_orm::{DatabaseBackend, MockDatabase};
-
         let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
         let (tmp, file) = present_nar(hash);
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])
             .into_connection();
         let (ctx, _pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -241,7 +240,7 @@ mod tests {
     #[tokio::test]
     async fn an_invalidation_deletes_a_present_output_object() {
         use gradient_types::ids::{DerivationId, DerivationOutputId};
-        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+        use sea_orm::{MockExecResult, Value};
         use std::collections::BTreeMap;
 
         let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
@@ -259,7 +258,7 @@ mod tests {
         let deleted = BTreeMap::from([("hash".to_owned(), Value::from(hash.to_owned()))]);
         let none = Vec::<BTreeMap<String, Value>>::new();
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![output.clone()], vec![output]])
             .append_query_results([
                 vec![producer_row],
@@ -288,7 +287,7 @@ mod tests {
         assert_eq!(producers.len(), 1, "the output's producer is returned");
         assert!(!file.exists(), "demote must delete the output's NAR object");
         drop(ctx);
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert!(
             log.iter().any(|s| s.contains("DELETE FROM cached_path")),
             "the row must be retired, so the counters it backed move with it: {log:?}"
@@ -358,7 +357,6 @@ mod tests {
     #[tokio::test]
     async fn a_reported_missing_output_stays_while_its_object_is_present() {
         use gradient_types::ids::{DerivationId, DerivationOutputId};
-        use sea_orm::{DatabaseBackend, MockDatabase};
 
         let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
         let (tmp, file) = present_nar(hash);
@@ -369,7 +367,7 @@ mod tests {
             is_cached: true,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![output]])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -387,7 +385,7 @@ mod tests {
             "a worker's outdated view of the cache deletes no object"
         );
         drop(ctx);
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
             1,
@@ -398,7 +396,7 @@ mod tests {
     #[tokio::test]
     async fn demote_of_a_hash_with_no_row_still_resets_its_producer() {
         use gradient_types::ids::{DerivationId, DerivationOutputId};
-        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+        use sea_orm::{MockExecResult, Value};
         use std::collections::BTreeMap;
 
         let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
@@ -415,7 +413,7 @@ mod tests {
 
         let none = Vec::<BTreeMap<String, Value>>::new();
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![output.clone()], vec![output]])
             .append_query_results([
                 vec![drv_row.clone()],
@@ -444,7 +442,7 @@ mod tests {
             .unwrap();
 
         drop(ctx);
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
             21,

@@ -50,8 +50,8 @@ pub async fn worker_ids_for_project<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::mock_db;
     use gradient_types::ids::{UserId, WorkerRegistrationId};
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     fn registration_row(
         active: bool,
@@ -72,7 +72,7 @@ mod tests {
 
     #[tokio::test]
     async fn returns_true_when_eval_capable_registration_exists() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![registration_row(true, true)]])
             .into_connection();
 
@@ -84,7 +84,7 @@ mod tests {
 
     #[tokio::test]
     async fn returns_false_when_no_registrations_exist() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
             .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
             .into_connection();
@@ -101,7 +101,7 @@ mod tests {
 
         let team = gradient_types::ids::TeamId::now_v7();
         let registered = registration_row(true, true);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![registered.clone()]])
             .append_query_results([vec![team_project::Model {
                 team,

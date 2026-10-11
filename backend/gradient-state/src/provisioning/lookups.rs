@@ -76,16 +76,12 @@ impl<'a> StateApplicator<'a> {
 #[cfg(test)]
 mod inbound_integration_lookup_tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
-    use uuid::Uuid;
-
-    pub(crate) fn project_id() -> ProjectId {
-        ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
-    }
+    use gradient_fixtures::ids::project_id;
+    use gradient_fixtures::mock::mock_db;
 
     #[tokio::test]
     async fn inbound_integrations_lookup_sql_filters_kind_inbound() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<integration::Model>::new()])
             .into_connection();
 

@@ -66,7 +66,8 @@ pub async fn sync_group_memberships<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::{all_statements, mock_db};
+    use sea_orm::MockExecResult;
 
     fn team(group: &str) -> MTeam {
         MTeam {
@@ -94,7 +95,7 @@ mod tests {
             scim_group: Some("acme".into()),
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MTeam>::new()])
             .append_query_results([vec![membership(
                 scim_only.id,
@@ -105,10 +106,8 @@ mod tests {
 
         sync_group_memberships(&db, user, &[]).await.expect("sync");
 
-        let deleted = db
-            .into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().to_vec())
+        let deleted = all_statements(db.into_transaction_log())
+            .into_iter()
             .any(|s| s.sql.starts_with("DELETE"));
         assert!(!deleted, "a SCIM membership must survive an OIDC sign-in");
     }
@@ -117,7 +116,7 @@ mod tests {
     async fn sign_in_joins_group_teams_and_leaves_lost_ones_but_keeps_manual_rows() {
         let user = UserId::now_v7();
         let (joined, left, manual) = (team("eng"), team("ops"), team("sales"));
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![joined.clone(), left.clone(), manual.clone()]])
             .append_query_results([vec![
                 membership(left.id, user, TeamMemberSource::Group),
@@ -138,10 +137,8 @@ mod tests {
             .await
             .expect("sync");
 
-        let statements: Vec<String> = db
-            .into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().to_vec())
+        let statements: Vec<String> = all_statements(db.into_transaction_log())
+            .into_iter()
             .map(|s| s.sql)
             .collect();
         assert_eq!(

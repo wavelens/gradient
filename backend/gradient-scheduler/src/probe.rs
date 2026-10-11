@@ -332,8 +332,9 @@ mod tests {
     use super::*;
     use gradient_entity::build_job::Model as MBuildJob;
     use gradient_entity::derivation_output::Model as MDerivationOutput;
+    use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_test_support::prelude::test_state;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use sea_orm::DatabaseBackend;
 
     fn output(derivation: DerivationId, hash: &str, cached: bool) -> MDerivationOutput {
         MDerivationOutput {
@@ -360,7 +361,7 @@ mod tests {
     async fn already_cached_outputs_are_not_probed() {
         let derivation = DerivationId::now_v7();
         let evaluation = EvaluationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![
                 output(derivation, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false),
                 output(derivation, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", true),
@@ -402,7 +403,7 @@ mod tests {
             derivation,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![
                 output(silent, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false),
                 output(missed, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", false),
@@ -435,7 +436,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_idle_pass_reads_nothing() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
 
         probe_pass(&state, &Mutex::new(None), &Mutex::new(Instant::now()))
             .await
@@ -445,7 +446,7 @@ mod tests {
     #[tokio::test]
     async fn an_unnamed_shared_build_is_not_probed() {
         let derivation = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![output(
                 derivation,
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -468,7 +469,7 @@ mod tests {
         let walked = DerivationId::now_v7();
         let stub = DerivationId::now_v7();
         let evaluation = EvaluationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![output(
                 walked,
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -495,7 +496,7 @@ mod tests {
 
     #[tokio::test]
     async fn only_a_wanted_shared_build_the_probe_has_not_answered_is_asked() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .into_connection();
         let log = db.clone();
@@ -530,7 +531,7 @@ mod tests {
             dependency,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![edge(missed), edge(answered), edge(parent)]])
             .append_query_results([vec![wanted(missed), wanted(parent)]])
             .into_connection();

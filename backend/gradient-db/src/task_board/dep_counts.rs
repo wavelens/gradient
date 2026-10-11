@@ -259,7 +259,8 @@ pub async fn load_entry_point_dep_counts<C: ConnectionTrait>(
 mod tests {
     use super::*;
     use gradient_entity::ids::EntryPointDepCountId;
-    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Value};
+    use gradient_fixtures::mock::{all_statements, mock_db};
+    use sea_orm::{DatabaseConnection, MockExecResult, Value};
     use std::collections::BTreeMap;
 
     fn ok(rows_affected: u64) -> MockExecResult {
@@ -346,7 +347,7 @@ mod tests {
         let eval = evaluation(3);
         let fresh = entry_point(eval.id, Some(3), 1);
         let stale = entry_point(eval.id, Some(2), DEP_COUNTS_REFRESH_SECS + 1);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([claimed(&[stale.id])])
             .append_query_results([vec![count_row(fresh.id, BuildStatus::Completed, 3)]])
             .append_exec_results([ok(0)])
@@ -387,7 +388,7 @@ mod tests {
     async fn a_fully_fresh_page_never_walks_or_writes() {
         let eval = evaluation(7);
         let ep = entry_point(eval.id, Some(7), 1);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![count_row(ep.id, BuildStatus::Queued, 5)]])
             .into_connection();
 
@@ -403,7 +404,7 @@ mod tests {
     async fn a_leaf_is_stamped_without_an_insert() {
         let eval = evaluation(1);
         let leaf = never_computed(eval.id);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([claimed(&[leaf.id])])
             .append_exec_results([ok(0)])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -433,7 +434,7 @@ mod tests {
     async fn a_just_computed_page_is_served_even_though_the_graph_moved() {
         let eval = evaluation(99);
         let ep = entry_point(eval.id, Some(4), DEP_COUNTS_REFRESH_SECS - 1);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![count_row(ep.id, BuildStatus::Building, 2)]])
             .into_connection();
 
@@ -449,7 +450,7 @@ mod tests {
     async fn rows_past_the_age_ceiling_update_even_with_a_matching_stamp() {
         let eval = evaluation(5);
         let ep = entry_point(eval.id, Some(5), DEP_COUNTS_MAX_AGE_SECS + 1);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([claimed(&[ep.id])])
             .append_exec_results([ok(0)])
             .append_query_results([vec![walk_row(ep.id, BuildStatus::Completed, 4)]])
@@ -473,7 +474,7 @@ mod tests {
     async fn a_refresh_claimed_by_a_concurrent_page_load_reads_the_stored_counts() {
         let eval = evaluation(8);
         let ep = entry_point(eval.id, Some(7), DEP_COUNTS_REFRESH_SECS + 1);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([claimed(&[])])
             .append_query_results([vec![count_row(ep.id, BuildStatus::Queued, 6)]])
             .into_connection();
@@ -500,7 +501,7 @@ mod tests {
         let eval = evaluation(2);
         let a = never_computed(eval.id);
         let b = never_computed(eval.id);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([claimed(&[a.id, b.id])])
             .append_exec_results([ok(0)])
             .append_query_results([vec![
@@ -516,10 +517,8 @@ mod tests {
 
         let mut expected = [a.id.into_inner(), b.id.into_inner()];
         expected.sort_unstable();
-        let bound: Vec<String> = db
-            .into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().to_vec())
+        let bound: Vec<String> = all_statements(db.into_transaction_log())
+            .into_iter()
             .filter(|s| s.sql.contains("SET dep_counts_version"))
             .map(|s| format!("{:?}", s.values))
             .collect();
@@ -536,9 +535,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_bump_locks_the_evaluations_in_id_order_and_skips_an_empty_set() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([ok(2)])
-            .into_connection();
+        let db = mock_db().append_exec_results([ok(2)]).into_connection();
 
         assert_eq!(bump_graph_version(&db, &[]).await.unwrap(), 0);
         let n = bump_graph_version(&db, &[EvaluationId::now_v7(), EvaluationId::now_v7()])

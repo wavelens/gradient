@@ -128,10 +128,10 @@ async fn project_roles<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::mock_db;
     use gradient_types::permissions::{
         CachePermission, Permission, cache_mask_from, cache_mask_grants, mask_from, mask_grants,
     };
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     fn access(role: RoleId) -> MProjectAccess {
         MProjectAccess {
@@ -143,7 +143,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_user_without_any_access_has_no_mask() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MProjectAccess>::new()])
             .into_connection();
 
@@ -156,7 +156,7 @@ mod tests {
     #[tokio::test]
     async fn a_direct_role_and_a_team_role_add_up() {
         let (direct, team) = (RoleId::now_v7(), RoleId::now_v7());
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![access(direct), access(team)]])
             .append_query_results([vec![
                 MRole {
@@ -195,7 +195,7 @@ mod tests {
             name: name.into(),
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row(BASE_ROLE_VIEW_ID), row(BASE_ROLE_WRITE_ID)]])
             .append_query_results([vec![
                 named(BASE_ROLE_VIEW_ID, "View"),
@@ -211,7 +211,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_team_grant_alone_reaches_the_project() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![access(RoleId::now_v7())]])
             .into_connection();
 
@@ -224,7 +224,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_missing_role_row_grants_nothing() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![access(RoleId::now_v7())]])
             .append_query_results([Vec::<MRole>::new()])
             .into_connection();
@@ -243,7 +243,7 @@ mod tests {
             user: UserId::now_v7(),
             role,
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row(direct), row(team)]])
             .append_query_results([vec![
                 MCacheRole {

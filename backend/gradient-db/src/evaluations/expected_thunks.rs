@@ -50,7 +50,7 @@ fn median(mut values: Vec<u64>) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
 
     fn metric(total_thunks: i64) -> MEvaluationMetric {
         MEvaluationMetric {
@@ -61,7 +61,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_median_of_the_recent_evaluations_gives_the_expected_thunks() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![
                 metric(30_000_000),
                 metric(450_000_000),
@@ -82,7 +82,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_task_without_evaluation_metrics_has_no_expected_thunks() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MEvaluationMetric>::new()])
             .into_connection();
 

@@ -72,7 +72,8 @@ async fn find<C: ConnectionTrait>(db: &C, project: ProjectId) -> Result<Option<M
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::MockExecResult;
 
     #[tokio::test]
     async fn an_existing_task_is_reused() {
@@ -80,7 +81,7 @@ mod tests {
             name: BUILD_REQUEST_TASK_NAME.to_string(),
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![existing.clone()]])
             .into_connection();
 
@@ -94,7 +95,7 @@ mod tests {
     #[tokio::test]
     async fn a_missing_task_is_created_as_managed() {
         let project = ProjectId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MTask>::new()])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -124,7 +125,7 @@ mod tests {
             name: BUILD_REQUEST_TASK_NAME.to_string(),
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MTask>::new()])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,

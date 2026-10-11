@@ -286,6 +286,7 @@ pub(super) fn negotiate_capabilities(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::{empty_db, mock_db};
     use std::sync::Arc;
 
     fn all_caps(val: bool) -> GradientCapabilities {
@@ -300,7 +301,7 @@ mod tests {
     }
 
     fn make_state(federate_proto: bool) -> ServerState {
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let mut state = Arc::try_unwrap(gradient_test_support::prelude::test_state(db)).unwrap();
         Arc::make_mut(&mut state.config).proto.federate = federate_proto;
         state
@@ -382,7 +383,6 @@ mod tests {
 
     use gradient_entity::project::Model as ProjectModel;
     use gradient_entity::project_cache::{CacheSubscriptionMode, Model as ProjectCacheModel};
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     fn project_row(id: ProjectId) -> ProjectModel {
         ProjectModel {
@@ -420,7 +420,7 @@ mod tests {
     async fn filter_project_peers_passes_through_project_with_cache() {
         let project = ProjectId::now_v7();
         let cache = gradient_types::ids::CacheId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![project_row(project)]])
             .append_query_results([vec![project_cache_row(project, cache)]])
             .into_connection();
@@ -434,7 +434,7 @@ mod tests {
     #[tokio::test]
     async fn filter_project_peers_demotes_project_without_cache() {
         let project = ProjectId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![project_row(project)]])
             .append_query_results([Vec::<ProjectCacheModel>::new()])
             .into_connection();
@@ -454,7 +454,7 @@ mod tests {
     #[tokio::test]
     async fn filter_project_peers_passes_through_non_project_uuids() {
         let cache_peer = ProjectId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<ProjectModel>::new()])
             .into_connection();
         let state = state_with_db(db);
@@ -470,7 +470,7 @@ mod tests {
         let project_without = ProjectId::now_v7();
         let cache = gradient_types::ids::CacheId::now_v7();
         let cache_peer = ProjectId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![
                 project_row(project_with),
                 project_row(project_without),
@@ -528,7 +528,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_team_without_projects_granted_with_workers_resolves_to_nothing() {
-        let state = state_with_db(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = state_with_db(empty_db());
         let team = team_challenge(&[]);
         let registered = vec![(TEAM.to_string(), SHA256_OF_T1.to_string())];
 
@@ -544,7 +544,7 @@ mod tests {
     async fn granted_projects_without_a_cache_are_demoted() {
         let project = ProjectId::now_v7();
         let state = state_with_db(
-            MockDatabase::new(DatabaseBackend::Postgres)
+            mock_db()
                 .append_query_results([vec![project_row(project)]])
                 .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
                 .into_connection(),

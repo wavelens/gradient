@@ -403,10 +403,12 @@ impl DaemonStore for CacheStore {
 mod tests {
     use super::*;
     use gradient_daemon::server::{next_conn, serve_stream};
+    use gradient_fixtures::mock::{empty_db, mock_db};
+    use gradient_test_support::state::TestState;
     use gradient_types::CacheId;
     use harmonia_protocol::daemon::wire::types2::{BuildResultInner, SuccessStatus};
     use harmonia_store_path::StorePath;
-    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, Value};
+    use sea_orm::{DatabaseConnection, Value};
     use std::collections::BTreeMap;
     use tokio::task::JoinSet;
 
@@ -419,9 +421,9 @@ mod tests {
 
     fn session_over(db: DatabaseConnection) -> Arc<Session> {
         Arc::new(Session {
-            state: gradient_test_support::state::test_state_web(db),
-            user: gradient_test_support::fixtures::user(),
-            project: gradient_test_support::fixtures::project(),
+            state: TestState::new().web_db(db).build(),
+            user: gradient_fixtures::rows::user(),
+            project: gradient_fixtures::rows::project(),
             permissions: 0,
             caches: vec![CacheId::now_v7()],
             closed: Default::default(),
@@ -484,7 +486,7 @@ mod tests {
 
     #[tokio::test]
     async fn path_info_comes_from_the_project_caches() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![served_row()]])
             .append_query_results([vec![references_row()]])
             .into_connection();
@@ -502,7 +504,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_path_outside_the_project_caches_is_invalid() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
@@ -527,7 +529,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_client_is_not_trusted() {
-        let session = session_over(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let session = session_over(empty_db());
         let backend = Arc::new(SshBackend::new(session));
         let store = backend.handler(next_conn(None));
         assert_eq!(store.trust_level(), Some(TrustLevel::NotTrusted));
@@ -535,7 +537,7 @@ mod tests {
 
     #[tokio::test]
     async fn garbage_collection_is_refused() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let (_server, mut client) = connect(session_over(db)).await;
 
         let err = client.find_roots().await.expect_err("refused");
@@ -544,7 +546,7 @@ mod tests {
 
     #[tokio::test]
     async fn copying_in_a_served_path_imports_nothing() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![served_row()]])
             .into_connection();
         let (_server, mut client) = connect(session_over(db)).await;
@@ -579,7 +581,7 @@ mod tests {
 
     #[tokio::test]
     async fn building_a_served_output_is_already_valid() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![served_row()]])
             .into_connection();
         let (_server, mut client) = connect(session_over(db)).await;
@@ -597,7 +599,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_missing_opaque_path_fails_the_build() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
         let (_server, mut client) = connect(session_over(db)).await;

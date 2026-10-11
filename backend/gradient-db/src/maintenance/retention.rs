@@ -229,7 +229,8 @@ async fn prune_in_batches<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Statement, Value};
+    use gradient_fixtures::mock::{mock_db, raw_statements};
+    use sea_orm::{MockExecResult, Statement, Value};
 
     fn affected(rows: &[u64]) -> Vec<MockExecResult> {
         rows.iter()
@@ -251,7 +252,7 @@ mod tests {
 
     #[tokio::test]
     async fn each_history_is_pruned_past_its_own_setting() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results(affected(&[0; 16]))
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
@@ -263,7 +264,7 @@ mod tests {
         run_retention(&ctx, now).await;
 
         drop(ctx);
-        let log = crate::pool::raw_statements(pool.into_transaction_log());
+        let log = raw_statements(pool.into_transaction_log());
         for table in [
             "dispatched_job",
             "pending_delivery",
@@ -293,13 +294,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_cluster_job_is_pruned_once_finished_and_old_or_orphaned() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results(affected(&[0]))
             .into_connection();
 
         prune_all(&db, &[&PRUNE_CLUSTER_JOB], gradient_types::now()).await;
 
-        let log = crate::pool::raw_statements(db.into_transaction_log());
+        let log = raw_statements(db.into_transaction_log());
         let sql = &deleting(&log, "cluster_job").expect("one delete").sql;
         let finished = [
             ClusterJobStatus::Completed,
@@ -323,13 +324,13 @@ mod tests {
 
     #[tokio::test]
     async fn an_open_worker_connection_is_pruned_only_once_superseded() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results(affected(&[0]))
             .into_connection();
 
         prune_all(&db, &[&PRUNE_WORKER_CONNECTION], gradient_types::now()).await;
 
-        let log = crate::pool::raw_statements(db.into_transaction_log());
+        let log = raw_statements(db.into_transaction_log());
         let sql = &deleting(&log, "worker_connection").expect("one delete").sql;
         let open_arm = sql
             .split(" OR ")
@@ -343,7 +344,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_full_batch_is_followed_by_another_until_one_comes_back_short() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results(affected(&[PRUNE_BATCH as u64, PRUNE_BATCH as u64, 7]))
             .into_connection();
 

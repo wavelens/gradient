@@ -9,32 +9,14 @@
 //! no-op.
 
 use gradient_entity::{ids::*, project_user, role};
-use gradient_test_support::fixtures::{project, project_id, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
-use gradient_types::SessionId;
+use gradient_fixtures::ids::project_id;
+use gradient_fixtures::rows::{project, project_member};
+use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use gradient_types::permissions::{Permission, admin_mask, view_mask, write_mask};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::MockExecResult;
 use serde_json::{Value, json};
 use uuid::Uuid;
-
-fn admin_membership() -> project_user::Model {
-    project_user::Model {
-        id: ProjectUserId::now_v7(),
-        project: project_id(),
-        user: user_id(),
-        role: BASE_ROLE_ADMIN_ID,
-    }
-}
-
-fn view_membership() -> project_user::Model {
-    project_user::Model {
-        id: ProjectUserId::now_v7(),
-        project: project_id(),
-        user: user_id(),
-        role: BASE_ROLE_VIEW_ID,
-    }
-}
 
 fn admin_role_row() -> role::Model {
     role::Model {
@@ -73,22 +55,14 @@ fn custom_role_row(id: RoleId, name: &str, permission: i64) -> role::Model {
     }
 }
 
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
 #[tokio::test]
 async fn list_roles_returns_builtins_plus_custom() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let custom_id = RoleId::now_v7();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![view_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
         .append_query_results([vec![
             admin_role_row(),
             write_role_row(),
@@ -99,7 +73,7 @@ async fn list_roles_returns_builtins_plus_custom() {
     let server = make_test_server(db.into_connection());
     let res = server
         .get("/api/v1/projects/test-project/roles")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status_ok();
@@ -130,17 +104,16 @@ async fn list_roles_returns_builtins_plus_custom() {
 
 #[tokio::test]
 async fn create_role_persists_permission_bitmask() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let inserted = custom_role_row(
         RoleId::now_v7(),
         "releaser",
         Permission::TriggerEvaluation.bit() | Permission::ViewProject.bit(),
     );
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role_row()]])
         .append_query_results::<role::Model, _, _>([Vec::<role::Model>::new()])
         .append_query_results([vec![inserted.clone()]])
@@ -152,7 +125,7 @@ async fn create_role_persists_permission_bitmask() {
     let server = make_test_server(db.into_connection());
     let res = server
         .post("/api/v1/projects/test-project/roles")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({
             "name": "releaser",
             "permissions": ["triggerEvaluation", "viewProject"],
@@ -171,18 +144,17 @@ async fn create_role_persists_permission_bitmask() {
 
 #[tokio::test]
 async fn create_role_rejects_unknown_permission() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
         .post("/api/v1/projects/test-project/roles")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({
             "name": "releaser",
             "permissions": ["banana"],
@@ -197,18 +169,17 @@ async fn create_role_rejects_unknown_permission() {
 
 #[tokio::test]
 async fn create_role_rejects_view_role_caller() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![view_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
         .append_query_results([vec![view_role_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
         .post("/api/v1/projects/test-project/roles")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({
             "name": "releaser",
             "permissions": ["triggerEvaluation"],
@@ -220,20 +191,19 @@ async fn create_role_rejects_view_role_caller() {
 
 #[tokio::test]
 async fn create_role_rejects_duplicate_name() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let existing = custom_role_row(RoleId::now_v7(), "releaser", Permission::ViewProject.bit());
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role_row()]])
         .append_query_results([vec![existing]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
         .post("/api/v1/projects/test-project/roles")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({
             "name": "releaser",
             "permissions": ["viewProject"],
@@ -245,12 +215,11 @@ async fn create_role_rejects_duplicate_name() {
 
 #[tokio::test]
 async fn patch_builtin_role_is_forbidden() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role_row()]])
         .append_query_results([vec![admin_role_row()]]);
 
@@ -260,7 +229,7 @@ async fn patch_builtin_role_is_forbidden() {
             "/api/v1/projects/test-project/roles/{}",
             BASE_ROLE_ADMIN_ID
         ))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({"permissions": ["viewProject"]}))
         .await;
 
@@ -269,8 +238,7 @@ async fn patch_builtin_role_is_forbidden() {
 
 #[tokio::test]
 async fn patch_custom_role_updates_mask() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let custom_id = RoleId::now_v7();
     let custom = custom_role_row(custom_id, "releaser", Permission::ViewProject.bit());
     let updated = custom_role_row(
@@ -279,9 +247,9 @@ async fn patch_custom_role_updates_mask() {
         Permission::ViewProject.bit() | Permission::TriggerEvaluation.bit(),
     );
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role_row()]])
         .append_query_results([vec![custom]])
         .append_query_results([vec![updated]])
@@ -296,7 +264,7 @@ async fn patch_custom_role_updates_mask() {
             "/api/v1/projects/test-project/roles/{}",
             custom_id
         ))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({
             "permissions": ["viewProject", "triggerEvaluation"],
         }))
@@ -310,12 +278,11 @@ async fn patch_custom_role_updates_mask() {
 
 #[tokio::test]
 async fn delete_builtin_role_is_forbidden() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role_row()]])
         .append_query_results([vec![view_role_row()]]);
 
@@ -325,7 +292,7 @@ async fn delete_builtin_role_is_forbidden() {
             "/api/v1/projects/test-project/roles/{}",
             BASE_ROLE_VIEW_ID
         ))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status(axum::http::StatusCode::FORBIDDEN);
@@ -333,8 +300,7 @@ async fn delete_builtin_role_is_forbidden() {
 
 #[tokio::test]
 async fn delete_role_in_use_is_rejected() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let custom_id = RoleId::now_v7();
     let custom = custom_role_row(custom_id, "releaser", Permission::ViewProject.bit());
 
@@ -345,9 +311,9 @@ async fn delete_role_in_use_is_rejected() {
         role: custom_id,
     };
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role_row()]])
         .append_query_results([vec![custom]])
         .append_query_results([vec![in_use_membership]]);
@@ -358,7 +324,7 @@ async fn delete_role_in_use_is_rejected() {
             "/api/v1/projects/test-project/roles/{}",
             custom_id
         ))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status(axum::http::StatusCode::BAD_REQUEST);
@@ -366,14 +332,13 @@ async fn delete_role_in_use_is_rejected() {
 
 #[tokio::test]
 async fn delete_role_granted_to_a_team_is_rejected() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let custom_id = RoleId::now_v7();
     let custom = custom_role_row(custom_id, "releaser", Permission::ViewProject.bit());
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role_row()]])
         .append_query_results([vec![custom]])
         .append_query_results::<project_user::Model, _, _>([Vec::<project_user::Model>::new()])
@@ -394,7 +359,7 @@ async fn delete_role_granted_to_a_team_is_rejected() {
             "/api/v1/projects/test-project/roles/{}",
             custom_id
         ))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status(axum::http::StatusCode::BAD_REQUEST);
@@ -402,14 +367,13 @@ async fn delete_role_granted_to_a_team_is_rejected() {
 
 #[tokio::test]
 async fn delete_unused_custom_role_succeeds() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let custom_id = RoleId::now_v7();
     let custom = custom_role_row(custom_id, "releaser", Permission::ViewProject.bit());
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role_row()]])
         .append_query_results([vec![custom]])
         .append_query_results::<project_user::Model, _, _>([Vec::<project_user::Model>::new()])
@@ -426,7 +390,7 @@ async fn delete_unused_custom_role_succeeds() {
             "/api/v1/projects/test-project/roles/{}",
             custom_id
         ))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status_ok();

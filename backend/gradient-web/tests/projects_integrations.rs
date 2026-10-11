@@ -11,10 +11,14 @@
 
 use gradient_entity::integration::IntegrationKind;
 use gradient_entity::{github_installation, ids::*, integration, project_user, role};
-use gradient_test_support::fixtures::{project, project_id, test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_fixtures::ids::{project_id, user_id};
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::{project, project_member};
+use gradient_fixtures::test_date;
+use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
+use gradient_types::consts::BASE_ROLE_ADMIN_ID;
 use gradient_types::{GitHostType, SessionId};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -90,25 +94,9 @@ fn gitea_outbound_row() -> integration::Model {
     }
 }
 
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
 fn with_project_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
         .append_query_results([vec![member_only_membership()]])
-}
-
-fn admin_membership() -> project_user::Model {
-    project_user::Model {
-        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap()),
-        project: project_id(),
-        user: user_id(),
-        role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
-    }
 }
 
 fn admin_role() -> role::Model {
@@ -126,7 +114,7 @@ fn with_project_manage(db: MockDatabase) -> MockDatabase {
 
 fn with_admin_of(db: MockDatabase, project: gradient_entity::project::Model) -> MockDatabase {
     db.append_query_results([vec![project]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
 }
 
@@ -144,11 +132,7 @@ async fn summary_endpoint_returns_all_kinds() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_project_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![
+    let db = with_project_member(with_auth(mock_db(), session_id)).append_query_results([vec![
         gitea_inbound_row(),
         github_inbound_row(),
         gitea_outbound_row(),
@@ -177,11 +161,8 @@ async fn summary_endpoint_excludes_credential_state() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_project_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![gitea_inbound_row(), gitea_outbound_row()]]);
+    let db = with_project_member(with_auth(mock_db(), session_id))
+        .append_query_results([vec![gitea_inbound_row(), gitea_outbound_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -210,17 +191,16 @@ async fn summary_endpoint_excludes_credential_state() {
 
 #[tokio::test]
 async fn summary_endpoint_rejects_non_member() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
         .append_query_results([Vec::<project_user::Model>::new()]);
 
     let server = make_test_server(db.into_connection());
     let res = server
         .get(SUMMARY_URL)
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status_not_found();
@@ -232,21 +212,18 @@ async fn delete_github_integration_removes_pair_and_installation() {
     let token = make_token(session_id);
     let integration_id = github_integration_id();
 
-    let db = with_project_manage(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![github_inbound_row()]])
-    .append_exec_results([
-        MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 2,
-        },
-        MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        },
-    ]);
+    let db = with_project_manage(with_auth(mock_db(), session_id))
+        .append_query_results([vec![github_inbound_row()]])
+        .append_exec_results([
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 2,
+            },
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            },
+        ]);
 
     let _ = github_installation_row();
     let server = make_test_server(db.into_connection());
@@ -269,10 +246,7 @@ async fn github_create_without_app_config_is_rejected() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_project_manage(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ));
+    let db = with_project_manage(with_auth(mock_db(), session_id));
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -309,11 +283,8 @@ async fn delete_state_managed_integration_is_forbidden() {
         ..gitea_inbound_row()
     };
 
-    let db = with_admin_of(
-        with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id),
-        state_managed_project(),
-    )
-    .append_query_results([vec![managed.clone()]]);
+    let db = with_admin_of(with_auth(mock_db(), session_id), state_managed_project())
+        .append_query_results([vec![managed.clone()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -330,15 +301,12 @@ async fn delete_unmanaged_integration_of_state_managed_project_succeeds() {
     let token = make_token(session_id);
     let leftover = gitea_inbound_row();
 
-    let db = with_admin_of(
-        with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id),
-        state_managed_project(),
-    )
-    .append_query_results([vec![leftover.clone()]])
-    .append_exec_results([MockExecResult {
-        last_insert_id: 0,
-        rows_affected: 1,
-    }]);
+    let db = with_admin_of(with_auth(mock_db(), session_id), state_managed_project())
+        .append_query_results([vec![leftover.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
     let server = make_test_server(db.into_connection());
     let res = server

@@ -245,12 +245,13 @@ pub async fn report_worker_message(
 mod tests {
     use super::*;
     use gradient_entity::ids::BuildAttemptId;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+    use gradient_fixtures::mock::{empty_db, mock_db, statements};
+    use sea_orm::{MockExecResult, Value};
     use std::collections::BTreeMap;
 
     #[tokio::test]
     async fn finalize_appends_a_late_inline_tail_to_the_earlier_chunks() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([
                 [BTreeMap::from([("num_items", Value::BigInt(Some(1)))])],
                 [BTreeMap::from([("id", Value::from(uuid::Uuid::now_v7()))])],
@@ -281,9 +282,7 @@ mod tests {
 
     #[tokio::test]
     async fn finalize_without_an_inline_log_leaves_the_chunks_and_index_alone() {
-        let (ctx, pool) =
-            crate::test_ctx::ctx(MockDatabase::new(DatabaseBackend::Postgres).into_connection())
-                .await;
+        let (ctx, pool) = crate::test_ctx::ctx(empty_db()).await;
         let logs = std::sync::Arc::clone(&ctx.storage.log_storage);
         let id = BuildAttemptId::now_v7();
         gradient_storage::log_chunk::compress_and_store_chunks(
@@ -299,6 +298,6 @@ mod tests {
 
         assert_eq!(logs.read(id).await.unwrap(), "done\n");
         crate::test_ctx::settle(ctx).await;
-        assert!(crate::pool::statements(pool.into_transaction_log()).is_empty());
+        assert!(statements(pool.into_transaction_log()).is_empty());
     }
 }

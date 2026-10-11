@@ -388,7 +388,7 @@ fn attempt_logs_to_reclaim(
 mod tests {
     use super::*;
     use crate::test_ctx::ctx;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::{empty_db, mock_db, statements};
     use std::collections::BTreeMap;
 
     fn norm(s: &str) -> String {
@@ -402,7 +402,7 @@ mod tests {
     #[tokio::test]
     async fn the_delete_excludes_what_a_root_created_since_the_scan_reaches() {
         let d = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([empty(), empty(), empty()])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -413,7 +413,7 @@ mod tests {
         drop(ctx);
 
         assert!(report.deleted_derivations.is_empty());
-        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         let delete = norm(
             log.iter()
                 .find(|s| s.contains("DELETE FROM derivation d"))
@@ -439,9 +439,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_retire_excludes_fresh_parents_and_the_fresh_closure() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([empty()])
-            .into_connection();
+        let db = mock_db().append_query_results([empty()]).into_connection();
         let (ctx, pool) = ctx(db).await;
 
         let report = retire_stale_paths(&ctx, &["abc".to_owned()], gradient_types::now())
@@ -450,7 +448,7 @@ mod tests {
         drop(ctx);
 
         assert!(report.retired.is_empty());
-        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         let sql = norm(&log[0]);
         assert!(sql.contains("e.kind IN (1, 2)"), "{sql}");
         assert!(
@@ -466,7 +464,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_request_costs_no_statement() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let (ctx, pool) = ctx(db).await;
 
         assert!(
@@ -484,7 +482,7 @@ mod tests {
         );
         drop(ctx);
 
-        assert!(gradient_db::pool::statements(pool.into_transaction_log()).is_empty());
+        assert!(statements(pool.into_transaction_log()).is_empty());
     }
 
     #[test]

@@ -252,11 +252,11 @@ pub async fn get_cache_stats(
 mod tests {
     use super::*;
     use chrono::Timelike;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::empty_db;
 
     #[tokio::test]
     async fn two_serves_accumulate_instead_of_writing() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let state = gradient_test_support::state::test_state(db);
 
         record_nar_traffic(&state, CacheId::nil(), 4096);

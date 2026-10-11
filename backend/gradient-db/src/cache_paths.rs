@@ -137,7 +137,8 @@ pub async fn served_hashes<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use gradient_fixtures::mock::{empty_db, mock_db};
+    use sea_orm::Value;
     use std::collections::BTreeMap;
 
     const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -160,7 +161,7 @@ mod tests {
 
     #[tokio::test]
     async fn one_path_carries_the_signature_of_every_cache() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row("main"), row("mirror")]])
             .into_connection();
 
@@ -176,7 +177,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_path_without_rows_is_not_served() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
 
@@ -188,7 +189,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_caches_serve_nothing_without_a_query() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
 
         assert!(served_path(&db, &[], HASH).await.expect("query").is_none());
         let hashes = served_hashes(&db, &[], &[HASH.to_owned()])

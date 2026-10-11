@@ -4,16 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_fixtures::mock::mock_db;
+use gradient_test_support::state::TestState;
+use gradient_types::consts::BASE_ROLE_VIEW_ID;
 use std::sync::Arc;
 
 use gradient_entity::team_user::TeamRole;
 use gradient_entity::{ids::*, project_user, team, team_user, team_worker, worker_registration};
-use gradient_test_support::fixtures::{project, project_id, user, user_id};
-use gradient_test_support::web::{
-    live_session, make_test_server, make_test_server_configured, make_test_server_with, make_token,
-};
+use gradient_fixtures::ids::user_id;
+use gradient_fixtures::rows::{project, project_member};
+use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
 use gradient_types::SessionId;
-use sea_orm::{DatabaseBackend, DbErr, MockDatabase, RuntimeErr, sqlx};
+use sea_orm::{DbErr, MockDatabase, RuntimeErr, sqlx};
 use serde_json::{Value, json};
 
 const URL: &str = "/api/v1/gradient-ci/connections";
@@ -66,9 +68,9 @@ fn temp_crypt_file() -> String {
 }
 
 fn as_member(session_id: SessionId) -> MockDatabase {
-    with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    with_auth(mock_db(), session_id)
         .append_query_results([vec![project()]])
-        .append_query_results([vec![member()]])
+        .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
 }
 
 async fn connect_project(
@@ -85,13 +87,6 @@ async fn connect_project(
         .await
 }
 
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
 fn team_row() -> team::Model {
     team::Model {
         id: TeamId::new(
@@ -100,33 +95,22 @@ fn team_row() -> team::Model {
         name: "platform".into(),
         display_name: "Platform".into(),
         created_by: Some(user_id()),
-        created_at: gradient_test_support::fixtures::test_date(),
+        created_at: gradient_fixtures::test_date(),
         ..Default::default()
-    }
-}
-
-fn member() -> project_user::Model {
-    project_user::Model {
-        id: ProjectUserId::now_v7(),
-        project: project_id(),
-        user: user_id(),
-        role: gradient_types::consts::BASE_ROLE_VIEW_ID,
     }
 }
 
 #[tokio::test]
 async fn connecting_is_refused_while_gradient_ci_is_turned_off() {
-    let session_id = SessionId::now_v7();
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id);
-    let server =
-        make_test_server_configured(db.into_connection(), |cli| cli.gradient_ci.enable = false);
+    let (db, auth) = signed_in();
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.gradient_ci.enable = false)
+        .server();
 
     let res = server
         .post(URL)
-        .add_header(
-            "authorization",
-            format!("Bearer {}", make_token(session_id)),
-        )
+        .add_header("authorization", auth)
         .json(&json!({ "scope": "project", "project": "test-project", "token": TOKEN }))
         .await;
 
@@ -135,8 +119,8 @@ async fn connecting_is_refused_while_gradient_ci_is_turned_off() {
 
 #[tokio::test]
 async fn a_team_connection_needs_a_team_admin() {
-    let session_id = SessionId::now_v7();
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let (db, auth) = signed_in();
+    let db = db
         .append_query_results([vec![team_row()]])
         .append_query_results([vec![team_user::Model {
             id: TeamUserId::now_v7(),
@@ -149,10 +133,7 @@ async fn a_team_connection_needs_a_team_admin() {
 
     let res = server
         .post(URL)
-        .add_header(
-            "authorization",
-            format!("Bearer {}", make_token(session_id)),
-        )
+        .add_header("authorization", auth)
         .json(&json!({ "scope": "team", "team": "platform", "token": TOKEN }))
         .await;
 
@@ -161,18 +142,15 @@ async fn a_team_connection_needs_a_team_admin() {
 
 #[tokio::test]
 async fn a_project_connection_is_hidden_from_non_members() {
-    let session_id = SessionId::now_v7();
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let (db, auth) = signed_in();
+    let db = db
         .append_query_results([vec![project()]])
         .append_query_results([Vec::<project_user::Model>::new()]);
     let server = make_test_server(db.into_connection());
 
     let res = server
         .post(URL)
-        .add_header(
-            "authorization",
-            format!("Bearer {}", make_token(session_id)),
-        )
+        .add_header("authorization", auth)
         .json(&json!({ "scope": "project", "project": "test-project", "token": TOKEN }))
         .await;
 
@@ -181,18 +159,15 @@ async fn a_project_connection_is_hidden_from_non_members() {
 
 #[tokio::test]
 async fn a_misplaced_paste_is_a_bad_request_naming_the_prefix() {
-    let session_id = SessionId::now_v7();
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let (db, auth) = signed_in();
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![member()]]);
+        .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]]);
     let server = make_test_server(db.into_connection());
 
     let res = server
         .post(URL)
-        .add_header(
-            "authorization",
-            format!("Bearer {}", make_token(session_id)),
-        )
+        .add_header("authorization", auth)
         .json(&json!({ "scope": "project", "project": "test-project", "token": "GRADabc" }))
         .await;
 
@@ -231,7 +206,10 @@ async fn a_concurrent_second_connection_is_a_conflict() {
         .append_query_results([Vec::<worker_registration::Model>::new()])
         .append_query_results([Vec::<team_worker::Model>::new()])
         .append_query_errors([unique_violation()]);
-    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_file()));
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.secrets.crypt_file = temp_crypt_file())
+        .server();
 
     let res = connect_project(&server, session_id).await;
 

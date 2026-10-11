@@ -100,10 +100,11 @@ pub async fn repair_build_graph(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::{mock_db, statements};
 
     #[tokio::test]
     async fn the_heal_adopts_the_closure_before_it_promotes_it() {
-        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+        use sea_orm::{MockExecResult, Value};
         use std::collections::BTreeMap;
 
         let eval = EvaluationId::now_v7();
@@ -113,7 +114,7 @@ mod tests {
             last_insert_id: 0,
             rows_affected,
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(0), exec(0)])
             .append_query_results([empty.clone(), empty.clone()])
             .append_exec_results([exec(0)])
@@ -138,7 +139,7 @@ mod tests {
 
         assert_eq!(report.adopted, 1);
         assert!(!report.is_noop(), "an adoption is progress");
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         let adopt = log
             .iter()
             .position(|s| s.contains("INSERT INTO build_job"))
@@ -173,9 +174,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_heal_fails_the_repair_and_starts_nothing_after_it() {
-        use sea_orm::{DatabaseBackend, DbErr, MockDatabase, MockExecResult};
+        use sea_orm::{DbErr, MockExecResult};
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
@@ -188,7 +189,7 @@ mod tests {
         drop(ctx);
 
         assert!(outcome.is_err(), "{outcome:?}");
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert!(
             !log.iter().any(|s| s.contains("SET status = 1")),
             "no later heal ran: {log:?}"
@@ -197,7 +198,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unstick_keeps_a_reproducible_failure_out_of_its_thaw() {
-        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+        use sea_orm::{MockExecResult, Value};
         use std::collections::BTreeMap;
 
         let eval = EvaluationId::now_v7();
@@ -206,7 +207,7 @@ mod tests {
             last_insert_id: 0,
             rows_affected,
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(0), exec(0), exec(0), exec(0)])
             .append_query_results([empty.clone(), empty.clone(), empty.clone(), empty.clone()])
             .append_exec_results([exec(0)])
@@ -220,7 +221,7 @@ mod tests {
         drop(ctx);
 
         assert!(report.is_noop());
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         let thaw = log
             .iter()
             .find(|s| s.contains("db.status IN (4, 5, 6, 9)"))

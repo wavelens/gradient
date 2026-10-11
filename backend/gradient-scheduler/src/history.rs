@@ -141,6 +141,7 @@ fn percentile_or_max(values: &mut [i64], p: f64) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::mock_db;
 
     fn metric(peak: Option<i64>, cpu: Option<i64>, oom: bool) -> MDerivationMetric {
         MDerivationMetric {
@@ -239,7 +240,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![MDerivationMetric {
                 derivation,
                 ..metric(Some(100), Some(1000), false)

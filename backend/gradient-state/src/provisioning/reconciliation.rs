@@ -313,8 +313,9 @@ mod keep_set_tests {
 #[cfg(test)]
 mod integration_reconciliation_tests {
     use super::*;
+    use gradient_fixtures::mock::{all_statements, mock_db};
     use integration::IntegrationKind;
-    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Statement};
+    use sea_orm::{DatabaseConnection, MockExecResult, Statement};
 
     fn state_listing_inbound_hook_of_acme() -> StateConfiguration {
         serde_json::from_value(serde_json::json!({
@@ -360,13 +361,6 @@ mod integration_reconciliation_tests {
         .unwrap();
     }
 
-    fn logged_statements(db: DatabaseConnection) -> Vec<Statement> {
-        db.into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().to_vec())
-            .collect()
-    }
-
     fn mentions(statement: &Statement, id: IntegrationId) -> bool {
         format!("{:?}", statement.values).contains(&id.to_string())
     }
@@ -381,7 +375,7 @@ mod integration_reconciliation_tests {
             last_insert_id: 0,
             rows_affected: 1,
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![
                 listed.clone(),
                 other_kind.clone(),
@@ -392,7 +386,7 @@ mod integration_reconciliation_tests {
 
         reconcile(&db, acme, other, true).await;
 
-        let deletes: Vec<Statement> = logged_statements(db)
+        let deletes: Vec<Statement> = all_statements(db.into_transaction_log())
             .into_iter()
             .filter(|s| s.sql.starts_with("DELETE FROM \"integration\""))
             .collect();
@@ -407,7 +401,7 @@ mod integration_reconciliation_tests {
         let (acme, other) = (ProjectId::now_v7(), ProjectId::now_v7());
         let listed = managed_row(acme, IntegrationKind::Inbound, "hook");
         let removed = managed_row(acme, IntegrationKind::Inbound, "old-hook");
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![listed.clone(), removed.clone()]])
             .append_query_results([vec![integration::Model {
                 managed: false,
@@ -417,7 +411,7 @@ mod integration_reconciliation_tests {
 
         reconcile(&db, acme, other, false).await;
 
-        let log = logged_statements(db);
+        let log = all_statements(db.into_transaction_log());
         assert!(!log.iter().any(|s| s.sql.starts_with("DELETE")));
         let updates: Vec<&Statement> = log
             .iter()

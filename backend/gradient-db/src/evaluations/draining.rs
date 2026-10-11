@@ -69,7 +69,8 @@ mod tests {
     use super::*;
     use gradient_entity::evaluation::Model as MEval;
     use gradient_entity::ids::{CommitId, EvaluationId};
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::MockExecResult;
 
     fn waiting_eval(reason: Option<WaitingReason>) -> MEval {
         MEval {
@@ -87,7 +88,7 @@ mod tests {
 
     #[tokio::test]
     async fn unpark_touches_only_draining_parks() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![
                 waiting_eval(Some(WaitingReason::Draining)),
                 waiting_eval(Some(WaitingReason::NoCache)),
@@ -103,7 +104,7 @@ mod tests {
 
     #[tokio::test]
     async fn unpark_skips_update_when_no_draining_parks() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![waiting_eval(Some(WaitingReason::NoCache))]])
             .into_connection();
 

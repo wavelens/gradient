@@ -85,8 +85,8 @@ pub(crate) async fn cleanup_expired_upload_sessions(state: Arc<ServerState>) -> 
 mod tests {
     use super::*;
     use crate::test_support::test_server_state;
+    use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_storage::NarStore;
-    use sea_orm::{DatabaseBackend, MockDatabase};
     use std::path::Path;
 
     fn state_with_worker_db(base: &Path, db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
@@ -112,7 +112,7 @@ mod tests {
             last_used_at: now() - chrono::Duration::days(30),
         };
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![stale.clone()]])
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
@@ -146,7 +146,7 @@ mod tests {
     async fn build_request_blob_sweep_disabled_when_ttl_zero() {
         let tmp = tempfile::tempdir().unwrap();
         let nar_storage = NarStore::local(tmp.path()).unwrap();
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let state = test_server_state(nar_storage, db, |config| {
             config.gc.nar_ttl_hours = 0;
         });
@@ -167,7 +167,7 @@ mod tests {
             created_at: now() - chrono::Duration::days(30),
             last_used_at: now() - chrono::Duration::days(30),
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![bad]])
             .into_connection();
         let state = state_with_worker_db(tmp.path(), db);
@@ -178,7 +178,7 @@ mod tests {
     #[tokio::test]
     async fn upload_session_sweep_deletes_expired_undispatched() {
         let tmp = tempfile::tempdir().unwrap();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 3,

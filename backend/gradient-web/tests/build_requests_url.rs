@@ -4,20 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
-)]
-
-use gradient_entity::{ids::*, project, project_user, role, task};
-use gradient_test_support::fixtures::{project_id, task_id, test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_entity::{ids::*, project, role, task};
+use gradient_fixtures::ids::{project_id, task_id, user_id};
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::{live_session, project_member, user};
+use gradient_fixtures::test_date;
+use gradient_test_support::web::{make_test_server, make_token};
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
 use gradient_types::permissions::PermissionMask;
 use gradient_types::{ConcurrencyPolicy, SessionId};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::{Value, json};
-use uuid::Uuid;
 
 const URL: &str = "/api/v1/build-requests/url";
 const REV: &str = "9c1a2b3c4d5e6f708192a3b4c5d6e7f809a1b2c3";
@@ -29,15 +26,6 @@ fn write_role() -> role::Model {
         name: "write".into(),
         permission: gradient_types::permissions::write_mask() as PermissionMask,
         ..Default::default()
-    }
-}
-
-fn membership() -> project_user::Model {
-    project_user::Model {
-        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap()),
-        project: project_id(),
-        user: user_id(),
-        role: BASE_ROLE_WRITE_ID,
     }
 }
 
@@ -75,12 +63,12 @@ fn reserved_task() -> task::Model {
 
 fn base_db(session_id: SessionId) -> MockDatabase {
     let session = live_session(session_id);
-    MockDatabase::new(DatabaseBackend::Postgres)
+    mock_db()
         .append_query_results([vec![session.clone()]])
         .append_query_results([vec![session]])
         .append_query_results([vec![user()]])
         .append_query_results([vec![project_row()]])
-        .append_query_results([vec![membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role()]])
 }
 

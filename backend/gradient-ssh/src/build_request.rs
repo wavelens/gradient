@@ -356,7 +356,9 @@ pub async fn run(
 mod tests {
     use super::*;
     use gradient_derivation::DerivationOutput;
-    use sea_orm::{DatabaseBackend, DbBackend, MockDatabase, QueryTrait};
+    use gradient_fixtures::mock::{empty_db, mock_db};
+    use gradient_test_support::state::TestState;
+    use sea_orm::{DbBackend, QueryTrait};
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -436,11 +438,11 @@ mod tests {
 
     #[tokio::test]
     async fn building_without_trigger_evaluation_is_refused() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let session = Session {
-            state: gradient_test_support::state::test_state_web(db.clone()),
-            user: gradient_test_support::fixtures::user(),
-            project: gradient_test_support::fixtures::project(),
+            state: TestState::new().web_db(db.clone()).build(),
+            user: gradient_fixtures::rows::user(),
+            project: gradient_fixtures::rows::project(),
             permissions: 0,
             caches: vec![],
             closed: Default::default(),
@@ -453,9 +455,9 @@ mod tests {
 
     fn session(db: sea_orm::DatabaseConnection) -> Session {
         Session {
-            state: gradient_test_support::state::test_state_web(db),
-            user: gradient_test_support::fixtures::user(),
-            project: gradient_test_support::fixtures::project(),
+            state: TestState::new().web_db(db).build(),
+            user: gradient_fixtures::rows::user(),
+            project: gradient_fixtures::rows::project(),
             permissions: 0,
             caches: vec![],
             closed: Default::default(),
@@ -465,7 +467,7 @@ mod tests {
     fn build_request_task() -> MTask {
         MTask {
             id: TaskId::now_v7(),
-            project: gradient_test_support::fixtures::project().id,
+            project: gradient_fixtures::rows::project().id,
             name: gradient_db::build_request_task::BUILD_REQUEST_TASK_NAME.into(),
             managed: true,
             ..Default::default()
@@ -478,7 +480,7 @@ mod tests {
             task: Some(task.id),
             kind: EvaluationKind::Ssh,
             status: EvaluationStatus::Building,
-            started_by: Some(gradient_test_support::fixtures::user().id),
+            started_by: Some(gradient_fixtures::rows::user().id),
             ..Default::default()
         }
     }
@@ -494,7 +496,7 @@ mod tests {
     async fn a_second_request_joins_the_running_evaluation() {
         let task = build_request_task();
         let running = ssh_evaluation(&task);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![task.clone()]])
             .append_query_results([vec![running.clone()]])
             .into_connection();
@@ -514,7 +516,7 @@ mod tests {
     async fn a_request_without_a_running_evaluation_creates_an_evaluation() {
         let task = build_request_task();
         let created = ssh_evaluation(&task);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![task.clone()]])
             .append_query_results([Vec::<MEvaluation>::new()])
             .append_query_results([vec![commit()]])

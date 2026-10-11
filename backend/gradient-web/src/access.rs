@@ -634,18 +634,16 @@ pub async fn load_team(
 mod tests {
     use super::*;
     use crate::authorization::ApiKeyContext;
-    use gradient_db::{WebDb, WorkerDb};
-    use gradient_notify::EmailSender;
-    use gradient_storage::NarStore;
-    use gradient_test_support::cli::test_cli;
-    use gradient_test_support::fakes::email::InMemoryEmailSender;
-    use gradient_test_support::log_storage::NoopLogStorage;
+
+    use gradient_fixtures::mock::{all_statements, mock_db};
+
+    use gradient_test_support::state::TestState;
+    use gradient_types::ConcurrencyPolicy;
     use gradient_types::consts::{
         BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
     };
     use gradient_types::ids::{ProjectUserId, RoleId, TaskId};
     use gradient_types::permissions::mask_from;
-    use gradient_types::{ConcurrencyPolicy, RuntimeConfig};
     use gradient_types::{ECache, MProjectAccess};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use uuid::uuid;
@@ -742,50 +740,7 @@ mod tests {
     }
 
     fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
-        let cli = test_cli();
-        let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-        let nar_storage = NarStore::local(&config.server.base_dir).expect("nar store");
-        Arc::new(ServerState {
-            web_db: WebDb::new(db),
-            cache_db: gradient_db::CacheDb::new(
-                sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-            ),
-            worker_db: WorkerDb::new(
-                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-            ),
-            config,
-            log_storage: Arc::new(NoopLogStorage),
-            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-            nar_storage,
-            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            http: gradient_util::http::build_client().expect("http client"),
-            shutdown: gradient_util::shutdown::Shutdown::new(),
-            last_used_stamps: gradient_core::last_used_stamps(),
-            build_progress: gradient_core::build_progress(),
-            eval_progress: gradient_core::eval_progress(),
-            cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-            started_at: chrono::Utc::now(),
-            pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-            events: gradient_types::EventBus::default(),
-            git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-            github_app_install_url: Default::default(),
-            upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-            nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-            upload_admission: gradient_storage::admission::UploadAdmission::new(
-                gradient_storage::admission::Limits {
-                    concurrency: 16,
-                    bytes: u64::MAX,
-                },
-            ),
-            delivery_wake: Default::default(),
-            eval_assign_wake: Default::default(),
-            probe_requests: Default::default(),
-            held_evaluations: Default::default(),
-            startable_set: Default::default(),
-            graph: gradient_core::Graph::stub(),
-        })
+        TestState::new().web_db(db).build()
     }
 
     fn run<F: std::future::Future>(fut: F) -> F::Output {
@@ -807,7 +762,7 @@ mod tests {
     fn project_admin_passes() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
                 .append_query_results([vec![admin_role_row()]])
@@ -829,7 +784,7 @@ mod tests {
     fn project_admin_view_role_forbidden() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
                 .append_query_results([vec![view_role_row()]])
@@ -852,7 +807,7 @@ mod tests {
     fn project_admin_managed_forbidden() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, true)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
                 .append_query_results([vec![admin_role_row()]])
@@ -875,7 +830,7 @@ mod tests {
     fn project_admin_non_member_not_found() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([Vec::<gradient_entity::project_user::Model>::new()])
                 .into_connection();
@@ -901,7 +856,7 @@ mod tests {
                 permission: Permission::ManageActions,
                 reject_managed: true,
             };
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_WRITE_ID)]])
                 .append_query_results([vec![write_role_row()]])
@@ -927,7 +882,7 @@ mod tests {
                 permission: Permission::ManageActions,
                 reject_managed: true,
             };
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
                 .append_query_results([vec![view_role_row()]])
@@ -953,7 +908,7 @@ mod tests {
             let access = ProjectAccess::Member {
                 reject_managed: false,
             };
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
                 .into_connection();
@@ -973,7 +928,7 @@ mod tests {
     #[test]
     fn project_readable_public_visible_to_anon() {
         run(async {
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(true, false)]])
                 .into_connection();
             let state = make_state(db);
@@ -994,7 +949,7 @@ mod tests {
     #[test]
     fn project_readable_private_invisible_to_anon() {
         run(async {
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .into_connection();
             let state = make_state(db);
@@ -1021,7 +976,7 @@ mod tests {
                 permission: Permission::EditTask,
                 reject_managed: true,
             };
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([vec![task_fixture(false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
@@ -1049,7 +1004,7 @@ mod tests {
                 permission: Permission::EditTask,
                 reject_managed: true,
             };
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([vec![task_fixture(false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
@@ -1078,7 +1033,7 @@ mod tests {
                 permission: Permission::EditTask,
                 reject_managed: true,
             };
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([vec![task_fixture(true)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
@@ -1107,7 +1062,7 @@ mod tests {
                 permission: Permission::EditTask,
                 reject_managed: true,
             };
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([Vec::<gradient_entity::project::Model>::new()])
                 .into_connection();
             let state = make_state(db);
@@ -1144,7 +1099,7 @@ mod tests {
         run(async {
             let user = user_fixture();
             let key = api_key_ctx(Permission::ViewProject.bit(), None);
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
                 .append_query_results([vec![admin_role_row()]])
@@ -1177,7 +1132,7 @@ mod tests {
                     "a0000000-0000-0000-0000-0000000000ff"
                 ))),
             );
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .into_connection();
             let state = make_state(db);
@@ -1207,7 +1162,7 @@ mod tests {
                     "a0000000-0000-0000-0000-000000000001"
                 ))),
             );
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
                 .append_query_results([vec![admin_role_row()]])
@@ -1233,7 +1188,7 @@ mod tests {
     fn session_caller_unaffected_by_api_key_logic() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
                 .append_query_results([vec![admin_role_row()]])
@@ -1306,7 +1261,7 @@ mod tests {
     fn cache_manage_settings_passes_for_member() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![cache_fixture(false)]])
                 .append_query_results([vec![cache_member_fixture()]])
                 .append_query_results([vec![cache_role_fixture()]])
@@ -1328,7 +1283,7 @@ mod tests {
     fn cache_manage_settings_rejects_managed() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![cache_fixture(true)]])
                 .append_query_results([vec![cache_member_fixture()]])
                 .append_query_results([vec![cache_role_fixture()]])
@@ -1351,7 +1306,7 @@ mod tests {
     fn cache_write_store_allows_managed() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![cache_fixture(true)]])
                 .append_query_results([vec![cache_member_fixture()]])
                 .append_query_results([vec![cache_role_fixture()]])
@@ -1377,7 +1332,7 @@ mod tests {
     fn cache_non_member_returns_not_found() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![cache_fixture(false)]])
                 .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()])
                 .into_connection();
@@ -1426,7 +1381,7 @@ mod tests {
     #[test]
     fn cache_readable_allows_public_anon() {
         run(async {
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![cache_fixture_public(false)]])
                 .into_connection();
             let state = make_state(db);
@@ -1449,7 +1404,7 @@ mod tests {
     #[test]
     fn cache_readable_blocks_anon_on_private() {
         run(async {
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![cache_fixture(false)]])
                 .into_connection();
             let state = make_state(db);
@@ -1470,7 +1425,7 @@ mod tests {
     fn cache_member_allows_member() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![cache_fixture(false)]])
                 .append_query_results([vec![cache_member_fixture()]])
                 .into_connection();
@@ -1493,7 +1448,7 @@ mod tests {
     fn cache_require_blocks_when_role_lacks_permission() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![cache_fixture(false)]])
                 .append_query_results([vec![cache_member_fixture()]])
                 .append_query_results([vec![cache_role_view_fixture()]])
@@ -1530,7 +1485,7 @@ mod tests {
     fn effective_cache_mask_returns_role_for_member() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![cache_member_fixture()]])
                 .append_query_results([vec![cache_role_fixture()]])
                 .into_connection();
@@ -1547,7 +1502,7 @@ mod tests {
     fn effective_cache_mask_returns_view_for_project_subscriber() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()])
                 .append_query_results([vec![project_cache_fixture()]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
@@ -1565,7 +1520,7 @@ mod tests {
     fn effective_cache_mask_none_for_outsider() {
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()])
                 .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
                 .into_connection();
@@ -1582,7 +1537,7 @@ mod tests {
         run(async {
             let user = user_fixture();
             let api_key = cache_view_api_key(user.id);
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![cache_fixture(false)]])
                 .append_query_results([vec![cache_member_fixture()]])
                 .append_query_results([vec![cache_role_fixture()]])
@@ -1609,7 +1564,7 @@ mod tests {
         use sea_orm::QueryTrait;
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
                 .append_query_results([vec![project_cache_fixture()]])
                 .into_connection();
@@ -1632,7 +1587,7 @@ mod tests {
         use sea_orm::QueryTrait;
         run(async {
             let user = user_fixture();
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([Vec::<gradient_entity::project_user::Model>::new()])
                 .into_connection();
             let state = make_state(db);
@@ -1656,7 +1611,7 @@ mod tests {
             id: UserId::now_v7(),
             ..Default::default()
         };
-        let mock = MockDatabase::new(DatabaseBackend::Postgres)
+        let mock = mock_db()
             .append_query_results([vec![project.clone()]])
             .append_query_results([vec![MProjectAccess {
                 project: project.id,
@@ -1677,10 +1632,8 @@ mod tests {
         .await
         .expect("a team grant is enough to read the project");
 
-        let read_access_view = db
-            .into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().to_vec())
+        let read_access_view = all_statements(db.into_transaction_log())
+            .into_iter()
             .any(|s| s.sql.contains("\"project_access\""));
         assert!(
             read_access_view,

@@ -102,7 +102,8 @@ impl EvaluationFailure<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::Value;
     use std::collections::BTreeMap;
 
     fn unmet(architecture: &str, features: &[&str], build_count: u32) -> UnmetRequirement {
@@ -128,7 +129,7 @@ mod tests {
     #[tokio::test]
     async fn an_unanswered_upstream_is_stored_only_for_its_first_pass() {
         let already_stored = [BTreeMap::from([("num_items", Value::BigInt(Some(1)))])];
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([already_stored])
             .into_connection();
         let warning = EvaluationWarning::UpstreamUnanswered {

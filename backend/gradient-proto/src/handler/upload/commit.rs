@@ -246,9 +246,9 @@ async fn place_eval_cache(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_storage::admission::{Admitted, ObjectKey};
     use gradient_test_support::state::test_state;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     async fn granted_permit(
         state: &Arc<ServerState>,
@@ -266,7 +266,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_passed_through_nar_with_the_wrong_size_is_rejected_and_frees_its_permit() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let (_session, permit) = granted_permit(&state).await;
         let dir = tempfile::TempDir::new().unwrap();
         let partials = gradient_storage::PartialStore::new(dir.path()).unwrap();
@@ -315,7 +315,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_presigned_nar_that_is_not_in_storage_is_retried() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let (_session, permit) = granted_permit(&state).await;
         let (writer_out, mut sent) = ProtoWriter::spy(std::time::Duration::from_secs(5));
 
@@ -367,7 +367,7 @@ mod tests {
             ..Default::default()
         };
         let state = test_state(
-            MockDatabase::new(DatabaseBackend::Postgres)
+            mock_db()
                 .append_query_results([vec![stored]])
                 .into_connection(),
         );
@@ -403,7 +403,7 @@ mod tests {
     #[tokio::test]
     async fn a_placed_nar_frees_its_budget_but_keeps_its_path_until_the_graph_records_it() {
         let Ok(mut unwired) = Arc::try_unwrap(test_state(
-            MockDatabase::new(DatabaseBackend::Postgres)
+            mock_db()
                 .append_query_results([Vec::<gradient_types::MCachedPath>::new()])
                 .into_connection(),
         )) else {
@@ -467,7 +467,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_resumed_passthrough_that_fails_its_hash_is_retried_from_scratch() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let (_session, permit) = granted_permit(&state).await;
         let dir = tempfile::TempDir::new().unwrap();
         let partials = gradient_storage::PartialStore::new(dir.path()).unwrap();

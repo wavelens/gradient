@@ -80,7 +80,7 @@ async fn team_emails<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
 
     #[tokio::test]
     async fn a_team_without_access_drops_out_and_the_rest_still_gets_mail() {
@@ -97,7 +97,7 @@ mod tests {
             },
         );
         let member = UserId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![granted.clone()]])
             .append_query_results([vec![MTeamProject {
                 team: granted.id,

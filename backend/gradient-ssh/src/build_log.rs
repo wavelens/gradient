@@ -231,7 +231,8 @@ async fn builds(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
+    use gradient_test_support::state::TestState;
     use std::sync::Mutex;
 
     const DRV: &str = "/nix/store/00000000000000000000000000000000-hello.drv";
@@ -314,15 +315,15 @@ mod tests {
             derivation_build: build.id,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![build.clone()]])
             .append_query_results([vec![attempt]])
             .append_query_results([Vec::<gradient_entity::build_log_chunk::Model>::new()])
             .into_connection();
         let session = Session {
-            state: gradient_test_support::state::test_state_web(db),
-            user: gradient_test_support::fixtures::user(),
-            project: gradient_test_support::fixtures::project(),
+            state: TestState::new().web_db(db).build(),
+            user: gradient_fixtures::rows::user(),
+            project: gradient_fixtures::rows::project(),
             permissions: 0,
             caches: vec![],
             closed: Default::default(),

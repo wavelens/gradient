@@ -331,6 +331,7 @@ mod tests {
 
 #[cfg(test)]
 pub(crate) mod test_ctx {
+    use gradient_fixtures::mock::empty_db;
     use std::sync::Arc;
 
     use clap::Parser as _;
@@ -338,7 +339,7 @@ pub(crate) mod test_ctx {
     use gradient_storage::{FileLogStorage, NarStore, StorageCtx};
     use gradient_types::{Cli, RuntimeConfig};
     use gradient_util::shutdown::Shutdown;
-    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
+    use sea_orm::DatabaseConnection;
 
     pub(crate) async fn ctx_with_probes(
         db: DatabaseConnection,
@@ -387,7 +388,7 @@ pub(crate) mod test_ctx {
         let worker_db = WorkerDb::new(db);
         let ctx = DbContext {
             worker_db: worker_db.clone(),
-            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            web_db: WebDb::new(empty_db()),
             config,
             storage: StorageCtx {
                 nar_storage: NarStore::local(&dir).unwrap(),

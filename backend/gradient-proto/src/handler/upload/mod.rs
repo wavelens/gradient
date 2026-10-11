@@ -401,10 +401,10 @@ impl InboundContext<'_> {
 mod tests {
     use super::*;
     use crate::handler::inbound::fixture::{JOB, TestSession, decode};
+    use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_test_support::state::test_state;
     use gradient_types::MCachedPath;
     use gradient_wire::messages::{ClientMessage, SMALL_UPLOAD_BYTES};
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     fn nar(c: char) -> UploadObject {
         UploadObject::Nar {
@@ -413,7 +413,7 @@ mod tests {
     }
 
     fn unknown_path() -> sea_orm::DatabaseConnection {
-        MockDatabase::new(DatabaseBackend::Postgres)
+        mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .into_connection()
     }
@@ -427,7 +427,7 @@ mod tests {
             ..Default::default()
         };
         let state = test_state(
-            MockDatabase::new(DatabaseBackend::Postgres)
+            mock_db()
                 .append_query_results([vec![stored]])
                 .into_connection(),
         );
@@ -449,7 +449,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_small_request_is_granted_without_a_cache_index_lookup() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
         ctx.on_upload_request(JOB.into(), 1, nar('s'), SMALL_UPLOAD_BYTES, uploads)
@@ -467,7 +467,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_request_for_a_job_this_session_does_not_run_is_rejected() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
         ctx.on_upload_request("build:unknown".into(), 1, nar('a'), 1, uploads)
@@ -503,7 +503,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_chunk_before_its_grant_is_rejected_and_not_staged() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
         ctx.on_upload_chunk(9, 0, b"bytes", false, uploads).await;

@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_test_support::fixtures::user;
-use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::{live_session, user};
+use gradient_test_support::web::{make_test_server, make_token};
 use gradient_types::SessionId;
-use sea_orm::{DatabaseBackend, MockDatabase};
+use sea_orm::MockDatabase;
 use serde_json::Value;
 
 fn superuser() -> gradient_entity::user::Model {
@@ -32,11 +33,7 @@ fn with_user(
 async fn assign_decisions_rejects_non_superuser() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
-    let db = with_user(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-        user(),
-    );
+    let db = with_user(mock_db(), session_id, user());
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -51,11 +48,7 @@ async fn assign_decisions_rejects_non_superuser() {
 async fn assign_decisions_superuser_returns_empty_ring() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
-    let db = with_user(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-        superuser(),
-    );
+    let db = with_user(mock_db(), session_id, superuser());
 
     let server = make_test_server(db.into_connection());
     let res = server

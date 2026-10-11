@@ -116,12 +116,13 @@ pub fn changed_fields<const N: usize>(fields: [(&str, bool); N]) -> serde_json::
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::mock_db;
     use gradient_types::Event;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
     #[tokio::test]
     async fn audit_record_publishes_the_typed_event_with_its_owner() {
-        let worker_db = MockDatabase::new(DatabaseBackend::Postgres)
+        let worker_db = mock_db()
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,

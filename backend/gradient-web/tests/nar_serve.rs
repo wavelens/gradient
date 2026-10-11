@@ -11,17 +11,12 @@
 
 use axum::extract::connect_info::MockConnectInfo;
 use axum_test::TestServer;
-use gradient_core::ServerState;
-use gradient_db::{WebDb, WorkerDb};
-use gradient_notify::EmailSender;
+use gradient_fixtures::mock::mock_db;
 use gradient_storage::NarStore;
-use gradient_test_support::fakes::email::InMemoryEmailSender;
-use gradient_test_support::log_storage::NoopLogStorage;
 use gradient_test_support::prelude::test_cli;
+use gradient_test_support::state::TestState;
 use gradient_types::ids::*;
-use sea_orm::{DatabaseBackend, MockDatabase};
 use std::net::SocketAddr;
-use std::sync::Arc;
 use uuid::Uuid;
 
 const STORE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -83,57 +78,11 @@ fn blob() -> Vec<u8> {
     (0..256 * 1024).map(|i| (i * 31 + 7) as u8).collect()
 }
 
-fn state(
-    cli: &gradient_types::Cli,
-    db: sea_orm::DatabaseConnection,
-    nar_storage: NarStore,
-) -> Arc<ServerState> {
-    Arc::new(ServerState {
-        web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(
-            MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-        ),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config: Arc::new(gradient_types::RuntimeConfig::from_cli(cli).expect("valid config")),
-        log_storage: Arc::new(NoopLogStorage),
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http client"),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-    })
-}
-
 #[tokio::test]
 async fn nar_serve_streams_stored_blob_byte_for_byte() {
     let cli = test_cli();
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![cached_path_row()]])
         .append_query_results([vec![served()]])
@@ -146,7 +95,7 @@ async fn nar_serve_streams_stored_blob_byte_for_byte() {
         .await
         .expect("seed NAR blob");
 
-    let state = state(&cli, db, nar_storage);
+    let state = TestState::new().web_db(db).nar_storage(nar_storage).build();
 
     let peer: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let router = gradient_web::create_router(state)
@@ -178,7 +127,7 @@ async fn nar_serve_streams_stored_blob_byte_for_byte() {
 #[tokio::test]
 async fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
     let cli = test_cli();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![cached_path_row()]])
         .append_query_results([vec![served()]])
@@ -200,7 +149,7 @@ async fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
         .expect("seed NAR blob");
     let hot = nar_storage.clone();
 
-    let state = state(&cli, db, nar_storage);
+    let state = TestState::new().web_db(db).nar_storage(nar_storage).build();
 
     let peer: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let router = gradient_web::create_router(state)
@@ -231,7 +180,7 @@ async fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
 #[tokio::test]
 async fn a_nar_this_cache_holds_no_claim_on_is_not_served() {
     let cli = test_cli();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![cached_path_row()]])
         .append_query_results([Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()])
@@ -241,7 +190,7 @@ async fn a_nar_this_cache_holds_no_claim_on_is_not_served() {
         .put(STORE_HASH, blob())
         .await
         .expect("seed NAR blob");
-    let state = state(&cli, db, nar_storage);
+    let state = TestState::new().web_db(db).nar_storage(nar_storage).build();
 
     let router = gradient_web::create_router(state)
         .expect("router")

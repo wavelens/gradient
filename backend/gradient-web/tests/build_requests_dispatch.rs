@@ -13,14 +13,14 @@ use axum::http::StatusCode;
 use chrono::{Duration, Utc};
 use gradient_entity::ids::*;
 use gradient_entity::role;
-use gradient_test_support::fixtures::{project_id, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_fixtures::ids::{project_id, user_id};
+use gradient_fixtures::rows::project_member;
+use gradient_test_support::web::{make_test_server, signed_in};
+use gradient_types::ConcurrencyPolicy;
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
 use gradient_types::permissions::PermissionMask;
-use gradient_types::{ConcurrencyPolicy, SessionId};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::MockExecResult;
 use serde_json::{Value, json};
-use uuid::Uuid;
 
 fn write_role_row() -> role::Model {
     role::Model {
@@ -29,22 +29,6 @@ fn write_role_row() -> role::Model {
         permission: gradient_types::permissions::write_mask() as PermissionMask,
         ..Default::default()
     }
-}
-
-fn membership() -> gradient_entity::project_user::Model {
-    gradient_entity::project_user::Model {
-        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap()),
-        project: project_id(),
-        user: user_id(),
-        role: BASE_ROLE_WRITE_ID,
-    }
-}
-
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
 }
 
 fn upload_session(
@@ -123,19 +107,18 @@ fn dispatch_url(session: UploadSessionId) -> String {
 
 #[tokio::test]
 async fn rejects_already_dispatched_session() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![upload_session(upload, vec![], true, false)]])
-        .append_query_results([vec![membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
         .post(&dispatch_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({}))
         .await;
 
@@ -144,19 +127,18 @@ async fn rejects_already_dispatched_session() {
 
 #[tokio::test]
 async fn rejects_expired_session() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![upload_session(upload, vec![], false, true)]])
-        .append_query_results([vec![membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
         .post(&dispatch_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({}))
         .await;
 
@@ -165,21 +147,20 @@ async fn rejects_expired_session() {
 
 #[tokio::test]
 async fn rejects_session_with_missing_blobs() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
     let missing = vec!["a".repeat(64)];
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![upload_session(upload, missing, false, false)]])
-        .append_query_results([vec![membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
         .post(&dispatch_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({}))
         .await;
 
@@ -188,17 +169,15 @@ async fn rejects_session_with_missing_blobs() {
 
 #[tokio::test]
 async fn rejects_session_not_found() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-        .append_query_results([Vec::<gradient_entity::upload_session::Model>::new()]);
+    let db = db.append_query_results([Vec::<gradient_entity::upload_session::Model>::new()]);
 
     let server = make_test_server(db.into_connection());
     let res = server
         .post(&dispatch_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({}))
         .await;
 
@@ -207,8 +186,7 @@ async fn rejects_session_not_found() {
 
 #[tokio::test]
 async fn happy_path_creates_task_commit_and_evaluation() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
     let task_id = TaskId::now_v7();
@@ -221,9 +199,9 @@ async fn happy_path_creates_task_commit_and_evaluation() {
         ..upload_session(upload, vec![], false, false)
     };
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![upload_session(upload, vec![], false, false)]])
-        .append_query_results([vec![membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role_row()]])
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([vec![task_model.clone()]])
@@ -251,7 +229,7 @@ async fn happy_path_creates_task_commit_and_evaluation() {
     let server = make_test_server(db.into_connection());
     let res = server
         .post(&dispatch_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({}))
         .await;
 
@@ -279,19 +257,18 @@ async fn happy_path_creates_task_commit_and_evaluation() {
 
 #[tokio::test]
 async fn rejects_local_input_override() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![upload_session(upload, vec![], false, false)]])
-        .append_query_results([vec![membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
         .post(&dispatch_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({
             "input_overrides": [{ "input_name": "nixpkgs", "url": "/home/u/np" }]
         }))
@@ -302,8 +279,7 @@ async fn rejects_local_input_override() {
 
 #[tokio::test]
 async fn happy_path_reuses_existing_build_request_task() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
     let task_id = TaskId::now_v7();
@@ -316,9 +292,9 @@ async fn happy_path_reuses_existing_build_request_task() {
         ..upload_session(upload, vec![], false, false)
     };
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![upload_session(upload, vec![], false, false)]])
-        .append_query_results([vec![membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role_row()]])
         .append_query_results([vec![task_model.clone()]])
         .append_query_results([vec![commit_model.clone()]])
@@ -341,7 +317,7 @@ async fn happy_path_reuses_existing_build_request_task() {
     let server = make_test_server(db.into_connection());
     let res = server
         .post(&dispatch_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({}))
         .await;
 

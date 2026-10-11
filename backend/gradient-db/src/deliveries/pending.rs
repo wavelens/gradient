@@ -190,7 +190,8 @@ pub async fn pending_counts<C: ConnectionTrait>(db: &C) -> Result<(i64, i64), Db
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::{empty_db, mock_db};
+    use sea_orm::MockExecResult;
     use std::collections::BTreeMap;
 
     fn norm(s: &str) -> String {
@@ -209,7 +210,7 @@ mod tests {
     #[tokio::test]
     async fn claim_due_leases_in_one_skip_locked_statement() {
         let id = PendingDeliveryId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![BTreeMap::from([
                 ("id".to_owned(), Value::from(id.into_inner())),
                 ("kind".to_owned(), Value::SmallInt(Some(3))),
@@ -259,7 +260,7 @@ mod tests {
 
     #[tokio::test]
     async fn claim_due_asks_for_nothing_when_there_is_no_room() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
 
         assert!(claim_due(&db, 0).await.unwrap().is_empty());
         assert!(db.into_transaction_log().is_empty());
@@ -267,7 +268,7 @@ mod tests {
 
     #[tokio::test]
     async fn mark_retry_schedules_and_dead_letters_at_the_cap() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -310,7 +311,7 @@ mod tests {
 
     #[tokio::test]
     async fn enqueue_does_nothing_on_a_pending_duplicate_key() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,

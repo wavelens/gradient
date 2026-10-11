@@ -96,7 +96,8 @@ fn add_minute_stmt(key: &Key, agg: Agg) -> Statement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend as Backend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::{mock_db, statements};
+    use sea_orm::MockExecResult;
 
     fn exec_results(n: usize) -> Vec<MockExecResult> {
         (0..n)
@@ -109,7 +110,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_minute_is_added_into_its_rollup_row() {
-        let db = MockDatabase::new(Backend::Postgres)
+        let db = mock_db()
             .append_exec_results(exec_results(5))
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
@@ -119,7 +120,7 @@ mod tests {
         flush(&ctx, &stats, &Gauges::new()).await;
 
         drop(ctx);
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         let upsert = log
             .iter()
             .find(|s| s.contains("storage.op_ms"))
@@ -149,7 +150,7 @@ mod tests {
 
     #[tokio::test]
     async fn gauges_are_sampled_on_every_flush() {
-        let db = MockDatabase::new(Backend::Postgres)
+        let db = mock_db()
             .append_exec_results(exec_results(4))
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
@@ -157,7 +158,7 @@ mod tests {
         flush(&ctx, &MinuteStats::default(), &Gauges::new()).await;
 
         drop(ctx);
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert_eq!(log.len(), 4, "four gauge rows even when idle: {log:?}");
         for m in [
             metric::PROTO_BULK_LANE_FILL,

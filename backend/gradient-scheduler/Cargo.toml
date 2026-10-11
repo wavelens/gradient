@@ -44,6 +44,7 @@ uuid       = { workspace = true }
 gradient-entity = { workspace = true }
 gradient-storage = { workspace = true }
 tempfile    = { workspace = true }
+gradient-fixtures = { workspace = true }
 gradient-test-support = { workspace = true }
 tokio       = { workspace = true, features = ["macros", "sync", "time", "rt-multi-thread"] }
 wiremock    = { workspace = true }

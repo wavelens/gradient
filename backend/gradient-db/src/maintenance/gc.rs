@@ -274,6 +274,7 @@ where
 mod tests {
     use super::*;
     use EvaluationStatus::*;
+    use gradient_fixtures::mock::{mock_db, statements};
 
     fn norm(s: &str) -> String {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -281,10 +282,10 @@ mod tests {
 
     #[tokio::test]
     async fn expired_cached_paths_selects_outside_the_live_set_past_the_bound() {
-        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+        use sea_orm::{MockExecResult, Value};
         use std::collections::BTreeMap;
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
@@ -424,13 +425,13 @@ mod tests {
 
     #[tokio::test]
     async fn the_live_evaluations_adopt_before_the_lost_names_are_regated() {
-        use sea_orm::{DatabaseBackend, MockDatabase, Value};
+        use sea_orm::Value;
         use std::collections::BTreeMap;
 
         let live = EvaluationId::now_v7();
         let orphan = DerivationId::now_v7();
         let empty = Vec::<BTreeMap<String, Value>>::new();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![BTreeMap::from([(
                 "?column?".to_owned(),
                 Value::Int(Some(1)),
@@ -451,7 +452,7 @@ mod tests {
 
         assert_eq!(adopted, 1);
         assert!(changes.is_empty());
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert_eq!(log.len(), 9, "{log:?}");
         assert!(
             log[0].contains(
@@ -485,12 +486,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_deletion_that_orphans_nothing_pending_walks_nothing() {
-        use sea_orm::{DatabaseBackend, MockDatabase, Value};
+        use sea_orm::Value;
         use std::collections::BTreeMap;
 
         let d = DerivationId::now_v7();
         let empty = Vec::<BTreeMap<String, Value>>::new();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([empty.clone(), empty.clone(), empty])
             .append_exec_results([exec(0), exec(0)])
             .into_connection();
@@ -501,7 +502,7 @@ mod tests {
 
         assert_eq!(adopted, 0);
         assert!(changes.is_empty());
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert_eq!(log.len(), 5, "{log:?}");
         assert!(
             log[0].contains("LIMIT 1")

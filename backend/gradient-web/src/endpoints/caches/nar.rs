@@ -172,7 +172,7 @@ fn upstream_nar_path(path: &str, query: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
 
     fn upstream_row(id: u128, url: Option<&str>) -> MCacheUpstream {
         MCacheUpstream {
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn resolve_returns_store_hash_from_cached_path() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![cached_path_row()]])
             .into_connection();
 
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn resolve_falls_back_to_url_hash_when_no_match() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
 
@@ -319,7 +319,7 @@ mod tests {
         let mut row = cached_path_row();
         row.file_hash = Some(format!("blake3:{FILE_HASH_NIX32}"));
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row]])
             .into_connection();
 

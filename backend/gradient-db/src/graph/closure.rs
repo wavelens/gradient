@@ -212,7 +212,7 @@ where
 mod tests {
     use super::*;
     use gradient_entity::{derivation_dependency, derivation_output};
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::{empty_db, mock_db};
 
     fn now() -> chrono::NaiveDateTime {
         chrono::Utc::now().naive_utc()
@@ -258,7 +258,7 @@ mod tests {
     async fn sums_closure_output_sizes() {
         let root = DerivationId::now_v7();
         let child = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([raise()])
             .append_query_results([vec![node(root), node(child)]])
             .append_query_results([vec![out(root, "r", Some(100)), out(child, "c", Some(40))]])
@@ -270,7 +270,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_roots_is_zero() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let total = transitive_closure_size(&db, &[]).await.unwrap();
         assert_eq!(total, 0);
     }
@@ -281,7 +281,7 @@ mod tests {
         let a = DerivationId::now_v7();
         let b = DerivationId::now_v7();
         let c = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([raise()])
             .append_query_results([vec![dep(root, a), dep(root, b), dep(a, c), dep(b, c)]])
             .append_query_results([vec![
@@ -300,7 +300,7 @@ mod tests {
     async fn one_raise_serves_many_root_sets_on_the_same_walk() {
         let a = DerivationId::now_v7();
         let b = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([raise()])
             .append_query_results([vec![node(a)]])
             .append_query_results([vec![node(b)]])

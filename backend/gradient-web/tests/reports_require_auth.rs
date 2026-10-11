@@ -5,12 +5,12 @@
  */
 
 use gradient_entity::ids::EvaluationId;
+use gradient_fixtures::mock::empty_db;
 use gradient_test_support::web::make_test_server;
-use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::Value;
 
 fn server() -> axum_test::TestServer {
-    make_test_server(MockDatabase::new(DatabaseBackend::Postgres).into_connection())
+    make_test_server(empty_db())
 }
 
 fn report_path(query: &str) -> String {

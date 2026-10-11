@@ -84,6 +84,7 @@ tar               = { workspace = true }
 [dev-dependencies]
 harmonia-file-nar = { workspace = true, features = ["test"] }
 mockall      = { workspace = true }
+gradient-fixtures = { workspace = true }
 gradient-test-support = { workspace = true }
 tokio-test   = { workspace = true }
 wiremock     = { workspace = true }

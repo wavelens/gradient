@@ -341,7 +341,7 @@ pub async fn get_eval_runtime_closure(
 mod tests {
     use super::*;
     use gradient_entity::{derivation, derivation_dependency, derivation_output};
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
 
     fn now() -> chrono::NaiveDateTime {
         chrono::Utc::now().naive_utc()
@@ -391,7 +391,7 @@ mod tests {
     async fn build_closure_graph_sums_and_links() {
         let root = DerivationId::now_v7();
         let child = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,

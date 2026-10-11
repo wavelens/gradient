@@ -180,7 +180,8 @@ async fn claim_signers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Statement, Value};
+    use gradient_fixtures::mock::{mock_db, raw_statements, statements};
+    use sea_orm::{MockExecResult, Statement, Value};
     use std::collections::BTreeMap;
 
     const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -265,7 +266,7 @@ mod tests {
         let (cached_path, cache) = (CachedPathId::now_v7(), CacheId::now_v7());
         let evaluation = EvaluationId::now_v7();
         let derivation = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![claim_row(cached_path, cache)]])
             .append_query_results([vec![cache_row(cache, signing_key(&secret))]])
             .append_exec_results([written(1)])
@@ -277,7 +278,7 @@ mod tests {
             .expect("the claim lands");
         drop(ctx);
 
-        let log = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let log = raw_statements(pool.into_transaction_log());
         let seed = format!("{:?}", log[0].values);
         assert!(
             seed.contains(&evaluation.to_string()) && seed.contains(&derivation.to_string()),
@@ -308,7 +309,7 @@ mod tests {
         let cached_path = CachedPathId::now_v7();
         let (first, second) = (CacheId::now_v7(), CacheId::now_v7());
         let key = signing_key(&secret);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![
                 claim_row(cached_path, first),
                 claim_row(cached_path, second),
@@ -323,7 +324,7 @@ mod tests {
             .expect("the claim lands");
         drop(ctx);
 
-        let log = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let log = raw_statements(pool.into_transaction_log());
         assert!(
             format!("{:?}", log[0].values).contains(HASH),
             "{:?}",
@@ -340,7 +341,7 @@ mod tests {
 
     #[tokio::test]
     async fn nothing_left_to_claim_reads_and_writes_nothing_else() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
@@ -350,10 +351,7 @@ mod tests {
             .expect("the claim lands");
         drop(ctx);
 
-        assert_eq!(
-            gradient_db::pool::statements(pool.into_transaction_log()).len(),
-            1
-        );
+        assert_eq!(statements(pool.into_transaction_log()).len(), 1);
     }
 
     #[test]

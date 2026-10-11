@@ -6,8 +6,8 @@
 
 use super::fixtures::{make_ctx, make_ctx_with, run};
 use crate::actions::summary::EventSummary;
+use gradient_fixtures::mock::mock_db;
 use gradient_types::{EvaluationId, MCommit, MEvaluation, MProject, MTask, ProjectId, TaskId};
-use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -88,7 +88,7 @@ fn build_event_resolves_names_commit_and_link_from_the_evaluation() {
         let evaluation_id = EvaluationId::now_v7();
         let task = TaskId::now_v7();
         let project = ProjectId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![MEvaluation {
                 id: evaluation_id,
                 task: Some(task),
@@ -139,8 +139,7 @@ fn build_event_resolves_names_commit_and_link_from_the_evaluation() {
 #[test]
 fn collected_evaluation_still_yields_a_message() {
     run(async {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<MEvaluation>::new()]);
+        let db = mock_db().append_query_results([Vec::<MEvaluation>::new()]);
         let envelope = json!({
             "at": "t",
             "content": { "evaluation_id": Uuid::now_v7().to_string() },

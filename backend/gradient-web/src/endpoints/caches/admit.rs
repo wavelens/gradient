@@ -62,14 +62,14 @@ async fn admit_object(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::empty_db;
     use gradient_storage::admission::Admitted;
     use gradient_test_support::state::test_state;
-    use sea_orm::{DatabaseBackend, MockDatabase};
     use std::time::Duration;
 
     #[tokio::test]
     async fn a_rest_upload_waits_for_a_permit_and_gives_up_busy() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let mut held = Vec::new();
         while let Ok(permit) = admit_within(&state, 1, Duration::from_millis(50)).await {
             held.push(permit);
@@ -85,7 +85,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_nar_upload_waits_for_the_upload_holding_its_path() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let hash = "a".repeat(32);
         let (holder, mut admitted) = state.upload_admission.open_session("holder");
         holder.request(1, ObjectKey::Nar(hash.clone()), 1, false);

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_fixtures::mock::empty_db;
 use std::sync::Arc;
 
 use axum::extract::Extension;
@@ -13,7 +14,6 @@ use gradient_scheduler::Scheduler;
 use gradient_test_support::state::test_state;
 use gradient_wire::ProtoLimiter;
 use http::header;
-use sea_orm::{DatabaseBackend, MockDatabase};
 
 fn upgrade_request(server: &TestServer) -> axum_test::TestRequest {
     server
@@ -25,7 +25,7 @@ fn upgrade_request(server: &TestServer) -> axum_test::TestRequest {
 }
 
 fn make_server(limiter: Arc<ProtoLimiter>) -> TestServer {
-    let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+    let state = test_state(empty_db());
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
     let app = proto_router()
         .with_state(Arc::clone(&state))

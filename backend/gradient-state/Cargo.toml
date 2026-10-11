@@ -39,3 +39,6 @@ uuid          = { workspace = true }
 
 crypter = { workspace = true }
 ssh-key = { workspace = true }
+
+[dev-dependencies]
+gradient-fixtures = { workspace = true }

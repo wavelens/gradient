@@ -31,4 +31,5 @@ tracing    = { workspace = true }
 uuid       = { workspace = true }
 
 [dev-dependencies]
+gradient-fixtures = { workspace = true }
 tokio = { workspace = true, features = ["macros", "test-util"] }

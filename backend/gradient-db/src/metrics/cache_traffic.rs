@@ -129,7 +129,8 @@ fn add_traffic_stmt(cache: CacheId, bucket: NaiveDateTime, traffic: Traffic) -> 
 mod tests {
     use super::*;
     use chrono::NaiveDate;
-    use sea_orm::{DatabaseBackend as Backend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::{empty_db, mock_db, statements};
+    use sea_orm::MockExecResult;
 
     fn bucket(minute: u32) -> NaiveDateTime {
         NaiveDate::from_ymd_opt(2026, 5, 2)
@@ -153,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn two_serves_in_one_bucket_flush_as_one_upsert() {
-        let db = MockDatabase::new(Backend::Postgres)
+        let db = mock_db()
             .append_exec_results(exec_results(1))
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
@@ -164,7 +165,7 @@ mod tests {
         flush(&ctx, &traffic).await;
 
         drop(ctx);
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert_eq!(log.len(), 1, "one upsert for both serves: {log:?}");
         assert!(log[0].contains("INSERT INTO cache_metric"), "{log:?}");
         assert!(
@@ -185,19 +186,19 @@ mod tests {
 
     #[tokio::test]
     async fn an_idle_interval_writes_nothing() {
-        let db = MockDatabase::new(Backend::Postgres).into_connection();
+        let db = empty_db();
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
 
         flush(&ctx, &CacheTraffic::new()).await;
 
         drop(ctx);
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert!(log.is_empty(), "no serves, no statement: {log:?}");
     }
 
     #[tokio::test]
     async fn each_cache_and_bucket_is_its_own_row() {
-        let db = MockDatabase::new(Backend::Postgres)
+        let db = mock_db()
             .append_exec_results(exec_results(3))
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
@@ -209,7 +210,7 @@ mod tests {
         flush(&ctx, &traffic).await;
 
         drop(ctx);
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert_eq!(log.len(), 3, "two caches over two buckets: {log:?}");
     }
 

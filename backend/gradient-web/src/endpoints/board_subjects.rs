@@ -275,7 +275,8 @@ pub async fn job_evaluation<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use gradient_fixtures::mock::{empty_db, mock_db};
+    use sea_orm::{DatabaseBackend, Value};
     use std::collections::BTreeMap;
 
     fn row(pairs: [(&str, Value); 2]) -> BTreeMap<&str, Value> {
@@ -286,7 +287,7 @@ mod tests {
     async fn a_build_names_its_derivation_and_an_eval_its_repository() {
         let (shared_build, drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
         let evaluation = EvaluationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row([
                 ("derivation", drv.into_inner().into()),
                 ("id", shared_build.into_inner().into()),
@@ -317,7 +318,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_worker_takes_the_name_of_its_first_ranked_registration_then_its_team_worker() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![
                 row([
                     ("worker_id", "w1".into()),
@@ -382,7 +383,7 @@ mod tests {
 
     #[tokio::test]
     async fn nothing_to_name_asks_nothing() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
 
         let subjects = JobSubjects::load(&db, &[], &[]).await.unwrap();
         let names = WorkerNames::load(&db, &MetricsScope::All, [])

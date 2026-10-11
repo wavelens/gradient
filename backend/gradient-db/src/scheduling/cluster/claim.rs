@@ -241,10 +241,11 @@ async fn close_attempt<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scheduling::cluster::test_rows::{exec, logged};
+    use crate::scheduling::cluster::test_rows::exec;
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
     use gradient_entity::ids::{DerivationBuildId, DispatchedJobId, EvaluationId};
-    use sea_orm::{DatabaseBackend, MockDatabase, Statement};
+    use gradient_fixtures::mock::{all_statements, mock_db};
+    use sea_orm::Statement;
 
     fn member(job_id: &str, gate: ClaimGate) -> (MDispatchedJob, ClaimGate) {
         let row = MDispatchedJob {
@@ -281,12 +282,12 @@ mod tests {
     }
 
     async fn run(results: Vec<u64>, claim: ClusterClaim) -> (bool, Vec<Statement>) {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results(results.into_iter().map(exec))
             .into_connection();
         let won = claim_cluster(&db, claim).await.expect("claim");
 
-        (won, logged(db))
+        (won, all_statements(db.into_transaction_log()))
     }
 
     fn inserts_into<'a>(statements: &'a [Statement], table: &str) -> Vec<&'a Statement> {
@@ -298,14 +299,14 @@ mod tests {
     }
 
     async fn closed(result: u64, outcome: ClusterAttemptOutcome) -> (bool, Vec<Statement>) {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(result), exec(2)])
             .into_connection();
         let closed = close_cluster_attempt(&db, ClusterAttemptId::now_v7(), outcome)
             .await
             .expect("close");
 
-        (closed, logged(db))
+        (closed, all_statements(db.into_transaction_log()))
     }
 
     fn updates<'a>(statements: &'a [Statement], table: &str) -> Vec<&'a Statement> {
@@ -317,7 +318,7 @@ mod tests {
     }
 
     async fn started(first: u64) -> (bool, Vec<Statement>) {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(first), exec(1)])
             .into_connection();
         let started =
@@ -325,7 +326,7 @@ mod tests {
                 .await
                 .expect("start");
 
-        (started, logged(db))
+        (started, all_statements(db.into_transaction_log()))
     }
 
     #[tokio::test]
@@ -458,7 +459,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_resolution_closes_and_requeues_in_one_transaction() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(1), exec(0), exec(1)])
             .into_connection();
 
@@ -474,7 +475,7 @@ mod tests {
         .expect("resolve");
 
         assert_eq!(resolved, Some(true));
-        let statements = logged(db);
+        let statements = all_statements(db.into_transaction_log());
         assert_eq!(statements.first().map(|s| s.sql.as_str()), Some("BEGIN"));
         assert_eq!(statements.last().map(|s| s.sql.as_str()), Some("COMMIT"));
         let cluster_updates = statements
@@ -489,9 +490,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolving_a_closed_attempt_writes_nothing() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([exec(0)])
-            .into_connection();
+        let db = mock_db().append_exec_results([exec(0)]).into_connection();
 
         let resolved = resolve_cluster_attempt(
             &db,
@@ -505,12 +504,16 @@ mod tests {
         .expect("resolve");
 
         assert_eq!(resolved, None);
-        assert!(logged(db).iter().any(|s| s.sql == "ROLLBACK"));
+        assert!(
+            all_statements(db.into_transaction_log())
+                .iter()
+                .any(|s| s.sql == "ROLLBACK")
+        );
     }
 
     #[tokio::test]
     async fn a_failed_prepare_returns_a_started_cluster_to_the_queue() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(1), exec(0), exec(1)])
             .into_connection();
 
@@ -520,7 +523,7 @@ mod tests {
                 .expect("fail")
         );
 
-        let statements = logged(db);
+        let statements = all_statements(db.into_transaction_log());
         let reset = statements
             .iter()
             .find(|s| s.sql.starts_with("UPDATE \"cluster_job\""))

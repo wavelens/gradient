@@ -146,7 +146,8 @@ async fn mark_aborted(
 mod tests {
     use super::*;
     use crate::test_ctx::ctx;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::{mock_db, raw_statements, statements};
+    use sea_orm::MockExecResult;
 
     fn evaluation(status: EvaluationStatus) -> MEvaluation {
         MEvaluation {
@@ -204,7 +205,7 @@ mod tests {
             ..evaluation(EvaluationStatus::Failed)
         };
         let build = shared_build(BuildStatus::DependencyFailed);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
@@ -218,7 +219,7 @@ mod tests {
         drop(ctx);
 
         assert_eq!(outcome, Err(BuildRefusal::NewerEvaluation));
-        let log = crate::pool::raw_statements(pool.into_transaction_log());
+        let log = raw_statements(pool.into_transaction_log());
         assert_eq!(log.len(), 1, "nothing but the reopen runs: {log:?}");
         assert!(log[0].sql.starts_with("UPDATE evaluation e"), "{log:?}");
     }
@@ -228,7 +229,7 @@ mod tests {
         let aborting = evaluation(EvaluationStatus::Building);
         let other = evaluation(EvaluationStatus::Waiting);
         let build = shared_build(BuildStatus::Building);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![MBuildJob {
                 id: BuildJobId::now_v7(),
                 evaluation: other.id,
@@ -246,7 +247,7 @@ mod tests {
         drop(ctx);
 
         assert_eq!(outcome, Err(BuildRefusal::NeededByOtherEvaluation));
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert!(
             !log.iter().any(|s| s.starts_with("UPDATE")),
             "nothing is written: {log:?}"

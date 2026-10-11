@@ -143,10 +143,11 @@ async fn requeue_interrupted_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::mock_db;
 
     use gradient_entity::evaluation::Model as MEval;
     use gradient_entity::ids::{CommitId, EvaluationId, TaskId};
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+    use sea_orm::{MockExecResult, Value};
     use std::collections::BTreeMap;
 
     fn derivation_row(derivation: DerivationId) -> BTreeMap<String, Value> {
@@ -191,7 +192,7 @@ mod tests {
     async fn all_operations_populate_report() {
         let task_id = TaskId::now_v7();
         let mid_flight = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 5,
@@ -253,7 +254,7 @@ mod tests {
             last_insert_id: 0,
             rows_affected: 0,
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([none.clone(), none])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<MEval>::new()])
@@ -289,7 +290,7 @@ mod tests {
             last_insert_id: 0,
             rows_affected: 0,
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([none.clone(), none.clone()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<MEval>::new()])
@@ -318,7 +319,7 @@ mod tests {
 
     #[tokio::test]
     async fn nothing_is_reported_without_interrupted_work() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,

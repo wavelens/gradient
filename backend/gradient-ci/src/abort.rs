@@ -44,7 +44,8 @@ pub async fn abort_evaluation<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::MockExecResult;
 
     fn make_eval(status: EvaluationStatus) -> gradient_entity::evaluation::Model {
         gradient_entity::evaluation::Model {
@@ -59,7 +60,7 @@ mod tests {
     #[tokio::test]
     async fn abort_terminal_eval_is_noop() {
         let eval = make_eval(EvaluationStatus::Completed);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval.clone()]])
             .into_connection();
         let aborted = abort_evaluation(&db, eval.id, AbortKind::Hard)
@@ -71,7 +72,7 @@ mod tests {
     #[tokio::test]
     async fn soft_abort_marks_only_eval() {
         let eval = make_eval(EvaluationStatus::Building);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval.clone()]])
             .append_query_results([vec![eval.clone()]])
             .append_exec_results([MockExecResult {

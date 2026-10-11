@@ -150,21 +150,21 @@ mod tests {
     use super::*;
     use crate::test_support::test_server_state;
     use gradient_entity::ids::UserId;
+    use gradient_fixtures::mock::mock_db;
     use gradient_storage::NarStore;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::{MockDatabase, MockExecResult};
 
     fn state(db: MockDatabase, deep_interval_secs: u64) -> Arc<ServerState> {
         let tmp = tempfile::tempdir().unwrap();
         let nar = NarStore::local(tmp.path()).unwrap();
-        test_server_state(nar, db.into_connection(), |config| {
+        test_server_state(nar, db.into_connection(), move |config| {
             config.gc.deep_interval_secs = deep_interval_secs;
         })
     }
 
     #[tokio::test]
     async fn no_background_round_starts_when_the_interval_is_zero() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<MAdminTask>::new()]);
+        let db = mock_db().append_query_results([Vec::<MAdminTask>::new()]);
 
         assert_eq!(step(&state(db, 0)).await.unwrap(), Step::Idle);
     }
@@ -180,7 +180,7 @@ mod tests {
             created_by: Some(UserId::now_v7()),
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![running]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,

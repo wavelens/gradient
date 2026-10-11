@@ -8,13 +8,12 @@
 //! and the INSERT is not provable with mocks.
 
 use gradient_entity::{ids::*, project, project_user};
-use gradient_test_support::fixtures::{test_date, user, user_id};
-use gradient_test_support::web::{
-    live_session, make_test_server, make_test_server_with, make_token,
-};
-use gradient_types::SessionId;
+use gradient_fixtures::ids::user_id;
+use gradient_fixtures::test_date;
+use gradient_test_support::state::TestState;
+use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::MockExecResult;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -44,25 +43,16 @@ fn project_user_row(project_id: ProjectId) -> project_user::Model {
     }
 }
 
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
 #[tokio::test]
 async fn put_project_returns_already_exists_via_pre_check() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-        .append_query_results([vec![project_row("dup")]]);
+    let db = db.append_query_results([vec![project_row("dup")]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
         .put("/api/v1/projects")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({
             "name": "dup",
             "display_name": "dup",
@@ -79,12 +69,11 @@ async fn put_project_returns_already_exists_via_pre_check() {
 
 #[tokio::test]
 async fn put_project_creates_project_and_admin_membership() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let inserted = project_row("fresh");
     let membership = project_user_row(inserted.id);
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results::<project::Model, _, _>([Vec::<project::Model>::new()])
         .append_query_results([vec![inserted]])
         .append_query_results([vec![membership]])
@@ -100,10 +89,13 @@ async fn put_project_creates_project_and_admin_membership() {
             },
         ]);
 
-    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.secrets.crypt_file = temp_crypt_secret_file())
+        .server();
     let res = server
         .put("/api/v1/projects")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({
             "name": "fresh",
             "display_name": "Fresh",

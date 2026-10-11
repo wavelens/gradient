@@ -170,9 +170,10 @@ fn store_hash(store_path: &str) -> Option<&str> {
 mod serve_nar_tests {
     use super::*;
     use bytes::Bytes;
+    use gradient_fixtures::mock::{empty_db, mock_db};
+    use gradient_test_support::state::TestState;
     use gradient_test_support::state::test_state;
     use gradient_wire::messages::ServerMessage;
-    use sea_orm::{DatabaseBackend, MockDatabase};
     use tokio::sync::mpsc;
 
     fn spy_writer(timeout: Duration) -> (ProtoWriter, mpsc::Receiver<Bytes>) {
@@ -189,7 +190,7 @@ mod serve_nar_tests {
 
     #[tokio::test]
     async fn serve_streams_full_payload_in_chunks() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let state = test_state(db);
         let mut payload = Vec::with_capacity(9 * 1024 * 1024);
         for i in 0..(9 * 1024 * 1024 / 4) {
@@ -239,7 +240,7 @@ mod serve_nar_tests {
 
     #[tokio::test]
     async fn serve_emits_nar_unavailable_when_missing() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let state = test_state(db);
         let (writer, mut rx) = spy_writer(Duration::from_secs(5));
 
@@ -265,7 +266,7 @@ mod serve_nar_tests {
 
     #[tokio::test]
     async fn serve_answers_a_hot_entry_in_bulk_chunks() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let cli = gradient_test_support::prelude::test_cli();
         let storage = gradient_storage::NarStore::local(&cli.server.base_dir)
             .unwrap()
@@ -273,7 +274,7 @@ mod serve_nar_tests {
                 4 * 1024 * 1024,
                 2 * 1024 * 1024,
             ));
-        let state = gradient_test_support::prelude::test_state_with_storage(db, storage);
+        let state = TestState::new().worker_db(db).nar_storage(storage).build();
         let payload: Vec<u8> = (0..(1024 * 1024 + 123)).map(|i| i as u8).collect();
         let hash = "abcdefghijklmnopqrstuvwxyz012345";
         state
@@ -311,7 +312,7 @@ mod serve_nar_tests {
 
     #[tokio::test]
     async fn an_invalid_store_path_is_unavailable() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let state = test_state(db);
         let (writer, mut rx) = spy_writer(Duration::from_secs(5));
 
@@ -335,7 +336,7 @@ mod serve_nar_tests {
             }
         }
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([
                 vec![row(false, chrono::Duration::minutes(1))],
                 vec![row(true, chrono::Duration::minutes(1))],

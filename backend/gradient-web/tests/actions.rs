@@ -10,21 +10,19 @@
 )]
 
 use axum_test::TestServer;
-use gradient_core::ServerState;
-use gradient_db::{WebDb, WorkerDb};
-use gradient_entity::{ids::*, project_user, task, task_action, task_action_delivery, team};
+use gradient_entity::{ids::*, task, task_action, task_action_delivery, team};
+use gradient_fixtures::ids::{project_id, task_id, user_id};
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::{admin_role, project, project_member};
+use gradient_fixtures::test_date;
 use gradient_notify::EmailSender;
-use gradient_storage::NarStore;
-use gradient_test_support::cli::{test_cli, test_cli_with_crypt};
 use gradient_test_support::fakes::email::InMemoryEmailSender;
-use gradient_test_support::fixtures::{project, project_id, task_id, test_date, user, user_id};
-use gradient_test_support::log_storage::NoopLogStorage;
-use gradient_test_support::web::{
-    TEST_JWT_SECRET, live_session, make_test_server_with, make_token,
-};
-use gradient_types::{ActionType, ConcurrencyPolicy, RuntimeConfig, SecretString, SessionId};
-use gradient_web::create_router;
-use sea_orm::{DatabaseBackend, MockDatabase};
+use gradient_test_support::state::TestState;
+use gradient_test_support::web::make_token;
+use gradient_test_support::web::{make_test_server, with_auth};
+use gradient_types::consts::BASE_ROLE_ADMIN_ID;
+use gradient_types::{ActionType, ConcurrencyPolicy, SessionId};
+use sea_orm::MockDatabase;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -48,24 +46,6 @@ fn task_row() -> task::Model {
         keep_evaluations: 10,
         concurrency: ConcurrencyPolicy::Skip,
         sign_cache: true,
-        ..Default::default()
-    }
-}
-
-fn admin_membership() -> project_user::Model {
-    project_user::Model {
-        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap()),
-        project: project_id(),
-        user: user_id(),
-        role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
-    }
-}
-
-fn admin_role_row() -> gradient_entity::role::Model {
-    gradient_entity::role::Model {
-        id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
-        name: "Admin".into(),
-        permission: gradient_types::permissions::admin_mask(),
         ..Default::default()
     }
 }
@@ -114,24 +94,17 @@ fn temp_crypt_secret_file() -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
 fn with_task_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
         .append_query_results([vec![task_row()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
 }
 
 fn with_task_edit(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
         .append_query_results([vec![task_row()]])
-        .append_query_results([vec![admin_membership()]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
 }
 
 fn server_with_email(
@@ -139,52 +112,15 @@ fn server_with_email(
     email: Arc<dyn EmailSender>,
     crypt_secret_file: Option<String>,
 ) -> TestServer {
-    let cli = match crypt_secret_file {
-        Some(path) => test_cli_with_crypt(path),
-        None => test_cli(),
-    };
-    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.server.base_dir).expect("nar store");
-    let state = Arc::new(ServerState {
-        web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(
-            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-        ),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config,
-        log_storage: Arc::new(NoopLogStorage),
-        email,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http client"),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: SecretString::new(TEST_JWT_SECRET.to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-    });
-    TestServer::new(create_router(state).expect("router"))
+    TestState::new()
+        .web_db(db)
+        .email(email)
+        .cli(|cli| {
+            if let Some(path) = crypt_secret_file {
+                cli.secrets.crypt_file = path;
+            }
+        })
+        .server()
 }
 
 const BASE_URL: &str = "/api/v1/tasks/test-project/test-task/actions";
@@ -194,13 +130,10 @@ async fn list_actions_empty() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([Vec::<task_action::Model>::new()]);
+    let db = with_task_member(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<task_action::Model>::new()]);
 
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
     let res = server
         .get(BASE_URL)
         .add_header("authorization", format!("Bearer {}", token))
@@ -218,14 +151,11 @@ async fn create_send_mail_returns_201_when_smtp_enabled() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([Vec::<task_action::Model>::new()])
-    .append_query_results([vec![send_mail_action_row()]]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<task_action::Model>::new()])
+        .append_query_results([vec![send_mail_action_row()]]);
 
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
     let res = server
         .post(BASE_URL)
         .add_header("authorization", format!("Bearer {}", token))
@@ -252,13 +182,10 @@ async fn a_mail_action_cannot_address_a_team_without_access() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([Vec::<team::Model>::new()]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<team::Model>::new()]);
 
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
     let res = server
         .post(BASE_URL)
         .add_header("authorization", format!("Bearer {}", token))
@@ -280,10 +207,7 @@ async fn create_send_mail_422_when_smtp_disabled() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ));
+    let db = with_task_edit(with_auth(mock_db(), session_id));
 
     let server = server_with_email(
         db.into_connection(),
@@ -317,14 +241,14 @@ async fn create_send_web_request_returns_token_once() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([Vec::<task_action::Model>::new()])
-    .append_query_results([vec![web_request_action_row()]]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<task_action::Model>::new()])
+        .append_query_results([vec![web_request_action_row()]]);
 
-    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.secrets.crypt_file = temp_crypt_secret_file())
+        .server();
     let res = server
         .post(BASE_URL)
         .add_header("authorization", format!("Bearer {}", token))
@@ -377,14 +301,14 @@ async fn create_matrix_action_never_echoes_the_access_token() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([Vec::<task_action::Model>::new()])
-    .append_query_results([vec![matrix_action_row()]]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<task_action::Model>::new()])
+        .append_query_results([vec![matrix_action_row()]]);
 
-    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.secrets.crypt_file = temp_crypt_secret_file())
+        .server();
     let res = server
         .post(BASE_URL)
         .add_header("authorization", format!("Bearer {}", token))
@@ -424,13 +348,9 @@ async fn read_slack_action_strips_the_webhook_url() {
         config: json!({ "type": "send_slack_message", "webhook_url": "ENCRYPTED_BLOB" }),
         ..matrix_action_row()
     };
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![row]]);
+    let db = with_task_member(with_auth(mock_db(), session_id)).append_query_results([vec![row]]);
 
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
     let res = server
         .get(&format!("{}/{}", BASE_URL, action_id()))
         .add_header("authorization", format!("Bearer {}", token))
@@ -446,12 +366,12 @@ async fn create_rejected(config: Value) -> Value {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ));
+    let db = with_task_edit(with_auth(mock_db(), session_id));
 
-    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.secrets.crypt_file = temp_crypt_secret_file())
+        .server();
     let res = server
         .post(BASE_URL)
         .add_header("authorization", format!("Bearer {}", token))
@@ -527,12 +447,9 @@ async fn create_git_host_status_report_rejects_nonempty_events() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ));
+    let db = with_task_edit(with_auth(mock_db(), session_id));
 
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
     let integration_id = IntegrationId::now_v7();
     let res = server
         .post(BASE_URL)
@@ -565,13 +482,10 @@ async fn read_action_strips_token_from_config() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![web_request_action_row()]]);
+    let db = with_task_member(with_auth(mock_db(), session_id))
+        .append_query_results([vec![web_request_action_row()]]);
 
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
     let url = format!("{}/{}", BASE_URL, action_id());
     let res = server
         .get(&url)
@@ -594,13 +508,10 @@ async fn update_rejects_action_type_change() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![send_mail_action_row()]]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![send_mail_action_row()]]);
 
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
     let url = format!("{}/{}", BASE_URL, action_id());
     let res = server
         .patch(&url)
@@ -639,14 +550,14 @@ async fn regenerate_token_returns_new_plaintext() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![web_request_action_row()]])
-    .append_query_results([vec![web_request_action_row()]]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![web_request_action_row()]])
+        .append_query_results([vec![web_request_action_row()]]);
 
-    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.secrets.crypt_file = temp_crypt_secret_file())
+        .server();
     let url = format!("{}/{}/regenerate-token", BASE_URL, action_id());
     let res = server
         .post(&url)
@@ -666,13 +577,10 @@ async fn regenerate_token_rejects_non_web_request_action() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![send_mail_action_row()]]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![send_mail_action_row()]]);
 
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
     let url = format!("{}/{}/regenerate-token", BASE_URL, action_id());
     let res = server
         .post(&url)
@@ -716,14 +624,11 @@ async fn list_deliveries_excludes_bodies() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![send_mail_action_row()]])
-    .append_query_results([vec![delivery_row()]]);
+    let db = with_task_member(with_auth(mock_db(), session_id))
+        .append_query_results([vec![send_mail_action_row()]])
+        .append_query_results([vec![delivery_row()]]);
 
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
     let url = format!("{}/{}/deliveries", BASE_URL, action_id());
     let res = server
         .get(&url)
@@ -752,14 +657,11 @@ async fn get_delivery_detail_includes_bodies() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![send_mail_action_row()]])
-    .append_query_results([vec![delivery_row()]]);
+    let db = with_task_member(with_auth(mock_db(), session_id))
+        .append_query_results([vec![send_mail_action_row()]])
+        .append_query_results([vec![delivery_row()]]);
 
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
     let url = format!("{}/{}/deliveries/{}", BASE_URL, action_id(), delivery_id());
     let res = server
         .get(&url)
@@ -780,13 +682,10 @@ async fn list_deliveries_404_on_unknown_action() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([Vec::<task_action::Model>::new()]);
+    let db = with_task_member(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<task_action::Model>::new()]);
 
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
     let unknown_id = TaskActionId::now_v7();
     let url = format!("{}/{}/deliveries", BASE_URL, unknown_id);
     let res = server
@@ -804,13 +703,10 @@ async fn delete_returns_404_when_unknown() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([Vec::<task_action::Model>::new()]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<task_action::Model>::new()]);
 
-    let server = make_test_server_with(db.into_connection(), None);
+    let server = make_test_server(db.into_connection());
     let unknown_id = TaskActionId::now_v7();
     let url = format!("{}/{}", BASE_URL, unknown_id);
     let res = server

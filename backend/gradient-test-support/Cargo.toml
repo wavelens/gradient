@@ -29,6 +29,7 @@ gradient-types = { workspace = true }
 gradient-wire = { workspace = true, features = ["testing"] }
 gradient-worker-client = { workspace = true, features = ["testing"] }
 gradient-entity = { workspace = true }
+gradient-fixtures = { workspace = true }
 gradient-proto = { workspace = true }
 gradient-web = { workspace = true }
 
@@ -39,7 +40,6 @@ chrono              = { workspace = true }
 futures             = { workspace = true }
 harmonia-file-nar         = { workspace = true }
 harmonia-store-derivation = { workspace = true }
-password-auth       = { workspace = true }
 sea-orm             = { workspace = true }
 serde               = { workspace = true }
 tempfile            = { workspace = true }

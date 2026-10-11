@@ -10,9 +10,10 @@
 )]
 
 use gradient_entity::{api, ids::*};
-use gradient_test_support::fixtures::{user, user_id};
+use gradient_fixtures::ids::user_id;
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::user;
 use gradient_test_support::web::make_test_server;
-use sea_orm::{DatabaseBackend, MockDatabase};
 use sha2::{Digest, Sha256};
 
 fn hash_api_key(raw: &str) -> String {
@@ -47,7 +48,7 @@ fn api_key(raw: &str) -> api::Model {
 async fn one_api_key_is_stamped_once_per_interval() {
     let raw = "s".repeat(64);
     let key = api_key(&raw);
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![key.clone()]])
         .append_query_results([vec![key.clone()]])
         .append_query_results([vec![user()]])

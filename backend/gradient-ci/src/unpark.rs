@@ -236,7 +236,8 @@ pub async fn find_approval_gated_eval(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::MockExecResult;
 
     fn waiting_eval(reason: WaitingReason) -> MEvaluation {
         gradient_entity::evaluation::Model {
@@ -257,7 +258,7 @@ mod tests {
         requeued.status = EvaluationStatus::Queued;
         requeued.waiting_reason = None;
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![parked.clone()]])
             .append_query_results([vec![requeued.clone()]])
             .append_exec_results([MockExecResult {
@@ -274,7 +275,7 @@ mod tests {
     #[tokio::test]
     async fn unpark_approval_no_op_for_non_approval_reason() {
         let parked = waiting_eval(WaitingReason::NoCache);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![parked.clone()]])
             .into_connection();
         assert!(unpark_approval(&db, parked.id).await.unwrap().is_none());
@@ -290,7 +291,7 @@ mod tests {
         requeued.waiting_reason = None;
         requeued.wildcard = "packages.x86_64-linux.foo".into();
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![parked.clone()]])
             .append_query_results([vec![requeued.clone()]])
             .append_exec_results([MockExecResult {
@@ -311,7 +312,7 @@ mod tests {
     #[tokio::test]
     async fn unpark_approval_with_wildcard_no_op_for_non_approval_reason() {
         let parked = waiting_eval(WaitingReason::NoCache);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![parked.clone()]])
             .into_connection();
         assert!(
@@ -375,7 +376,7 @@ mod tests {
         requeued.status = EvaluationStatus::Queued;
         requeued.waiting_reason = None;
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval_capable_registration()]])
             .append_query_results([vec![task.clone()]])
             .append_query_results([vec![stranded.clone(), capability_mismatch.clone()]])
@@ -395,7 +396,7 @@ mod tests {
 
     #[tokio::test]
     async fn unpark_no_workers_is_noop_when_no_eval_capable_registration() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
             .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
             .into_connection();
@@ -419,7 +420,7 @@ mod tests {
         requeued.status = EvaluationStatus::Queued;
         requeued.waiting_reason = None;
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
             .append_query_results([vec![task.clone()]])
             .append_query_results([vec![stranded.clone()]])

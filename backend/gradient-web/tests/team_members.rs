@@ -13,17 +13,16 @@ use axum::http::StatusCode;
 use gradient_entity::ids::*;
 use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 use gradient_entity::{team, team_invitation, team_user};
-use gradient_test_support::fixtures::{test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_fixtures::ids::{team_id, user_id};
+use gradient_fixtures::mock::{all_statements, exec_ok, mock_db};
+use gradient_fixtures::rows::user;
+use gradient_fixtures::test_date;
+use gradient_test_support::web::{bearer, make_test_server, signed_in, with_auth};
 use gradient_types::SessionId;
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::MockDatabase;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use uuid::Uuid;
-
-fn team_id() -> TeamId {
-    TeamId::new(Uuid::parse_str("7e000000-0000-0000-0000-000000000001").unwrap())
-}
 
 fn team_row() -> team::Model {
     team::Model {
@@ -40,24 +39,6 @@ fn managed_team_row() -> team::Model {
     team::Model {
         managed: true,
         ..team_row()
-    }
-}
-
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
-fn bearer(session_id: SessionId) -> String {
-    format!("Bearer {}", make_token(session_id))
-}
-
-fn exec_ok() -> MockExecResult {
-    MockExecResult {
-        last_insert_id: 0,
-        rows_affected: 1,
     }
 }
 
@@ -115,7 +96,7 @@ fn state_member() -> team_user::Model {
 }
 
 fn with_state_member(session_id: SessionId) -> MockDatabase {
-    with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    with_auth(mock_db(), session_id)
         .append_query_results([vec![managed_team_row()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![other_user()]])
@@ -124,8 +105,8 @@ fn with_state_member(session_id: SessionId) -> MockDatabase {
 
 #[tokio::test]
 async fn an_admin_invites_a_user_into_a_state_managed_team() {
-    let session_id = SessionId::now_v7();
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let (db, auth) = signed_in();
+    let db = db
         .append_query_results([vec![managed_team_row()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![other_user()]])
@@ -140,7 +121,7 @@ async fn an_admin_invites_a_user_into_a_state_managed_team() {
 
     let res = server
         .post("/api/v1/teams/platform/members")
-        .add_header("authorization", bearer(session_id))
+        .add_header("authorization", auth)
         .json(&json!({ "user": "otheruser", "role": "member" }))
         .await;
 
@@ -179,15 +160,15 @@ async fn a_member_declared_by_the_state_cannot_be_removed() {
 
 #[tokio::test]
 async fn a_member_cannot_invite() {
-    let session_id = SessionId::now_v7();
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let (db, auth) = signed_in();
+    let db = db
         .append_query_results([vec![team_row()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Member)]]);
     let server = make_test_server(db.into_connection());
 
     let res = server
         .post("/api/v1/teams/platform/members")
-        .add_header("authorization", bearer(session_id))
+        .add_header("authorization", auth)
         .json(&json!({ "user": "otheruser", "role": "member" }))
         .await;
 
@@ -196,8 +177,8 @@ async fn a_member_cannot_invite() {
 
 #[tokio::test]
 async fn the_last_admin_cannot_be_removed() {
-    let session_id = SessionId::now_v7();
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let (db, auth) = signed_in();
+    let db = db
         .append_query_results([vec![team_row()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![user()]])
@@ -207,7 +188,7 @@ async fn the_last_admin_cannot_be_removed() {
 
     let res = server
         .delete("/api/v1/teams/platform/members")
-        .add_header("authorization", bearer(session_id))
+        .add_header("authorization", auth)
         .json(&json!({ "user": "testuser" }))
         .await;
 
@@ -216,8 +197,8 @@ async fn the_last_admin_cannot_be_removed() {
 
 #[tokio::test]
 async fn the_last_admin_cannot_be_demoted() {
-    let session_id = SessionId::now_v7();
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let (db, auth) = signed_in();
+    let db = db
         .append_query_results([vec![team_row()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![user()]])
@@ -227,7 +208,7 @@ async fn the_last_admin_cannot_be_demoted() {
 
     let res = server
         .patch("/api/v1/teams/platform/members")
-        .add_header("authorization", bearer(session_id))
+        .add_header("authorization", auth)
         .json(&json!({ "user": "testuser", "role": "member" }))
         .await;
 
@@ -241,7 +222,7 @@ async fn a_group_member_made_admin_stays_past_the_group_sync() {
         source: TeamMemberSource::Group,
         ..member_row(other_user_id(), TeamRole::Member)
     };
-    let conn = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let conn = with_auth(mock_db(), session_id)
         .append_query_results([vec![team_row()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![other_user()]])
@@ -262,10 +243,8 @@ async fn a_group_member_made_admin_stays_past_the_group_sync() {
 
     res.assert_status_ok();
     drop(server);
-    let clears_group_flag = conn
-        .into_transaction_log()
-        .iter()
-        .flat_map(|t| t.statements().to_vec())
+    let clears_group_flag = all_statements(conn.into_transaction_log())
+        .into_iter()
         .any(|s| s.sql.starts_with("UPDATE \"team_user\"") && s.sql.contains("\"source\""));
     assert!(
         clears_group_flag,
@@ -275,8 +254,8 @@ async fn a_group_member_made_admin_stays_past_the_group_sync() {
 
 #[tokio::test]
 async fn accepting_a_team_invite_adds_the_membership() {
-    let session_id = SessionId::now_v7();
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let (db, auth) = signed_in();
+    let db = db
         .append_query_results([Vec::<gradient_entity::project_invitation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::cache_invitation::Model>::new()])
         .append_query_results([vec![invitation()]])
@@ -287,7 +266,7 @@ async fn accepting_a_team_invite_adds_the_membership() {
 
     let res = server
         .post("/api/v1/user/invites/accept")
-        .add_header("authorization", bearer(session_id))
+        .add_header("authorization", auth)
         .json(&json!({ "token": "team-tok" }))
         .await;
 

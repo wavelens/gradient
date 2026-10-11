@@ -82,11 +82,11 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
 mod tests {
     use super::*;
     use crate::test_ctx::ctx;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
 
     #[tokio::test]
     async fn an_unknown_path_reports_no_cached_path() {
-        let (ctx, _) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
+        let (ctx, _) = ctx(mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .into_connection())
         .await;

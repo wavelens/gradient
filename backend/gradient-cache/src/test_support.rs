@@ -5,20 +5,17 @@
  */
 
 use gradient_core::ServerState;
-use gradient_db::{CacheDb, WebDb, WorkerDb};
-use gradient_notify::EmailSender;
 use gradient_storage::{LogStorage, NarStore};
-use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::log_storage::NoopLogStorage;
-use gradient_test_support::prelude::test_cli;
+use gradient_test_support::state::TestState;
 use gradient_types::RuntimeConfig;
-use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
+use sea_orm::DatabaseConnection;
 use std::sync::Arc;
 
 pub(crate) fn test_server_state(
     nar: NarStore,
     db: DatabaseConnection,
-    configure: impl FnOnce(&mut RuntimeConfig),
+    configure: impl FnOnce(&mut RuntimeConfig) + 'static,
 ) -> Arc<ServerState> {
     test_server_state_with_log(nar, Arc::new(NoopLogStorage), db, configure)
 }
@@ -27,46 +24,12 @@ pub(crate) fn test_server_state_with_log(
     nar: NarStore,
     log_storage: Arc<dyn LogStorage>,
     db: DatabaseConnection,
-    configure: impl FnOnce(&mut RuntimeConfig),
+    configure: impl FnOnce(&mut RuntimeConfig) + 'static,
 ) -> Arc<ServerState> {
-    let mut config = RuntimeConfig::from_cli(&test_cli()).expect("valid test config");
-    configure(&mut config);
-
-    Arc::new(ServerState {
-        web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cache_db: CacheDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        worker_db: WorkerDb::new(db),
-        config: Arc::new(config),
-        log_storage,
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage: nar,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http client"),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-    })
+    TestState::new()
+        .worker_db(db)
+        .nar_storage(nar)
+        .log_storage(log_storage)
+        .config(configure)
+        .build()
 }
