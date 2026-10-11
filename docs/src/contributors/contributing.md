@@ -71,7 +71,7 @@ CI (`.github/workflows/rust.yml`) will check fmt, the `#[allow]` grep check and 
 |---|---|
 | New endpoint in `backend/gradient-web/src/endpoints/` | `docs/gradient-api.yaml`. Handlers extract parameters, check authorization, query and respond |
 | New table | A migration in `backend/gradient-migration/src/`, an entity in `backend/gradient-entity/src/`, see [Migrations](migrations.md) |
-| Configuration option | A field in `backend/gradient-types/src/cli/`, then the generated files below. Worker options live in `backend/gradient-worker/src/config/options.rs` and also need `nix/modules/gradient-worker.nix` |
+| Configuration option | A field in `backend/gradient-types/src/cli/`, or in `backend/gradient-worker/src/config/options.rs` for the worker, then the generated files below |
 
 Flag, environment variable, NixOS option and the row in the [Configuration](../reference/configuration.md) reference derive from the field and its doc comment. Three commands refresh the generated files.
 

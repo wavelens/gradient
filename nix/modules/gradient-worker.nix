@@ -6,10 +6,37 @@
 
 { lib, pkgs, config, ... }: let
   cfg = config.services.gradient.worker;
+  workerOptions = import ./options.nix {
+    inherit lib;
+    specs = builtins.fromJSON (builtins.readFile ../../backend/gradient-worker/options.json);
+    subGroups = { eval = [ "cache" ]; log = [ "level" ]; };
+    emptyListIsUnset = true;
+    withoutEnvironment = [ [ "peers" ] [ "nixBin" ] [ "sshBin" ] [ "evalSubprocess" ] [ "evalDriver" ] ];
+
+    writtenByHand = [
+      [ "peers" ]
+      [ "nixBin" ]
+      [ "sshBin" ]
+      [ "evalSubprocess" ]
+      [ "evalDriver" ]
+      [ "serverUrl" ]
+      [ "system" "architectures" ]
+      [ "system" "features" ]
+      [ "nixDaemon" "maxConnections" ]
+      [ "build" "cgroup" ]
+      [ "nar" "chunkBytes" ]
+      [ "log" "level" "default" ]
+      [ "log" "level" "eval" ]
+      [ "log" "level" "build" ]
+      [ "log" "level" "proto" ]
+    ];
+  };
+
   logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
   environmentValue = value: if lib.isBool value then lib.boolToString value else lib.mapNullable toString value;
 in {
   imports = [
+    { options.services.gradient.worker = workerOptions.options; }
     (lib.mkRemovedOptionModule [ "services" "gradient" "worker" "drainTimeoutSecs" ] "a stop aborts the running jobs and the server queues them again")
   ];
 
@@ -82,8 +109,6 @@ in {
 
     useTls = lib.mkEnableOption "TLS" // { default = true; };
 
-    discoverable = lib.mkEnableOption "incoming server connections on `/proto`";
-
     domain = lib.mkOption {
       type = lib.types.str;
       default = "";
@@ -101,56 +126,6 @@ in {
       description = ''
         WebSocket URL of the Gradient server's `/proto` endpoint. `null` leaves the worker
         waiting for the server to connect.
-      '';
-    };
-
-    baseDir = lib.mkOption {
-      type = lib.types.path;
-      default = "/var/lib/gradient-worker";
-      description = "Directory holding the worker's state.";
-    };
-
-    listenAddr = lib.mkOption {
-      type = lib.types.str;
-      default = "127.0.0.1";
-      description = "IP address the worker listens on for incoming server connections.";
-    };
-
-    port = lib.mkOption {
-      type = lib.types.port;
-      default = 3100;
-      description = "Port the worker listens on for incoming server connections.";
-    };
-
-    id = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      example = "550e8400-e29b-41d4-a716-446655440001";
-      description = ''
-        Worker UUID. `null` generates one on first start and stores it in
-        {file}`<services.gradient.worker.baseDir>/worker-id`. Set it when the UUID must be known in
-        advance, for example to register the worker in {option}`services.gradient.state.workers`.
-      '';
-    };
-
-    zone = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      example = "fra1";
-      description = ''
-        Locality label advertised to the scheduler. A cluster job asking for one zone places
-        every member on workers with the same label. `null` puts the worker in the zone of
-        all unlabelled workers.
-      '';
-    };
-
-    endpoint = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      example = "10.0.0.7:7000";
-      description = ''
-        Address at which other members of a cluster job reach this worker, passed through
-        verbatim in the cluster roster. `null` advertises none.
       '';
     };
 
@@ -189,22 +164,6 @@ in {
       '';
     };
 
-    gcrootsDir = lib.mkOption {
-      type = lib.types.str;
-      default = "/nix/var/nix/gcroots/gradient";
-      description = ''
-        Directory for the indirect GC roots pinning each running build's inputs and outputs against
-        a concurrent {command}`nix-collect-garbage`. An empty string disables pinning.
-      '';
-    };
-
-    capabilities = {
-      federate = lib.mkEnableOption "forwarding work and NARs between workers and servers (requiring `discoverable`)";
-      fetch = lib.mkEnableOption "prefetching flake inputs and sources" // { default = true; };
-      eval = lib.mkEnableOption "Nix flake evaluations" // { default = true; };
-      build = lib.mkEnableOption "Nix builds" // { default = true; };
-    };
-
     system = {
       architectures = lib.mkOption {
         type = lib.types.listOf lib.types.str;
@@ -224,25 +183,6 @@ in {
         '';
       };
 
-      cpuCoreScore = lib.mkOption {
-        type = lib.types.nullOr lib.types.ints.positive;
-        default = null;
-        description = ''
-          Single-core speed score advertised to the scheduler, higher is faster. `null`
-          benchmarks the host at startup.
-        '';
-      };
-
-      minFreeRamMb = lib.mkOption {
-        type = lib.types.ints.unsigned;
-        default = 0;
-        description = ''
-          Free memory in MiB below which the worker kills the one evaluation subprocess large
-          enough to restore the margin. The worker reports that evaluation as failed instead of
-          letting the host freeze. `0` uses 10% of total memory, clamped to 128 MiB to 1 GiB.
-          {option}`services.gradient.worker.eval.maxRss` still bounds steady-state memory.
-        '';
-      };
     };
 
     nixDaemon = {
@@ -258,32 +198,6 @@ in {
     };
 
     eval = {
-      maxConcurrent = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = 1;
-        description = "Maximum simultaneous evaluations.";
-      };
-
-      forkWorkers = lib.mkOption {
-        type = lib.types.nullOr lib.types.ints.positive;
-        default = null;
-        description = ''
-          Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` sizes
-          the pool to the host's core count, capped at 16.
-        '';
-      };
-
-      maxRss = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = 2 * 1024 * 1024 * 1024;
-        description = ''
-          Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit
-          restart after their call and free the Nix heap. A call may grow past the limit, with
-          {option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.
-          Keep it above a typical evaluation's heap.
-        '';
-      };
-
       metrics = lib.mkOption {
         type = lib.types.bool;
         default = true;
@@ -293,39 +207,9 @@ in {
         '';
       };
 
-      cache = {
-        dir = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          description = ''
-            Eval cache directory, exported to evaluation subprocesses as {env}`NIX_CACHE_HOME`.
-            `null` uses {file}`<services.gradient.worker.baseDir>/eval-cache`.
-          '';
-        };
-
-        share = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = "Whether to share eval cache blobs with other workers through the server.";
-        };
-      };
     };
 
     build = {
-      maxConcurrent = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = 32;
-        description = "Maximum simultaneous builds.";
-      };
-
-      maxCores = lib.mkOption {
-        type = lib.types.nullOr lib.types.ints.positive;
-        default = null;
-        description = ''
-          CPU cores a single build can use, passed as `--cores`. `null` uses all cores.
-        '';
-      };
-
       metrics = lib.mkOption {
         type = lib.types.bool;
         default = false;
@@ -368,25 +252,6 @@ in {
     };
 
     nar = {
-      maxConcurrentUploads = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = 16;
-        description = ''
-          Upload requests over 1 MiB the worker keeps open at once, waiting for a server grant or
-          transferring. One job holds at most half. Smaller uploads have a window of 128 of their
-          own. The server's upload budget decides how many run. This limit bounds worker memory.
-        '';
-      };
-
-      partialTtlSecs = lib.mkOption {
-        type = lib.types.ints.unsigned;
-        default = 86400;
-        description = ''
-          Seconds after its last write before the deletion of an unfinished NAR download under
-          {file}`<services.gradient.worker.baseDir>/nar-partial`. `0` disables the cleanup.
-        '';
-      };
-
       chunkBytes = lib.mkOption {
         type = lib.types.ints.between 4096 4194304;
         default = 524288;
@@ -439,39 +304,6 @@ in {
         description = "Log levels per component.";
       };
 
-      burstBytesPerMin = lib.mkOption {
-        type = lib.types.int;
-        default = 8 * 1024 * 1024;
-        description = ''
-          Build log bytes forwarded per build within any minute. The worker stops forwarding
-          a build's log past this limit. The build itself continues.
-        '';
-      };
-
-      sustainedBytesPerHour = lib.mkOption {
-        type = lib.types.int;
-        default = 64 * 1024 * 1024;
-        description = "Build log bytes forwarded per build within any hour.";
-      };
-
-      fetchFromStore = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = ''
-          Whether to forward the stored build log of a derivation already built locally and
-          therefore producing no new log.
-        '';
-      };
-
-      traceDir = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        example = "/var/lib/gradient-worker/trace";
-        description = ''
-          Directory receiving every closed stage span of the worker and its eval subprocesses as
-          JSON lines, one file per process. `null` disables span tracing.
-        '';
-      };
     };
   };
 
@@ -554,66 +386,14 @@ in {
           NIX_REMOTE = "daemon";
           XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
           RUST_LOG = cfg.log.level.default;
-          GRADIENT_WORKER_BASE_DIR = cfg.baseDir;
           GRADIENT_WORKER_NIX_BIN = lib.getExe' cfg.packages.nix "nix";
           GRADIENT_WORKER_SSH_BIN = lib.getExe' cfg.packages.ssh "ssh";
-          GRADIENT_WORKER_GCROOTS_DIR = cfg.gcrootsDir;
-          GRADIENT_WORKER_DISCOVERABLE = lib.boolToString cfg.discoverable;
-          GRADIENT_WORKER_LISTEN_ADDR = cfg.listenAddr;
-          GRADIENT_WORKER_PORT = toString cfg.port;
-          GRADIENT_WORKER_CAPABILITIES_FEDERATE = lib.boolToString cfg.capabilities.federate;
-          GRADIENT_WORKER_CAPABILITIES_FETCH = lib.boolToString cfg.capabilities.fetch;
-          GRADIENT_WORKER_CAPABILITIES_EVAL = lib.boolToString cfg.capabilities.eval;
-          GRADIENT_WORKER_CAPABILITIES_BUILD = lib.boolToString cfg.capabilities.build;
-          GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB = toString cfg.system.minFreeRamMb;
-          GRADIENT_WORKER_NIX_DAEMON_MAX_CONNECTIONS = toString cfg.nixDaemon.maxConnections;
-          GRADIENT_WORKER_EVAL_MAX_CONCURRENT = toString cfg.eval.maxConcurrent;
-          GRADIENT_WORKER_EVAL_MAX_RSS = toString cfg.eval.maxRss;
           GRADIENT_WORKER_EVAL_METRICS = lib.boolToString cfg.eval.metrics;
-          GRADIENT_WORKER_EVAL_CACHE_SHARE = lib.boolToString cfg.eval.cache.share;
-          GRADIENT_WORKER_BUILD_MAX_CONCURRENT = toString cfg.build.maxConcurrent;
-          GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS = toString cfg.nar.maxConcurrentUploads;
-          GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS = toString cfg.nar.partialTtlSecs;
-          GRADIENT_WORKER_NAR_CHUNK_BYTES = toString cfg.nar.chunkBytes;
-          GRADIENT_WORKER_LOG_LEVEL_DEFAULT = cfg.log.level.default;
-          GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN = toString cfg.log.burstBytesPerMin;
-          GRADIENT_WORKER_LOG_SUSTAINED_BYTES_PER_HOUR = toString cfg.log.sustainedBytesPerHour;
-          GRADIENT_WORKER_LOG_FETCH_FROM_STORE = lib.boolToString cfg.log.fetchFromStore;
-        } // lib.optionalAttrs (cfg.serverUrl != null) {
-          GRADIENT_WORKER_SERVER_URL = cfg.serverUrl;
         } // lib.optionalAttrs (cfg.peersFile != null) {
           GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
         } // lib.optionalAttrs (cfg.acceptedServerTokensFile != null) {
           GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE = "%d/gradient_worker_accepted_server_tokens";
-        } // lib.optionalAttrs (cfg.id != null) {
-          GRADIENT_WORKER_ID = cfg.id;
-        } // lib.optionalAttrs (cfg.zone != null) {
-          GRADIENT_WORKER_ZONE = cfg.zone;
-        } // lib.optionalAttrs (cfg.endpoint != null) {
-          GRADIENT_WORKER_ENDPOINT = cfg.endpoint;
-        } // lib.optionalAttrs (cfg.system.architectures != [ ]) {
-          GRADIENT_WORKER_SYSTEM_ARCHITECTURES = lib.concatStringsSep "," cfg.system.architectures;
-        } // lib.optionalAttrs (cfg.system.features != [ ]) {
-          GRADIENT_WORKER_SYSTEM_FEATURES = lib.concatStringsSep "," cfg.system.features;
-        } // lib.optionalAttrs (cfg.system.cpuCoreScore != null) {
-          GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE = toString cfg.system.cpuCoreScore;
-        } // lib.optionalAttrs (cfg.build.maxCores != null) {
-          GRADIENT_WORKER_BUILD_MAX_CORES = toString cfg.build.maxCores;
-        } // lib.optionalAttrs (cfg.build.cgroup != null) {
-          GRADIENT_WORKER_BUILD_CGROUP = cfg.build.cgroup;
-        } // lib.optionalAttrs (cfg.eval.cache.dir != null) {
-          GRADIENT_WORKER_EVAL_CACHE_DIR = cfg.eval.cache.dir;
-        } // lib.optionalAttrs (cfg.eval.forkWorkers != null) {
-          GRADIENT_WORKER_EVAL_FORK_WORKERS = toString cfg.eval.forkWorkers;
-        } // lib.optionalAttrs (cfg.log.traceDir != null) {
-          GRADIENT_WORKER_LOG_TRACE_DIR = cfg.log.traceDir;
-        } // lib.optionalAttrs (cfg.log.level.eval != null) {
-          GRADIENT_WORKER_LOG_LEVEL_EVAL = cfg.log.level.eval;
-        } // lib.optionalAttrs (cfg.log.level.build != null) {
-          GRADIENT_WORKER_LOG_LEVEL_BUILD = cfg.log.level.build;
-        } // lib.optionalAttrs (cfg.log.level.proto != null) {
-          GRADIENT_WORKER_LOG_LEVEL_PROTO = cfg.log.level.proto;
-        } // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
+        } // workerOptions.environment cfg // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
       };
     };
 
