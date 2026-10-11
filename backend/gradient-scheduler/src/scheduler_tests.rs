@@ -2092,7 +2092,7 @@ async fn an_undelivered_member_times_the_attempt_out() {
     let mut state = gradient_test_support::prelude::test_state(cluster_claims(&[1, 1, 1, 1, 2, 0]));
     Arc::make_mut(&mut Arc::get_mut(&mut state).expect("unshared").config)
         .scheduler
-        .cluster_prepare_timeout_secs = 0;
+        .cluster_prepare_timeout_secs = std::num::NonZeroU64::MIN;
     let scheduler = Arc::new(Scheduler::new(state));
     scheduler.spawn_core(None).await.unwrap();
     let mut w1 = idle(&scheduler, "w1").await;
@@ -2100,6 +2100,7 @@ async fn an_undelivered_member_times_the_attempt_out() {
     ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
     scheduler.plan_clusters().await.unwrap();
     drain(&mut w1);
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
 
     scheduler.plan_clusters().await.unwrap();
 

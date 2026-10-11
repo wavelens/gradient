@@ -54,7 +54,7 @@ pub use proto::ProtoArgs;
 pub use pull_requests::PullRequestsArgs;
 pub use registration::RegistrationArgs;
 pub use s3::S3Args;
-pub use scheduler::SchedulerArgs;
+pub use scheduler::{SchedulerArgs, ScoringPolicy};
 pub use scim::ScimArgs;
 pub use secrets::SecretsArgs;
 pub use sentry::{DEFAULT_SENTRY_DSN, SentryArgs, effective_sentry_dsn};

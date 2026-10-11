@@ -390,7 +390,7 @@ pub(crate) mod test_ctx {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             config,
             storage: StorageCtx {
-                nar_storage: NarStore::local(dir.to_str().unwrap()).unwrap(),
+                nar_storage: NarStore::local(&dir).unwrap(),
                 log_storage: Arc::new(FileLogStorage::new(&dir).await.unwrap()),
             },
             shutdown: Shutdown::new(),

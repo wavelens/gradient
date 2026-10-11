@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::path::PathBuf;
+
 use crate::input::port_in_range;
 use clap::Args;
 use gradient_derive::config_group;
@@ -35,7 +37,7 @@ pub struct ServerArgs {
     pub use_quic: bool,
     /// Directory holding Gradient's state, NAR files and caches.
     #[arg(default_value = ".")]
-    pub base_dir: String,
+    pub base_dir: PathBuf,
     pub store_path: Option<String>,
     /// Expose `GET /api/v1/workers` and worker stats without authentication. Only superusers can
     /// access those endpoints with `false` (default).
@@ -49,22 +51,22 @@ pub struct ServerArgs {
     /// finished admin task of each kind stay exempt. Open worker connections stay until the
     /// next connection of the same worker. Set it to `0` to keep every record forever.
     #[arg(default_value_t = 90)]
-    pub retention_days: i64,
+    pub retention_days: u32,
 }
 
 impl ServerArgs {
     /// Where granted worker uploads over `/proto` stage their `*.partial` files.
     pub fn nar_partial_dir(&self) -> std::path::PathBuf {
-        std::path::Path::new(&self.base_dir).join("nar-partial")
+        self.base_dir.join("nar-partial")
     }
 
     /// Where chunked HTTP cache uploads stage their `*.partial` files.
     pub fn nar_upload_partial_dir(&self) -> std::path::PathBuf {
-        std::path::Path::new(&self.base_dir).join("nar-upload-partial")
+        self.base_dir.join("nar-upload-partial")
     }
 
     /// Where chunked source uploads stage their `*.partial` files.
     pub fn source_upload_partial_dir(&self) -> std::path::PathBuf {
-        std::path::Path::new(&self.base_dir).join("source-upload-partial")
+        self.base_dir.join("source-upload-partial")
     }
 }

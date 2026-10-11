@@ -23,7 +23,6 @@ mod store;
 
 use gradient_core::ServerState;
 use russh::server::Server as _;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -35,12 +34,10 @@ pub async fn start(state: Arc<ServerState>) -> std::io::Result<()> {
         .listen_address
         .clone()
         .unwrap_or_else(|| state.config.server.listen_addr.clone());
-    let key = host_key::load_or_generate(
-        ssh.host_key_file.as_deref(),
-        Path::new(&state.config.server.base_dir),
-    )
-    .await
-    .map_err(std::io::Error::other)?;
+    let key =
+        host_key::load_or_generate(ssh.host_key_file.as_deref(), &state.config.server.base_dir)
+            .await
+            .map_err(std::io::Error::other)?;
     let listener = listener::bind(&host, ssh.port).await?;
     tracing::info!(%host, port = ssh.port, "ssh server listening");
 

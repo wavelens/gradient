@@ -32,8 +32,8 @@ pub use self::cli::{
     BuildArgs, CacheArgs, CidrParseError, CreatePermission, DatabaseArgs, EmailArgs, EvalArgs,
     GcArgs, GitHubAppArgs, GradientCiArgs, HttpArgs, LogArgs, MetricsArgs, NarArgs, OidcArgs,
     PermissionsArgs, ProtoArgs, PullRequestsArgs, RegistrationArgs, S3Args, SchedulerArgs,
-    ScimArgs, SecretsArgs, SentryArgs, ServerArgs, SshArgs, StateArgs, UploadArgs, in_any,
-    parse_cidr_list,
+    ScimArgs, ScoringPolicy, SecretsArgs, SentryArgs, ServerArgs, SshArgs, StateArgs, UploadArgs,
+    in_any, parse_cidr_list,
 };
 pub use self::config::{
     ConfigError, EmailConfig, GitHubAppConfig, MetricsConfig, NetworkConfig, OidcConfig,

@@ -25,7 +25,7 @@ pub(super) async fn run_gates<C: ConnectionTrait>(
     eval: MEvaluation,
     approval: Option<&ApprovalInfo>,
     project: ProjectId,
-    instance_max_storage_gb: i32,
+    instance_max_storage_gb: u32,
 ) -> Result<MEvaluation, sea_orm::DbErr> {
     let eval = park_if_pending_approval(db, eval, approval).await?;
     let eval = park_if_no_cache(db, eval, project).await?;

@@ -27,7 +27,7 @@ async fn config_defaults_to_everyone() {
 async fn config_reports_a_configured_github_app() {
     let db = MockDatabase::new(DatabaseBackend::Postgres);
     let server = make_test_server_configured(db.into_connection(), |cli| {
-        cli.github_app.id = Some(1);
+        cli.github_app.id = std::num::NonZeroU64::new(1);
         cli.github_app.private_key_file = Some("/run/key.pem".into());
         cli.github_app.webhook_secret_file = Some("/run/secret".into());
     });

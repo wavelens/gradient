@@ -25,11 +25,11 @@ fn file_size_sum_bigint() -> Expr {
 
 const BYTES_PER_GB: i64 = 1024 * 1024 * 1024;
 
-fn limit_to_bytes(max_storage_gb: i32) -> Option<i64> {
+fn limit_to_bytes(max_storage_gb: i64) -> Option<i64> {
     if max_storage_gb <= 0 {
         None
     } else {
-        Some(max_storage_gb as i64 * BYTES_PER_GB)
+        Some(max_storage_gb * BYTES_PER_GB)
     }
 }
 
@@ -112,13 +112,13 @@ pub async fn project_writable_caches<C: ConnectionTrait>(
 fn headroom(
     cache_limit_gb: i32,
     cache_used: i64,
-    instance_limit_gb: i32,
+    instance_limit_gb: u32,
     instance_used: i64,
 ) -> i64 {
-    let cache_free = limit_to_bytes(cache_limit_gb)
+    let cache_free = limit_to_bytes(i64::from(cache_limit_gb))
         .map(|lim| lim - cache_used)
         .unwrap_or(i64::MAX);
-    let instance_free = limit_to_bytes(instance_limit_gb)
+    let instance_free = limit_to_bytes(i64::from(instance_limit_gb))
         .map(|lim| lim - instance_used)
         .unwrap_or(i64::MAX);
     cache_free.min(instance_free)
@@ -127,7 +127,7 @@ fn headroom(
 pub async fn project_caches_all_full<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
-    instance_limit_gb: i32,
+    instance_limit_gb: u32,
 ) -> Result<bool, sea_orm::DbErr> {
     let caches = project_writable_caches(db, project).await?;
     if caches.is_empty() {

@@ -90,7 +90,7 @@ mod tests {
     use std::path::Path;
 
     fn state_with_worker_db(base: &Path, db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
-        let nar_storage = NarStore::local(base.to_str().unwrap()).unwrap();
+        let nar_storage = NarStore::local(base).unwrap();
         test_server_state(nar_storage, db, |config| {
             config.gc.nar_ttl_hours = 24;
         })
@@ -145,7 +145,7 @@ mod tests {
     #[tokio::test]
     async fn build_request_blob_sweep_disabled_when_ttl_zero() {
         let tmp = tempfile::tempdir().unwrap();
-        let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let nar_storage = NarStore::local(tmp.path()).unwrap();
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         let state = test_server_state(nar_storage, db, |config| {
             config.gc.nar_ttl_hours = 0;

@@ -62,7 +62,7 @@ pub async fn nars_upload(
     )
     .await?;
 
-    let max = state.config.nar.max_upload_size as u64;
+    let max = u64::try_from(state.config.nar.max_upload_size.get()).unwrap_or(u64::MAX);
     let declared = headers
         .get(header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
@@ -281,7 +281,7 @@ pub async fn nar_chunk(
     .await?;
     require_safe_hash(&store_hash)?;
 
-    let max = state.config.nar.max_upload_size as u64;
+    let max = u64::try_from(state.config.nar.max_upload_size.get()).unwrap_or(u64::MAX);
     if offset + body.len() as u64 > max {
         return Err(CacheRefusal::NarTooLarge { max }.into());
     }

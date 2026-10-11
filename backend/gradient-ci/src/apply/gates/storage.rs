@@ -17,7 +17,7 @@ pub async fn park_if_storage_full<C: ConnectionTrait>(
     db: &C,
     eval: MEvaluation,
     project: ProjectId,
-    instance_max_storage_gb: i32,
+    instance_max_storage_gb: u32,
 ) -> Result<MEvaluation, sea_orm::DbErr> {
     if eval.status != EvaluationStatus::Queued {
         return Ok(eval);

@@ -79,7 +79,7 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: Arc::new(RuntimeConfig::from_cli(&cli).expect("test config")),
         storage: StorageCtx {
-            nar_storage: NarStore::local(&path).expect("test NarStore"),
+            nar_storage: NarStore::local(dir).expect("test NarStore"),
             log_storage: Arc::new(FileLogStorage::new(dir).await.expect("test log storage")),
         },
         shutdown: Shutdown::new(),

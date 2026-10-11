@@ -96,7 +96,7 @@ pub async fn evaluation_gc_plan(
     Ok(evaluations_to_gc(
         &evals,
         keep,
-        ctx.config.gc.wedged_eval_hours,
+        i64::from(ctx.config.gc.wedged_eval_hours),
         gradient_types::now(),
     )
     .into_iter()

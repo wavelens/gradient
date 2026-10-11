@@ -138,7 +138,7 @@ mod tests {
 
     fn temp_store() -> NarStore {
         let dir = std::env::temp_dir().join(format!("gradient-import-{}", Uuid::now_v7()));
-        NarStore::local(dir.to_str().unwrap()).expect("local store")
+        NarStore::local(&dir).expect("local store")
     }
     fn cache_id() -> CacheId {
         CacheId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap())

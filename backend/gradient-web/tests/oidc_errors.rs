@@ -38,8 +38,8 @@ fn server_with_broken_oidc() -> TestServer {
         required: false,
         client_id: Some("test-client".into()),
         client_secret_file: Some(client_secret_path.to_string_lossy().into_owned()),
-        scopes: None,
         discovery_url: Some("http://127.0.0.1:1/oidc".into()),
+        ..Default::default()
     };
 
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));

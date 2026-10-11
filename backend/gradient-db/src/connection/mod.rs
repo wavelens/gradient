@@ -125,7 +125,7 @@ async fn server_version_num(db: &DatabaseConnection) -> Result<i32> {
 pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     let db = Database::connect(make_connect_options(
         cli,
-        cli.database.max_connections,
+        cli.database.max_connections.get(),
         cli.database.min_connections,
     )?)
     .await
@@ -211,7 +211,7 @@ async fn prune_removed_migrations(db: &DatabaseConnection) -> Result<()> {
 pub async fn connect_web_db(cli: &Cli) -> Result<DatabaseConnection> {
     Database::connect(make_connect_options(
         cli,
-        cli.database.web_max_connections,
+        cli.database.web_max_connections.get(),
         cli.database.web_min_connections,
     )?)
     .await
@@ -221,7 +221,7 @@ pub async fn connect_web_db(cli: &Cli) -> Result<DatabaseConnection> {
 pub async fn connect_cache_db(cli: &Cli) -> Result<DatabaseConnection> {
     Database::connect(make_connect_options(
         cli,
-        cli.database.cache_max_connections,
+        cli.database.cache_max_connections.get(),
         cli.database.cache_min_connections,
     )?)
     .await

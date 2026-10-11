@@ -58,7 +58,7 @@ fn make_state(
         None => test_cli(),
     };
     if let Some(ref p) = gh_secret_path {
-        cli.github_app.id = Some(1234);
+        cli.github_app.id = std::num::NonZeroU64::new(1234);
         cli.github_app.private_key_file = Some("/dev/null".into());
         cli.github_app.webhook_secret_file = Some(p.clone());
     }

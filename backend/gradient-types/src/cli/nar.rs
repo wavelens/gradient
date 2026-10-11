@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::input::greater_than_zero;
+use std::num::{NonZeroU64, NonZeroUsize};
+
 use clap::Args;
 use gradient_derive::config_group;
 
@@ -12,8 +13,8 @@ use gradient_derive::config_group;
 #[derive(Args, Debug, Clone)]
 pub struct NarArgs {
     /// Maximum size in bytes of a NAR uploaded to the cache upload endpoint.
-    #[arg(value_parser = greater_than_zero::<usize>, default_value_t = 512 * 1024 * 1024)]
-    pub max_upload_size: usize,
+    #[arg(default_value = "536870912")]
+    pub max_upload_size: NonZeroUsize,
 
     /// Size in bytes up to which NAR downloads come from the server itself instead of a
     /// presigned S3 URL. NARs up to this size also stay in the in-memory cache. Uploads do not
@@ -33,13 +34,13 @@ pub struct NarArgs {
 
     /// Seconds to wait for a NAR object stream from storage (for example an S3 GET) before
     /// answering the worker with `NarAbort`. Workers retry after a `NarAbort`.
-    #[arg(default_value_t = 60)]
-    pub storage_open_timeout_secs: u64,
+    #[arg(default_value = "60")]
+    pub storage_open_timeout_secs: NonZeroU64,
 
     /// Seconds an outbound `NarPush` chunk can wait for the WebSocket to drain before an abort
     /// of the transfer with `NarAbort`.
-    #[arg(default_value_t = 30)]
-    pub send_chunk_timeout_secs: u64,
+    #[arg(default_value = "30")]
+    pub send_chunk_timeout_secs: NonZeroU64,
 
     /// Size in bytes of each outbound `NarPush` chunk, from 4 KiB to 4 MiB.
     /// Smaller chunks can help slow or high-latency links like Tailscale over DERP.
@@ -52,13 +53,13 @@ pub struct NarArgs {
 
     /// NAR serving tasks that can run at once per worker connection, bounding memory and
     /// storage fan-out for large batches.
-    #[arg(default_value_t = 8)]
-    pub max_concurrent_serves: usize,
+    #[arg(default_value = "8")]
+    pub max_concurrent_serves: NonZeroUsize,
 
     /// NAR downloads from storage that can run at once across all connections, keeping the
     /// storage near its best total throughput.
-    #[arg(value_parser = greater_than_zero::<usize>, default_value_t = 16)]
-    pub max_concurrent_downloads: usize,
+    #[arg(default_value = "16")]
+    pub max_concurrent_downloads: NonZeroUsize,
 
     /// Maximum age in seconds of an unfinished upload staged under
     /// {file}`<services.gradient.baseDir>`, counted from its last write. Older uploads disappear

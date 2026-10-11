@@ -2125,7 +2125,7 @@ mod tests {
             system_features: vec![],
             ..Default::default()
         };
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
@@ -2170,7 +2170,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
@@ -2204,7 +2204,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
@@ -2229,7 +2229,7 @@ mod tests {
             system_features: vec![],
             ..Default::default()
         };
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         let assignment =
             tracker.take_best_of_kind("w1", None, Some(&x86_caps), &JobKind::Build, &*p, &inst);
@@ -2268,7 +2268,7 @@ mod tests {
                 }],
             );
         }
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
@@ -2287,7 +2287,7 @@ mod tests {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
         tracker.add_pending("j1".into(), build_job(peer, vec![]));
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
 
         assert!(
@@ -2334,7 +2334,7 @@ mod tests {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
         tracker.add_pending("j1".into(), build_job(peer, vec![]));
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
 
         tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
@@ -2369,7 +2369,7 @@ mod tests {
     fn terminal_job_removal_prunes_scores_across_all_workers() {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
 
         tracker.add_pending("build:j1".into(), build_job(peer, vec![]));
@@ -2457,7 +2457,7 @@ mod tests {
             ),
         );
 
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
 
         assert!(
@@ -2542,7 +2542,7 @@ mod tests {
         let peer = ProjectId::now_v7();
         tracker.add_pending("j1".into(), eval_job(peer));
 
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
         assert!(assignment.is_some());
@@ -2569,7 +2569,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_pool::score::policy_by_name("simple"),
+            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
         );
         tracker.take_best_of_kind(
@@ -2577,7 +2577,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_pool::score::policy_by_name("simple"),
+            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
         );
         assert_eq!(tracker.active_count(), 2);
@@ -2605,7 +2605,7 @@ mod tests {
         );
         tracker.add_pending("j2".into(), eval_job(peer));
 
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
         assert!(assignment.is_some());
@@ -2626,7 +2626,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_pool::score::policy_by_name("simple"),
+            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
         );
         tracker.take_best_of_kind(
@@ -2634,7 +2634,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_pool::score::policy_by_name("simple"),
+            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
         );
         tracker.take_best_of_kind(
@@ -2642,7 +2642,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_pool::score::policy_by_name("simple"),
+            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
         );
         assert_eq!(tracker.active_jobs().count(), 3);
@@ -2666,7 +2666,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_pool::score::policy_by_name("simple"),
+            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
         );
 
@@ -2688,7 +2688,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_pool::score::policy_by_name("simple"),
+            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
         );
         assert!(tracker.contains_job("j1"));
@@ -2714,7 +2714,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_pool::score::policy_by_name("simple"),
+            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
         );
         assert!(tracker.contains_job("j1"));
@@ -2834,7 +2834,7 @@ mod tests {
         assert_eq!(offered[0].job_id, "m1");
         assert!(tracker.contains_job("m1"));
 
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
@@ -2897,7 +2897,7 @@ mod tests {
         let attempt = ClusterAttemptId::now_v7();
         let mut tracker = JobTracker::new();
         tracker.add_pending("single".into(), eval_job(peer));
-        let p = gradient_pool::score::policy_by_name("simple");
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
         tracker.activate_members(attempt, vec![("w1".into(), "m1".into(), eval_job(peer))]);
@@ -2937,7 +2937,7 @@ mod tests {
             None,
             &key,
             &job,
-            &*gradient_pool::score::policy_by_name("simple"),
+            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
         );
 

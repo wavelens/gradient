@@ -101,8 +101,10 @@ pub(super) async fn instance_metrics_pass(scheduler: Arc<Scheduler>) -> anyhow::
         cpu_core_score_mean: c.cpu_core_score_mean,
         upload_speed_mean_mbps: c.upload_speed_mean_mbps,
         download_speed_mean_mbps: c.download_speed_mean_mbps,
-        download_slots: scheduler.state.config.nar.max_concurrent_downloads as u32,
-        upload_slots: scheduler.state.config.upload.concurrency as u32,
+        download_slots: u32::try_from(scheduler.state.config.nar.max_concurrent_downloads.get())
+            .unwrap_or(u32::MAX),
+        upload_slots: u32::try_from(scheduler.state.config.upload.concurrency.get())
+            .unwrap_or(u32::MAX),
     };
     let ctx = crate::instance::compute_instance_context(
         &scheduler.state.worker_db,

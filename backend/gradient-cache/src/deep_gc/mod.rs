@@ -155,7 +155,7 @@ mod tests {
 
     fn state(db: MockDatabase, deep_interval_secs: u64) -> Arc<ServerState> {
         let tmp = tempfile::tempdir().unwrap();
-        let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let nar = NarStore::local(tmp.path()).unwrap();
         test_server_state(nar, db.into_connection(), |config| {
             config.gc.deep_interval_secs = deep_interval_secs;
         })

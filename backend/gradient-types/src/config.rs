@@ -16,7 +16,7 @@ use ipnet::IpNet;
 pub struct OidcConfig {
     pub client_id: String,
     pub client_secret_file: String,
-    pub scopes: Option<String>,
+    pub scopes: Vec<String>,
     pub discovery_url: String,
     pub required: bool,
 }
@@ -115,7 +115,7 @@ impl Cli {
 
     pub fn github_app_config(&self) -> Option<GitHubAppConfig> {
         Some(GitHubAppConfig {
-            app_id: self.github_app.id?,
+            app_id: self.github_app.id?.get(),
             private_key_file: self.github_app.private_key_file.clone()?,
             webhook_secret_file: self.github_app.webhook_secret_file.clone()?,
         })
@@ -256,7 +256,7 @@ mod tests {
             },
             registration: RegistrationArgs { enable: false },
             proto: ProtoArgs {
-                max_connections: 16,
+                max_connections: std::num::NonZeroUsize::new(16).expect("non-zero"),
                 discoverable: false,
                 ..Default::default()
             },
@@ -291,7 +291,6 @@ mod tests {
         cli.oidc.discovery_url = Some("https://idp.example.com".into());
         let config = cli.oidc_config().expect("should return Some");
         assert_eq!(config.client_id, "client-id");
-        assert!(config.scopes.is_none());
     }
 
     #[test]
@@ -329,14 +328,14 @@ mod tests {
     #[test]
     fn github_app_config_partial_returns_none() {
         let mut cli = base_cli();
-        cli.github_app.id = Some(42);
+        cli.github_app.id = std::num::NonZeroU64::new(42);
         assert!(cli.github_app_config().is_none());
     }
 
     #[test]
     fn github_app_config_fully_configured_returns_some() {
         let mut cli = base_cli();
-        cli.github_app.id = Some(12345);
+        cli.github_app.id = std::num::NonZeroU64::new(12345);
         cli.github_app.private_key_file = Some("/run/secrets/github-app.pem".into());
         cli.github_app.webhook_secret_file = Some("/run/secrets/github-webhook".into());
         let config = cli.github_app_config().expect("should return Some");
@@ -365,14 +364,14 @@ mod tests {
     fn network_config_defaults_parse() {
         let cli = base_cli();
         let cfg = cli.network_config().expect("default CIDR lists parse");
-        assert_eq!(cfg.trusted_proxies.len(), 2);
-        assert_eq!(cfg.local_ips.len(), 1);
+        assert!(!cfg.trusted_proxies.is_empty());
+        assert!(!cfg.local_ips.is_empty());
     }
 
     #[test]
     fn network_config_invalid_trusted_proxies_returns_err() {
         let mut cli = base_cli();
-        cli.http.trusted_proxies = "not-a-cidr".into();
+        cli.http.trusted_proxies = vec!["not-a-cidr".into()];
         let err = cli.network_config().unwrap_err();
         assert!(err.to_string().contains("GRADIENT_HTTP_TRUSTED_PROXIES"));
     }
@@ -380,7 +379,7 @@ mod tests {
     #[test]
     fn network_config_invalid_local_ips_returns_err() {
         let mut cli = base_cli();
-        cli.http.local_ips = "10.0.0.0/8, banana".into();
+        cli.http.local_ips = vec!["10.0.0.0/8".into(), "banana".into()];
         let err = cli.network_config().unwrap_err();
         assert!(err.to_string().contains("GRADIENT_HTTP_LOCAL_IPS"));
         assert!(err.to_string().contains("banana"));

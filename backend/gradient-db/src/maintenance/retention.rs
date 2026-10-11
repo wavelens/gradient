@@ -186,7 +186,12 @@ async fn run_retention(ctx: &DbContext, now: NaiveDateTime) {
 
     for (days, prunes) in groups {
         if days > 0 {
-            prune_all(&ctx.worker_db, prunes, now - chrono::Duration::days(days)).await;
+            prune_all(
+                &ctx.worker_db,
+                prunes,
+                now - chrono::Duration::days(i64::from(days)),
+            )
+            .await;
         }
     }
 
@@ -252,8 +257,8 @@ mod tests {
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
         let now = gradient_types::now();
         let days = |n| Value::from(now - chrono::Duration::days(n));
-        let history = days(ctx.config.server.retention_days);
-        let raw = days(ctx.config.metrics_args.retention_raw_days);
+        let history = days(i64::from(ctx.config.server.retention_days));
+        let raw = days(i64::from(ctx.config.metrics_args.retention_raw_days));
 
         run_retention(&ctx, now).await;
 

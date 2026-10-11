@@ -67,7 +67,7 @@ impl object_store::client::HttpConnector for SharedHttpConnector {
 pub struct NarStore {
     inner: Arc<dyn ObjectStore>,
     prefix: String,
-    local_base: Option<String>,
+    local_base: Option<PathBuf>,
     s3_signer: Option<Arc<object_store::aws::AmazonS3>>,
     hot: Arc<HotNarCache>,
 }
@@ -117,15 +117,15 @@ impl NarStore {
 }
 
 impl NarStore {
-    pub fn local(base_path: &str) -> Result<Self> {
+    pub fn local(base_path: &std::path::Path) -> Result<Self> {
         std::fs::create_dir_all(base_path)
-            .with_context(|| format!("create NAR storage directory: {}", base_path))?;
+            .with_context(|| format!("create NAR storage directory: {}", base_path.display()))?;
         let store = object_store::local::LocalFileSystem::new_with_prefix(base_path)
             .context("create local NAR storage")?;
         Ok(Self {
             inner: Arc::new(TimedStore::new(Arc::new(store), &STATS, &GAUGES)),
             prefix: String::new(),
-            local_base: Some(base_path.to_string()),
+            local_base: Some(base_path.to_path_buf()),
             s3_signer: None,
             hot: Arc::new(HotNarCache::disabled()),
         })
@@ -247,11 +247,7 @@ impl NarStore {
 
         if let Some(base) = &self.local_base {
             let guard = OpGuard::start(&STATS, "get");
-            let opened = local_stream(
-                std::path::Path::new(base).join(path.as_ref()),
-                offset.unwrap_or(0),
-            )
-            .await;
+            let opened = local_stream(base.join(path.as_ref()), offset.unwrap_or(0)).await;
 
             guard.finish_with(opened.is_ok());
             return opened
@@ -425,7 +421,7 @@ impl NarStore {
     pub async fn adopt_file(&self, hash: &str, path: &std::path::Path) -> Result<()> {
         let object = self.object_path(hash);
         if let Some(base) = &self.local_base {
-            let dest = std::path::Path::new(base).join(object.as_ref());
+            let dest = base.join(object.as_ref());
             if let Some(parent) = dest.parent() {
                 tokio::fs::create_dir_all(parent)
                     .await
@@ -467,7 +463,7 @@ impl NarStore {
         self.delete_object(&self.object_path(hash)).await
     }
 
-    pub fn local_base(&self) -> Option<&str> {
+    pub fn local_base(&self) -> Option<&std::path::Path> {
         self.local_base.as_deref()
     }
 
@@ -821,7 +817,7 @@ mod tests {
     #[tokio::test]
     async fn a_shard_lists_only_its_own_nars_by_full_hash() {
         let dir = TempDir::new().unwrap();
-        let store = NarStore::local(dir.path().to_str().unwrap()).unwrap();
+        let store = NarStore::local(dir.path()).unwrap();
         let mine = format!("0a{}", "b".repeat(30));
         let other = format!("0b{}", "a".repeat(30));
         store.put(&mine, b"x".to_vec()).await.unwrap();
@@ -841,7 +837,7 @@ mod tests {
     #[tokio::test]
     async fn a_local_store_passes_through_every_upload() {
         let dir = tempfile::TempDir::new().unwrap();
-        let store = NarStore::local(dir.path().to_str().unwrap()).unwrap();
+        let store = NarStore::local(dir.path()).unwrap();
         for object in [
             ObjectKey::Nar("a".repeat(32)),
             ObjectKey::EvalCache("fp".into()),
@@ -890,13 +886,13 @@ mod tests {
 
     fn local_store() -> (TempDir, NarStore) {
         let dir = TempDir::new().expect("tempdir");
-        let store = NarStore::local(dir.path().to_str().unwrap()).expect("local store");
+        let store = NarStore::local(dir.path()).expect("local store");
         (dir, store)
     }
 
     fn tiered_store(threshold: u64) -> (TempDir, NarStore) {
         let dir = TempDir::new().expect("tempdir");
-        let store = NarStore::local(dir.path().to_str().unwrap())
+        let store = NarStore::local(dir.path())
             .expect("local store")
             .with_hot_cache(HotNarCache::new(4 * 1024 * 1024, threshold));
         (dir, store)

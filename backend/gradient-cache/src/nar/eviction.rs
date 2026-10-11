@@ -65,7 +65,7 @@ mod tests {
 
     async fn store_with(keys: &[&str]) -> (TempDir, NarStore) {
         let dir = TempDir::new().expect("tempdir");
-        let store = NarStore::local(dir.path().to_str().expect("utf8")).expect("store");
+        let store = NarStore::local(dir.path()).expect("store");
         for key in keys {
             store.put(key, b"nar".to_vec()).await.expect("put");
         }

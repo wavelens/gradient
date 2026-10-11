@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 use clap::Args;
@@ -27,8 +28,8 @@ pub struct LogArgs {
     pub level_scheduler: Option<String>,
     /// Target uncompressed size in bytes of a stored build log chunk. Chunks split on line
     /// boundaries, and a long line can exceed the target.
-    #[arg(default_value_t = 262144)]
-    pub chunk_bytes: usize,
+    #[arg(default_value = "262144")]
+    pub chunk_bytes: NonZeroUsize,
     /// Directory receiving every closed stage span of the server as JSON lines, one file per
     /// process. Set it to `null` to disable span tracing.
     pub trace_dir: Option<PathBuf>,

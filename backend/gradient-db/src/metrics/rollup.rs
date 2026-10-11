@@ -198,7 +198,7 @@ fn upstream_misses_sql() -> String {
 }
 
 pub fn child_spec(ctx: DbContext) -> ChildSpec {
-    let secs = ctx.config.metrics_args.rollup_interval_secs.max(1);
+    let secs = ctx.config.metrics_args.rollup_interval_secs.get();
     ChildSpec::periodic(
         "rollup",
         Duration::from_secs(secs),

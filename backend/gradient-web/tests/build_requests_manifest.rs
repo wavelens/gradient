@@ -74,7 +74,8 @@ async fn rejects_oversized_total() {
         session_id,
     ));
     let server = make_test_server_configured(db.into_connection(), |cli| {
-        cli.http.max_source_upload_size = 20 * 1024 * 1024;
+        cli.http.max_source_upload_size =
+            std::num::NonZeroUsize::new(20 * 1024 * 1024).expect("non-zero");
     });
 
     let body = json!({

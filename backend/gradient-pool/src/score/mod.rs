@@ -16,6 +16,6 @@ pub use context::{
     BuildContext, DerivationRef, EvalContext, HistoryPrediction, InstanceContext, JobKindContext,
     RamFit, RamNeed, ScoredBuild, ScoredJob, SubstituteCost, Windowed, WorkerMetricsView,
 };
-pub use policy::{RulePolicy, ScoringPolicy, policy_by_name, rule_catalog};
+pub use policy::{RulePolicy, ScoringPolicy, policy_for, rule_catalog};
 pub use rule::{JobContext, ScoreRule, WorkerContext};
 pub use rules::estimated_time::contention_factor;

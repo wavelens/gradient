@@ -23,7 +23,7 @@ pub(super) async fn admit_nar(
 }
 
 fn rest_wait(state: &ServerState) -> Duration {
-    Duration::from_secs(state.config.upload.rest_wait_secs)
+    Duration::from_secs(state.config.upload.rest_wait_secs.get())
 }
 
 async fn admit_within(state: &ServerState, size: u64, wait: Duration) -> WebResult<HeldPermit> {

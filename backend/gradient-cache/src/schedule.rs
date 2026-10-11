@@ -40,7 +40,7 @@ impl Sweep {
 
 fn sweeps(state: &ServerState) -> Vec<Sweep> {
     let config = &state.config;
-    let secs = |s: u64| Duration::from_secs(s.max(1));
+    let secs = |s: std::num::NonZeroU64| Duration::from_secs(s.get());
     vec![
         Sweep::new(
             "cache-maintenance",

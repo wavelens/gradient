@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 fn make_state_with_limits(max_request_size: usize) -> Arc<ServerState> {
     let mut cli = test_cli();
-    cli.http.max_request_size = max_request_size;
+    cli.http.max_request_size = std::num::NonZeroUsize::new(max_request_size).expect("non-zero");
     let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
@@ -150,7 +150,7 @@ async fn source_chunk_over_source_limit_returns_413() {
     let token = make_token(session_id);
     let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id);
     let server = make_test_server_configured(db.into_connection(), |cli| {
-        cli.http.max_source_upload_size = 32 * 1024;
+        cli.http.max_source_upload_size = std::num::NonZeroUsize::new(32 * 1024).expect("non-zero");
     });
 
     let over = vec![b'x'; 64 * 1024];
