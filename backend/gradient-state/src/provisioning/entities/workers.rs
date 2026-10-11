@@ -28,6 +28,7 @@ impl<'a> StateApplicator<'a> {
 
         for state_worker in state_workers.values() {
             let (token, _) = read_credential(
+                self.credentials_dir,
                 "worker",
                 &state_worker.worker_id,
                 "token",

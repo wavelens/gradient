@@ -29,6 +29,7 @@ impl<'a> StateApplicator<'a> {
 
         for state_cache in state_caches.values() {
             let (signing_key, _) = read_credential(
+                self.credentials_dir,
                 "cache",
                 &state_cache.name,
                 "signing_key",

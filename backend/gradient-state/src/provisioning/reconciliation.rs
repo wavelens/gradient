@@ -346,6 +346,7 @@ mod integration_reconciliation_tests {
         let app = StateApplicator {
             db,
             crypt_secret_file: "",
+            credentials_dir: std::path::Path::new(""),
             email_enabled: false,
         };
         let project_name_by_id =

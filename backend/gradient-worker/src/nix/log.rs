@@ -21,6 +21,10 @@ pub fn store_log_path(log_dir: &Path, drv_path: &str) -> PathBuf {
         .join(format!("{rest}.bz2"))
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "NIX_LOG_DIR is a variable of Nix, not an option of Gradient"
+)]
 pub fn nix_log_dir() -> PathBuf {
     std::env::var_os("NIX_LOG_DIR")
         .map(PathBuf::from)

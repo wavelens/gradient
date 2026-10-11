@@ -65,8 +65,13 @@ impl<'a> StateApplicator<'a> {
                 })?),
             };
 
-            let (key_value, key_path) =
-                read_credential("api", &state_api_key.name, "key", "API key file")?;
+            let (key_value, key_path) = read_credential(
+                self.credentials_dir,
+                "api",
+                &state_api_key.name,
+                "key",
+                "API key file",
+            )?;
             let key_hash = parse_api_key_hash(&key_value, &key_path)?;
 
             let existing_api_key = api::Entity::find()

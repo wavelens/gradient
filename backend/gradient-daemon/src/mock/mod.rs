@@ -73,10 +73,8 @@ impl MockBackend {
         mut config: DaemonConfig,
         root: PathBuf,
         base_db: Option<&Path>,
+        seed: Option<u64>,
     ) -> anyhow::Result<Arc<Self>> {
-        let seed = std::env::var("GRADIENT_DAEMON_SEED")
-            .ok()
-            .and_then(|s| s.parse().ok());
         if let Some(seed) = seed {
             config.timing.seed = seed;
             config

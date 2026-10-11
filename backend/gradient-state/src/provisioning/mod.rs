@@ -17,6 +17,7 @@ use sea_orm::{
     IntoActiveModel, QueryFilter, Set,
 };
 use std::collections::HashMap;
+use std::path::Path;
 
 pub(crate) use credentials::{
     derive_public_key, parse_api_key_hash, parse_password_phc, read_credential,
@@ -43,6 +44,7 @@ pub(super) async fn apply_state_to_database(
     db: &DatabaseConnection,
     config: &StateConfiguration,
     crypt_secret_file: &str,
+    credentials_dir: &Path,
     delete_state: bool,
     email_enabled: bool,
 ) -> Result<StateApplyResult, DynError> {
@@ -51,6 +53,7 @@ pub(super) async fn apply_state_to_database(
     let app = StateApplicator {
         db,
         crypt_secret_file,
+        credentials_dir,
         email_enabled,
     };
 
@@ -81,6 +84,7 @@ pub(super) async fn apply_state_to_database(
 struct StateApplicator<'a> {
     db: &'a DatabaseConnection,
     crypt_secret_file: &'a str,
+    credentials_dir: &'a Path,
     email_enabled: bool,
 }
 

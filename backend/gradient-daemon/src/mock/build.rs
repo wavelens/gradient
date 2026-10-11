@@ -375,7 +375,7 @@ mod tests {
 
     async fn setup() -> (Arc<MockBackend>, Client, (tempfile::TempDir, JoinSet<()>)) {
         let dir = tempfile::tempdir().expect("tmp");
-        let backend = MockBackend::new(config(), dir.path().to_path_buf(), None)
+        let backend = MockBackend::new(config(), dir.path().to_path_buf(), None, None)
             .await
             .expect("backend");
         write_drv(&backend, "t/lib", &[]).await;

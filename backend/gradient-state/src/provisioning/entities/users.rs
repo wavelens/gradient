@@ -23,8 +23,13 @@ impl<'a> StateApplicator<'a> {
             // An unset `password_file` is storing `None` for an OIDC-only user. The OIDC login flow
             // is then accepting the account instead of rejecting it as a password account.
             let password_hash = if state_user.password_file.is_some() {
-                let (contents, path) =
-                    read_credential("user", &state_user.username, "password", "password file")?;
+                let (contents, path) = read_credential(
+                    self.credentials_dir,
+                    "user",
+                    &state_user.username,
+                    "password",
+                    "password file",
+                )?;
                 Some(parse_password_phc(&contents, &path)?)
             } else {
                 None

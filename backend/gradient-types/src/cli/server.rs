@@ -38,6 +38,9 @@ pub struct ServerArgs {
     /// Directory holding Gradient's state, NAR files and caches.
     #[arg(default_value = ".")]
     pub base_dir: PathBuf,
+    /// Directory holding the credential files of the declarative state.
+    #[arg(default_value = "/run/credentials/gradient-server")]
+    pub credentials_dir: PathBuf,
     pub store_path: Option<String>,
     /// Expose `GET /api/v1/workers` and worker stats without authentication. Only superusers can
     /// access those endpoints with `false` (default).
