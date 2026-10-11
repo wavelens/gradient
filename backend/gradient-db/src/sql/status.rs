@@ -7,6 +7,20 @@
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::transition::Transition;
+
+pub fn to<S: Into<i32> + Copy>(transition: Transition<S>) -> i32 {
+    transition.to.into()
+}
+
+pub fn from<S: Into<i32> + Copy>(transition: Transition<S>) -> String {
+    transition
+        .from
+        .iter()
+        .map(|status| (*status).into().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 pub fn build(status: BuildStatus) -> i32 {
     status.into()

@@ -9,6 +9,9 @@
     reason = "Query::bind and bind_built are the constructors the lint points every other call site at"
 )]
 
+use gradient_entity::build::BuildStatus;
+use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::transition::Transition;
 use sea_orm::{DatabaseBackend, Statement, Value};
 use std::borrow::Cow;
 
@@ -46,6 +49,28 @@ pub enum Flag {
     DefaultWorkMem,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatusWrite {
+    pub table: &'static str,
+    pub to: i32,
+}
+
+impl StatusWrite {
+    pub const fn build(transition: Transition<BuildStatus>) -> Self {
+        Self {
+            table: "derivation_build",
+            to: transition.to as i32,
+        }
+    }
+
+    pub const fn evaluation(transition: Transition<EvaluationStatus>) -> Self {
+        Self {
+            table: "evaluation",
+            to: transition.to as i32,
+        }
+    }
+}
+
 pub struct Query {
     pub name: &'static str,
     pub sql: Sql,
@@ -55,6 +80,7 @@ pub struct Query {
     pub tier: Tier,
     pub budget: Budget,
     pub flags: &'static [Flag],
+    pub status_write: Option<StatusWrite>,
 }
 
 impl Query {

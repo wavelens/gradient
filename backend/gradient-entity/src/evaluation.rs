@@ -49,6 +49,8 @@ pub enum EvaluationStatus {
     Fetching = 8,
 }
 
+use crate::transition::Transition;
+
 impl From<EvaluationStatus> for i16 {
     fn from(status: EvaluationStatus) -> Self {
         status as Self
@@ -78,6 +80,40 @@ impl EvaluationStatus {
     ];
 
     pub const TERMINAL: [Self; 3] = [Self::Completed, Self::Failed, Self::Aborted];
+
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Aborted)
+    }
+
+    pub const fn sources(self) -> &'static [Self] {
+        match self {
+            Self::Queued => &[
+                Self::Waiting,
+                Self::Fetching,
+                Self::EvaluatingFlake,
+                Self::EvaluatingDerivation,
+            ],
+            Self::Fetching => &[Self::Queued],
+            Self::EvaluatingFlake => &[Self::Queued, Self::Fetching],
+            Self::EvaluatingDerivation => &[Self::EvaluatingFlake],
+            Self::Building => &[Self::EvaluatingDerivation, Self::Waiting],
+            Self::Waiting => &[
+                Self::Building,
+                Self::Queued,
+                Self::Fetching,
+                Self::EvaluatingFlake,
+                Self::EvaluatingDerivation,
+            ],
+            Self::Completed | Self::Failed | Self::Aborted => &Self::ACTIVE,
+        }
+    }
+
+    pub const fn report(self) -> Transition<Self> {
+        Transition {
+            from: self.sources(),
+            to: self,
+        }
+    }
 
     pub const REOPENABLE: [Self; 2] = [Self::Failed, Self::Aborted];
 
