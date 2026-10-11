@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::lookup::by_ids;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -153,18 +154,12 @@ impl PullMetadata {
         .unwrap_or_default();
 
         let cache_ids: Vec<CacheId> = signature_rows.iter().map(|r| r.cache).collect();
-        let cache_names: HashMap<CacheId, String> = if cache_ids.is_empty() {
-            HashMap::new()
-        } else {
-            gradient_db::fetch_in_chunks(&cache_ids, |chunk| async move {
-                ECache::find().filter(CCache::Id.is_in(chunk)).all(db).await
-            })
+        let cache_names: HashMap<CacheId, String> = by_ids::<ECache, _>(db, &cache_ids)
             .await
             .unwrap_or_default()
             .into_iter()
-            .map(|c| (c.id, c.name))
-            .collect()
-        };
+            .map(|(id, cache)| (id, cache.name))
+            .collect();
 
         let serve_url = &config.server.serve_url;
         let mut signatures: HashMap<CachedPathId, Vec<String>> = HashMap::new();

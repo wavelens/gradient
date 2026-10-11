@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::lookup::{by_id, by_ids};
 use std::time::Duration;
 
 use chrono::{NaiveDateTime, Utc};
@@ -162,13 +163,7 @@ async fn tasks_of(
         .into_iter()
         .collect();
 
-    Ok(gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
-        ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
-    })
-    .await?
-    .into_iter()
-    .map(|p| (p.id, p))
-    .collect())
+    by_ids::<ETask, _>(db, &task_ids).await
 }
 
 fn parse_config(trig: &ept::Model) -> Option<TriggerConfig> {
@@ -200,13 +195,13 @@ async fn load_pending_firing(
     db: &WorkerDb,
     fire: &TriggerFire,
 ) -> Result<Option<(ept::Model, MTask, TriggerConfig)>, sea_orm::DbErr> {
-    let Some(trig) = ept::Entity::find_by_id(fire.trigger).one(db).await? else {
+    let Some(trig) = by_id::<ept::Entity, _>(db, fire.trigger).await? else {
         return Ok(None);
     };
     if !trig.active || trig.last_fired_at != fire.last_fired_at {
         return Ok(None);
     }
-    let Some(task) = ETask::find_by_id(trig.task).one(db).await? else {
+    let Some(task) = by_id::<ETask, _>(db, trig.task).await? else {
         return Ok(None);
     };
     if !task.active {

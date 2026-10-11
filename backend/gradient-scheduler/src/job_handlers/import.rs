@@ -234,20 +234,29 @@ impl Scheduler {
         &self,
         evaluations: &[MEvaluation],
     ) -> Result<HashSet<EvaluationId>> {
-        let tasks: HashSet<TaskId> = evaluations.iter().filter_map(|e| e.task).collect();
+        let tasks: Vec<TaskId> = evaluations
+            .iter()
+            .filter_map(|e| e.task)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
         if tasks.is_empty() {
             return Ok(HashSet::new());
         }
 
-        let waiting: HashSet<TaskId> = ETask::find()
-            .filter(CTask::Id.is_in(tasks))
-            .filter(CTask::WaitForWorkers.eq(true))
-            .all(&self.db.worker_db)
-            .await
-            .context("read the tasks waiting for workers")?
-            .into_iter()
-            .map(|t| t.id)
-            .collect();
+        let db = &self.db.worker_db;
+        let waiting: HashSet<TaskId> = gradient_db::fetch_in_chunks(&tasks, |chunk| async move {
+            ETask::find()
+                .filter(CTask::Id.is_in(chunk))
+                .filter(CTask::WaitForWorkers.eq(true))
+                .all(db)
+                .await
+        })
+        .await
+        .context("read the tasks waiting for workers")?
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
 
         Ok(evaluations
             .iter()

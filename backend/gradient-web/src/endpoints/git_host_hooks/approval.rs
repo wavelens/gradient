@@ -12,12 +12,12 @@ use super::installation::resolve_github_app_targets;
 use super::payloads::GithubCheckRunRequestedAction;
 use gradient_ci::CiContext;
 use gradient_ci::{APPROVAL_ACTION_ID, find_approval_gated_eval, unpark_approval};
+use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
 use gradient_git_host::{ParsedPullRequestEvent, ParsedPullRequestReviewEvent};
 use gradient_scheduler::Scheduler;
 use gradient_types::events::evaluation;
 use gradient_types::*;
-use sea_orm::EntityTrait;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -161,8 +161,7 @@ async fn find_eval_by_check_id(db: &WebDb, check_id: i64) -> Option<MEvaluation>
             .ok()
             .flatten()?;
 
-    EEvaluation::find_by_id(gradient_entity::ids::EvaluationId::new(row.id))
-        .one(db)
+    by_id::<EEvaluation, _>(db, gradient_entity::ids::EvaluationId::new(row.id))
         .await
         .ok()
         .flatten()

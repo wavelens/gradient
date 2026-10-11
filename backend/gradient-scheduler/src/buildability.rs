@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::lookup::by_ids;
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result};
@@ -26,16 +27,9 @@ impl BuildabilityChecker {
     pub(crate) async fn load(db: &WorkerDb, shared_builds: &[MDerivationBuild]) -> Result<Self> {
         let drv_ids: Vec<DerivationId> = shared_builds.iter().map(|a| a.derivation).collect();
 
-        let drvs = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
-            EDerivation::find()
-                .filter(CDerivation::Id.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await
-        .context("fetch derivations for pending builds")?;
-        let drv_by_id: HashMap<DerivationId, MDerivation> =
-            drvs.into_iter().map(|d| (d.id, d)).collect();
+        let drv_by_id: HashMap<DerivationId, MDerivation> = by_ids::<EDerivation, _>(db, &drv_ids)
+            .await
+            .context("fetch derivations for pending builds")?;
 
         let edges = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationFeature::find()
@@ -54,16 +48,12 @@ impl BuildabilityChecker {
         }
 
         let feature_ids: Vec<FeatureId> = edges.iter().map(|e| e.feature).collect();
-        let feature_rows = gradient_db::fetch_in_chunks(&feature_ids, |chunk| async move {
-            EFeature::find()
-                .filter(CFeature::Id.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await
-        .context("fetch feature names")?;
-        let feature_name: HashMap<FeatureId, String> =
-            feature_rows.into_iter().map(|f| (f.id, f.name)).collect();
+        let feature_name: HashMap<FeatureId, String> = by_ids::<EFeature, _>(db, &feature_ids)
+            .await
+            .context("fetch feature names")?
+            .into_iter()
+            .map(|(id, feature)| (id, feature.name))
+            .collect();
 
         Ok(Self {
             drv_by_id,

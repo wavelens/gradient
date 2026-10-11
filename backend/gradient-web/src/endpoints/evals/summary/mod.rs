@@ -13,6 +13,7 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::evaluations::failed_attributes::{FailedAttribute, failed_attributes};
+use gradient_db::lookup::{by_id, by_ids};
 use gradient_entity::build::BuildStatus;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
@@ -25,7 +26,6 @@ pub use self::analysis::PackageCounts;
 use self::analysis::{Baseline, EvaluationGraph, Failure, Package};
 use super::EvalAccessContext;
 
-const IS_IN_CHUNK: usize = 10_000;
 const FAILURES_SHOWN: usize = 100;
 const BLOCKED_SHOWN: usize = 20;
 const FIXED_SHOWN: usize = 100;
@@ -142,27 +142,21 @@ async fn shared_build_statuses<C: ConnectionTrait>(
     jobs: &[MBuildJob],
 ) -> Result<HashMap<DerivationBuildId, BuildStatus>, DbErr> {
     let ids: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
-    let mut statuses = HashMap::new();
-    for chunk in ids.chunks(IS_IN_CHUNK) {
-        let builds = EDerivationBuild::find()
-            .filter(CDerivationBuild::Id.is_in(chunk.to_vec()))
-            .all(db)
-            .await?;
-        statuses.extend(builds.into_iter().map(|b| (b.id, b.status)));
-    }
-
-    Ok(statuses)
+    Ok(by_ids::<EDerivationBuild, _>(db, &ids)
+        .await?
+        .into_iter()
+        .map(|(id, build)| (id, build.status))
+        .collect())
 }
 
 async fn compared_evaluation<C: ConnectionTrait>(
     db: &C,
     previous: EvaluationId,
 ) -> Result<Option<(ComparedEvaluation, Baseline)>, DbErr> {
-    let Some(evaluation) = EEvaluation::find_by_id(previous).one(db).await? else {
+    let Some(evaluation) = by_id::<EEvaluation, _>(db, previous).await? else {
         return Ok(None);
     };
-    let commit = ECommit::find_by_id(evaluation.commit)
-        .one(db)
+    let commit = by_id::<ECommit, _>(db, evaluation.commit)
         .await?
         .map(|c| vec_to_hex(&c.hash))
         .unwrap_or_default();
@@ -188,13 +182,9 @@ async fn failed_builds<C: ConnectionTrait>(
     failures: Vec<Failure>,
 ) -> Result<Vec<FailedBuildSummary>, DbErr> {
     let shown: Vec<Failure> = failures.into_iter().take(FAILURES_SHOWN).collect();
-    let derivations: HashMap<DerivationId, MDerivation> = EDerivation::find()
-        .filter(CDerivation::Id.is_in(shown.iter().map(|f| f.derivation)))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|d| (d.id, d))
-        .collect();
+    let derivations: HashMap<DerivationId, MDerivation> =
+        by_ids::<EDerivation, _>(db, &shown.iter().map(|f| f.derivation).collect::<Vec<_>>())
+            .await?;
 
     Ok(shown
         .into_iter()

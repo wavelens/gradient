@@ -8,6 +8,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use badgelib::{Badge, Color, Style};
 use gradient_db::WebDb;
+use gradient_db::lookup::{by_id, get_any_project_by_name};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_util::debounce::Debounce;
@@ -24,7 +25,6 @@ use crate::helpers::OptionExt;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use gradient_core::ServerState;
-use gradient_db::lookup::get_any_project_by_name;
 use gradient_types::*;
 
 #[derive(Deserialize, Debug)]
@@ -143,7 +143,7 @@ async fn resolve_badge_user(
             {
                 return Err(SharedRefusal::SourceIpNotAllowed.into());
             }
-            let user = EUser::find_by_id(decoded.user_id()).one(db).await?;
+            let user = by_id::<EUser, _>(db, decoded.user_id()).await?;
             Ok((user, decoded.api_key_context().cloned()))
         }
         None => Ok((maybe_user, api_key.as_ref().cloned())),
@@ -228,7 +228,7 @@ async fn badge_status_for_latest_eval(
         return Ok((None, false));
     };
 
-    let eval = EEvaluation::find_by_id(eval_id).one(db).await?;
+    let eval = by_id::<EEvaluation, _>(db, eval_id).await?;
 
     let has_failed = match &eval {
         Some(e) if e.status == EvaluationStatus::Completed => {

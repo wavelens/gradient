@@ -19,6 +19,7 @@ use chrono::NaiveDateTime;
 use gradient_ci::CiContext;
 use gradient_core::ServerState;
 use gradient_db::DbContext;
+use gradient_db::lookup::by_ids;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_notify::{SubscriptionEvent, SubscriptionMail};
 use gradient_scheduler::Scheduler;
@@ -66,21 +67,20 @@ pub async fn get_cache_subscription_requests(
         .await?;
     requests.sort_by_key(|r| std::cmp::Reverse(r.created_at));
 
-    let projects: HashMap<ProjectId, MProject> = EProject::find()
-        .filter(CProject::Id.is_in(requests.iter().map(|r| r.project).collect::<Vec<_>>()))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|p| (p.id, p))
-        .collect();
+    let projects: HashMap<ProjectId, MProject> = by_ids::<EProject, _>(
+        &state.web_db,
+        &requests.iter().map(|r| r.project).collect::<Vec<_>>(),
+    )
+    .await?;
 
-    let requesters: HashMap<UserId, String> = EUser::find()
-        .filter(CUser::Id.is_in(requests.iter().map(|r| r.requested_by).collect::<Vec<_>>()))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|u| (u.id, u.username))
-        .collect();
+    let requesters: HashMap<UserId, String> = by_ids::<EUser, _>(
+        &state.web_db,
+        &requests.iter().map(|r| r.requested_by).collect::<Vec<_>>(),
+    )
+    .await?
+    .into_iter()
+    .map(|(id, u)| (id, u.username))
+    .collect();
 
     let items: Vec<SubscriptionRequestItem> = requests
         .iter()

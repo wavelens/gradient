@@ -19,6 +19,7 @@ use bytes::Bytes;
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
 use gradient_db::WebDb;
+use gradient_db::lookup::by_id;
 use gradient_graph::Demotion;
 use gradient_graph::Graph;
 use gradient_storage::NarSource;
@@ -64,8 +65,7 @@ async fn try_authenticate_basic(
     {
         return Err(SharedRefusal::SourceIpNotAllowed.into());
     }
-    Ok(EUser::find_by_id(decoded.user_id())
-        .one(db)
+    Ok(by_id::<EUser, _>(db, decoded.user_id())
         .await
         .ok()
         .flatten())

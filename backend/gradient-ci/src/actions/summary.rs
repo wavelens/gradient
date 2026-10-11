@@ -7,9 +7,9 @@
 use super::evaluation_rows::{load_evaluation_rows, load_project_name};
 use crate::context::CiContext;
 use anyhow::{Context, Result};
+use gradient_db::lookup::by_id;
 use gradient_types::input::vec_to_hex;
 use gradient_types::{EEvaluation, EvaluationId};
-use sea_orm::EntityTrait;
 use serde_json::Value as JsonValue;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -71,8 +71,7 @@ impl EventSummary {
     }
 
     async fn fill_from_evaluation(&mut self, ctx: &CiContext, id: EvaluationId) -> Result<()> {
-        let Some(evaluation) = EEvaluation::find_by_id(id)
-            .one(&ctx.db.worker_db)
+        let Some(evaluation) = by_id::<EEvaluation, _>(&ctx.db.worker_db, id)
             .await
             .context("load evaluation")?
         else {

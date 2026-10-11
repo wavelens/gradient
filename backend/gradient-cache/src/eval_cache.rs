@@ -98,10 +98,14 @@ impl EvalCacheSweep {
             return Ok(());
         }
 
-        let models = EEvalCacheStore::find()
-            .filter(CEvalCacheStore::Id.is_in(victims))
-            .all(&self.db)
-            .await?;
+        let db = &self.db;
+        let models = gradient_db::fetch_in_chunks(&victims, |chunk| async move {
+            EEvalCacheStore::find()
+                .filter(CEvalCacheStore::Id.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await?;
 
         let mut freed: u64 = 0;
         let mut evicted = 0usize;

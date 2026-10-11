@@ -551,14 +551,14 @@ async fn admin_emails(db: &WebDb, ids: Vec<UserId>) -> WebResult<Vec<String>> {
         return Ok(Vec::new());
     }
 
-    Ok(EUser::find()
-        .filter(CUser::Id.is_in(ids))
-        .all(db)
-        .await?
-        .into_iter()
-        .filter(|u| u.active && !u.email.is_empty())
-        .map(|u| u.email)
-        .collect())
+    Ok(gradient_db::fetch_in_chunks(&ids, |chunk| async move {
+        EUser::find().filter(CUser::Id.is_in(chunk)).all(db).await
+    })
+    .await?
+    .into_iter()
+    .filter(|u| u.active && !u.email.is_empty())
+    .map(|u| u.email)
+    .collect())
 }
 
 pub(crate) fn reject_managed_integration(integration: &MIntegration) -> WebResult<()> {

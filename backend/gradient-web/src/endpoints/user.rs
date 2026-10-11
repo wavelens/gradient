@@ -9,6 +9,7 @@ use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key, session_claims};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
+use crate::lookup::require;
 use crate::permissions::{
     PermissionEntry, available_cache_permissions, available_permissions, mask_to_vec,
     parse_cache_permission_list, parse_permission_list,
@@ -18,13 +19,13 @@ use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::{Extension, Json};
+use gradient_db::lookup::{by_ids, get_any_project_by_name};
 use gradient_db::{DbContext, WebDb};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
 use chrono::Duration;
 use gradient_core::ServerState;
-use gradient_db::lookup::get_any_project_by_name;
 use gradient_types::consts::*;
 use gradient_types::input::{validate_display_name, validate_username};
 use gradient_types::*;
@@ -363,14 +364,11 @@ async fn project_name_lookup(
     db: &WebDb,
     project_ids: &[ProjectId],
 ) -> WebResult<std::collections::HashMap<ProjectId, String>> {
-    if project_ids.is_empty() {
-        return Ok(std::collections::HashMap::new());
-    }
-    let rows = EProject::find()
-        .filter(CProject::Id.is_in(project_ids.to_vec()))
-        .all(db)
-        .await?;
-    Ok(rows.into_iter().map(|o| (o.id, o.name)).collect())
+    Ok(by_ids::<EProject, _>(db, project_ids)
+        .await?
+        .into_iter()
+        .map(|(id, project)| (id, project.name))
+        .collect())
 }
 
 fn api_key_info(
@@ -553,10 +551,7 @@ pub async fn patch_key(
     let db = state.db();
     forbid_via_api_key(&api_key_caller)?;
 
-    let api_key = EApi::find_by_id(api_id)
-        .one(&state.web_db)
-        .await?
-        .or_not_found(Resource::ApiKey)?;
+    let api_key = require::<EApi>(&state.web_db, api_id).await?;
     if api_key.owned_by != user.id {
         return Err(WebError::not_found(Resource::ApiKey));
     }
@@ -683,10 +678,7 @@ pub async fn post_key_revoke(
     Path(api_id): Path<ApiId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     forbid_via_api_key(&api_key_caller)?;
-    let api_key = EApi::find_by_id(api_id)
-        .one(&state.web_db)
-        .await?
-        .or_not_found(Resource::ApiKey)?;
+    let api_key = require::<EApi>(&state.web_db, api_id).await?;
 
     if api_key.owned_by != user.id {
         return Err(WebError::not_found(Resource::ApiKey));
@@ -754,10 +746,7 @@ pub async fn delete_session(
     Extension(user): Extension<MUser>,
     Path(session_id): Path<SessionId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let session = ESession::find_by_id(session_id)
-        .one(&state.web_db)
-        .await?
-        .or_not_found(Resource::Session)?;
+    let session = require::<ESession>(&state.web_db, session_id).await?;
 
     if session.user_id != user.id {
         return Err(WebError::not_found(Resource::Session));

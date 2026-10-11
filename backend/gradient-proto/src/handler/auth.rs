@@ -37,20 +37,21 @@ pub(super) async fn filter_project_peers_without_cache(
 
     let uuid_set: Vec<ProjectId> = uuid_peers.iter().map(|(_, u)| *u).collect();
 
-    let project_ids: HashSet<ProjectId> = match EProject::find()
-        .filter(OCol::Id.is_in(uuid_set.clone()))
-        .all(db)
+    let project_ids: HashSet<ProjectId> =
+        match gradient_db::fetch_in_chunks(&uuid_set, |chunk| async move {
+            EProject::find().filter(OCol::Id.is_in(chunk)).all(db).await
+        })
         .await
-    {
-        Ok(rows) => rows.into_iter().map(|r| r.id).collect(),
-        Err(e) => {
-            warn!(error = %e, "failed to look up projects for peer filter");
-            for (s, _) in uuid_peers {
-                authorized_out.push(s);
+        {
+            Ok(rows) => rows.into_iter().map(|r| r.id).collect(),
+            Err(e) => {
+                warn!(error = %e, "failed to look up projects for peer filter");
+                for (s, _) in uuid_peers {
+                    authorized_out.push(s);
+                }
+                return (authorized_out, Vec::new());
             }
-            return (authorized_out, Vec::new());
-        }
-    };
+        };
 
     let projects_with_cache: HashSet<ProjectId> = if project_ids.is_empty() {
         HashSet::new()

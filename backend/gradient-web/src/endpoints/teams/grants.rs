@@ -21,7 +21,7 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
-use gradient_db::lookup::{get_any_cache_by_name, get_any_project_by_name};
+use gradient_db::lookup::{by_ids, get_any_cache_by_name, get_any_project_by_name};
 use gradient_scheduler::Scheduler;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -207,13 +207,7 @@ pub async fn get_project_teams(
         .map(|g| g.team)
         .chain(requests.iter().map(|r| r.team))
         .collect();
-    let teams: HashMap<TeamId, MTeam> = ETeam::find()
-        .filter(CTeam::Id.is_in(team_ids))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|team| (team.id, team))
-        .collect();
+    let teams: HashMap<TeamId, MTeam> = by_ids::<ETeam, _>(&state.web_db, &team_ids).await?;
     let role_ids: Vec<RoleId> = grants
         .iter()
         .filter_map(|g| g.role)
@@ -544,24 +538,16 @@ pub async fn get_cache_teams(
         .map(|g| g.team)
         .chain(requests.iter().map(|r| r.team))
         .collect();
-    let teams: HashMap<TeamId, MTeam> = ETeam::find()
-        .filter(CTeam::Id.is_in(team_ids))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|team| (team.id, team))
-        .collect();
+    let teams: HashMap<TeamId, MTeam> = by_ids::<ETeam, _>(&state.web_db, &team_ids).await?;
     let role_ids: Vec<RoleId> = grants
         .iter()
         .map(|g| g.role)
         .chain(requests.iter().map(|r| r.role))
         .collect();
-    let roles: HashMap<RoleId, String> = ECacheRole::find()
-        .filter(CCacheRole::Id.is_in(role_ids))
-        .all(&state.web_db)
+    let roles: HashMap<RoleId, String> = by_ids::<ECacheRole, _>(&state.web_db, &role_ids)
         .await?
         .into_iter()
-        .map(|role| (role.id, role.name))
+        .map(|(id, role)| (id, role.name))
         .collect();
 
     let entry = |team: TeamId, role, pending| {

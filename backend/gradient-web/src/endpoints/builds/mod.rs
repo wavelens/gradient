@@ -32,9 +32,10 @@ pub use self::query::{BuildWithOutputs, get_build};
 use crate::access::is_project_member;
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
-use crate::helpers::OptionExt;
+use crate::lookup::require;
 use crate::resource::Resource;
 use gradient_db::WebDb;
+use gradient_db::lookup::by_id;
 use gradient_db::scheduling::build_attempt::latest_attempt_id;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -47,13 +48,9 @@ pub(super) struct BuildAccessContext {
 
 impl BuildAccessContext {
     pub(super) async fn load_unguarded(db: &WebDb, build_job_id: BuildJobId) -> WebResult<Self> {
-        let build_job = EBuildJob::find_by_id(build_job_id)
-            .one(db)
-            .await?
-            .or_not_found(Resource::Build)?;
+        let build_job = require::<EBuildJob>(db, build_job_id).await?;
 
-        let shared_build = EDerivationBuild::find_by_id(build_job.derivation_build)
-            .one(db)
+        let shared_build = by_id::<EDerivationBuild, _>(db, build_job.derivation_build)
             .await?
             .ok_or_else(|| {
                 tracing::warn!(
@@ -64,8 +61,7 @@ impl BuildAccessContext {
                 WebError::data_inconsistency(Resource::Build)
             })?;
 
-        let evaluation = EEvaluation::find_by_id(build_job.evaluation)
-            .one(db)
+        let evaluation = by_id::<EEvaluation, _>(db, build_job.evaluation)
             .await?
             .ok_or_else(|| {
                 tracing::warn!(
@@ -81,8 +77,7 @@ impl BuildAccessContext {
             WebError::data_inconsistency(Resource::Evaluation)
         })?;
 
-        let project_id = ETask::find_by_id(task_id)
-            .one(db)
+        let project_id = by_id::<ETask, _>(db, task_id)
             .await?
             .ok_or_else(|| {
                 tracing::warn!(
@@ -94,13 +89,10 @@ impl BuildAccessContext {
             })?
             .project;
 
-        let project = EProject::find_by_id(project_id)
-            .one(db)
-            .await?
-            .ok_or_else(|| {
-                tracing::warn!(%project_id, "Project not found");
-                WebError::data_inconsistency(Resource::Project)
-            })?;
+        let project = by_id::<EProject, _>(db, project_id).await?.ok_or_else(|| {
+            tracing::warn!(%project_id, "Project not found");
+            WebError::data_inconsistency(Resource::Project)
+        })?;
 
         Ok(Self {
             build_job,
@@ -152,15 +144,19 @@ async fn reachable_projects_accessible(
     }
 
     let eval_ids: Vec<EvaluationId> = jobs.into_iter().map(|j| j.evaluation).collect();
-    let evals = EEvaluation::find()
-        .filter(CEvaluation::Id.is_in(eval_ids))
-        .all(db)
-        .await?;
+    let evals = gradient_db::fetch_in_chunks(&eval_ids, |chunk| async move {
+        EEvaluation::find()
+            .filter(CEvaluation::Id.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await?;
 
     let task_ids: Vec<TaskId> = evals.iter().filter_map(|ev| ev.task).collect();
-    let project_ids: std::collections::HashSet<ProjectId> = ETask::find()
-        .filter(CTask::Id.is_in(task_ids))
-        .all(db)
+    let project_ids: std::collections::HashSet<ProjectId> =
+        gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
+            ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
+        })
         .await?
         .into_iter()
         .map(|t| t.project)

@@ -8,15 +8,16 @@ use super::refusal::EvaluationRefusal;
 use crate::access::is_project_member;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_superuser};
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::ok_json;
+use crate::lookup::require;
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::lookup::by_id;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
-use sea_orm::EntityTrait;
 use std::sync::Arc;
 
 use super::EvalAccessContext;
@@ -74,7 +75,7 @@ pub async fn post_evaluation_retry(
     }
 
     let task = match ctx.evaluation.task {
-        Some(task) => ETask::find_by_id(task).one(&state.web_db).await?,
+        Some(task) => by_id::<ETask, _>(&state.web_db, task).await?,
         None => None,
     }
     .ok_or(EvaluationRefusal::WithoutTask)?;
@@ -107,10 +108,7 @@ pub async fn post_evaluation_prioritize(
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     require_superuser(&user)?;
-    let evaluation = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.web_db)
-        .await?
-        .or_not_found(Resource::Evaluation)?;
+    let evaluation = require::<EEvaluation>(&state.web_db, evaluation_id).await?;
 
     scheduler
         .prioritize_evaluation(evaluation.id)

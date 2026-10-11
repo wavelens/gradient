@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::lookup::{by_id, by_ids};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -196,16 +197,7 @@ impl EvalAssignMaps {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
-        let commits = gradient_db::fetch_in_chunks(&commit_ids, |chunk| async move {
-            ECommit::find()
-                .filter(CCommit::Id.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await?
-        .into_iter()
-        .map(|c| (c.id, c))
-        .collect();
+        let commits = by_ids::<ECommit, _>(db, &commit_ids).await?;
 
         let update_ids: Vec<EvaluationId> = evals
             .iter()
@@ -339,7 +331,7 @@ pub(crate) async fn project_id_for_eval(db: &WorkerDb, eval: &MEvaluation) -> Op
         error!(evaluation_id = %eval.id, "evaluation has no task");
         None
     })?;
-    match ETask::find_by_id(task_id).one(db).await {
+    match by_id::<ETask, _>(db, task_id).await {
         Ok(Some(p)) => Some(p.project),
         Ok(None) => None,
         Err(e) => {

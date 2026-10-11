@@ -15,6 +15,7 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
+use gradient_db::lookup::by_id;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
@@ -159,8 +160,7 @@ pub async fn delete_ssh_key(
 ) -> WebResult<Json<BaseResponse<String>>> {
     forbid_via_api_key(&api_key)?;
     require_ssh(&state.config)?;
-    let key = EUserSshKey::find_by_id(ssh_key_id)
-        .one(&state.web_db)
+    let key = by_id::<EUserSshKey, _>(&state.web_db, ssh_key_id)
         .await?
         .filter(|k| k.user == user.id)
         .or_not_found(Resource::SshKey)?;

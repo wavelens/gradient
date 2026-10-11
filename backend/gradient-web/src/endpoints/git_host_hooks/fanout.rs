@@ -9,6 +9,7 @@ use super::installation::event_repo_matches_task;
 use super::response::{QueuedEvaluation, SkippedTask, WebhookTriggerOutcome};
 use gradient_ci::CiContext;
 use gradient_ci::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, parse_owner_repo};
+use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
 use gradient_entity::task_trigger as ept;
 use gradient_graph::Graph;
@@ -323,7 +324,7 @@ fn parse_trigger_config(trig: &ept::Model) -> Option<TriggerConfig> {
 }
 
 async fn load_trigger_task(db: &WebDb, trig: &ept::Model) -> Option<MTask> {
-    match ETask::find_by_id(trig.task).one(db).await {
+    match by_id::<ETask, _>(db, trig.task).await {
         Ok(Some(p)) => Some(p),
         Ok(None) => {
             warn!(trigger_id = %trig.id, task_id = %trig.task, "task not found for trigger");
@@ -539,8 +540,7 @@ fn glob_match_recursive(p: &[char], t: &[char], pi: usize, ti: usize) -> bool {
 }
 
 async fn project_name_for(db: &WebDb, project_id: ProjectId) -> Option<String> {
-    EProject::find_by_id(project_id)
-        .one(db)
+    by_id::<EProject, _>(db, project_id)
         .await
         .ok()
         .flatten()

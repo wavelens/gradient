@@ -11,6 +11,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
+use crate::lookup::require;
 use crate::metrics_scope::MetricsScope;
 use crate::resource::Resource;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -19,6 +20,7 @@ use axum::response::Response;
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
+use gradient_db::lookup::by_id;
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::{build_attempt, flake_output_node};
 use gradient_scheduler::Scheduler;
@@ -492,10 +494,11 @@ pub async fn get_dispatched_job(
         }));
     }
 
-    let j = gradient_entity::dispatched_job::Entity::find_by_id(DispatchedJobId::from(id))
-        .one(&state.web_db)
-        .await?
-        .ok_or_else(|| WebError::not_found(Resource::Job))?;
+    let j = require::<gradient_entity::dispatched_job::Entity>(
+        &state.web_db,
+        DispatchedJobId::from(id),
+    )
+    .await?;
 
     if !scope.allows(&Uuid::from(j.project)) {
         return Err(WebError::not_found(Resource::Job));
@@ -526,20 +529,19 @@ pub async fn get_dispatched_job(
 
     let pname = match shared_build_id {
         Some(aid) => {
-            let shared_build = EDerivationBuild::find_by_id(aid)
-                .one(&state.web_db)
+            let shared_build = by_id::<EDerivationBuild, _>(&state.web_db, aid)
                 .await
                 .ok()
                 .flatten();
             match shared_build {
-                Some(shared_build) => {
-                    gradient_entity::derivation::Entity::find_by_id(shared_build.derivation)
-                        .one(&state.web_db)
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|d| d.pname)
-                }
+                Some(shared_build) => by_id::<gradient_entity::derivation::Entity, _>(
+                    &state.web_db,
+                    shared_build.derivation,
+                )
+                .await
+                .ok()
+                .flatten()
+                .and_then(|d| d.pname),
                 None => None,
             }
         }

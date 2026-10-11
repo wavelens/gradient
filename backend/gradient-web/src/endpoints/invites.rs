@@ -17,6 +17,7 @@ use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
+use gradient_db::lookup::by_ids;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
@@ -69,48 +70,41 @@ pub async fn get_user_invites(
         .chain(cache_rows.iter().map(|r| r.invited_by))
         .chain(team_rows.iter().map(|r| r.invited_by))
         .collect();
-    let inviters: HashMap<UserId, String> = EUser::find()
-        .filter(CUser::Id.is_in(inviter_ids))
-        .all(&state.web_db)
+    let inviters: HashMap<UserId, String> = by_ids::<EUser, _>(&state.web_db, &inviter_ids)
         .await?
         .into_iter()
-        .map(|u| (u.id, u.username))
+        .map(|(id, u)| (id, u.username))
         .collect();
 
-    let projects: HashMap<ProjectId, MProject> = EProject::find()
-        .filter(CProject::Id.is_in(project_rows.iter().map(|r| r.project).collect::<Vec<_>>()))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|p| (p.id, p))
-        .collect();
-    let caches: HashMap<CacheId, MCache> = ECache::find()
-        .filter(CCache::Id.is_in(cache_rows.iter().map(|r| r.cache).collect::<Vec<_>>()))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|c| (c.id, c))
-        .collect();
-    let teams: HashMap<TeamId, MTeam> = ETeam::find()
-        .filter(CTeam::Id.is_in(team_rows.iter().map(|r| r.team).collect::<Vec<_>>()))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|t| (t.id, t))
-        .collect();
+    let projects: HashMap<ProjectId, MProject> = by_ids::<EProject, _>(
+        &state.web_db,
+        &project_rows.iter().map(|r| r.project).collect::<Vec<_>>(),
+    )
+    .await?;
+    let caches: HashMap<CacheId, MCache> = by_ids::<ECache, _>(
+        &state.web_db,
+        &cache_rows.iter().map(|r| r.cache).collect::<Vec<_>>(),
+    )
+    .await?;
+    let teams: HashMap<TeamId, MTeam> = by_ids::<ETeam, _>(
+        &state.web_db,
+        &team_rows.iter().map(|r| r.team).collect::<Vec<_>>(),
+    )
+    .await?;
 
     let project_roles = role_names(
         &state.web_db,
         project_rows.iter().map(|r| r.role).collect::<Vec<_>>(),
     )
     .await?;
-    let cache_roles: HashMap<RoleId, String> = ECacheRole::find()
-        .filter(CCacheRole::Id.is_in(cache_rows.iter().map(|r| r.role).collect::<Vec<_>>()))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|r| (r.id, r.name))
-        .collect();
+    let cache_roles: HashMap<RoleId, String> = by_ids::<ECacheRole, _>(
+        &state.web_db,
+        &cache_rows.iter().map(|r| r.role).collect::<Vec<_>>(),
+    )
+    .await?
+    .into_iter()
+    .map(|(id, r)| (id, r.name))
+    .collect();
 
     let project_items: Vec<InviteItem> = project_rows
         .iter()

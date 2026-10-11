@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::lookup::by_id;
 use gradient_db::status::{
     EvaluationFailure, update_evaluation_status, update_evaluation_status_with_error,
 };
@@ -102,10 +103,7 @@ pub async fn requeue_orphaned_jobs(
 
     for job in orphaned.iter().filter(|j| j.derivation_build().is_none()) {
         let evaluation_id = job.evaluation_id();
-        match EEvaluation::find_by_id(evaluation_id)
-            .one(&db.worker_db)
-            .await
-        {
+        match by_id::<EEvaluation, _>(&db.worker_db, evaluation_id).await {
             Ok(Some(eval))
                 if matches!(
                     eval.status,
@@ -180,10 +178,7 @@ pub(crate) async fn requeue_cluster_members(db: &DbContext, graph: &Graph, jobs:
         }));
 
     for job in jobs.iter().filter(|j| j.derivation_build().is_none()) {
-        match EEvaluation::find_by_id(job.evaluation_id())
-            .one(&db.worker_db)
-            .await
-        {
+        match by_id::<EEvaluation, _>(&db.worker_db, job.evaluation_id()).await {
             Ok(Some(eval))
                 if matches!(
                     eval.status,

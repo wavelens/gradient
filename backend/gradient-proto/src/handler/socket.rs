@@ -5,9 +5,9 @@
  */
 
 use gradient_db::DbContext;
+use gradient_db::lookup::by_id;
 use gradient_types::ids::ProjectId;
 use gradient_types::*;
-use sea_orm::EntityTrait;
 use tracing::{debug, warn};
 
 use gradient_scheduler::Scheduler;
@@ -66,7 +66,7 @@ pub(super) async fn send_credentials_for_job(
 async fn send_ssh_key_credential(writer: &ProtoWriter, db: &DbContext, project_id: ProjectId) {
     use gradient_wire::types::CredentialKind;
 
-    match EProject::find_by_id(project_id).one(&db.worker_db).await {
+    match by_id::<EProject, _>(&db.worker_db, project_id).await {
         Ok(Some(project)) => {
             match gradient_sources::ssh_key::decrypt_ssh_private_key(
                 &db.config.secrets.crypt_file,

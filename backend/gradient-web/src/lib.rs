@@ -16,6 +16,7 @@ pub mod error;
 pub mod helpers;
 pub mod invite_policy;
 pub mod ip_allowlist;
+pub mod lookup;
 pub mod metrics_scope;
 pub mod otlp;
 pub mod permissions;

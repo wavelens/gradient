@@ -18,6 +18,7 @@ use axum::{Extension, Json, Router};
 use chrono::Utc;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::ServerState;
+use gradient_db::lookup::by_ids;
 use gradient_graph::Graph;
 use gradient_graph::Transition;
 use gradient_scheduler::Scheduler;
@@ -112,14 +113,7 @@ async fn load_integrations_for_triggers<C: ConnectionTrait>(
         .iter()
         .filter_map(|t| trigger_integration_id(t.trigger_type, &t.config))
         .collect();
-    if ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let integrations = EIntegration::find()
-        .filter(CIntegration::Id.is_in(ids))
-        .all(db)
-        .await?;
-    Ok(integrations.into_iter().map(|i| (i.id, i)).collect())
+    Ok(by_ids::<EIntegration, _>(db, &ids).await?)
 }
 
 #[derive(Deserialize, Debug)]

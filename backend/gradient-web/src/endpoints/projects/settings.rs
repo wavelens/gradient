@@ -20,6 +20,7 @@ use axum::{Extension, Json};
 use gradient_ci::CiContext;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
+use gradient_db::lookup::by_ids;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_notify::{SubscriptionEvent, SubscriptionMail};
 use gradient_scheduler::Scheduler;
@@ -135,12 +136,10 @@ pub async fn get_project_subscribe(
         .map(|oc| oc.cache)
         .chain(pending.iter().map(|r| r.cache))
         .collect();
-    let names: HashMap<CacheId, String> = ECache::find()
-        .filter(CCache::Id.is_in(cache_ids))
-        .all(&state.web_db)
+    let names: HashMap<CacheId, String> = by_ids::<ECache, _>(&state.web_db, &cache_ids)
         .await?
         .into_iter()
-        .map(|c| (c.id, c.name))
+        .map(|(id, c)| (id, c.name))
         .collect();
 
     let mut subscribed = Vec::new();

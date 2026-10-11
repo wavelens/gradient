@@ -14,10 +14,10 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
 use gradient_core::ServerState;
+use gradient_db::lookup::by_id;
 use gradient_db::scheduling::build_attempt::latest_attempt_id;
 use gradient_db::status::log_tail::LogTail;
 use gradient_types::*;
-use sea_orm::EntityTrait;
 use std::sync::Arc;
 use tokio::time::Duration;
 
@@ -71,7 +71,7 @@ pub async fn post_build_log(
         loop {
             tokio::time::sleep(POLL_INTERVAL).await;
 
-            let shared_build = match EDerivationBuild::find_by_id(shared_build_id).one(&state.web_db).await {
+            let shared_build = match by_id::<EDerivationBuild, _>(&state.web_db, shared_build_id).await {
                 Ok(Some(shared_build)) => shared_build,
                 Ok(None) => break,
                 Err(e) => {

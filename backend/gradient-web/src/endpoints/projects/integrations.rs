@@ -20,6 +20,7 @@ use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
+use gradient_db::lookup::by_id;
 
 use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_secret_with_file;
@@ -80,11 +81,7 @@ async fn integration_response(
     m: MIntegration,
 ) -> Result<IntegrationResponse, WebError> {
     let install = match m.github_installation {
-        Some(fk) => {
-            gradient_entity::github_installation::Entity::find_by_id(fk)
-                .one(db)
-                .await?
-        }
+        Some(fk) => by_id::<gradient_entity::github_installation::Entity, _>(db, fk).await?,
         None => None,
     };
     Ok(IntegrationResponse {

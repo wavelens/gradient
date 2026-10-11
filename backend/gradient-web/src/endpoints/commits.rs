@@ -6,7 +6,7 @@
 
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
-use crate::helpers::OptionExt;
+use crate::lookup::require;
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -23,10 +23,7 @@ pub async fn get_commit(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(commit_id): Path<CommitId>,
 ) -> WebResult<Json<BaseResponse<MCommit>>> {
-    let commit = ECommit::find_by_id(commit_id)
-        .one(&state.web_db)
-        .await?
-        .or_not_found(Resource::Commit)?;
+    let commit = require::<ECommit>(&state.web_db, commit_id).await?;
 
     let evaluations = EEvaluation::find()
         .filter(CEvaluation::Commit.eq(commit_id))
@@ -55,10 +52,14 @@ pub async fn get_commit(
 
     let project_id_vec: Vec<ProjectId> = project_ids.into_iter().collect();
 
-    let projects = EProject::find()
-        .filter(CProject::Id.is_in(project_id_vec.clone()))
-        .all(&state.web_db)
-        .await?;
+    let db = &state.web_db;
+    let projects = gradient_db::fetch_in_chunks(&project_id_vec, |chunk| async move {
+        EProject::find()
+            .filter(CProject::Id.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await?;
 
     let any_public = projects.iter().any(|o| o.public);
 
