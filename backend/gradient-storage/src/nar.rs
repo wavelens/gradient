@@ -119,9 +119,9 @@ impl NarStore {
 impl NarStore {
     pub fn local(base_path: &str) -> Result<Self> {
         std::fs::create_dir_all(base_path)
-            .with_context(|| format!("Failed to create NAR storage directory: {}", base_path))?;
+            .with_context(|| format!("create NAR storage directory: {}", base_path))?;
         let store = object_store::local::LocalFileSystem::new_with_prefix(base_path)
-            .context("Failed to create local NAR storage")?;
+            .context("create local NAR storage")?;
         Ok(Self {
             inner: Arc::new(TimedStore::new(Arc::new(store), &STATS, &GAUGES)),
             prefix: String::new(),
@@ -176,7 +176,7 @@ impl NarStore {
             builder = builder.with_secret_access_key(secret);
         }
 
-        let store = builder.build().context("Failed to create S3 NAR storage")?;
+        let store = builder.build().context("create S3 NAR storage")?;
         let store = Arc::new(store);
 
         Ok(Self {
@@ -205,7 +205,7 @@ impl NarStore {
         match self.inner.head(path).await {
             Ok(meta) => Ok(Some(meta)),
             Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(e).context("Failed to head object"),
+            Err(e) => Err(e).context("head object"),
         }
     }
 
@@ -223,21 +223,18 @@ impl NarStore {
     async fn get_object(&self, path: &Path) -> Result<Option<Vec<u8>>> {
         match self.inner.get(path).await {
             Ok(result) => {
-                let bytes = result
-                    .bytes()
-                    .await
-                    .context("Failed to read object bytes")?;
+                let bytes = result.bytes().await.context("read object bytes")?;
                 Ok(Some(bytes.to_vec()))
             }
             Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(e).context("Failed to get object"),
+            Err(e) => Err(e).context("get object"),
         }
     }
 
     async fn delete_object(&self, path: &Path) -> Result<()> {
         match self.inner.delete(path).await {
             Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
-            Err(e) => Err(e).context("Failed to delete object"),
+            Err(e) => Err(e).context("delete object"),
         }
     }
 
@@ -267,12 +264,12 @@ impl NarStore {
                     let size = result.meta.size;
                     let stream = result
                         .into_stream()
-                        .map(|chunk| chunk.context("object stream chunk read failed"))
+                        .map(|chunk| chunk.context("read the object stream chunk"))
                         .boxed();
                     Ok(Some((size, stream)))
                 }
                 Err(object_store::Error::NotFound { .. }) => Ok(None),
-                Err(e) => Err(e).context("Failed to open object stream"),
+                Err(e) => Err(e).context("open object stream"),
             };
         };
 
@@ -294,12 +291,12 @@ impl NarStore {
             Ok(result) => {
                 let stream = result
                     .into_stream()
-                    .map(|chunk| chunk.context("object range stream chunk read failed"))
+                    .map(|chunk| chunk.context("read the object range stream chunk"))
                     .boxed();
                 Ok(Some((size, stream)))
             }
             Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(e).context("Failed to open object range stream"),
+            Err(e) => Err(e).context("open object range stream"),
         }
     }
 
@@ -318,7 +315,7 @@ impl NarStore {
         let url = signer
             .signed_url(method, path, expires_in)
             .await
-            .context("failed to generate presigned URL")?;
+            .context("generate presigned URL")?;
 
         Ok(Some(url.to_string()))
     }
@@ -329,7 +326,7 @@ impl NarStore {
             Ok(_)
             | Err(object_store::Error::NotFound { .. })
             | Err(object_store::Error::PermissionDenied { .. }) => Ok(()),
-            Err(e) => Err(e).context("Storage backend unreachable"),
+            Err(e) => Err(e).context("storage backend unreachable"),
         }
     }
 
@@ -381,7 +378,7 @@ impl NarStore {
             .inner
             .put_multipart(&self.object_path(hash))
             .await
-            .context("Failed to initiate multipart upload")?;
+            .context("initiate multipart upload")?;
         Ok(WriteMultipart::new_with_chunk_size(upload, chunk_size))
     }
 
@@ -633,7 +630,7 @@ impl NarStore {
         let mut stream = self.inner.list(Some(&prefix));
         let mut hashes = Vec::new();
         while let Some(item) = stream.next().await {
-            let meta = item.context("Failed to list NAR store")?;
+            let meta = item.context("list NAR store")?;
             if let Some(stem) = meta
                 .location
                 .filename()
@@ -650,7 +647,7 @@ impl NarStore {
         let mut stream = self.inner.list(Some(&prefix));
         let mut out = Vec::new();
         while let Some(item) = stream.next().await {
-            let meta = item.context("Failed to list build-request-blobs")?;
+            let meta = item.context("list build-request-blobs")?;
             let p = meta.location.to_string();
             let parts: Vec<&str> = p.split('/').collect();
             if parts.len() < 3 {
@@ -697,7 +694,7 @@ async fn local_stream(
         .await
         .context("seek local NAR")?;
     let stream = tokio_util::io::ReaderStream::with_capacity(file, BULK_CHUNK_SIZE)
-        .map(|c| c.context("local NAR read failed"))
+        .map(|c| c.context("read local NAR"))
         .boxed();
     Ok(Some((size, stream)))
 }

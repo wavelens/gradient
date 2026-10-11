@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn the_client_sees_the_cause_behind_a_context() {
-        let e = anyhow::anyhow!("permission denied").context("Failed to initiate multipart upload");
+        let e = anyhow::anyhow!("permission denied").context("initiate multipart upload");
         let message = err(e).to_string();
         assert!(message.contains("permission denied"), "{message}");
     }

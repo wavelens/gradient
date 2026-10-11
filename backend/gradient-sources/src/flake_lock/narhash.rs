@@ -15,7 +15,7 @@ pub async fn nar_hash_of_dir(path: &Path) -> Result<String> {
     let mut stream = harmonia_file_nar::NarByteStream::new(path.to_path_buf());
     let mut hasher = Sha256::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.context("reading NAR byte stream")?;
+        let chunk = chunk.context("read NAR byte stream")?;
         hasher.update(&chunk);
     }
 
@@ -31,16 +31,16 @@ pub async fn tarball_source_nar_hash(req: reqwest::RequestBuilder) -> Result<Str
     let resp = req
         .send()
         .await
-        .context("fetching source tarball")?
+        .context("fetch source tarball")?
         .error_for_status()
-        .context("source tarball request failed")?;
+        .context("request the source tarball")?;
     let bytes = resp
         .bytes()
         .await
-        .context("reading source tarball body")?
+        .context("read source tarball body")?
         .to_vec();
 
-    let tmp = tempfile::tempdir().context("creating extraction temp dir")?;
+    let tmp = tempfile::tempdir().context("create extraction temp dir")?;
     let dest = tmp.path().to_path_buf();
     tokio::task::spawn_blocking(move || extract_targz_stripped(&bytes, &dest))
         .await
@@ -55,8 +55,8 @@ fn extract_targz_stripped(bytes: &[u8], dest: &Path) -> Result<()> {
     archive.set_preserve_permissions(true);
     archive.set_preserve_mtime(false);
 
-    for entry in archive.entries().context("reading tar entries")? {
-        let mut entry = entry.context("reading tar entry")?;
+    for entry in archive.entries().context("read tar entries")? {
+        let mut entry = entry.context("read tar entry")?;
         let path = entry.path().context("entry path")?.into_owned();
 
         let mut comps = path.components();
@@ -74,7 +74,7 @@ fn extract_targz_stripped(bytes: &[u8], dest: &Path) -> Result<()> {
 
         entry
             .unpack(&out)
-            .with_context(|| format!("unpacking {}", out.display()))?;
+            .with_context(|| format!("unpack {}", out.display()))?;
     }
 
     Ok(())

@@ -205,7 +205,7 @@ pub(crate) async fn stage_one_presigned(
                     return Ok((path, Some((body, cp))));
                 }
             }
-            Err(e) => anyhow::Error::new(e).context(format!("HTTP GET {url} (path {path})")),
+            Err(e) => anyhow::Error::new(e).context(format!("send HTTP GET {url} (path {path})")),
         };
 
         if attempt < PRESIGNED_DOWNLOAD_MAX_ATTEMPTS {
@@ -662,7 +662,7 @@ async fn download_by_url(
     let mut results = Vec::new();
     let mut missing = Vec::new();
     for outcome in outcomes {
-        let (cp, fetched) = outcome.context("presigned NAR download failed")?;
+        let (cp, fetched) = outcome.context("download the presigned NAR")?;
         match fetched {
             Some(body) => results.push((cp.path.clone(), body, cp)),
             None => missing.push(cp.path),

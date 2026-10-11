@@ -110,7 +110,7 @@ impl EvalWorkerPool {
                         Arc::clone(&self.thunks),
                     )
                     .await
-                    .context("spawning fresh eval worker")?;
+                    .context("spawn fresh eval worker")?;
                 }
             }
         };

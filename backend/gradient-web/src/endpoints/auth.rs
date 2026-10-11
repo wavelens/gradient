@@ -372,7 +372,7 @@ pub async fn post_basic_login(
     let mut response = Json(res).into_response();
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&cookie).context("Bad cookie")?,
+        HeaderValue::from_str(&cookie).context("bad cookie")?,
     );
     Ok(response)
 }
@@ -457,7 +457,7 @@ pub async fn get_oauth_authorize(
     let mut response = Json(res).into_response();
     response.headers_mut().append(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&oidc_csrf_clear_cookie(use_tls)).context("Bad cookie")?,
+        HeaderValue::from_str(&oidc_csrf_clear_cookie(use_tls)).context("bad cookie")?,
     );
     Ok(response)
 }
@@ -480,7 +480,7 @@ pub async fn post_oauth_authorize(state: State<Arc<ServerState>>) -> WebResult<R
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
         HeaderValue::from_str(&oidc_csrf_set_cookie(&req.cookie_value, use_tls))
-            .context("Bad cookie")?,
+            .context("bad cookie")?,
     );
     Ok(response)
 }
@@ -506,7 +506,7 @@ pub async fn get_oidc_login(
             oidc_csrf_set_cookie(&req.cookie_value, use_tls),
         )
         .body(Body::empty())
-        .context("Failed to build redirect response")
+        .context("build redirect response")
         .map_err(Into::into)
 }
 
@@ -561,7 +561,7 @@ pub async fn get_oidc_callback(
         .header("Set-Cookie", &session_cookie)
         .header("Set-Cookie", &clear_csrf)
         .body(Body::empty())
-        .context("Failed to build redirect response")
+        .context("build redirect response")
         .map_err(Into::into)
 }
 
@@ -607,7 +607,7 @@ pub async fn post_logout(
     let mut response = Json(res).into_response();
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&clear_cookie).context("Bad cookie")?,
+        HeaderValue::from_str(&clear_cookie).context("bad cookie")?,
     );
     Ok(response)
 }
@@ -743,7 +743,7 @@ pub async fn post_resend_verification(
             &state.config.server.serve_url,
         )
         .await
-        .context("Failed to send verification email")?;
+        .context("send verification email")?;
 
     tx.commit().await?;
 

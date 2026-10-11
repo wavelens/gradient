@@ -70,7 +70,7 @@ impl<'a> NarImporter<'a> {
         let digest = tokio::task::spawn_blocking(move || {
             digesting
                 .digest()
-                .with_context(|| format!("decompress failed for {store_path}"))
+                .with_context(|| format!("decompress {store_path}"))
         })
         .await
         .context("decompress task panicked")??;

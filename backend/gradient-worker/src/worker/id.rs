@@ -20,14 +20,13 @@ pub(super) fn load_or_generate_id(data_dir: &str, id_override: Option<&str>) -> 
     }
 
     let dir = Path::new(data_dir);
-    fs::create_dir_all(dir)
-        .with_context(|| format!("failed to create data directory '{}'", data_dir))?;
+    fs::create_dir_all(dir).with_context(|| format!("create data directory '{}'", data_dir))?;
 
     let id_path = dir.join("worker-id");
 
     if id_path.exists() {
         let raw = fs::read_to_string(&id_path)
-            .with_context(|| format!("failed to read '{}'", id_path.display()))?;
+            .with_context(|| format!("read '{}'", id_path.display()))?;
         let id = raw.trim().to_owned();
         id.parse::<uuid::Uuid>().with_context(|| {
             format!("'{}' contains an invalid UUID: {:?}", id_path.display(), id)
@@ -37,7 +36,7 @@ pub(super) fn load_or_generate_id(data_dir: &str, id_override: Option<&str>) -> 
     }
 
     let id = uuid::Uuid::now_v7().to_string();
-    fs::write(&id_path, &id).with_context(|| format!("failed to write '{}'", id_path.display()))?;
+    fs::write(&id_path, &id).with_context(|| format!("write '{}'", id_path.display()))?;
     info!(path = %id_path.display(), %id, "generated and persisted new worker ID");
     Ok(id)
 }

@@ -75,7 +75,7 @@ impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
         let lock_path = checkout.join("flake.lock");
         let bytes = tokio::fs::read(&lock_path)
             .await
-            .with_context(|| format!("reading {}", lock_path.display()))?;
+            .with_context(|| format!("read {}", lock_path.display()))?;
         let mut lock = FlakeLock::parse(&bytes)?;
 
         let declared = lock.root_input_names();
@@ -111,13 +111,13 @@ impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
                 .with_context(|| format!("lock node `{node_name}` missing for input `{input}`"))?;
             let reference = node
                 .original_ref()
-                .with_context(|| format!("reading `original` of input `{input}`"))?;
+                .with_context(|| format!("read `original` of input `{input}`"))?;
             let old_rev = node.locked_rev().map(str::to_owned);
             let resolved = self
                 .resolver
                 .resolve(&reference)
                 .await
-                .with_context(|| format!("resolving newest revision for input `{input}`"))?;
+                .with_context(|| format!("resolve newest revision for input `{input}`"))?;
             resolutions.push((
                 input.clone(),
                 node_name.clone(),

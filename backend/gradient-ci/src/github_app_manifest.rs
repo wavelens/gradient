@@ -92,7 +92,7 @@ pub async fn exchange_code_with_base(
         .header("X-GitHub-Api-Version", "2022-11-28")
         .send()
         .await
-        .context("github manifest exchange request failed")?;
+        .context("send github manifest exchange request")?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -102,7 +102,7 @@ pub async fn exchange_code_with_base(
 
     resp.json::<ManifestResult>()
         .await
-        .context("failed to parse manifest exchange response")
+        .context("parse manifest exchange response")
 }
 
 #[cfg(test)]

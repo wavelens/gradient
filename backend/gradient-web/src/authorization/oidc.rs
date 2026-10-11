@@ -81,10 +81,10 @@ async fn get_oidc_metadata(
         .get(url)
         .send()
         .await
-        .context("Failed to fetch OIDC metadata")?
+        .context("fetch OIDC metadata")?
         .json::<serde_json::Value>()
         .await
-        .context("Failed to parse OIDC metadata")?;
+        .context("parse OIDC metadata")?;
 
     Ok(metadata)
 }
@@ -94,10 +94,10 @@ async fn fetch_jwks(http_client: &reqwest::Client, jwks_uri: &str) -> Result<Jwk
         .get(jwks_uri)
         .send()
         .await
-        .context("Failed to fetch JWKS")?
+        .context("fetch JWKS")?
         .json()
         .await
-        .context("Failed to parse JWKS")?;
+        .context("parse JWKS")?;
 
     Ok(jwks)
 }
@@ -113,7 +113,7 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<OidcAut
 
     let auth_endpoint = metadata["authorization_endpoint"]
         .as_str()
-        .context("No authorization_endpoint in OIDC metadata")?;
+        .context("no authorization_endpoint in OIDC metadata")?;
 
     let redirect_uri = format!(
         "{}/api/v1/auth/oidc/callback",
@@ -138,7 +138,7 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<OidcAut
         nonce: nonce.clone(),
         pkce_verifier,
     };
-    let cookie_value = sign_claims(&state, &claims).context("Failed to sign OIDC CSRF cookie")?;
+    let cookie_value = sign_claims(&state, &claims).context("sign OIDC CSRF cookie")?;
 
     let params = vec![
         ("response_type", "code"),
@@ -151,8 +151,8 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<OidcAut
         ("code_challenge_method", "S256"),
     ];
 
-    let auth_url = Url::parse_with_params(auth_endpoint, &params)
-        .context("Failed to build authorization URL")?;
+    let auth_url =
+        Url::parse_with_params(auth_endpoint, &params).context("build authorization URL")?;
 
     Ok(OidcAuthRequest {
         auth_url,
@@ -173,7 +173,7 @@ pub async fn oidc_login_verify(
         .context("OIDC is not enabled or not fully configured")?;
 
     let csrf: CsrfClaims =
-        verify_claims(&state, &csrf_cookie).context("Invalid or expired OIDC CSRF cookie")?;
+        verify_claims(&state, &csrf_cookie).context("invalid or expired OIDC CSRF cookie")?;
 
     if csrf
         .state
@@ -192,14 +192,14 @@ pub async fn oidc_login_verify(
 
     let issuer = metadata["issuer"]
         .as_str()
-        .context("No issuer in OIDC metadata")?
+        .context("no issuer in OIDC metadata")?
         .to_string();
     let token_endpoint = metadata["token_endpoint"]
         .as_str()
-        .context("No token_endpoint in OIDC metadata")?;
+        .context("no token_endpoint in OIDC metadata")?;
     let jwks_uri = metadata["jwks_uri"]
         .as_str()
-        .context("No jwks_uri in OIDC metadata")?;
+        .context("no jwks_uri in OIDC metadata")?;
 
     let http_client = &state.http;
 
@@ -207,8 +207,7 @@ pub async fn oidc_login_verify(
         "{}/api/v1/auth/oidc/callback",
         state.config.server.serve_url
     );
-    let client_secret =
-        load_secret(&oidc.client_secret_file).context("Failed to read OIDC client secret")?;
+    let client_secret = load_secret(&oidc.client_secret_file).context("read OIDC client secret")?;
 
     let token_response = http_client
         .post(token_endpoint)
@@ -222,7 +221,7 @@ pub async fn oidc_login_verify(
         ])
         .send()
         .await
-        .context("Token exchange request failed")?;
+        .context("send token exchange request")?;
 
     if !token_response.status().is_success() {
         bail!(
@@ -234,11 +233,11 @@ pub async fn oidc_login_verify(
     let token_data: serde_json::Value = token_response
         .json::<serde_json::Value>()
         .await
-        .context("Failed to parse token response")?;
+        .context("parse token response")?;
 
     let id_token = token_data["id_token"]
         .as_str()
-        .context("No id_token in token response")?;
+        .context("no id_token in token response")?;
 
     let claims = verify_id_token(&state.http, id_token, jwks_uri, &issuer, &oidc.client_id).await?;
 
@@ -257,14 +256,13 @@ async fn verify_id_token(
     expected_iss: &str,
     expected_aud: &str,
 ) -> Result<IdTokenClaims> {
-    let header = decode_header(id_token).context("Failed to decode id_token header")?;
+    let header = decode_header(id_token).context("decode id_token header")?;
     let kid = header.kid.clone().context("id_token header has no kid")?;
 
     let jwks = fetch_jwks(http, jwks_uri).await?;
-    let jwk = jwks.find(&kid).context("No JWK matches id_token kid")?;
+    let jwk = jwks.find(&kid).context("no JWK matches id_token kid")?;
 
-    let decoding_key =
-        DecodingKey::from_jwk(jwk).context("Failed to construct decoding key from JWK")?;
+    let decoding_key = DecodingKey::from_jwk(jwk).context("construct decoding key from JWK")?;
 
     let mut validation = Validation::new(header.alg);
     validation.set_issuer(&[expected_iss]);
@@ -294,14 +292,14 @@ async fn create_or_update_user(
         .inner()
         .begin()
         .await
-        .context("Failed to start OIDC user transaction")?;
+        .context("start OIDC user transaction")?;
 
     let existing = EUser::find()
         .filter(CUser::OidcIssuer.eq(&claims.iss))
         .filter(CUser::OidcSubject.eq(&claims.sub))
         .one(&tx)
         .await
-        .context("Database error while finding OIDC user")?;
+        .context("find OIDC user")?;
 
     if let Some(user) = existing {
         if !user.active {
@@ -326,10 +324,7 @@ async fn create_or_update_user(
             auser.name = Set(new_name.clone());
         }
 
-        let user = auser
-            .update(&tx)
-            .await
-            .context("Failed to update OIDC user")?;
+        let user = auser.update(&tx).await.context("update OIDC user")?;
 
         if let Err(e) =
             gradient_db::teams::members::sync_group_memberships(&tx, user.id, &groups).await
@@ -338,9 +333,7 @@ async fn create_or_update_user(
                 "Failed to sync OIDC group team memberships");
         }
 
-        tx.commit()
-            .await
-            .context("Failed to commit OIDC user transaction")?;
+        tx.commit().await.context("commit OIDC user transaction")?;
         return Ok(user);
     }
 
@@ -352,7 +345,7 @@ async fn create_or_update_user(
         )
         .one(&tx)
         .await
-        .context("Database error while checking for OIDC username/email collision")?;
+        .context("check for OIDC username/email collision")?;
 
     if let Some(existing) = collision {
         if !is_claimable(&existing.password, &existing.oidc_subject) {
@@ -377,10 +370,7 @@ async fn create_or_update_user(
             auser.name = Set(new_name.clone());
         }
 
-        let user = auser
-            .update(&tx)
-            .await
-            .context("Failed to claim OIDC account")?;
+        let user = auser.update(&tx).await.context("claim OIDC account")?;
 
         if let Err(e) = gradient_state::apply_pending_project_memberships(
             &tx,
@@ -404,9 +394,7 @@ async fn create_or_update_user(
                 "Failed to sync OIDC group team memberships");
         }
 
-        tx.commit()
-            .await
-            .context("Failed to commit OIDC account claim")?;
+        tx.commit().await.context("commit OIDC account claim")?;
         return Ok(user);
     }
 
@@ -426,7 +414,7 @@ async fn create_or_update_user(
     .into_active_model()
     .insert(&tx)
     .await
-    .context("Failed to create user")?;
+    .context("create user")?;
 
     if let Err(e) = gradient_state::apply_pending_project_memberships(
         &tx,
@@ -449,9 +437,7 @@ async fn create_or_update_user(
             "Failed to sync OIDC group team memberships");
     }
 
-    tx.commit()
-        .await
-        .context("Failed to commit OIDC user transaction")?;
+    tx.commit().await.context("commit OIDC user transaction")?;
 
     Ok(user)
 }

@@ -141,7 +141,7 @@ impl From<&WorkerInfo> for WorkerLiveInfo {
 
 pub(crate) fn encrypt_token(crypt_file: &str, token: &str) -> WebResult<String> {
     gradient_sources::encrypt_secret(crypt_file, token)
-        .context("encrypting the worker token failed")
+        .context("encrypt the worker token")
         .map_err(Into::into)
 }
 

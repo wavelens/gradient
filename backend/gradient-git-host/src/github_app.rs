@@ -50,12 +50,12 @@ fn pem_to_der(pem: &str) -> Result<Vec<u8>> {
     let body: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
     general_purpose::STANDARD
         .decode(body.trim())
-        .context("base64 decode of PEM body failed")
+        .context("decode the base64 PEM body")
 }
 
 /// GitHub App manifests are returning PKCS#1 keys. PKCS#8 and PKCS#1 are both accepted.
 fn parse_rsa_key(pem: &str) -> Result<RsaKeyPair> {
-    let der = pem_to_der(pem).context("failed to decode GitHub App private key PEM")?;
+    let der = pem_to_der(pem).context("decode GitHub App private key PEM")?;
     let is_pkcs1 = pem.contains("BEGIN RSA PRIVATE KEY");
     if is_pkcs1 {
         RsaKeyPair::from_der(&der).map_err(|e| anyhow!("invalid PKCS#1 RSA private key: {e:?}"))
@@ -87,7 +87,7 @@ pub async fn get_installation_token(
         .header("X-GitHub-Api-Version", "2022-11-28")
         .send()
         .await
-        .context("GitHub installation token request failed")?;
+        .context("send GitHub installation token request")?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -98,7 +98,7 @@ pub async fn get_installation_token(
     let token_resp: InstallationTokenResponse = resp
         .json()
         .await
-        .context("failed to parse GitHub installation token response")?;
+        .context("parse GitHub installation token response")?;
 
     Ok(token_resp.token)
 }
@@ -161,7 +161,7 @@ async fn app_get<T: serde::de::DeserializeOwned>(
         .header("User-Agent", "gradient")
         .send()
         .await
-        .with_context(|| format!("GitHub GET /{path} failed"))?;
+        .with_context(|| format!("send GitHub GET /{path}"))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -171,7 +171,7 @@ async fn app_get<T: serde::de::DeserializeOwned>(
 
     resp.json()
         .await
-        .with_context(|| format!("failed to parse GitHub GET /{path} response"))
+        .with_context(|| format!("parse GitHub GET /{path} response"))
 }
 
 pub fn verify_github_signature(secret: &str, signature_header: &str, body: &[u8]) -> bool {

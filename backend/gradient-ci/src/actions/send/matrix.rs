@@ -87,7 +87,7 @@ pub(crate) async fn post_matrix_message(
         .json(&body)
         .send()
         .await
-        .context("Matrix send failed")?;
+        .context("send to Matrix")?;
     chat_response("Matrix", resp).await
 }
 

@@ -165,10 +165,10 @@ async fn read_lock(flake_root: &str) -> Result<Option<serde_json::Value>> {
     let path = std::path::Path::new(flake_root).join("flake.lock");
     match tokio::fs::read(&path).await {
         Ok(bytes) => Ok(Some(
-            serde_json::from_slice(&bytes).context("failed to parse flake.lock")?,
+            serde_json::from_slice(&bytes).context("parse flake.lock")?,
         )),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e).with_context(|| format!("failed to read {}", path.display())),
+        Err(e) => Err(e).with_context(|| format!("read {}", path.display())),
     }
 }
 
@@ -413,9 +413,8 @@ async fn run_input_update(
         let lock_path = std::path::Path::new(checkout).join("flake.lock");
         let bytes = tokio::fs::read(&lock_path)
             .await
-            .with_context(|| format!("failed to read {}", lock_path.display()))?;
-        let lock: serde_json::Value =
-            serde_json::from_slice(&bytes).context("failed to parse flake.lock")?;
+            .with_context(|| format!("read {}", lock_path.display()))?;
+        let lock: serde_json::Value = serde_json::from_slice(&bytes).context("parse flake.lock")?;
         let declared = declared_inputs_from_lock(&lock)?;
         let mut matched: Vec<String> = spec
             .inputs
@@ -444,7 +443,7 @@ async fn run_input_update(
     let Some(patch) = generator
         .produce(std::path::Path::new(checkout), &tracked)
         .await
-        .context("flake.lock update generator failed")?
+        .context("run the flake.lock update generator")?
     else {
         return Ok(());
     };
@@ -453,7 +452,7 @@ async fn run_input_update(
         let dest = std::path::Path::new(checkout).join(&edit.path);
         tokio::fs::write(&dest, &edit.contents)
             .await
-            .with_context(|| format!("writing {}", dest.display()))?;
+            .with_context(|| format!("write {}", dest.display()))?;
     }
 
     let candidate = patch
@@ -485,13 +484,13 @@ async fn ssh_key_env(
     let Some(key) = ssh_key else {
         return Ok(None);
     };
-    let kf = NamedTempFile::with_suffix(".key").context("failed to create SSH key temp file")?;
+    let kf = NamedTempFile::with_suffix(".key").context("create SSH key temp file")?;
     tokio::fs::set_permissions(kf.path(), std::fs::Permissions::from_mode(0o600))
         .await
-        .context("failed to chmod SSH key file")?;
+        .context("chmod SSH key file")?;
     tokio::fs::write(kf.path(), key.as_bytes())
         .await
-        .context("failed to write SSH key file")?;
+        .context("write SSH key file")?;
     let ssh_command = format!(
         "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
         binpath_ssh,

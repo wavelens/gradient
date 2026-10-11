@@ -52,7 +52,7 @@ pub async fn repair_nar_shard(state: Arc<ServerState>, shard: &str) -> Result<Cl
         .nar_storage
         .list_shard(shard)
         .await
-        .context("Failed to list NAR store")?;
+        .context("list NAR store")?;
     let on_disk_set: HashSet<String> = on_disk.iter().map(|(h, _)| h.clone()).collect();
 
     let mut report = CleanupReport {
@@ -105,7 +105,7 @@ async fn zombie_hashes(
     let rows = zombie_candidates(shard)
         .all(&state.worker_db)
         .await
-        .context("Failed to load cached_path rows for zombie purge")?;
+        .context("load cached_path rows for zombie purge")?;
 
     let mut zombies = Vec::new();
     for row in rows {
@@ -196,7 +196,7 @@ async fn unreferenced_hashes(state: &ServerState, candidates: &[String]) -> Resu
             sea_orm::Value::Int(Some(BuildStatus::FailedTimeout as i32)),
         ]))
         .await
-        .context("Failed to probe NAR hashes for references")?;
+        .context("probe NAR hashes for references")?;
 
     rows.iter()
         .map(|row| row.try_get::<String>("", "hash").map_err(Into::into))

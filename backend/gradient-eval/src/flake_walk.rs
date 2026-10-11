@@ -110,13 +110,13 @@ impl<'a> FlakeWalker<'a> {
 
         let drv = cursor
             .drv_path(self.state)
-            .with_context(|| format!("resolving drvPath of '{attr_path}'"))?;
+            .with_context(|| format!("resolve drvPath of '{attr_path}'"))?;
 
         Ok((strip_nix_store_prefix(&drv), vec![]))
     }
 
     pub fn checkpoint_cache(&self) -> Result<()> {
-        self.cache.checkpoint().context("checkpointing eval cache")
+        self.cache.checkpoint().context("checkpoint eval cache")
     }
 }
 
@@ -131,19 +131,19 @@ fn lock_flake(
 ) -> Result<LockedFlake> {
     let parse_flags = FlakeReferenceParseFlags::new(ctx, flake)?;
     let (reference, _frag) = FlakeReference::parse(ctx, fetch, flake, &parse_flags, flake_ref)
-        .with_context(|| format!("parsing flake reference '{flake_ref}'"))?;
+        .with_context(|| format!("parse flake reference '{flake_ref}'"))?;
 
     let mut lock_flags = LockFlags::new(ctx, flake)?;
     for (name, ref_str) in overrides {
         let (override_ref, _) = FlakeReference::parse(ctx, fetch, flake, &parse_flags, ref_str)
-            .with_context(|| format!("parsing override flake reference '{ref_str}'"))?;
+            .with_context(|| format!("parse override flake reference '{ref_str}'"))?;
         lock_flags = lock_flags
             .add_input_override(name, &override_ref)
-            .with_context(|| format!("applying override-input '{name}'"))?;
+            .with_context(|| format!("apply override-input '{name}'"))?;
     }
 
     LockedFlake::lock(ctx, fetch, flake, state, &lock_flags, &reference)
-        .with_context(|| format!("locking flake '{flake_ref}'"))
+        .with_context(|| format!("lock flake '{flake_ref}'"))
 }
 
 pub fn fingerprint(

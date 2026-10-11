@@ -164,21 +164,21 @@ async fn delete_derivations(
 
     let attempts = pairs(db, GC_CANDIDATE_ATTEMPTS.bind([ids(candidates)]), "attempt")
         .await
-        .context("GC: failed to snapshot the candidates' build attempts")?;
+        .context("GC: snapshot the candidates' build attempts")?;
     let wanted_by = pairs(
         db,
         GC_CANDIDATE_PARENTS.bind([ids(candidates)]),
         "dependency",
     )
     .await
-    .context("GC: failed to snapshot the edges into the candidates")?;
+    .context("GC: snapshot the edges into the candidates")?;
 
     let deleted: HashSet<DerivationId> = db
         .query_all_raw(
             GC_DELETE_DERIVATIONS.bind([ids(candidates), Value::ChronoDateTime(Some(scanned_at))]),
         )
         .await
-        .context("GC: failed to delete the orphan derivations")?
+        .context("GC: delete the orphan derivations")?
         .iter()
         .filter_map(|r| r.try_get::<Uuid>("", "id").ok())
         .map(DerivationId::new)
@@ -193,13 +193,13 @@ async fn delete_derivations(
         let txn = db.begin().await.context("GC: begin the survivor un-walk")?;
         gradient_db::graph::walk_completeness::unwalk(&txn, &survivors)
             .await
-            .context("GC: failed to re-walk the survivors of a deleted dependency")?;
+            .context("GC: re-walk the survivors of a deleted dependency")?;
         txn.commit()
             .await
             .context("GC: commit the survivor un-walk")?;
         let changes = gradient_db::graph::can_start::unpromote_ungated(db, &survivors)
             .await
-            .context("GC: failed to settle the survivors of a deleted dependency")?;
+            .context("GC: settle the survivors of a deleted dependency")?;
         gradient_db::status::emit_transition_effects(ctx, &changes).await?;
     }
 
@@ -232,7 +232,7 @@ async fn retire_stale_paths(
             Value::ChronoDateTime(Some(scanned_at)),
         ]))
         .await
-        .context("GC: failed to re-check what became live since the scan")?
+        .context("GC: re-check what became live since the scan")?
         .iter()
         .filter_map(|r| r.try_get::<String>("", "hash").ok())
         .collect();
@@ -245,17 +245,14 @@ async fn retire_stale_paths(
     // Inside the graph writer its transaction is a savepoint.
     // Postgres is keeping a subtransaction's locks until the outer commit.
     // The release below can therefore never drop one early.
-    let savepoint = db
-        .begin()
-        .await
-        .context("GC: failed to open the retire savepoint")?;
+    let savepoint = db.begin().await.context("GC: open the retire savepoint")?;
     let retired = retire_outputs(&savepoint, &still_stale)
         .await
-        .context("GC: failed to retire the stale paths")?;
+        .context("GC: retire the stale paths")?;
     savepoint
         .commit()
         .await
-        .context("GC: failed to release the retire savepoint")?;
+        .context("GC: release the retire savepoint")?;
     gradient_db::status::emit_transition_effects(ctx, &retired.transitions).await?;
 
     Ok(GcReport {
@@ -274,7 +271,7 @@ async fn delete_evaluations(ctx: &DbContext, evaluations: &[EvaluationId]) -> Re
     let lost: Vec<DerivationId> = db
         .query_all_raw(GC_SHARED_BUILDS_LOSING_AN_EVALUATION.bind([raw.into()]))
         .await
-        .context("GC: failed to collect the derivations of the evaluations to delete")?
+        .context("GC: collect the derivations of the evaluations to delete")?
         .iter()
         .filter_map(|r| r.try_get::<Uuid>("", "derivation").ok())
         .map(DerivationId::new)
@@ -282,18 +279,18 @@ async fn delete_evaluations(ctx: &DbContext, evaluations: &[EvaluationId]) -> Re
 
     unlink(db, evaluations)
         .await
-        .context("GC: failed to NULL evaluation linked-list pointers")?;
+        .context("GC: set evaluation linked-list pointers to NULL")?;
 
     for id in evaluations {
         EEvaluation::delete_by_id(*id)
             .exec(db)
             .await
-            .context("GC: failed to delete an evaluation")?;
+            .context("GC: delete an evaluation")?;
     }
 
     let (adopted, changes) = gradient_db::maintenance::gc::settle_after_delete(ctx, &lost)
         .await
-        .context("GC: failed to settle the queue after deleting evaluations")?;
+        .context("GC: settle the queue after deleting evaluations")?;
     gradient_db::status::emit_transition_effects(ctx, &changes).await?;
 
     info!(

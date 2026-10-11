@@ -23,7 +23,7 @@ crate::sql! {
 pub(super) async fn require_upgrade_floor(db: &DatabaseConnection) -> Result<()> {
     let applied = names(db, &APPLIED_MIGRATIONS)
         .await
-        .context("Failed to list the applied database migrations")?;
+        .context("list the applied database migrations")?;
 
     if !is_upgrade_from_an_earlier_major(&applied, &baseline()?) {
         return Ok(());
@@ -36,7 +36,7 @@ pub(super) async fn require_upgrade_floor(db: &DatabaseConnection) -> Result<()>
 
     let finished = names(db, &FINISHED_STORAGE_MIGRATIONS)
         .await
-        .context("Failed to list the finished storage migrations")?;
+        .context("list the finished storage migrations")?;
 
     require_storage_migrations(&UPGRADE_FLOOR, &finished)
 }
@@ -45,7 +45,7 @@ fn baseline() -> Result<String> {
     Migrator::migrations()
         .first()
         .map(|migration| migration.name().to_owned())
-        .context("The migration list holds no baseline")
+        .context("the migration list holds no baseline")
 }
 
 async fn names(db: &DatabaseConnection, query: &Query) -> Result<HashSet<String>> {

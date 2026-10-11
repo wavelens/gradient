@@ -72,7 +72,7 @@ pub async fn post_blobs(
     }
 
     let mut missing: HashSet<String> =
-        serde_json::from_value(session.missing.clone()).context("Corrupt session.missing JSON")?;
+        serde_json::from_value(session.missing.clone()).context("corrupt session.missing JSON")?;
 
     let missing_before = missing.len();
     while let Some(field) =
@@ -90,7 +90,7 @@ pub async fn post_blobs(
 
     let remaining = missing.len();
     let missing_value = serde_json::to_value(missing.into_iter().collect::<Vec<String>>())
-        .context("Failed to serialise missing list")?;
+        .context("serialise missing list")?;
 
     let mut active: AUploadSession = session.into();
     active.missing = Set(missing_value);
@@ -138,7 +138,7 @@ async fn store_blob(state: &ServerState, project: ProjectId, blob: VerifiedBlob)
         .nar_storage
         .put_blob(project.into_inner(), &blob.hash, blob.data)
         .await
-        .context("Failed to persist blob")?;
+        .context("persist blob")?;
 
     let stored_at = now();
     let inserted = MBuildRequestBlob {

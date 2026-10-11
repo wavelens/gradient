@@ -34,7 +34,7 @@ pub async fn start_deep_gc(
         Err(InsertPendingError::AlreadyActive(id)) => {
             admin_tasks::restart(db, id, Some(user.id))
                 .await
-                .context("admin_task restart failed")?;
+                .context("restart admin_task")?;
             id
         }
         Err(InsertPendingError::Db(e)) => {

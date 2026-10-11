@@ -40,7 +40,7 @@ pub async fn set_draining(
     } else {
         gradient_db::evaluations::draining::unpark_draining_evals(&state.worker_db).await
     }
-    .context("draining transition failed")?;
+    .context("apply the draining transition")?;
 
     info!(enabled = req.enabled, evaluations, "draining toggled");
 

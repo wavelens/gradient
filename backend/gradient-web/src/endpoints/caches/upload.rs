@@ -120,7 +120,7 @@ pub async fn nars_upload(
     let verify_reader = upload_store
         .open_read(&stage_key)
         .await
-        .context("failed to read staged NAR")?;
+        .context("read staged NAR")?;
     if let Err(e) = gradient_storage::verify_nar_reader(
         verify_reader,
         &narinfo.file_hash,
@@ -145,7 +145,7 @@ pub async fn nars_upload(
     let nar_reader = upload_store
         .open_read(&stage_key)
         .await
-        .context("failed to read staged NAR")?;
+        .context("read staged NAR")?;
     let outcome = import_nar_reader(
         &state.web_db,
         &state.nar_storage,
@@ -246,7 +246,7 @@ async fn stage_nar_field(
         store
             .append(key, token, offset, &chunk)
             .await
-            .context("failed to stage NAR")?;
+            .context("stage NAR")?;
         offset += chunk.len() as u64;
     }
     Ok(offset)
@@ -344,10 +344,7 @@ pub async fn nar_finalize(
         narinfo.file_size as u64,
     )
     .await?;
-    let verify_reader = store
-        .open_read(&key)
-        .await
-        .context("failed to read staged NAR")?;
+    let verify_reader = store.open_read(&key).await.context("read staged NAR")?;
     if let Err(e) = gradient_storage::verify_nar_reader(
         verify_reader,
         &narinfo.file_hash,
@@ -360,10 +357,7 @@ pub async fn nar_finalize(
         }
         .into());
     }
-    let nar_reader = store
-        .open_read(&key)
-        .await
-        .context("failed to read staged NAR")?;
+    let nar_reader = store.open_read(&key).await.context("read staged NAR")?;
     let outcome = import_nar_reader(
         &state.web_db,
         &state.nar_storage,

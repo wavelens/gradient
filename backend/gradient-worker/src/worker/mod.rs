@@ -220,7 +220,7 @@ async fn perform_setup(
     side: Side,
 ) -> Result<()> {
     let peer_id = load_or_generate_id(&config.base_dir, config.id.as_deref())
-        .context("failed to load or generate persistent worker ID")?;
+        .context("load or generate persistent worker ID")?;
     let handshake = match side {
         Side::Inbound => {
             perform_dialed_handshake(

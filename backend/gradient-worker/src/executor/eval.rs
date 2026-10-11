@@ -407,13 +407,13 @@ async fn parse_drv_wave(
             async move {
                 let bytes = drv_reader.read_drv(&drv_path).await.with_context(|| {
                     format!(
-                        "cannot read .drv {drv_path} during closure walk; aborting eval \
+                        "read .drv {drv_path} during closure walk; aborting eval \
                          to avoid silently dropping dependencies"
                     )
                 })?;
                 let parsed = parse_drv(&bytes).with_context(|| {
                     format!(
-                        "cannot parse .drv {drv_path} during closure walk; aborting eval \
+                        "parse .drv {drv_path} during closure walk; aborting eval \
                          to avoid silently dropping dependencies"
                     )
                 })?;
@@ -876,7 +876,7 @@ pub async fn evaluate_derivations_with(
             let _ = updater
                 .report_eval_result(vec![], vec![], vec![err_msg])
                 .await;
-            return Err(e).context("list_flake_derivations failed");
+            return Err(e).context("run list_flake_derivations");
         }
     };
 

@@ -177,12 +177,12 @@ async fn load_subject(
         let build_job = EBuildJob::find_by_id(build_job_id)
             .one(&ctx.db.worker_db)
             .await
-            .context("loading build_job")?
+            .context("load build_job")?
             .ok_or_else(|| anyhow!("build_job {} not found", build_job_id))?;
         let evaluation = EEvaluation::find_by_id(build_job.evaluation)
             .one(&ctx.db.worker_db)
             .await
-            .context("loading evaluation")?
+            .context("load evaluation")?
             .ok_or(MissingRow::Evaluation {
                 id: build_job.evaluation,
             })?;
@@ -198,7 +198,7 @@ async fn load_subject(
     let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&ctx.db.worker_db)
         .await
-        .context("loading evaluation")?
+        .context("load evaluation")?
         .ok_or(MissingRow::Evaluation { id: evaluation_id })?;
     Ok((evaluation, None))
 }
@@ -215,7 +215,7 @@ async fn build_job_entry_point(
         .filter(CEntryPoint::Evaluation.eq(b.evaluation))
         .one(&ctx.db.worker_db)
         .await
-        .context("loading entry points")?;
+        .context("load entry points")?;
     Ok(entry_point.map(|ep| ep.eval))
 }
 
@@ -233,7 +233,7 @@ async fn evaluation_reports(
 
     let failed = failed_attributes(&ctx.db.worker_db, evaluation.id)
         .await
-        .context("loading failed attributes")?;
+        .context("load failed attributes")?;
     let status = reporting::evaluation_check_status(status, !failed.is_empty());
     let attributes_failed = status == CiStatus::Failure && !failed.is_empty();
 

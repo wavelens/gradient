@@ -44,18 +44,18 @@ fn force_push_blocking(
         .remote_callbacks(credentials_cb(cred_user, cred_pass));
     remote
         .fetch(&[&format!("refs/heads/{base}")], Some(&mut fetch), None)
-        .with_context(|| format!("fetching base branch {base}"))?;
+        .with_context(|| format!("fetch base branch {base}"))?;
 
     let base_commit = repo
         .find_reference("FETCH_HEAD")
         .and_then(|r| r.peel_to_commit())
-        .context("resolving base commit")?;
+        .context("resolve base commit")?;
 
     let mut tree = base_commit.tree().context("base tree")?;
     for file in &commit.files {
-        let blob = repo.blob(&file.contents).context("writing blob")?;
+        let blob = repo.blob(&file.contents).context("write blob")?;
         let oid = upsert_path(&repo, Some(&tree), &file.path, blob)?;
-        tree = repo.find_tree(oid).context("reloading tree")?;
+        tree = repo.find_tree(oid).context("reload tree")?;
     }
 
     let author = commit
@@ -65,7 +65,7 @@ fn force_push_blocking(
     let sig = Signature::now(&author.name, &author.email).context("commit signature")?;
     let new_commit = repo
         .commit(None, &sig, &sig, &commit.message, &tree, &[&base_commit])
-        .context("creating commit")?;
+        .context("create commit")?;
     repo.reference(
         &format!("refs/heads/{head}"),
         new_commit,
@@ -81,7 +81,7 @@ fn force_push_blocking(
             &[&format!("+refs/heads/{head}:refs/heads/{head}")],
             Some(&mut push),
         )
-        .with_context(|| format!("force-pushing {head}"))?;
+        .with_context(|| format!("force-push {head}"))?;
 
     Ok(new_commit.to_string())
 }

@@ -87,7 +87,7 @@ impl EvalWorker {
         live: Arc<Mutex<HashSet<u32>>>,
         thunks: Arc<LiveThunks>,
     ) -> Result<Self> {
-        let exe = std::env::current_exe().context("locating current executable")?;
+        let exe = std::env::current_exe().context("locate current executable")?;
         trace!(exe = %exe.display(), "spawning eval worker subprocess");
         let mut command = Command::new(&exe);
         command.arg("--eval-subprocess");
@@ -144,7 +144,7 @@ impl EvalWorker {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        let mut child = command.spawn().context("spawning eval worker subprocess")?;
+        let mut child = command.spawn().context("spawn eval worker subprocess")?;
         let pid = child.id();
         let stdin = child.stdin.take().context("worker stdin missing")?;
         let stdout = BufReader::new(child.stdout.take().context("worker stdout missing")?);
@@ -167,7 +167,7 @@ impl EvalWorker {
         tokio::time::timeout(HANDSHAKE_TIMEOUT, self.stdout.read_exact(&mut version))
             .await
             .context("eval worker handshake timed out")?
-            .context("reading eval worker handshake")?;
+            .context("read eval worker handshake")?;
         anyhow::ensure!(
             version[0] == EVAL_IPC_VERSION,
             "eval worker IPC version mismatch: parent {EVAL_IPC_VERSION}, subprocess {} (binary replaced mid-run?)",
@@ -195,19 +195,16 @@ impl EvalWorker {
     async fn send(&mut self, req: &EvalRequest) -> Result<()> {
         self.in_flight = true;
         trace!(pid = self.child.id(), ?req, "sending eval worker request");
-        let payload = encode_request(req).context("encoding eval worker request")?;
+        let payload = encode_request(req).context("encode eval worker request")?;
         self.stdin
             .write_all(&u32::try_from(payload.len())?.to_le_bytes())
             .await
-            .context("writing to eval worker stdin")?;
+            .context("write to eval worker stdin")?;
         self.stdin
             .write_all(&payload)
             .await
-            .context("writing to eval worker stdin")?;
-        self.stdin
-            .flush()
-            .await
-            .context("flushing eval worker stdin")
+            .context("write to eval worker stdin")?;
+        self.stdin.flush().await.context("flush eval worker stdin")
     }
 
     async fn recv(&mut self, imports: &dyn ImportBuilder) -> Result<EvalResponse> {
@@ -247,14 +244,14 @@ impl EvalWorker {
         self.stdout
             .read_exact(&mut payload)
             .await
-            .context("reading eval worker response frame")?;
+            .context("read eval worker response frame")?;
 
         trace!(
             pid = self.child.id(),
             bytes = payload.len(),
             "received eval worker response"
         );
-        decode_response(&payload).context("decoding eval worker response")
+        decode_response(&payload).context("decode eval worker response")
     }
 
     async fn describe_death(&mut self, read_err: std::io::Error) -> String {

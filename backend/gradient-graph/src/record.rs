@@ -359,7 +359,7 @@ impl BatchWriter<'_> {
             if let Err(e) = res
                 && !matches!(e, sea_orm::DbErr::RecordNotInserted)
             {
-                return Err(anyhow::Error::new(e).context("failed to insert derivation outputs"));
+                return Err(anyhow::Error::new(e).context("insert derivation outputs"));
             }
         }
 
@@ -512,7 +512,7 @@ impl BatchWriter<'_> {
             if let Err(e) = res
                 && !matches!(e, sea_orm::DbErr::RecordNotInserted)
             {
-                return Err(anyhow::Error::new(e).context("failed to upsert shared builds"));
+                return Err(anyhow::Error::new(e).context("upsert shared builds"));
             }
         }
         self.set_shared_build_limits(&limits).await?;
@@ -563,7 +563,7 @@ impl BatchWriter<'_> {
             if let Err(e) = res
                 && !matches!(e, sea_orm::DbErr::RecordNotInserted)
             {
-                return Err(anyhow::Error::new(e).context("failed to upsert build_job rows"));
+                return Err(anyhow::Error::new(e).context("upsert build_job rows"));
             }
         }
 

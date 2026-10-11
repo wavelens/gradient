@@ -133,15 +133,13 @@ pub async fn post_manifest(
         .map(hex::encode)
         .collect();
 
-    let manifest_value =
-        serde_json::to_value(&body.files).context("Failed to serialise manifest")?;
+    let manifest_value = serde_json::to_value(&body.files).context("serialise manifest")?;
 
-    let missing_value =
-        serde_json::to_value(&missing_hex).context("Failed to serialise missing list")?;
+    let missing_value = serde_json::to_value(&missing_hex).context("serialise missing list")?;
 
     let session_id = UploadSessionId::now_v7();
     let expires_at =
-        now_ts + Duration::from_std(UPLOAD_SESSION_TTL).context("Invalid UPLOAD_SESSION_TTL")?;
+        now_ts + Duration::from_std(UPLOAD_SESSION_TTL).context("invalid UPLOAD_SESSION_TTL")?;
 
     MUploadSession {
         id: session_id,

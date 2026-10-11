@@ -78,7 +78,7 @@ pub async fn get_evaluation_report(
         }
     }
 
-    let file = tempfile::NamedTempFile::new().context("Failed to create report file")?;
+    let file = tempfile::NamedTempFile::new().context("create report file")?;
 
     let report_ctx = ReportContext {
         logs: state.log_storage.as_ref(),
@@ -94,9 +94,9 @@ pub async fn get_evaluation_report(
         file.path(),
     )
     .await
-    .context("Failed to generate report")?;
+    .context("generate report")?;
 
-    let bytes = std::fs::read(file.path()).context("Failed to read report file")?;
+    let bytes = std::fs::read(file.path()).context("read report file")?;
 
     let filename = report_filename(evaluation_id);
     Response::builder()
@@ -108,7 +108,7 @@ pub async fn get_evaluation_report(
         )
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
         .body(Body::from(bytes))
-        .context("Failed to build response")
+        .context("build response")
         .map_err(Into::into)
 }
 

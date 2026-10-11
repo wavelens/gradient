@@ -22,7 +22,7 @@ pub async fn add_features(
             .filter(CFeature::Kind.eq(kind.clone()))
             .one(&ctx.worker_db)
             .await
-            .context("Failed to query feature")?;
+            .context("query feature")?;
 
         let feature = if let Some(f) = feature {
             f
@@ -37,7 +37,7 @@ pub async fn add_features(
             afeature
                 .insert(&ctx.worker_db)
                 .await
-                .context("Failed to insert feature")?
+                .context("insert feature")?
         };
 
         if let Some(d_id) = derivation_id {
@@ -63,7 +63,7 @@ pub async fn add_features(
                 .try_insert()
                 .exec(&ctx.worker_db)
                 .await
-                .context("Failed to insert derivation feature")?;
+                .context("insert derivation feature")?;
         }
     }
     Ok(())

@@ -55,7 +55,7 @@ pub(crate) async fn execute_open_pr(
         .filter(CEvaluationInputUpdate::Evaluation.eq(evaluation_id))
         .one(&ctx.db.worker_db)
         .await
-        .context("loading input_update sidecar")?;
+        .context("load input_update sidecar")?;
     let Some(sidecar) = sidecar else {
         return Ok(no_op());
     };
@@ -68,7 +68,7 @@ pub(crate) async fn execute_open_pr(
         .as_ref()
         .map(|v| serde_json::from_value(v.clone()))
         .transpose()
-        .context("decoding bumped_inputs")?
+        .context("decode bumped_inputs")?
         .unwrap_or_default();
     if bumps.is_empty() {
         return Ok(no_op());
@@ -77,7 +77,7 @@ pub(crate) async fn execute_open_pr(
     let task = ETask::find_by_id(task_id)
         .one(&ctx.db.worker_db)
         .await
-        .context("loading task")?
+        .context("load task")?
         .ok_or(ActionError::TaskNotFound { id: task_id })?;
     let (owner, repo) =
         parse_owner_repo(&task.repository).ok_or_else(|| ActionError::RepositoryUnparsable {
@@ -88,7 +88,7 @@ pub(crate) async fn execute_open_pr(
     let base_branch = reporter
         .default_branch(&owner, &repo)
         .await
-        .context("resolving repository default branch")?;
+        .context("resolve repository default branch")?;
 
     let primary_input = bumps.first().map(|b| b.name.as_str()).unwrap_or("inputs");
     let branch = branch_pattern.replace("{input}", primary_input);
@@ -102,7 +102,7 @@ pub(crate) async fn execute_open_pr(
             .filter(COpenPrState::Branch.eq(branch.clone()))
             .one(&ctx.db.worker_db)
             .await
-            .context("checking existing open_pr_state")?;
+            .context("check existing open_pr_state")?;
         if existing
             .as_ref()
             .and_then(|s| s.git_host_pr_number)
@@ -127,12 +127,12 @@ pub(crate) async fn execute_open_pr(
     let head_commit = reporter
         .upsert_branch(&owner, &repo, &branch, &base_branch, &commit)
         .await
-        .context("committing candidate lock to branch")?;
+        .context("commit candidate lock to branch")?;
 
     let pr = reporter
         .open_or_update_pr(&owner, &repo, &branch, &base_branch, &title, &body)
         .await
-        .context("opening pull request")?;
+        .context("open pull request")?;
 
     upsert_open_pr_state(ctx, task_id, action_id, &branch, pr.number, &head_commit).await?;
     point_eval_at_pushed_commit(ctx, evaluation_id, &head_commit, &title).await?;
@@ -177,7 +177,7 @@ async fn upsert_open_pr_state(
         .filter(COpenPrState::Branch.eq(branch))
         .one(&ctx.db.worker_db)
         .await
-        .context("loading open_pr_state")?;
+        .context("load open_pr_state")?;
 
     if let Some(row) = existing {
         let mut am = row.into_active_model();
@@ -187,7 +187,7 @@ async fn upsert_open_pr_state(
         am.updated_at = Set(now);
         am.update(&ctx.db.worker_db)
             .await
-            .context("updating open_pr_state")?;
+            .context("update open_pr_state")?;
     } else {
         AOpenPrState {
             id: Set(OpenPrStateId::now_v7()),
@@ -202,7 +202,7 @@ async fn upsert_open_pr_state(
         }
         .insert(&ctx.db.worker_db)
         .await
-        .context("inserting open_pr_state")?;
+        .context("insert open_pr_state")?;
     }
 
     Ok(())
@@ -221,14 +221,14 @@ async fn point_eval_at_pushed_commit(
     let Some(eval) = EEvaluation::find_by_id(evaluation_id)
         .one(&ctx.db.worker_db)
         .await
-        .context("loading evaluation")?
+        .context("load evaluation")?
     else {
         return Ok(());
     };
     let Some(commit) = ECommit::find_by_id(eval.commit)
         .one(&ctx.db.worker_db)
         .await
-        .context("loading evaluation commit")?
+        .context("load evaluation commit")?
     else {
         return Ok(());
     };
@@ -245,7 +245,7 @@ async fn point_eval_at_pushed_commit(
         .unwrap_or_else(|| "Gradient".to_owned()));
     am.update(&ctx.db.worker_db)
         .await
-        .context("updating evaluation commit")?;
+        .context("update evaluation commit")?;
 
     Ok(())
 }

@@ -51,7 +51,7 @@ fn uuid_field(row: &PendingDelivery, name: &str) -> Result<uuid::Uuid> {
 
 async fn expand_event(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
     let event: Event =
-        serde_json::from_value(row.payload.clone()).context("decoding a stored event")?;
+        serde_json::from_value(row.payload.clone()).context("decode a stored event")?;
     let Some(event) = crate::enrich::enrich(&ctx.db(), event).await? else {
         return Ok(());
     };
@@ -110,14 +110,14 @@ async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<
         Some(task) => {
             let all = active_actions_for_task(&ci, task)
                 .await
-                .context("loading the task's actions")?;
+                .context("load the task's actions")?;
             matching_actions(all, &name, &envelope.event.content())
         }
         None => Vec::new(),
     };
     let hooks: Vec<MWebhook> = gradient_ci::webhooks::candidates(&ci.db.worker_db, &owner)
         .await
-        .context("loading the event's webhooks")?
+        .context("load the event's webhooks")?
         .into_iter()
         .filter(|h| gradient_ci::webhooks::routes_to(h, &owner, &name, envelope.event.personal()))
         .collect();
@@ -152,7 +152,7 @@ async fn live_webhook<C: ConnectionTrait>(
     let hook = EWebhook::find_by_id(id)
         .one(db)
         .await
-        .context("looking up the webhook of a delivery")?;
+        .context("look up the webhook of a delivery")?;
     Ok(hook.filter(|h| h.active))
 }
 
@@ -213,7 +213,7 @@ async fn deliver_action(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
     let Some(action) = ETaskAction::find_by_id(action_id)
         .one(&ci.db.worker_db)
         .await
-        .context("looking up the action of a delivery")?
+        .context("look up the action of a delivery")?
     else {
         return Ok(());
     };

@@ -28,13 +28,13 @@ impl ProtoConnection {
         tokio::time::timeout(OPEN_TIMEOUT, Self::connect_and_agree(url))
             .await
             .map_err(|_| Unresponsive)
-            .with_context(|| format!("failed to connect to {url}"))?
+            .with_context(|| format!("connect to {url}"))?
     }
 
     async fn connect_and_agree(url: &str) -> Result<Self> {
         let mut socket = gradient_wire::client::dial(url)
             .await
-            .with_context(|| format!("failed to connect to {url}"))?;
+            .with_context(|| format!("connect to {url}"))?;
 
         if socket.agree_version().await.is_none() {
             let reason = socket

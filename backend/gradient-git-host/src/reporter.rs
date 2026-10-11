@@ -291,7 +291,7 @@ impl CiReporter for GiteaReporter {
             .json(&payload)
             .send()
             .await
-            .context("Failed to send Gitea status request")?;
+            .context("send Gitea status request")?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -319,7 +319,7 @@ impl CiReporter for GiteaReporter {
             .header("Authorization", format!("token {}", self.token))
             .send()
             .await
-            .context("Failed to query Gitea collaborator permission")?;
+            .context("query Gitea collaborator permission")?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(false);
         }
@@ -335,7 +335,7 @@ impl CiReporter for GiteaReporter {
         let parsed: PermissionResponse = resp
             .json()
             .await
-            .context("Failed to parse Gitea permission response")?;
+            .context("parse Gitea permission response")?;
         Ok(matches!(
             parsed.permission.as_str(),
             "admin" | "owner" | "write"
@@ -360,7 +360,7 @@ impl CiReporter for GiteaReporter {
             .json(&payload)
             .send()
             .await
-            .context("Failed to send Gitea comment request")?;
+            .context("send Gitea comment request")?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -395,7 +395,7 @@ impl CiReporter for GiteaReporter {
             })
             .send()
             .await
-            .context("Failed to send Gitea comment reaction")?;
+            .context("send Gitea comment reaction")?;
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -426,7 +426,7 @@ impl CiReporter for GiteaReporter {
             .header("Authorization", format!("token {}", self.token))
             .send()
             .await
-            .context("Failed to query Gitea pull request")?;
+            .context("query Gitea pull request")?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
         }
@@ -461,7 +461,7 @@ impl CiReporter for GiteaReporter {
         let pr: PrResponse = resp
             .json()
             .await
-            .context("Failed to parse Gitea pull request response")?;
+            .context("parse Gitea pull request response")?;
         let head_branch = pr.head.ref_.clone().unwrap_or_default();
         let head_full = pr.head.repo.as_ref().and_then(|r| r.full_name.clone());
         let base_full = pr
@@ -633,7 +633,7 @@ impl CiReporter for GitlabReporter {
             .json(&payload)
             .send()
             .await
-            .context("Failed to send GitLab status request")?;
+            .context("send GitLab status request")?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -664,7 +664,7 @@ impl CiReporter for GitlabReporter {
             .header("PRIVATE-TOKEN", &self.token)
             .send()
             .await
-            .context("Failed to query GitLab member access level")?;
+            .context("query GitLab member access level")?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
@@ -675,10 +675,7 @@ impl CiReporter for GitlabReporter {
             username: String,
             access_level: i32,
         }
-        let members: Vec<Member> = resp
-            .json()
-            .await
-            .context("Failed to parse GitLab members response")?;
+        let members: Vec<Member> = resp.json().await.context("parse GitLab members response")?;
         Ok(members
             .iter()
             .any(|m| m.username.eq_ignore_ascii_case(username) && m.access_level >= 30))
@@ -702,7 +699,7 @@ impl CiReporter for GitlabReporter {
             .json(&payload)
             .send()
             .await
-            .context("Failed to send GitLab comment request")?;
+            .context("send GitLab comment request")?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -738,7 +735,7 @@ impl CiReporter for GitlabReporter {
             })
             .send()
             .await
-            .context("Failed to send GitLab note award_emoji")?;
+            .context("send GitLab note award_emoji")?;
         let status = resp.status();
         if status == reqwest::StatusCode::CONFLICT {
             return Ok(());
@@ -773,7 +770,7 @@ impl CiReporter for GitlabReporter {
             .header("PRIVATE-TOKEN", &self.token)
             .send()
             .await
-            .context("Failed to query GitLab merge request")?;
+            .context("query GitLab merge request")?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
         }
@@ -796,7 +793,7 @@ impl CiReporter for GitlabReporter {
         let mr: MrResponse = resp
             .json()
             .await
-            .context("Failed to parse GitLab merge request response")?;
+            .context("parse GitLab merge request response")?;
         let is_fork = matches!(
             (mr.source_project_id, mr.target_project_id),
             (Some(s), Some(t)) if s != t
@@ -960,7 +957,7 @@ impl CiReporter for GithubReporter {
             .json(&payload)
             .send()
             .await
-            .context("Failed to send GitHub status request")?;
+            .context("send GitHub status request")?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -990,7 +987,7 @@ impl CiReporter for GithubReporter {
             .header("X-GitHub-Api-Version", "2022-11-28")
             .send()
             .await
-            .context("Failed to query GitHub collaborator permission")?;
+            .context("query GitHub collaborator permission")?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(false);
         }
@@ -1002,7 +999,7 @@ impl CiReporter for GithubReporter {
         let parsed: GithubPermissionResponse = resp
             .json()
             .await
-            .context("Failed to parse GitHub permission response")?;
+            .context("parse GitHub permission response")?;
         Ok(matches!(parsed.permission.as_str(), "admin" | "write"))
     }
 
@@ -1025,7 +1022,7 @@ impl CiReporter for GithubReporter {
             .json(&payload)
             .send()
             .await
-            .context("Failed to send GitHub comment request")?;
+            .context("send GitHub comment request")?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -1059,7 +1056,7 @@ impl CiReporter for GithubReporter {
             .header("X-GitHub-Api-Version", "2022-11-28")
             .send()
             .await
-            .context("Failed to query GitHub pull request")?;
+            .context("query GitHub pull request")?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
         }
@@ -1071,7 +1068,7 @@ impl CiReporter for GithubReporter {
         let pr: GithubPrResponse = resp
             .json()
             .await
-            .context("Failed to parse GitHub pull request response")?;
+            .context("parse GitHub pull request response")?;
         Ok(Some(PullRequestSnapshot::from(pr)))
     }
 
@@ -1162,7 +1159,7 @@ async fn post_github_reaction(
         })
         .send()
         .await
-        .context("Failed to send GitHub comment reaction")?;
+        .context("send GitHub comment reaction")?;
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
@@ -1332,7 +1329,7 @@ impl GithubAppReporter {
             self.installation_id,
         )
         .await
-        .context("Failed to mint GitHub App installation token")
+        .context("mint GitHub App installation token")
     }
 }
 
@@ -1346,7 +1343,7 @@ impl CiReporter for GithubAppReporter {
             self.installation_id,
         )
         .await
-        .context("Failed to mint GitHub App installation token")?;
+        .context("mint GitHub App installation token")?;
 
         let (gh_status, conclusion) = map_ci_status(&report.status);
         let output = report.description.as_deref().map(|s| CheckRunOutput {
@@ -1375,7 +1372,7 @@ impl CiReporter for GithubAppReporter {
                 .json(&payload)
                 .send()
                 .await
-                .context("Failed to send GitHub App check-run update")?;
+                .context("send GitHub App check-run update")?;
             let status = resp.status();
             if !status.is_success() {
                 let body = resp.text().await.unwrap_or_default();
@@ -1412,7 +1409,7 @@ impl CiReporter for GithubAppReporter {
                 .json(&payload)
                 .send()
                 .await
-                .context("Failed to send GitHub App check-run create")?;
+                .context("send GitHub App check-run create")?;
             let status = resp.status();
             if !status.is_success() {
                 let body = resp.text().await.unwrap_or_default();
@@ -1428,7 +1425,7 @@ impl CiReporter for GithubAppReporter {
             let parsed: CheckRunCreateResponse = resp
                 .json()
                 .await
-                .context("Failed to parse GitHub check-run create response")?;
+                .context("parse GitHub check-run create response")?;
             Ok(Some(parsed.id))
         }
     }
@@ -1441,7 +1438,7 @@ impl CiReporter for GithubAppReporter {
             self.installation_id,
         )
         .await
-        .context("Failed to mint GitHub App installation token")?;
+        .context("mint GitHub App installation token")?;
 
         let url = format!(
             "{}/repos/{}/{}/collaborators/{}/permission",
@@ -1455,7 +1452,7 @@ impl CiReporter for GithubAppReporter {
             .header("X-GitHub-Api-Version", "2022-11-28")
             .send()
             .await
-            .context("Failed to query GitHub collaborator permission")?;
+            .context("query GitHub collaborator permission")?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(false);
         }
@@ -1467,7 +1464,7 @@ impl CiReporter for GithubAppReporter {
         let parsed: GithubPermissionResponse = resp
             .json()
             .await
-            .context("Failed to parse GitHub permission response")?;
+            .context("parse GitHub permission response")?;
         Ok(matches!(parsed.permission.as_str(), "admin" | "write"))
     }
 
@@ -1485,7 +1482,7 @@ impl CiReporter for GithubAppReporter {
             self.installation_id,
         )
         .await
-        .context("Failed to mint GitHub App installation token")?;
+        .context("mint GitHub App installation token")?;
 
         let url = github_comment_url(&self.api_base_url, owner, repo, pr_number);
         let payload = GitHostCommentPayload { body };
@@ -1499,7 +1496,7 @@ impl CiReporter for GithubAppReporter {
             .json(&payload)
             .send()
             .await
-            .context("Failed to send GitHub App comment request")?;
+            .context("send GitHub App comment request")?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -1529,7 +1526,7 @@ impl CiReporter for GithubAppReporter {
             self.installation_id,
         )
         .await
-        .context("Failed to mint GitHub App installation token")?;
+        .context("mint GitHub App installation token")?;
 
         let url = format!(
             "{}/repos/{}/{}/pulls/{}",
@@ -1543,7 +1540,7 @@ impl CiReporter for GithubAppReporter {
             .header("X-GitHub-Api-Version", "2022-11-28")
             .send()
             .await
-            .context("Failed to query GitHub pull request")?;
+            .context("query GitHub pull request")?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
         }
@@ -1555,7 +1552,7 @@ impl CiReporter for GithubAppReporter {
         let pr: GithubPrResponse = resp
             .json()
             .await
-            .context("Failed to parse GitHub pull request response")?;
+            .context("parse GitHub pull request response")?;
         Ok(Some(PullRequestSnapshot::from(pr)))
     }
 
@@ -1567,7 +1564,7 @@ impl CiReporter for GithubAppReporter {
             self.installation_id,
         )
         .await
-        .context("Failed to mint GitHub App installation token")?;
+        .context("mint GitHub App installation token")?;
         let url = github_reaction_url(
             &self.api_base_url,
             &target.owner,

@@ -30,7 +30,7 @@ pub async fn get_project_by_name(
         )
         .one(&ctx.web_db)
         .await
-        .context("Failed to query project")
+        .context("query project")
 }
 
 pub async fn get_any_project_by_name(ctx: &DbContext, name: String) -> Result<Option<MProject>> {
@@ -38,7 +38,7 @@ pub async fn get_any_project_by_name(ctx: &DbContext, name: String) -> Result<Op
         .filter(CProject::Name.eq(name))
         .one(&ctx.web_db)
         .await
-        .context("Failed to query project")
+        .context("query project")
 }
 
 pub async fn get_task_by_name(
@@ -53,7 +53,7 @@ pub async fn get_task_by_name(
             .filter(CTask::Name.eq(task_name))
             .one(&ctx.web_db)
             .await
-            .context("Failed to query task")?
+            .context("query task")?
             .map(|p| (o, p))),
         None => Ok(None),
     }
@@ -70,7 +70,7 @@ pub async fn get_any_task_by_name(
             .filter(CTask::Name.eq(task_name))
             .one(&ctx.web_db)
             .await
-            .context("Failed to query task")?
+            .context("query task")?
             .map(|p| (o, p))),
         None => Ok(None),
     }
@@ -89,7 +89,7 @@ pub async fn get_cache_by_name(
         )
         .one(&ctx.web_db)
         .await
-        .context("Failed to query cache")
+        .context("query cache")
 }
 
 pub async fn get_any_cache_by_name(ctx: &DbContext, name: String) -> Result<Option<MCache>> {
@@ -97,5 +97,5 @@ pub async fn get_any_cache_by_name(ctx: &DbContext, name: String) -> Result<Opti
         .filter(CCache::Name.eq(name))
         .one(&ctx.web_db)
         .await
-        .context("Failed to query cache")
+        .context("query cache")
 }

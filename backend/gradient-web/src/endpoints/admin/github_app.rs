@@ -89,7 +89,7 @@ pub async fn callback(
 
     let creds = gradient_ci::github_app_manifest::exchange_code(&state.http, &host, &q.code)
         .await
-        .context("github exchange failed")?;
+        .context("run github exchange")?;
 
     gradient_ci::manifest_state::store_credentials(&state.pending_credentials, user_id, creds);
 

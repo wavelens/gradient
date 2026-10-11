@@ -64,12 +64,11 @@ pub struct MockServerConn {
 
 impl MockServerConn {
     pub async fn send(&mut self, msg: ServerMessage) -> Result<()> {
-        let bytes =
-            to_bytes(&msg, *PROTO_VERSIONS.end()).context("failed to encode ServerMessage")?;
+        let bytes = to_bytes(&msg, *PROTO_VERSIONS.end()).context("encode ServerMessage")?;
         self.socket
             .send(Message::Binary(bytes))
             .await
-            .context("mock server WebSocket send failed")
+            .context("send on the mock server WebSocket")
     }
 
     pub async fn recv(&mut self) -> Result<ClientMessage> {
@@ -81,7 +80,7 @@ impl MockServerConn {
                 }
                 Some(Ok(Message::Binary(bytes))) => {
                     return from_bytes(bytes, *PROTO_VERSIONS.end())
-                        .context("failed to decode ClientMessage");
+                        .context("decode ClientMessage");
                 }
                 Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
                 Some(Ok(Message::Close(_))) => {
