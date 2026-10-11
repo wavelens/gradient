@@ -6,11 +6,11 @@
 
 use super::members::role_label;
 use crate::audit::Audit;
-use crate::endpoints::projects::invitations::{PendingInvitationItem, RevokeInvitationRequest};
+use crate::endpoints::membership::find_user_by_username;
+use crate::endpoints::membership::invitations::{PendingInvitationItem, RevokeInvitationRequest};
 use crate::error::WebResult;
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::ok_json;
 use crate::refusal::SharedRefusal;
-use crate::resource::Resource;
 use crate::scope::{Admin, TeamScope};
 use axum::Json;
 use gradient_types::events::EventOwner;
@@ -56,11 +56,7 @@ pub async fn delete_team_invitation(
     audit: Audit,
     Json(body): Json<RevokeInvitationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let target_user = EUser::find()
-        .filter(CUser::Username.eq(body.user.clone()))
-        .one(&db.web_db)
-        .await?
-        .or_not_found(Resource::User)?;
+    let target_user = find_user_by_username(&db.web_db, &body.user).await?;
 
     let invitation = ETeamInvitation::find()
         .filter(CTeamInvitation::Team.eq(team.id))

@@ -5,11 +5,8 @@
  */
 
 pub mod integrations;
-pub mod invitations;
 pub mod management;
-pub mod members;
 mod refusal;
-pub mod roles;
 pub mod settings;
 pub mod ssh;
 pub mod workers;
@@ -19,21 +16,9 @@ pub use self::integrations::{
     PatchIntegrationRequest, delete_integration, get_integration, get_integration_summaries,
     get_integrations, patch_integration, put_integration,
 };
-pub use self::invitations::{
-    PendingInvitationItem, RevokeInvitationRequest, delete_project_invitation,
-    get_project_invitations,
-};
 pub use self::management::{
     MakeProjectRequest, PatchProjectRequest, ProjectResponse, ProjectSummary, delete_project, get,
     get_project, get_project_name_available, get_public_projects, patch_project, put,
-};
-pub use self::members::{
-    AddUserRequest, RemoveUserRequest, StringListItem, delete_project_users, get_project_users,
-    patch_project_users, post_project_users,
-};
-pub use self::roles::{
-    CreateRoleRequest, PatchRoleRequest, RoleListResponse, RoleResponse, delete_project_role,
-    get_project_role, get_project_roles, patch_project_role, post_project_role,
 };
 pub use self::settings::{
     CacheSubscriptionItem, SubscribeCacheRequest, delete_project_public,

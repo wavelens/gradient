@@ -1,0 +1,245 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use super::{
+    MemberTable, Owner, OwnerScope, RoleRow, RoleTable, active, delete_row, insert_row, update_row,
+};
+use crate::audit::Audit;
+use crate::error::{WebError, WebResult};
+use crate::helpers::ok_json;
+use crate::json_body::JsonBody;
+use crate::lookup::require;
+use crate::names::RoleName;
+use crate::permissions::PermissionEntry;
+use crate::refusal::{Change, SharedRefusal};
+use crate::resource::Resource;
+use axum::Json;
+use gradient_db::WebDb;
+use gradient_types::*;
+use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Debug)]
+pub struct RoleResponse<F> {
+    pub id: RoleId,
+    pub name: String,
+    #[serde(flatten)]
+    pub owner: F,
+    pub builtin: bool,
+    pub managed: bool,
+    pub permissions: Vec<&'static str>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct RoleListResponse<F> {
+    pub roles: Vec<RoleResponse<F>>,
+    pub available_permissions: Vec<PermissionEntry>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct CreateRoleRequest {
+    pub name: RoleName,
+    pub permissions: Vec<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct PatchRoleRequest {
+    pub name: Option<RoleName>,
+    pub permissions: Option<Vec<String>>,
+}
+
+type OwnerField<O> = <<O as Owner>::Roles as RoleTable>::OwnerField;
+type Role<O> = RoleResponse<OwnerField<O>>;
+
+pub fn builtin_or_owned<T: RoleTable>(owner: T::Id) -> Condition {
+    Condition::any()
+        .add(T::owner_column().is_null())
+        .add(T::owner_column().eq(owner))
+}
+
+pub fn owned_or_builtin<T: RoleTable>(owner: T::Id) -> Condition {
+    Condition::any()
+        .add(T::owner_column().eq(owner))
+        .add(T::owner_column().is_null())
+}
+
+fn response<O: Owner>(row: &RoleRow<O>) -> Role<O> {
+    let fields = <O::Roles as RoleTable>::fields(row);
+    RoleResponse {
+        id: fields.id,
+        name: fields.name,
+        owner: <O::Roles as RoleTable>::owner_field(fields.owner),
+        builtin: O::is_builtin_role(fields.id),
+        managed: fields.managed,
+        permissions: O::permission_names(fields.permission),
+    }
+}
+
+async fn load_role<O: Owner>(db: &WebDb, owner: O::Id, role_id: RoleId) -> WebResult<RoleRow<O>> {
+    let role = require::<O::Roles>(db, role_id).await?;
+
+    if let Some(role_owner) = <O::Roles as RoleTable>::fields(&role).owner
+        && role_owner != owner
+    {
+        // Cross-owner access is treated as not-found to avoid leaking ids.
+        return Err(WebError::not_found(Resource::Role));
+    }
+
+    Ok(role)
+}
+
+async fn name_clash<T: RoleTable>(
+    db: &WebDb,
+    owner: T::Id,
+    name: &str,
+    except: Option<RoleId>,
+) -> WebResult<()> {
+    let mut query = T::find().filter(T::name_column().eq(name));
+    if let Some(role_id) = except {
+        query = query.filter(T::id_column().ne(role_id));
+    }
+    let clash = query.filter(owned_or_builtin::<T>(owner)).one(db).await?;
+    if clash.is_some() {
+        return Err(WebError::already_exists(Resource::RoleName));
+    }
+    Ok(())
+}
+
+async fn assigned_to_members<T: MemberTable>(
+    db: &WebDb,
+    owner: T::Id,
+    role_id: RoleId,
+) -> WebResult<bool> {
+    Ok(T::find()
+        .filter(T::role_column().eq(role_id))
+        .filter(T::owner_column().eq(owner))
+        .one(db)
+        .await?
+        .is_some())
+}
+
+pub async fn list<O: Owner>(
+    scope: O::ReadRolesScope,
+) -> WebResult<Json<BaseResponse<RoleListResponse<OwnerField<O>>>>> {
+    let roles = <O::Roles as EntityTrait>::find()
+        .filter(builtin_or_owned::<O::Roles>(scope.id()))
+        .all(&scope.db().web_db)
+        .await?;
+
+    Ok(ok_json(RoleListResponse {
+        roles: roles.iter().map(response::<O>).collect(),
+        available_permissions: O::available_permissions(),
+    }))
+}
+
+pub async fn create<O: Owner>(
+    scope: O::ManageRolesScope,
+    audit: Audit,
+    JsonBody(body): JsonBody<CreateRoleRequest>,
+) -> WebResult<Json<BaseResponse<Role<O>>>> {
+    let owner = scope.id();
+    let db = &scope.db().web_db;
+    let mask = O::parse_permissions(&body.permissions)?;
+
+    // Names must be unique within the owner and must not collide with a built-in role name.
+    // Membership lookup by name would become ambiguous otherwise.
+    name_clash::<O::Roles>(db, owner, body.name.as_str(), None).await?;
+
+    let role = insert_row::<O::Roles>(
+        db,
+        <O::Roles as RoleTable>::new(RoleId::now_v7(), body.name.to_string(), owner, mask),
+    )
+    .await?;
+    let created = <O::Roles as RoleTable>::fields(&role);
+
+    audit.write(O::ACTIONS.role_create, O::event_owner(owner), serde_json::json!({ (O::ID_KEY): owner.to_string(), "role_id": created.id.to_string(), "name": created.name, "permission_mask": mask, }))
+    .await;
+
+    Ok(ok_json(response::<O>(&role)))
+}
+
+pub async fn show<O: Owner>(scope: O::ReadRolesScope) -> WebResult<Json<BaseResponse<Role<O>>>> {
+    let role_id: RoleId = scope.params().param("role_id")?;
+
+    let role = load_role::<O>(&scope.db().web_db, scope.id(), role_id).await?;
+    Ok(ok_json(response::<O>(&role)))
+}
+
+pub async fn update<O: Owner>(
+    scope: O::ManageRolesScope,
+    audit: Audit,
+    JsonBody(body): JsonBody<PatchRoleRequest>,
+) -> WebResult<Json<BaseResponse<Role<O>>>> {
+    let owner = scope.id();
+    let db = &scope.db().web_db;
+    let role_id: RoleId = scope.params().param("role_id")?;
+
+    let role = load_role::<O>(db, owner, role_id).await?;
+    let current = <O::Roles as RoleTable>::fields(&role);
+
+    if O::is_builtin_role(current.id) {
+        return Err(SharedRefusal::BuiltinRole(Change::Modify).into());
+    }
+
+    if current.managed {
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Role).into());
+    }
+
+    let previous_mask = current.permission;
+    let previous_name = current.name;
+    let mut row = active::<O::Roles>(role);
+
+    if let Some(name) = body.name {
+        name_clash::<O::Roles>(db, owner, name.as_str(), Some(role_id)).await?;
+        <O::Roles as RoleTable>::rename(&mut row, name.into_inner());
+    }
+
+    if let Some(perms) = body.permissions {
+        <O::Roles as RoleTable>::set_permission(&mut row, O::parse_permissions(&perms)?);
+    }
+
+    let updated = update_row::<O::Roles>(db, row).await?;
+    let fields = <O::Roles as RoleTable>::fields(&updated);
+
+    audit.write(O::ACTIONS.role_update, O::event_owner(owner), serde_json::json!({ (O::ID_KEY): owner.to_string(), "role_id": fields.id.to_string(), "previous_name": previous_name, "previous_permission_mask": previous_mask, "new_name": fields.name, "new_permission_mask": fields.permission, }))
+    .await;
+
+    Ok(ok_json(response::<O>(&updated)))
+}
+
+pub async fn delete<O: Owner>(
+    scope: O::ManageRolesScope,
+    audit: Audit,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    let owner = scope.id();
+    let db = &scope.db().web_db;
+    let role_id: RoleId = scope.params().param("role_id")?;
+
+    let role = load_role::<O>(db, owner, role_id).await?;
+    let current = <O::Roles as RoleTable>::fields(&role);
+
+    if O::is_builtin_role(current.id) {
+        return Err(SharedRefusal::BuiltinRole(Change::Delete).into());
+    }
+
+    if current.managed {
+        return Err(SharedRefusal::StateManaged(Change::Delete, Resource::Role).into());
+    }
+
+    if assigned_to_members::<O::Members>(db, owner, role_id).await? {
+        return Err(SharedRefusal::RoleAssignedToMembers.into());
+    }
+    if O::role_granted_to_a_team(db, role_id).await? {
+        return Err(SharedRefusal::RoleGrantedToTeam.into());
+    }
+
+    delete_row::<O::Roles>(db, role).await?;
+
+    audit.write(O::ACTIONS.role_delete, O::event_owner(owner), serde_json::json!({ (O::ID_KEY): owner.to_string(), "role_id": role_id.to_string(), "name": current.name, }))
+    .await;
+
+    Ok(ok_json(true))
+}

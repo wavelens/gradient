@@ -23,6 +23,7 @@ pub mod gradient_ci_connections;
 pub mod invites;
 pub mod live;
 pub mod log_stream;
+pub(crate) mod membership;
 pub mod metrics;
 pub mod metrics_query;
 pub mod projects;
