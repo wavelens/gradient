@@ -9,7 +9,9 @@ use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key, session_claims};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
+use crate::json_body::JsonBody;
 use crate::lookup::require;
+use crate::names::UserDisplayName;
 use crate::permissions::{
     PermissionEntry, available_cache_permissions, available_permissions, mask_to_vec,
     parse_cache_permission_list, parse_permission_list,
@@ -27,7 +29,7 @@ use gradient_types::events::audit::Action;
 use chrono::Duration;
 use gradient_core::ServerState;
 use gradient_types::consts::*;
-use gradient_types::input::{validate_display_name, validate_username};
+use gradient_types::input::validate_username;
 use gradient_types::*;
 use password_auth::verify_password;
 use sea_orm::ActiveValue::Set;
@@ -63,8 +65,6 @@ enum UserRefusal {
         "Cannot modify profile of an OIDC user. Your profile is managed by your identity provider."
     )]
     ModifyOidcUserProfile,
-    #[error("Invalid name: {reason}")]
-    InvalidName { reason: String },
 }
 
 impl Refusal for UserRefusal {
@@ -79,8 +79,7 @@ impl Refusal for UserRefusal {
             | Self::ModifyOidcUserProfile => RefusalStatus::Forbidden,
             Self::UnknownProjectOrNotMember { .. }
             | Self::PinToProjectAndCache
-            | Self::NoPermissionsSelected
-            | Self::InvalidName { .. } => RefusalStatus::BadRequest,
+            | Self::NoPermissionsSelected => RefusalStatus::BadRequest,
         }
     }
 }
@@ -199,7 +198,7 @@ pub struct AuditLogEntry {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PatchUserSettingsRequest {
     pub username: Option<String>,
-    pub name: Option<String>,
+    pub name: Option<UserDisplayName>,
     pub email: Option<String>,
 }
 
@@ -811,7 +810,7 @@ pub async fn get_settings(
 pub async fn patch_settings(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Json(body): Json<PatchUserSettingsRequest>,
+    JsonBody(body): JsonBody<PatchUserSettingsRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if user.managed {
         return Err(SharedRefusal::StateManaged(Change::Modify, Resource::User).into());
@@ -841,13 +840,7 @@ pub async fn patch_settings(
     }
 
     if let Some(name) = body.name {
-        if let Err(e) = validate_display_name(&name) {
-            return Err(UserRefusal::InvalidName {
-                reason: e.to_string(),
-            }
-            .into());
-        }
-        auser.name = Set(name);
+        auser.name = Set(name.into_inner());
     }
 
     if let Some(email) = body.email {

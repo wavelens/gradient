@@ -7,7 +7,9 @@
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::json_body::JsonBody;
 use crate::lookup::require;
+use crate::names::RoleName;
 use crate::permissions::{
     PermissionEntry, available_permissions, is_builtin_role, mask_to_vec, parse_permission_list,
 };
@@ -18,7 +20,6 @@ use axum::Json;
 use gradient_db::WebDb;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
-use gradient_types::input::check_index_name;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -62,13 +63,13 @@ pub struct RoleListResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct CreateRoleRequest {
-    pub name: String,
+    pub name: RoleName,
     pub permissions: Vec<String>,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct PatchRoleRequest {
-    pub name: Option<String>,
+    pub name: Option<RoleName>,
     pub permissions: Option<Vec<String>>,
 }
 
@@ -108,12 +109,8 @@ pub async fn post_project_role(
         project, user, db, ..
     }: ProjectScope<RequiresUnmanaged<can::ManageRoles>>,
     info: RequestInfo,
-    Json(body): Json<CreateRoleRequest>,
+    JsonBody(body): JsonBody<CreateRoleRequest>,
 ) -> WebResult<Json<BaseResponse<RoleResponse>>> {
-    if check_index_name(&body.name).is_err() {
-        return Err(WebError::invalid_name(Resource::RoleName));
-    }
-
     let mask = parse_permission_list(&body.permissions, "GET /projects/{project}/roles")?;
 
     // Names must be unique within the project and must not collide with a built-in role name.
@@ -133,7 +130,7 @@ pub async fn post_project_role(
 
     let role = MRole {
         id: RoleId::now_v7(),
-        name: body.name.clone(),
+        name: body.name.to_string(),
         project: Some(project.id),
         permission: mask,
         ..Default::default()
@@ -186,7 +183,7 @@ pub async fn patch_project_role(
         ..
     }: ProjectScope<RequiresUnmanaged<can::ManageRoles>>,
     info: RequestInfo,
-    Json(body): Json<PatchRoleRequest>,
+    JsonBody(body): JsonBody<PatchRoleRequest>,
 ) -> WebResult<Json<BaseResponse<RoleResponse>>> {
     let role_id: RoleId = params.param("role_id")?;
 
@@ -205,9 +202,6 @@ pub async fn patch_project_role(
     let mut active: ARole = role.into_active_model();
 
     if let Some(name) = body.name {
-        if check_index_name(&name).is_err() {
-            return Err(WebError::invalid_name(Resource::RoleName));
-        }
         let clash = ERole::find()
             .filter(CRole::Name.eq(name.as_str()))
             .filter(CRole::Id.ne(role_id))
@@ -221,7 +215,7 @@ pub async fn patch_project_role(
         if clash.is_some() {
             return Err(WebError::already_exists(Resource::RoleName));
         }
-        active.name = Set(name);
+        active.name = Set(name.into_inner());
     }
 
     if let Some(perms) = body.permissions {

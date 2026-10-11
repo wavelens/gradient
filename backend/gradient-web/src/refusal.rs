@@ -82,8 +82,6 @@ pub enum SharedRefusal {
     NoPendingInvitation,
     #[error("Cannot remove the last Admin from the {0}.")]
     LastAdmin(Resource),
-    #[error("Invalid display name: {reason}")]
-    InvalidDisplayName { reason: String },
     #[error("worker_id must be a valid UUID")]
     InvalidWorkerId,
     #[error("worker is managed by server state")]
@@ -118,7 +116,6 @@ impl Refusal for SharedRefusal {
             | Self::RoleGrantedToTeam
             | Self::NotAMember(_)
             | Self::NoPendingInvitation
-            | Self::InvalidDisplayName { .. }
             | Self::InvalidWorkerId
             | Self::EmptyField(_)
             | Self::InvalidAllowedIp { .. }

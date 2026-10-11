@@ -9,7 +9,8 @@ use super::workers::withdraw_team_workers;
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::error::{WebError, WebResult, require_create_permission, require_superuser};
 use crate::helpers::ok_json;
-use crate::refusal::SharedRefusal;
+use crate::json_body::JsonBody;
+use crate::names::{TeamDisplayName, TeamName};
 use crate::resource::Resource;
 use crate::scope::{AdminUnmanaged, Member, TeamScope};
 use axum::extract::{Query, State};
@@ -19,7 +20,6 @@ use gradient_scheduler::Scheduler;
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
-use gradient_types::input::{check_index_name, validate_display_name};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -53,13 +53,13 @@ pub struct TeamResponse {
 
 #[derive(Deserialize)]
 pub struct MakeTeamRequest {
-    pub name: String,
-    pub display_name: String,
+    pub name: TeamName,
+    pub display_name: TeamDisplayName,
 }
 
 #[derive(Deserialize)]
 pub struct PatchTeamRequest {
-    pub display_name: Option<String>,
+    pub display_name: Option<TeamDisplayName>,
     pub new_project_users: Option<bool>,
     pub new_project_workers: Option<bool>,
     pub new_project_role: Option<String>,
@@ -139,9 +139,9 @@ pub async fn get_team_name_available(
     Query(params): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
-    if check_index_name(&name).is_err() {
+    let Ok(name) = TeamName::try_from(name) else {
         return Ok(ok_json(false));
-    }
+    };
     let taken = ETeam::find()
         .filter(CTeam::Name.eq(name.as_str()))
         .one(&state.web_db)
@@ -154,16 +154,9 @@ pub async fn put_team(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
     Extension(user): Extension<MUser>,
-    Json(body): Json<MakeTeamRequest>,
+    JsonBody(body): JsonBody<MakeTeamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     require_create_permission(state.config.permissions.create_team, &user)?;
-
-    if check_index_name(&body.name).is_err() {
-        return Err(WebError::invalid_name(Resource::TeamName));
-    }
-    validate_display_name(&body.display_name).map_err(|e| SharedRefusal::InvalidDisplayName {
-        reason: e.to_string(),
-    })?;
 
     if ETeam::find()
         .filter(CTeam::Name.eq(body.name.as_str()))
@@ -177,7 +170,7 @@ pub async fn put_team(
     let tx = state.web_db.inner().begin().await?;
     let team = MTeam {
         id: TeamId::now_v7(),
-        name: body.name.clone(),
+        name: body.name.to_string(),
         display_name: body.display_name.trim().to_string(),
         created_by: Some(user.id),
         created_at: gradient_types::now(),
@@ -230,7 +223,7 @@ pub async fn get_team_evaluations(
 pub async fn patch_team(
     TeamScope { team, user, db, .. }: TeamScope<AdminUnmanaged>,
     info: RequestInfo,
-    Json(body): Json<PatchTeamRequest>,
+    JsonBody(body): JsonBody<PatchTeamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if body.oidc_group.is_some()
         || body.scim_group.is_some()
@@ -244,9 +237,6 @@ pub async fn patch_team(
     let team_id = team.id;
     let mut active: ATeam = team.into();
     if let Some(display_name) = body.display_name {
-        validate_display_name(&display_name).map_err(|e| SharedRefusal::InvalidDisplayName {
-            reason: e.to_string(),
-        })?;
         active.display_name = Set(display_name.trim().to_string());
     }
     if let Some(users) = body.new_project_users {

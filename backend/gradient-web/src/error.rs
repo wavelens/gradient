@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::names::NameError;
 use crate::resource::Resource;
 use anyhow::Error as AnyhowError;
 use axum::Json;
@@ -187,7 +188,11 @@ impl From<gradient_db::status::BuildRefusal> for WebError {
 
 impl From<JsonRejection> for WebError {
     fn from(err: JsonRejection) -> Self {
-        Self::BadRequest(ErrorCode::JSON_PARSING, format!("Invalid JSON: {}", err))
+        let text = err.to_string();
+        match NameError::find_in(&text) {
+            Some(name_error) => name_error.into(),
+            None => Self::BadRequest(ErrorCode::JSON_PARSING, format!("Invalid JSON: {}", text)),
+        }
     }
 }
 
@@ -236,10 +241,6 @@ impl IntoResponse for WebError {
 }
 
 impl WebError {
-    pub fn invalid_name(name: Resource) -> Self {
-        Self::BadRequest(ErrorCode::INVALID_NAME, format!("Invalid {}", name))
-    }
-
     pub fn already_exists(resource: Resource) -> Self {
         Self::Conflict(
             ErrorCode::ALREADY_EXISTS,

@@ -11,6 +11,8 @@ use crate::authorization::{
 };
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::json_body::JsonBody;
+use crate::names::UserDisplayName;
 use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
 use anyhow::Context;
@@ -30,7 +32,7 @@ use email_address::EmailAddress;
 use gradient_core::ServerState;
 use gradient_notify::generate_verification_token;
 use gradient_types::consts::*;
-use gradient_types::input::{validate_display_name, validate_password, validate_username};
+use gradient_types::input::{validate_password, validate_username};
 use gradient_types::*;
 use password_auth::{generate_hash, verify_password};
 use rand::distr::{Alphanumeric, SampleString};
@@ -46,8 +48,6 @@ use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
 enum AuthRefusal {
-    #[error("Invalid name: {reason}")]
-    InvalidName { reason: String },
     #[error(
         "Email not verified. Please check your email and verify your account before logging in."
     )]
@@ -83,8 +83,7 @@ enum AuthRefusal {
 impl Refusal for AuthRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
-            Self::InvalidName { .. }
-            | Self::EmailNotVerified
+            Self::EmailNotVerified
             | Self::EmailVerificationDisabled
             | Self::MissingVerificationToken
             | Self::InvalidVerificationToken
@@ -124,7 +123,7 @@ pub struct MakeLoginRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeUserRequest {
     pub username: String,
-    pub name: String,
+    pub name: UserDisplayName,
     pub email: String,
     pub password: String,
 }
@@ -137,7 +136,7 @@ pub struct CheckUsernameRequest {
 pub async fn post_basic_register(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Json(body): Json<MakeUserRequest>,
+    JsonBody(body): JsonBody<MakeUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if !state.config.registration.enable || state.config.oidc.as_ref().is_some_and(|o| o.required) {
         return Err(WebError::registration_disabled());
@@ -145,13 +144,6 @@ pub async fn post_basic_register(
 
     if let Err(e) = validate_username(&body.username) {
         return Err(WebError::invalid_username(e.to_string()));
-    }
-
-    if let Err(e) = validate_display_name(&body.name) {
-        return Err(AuthRefusal::InvalidName {
-            reason: e.to_string(),
-        }
-        .into());
     }
 
     if !EmailAddress::is_valid(body.email.clone().as_str()) {
@@ -191,7 +183,7 @@ pub async fn post_basic_register(
     let user = MUser {
         id: UserId::now_v7(),
         username: body.username.clone(),
-        name: body.name.clone(),
+        name: body.name.to_string(),
         email: body.email.clone(),
         password: Some(generate_hash(body.password.clone())),
         last_login_at: *NULL_TIME,
