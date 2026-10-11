@@ -1409,12 +1409,12 @@
   },
   {
     "group": "ssh",
-    "field": "listen_address",
-    "flag": "ssh-listen-address",
-    "env": "GRADIENT_SSH_LISTEN_ADDRESS",
-    "type": "Option<String>",
-    "description": "IP address for the SSH server to listen on. IPv6 addresses also accept IPv4 clients.\nThe default `::` thus means listening on every address of both families.",
-    "default": null,
+    "field": "listen_addresses",
+    "flag": "ssh-listen-addresses",
+    "env": "GRADIENT_SSH_LISTEN_ADDRESSES",
+    "type": "Vec<String>",
+    "description": "IP addresses for the SSH server to listen on. IPv6 addresses also accept IPv4 clients.\nThe default `::` thus means listening on every address of both families.",
+    "default": "::",
     "values": []
   },
   {

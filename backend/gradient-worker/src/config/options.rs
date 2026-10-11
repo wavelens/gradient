@@ -162,15 +162,15 @@ pub struct CapabilitiesArgs {
     pub federate: bool,
 
     /// Whether to enable prefetching flake inputs and sources.
-    #[arg(default_value = "false")]
+    #[arg(default_value = "true")]
     pub fetch: bool,
 
     /// Whether to enable Nix flake evaluations.
-    #[arg(default_value = "false")]
+    #[arg(default_value = "true")]
     pub eval: bool,
 
     /// Whether to enable Nix builds.
-    #[arg(default_value = "false")]
+    #[arg(default_value = "true")]
     pub build: bool,
 }
 
@@ -223,7 +223,7 @@ pub struct EvalArgs {
     /// restart after their call and free the Nix heap. A call may grow past the limit, with
     /// {option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.
     /// Keep it above a typical evaluation's heap.
-    #[arg(default_value_t = 8 * 1024 * 1024 * 1024)]
+    #[arg(default_value_t = 2 * 1024 * 1024 * 1024)]
     pub max_rss: u64,
 
     /// Eval cache directory, exported to evaluation subprocesses as {env}`NIX_CACHE_HOME`.
@@ -239,7 +239,7 @@ pub struct EvalArgs {
 #[derive(Args, Debug, Clone)]
 pub struct BuildArgs {
     /// Maximum simultaneous builds.
-    #[arg(id = "build-max-concurrent", default_value_t = 1)]
+    #[arg(id = "build-max-concurrent", default_value_t = 32)]
     pub max_concurrent: u32,
 
     /// CPU cores a single build can use, passed as `--cores`. `null` uses all cores.

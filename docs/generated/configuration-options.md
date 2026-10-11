@@ -60,7 +60,7 @@
 | `email.smtp.host` | string | - | `GRADIENT_EMAIL_SMTP_HOST` | SMTP server host name. |
 | `email.smtp.passwordFile` | path | - | `GRADIENT_EMAIL_SMTP_PASSWORD_FILE` | File containing the SMTP password. |
 | `email.smtp.port` | port | `587` | `GRADIENT_EMAIL_SMTP_PORT` | SMTP server port. |
-| `email.smtp.useTls` | bool | `false` | `GRADIENT_EMAIL_SMTP_USE_TLS` | Whether to enable TLS for SMTP. |
+| `email.smtp.useTls` | bool | `true` | `GRADIENT_EMAIL_SMTP_USE_TLS` | Whether to enable TLS for SMTP. |
 | `email.smtp.username` | string | - | `GRADIENT_EMAIL_SMTP_USERNAME` | SMTP user name. |
 
 ## `eval`
@@ -284,7 +284,7 @@
 |---|---|---|---|---|
 | `ssh.enable` | bool | `false` | `GRADIENT_SSH_ENABLE` | Whether to enable the Nix daemon over SSH for `ssh-ng://` substituters, `nix copy` and `nixos-rebuild --build-host`. |
 | `ssh.hostKeyFile` | null or path | `null` | `GRADIENT_SSH_HOST_KEY_FILE` | File containing the OpenSSH private host key. Set it to `null` to generate an ed25519 key in `baseDir` on first start. |
-| `ssh.listenAddress` | string | `"::"` | `GRADIENT_SSH_LISTEN_ADDRESS` | IP address for the SSH server to listen on. IPv6 addresses also accept IPv4 clients. The default `::` thus means listening on every address of both families. |
+| `ssh.listenAddresses` | list of string | `[ "::" ]` | `GRADIENT_SSH_LISTEN_ADDRESSES` | IP addresses for the SSH server to listen on. IPv6 addresses also accept IPv4 clients. The default `::` thus means listening on every address of both families. |
 | `ssh.openFirewall` | bool | `false` | - | Whether to enable the SSH port in the firewall. |
 | `ssh.port` | port | `2222` | `GRADIENT_SSH_PORT` | Port for the SSH server to listen on. |
 
