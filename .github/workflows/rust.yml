@@ -86,6 +86,15 @@ jobs:
             exit 1
           fi
 
+      - name: "Forbid database queries in the web crate"
+        run: |
+          if grep -rsnE --include='*.rs' \
+               '\b(EntityTrait|ActiveModelTrait|QueryFilter|QuerySelect|QueryOrder)\b' gradient-web/src \
+               | grep -v -E '^gradient-web/src/(access|lookup|endpoints/membership/mod)\.rs'; then
+            echo "::error::write the query as a function in gradient-db and call it from the handler"
+            exit 1
+          fi
+
       - name: "cargo-deny (licenses, bans, sources)"
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
