@@ -324,7 +324,8 @@ mod tests {
 
     crate::sql! {
         TEST_TRANSACTIONAL_UPDATE = "UPDATE derivation_build SET status = 1",
-            params = [];
+            params = [],
+            status_write = crate::sql::StatusWrite::build(gradient_entity::build::BuildStatus::QUEUE);
     }
 
     #[tokio::test]

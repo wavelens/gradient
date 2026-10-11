@@ -6,6 +6,7 @@
 
 use crate::graph::predicates::fetchable_predicate;
 use crate::graph::promotion::{returned_derivations, returned_transitions};
+use crate::sql::StatusWrite;
 use crate::status::TransitionChange;
 
 use super::lock::{SeedLock, SharedBuildLock, ids, lock_shared_builds};
@@ -16,9 +17,9 @@ use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait};
 use std::sync::LazyLock;
 
-/// A `LEFT JOIN` is counting a dependency with no shared build row as blocking.
-/// An inner join would fail open, in a gate meant to stop a dispatch against a missing input.
-/// Runtime-only edges are not build inputs, and `missing_runtime_deps` is covering them.
+/// Left joins count a dependency without a shared build row as blocking.
+/// Inner joins fail open and start a dispatch against a missing input.
+/// Runtime-only edges are no build inputs and belong to `missing_runtime_deps`.
 pub(super) fn blocking_dependency_count(alias: &str) -> String {
     format!(
         "(SELECT count(*) FROM derivation_dependency e \
@@ -97,19 +98,20 @@ static BLOCK_PARENTS: LazyLock<String> = LazyLock::new(|| {
          RETURNING d.derivation, old.status AS from_status, d.status AS to_status",
         unqueue = format!(
             "d.status = {queued} AND {not_in_flight}",
-            queued = crate::sql::status::build(BuildStatus::Queued),
+            queued = crate::sql::status::from(BuildStatus::UNQUEUE),
             not_in_flight = crate::scheduling::assignment_record::no_open_assignment_predicate(
                 &crate::scheduling::assignment_record::build_job_key_sql("d.id")
             ),
         ),
-        created = crate::sql::status::build(BuildStatus::Created),
+        created = crate::sql::status::to(BuildStatus::UNQUEUE),
     )
 });
 
 crate::sql_lazy! {
     BLOCK_PARENTS_QUERY = || BLOCK_PARENTS.as_str(),
         params = [DerivationIds(64)],
-        tier = Bulk;
+        tier = Bulk,
+        status_write = StatusWrite::build(BuildStatus::UNQUEUE);
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

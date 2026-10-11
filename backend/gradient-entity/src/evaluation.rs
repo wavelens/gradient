@@ -118,6 +118,26 @@ impl EvaluationStatus {
     pub const REOPENABLE: [Self; 2] = [Self::Failed, Self::Aborted];
 
     pub const EVALUATING: [Self; 2] = [Self::EvaluatingFlake, Self::EvaluatingDerivation];
+
+    pub const REOPEN: Transition<Self> = Transition {
+        from: &Self::REOPENABLE,
+        to: Self::Building,
+    };
+
+    pub const PARK: Transition<Self> = Transition {
+        from: &[Self::Queued],
+        to: Self::Waiting,
+    };
+
+    pub const UNPARK: Transition<Self> = Transition {
+        from: &[Self::Waiting],
+        to: Self::Queued,
+    };
+
+    pub const ABORT: Transition<Self> = Transition {
+        from: &Self::ACTIVE,
+        to: Self::Aborted,
+    };
 }
 
 #[cfg(test)]

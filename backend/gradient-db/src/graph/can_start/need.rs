@@ -6,39 +6,58 @@
 
 use crate::graph::predicates::{builder_predicate, open_predicate};
 use crate::graph::promotion::returned_transitions;
+use crate::sql::StatusWrite;
 use crate::status::TransitionChange;
 
 use super::lock::{ids, lock_shared_builds};
 use super::queue::{promote, unpromote_ungated};
+use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait};
 use std::sync::LazyLock;
 
-crate::sql! {
-    SKIP_UNWANTED = "UPDATE derivation_build db SET status = 10, updated_at = (now() AT TIME ZONE 'UTC') \
-         WHERE db.derivation = ANY($1::uuid[]) AND db.status = 0 AND NOT db.wanted \
+const IN_CANDIDATES: &str = "db.derivation = ANY($1::uuid[]) AND ";
+
+fn skip_unwanted_sql(scope: &str) -> String {
+    format!(
+        "UPDATE derivation_build db SET status = {to}, updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE {scope}db.status = {from} AND NOT db.wanted \
            AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = db.derivation) \
-         RETURNING db.derivation, 0 AS from_status, 10 AS to_status",
-        params = [DerivationIds(64)];
+         RETURNING db.derivation, {from} AS from_status, {to} AS to_status",
+        from = crate::sql::status::from(BuildStatus::SKIP_UNWANTED),
+        to = crate::sql::status::to(BuildStatus::SKIP_UNWANTED),
+    )
+}
 
-    THAW_WANTED = "UPDATE derivation_build db SET status = 0, attempt = 0, updated_at = (now() AT TIME ZONE 'UTC') \
-         WHERE db.derivation = ANY($1::uuid[]) AND db.status IN (5, 10) AND db.wanted \
-         RETURNING db.derivation, old.status AS from_status, 0 AS to_status",
-        params = [DerivationIds(64)];
+fn thaw_wanted_sql(scope: &str) -> String {
+    format!(
+        "UPDATE derivation_build db SET status = {to}, attempt = 0, updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE {scope}db.status IN ({from}) AND db.wanted \
+         RETURNING db.derivation, old.status AS from_status, {to} AS to_status",
+        from = crate::sql::status::from(BuildStatus::THAW_WANTED),
+        to = crate::sql::status::to(BuildStatus::THAW_WANTED),
+    )
+}
 
-    SKIP_UNWANTED_ALL = "UPDATE derivation_build db SET status = 10, updated_at = (now() AT TIME ZONE 'UTC') \
-         WHERE db.status = 0 AND NOT db.wanted \
-           AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = db.derivation) \
-         RETURNING db.derivation, 0 AS from_status, 10 AS to_status",
+crate::sql_fn! {
+    SKIP_UNWANTED = || skip_unwanted_sql(IN_CANDIDATES),
+        params = [DerivationIds(64)],
+        status_write = StatusWrite::build(BuildStatus::SKIP_UNWANTED);
+
+    THAW_WANTED = || thaw_wanted_sql(IN_CANDIDATES),
+        params = [DerivationIds(64)],
+        status_write = StatusWrite::build(BuildStatus::THAW_WANTED);
+
+    SKIP_UNWANTED_ALL = || skip_unwanted_sql(""),
         params = [],
-        tier = Sweep;
+        tier = Sweep,
+        status_write = StatusWrite::build(BuildStatus::SKIP_UNWANTED);
 
-    THAW_WANTED_ALL = "UPDATE derivation_build db SET status = 0, attempt = 0, updated_at = (now() AT TIME ZONE 'UTC') \
-         WHERE db.status IN (5, 10) AND db.wanted \
-         RETURNING db.derivation, old.status AS from_status, 0 AS to_status",
+    THAW_WANTED_ALL = || thaw_wanted_sql(""),
         params = [],
-        tier = Sweep;
+        tier = Sweep,
+        status_write = StatusWrite::build(BuildStatus::THAW_WANTED);
 }
 
 async fn skip_unwanted<C: ConnectionTrait>(

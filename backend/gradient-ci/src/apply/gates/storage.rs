@@ -8,8 +8,7 @@ use gradient_db::caches::capacity::project_caches_all_full;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::*;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ConnectionTrait};
+use sea_orm::ConnectionTrait;
 
 /// A project without writable caches is left to [`park_if_no_cache`](super::park_if_no_cache).
 #[tracing::instrument(level = "debug", skip_all)]
@@ -25,9 +24,5 @@ pub async fn park_if_storage_full<C: ConnectionTrait>(
     if !project_caches_all_full(db, project, instance_max_storage_gb).await? {
         return Ok(eval);
     }
-    let mut ae: AEvaluation = eval.into();
-    ae.status = Set(EvaluationStatus::Waiting);
-    ae.waiting_reason = Set(Some(WaitingReason::CacheStorageFull.to_json()));
-    ae.updated_at = Set(gradient_types::now());
-    ae.update(db).await
+    super::park(db, eval, WaitingReason::CacheStorageFull).await
 }

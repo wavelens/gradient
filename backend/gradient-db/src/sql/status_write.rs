@@ -117,6 +117,12 @@ mod tests {
     };
 
     #[test]
+    fn every_status_write_declares_its_transition() {
+        let violations = violations();
+        assert!(violations.is_empty(), "{}", violations.join("\n"));
+    }
+
+    #[test]
     fn a_declared_literal_write_passes() {
         let sql = "UPDATE derivation_build db SET status = 1, updated_at = now() \
                    WHERE db.status = 0 RETURNING db.derivation";

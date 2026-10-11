@@ -9,6 +9,7 @@ use crate::graph::{
     predicates::{gates_predicate, promotable_predicate},
     walks::eval_closure_cte,
 };
+use crate::sql::StatusWrite;
 use crate::status::TransitionChange;
 
 use super::lock::{ids, lock_shared_builds};
@@ -24,7 +25,7 @@ fn promote_sql(scope: &str) -> String {
              updated_at = (now() AT TIME ZONE 'UTC') \
          WHERE {scope}{promotable} \
          RETURNING db.derivation",
-        queued = crate::sql::status::build(BuildStatus::Queued),
+        queued = crate::sql::status::to(BuildStatus::QUEUE),
         promotable = promotable_predicate("db"),
     )
 }
@@ -34,7 +35,8 @@ static PROMOTE: LazyLock<String> =
 
 crate::sql_lazy! {
     PROMOTE_QUERY = || PROMOTE.as_str(),
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        status_write = StatusWrite::build(BuildStatus::QUEUE);
 }
 
 static PROMOTE_ANY: LazyLock<String> =
@@ -43,7 +45,8 @@ static PROMOTE_ANY: LazyLock<String> =
 crate::sql_lazy! {
     pub(super) PROMOTE_ANY_QUERY = || PROMOTE_ANY.as_str(),
         params = [],
-        tier = Sweep;
+        tier = Sweep,
+        status_write = StatusWrite::build(BuildStatus::QUEUE);
 }
 
 static PROMOTE_CLOSURE: LazyLock<String> = LazyLock::new(|| {
@@ -61,7 +64,8 @@ crate::sql_lazy! {
         budget = crate::sql::Budget::walk().buffers(900_000)
             .because("the scope is an evaluation's whole dependency closure, and the \
                       walk that names it reads ~5 buffers per node it visits"),
-        flags = [Walk];
+        flags = [Walk],
+        status_write = StatusWrite::build(BuildStatus::QUEUE);
 }
 
 fn unpromote_sql(reason: &str) -> String {
@@ -70,8 +74,8 @@ fn unpromote_sql(reason: &str) -> String {
          SET status = {created}, updated_at = (now() AT TIME ZONE 'UTC') \
          WHERE db.status = {queued} AND {not_in_flight} AND {reason} \
          RETURNING db.derivation, old.status AS from_status, db.status AS to_status",
-        created = crate::sql::status::build(BuildStatus::Created),
-        queued = crate::sql::status::build(BuildStatus::Queued),
+        created = crate::sql::status::to(BuildStatus::UNQUEUE),
+        queued = crate::sql::status::from(BuildStatus::UNQUEUE),
         not_in_flight = crate::scheduling::assignment_record::no_open_assignment_predicate(
             &crate::scheduling::assignment_record::build_job_key_sql("db.id")
         ),
@@ -94,7 +98,8 @@ static UNPROMOTE_DRV_OWNERS: LazyLock<String> = LazyLock::new(|| {
 
 crate::sql_lazy! {
     UNPROMOTE_DRV_OWNERS_QUERY = || UNPROMOTE_DRV_OWNERS.as_str(),
-        params = [DerivationHashes(64)];
+        params = [DerivationHashes(64)],
+        status_write = StatusWrite::build(BuildStatus::UNQUEUE);
 }
 
 static UNPROMOTE_UNGATED: LazyLock<String> = LazyLock::new(|| unpromote_ungated_sql(""));
@@ -102,7 +107,8 @@ static UNPROMOTE_UNGATED: LazyLock<String> = LazyLock::new(|| unpromote_ungated_
 crate::sql_lazy! {
     pub(super) UNPROMOTE_UNGATED_QUERY = || UNPROMOTE_UNGATED.as_str(),
         params = [],
-        tier = Sweep;
+        tier = Sweep,
+        status_write = StatusWrite::build(BuildStatus::UNQUEUE);
 }
 
 static UNPROMOTE_UNGATED_IN: LazyLock<String> =
@@ -110,7 +116,8 @@ static UNPROMOTE_UNGATED_IN: LazyLock<String> =
 
 crate::sql_lazy! {
     UNPROMOTE_UNGATED_IN_QUERY = || UNPROMOTE_UNGATED_IN.as_str(),
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        status_write = StatusWrite::build(BuildStatus::UNQUEUE);
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

@@ -9,8 +9,10 @@ use gradient_types::ids::ProjectId;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::*;
 
+use gradient_db::status::change_evaluation_status;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 pub async fn unpark_no_cache_for_project<C: ConnectionTrait>(
@@ -135,13 +137,27 @@ async fn unpark_for_project<C: ConnectionTrait, F: Fn(&WaitingReason) -> bool>(
 
     let mut unparked = Vec::with_capacity(candidates.len());
     for eval in candidates {
-        let mut ae: AEvaluation = eval.into();
-        ae.status = Set(EvaluationStatus::Queued);
-        ae.waiting_reason = Set(None);
-        ae.updated_at = Set(gradient_types::now());
-        unparked.push(ae.update(db).await?);
+        unparked.extend(unpark(db, eval.id, None).await?);
     }
     Ok(unparked)
+}
+
+async fn unpark<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+    wildcard: Option<&str>,
+) -> Result<Option<MEvaluation>, sea_orm::DbErr> {
+    change_evaluation_status(db, evaluation, EvaluationStatus::UNPARK, |update| {
+        let update = update.col_expr(
+            CEvaluation::WaitingReason,
+            Expr::value(Option::<serde_json::Value>::None),
+        );
+        match wildcard {
+            Some(wildcard) => update.col_expr(CEvaluation::Wildcard, Expr::value(wildcard)),
+            None => update,
+        }
+    })
+    .await
 }
 
 pub async fn unpark_approval(
@@ -162,11 +178,7 @@ pub async fn unpark_approval(
     if !is_approval {
         return Ok(None);
     }
-    let mut ae: AEvaluation = eval.into();
-    ae.status = Set(EvaluationStatus::Queued);
-    ae.waiting_reason = Set(None);
-    ae.updated_at = Set(gradient_types::now());
-    Ok(Some(ae.update(db).await?))
+    unpark(db, eval.id, None).await
 }
 
 pub async fn unpark_approval_with_wildcard(
@@ -188,12 +200,7 @@ pub async fn unpark_approval_with_wildcard(
     if !is_approval {
         return Ok(None);
     }
-    let mut ae: AEvaluation = eval.into();
-    ae.status = Set(EvaluationStatus::Queued);
-    ae.waiting_reason = Set(None);
-    ae.wildcard = Set(wildcard.to_string());
-    ae.updated_at = Set(gradient_types::now());
-    Ok(Some(ae.update(db).await?))
+    unpark(db, eval.id, Some(wildcard)).await
 }
 
 /// The terminal-status reaction must land on the maintainer's `/gradient run` or `/gradient

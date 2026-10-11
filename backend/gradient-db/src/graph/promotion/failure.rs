@@ -8,18 +8,13 @@ use crate::graph::{
     predicates::{aborted_in_evaluation, failure_spreads_predicate},
     walks::{ClosureDirection, bounded_dependency_closure_cte_body, eval_closure_cte_body},
 };
+use crate::sql::StatusWrite;
 use crate::status::TransitionChange;
 
 use super::transitions::returned_transitions;
 use gradient_entity::build::BuildStatus;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait, Value};
-
-const CASCADE_TARGET: [BuildStatus; 3] = [
-    BuildStatus::Created,
-    BuildStatus::Queued,
-    BuildStatus::FailedTransient,
-];
 
 fn cascade_dependency_failed_sql() -> String {
     let cte = format!(
@@ -41,8 +36,8 @@ fn cascade_dependency_failed_sql() -> String {
       AND db.derivation IN (SELECT derivation FROM wanted_by WHERE derivation <> $1)
     RETURNING db.derivation, old.status AS from_status, db.status AS to_status
     "#,
-        dependency_failed = crate::sql::status::build(BuildStatus::DependencyFailed),
-        cascade_target = crate::sql::status::build_in(&CASCADE_TARGET),
+        dependency_failed = crate::sql::status::to(BuildStatus::CASCADE_DEPENDENCY_FAILED),
+        cascade_target = crate::sql::status::from(BuildStatus::CASCADE_DEPENDENCY_FAILED),
     )
 }
 
@@ -50,7 +45,8 @@ crate::sql_fn! {
     CASCADE_DEPENDENCY_FAILED = cascade_dependency_failed_sql,
         params = [DerivationId],
         tier = Walk,
-        flags = [Walk];
+        flags = [Walk],
+        status_write = StatusWrite::build(BuildStatus::CASCADE_DEPENDENCY_FAILED);
 }
 
 pub async fn cascade_dependency_failed<C>(
@@ -93,8 +89,8 @@ where
 }
 
 fn dependency_failed_repair_sql() -> String {
-    let dependency_failed = crate::sql::status::build(BuildStatus::DependencyFailed);
-    let cascade_target = crate::sql::status::build_in(&CASCADE_TARGET);
+    let dependency_failed = crate::sql::status::to(BuildStatus::CASCADE_DEPENDENCY_FAILED);
+    let cascade_target = crate::sql::status::from(BuildStatus::CASCADE_DEPENDENCY_FAILED);
     let terminal_failure = crate::sql::status::build_in(&BuildStatus::TERMINAL_FAILURE);
     let prelude = format!(
         "WITH RECURSIVE {closure},\n    {wanted_by}",
@@ -131,7 +127,8 @@ crate::sql_fn! {
     DEPENDENCY_FAILED_REPAIR = dependency_failed_repair_sql,
         params = [EvaluationId],
         tier = Walk,
-        flags = [Walk];
+        flags = [Walk],
+        status_write = StatusWrite::build(BuildStatus::CASCADE_DEPENDENCY_FAILED);
 }
 
 #[cfg(test)]
@@ -170,10 +167,12 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
         let terminal_failure = crate::sql::status::build_in(&BuildStatus::TERMINAL_FAILURE);
-        let cascade_target = crate::sql::status::build_in(&CASCADE_TARGET);
+        let cascade_target = crate::sql::status::from(BuildStatus::CASCADE_DEPENDENCY_FAILED);
         assert!(
             !BuildStatus::TERMINAL_FAILURE.contains(&BuildStatus::Aborted)
-                && !CASCADE_TARGET.contains(&BuildStatus::Building),
+                && !BuildStatus::CASCADE_DEPENDENCY_FAILED
+                    .from
+                    .contains(&BuildStatus::Building),
             "seed excludes Aborted (retried, not permanent); target excludes Building"
         );
         assert!(

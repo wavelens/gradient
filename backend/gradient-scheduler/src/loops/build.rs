@@ -12,7 +12,6 @@ use std::time::Instant;
 use crate::assign_mode::decide_build_spec_kind;
 use gradient_core::ServerState;
 use gradient_db::scheduling::startable_set::StartableMoves;
-use gradient_entity::evaluation::EvaluationStatus;
 use gradient_graph::Transition;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -242,7 +241,7 @@ impl BuildAssignMaps {
                 .find(|e| {
                     evaluations
                         .get(*e)
-                        .is_some_and(|ev| !eval_is_terminal(ev.status))
+                        .is_some_and(|ev| !ev.status.is_terminal())
                 })
                 .or_else(|| eval_list.first());
             if let Some(e) = chosen {
@@ -657,18 +656,11 @@ fn lifted_by_live_eval(
             evals.iter().any(|e| {
                 evaluations
                     .get(e)
-                    .is_some_and(|ev| lifts(ev) && !eval_is_terminal(ev.status))
+                    .is_some_and(|ev| lifts(ev) && !ev.status.is_terminal())
             })
         })
         .map(|(shared_build, _)| *shared_build)
         .collect()
-}
-
-fn eval_is_terminal(status: EvaluationStatus) -> bool {
-    matches!(
-        status,
-        EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted
-    )
 }
 
 pub(crate) async fn admit_startable_moves(scheduler: &Scheduler) -> anyhow::Result<()> {
@@ -838,6 +830,7 @@ mod limit_tests {
 #[cfg(test)]
 mod priority_tests {
     use super::*;
+    use gradient_entity::evaluation::EvaluationStatus;
 
     fn eval(status: EvaluationStatus, prioritized: bool) -> MEvaluation {
         MEvaluation {

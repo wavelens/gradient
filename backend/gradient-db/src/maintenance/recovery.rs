@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::sql::StatusWrite;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::AttemptOutcome;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -36,15 +37,16 @@ fn requeue_mid_flight_sql() -> String {
         "UPDATE derivation_build SET status = {queued}, \
          updated_at = (now() AT TIME ZONE 'UTC') \
          WHERE status = {building} RETURNING derivation",
-        queued = crate::sql::status::build(BuildStatus::Queued),
-        building = crate::sql::status::build(BuildStatus::Building),
+        queued = crate::sql::status::to(BuildStatus::REQUEUE_MID_FLIGHT),
+        building = crate::sql::status::from(BuildStatus::REQUEUE_MID_FLIGHT),
     )
 }
 
 crate::sql_fn! {
     REQUEUE_MID_FLIGHT = requeue_mid_flight_sql,
         params = [],
-        tier = Sweep;
+        tier = Sweep,
+        status_write = StatusWrite::build(BuildStatus::REQUEUE_MID_FLIGHT);
 }
 
 pub async fn recover_interrupted_work<C: ConnectionTrait>(

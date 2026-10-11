@@ -11,11 +11,13 @@
 
 use std::collections::BTreeMap;
 
+use gradient_entity::build::BuildStatus;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait};
 
 use crate::graph::can_start::{ids, lock_shared_builds};
 use crate::graph::predicates::{present_predicate, shared_build_complete_predicate};
+use crate::sql::StatusWrite;
 
 fn seed_sql() -> String {
     format!(
@@ -125,15 +127,15 @@ fn reset_uncached_producers_sql() -> String {
          WHERE db.derivation = ANY($1::uuid[]) \
            AND db.status IN ({terminal_success}) AND NOT db.fetchable \
          RETURNING db.derivation, old.status AS from_status, db.status AS to_status",
-        created = crate::sql::status::build(gradient_entity::build::BuildStatus::Created),
-        terminal_success =
-            crate::sql::status::build_in(&gradient_entity::build::BuildStatus::TERMINAL_SUCCESS),
+        created = crate::sql::status::to(BuildStatus::RESET_UNCACHED),
+        terminal_success = crate::sql::status::from(BuildStatus::RESET_UNCACHED),
     )
 }
 
 crate::sql_fn! {
     RESET_UNCACHED_PRODUCERS = reset_uncached_producers_sql,
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        status_write = StatusWrite::build(BuildStatus::RESET_UNCACHED);
 }
 
 crate::sql_fn! {

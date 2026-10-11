@@ -23,7 +23,6 @@ pub mod pool;
 pub mod projects;
 pub mod scheduling;
 pub mod sql;
-pub mod state_machine;
 pub mod status;
 pub mod task_board;
 pub mod teams;

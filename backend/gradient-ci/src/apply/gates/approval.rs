@@ -8,8 +8,7 @@ use crate::apply::ApprovalInfo;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::*;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ConnectionTrait};
+use sea_orm::ConnectionTrait;
 
 pub async fn park_if_pending_approval<C: ConnectionTrait>(
     db: &C,
@@ -22,11 +21,6 @@ pub async fn park_if_pending_approval<C: ConnectionTrait>(
     if eval.status != EvaluationStatus::Queued {
         return Ok(eval);
     }
-    let mut ae: AEvaluation = eval.into();
-    ae.status = Set(EvaluationStatus::Waiting);
-    ae.waiting_reason = Set(Some(
-        WaitingReason::approval(info.pr_number, info.pr_author.clone()).to_json(),
-    ));
-    ae.updated_at = Set(gradient_types::now());
-    ae.update(db).await
+    let reason = WaitingReason::approval(info.pr_number, info.pr_author.clone());
+    super::park(db, eval, reason).await
 }

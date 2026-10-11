@@ -5,6 +5,7 @@
  */
 
 use crate::graph::walks::eval_closure_cte;
+use crate::sql::StatusWrite;
 use crate::status::TransitionChange;
 
 use super::transitions::returned_transitions;
@@ -33,14 +34,15 @@ fn substitute_created_shared_builds_sql() -> String {
         WHERE db.status = {created} AND db.derivation = ANY($1::uuid[])
         RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
-        substituted = crate::sql::status::build(BuildStatus::Substituted),
-        created = crate::sql::status::build(BuildStatus::Created),
+        substituted = crate::sql::status::to(BuildStatus::SUBSTITUTE_CREATED),
+        created = crate::sql::status::from(BuildStatus::SUBSTITUTE_CREATED),
     )
 }
 
 crate::sql_fn! {
     SUBSTITUTE_CREATED_SHARED_BUILDS = substitute_created_shared_builds_sql,
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        status_write = StatusWrite::build(BuildStatus::SUBSTITUTE_CREATED);
 }
 
 pub async fn repair_cached_shared_builds_for_eval<C>(
@@ -83,7 +85,7 @@ fn repair_cached_shared_builds_for_eval_sql() -> String {
     RETURNING db.derivation, old.status AS from_status, db.status AS to_status
     "#,
         terminal_success = crate::sql::status::build_in(&BuildStatus::TERMINAL_SUCCESS),
-        completed = crate::sql::status::build(BuildStatus::Completed),
+        completed = crate::sql::status::to(BuildStatus::COMPLETE_CACHED),
     )
 }
 
@@ -94,7 +96,8 @@ crate::sql_fn! {
         budget = crate::sql::Budget::walk().buffers(500_000)
             .because("the same whole-closure walk PROMOTE_CLOSURE_QUERY pays for, plus \
                       one output-and-path anti-join per shared build the closure names"),
-        flags = [Walk];
+        flags = [Walk],
+        status_write = StatusWrite::build(BuildStatus::COMPLETE_CACHED);
 }
 
 #[cfg(test)]

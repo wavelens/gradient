@@ -143,7 +143,7 @@ pub fn gates_predicate(alias: &str) -> String {
 pub fn promotable_predicate(alias: &str) -> String {
     format!(
         "({alias}.status = {created} AND {gates})",
-        created = crate::sql::status::build(BuildStatus::Created),
+        created = crate::sql::status::from(BuildStatus::QUEUE),
         gates = gates_predicate(alias),
     )
 }

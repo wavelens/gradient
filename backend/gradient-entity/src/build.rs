@@ -164,6 +164,71 @@ impl BuildStatus {
         Self::DependencyFailed,
         Self::FailedTimeout,
     ];
+
+    pub const QUEUE: Transition<Self> = Transition {
+        from: &[Self::Created],
+        to: Self::Queued,
+    };
+
+    pub const UNQUEUE: Transition<Self> = Transition {
+        from: &[Self::Queued],
+        to: Self::Created,
+    };
+
+    pub const SKIP_UNWANTED: Transition<Self> = Transition {
+        from: &[Self::Created],
+        to: Self::Skipped,
+    };
+
+    pub const THAW_WANTED: Transition<Self> = Transition {
+        from: &[Self::Aborted, Self::Skipped],
+        to: Self::Created,
+    };
+
+    pub const SUBSTITUTE_CREATED: Transition<Self> = Transition {
+        from: &[Self::Created],
+        to: Self::Substituted,
+    };
+
+    pub const COMPLETE_CACHED: Transition<Self> = Transition {
+        from: &[
+            Self::Created,
+            Self::Queued,
+            Self::Building,
+            Self::FailedPermanent,
+            Self::Aborted,
+            Self::DependencyFailed,
+            Self::FailedTransient,
+            Self::FailedTimeout,
+            Self::Skipped,
+        ],
+        to: Self::Completed,
+    };
+
+    pub const CASCADE_DEPENDENCY_FAILED: Transition<Self> = Transition {
+        from: &[Self::Created, Self::Queued, Self::FailedTransient],
+        to: Self::DependencyFailed,
+    };
+
+    pub const REQUEUE: Transition<Self> = Transition {
+        from: &Self::REQUEUEABLE,
+        to: Self::Created,
+    };
+
+    pub const RESET_UNCACHED: Transition<Self> = Transition {
+        from: &Self::TERMINAL_SUCCESS,
+        to: Self::Created,
+    };
+
+    pub const REQUEUE_MID_FLIGHT: Transition<Self> = Transition {
+        from: &[Self::Building],
+        to: Self::Queued,
+    };
+
+    pub const BUILD_AFTER_SUBSTITUTE_MISSES: Transition<Self> = Transition {
+        from: &Self::UNFINISHED,
+        to: Self::Created,
+    };
 }
 
 #[cfg(test)]
