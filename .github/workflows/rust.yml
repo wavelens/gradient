@@ -86,6 +86,22 @@ jobs:
             exit 1
           fi
 
+      - name: "Forbid server state literals outside the two builders"
+        run: |
+          if grep -rnE --include='*.rs' --exclude-dir=target '\b(ServerState|AppState) \{' . \
+               | grep -v -E -e '^\./gradient-(core|test-support)/' -e '\b(impl|for)\b'; then
+            echo "::error::build the server state with TestState in tests and with init_state in the binaries"
+            exit 1
+          fi
+
+      - name: "Forbid requests to a Git host outside the shared client"
+        run: |
+          if grep -rsnE --include='*.rs' '\.send\(\)' gradient-git-host/src \
+               | grep -v '^gradient-git-host/src/client\.rs'; then
+            echo "::error::send the request through a HostClient method"
+            exit 1
+          fi
+
       - name: "Forbid database queries in the web crate"
         run: |
           if grep -rsnE --include='*.rs' \
