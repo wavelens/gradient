@@ -49,6 +49,17 @@ jobs:
             exit 1
           fi
 
+      - name: "Forbid status writes outside the transition builders"
+        run: |
+          if grep -rnE --include='*.rs' --exclude-dir=target \
+               -e 'Set\((EvaluationStatus|BuildStatus)::' \
+               -e '(CEvaluation|CDerivationBuild)::Status,' . \
+               | grep -v -e 'gradient-db/src/status/evaluation_status.rs' \
+                         -e 'gradient-db/src/status/derivation_build_status.rs'; then
+            echo "::error::write a build or evaluation status through build_change, evaluation_change or change_evaluation_status with a named transition"
+            exit 1
+          fi
+
       - name: "cargo-deny (licenses, bans, sources)"
         uses: EmbarkStudios/cargo-deny-action@v2
         with:

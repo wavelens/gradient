@@ -225,6 +225,11 @@ impl BuildStatus {
         to: Self::Queued,
     };
 
+    pub const ABORT: Transition<Self> = Transition {
+        from: &Self::ABORTABLE,
+        to: Self::Aborted,
+    };
+
     pub const BUILD_AFTER_SUBSTITUTE_MISSES: Transition<Self> = Transition {
         from: &Self::UNFINISHED,
         to: Self::Created,

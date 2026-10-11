@@ -8,11 +8,18 @@ use super::effects::{TransitionChange, emit_transition_effects};
 use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
 use gradient_entity::build::BuildStatus;
+use gradient_entity::transition::Transition;
 use gradient_types::*;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter, UpdateMany};
 use std::collections::{HashMap, HashSet};
 use tracing::{error, info};
+
+pub fn build_change(transition: Transition<BuildStatus>) -> UpdateMany<EDerivationBuild> {
+    EDerivationBuild::update_many()
+        .col_expr(CDerivationBuild::Status, Expr::value(transition.to))
+        .filter(CDerivationBuild::Status.is_in(transition.from.iter().copied()))
+}
 
 pub async fn update_derivation_build_status(
     ctx: &DbContext,
@@ -37,9 +44,8 @@ pub async fn update_derivation_build_status(
 
     let now = gradient_types::now();
     let prev_status = shared_build.status;
-    let mut change = EDerivationBuild::update_many()
-        .col_expr(CDerivationBuild::Status, Expr::value(status))
-        .col_expr(CDerivationBuild::UpdatedAt, Expr::value(now));
+    let mut change =
+        build_change(status.report()).col_expr(CDerivationBuild::UpdatedAt, Expr::value(now));
     if status == BuildStatus::Queued && shared_build.queued_at.is_none() {
         change = change.col_expr(CDerivationBuild::QueuedAt, Expr::value(Some(now)));
     }
@@ -64,7 +70,6 @@ pub async fn update_derivation_build_status(
 
     let changed = change
         .filter(CDerivationBuild::Id.eq(shared_build.id))
-        .filter(CDerivationBuild::Status.is_in(status.sources().iter().copied()))
         .exec_with_returning(&ctx.worker_db)
         .await?;
     let Some(updated) = changed.into_iter().next() else {

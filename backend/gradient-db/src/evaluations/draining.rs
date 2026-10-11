@@ -11,20 +11,12 @@ use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use gradient_types::*;
 
 pub async fn park_active_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, DbErr> {
-    let res = EEvaluation::update_many()
-        .col_expr(CEvaluation::Status, Expr::value(EvaluationStatus::Waiting))
+    let res = crate::status::evaluation_change(EvaluationStatus::PARK_FOR_DRAINING)
         .col_expr(
             CEvaluation::WaitingReason,
             Expr::value(Some(WaitingReason::Draining.to_json())),
         )
         .col_expr(CEvaluation::UpdatedAt, Expr::value(now()))
-        .filter(CEvaluation::Status.is_in([
-            EvaluationStatus::Queued,
-            EvaluationStatus::Fetching,
-            EvaluationStatus::EvaluatingFlake,
-            EvaluationStatus::EvaluatingDerivation,
-            EvaluationStatus::Building,
-        ]))
         .exec(conn)
         .await?;
 
@@ -50,8 +42,7 @@ pub async fn unpark_draining_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, 
         return Ok(0);
     }
 
-    let res = EEvaluation::update_many()
-        .col_expr(CEvaluation::Status, Expr::value(EvaluationStatus::Queued))
+    let res = crate::status::evaluation_change(EvaluationStatus::UNPARK)
         .col_expr(
             CEvaluation::WaitingReason,
             Expr::value(None::<serde_json::Value>),

@@ -88,8 +88,7 @@ pub(super) async fn abort_shared_builds(
     let now = gradient_types::now();
 
     for_each_chunk(&abort_ids, |chunk| async move {
-        EDerivationBuild::update_many()
-            .col_expr(CDerivationBuild::Status, Expr::value(BuildStatus::Aborted))
+        super::build_change(BuildStatus::ABORT)
             .col_expr(CDerivationBuild::UpdatedAt, Expr::value(now))
             .filter(CDerivationBuild::Id.is_in(chunk))
             .exec(&ctx.worker_db)

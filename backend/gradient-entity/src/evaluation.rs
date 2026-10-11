@@ -138,6 +138,26 @@ impl EvaluationStatus {
         from: &Self::ACTIVE,
         to: Self::Aborted,
     };
+
+    pub const PARK_FOR_DRAINING: Transition<Self> = Transition {
+        from: &[
+            Self::Queued,
+            Self::Fetching,
+            Self::EvaluatingFlake,
+            Self::EvaluatingDerivation,
+            Self::Building,
+        ],
+        to: Self::Waiting,
+    };
+
+    pub const REQUEUE_INTERRUPTED: Transition<Self> = Transition {
+        from: &[
+            Self::Fetching,
+            Self::EvaluatingFlake,
+            Self::EvaluatingDerivation,
+        ],
+        to: Self::Queued,
+    };
 }
 
 #[cfg(test)]
