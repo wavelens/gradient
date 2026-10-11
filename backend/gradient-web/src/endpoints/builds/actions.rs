@@ -8,6 +8,7 @@ use crate::access::is_project_member;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -25,7 +26,7 @@ async fn load_member_build(
     let api_key_ref = api_key.as_ref();
     let ctx = BuildAccessContext::load(state, build_id, &Some(user.clone()), api_key_ref).await?;
     if !is_project_member(state, user.id, ctx.project.id, api_key_ref).await? {
-        return Err(WebError::not_found("Build"));
+        return Err(WebError::not_found(Resource::Build));
     }
 
     Ok(ctx)

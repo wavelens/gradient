@@ -10,6 +10,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
 use crate::permissions::CachePermission;
+use crate::resource::Resource;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -129,7 +130,7 @@ pub async fn put(
     require_create_permission(state.config.permissions.create_cache, &user)?;
 
     if check_index_name(body.name.clone().as_str()).is_err() {
-        return Err(WebError::invalid_name("Cache Name"));
+        return Err(WebError::invalid_name(Resource::CacheName));
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
@@ -148,7 +149,7 @@ pub async fn put(
         .await?;
 
     if existing_cache.is_some() {
-        return Err(WebError::already_exists("Cache Name"));
+        return Err(WebError::already_exists(Resource::CacheName));
     }
 
     let (private_key, public_key) = generate_signing_key(&state.config.secrets.crypt_file)
@@ -179,7 +180,7 @@ pub async fn put(
     .into_active_model()
     .insert(&tx)
     .await
-    .map_err(|e| WebError::from_db_err(e, "Cache Name"))?;
+    .map_err(|e| WebError::from_db_err(e, Resource::CacheName))?;
 
     MCacheUpstream {
         id: CacheUpstreamId::now_v7(),
@@ -326,7 +327,7 @@ pub async fn patch_cache(
 
     if let Some(name) = body.name {
         if check_index_name(name.as_str()).is_err() {
-            return Err(WebError::invalid_name("Cache Name"));
+            return Err(WebError::invalid_name(Resource::CacheName));
         }
         if ECache::find()
             .filter(CCache::Name.eq(name.clone()))
@@ -334,7 +335,7 @@ pub async fn patch_cache(
             .await?
             .is_some()
         {
-            return Err(WebError::already_exists("Cache Name"));
+            return Err(WebError::already_exists(Resource::CacheName));
         }
         acache.name = Set(name);
     }
@@ -376,7 +377,7 @@ pub async fn patch_cache(
     acache
         .update(&state.web_db)
         .await
-        .map_err(|e| WebError::from_db_err(e, "Cache Name"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::CacheName))?;
 
     if raised_limit {
         let project_ids: Vec<ProjectId> = EProjectCache::find()

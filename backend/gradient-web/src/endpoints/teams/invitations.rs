@@ -11,6 +11,7 @@ use crate::authorization::MaybeApiKey;
 use crate::endpoints::projects::invitations::{PendingInvitationItem, RevokeInvitationRequest};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -90,7 +91,7 @@ pub async fn delete_team_invitation(
         .filter(CUser::Username.eq(body.user.clone()))
         .one(&state.web_db)
         .await?
-        .or_not_found("User")?;
+        .or_not_found(Resource::User)?;
 
     let invitation = ETeamInvitation::find()
         .filter(CTeamInvitation::Team.eq(team.id))

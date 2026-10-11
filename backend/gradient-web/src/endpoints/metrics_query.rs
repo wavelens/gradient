@@ -8,6 +8,7 @@ use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
+use crate::resource::Resource;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -154,7 +155,7 @@ pub async fn get_metrics_query(
     Query(params): Query<MetricQueryParams>,
 ) -> WebResult<Json<BaseResponse<Vec<MetricPoint>>>> {
     if !CATALOG.iter().any(|m| m.key == params.metric) {
-        return Err(WebError::not_found("Metric"));
+        return Err(WebError::not_found(Resource::Metric));
     }
 
     let gran = RollupGranularity::from_query_param(params.granularity.as_deref());
@@ -166,7 +167,7 @@ pub async fn get_metrics_query(
         (MetricsScope::Projects(projects), Some(o)) => {
             let o = o.to_string();
             if !projects.contains(&o) {
-                return Err(WebError::not_found("Metric"));
+                return Err(WebError::not_found(Resource::Metric));
             }
 
             Some(vec![o])

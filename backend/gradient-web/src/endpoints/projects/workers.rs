@@ -6,6 +6,7 @@
 
 use crate::access::{Caller, ProjectAccess, has_permission, load_project};
 use crate::authorization::MaybeApiKey;
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
@@ -421,7 +422,7 @@ pub async fn get_project_worker_metrics(
     };
     let display_name = registration_name
         .or(team_name)
-        .ok_or_else(|| WebError::not_found("worker"))?;
+        .ok_or_else(|| WebError::not_found(Resource::Worker))?;
 
     let samples = gradient_entity::worker_sample::Entity::find()
         .filter(gradient_entity::worker_sample::Column::WorkerId.eq(&worker_id))
@@ -555,7 +556,7 @@ pub async fn patch_project_worker(
         .filter(worker_registration::Column::WorkerId.eq(&worker_id))
         .one(&state.web_db)
         .await?
-        .or_not_found("worker registration")?;
+        .or_not_found(Resource::WorkerRegistration)?;
 
     if reg.managed && patch_edits_managed_fields(&body) {
         return Err(WebError::conflict("worker is managed by server state"));
@@ -637,7 +638,7 @@ pub async fn delete_project_worker(
             ));
         }
 
-        return Err(WebError::not_found("worker registration"));
+        return Err(WebError::not_found(Resource::WorkerRegistration));
     }
 
     let project_set = std::collections::HashSet::from([project.id]);

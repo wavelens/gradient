@@ -10,6 +10,7 @@ use crate::helpers::OptionExt;
 use crate::permissions::{
     CachePermission, Permission, PermissionMask, cache_mask_grants, mask_grants,
 };
+use crate::resource::Resource;
 use gradient_core::ServerState;
 use gradient_db::lookup::{get_any_cache_by_name, get_any_project_by_name, get_any_task_by_name};
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
@@ -47,10 +48,10 @@ impl<'a> Caller<'a> {
 
 #[derive(Clone, Copy)]
 pub enum ProjectAccess {
-    /// Private projects require membership. Task endpoints are passing `"Task"` as `label` so a
+    /// Private projects require membership. Task endpoints are passing `Resource::Task` as `label` so a
     /// not-found answer cannot leak that the project exists.
     Readable {
-        label: &'static str,
+        label: Resource,
     },
 
     Require {
@@ -100,7 +101,7 @@ pub async fn load_project(
 
     let label = match access {
         ProjectAccess::Readable { label } => label,
-        _ => "Project",
+        _ => Resource::Project,
     };
 
     let project = get_any_project_by_name(&state.db(), project_name)
@@ -157,7 +158,7 @@ pub async fn load_task(
         ));
     }
 
-    let label = "Task";
+    let label = Resource::Task;
 
     let (project, task) = get_any_task_by_name(&state.db(), project_name, task_name)
         .await?
@@ -205,7 +206,7 @@ pub async fn load_cache(
     cache_name: String,
     access: CacheAccess,
 ) -> WebResult<MCache> {
-    let label = "Cache";
+    let label = Resource::Cache;
 
     let cache = get_any_cache_by_name(&state.db(), cache_name)
         .await?
@@ -298,7 +299,7 @@ pub async fn load_integration_in_project(
         .filter(CIntegration::Project.eq(project_id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Integration")
+        .or_not_found(Resource::Integration)
 }
 
 pub async fn is_project_member(
@@ -373,7 +374,7 @@ async fn require_project_permission(
     user_id: UserId,
     project_id: ProjectId,
     permission: Permission,
-    not_found_label: &str,
+    not_found_label: Resource,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<()> {
     let mask = load_membership_with_permissions(state, user_id, project_id, api_key)
@@ -499,7 +500,7 @@ async fn require_cache_permission(
     user_id: UserId,
     cache_id: CacheId,
     permission: CachePermission,
-    label: &'static str,
+    label: Resource,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<()> {
     let role_mask = cache_role_mask(state, user_id, cache_id)
@@ -604,11 +605,11 @@ pub async fn load_team(
         .filter(CTeam::Name.eq(team_name))
         .one(&state.web_db)
         .await?
-        .or_not_found("Team")?;
+        .or_not_found(Resource::Team)?;
     let role = gradient_db::teams::team_role_of(&state.web_db, team.id, user.id).await?;
 
     match (access, role) {
-        (_, None) if !user.superuser => return Err(WebError::not_found("Team")),
+        (_, None) if !user.superuser => return Err(WebError::not_found(Resource::Team)),
         (TeamAccess::Admin { .. }, Some(TeamRole::Member)) if !user.superuser => {
             return Err(WebError::forbidden(
                 "You do not have permission to perform this action.",
@@ -982,7 +983,9 @@ mod tests {
                 Caller::Anon,
                 None,
                 "test-project".into(),
-                ProjectAccess::Readable { label: "Project" },
+                ProjectAccess::Readable {
+                    label: Resource::Project,
+                },
             )
             .await;
             assert!(r.is_ok());
@@ -1001,7 +1004,9 @@ mod tests {
                 Caller::Anon,
                 None,
                 "test-project".into(),
-                ProjectAccess::Readable { label: "Project" },
+                ProjectAccess::Readable {
+                    label: Resource::Project,
+                },
             )
             .await
             .expect_err("anon must not see private project");
@@ -1666,7 +1671,9 @@ mod tests {
             Caller::User(&user),
             None,
             "private".into(),
-            ProjectAccess::Readable { label: "Project" },
+            ProjectAccess::Readable {
+                label: Resource::Project,
+            },
         )
         .await
         .expect("a team grant is enough to read the project");

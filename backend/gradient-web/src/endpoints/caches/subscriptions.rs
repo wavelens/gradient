@@ -12,6 +12,7 @@ use crate::endpoints::projects::workers::reauth_project_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::CachePermission;
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
@@ -106,7 +107,7 @@ async fn load_request(
 ) -> WebResult<(MProject, MCacheSubscriptionRequest)> {
     let project = gradient_db::lookup::get_any_project_by_name(&state.db(), project_name)
         .await?
-        .ok_or_else(|| WebError::not_found("Subscription request"))?;
+        .ok_or_else(|| WebError::not_found(Resource::SubscriptionRequest))?;
 
     let request = ECacheSubscriptionRequest::find()
         .filter(
@@ -116,7 +117,7 @@ async fn load_request(
         )
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Subscription request"))?;
+        .ok_or_else(|| WebError::not_found(Resource::SubscriptionRequest))?;
 
     Ok((project, request))
 }

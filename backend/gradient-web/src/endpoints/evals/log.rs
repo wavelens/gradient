@@ -7,6 +7,7 @@
 use crate::access::is_project_member;
 use crate::authorization::MaybeApiKey;
 use crate::error::WebError;
+use crate::resource::Resource;
 use async_stream::stream;
 use axum::Extension;
 use axum::extract::{Path, State};
@@ -119,7 +120,7 @@ pub async fn post_evaluation_builds(
         EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
 
     if !is_project_member(&state, user.id, ctx.project_id, api_key_ref).await? {
-        return Err(WebError::not_found("Evaluation"));
+        return Err(WebError::not_found(Resource::Evaluation));
     }
 
     let evaluation = ctx.evaluation;

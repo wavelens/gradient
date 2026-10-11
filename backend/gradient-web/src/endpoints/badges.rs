@@ -18,6 +18,7 @@ use crate::access::is_project_member;
 use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
 use crate::error::WebError;
 use crate::helpers::OptionExt;
+use crate::resource::Resource;
 use gradient_core::ServerState;
 use gradient_db::lookup::get_any_project_by_name;
 use gradient_types::*;
@@ -160,7 +161,7 @@ async fn check_badge_project_access(
     match resolved_user {
         Some(user) => {
             if !is_project_member(state, user.id, project.id, api_key).await? {
-                return Err(WebError::not_found("Project"));
+                return Err(WebError::not_found(Resource::Project));
             }
         }
         None => return Err(WebError::unauthorized("Authorization required")),
@@ -267,7 +268,7 @@ pub async fn get_task_badge(
 ) -> Result<Response, WebError> {
     let project = get_any_project_by_name(&state.db(), project)
         .await?
-        .or_not_found("Project")?;
+        .or_not_found(Resource::Project)?;
 
     let (resolved_user, resolved_key) =
         resolve_badge_user(&state, maybe_user, api_key, params.token, client_ip).await?;
@@ -278,7 +279,7 @@ pub async fn get_task_badge(
         .filter(CTask::Name.eq(&task))
         .one(&state.web_db)
         .await?
-        .or_not_found("Task")?;
+        .or_not_found(Resource::Task)?;
 
     let (status, has_failed_builds) = if let Some(ref eval_attr) = params.eval {
         badge_status_for_entry_point(&state, task.id, eval_attr).await?

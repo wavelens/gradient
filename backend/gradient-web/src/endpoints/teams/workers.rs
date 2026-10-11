@@ -13,6 +13,7 @@ use crate::endpoints::projects::workers::{
 };
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
@@ -90,7 +91,7 @@ async fn find_team_worker(
         .filter(CTeamWorker::WorkerId.eq(worker_id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Team worker")
+        .or_not_found(Resource::TeamWorker)
 }
 
 pub async fn get_team_workers(

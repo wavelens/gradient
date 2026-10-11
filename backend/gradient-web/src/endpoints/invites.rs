@@ -11,6 +11,7 @@ use crate::helpers::{ok_json, role_names};
 use crate::invite_policy::{
     InviteDecision, InviteItem, InviteKind, evaluate_invite, merge_invites,
 };
+use crate::resource::Resource;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -213,7 +214,7 @@ async fn find_invitation(state: &Arc<ServerState>, token: &str) -> WebResult<Inv
         .one(&state.web_db)
         .await?
         .map(Invitation::Team)
-        .ok_or_else(|| WebError::not_found("Invitation"))
+        .ok_or_else(|| WebError::not_found(Resource::Invitation))
 }
 
 /// The session must belong to the invitee. A forwarded mail is useless to anybody else.
@@ -231,7 +232,7 @@ async fn claim_invitation(
         gradient_types::now(),
     ) {
         InviteDecision::Redeem => Ok(invitation),
-        InviteDecision::NotInvitee => Err(WebError::not_found("Invitation")),
+        InviteDecision::NotInvitee => Err(WebError::not_found(Resource::Invitation)),
         InviteDecision::Expired => {
             match invitation {
                 Invitation::Project(i) => {

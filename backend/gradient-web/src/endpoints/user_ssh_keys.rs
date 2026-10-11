@@ -9,6 +9,7 @@ use crate::authorization::MaybeApiKey;
 use crate::endpoints::user::forbid_via_api_key;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
@@ -59,7 +60,7 @@ fn require_ssh(state: &ServerState) -> WebResult<()> {
     if state.config.ssh.enable {
         Ok(())
     } else {
-        Err(WebError::not_found("SSH"))
+        Err(WebError::not_found_msg("SSH not found"))
     }
 }
 
@@ -100,7 +101,7 @@ pub async fn post_ssh_key(
         .await?
         .is_some()
     {
-        return Err(WebError::already_exists("SSH key"));
+        return Err(WebError::already_exists(Resource::SshKey));
     }
 
     let inserted = MUserSshKey {
@@ -145,7 +146,7 @@ pub async fn delete_ssh_key(
         .one(&state.web_db)
         .await?
         .filter(|k| k.user == user.id)
-        .or_not_found("SSH key")?;
+        .or_not_found(Resource::SshKey)?;
 
     let key_id = key.id;
     key.delete(&state.web_db).await?;

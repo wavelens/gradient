@@ -14,6 +14,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
@@ -260,7 +261,7 @@ pub async fn put_integration(
     .await?;
 
     if check_index_name(&body.name).is_err() {
-        return Err(WebError::invalid_name("Integration Name"));
+        return Err(WebError::invalid_name(Resource::IntegrationName));
     }
 
     let git_host = parse_git_host(&body.git_host_type)?;
@@ -327,7 +328,7 @@ pub async fn put_integration(
         .one(&state.web_db)
         .await?;
     if existing.is_some() {
-        return Err(WebError::already_exists("Integration Name"));
+        return Err(WebError::already_exists(Resource::IntegrationName));
     }
 
     let encrypted_secret = match body.secret.as_deref() {
@@ -439,7 +440,7 @@ pub async fn patch_integration(
 
     if let Some(name) = body.name {
         if check_index_name(&name).is_err() {
-            return Err(WebError::invalid_name("Integration Name"));
+            return Err(WebError::invalid_name(Resource::IntegrationName));
         }
         let clash = EIntegration::find()
             .filter(CIntegration::Project.eq(project.id))
@@ -449,7 +450,7 @@ pub async fn patch_integration(
             .one(&state.web_db)
             .await?;
         if clash.is_some() {
-            return Err(WebError::already_exists("Integration Name"));
+            return Err(WebError::already_exists(Resource::IntegrationName));
         }
         active.name = Set(name);
     }

@@ -10,6 +10,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{ok_json, paginate};
 use crate::permissions::Permission;
+use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
@@ -190,7 +191,7 @@ pub async fn put(
     require_create_permission(state.config.permissions.create_project, &user)?;
 
     if check_index_name(body.name.clone().as_str()).is_err() {
-        return Err(WebError::invalid_name("Project Name"));
+        return Err(WebError::invalid_name(Resource::ProjectName));
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
@@ -206,7 +207,7 @@ pub async fn put(
         .await?;
 
     if existing_project.is_some() {
-        return Err(WebError::already_exists("Project Name"));
+        return Err(WebError::already_exists(Resource::ProjectName));
     }
 
     let (private_key, public_key) =
@@ -233,7 +234,7 @@ pub async fn put(
     .into_active_model()
     .insert(&tx)
     .await
-    .map_err(|e| WebError::from_db_err(e, "Project Name"))?;
+    .map_err(|e| WebError::from_db_err(e, Resource::ProjectName))?;
 
     MProjectUser {
         id: ProjectUserId::now_v7(),
@@ -306,7 +307,9 @@ pub async fn get_project(
         Caller::from_option(&maybe_user),
         api_key.as_ref(),
         project,
-        ProjectAccess::Readable { label: "Project" },
+        ProjectAccess::Readable {
+            label: Resource::Project,
+        },
     )
     .await?;
 
@@ -388,7 +391,7 @@ pub async fn patch_project(
 
     if let Some(name) = body.name {
         if check_index_name(name.as_str()).is_err() {
-            return Err(WebError::invalid_name("Project Name"));
+            return Err(WebError::invalid_name(Resource::ProjectName));
         }
 
         let existing_project = EProject::find()
@@ -397,7 +400,7 @@ pub async fn patch_project(
             .await?;
 
         if existing_project.is_some() {
-            return Err(WebError::already_exists("Project Name"));
+            return Err(WebError::already_exists(Resource::ProjectName));
         }
 
         aproject.name = Set(name);
@@ -423,7 +426,7 @@ pub async fn patch_project(
     let project = aproject
         .update(&state.web_db)
         .await
-        .map_err(|e| WebError::from_db_err(e, "Project Name"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::ProjectName))?;
 
     audit_record(
         &state,

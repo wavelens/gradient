@@ -7,6 +7,7 @@
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::resource::Resource;
 use async_stream::stream;
 use axum::extract::{Path, Query, State};
 use axum::http::header;
@@ -102,20 +103,20 @@ pub async fn get_build_log_chunk(
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
     let log_key = super::effective_log_id(&state, &ctx.shared_build)
         .await
-        .ok_or_else(|| WebError::not_found("LogChunk"))?;
+        .ok_or_else(|| WebError::not_found(Resource::LogChunk))?;
 
     let row = gradient_entity::build_log_chunk::Entity::find()
         .filter(gradient_entity::build_log_chunk::Column::BuildAttempt.eq(log_key))
         .filter(gradient_entity::build_log_chunk::Column::ChunkIndex.eq(index as i32))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("LogChunk"))?;
+        .ok_or_else(|| WebError::not_found(Resource::LogChunk))?;
 
     let raw = state
         .log_storage
         .read_chunk(log_key, index)
         .await
-        .map_err(|_| WebError::not_found("LogChunk"))?;
+        .map_err(|_| WebError::not_found(Resource::LogChunk))?;
 
     let text = format!("{}{}", row.color_prefix, decode_chunk(&raw)?);
 

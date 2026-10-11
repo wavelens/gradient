@@ -9,6 +9,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::CachePermission;
+use crate::resource::Resource;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -140,7 +141,7 @@ async fn load_upstream(
         .filter(CCacheUpstream::Cache.eq(cache_id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Upstream cache")
+        .or_not_found(Resource::UpstreamCache)
 }
 
 pub async fn get_upstream_caches(

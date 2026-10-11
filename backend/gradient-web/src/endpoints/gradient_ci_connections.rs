@@ -25,6 +25,7 @@ use crate::authorization::MaybeApiKey;
 use crate::endpoints::projects::workers::encrypt_token;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::resource::Resource;
 
 const DISPLAY_NAME: &str = "Gradient.CI Servers";
 const PREFIX: &str = "gci1_";
@@ -265,7 +266,7 @@ async fn insert_registration(
         .into_active_model()
         .insert(&state.web_db)
         .await
-        .map_err(|e| WebError::from_db_err(e, "Gradient.CI connection"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::GradientCiConnection))?;
     if let Err(e) = gradient_ci::unpark_no_workers_for_project(&state.web_db, project.id).await {
         tracing::warn!(
             error = %e,
@@ -289,7 +290,7 @@ async fn insert_team_worker(
         .into_active_model()
         .insert(&state.web_db)
         .await
-        .map_err(|e| WebError::from_db_err(e, "Gradient.CI connection"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::GradientCiConnection))?;
 
     let projects =
         gradient_db::teams::workers::projects_granted_with_workers(&state.web_db, team.id).await?;

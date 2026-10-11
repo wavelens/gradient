@@ -6,6 +6,7 @@
 
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::resource::Resource;
 use axum::{
     Json,
     extract::{Path, State},
@@ -64,6 +65,6 @@ pub async fn get_task(
     let row = admin_tasks::get(&state.worker_db, task_id)
         .await
         .map_err(|e| WebError::internal(format!("get_task: {e}")))?
-        .ok_or_else(|| WebError::not_found("admin_task"))?;
+        .ok_or_else(|| WebError::not_found(Resource::AdminTask))?;
     Ok(ok_json(AdminTaskDto::from(row)))
 }

@@ -11,6 +11,7 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, role_names};
 use crate::invite_policy::invitation_expiry;
 use crate::permissions::Permission;
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -48,7 +49,7 @@ async fn find_user_by_username(state: &Arc<ServerState>, username: &str) -> WebR
         .filter(CUser::Username.eq(username))
         .one(&state.web_db)
         .await?
-        .or_not_found("User")
+        .or_not_found(Resource::User)
 }
 
 async fn find_project_membership(
@@ -92,7 +93,9 @@ pub async fn get_project_users(
         Caller::from_option(&maybe_user),
         api_key.as_ref(),
         project,
-        ProjectAccess::Readable { label: "Project" },
+        ProjectAccess::Readable {
+            label: Resource::Project,
+        },
     )
     .await?;
 
@@ -151,14 +154,14 @@ pub async fn post_project_users(
         .await?
         .is_some()
     {
-        return Err(WebError::already_exists("User already in Project"));
+        return Err(WebError::already_exists(Resource::ProjectMembership));
     }
 
     if find_project_invitation(&state, project.id, target_user.id)
         .await?
         .is_some()
     {
-        return Err(WebError::already_exists("User already invited"));
+        return Err(WebError::already_exists(Resource::Invitation));
     }
 
     let role = ERole::find()
@@ -171,7 +174,7 @@ pub async fn post_project_users(
         )
         .one(&state.web_db)
         .await?
-        .or_not_found("Role")?;
+        .or_not_found(Resource::Role)?;
 
     if user.superuser {
         MProjectUser {
@@ -299,7 +302,7 @@ pub async fn patch_project_users(
         )
         .one(&state.web_db)
         .await?
-        .or_not_found("Role")?;
+        .or_not_found(Resource::Role)?;
 
     let mut active: AProjectUser = membership.into();
     active.role = Set(role.id);

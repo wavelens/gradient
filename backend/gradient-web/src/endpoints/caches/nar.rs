@@ -7,6 +7,7 @@
 use super::helpers::{CacheContext, cache_client_ip};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
+use crate::resource::Resource;
 use axum::body::Body;
 use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, header};
@@ -33,7 +34,7 @@ pub async fn nar(
         get_hash_from_url(path.clone()).map_err(|e| WebError::bad_request(e.to_string()))?;
 
     if !(path.ends_with(".nar") || path.contains(".nar.")) {
-        return Err(WebError::not_found("Path"));
+        return Err(WebError::not_found(Resource::Path));
     }
 
     let client_ip = cache_client_ip(&state, &headers, peer);
@@ -74,14 +75,14 @@ pub async fn upstream_nar(
 
     let sources = named_first(substitution_sources(&upstream_caches), upstream_id);
     if sources.is_empty() {
-        return Err(WebError::not_found("Upstream"));
+        return Err(WebError::not_found(Resource::Upstream));
     }
 
     let Some(object) =
         fetch_from_upstream_caches(&sources, &upstream_nar_path(&path, query.as_deref()), None)
             .await
     else {
-        return Err(WebError::not_found("NAR in upstream"));
+        return Err(WebError::not_found(Resource::NarInUpstream));
     };
 
     let mut builder = Response::builder().header(

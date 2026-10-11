@@ -12,6 +12,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::permissions::Permission;
+use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_types::events::EventOwner;
@@ -80,7 +81,7 @@ pub async fn get_task_name_available(
     }
     let project = get_any_project_by_name(&state.db(), project)
         .await?
-        .or_not_found("Project")?;
+        .or_not_found(Resource::Project)?;
     let exists = ETask::find()
         .filter(CTask::Name.eq(name.as_str()))
         .filter(CTask::Project.eq(project.id))
@@ -103,7 +104,9 @@ pub async fn get(
         Caller::from_option(&maybe_user),
         api_key_ref,
         project,
-        ProjectAccess::Readable { label: "Project" },
+        ProjectAccess::Readable {
+            label: Resource::Project,
+        },
     )
     .await?;
 
@@ -198,7 +201,7 @@ pub async fn put(
     Json(body): Json<MakeTaskRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if check_task_name(body.name.clone().as_str()).is_err() {
-        return Err(WebError::invalid_name("Task Name"));
+        return Err(WebError::invalid_name(Resource::TaskName));
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
@@ -234,7 +237,7 @@ pub async fn put(
         .await?;
 
     if existing_task.is_some() {
-        return Err(WebError::already_exists("Task Name"));
+        return Err(WebError::already_exists(Resource::TaskName));
     }
 
     let wildcard = body
@@ -495,7 +498,7 @@ impl<'a> TaskPatcher<'a> {
 
     async fn apply_name(&mut self, project: &MProject, name: String) -> WebResult<()> {
         if check_task_name(name.as_str()).is_err() {
-            return Err(WebError::invalid_name("Task Name"));
+            return Err(WebError::invalid_name(Resource::TaskName));
         }
         let existing = ETask::find()
             .filter(
@@ -506,7 +509,7 @@ impl<'a> TaskPatcher<'a> {
             .one(&self.state.web_db)
             .await?;
         if existing.is_some() {
-            return Err(WebError::already_exists("Task Name"));
+            return Err(WebError::already_exists(Resource::TaskName));
         }
         self.atask.name = Set(name);
         Ok(())

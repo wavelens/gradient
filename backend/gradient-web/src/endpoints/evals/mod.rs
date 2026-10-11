@@ -26,12 +26,13 @@ use crate::access::is_project_member;
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
+use crate::resource::Resource;
 use gradient_core::ServerState;
 use gradient_types::*;
 use sea_orm::EntityTrait;
 use std::sync::Arc;
 
-/// Every failure is answered with `not_found("Evaluation")`. Callers cannot distinguish missing
+/// Every failure is answered with `not_found(Resource::Evaluation)`. Callers cannot distinguish missing
 /// from forbidden.
 pub(super) struct EvalAccessContext {
     pub evaluation: MEvaluation,
@@ -50,11 +51,11 @@ impl EvalAccessContext {
         let evaluation = EEvaluation::find_by_id(evaluation_id)
             .one(&state.web_db)
             .await?
-            .or_not_found("Evaluation")?;
+            .or_not_found(Resource::Evaluation)?;
 
         let task_id = evaluation.task.ok_or_else(|| {
             tracing::warn!(%evaluation_id, "evaluation has no task");
-            WebError::data_inconsistency("Evaluation")
+            WebError::data_inconsistency(Resource::Evaluation)
         })?;
         let task = ETask::find_by_id(task_id)
             .one(&state.web_db)
@@ -65,7 +66,7 @@ impl EvalAccessContext {
                     %evaluation_id,
                     "Task not found for evaluation",
                 );
-                WebError::data_inconsistency("Evaluation")
+                WebError::data_inconsistency(Resource::Evaluation)
             })?;
         let project_id = task.project;
         let task_name = Some(task.name);
@@ -76,7 +77,7 @@ impl EvalAccessContext {
             .await?
             .ok_or_else(|| {
                 tracing::warn!(%project_id, "Project not found");
-                WebError::data_inconsistency("Project")
+                WebError::data_inconsistency(Resource::Project)
             })?;
 
         let can_access = if project.public {
@@ -88,7 +89,7 @@ impl EvalAccessContext {
             }
         };
         if !can_access {
-            return Err(WebError::not_found("Evaluation"));
+            return Err(WebError::not_found(Resource::Evaluation));
         }
 
         Ok(Self {

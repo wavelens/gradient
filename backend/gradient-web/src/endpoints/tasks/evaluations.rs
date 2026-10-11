@@ -15,6 +15,7 @@ use crate::endpoints::{archive_headers, build_product_headers};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
+use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -344,7 +345,7 @@ pub async fn get_task_evaluations(
             .filter(CEvaluation::Task.eq(task.id))
             .one(&state.web_db)
             .await?
-            .or_not_found("Evaluation")?;
+            .or_not_found(Resource::Evaluation)?;
         query = query.filter(older_than(&cursor));
     }
 
@@ -590,10 +591,10 @@ pub async fn get_task_entry_points(
     let evaluation = EEvaluation::find_by_id(eval_id)
         .one(&state.web_db)
         .await?
-        .or_not_found("Evaluation")?;
+        .or_not_found(Resource::Evaluation)?;
 
     if evaluation.task != Some(task.id) {
-        return Err(WebError::not_found("Evaluation"));
+        return Err(WebError::not_found(Resource::Evaluation));
     }
 
     let failed_attributes: Vec<FailedAttributeSummary> =
@@ -938,14 +939,14 @@ pub async fn get_entry_point_download(
 ) -> Result<Response, WebError> {
     let project = get_any_project_by_name(&state.db(), project)
         .await?
-        .or_not_found("Project")?;
+        .or_not_found(Resource::Project)?;
 
     let task = ETask::find()
         .filter(CTask::Project.eq(project.id))
         .filter(CTask::Name.eq(&task))
         .one(&state.web_db)
         .await?
-        .or_not_found("Task")?;
+        .or_not_found(Resource::Task)?;
 
     let (resolved_user, resolved_key) = if let Some(token_str) = params.token {
         let decoded = crate::authorization::decode_jwt(State(Arc::clone(&state)), token_str)
@@ -971,36 +972,36 @@ pub async fn get_entry_point_download(
         match resolved_user {
             Some(ref user) => {
                 if !is_project_member(&state, user.id, project.id, resolved_key.as_ref()).await? {
-                    return Err(WebError::not_found("Task"));
+                    return Err(WebError::not_found(Resource::Task));
                 }
             }
             None => return Err(WebError::unauthorized("Authorization required")),
         }
     }
 
-    let evaluation_id = task.last_evaluation.or_not_found("Evaluation")?;
+    let evaluation_id = task.last_evaluation.or_not_found(Resource::Evaluation)?;
     let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&state.web_db)
         .await?
-        .or_not_found("Evaluation")?;
+        .or_not_found(Resource::Evaluation)?;
 
     let ep = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation.id))
         .filter(CEntryPoint::Eval.eq(&params.eval))
         .one(&state.web_db)
         .await?
-        .or_not_found("Entry point")?;
+        .or_not_found(Resource::EntryPoint)?;
 
     let shared_build = EDerivationBuild::find()
         .filter(CDerivationBuild::Derivation.eq(ep.derivation))
         .one(&state.web_db)
         .await?
-        .or_not_found("Build")?;
+        .or_not_found(Resource::Build)?;
 
     if shared_build.status != BuildStatus::Completed
         && shared_build.status != BuildStatus::Substituted
     {
-        return Err(WebError::not_found("File"));
+        return Err(WebError::not_found(Resource::File));
     }
 
     let build_outputs = EDerivationOutput::find()
@@ -1010,7 +1011,7 @@ pub async fn get_entry_point_download(
 
     match serve_hydra_artifact(&state, build_outputs, &params.filename).await? {
         Some(response) => Ok(response),
-        None => Err(WebError::not_found("File")),
+        None => Err(WebError::not_found(Resource::File)),
     }
 }
 

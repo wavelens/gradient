@@ -10,6 +10,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::invite_policy::invitation_expiry;
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -56,7 +57,7 @@ async fn find_user(state: &Arc<ServerState>, username: &str) -> WebResult<MUser>
         .filter(CUser::Username.eq(username))
         .one(&state.web_db)
         .await?
-        .or_not_found("User")
+        .or_not_found(Resource::User)
 }
 
 async fn find_membership(
@@ -153,7 +154,7 @@ pub async fn post_team_members(
     let target = find_user(&state, &body.user).await?;
 
     if find_membership(&state, team.id, target.id).await?.is_some() {
-        return Err(WebError::already_exists("User already in Team"));
+        return Err(WebError::already_exists(Resource::TeamMembership));
     }
     if ETeamInvitation::find()
         .filter(CTeamInvitation::Team.eq(team.id))
@@ -162,7 +163,7 @@ pub async fn post_team_members(
         .await?
         .is_some()
     {
-        return Err(WebError::already_exists("User already invited"));
+        return Err(WebError::already_exists(Resource::Invitation));
     }
 
     let payload = serde_json::json!({

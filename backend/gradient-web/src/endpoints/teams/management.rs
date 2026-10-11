@@ -10,6 +10,7 @@ use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_create_permission, require_superuser};
 use crate::helpers::ok_json;
+use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -157,7 +158,7 @@ pub async fn put_team(
     require_create_permission(state.config.permissions.create_team, &user)?;
 
     if check_index_name(&body.name).is_err() {
-        return Err(WebError::invalid_name("Team Name"));
+        return Err(WebError::invalid_name(Resource::TeamName));
     }
     validate_display_name(&body.display_name)
         .map_err(|e| WebError::bad_request(format!("Invalid display name: {}", e)))?;
@@ -168,7 +169,7 @@ pub async fn put_team(
         .await?
         .is_some()
     {
-        return Err(WebError::already_exists("Team Name"));
+        return Err(WebError::already_exists(Resource::TeamName));
     }
 
     let tx = state.web_db.inner().begin().await?;
@@ -183,7 +184,7 @@ pub async fn put_team(
     .into_active_model()
     .insert(&tx)
     .await
-    .map_err(|e| WebError::from_db_err(e, "Team Name"))?;
+    .map_err(|e| WebError::from_db_err(e, Resource::TeamName))?;
 
     MTeamUser {
         id: TeamUserId::now_v7(),
@@ -292,7 +293,7 @@ pub async fn patch_team(
     active
         .update(&state.web_db)
         .await
-        .map_err(|e| WebError::from_db_err(e, "SCIM group"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::ScimGroup))?;
 
     audit_record(
         &state,

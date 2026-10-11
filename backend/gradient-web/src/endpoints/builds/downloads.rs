@@ -7,6 +7,7 @@
 use crate::authorization::{MaybeApiKey, MaybeUser, decode_download_token, encode_download_token};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -226,7 +227,7 @@ async fn load_with_download_token(
         .await
         .map_err(|_| WebError::unauthorized("Invalid download token"))?;
     if claims.derivation != ctx.build_job.derivation {
-        return Err(WebError::not_found("Build"));
+        return Err(WebError::not_found(Resource::Build));
     }
     Ok(ctx)
 }
@@ -256,7 +257,7 @@ pub async fn get_build_download(
 
     match find_and_serve_file(&state, build_id, build_outputs, &filename).await? {
         Some(response) => Ok(response),
-        None => Err(WebError::not_found("File")),
+        None => Err(WebError::not_found(Resource::File)),
     }
 }
 

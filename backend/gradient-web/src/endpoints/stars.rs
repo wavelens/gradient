@@ -11,6 +11,7 @@ use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::WebResult;
 use crate::helpers::ok_json;
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -77,7 +78,9 @@ async fn project_target(
     api_key: &MaybeApiKey,
     project: String,
 ) -> WebResult<StarTarget> {
-    let access = ProjectAccess::Readable { label: "Project" };
+    let access = ProjectAccess::Readable {
+        label: Resource::Project,
+    };
     let project =
         load_project(state, Caller::User(user), api_key.as_ref(), project, access).await?;
     Ok(StarTarget {

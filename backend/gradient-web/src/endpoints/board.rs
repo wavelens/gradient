@@ -12,6 +12,7 @@ use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
+use crate::resource::Resource;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
@@ -439,7 +440,7 @@ pub async fn get_dispatched_job(
 
     if let Some(c) = scheduler.candidate_detail(DispatchedJobId::from(id)).await {
         if !scope.allows(&Uuid::from(c.project)) {
-            return Err(WebError::not_found("Job"));
+            return Err(WebError::not_found(Resource::Job));
         }
 
         let (project, worker_name) =
@@ -492,10 +493,10 @@ pub async fn get_dispatched_job(
     let j = gradient_entity::dispatched_job::Entity::find_by_id(DispatchedJobId::from(id))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Job"))?;
+        .ok_or_else(|| WebError::not_found(Resource::Job))?;
 
     if !scope.allows(&Uuid::from(j.project)) {
-        return Err(WebError::not_found("Job"));
+        return Err(WebError::not_found(Resource::Job));
     }
 
     let (project, worker_name) =
@@ -1333,8 +1334,8 @@ pub async fn get_expensive_by_resource(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Query(params): Query<ResourceParams>,
 ) -> WebResult<Json<BaseResponse<Vec<ExpensiveResource>>>> {
-    let (value_expr, unit) =
-        resource_metric_expr(&params.metric).ok_or_else(|| WebError::not_found("Metric"))?;
+    let (value_expr, unit) = resource_metric_expr(&params.metric)
+        .ok_or_else(|| WebError::not_found(Resource::Metric))?;
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
     let project_filter = scope.project_in_list();
@@ -1524,7 +1525,7 @@ pub async fn get_expensive_evals_by_resource(
     Query(params): Query<EvalResourceParams>,
 ) -> WebResult<Json<BaseResponse<Vec<ExpensiveEval>>>> {
     let (value_expr, unit) =
-        eval_metric_expr(&params.metric).ok_or_else(|| WebError::not_found("Metric"))?;
+        eval_metric_expr(&params.metric).ok_or_else(|| WebError::not_found(Resource::Metric))?;
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
     let project_filter = scope.project_in_list();

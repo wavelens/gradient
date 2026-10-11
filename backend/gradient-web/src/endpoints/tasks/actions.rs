@@ -10,6 +10,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
+use crate::resource::Resource;
 use axum::extract::Query;
 use axum::extract::{Path, State};
 use axum::{Extension, Json, Router};
@@ -334,7 +335,7 @@ pub async fn create_action(
     let m = am
         .insert(&state.web_db)
         .await
-        .map_err(|e| WebError::from_db_err(e, "Action"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
 
     record_action_event(
         &state,
@@ -381,7 +382,7 @@ pub async fn read_action(
         .filter(CTaskAction::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Action")?;
+        .or_not_found(Resource::Action)?;
 
     Ok(ok_json(to_response(row)))
 }
@@ -412,7 +413,7 @@ pub async fn update_action(
         .filter(CTaskAction::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Action")?;
+        .or_not_found(Resource::Action)?;
 
     let existing_type = row.action_type;
 
@@ -501,7 +502,7 @@ pub async fn update_action(
     let updated = active
         .update(&state.web_db)
         .await
-        .map_err(|e| WebError::from_db_err(e, "Action"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
 
     record_action_event(
         &state,
@@ -567,7 +568,7 @@ pub async fn delete_action(
         .filter(CTaskAction::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Action")?;
+        .or_not_found(Resource::Action)?;
 
     let active: ATaskAction = row.clone().into();
     active.delete(&state.web_db).await?;
@@ -609,7 +610,7 @@ pub async fn test_action(
         .filter(CTaskAction::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Action")?;
+        .or_not_found(Resource::Action)?;
 
     let action_type = action.action_type;
 
@@ -689,7 +690,7 @@ pub async fn regenerate_token(
         .filter(CTaskAction::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Action")?;
+        .or_not_found(Resource::Action)?;
 
     if existing.action_type != ActionType::SendWebRequest {
         return Err(WebError::unprocessable_entity(
@@ -714,7 +715,7 @@ pub async fn regenerate_token(
     am.updated_at = Set(Utc::now().naive_utc());
     am.update(&state.web_db)
         .await
-        .map_err(|e| WebError::from_db_err(e, "Action"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
 
     Ok(ok_json(serde_json::json!({ "token": plaintext_token })))
 }
@@ -778,7 +779,7 @@ pub async fn list_deliveries(
         .filter(CTaskAction::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Action")?;
+        .or_not_found(Resource::Action)?;
 
     let limit = q.limit.unwrap_or(50).min(200);
     let offset = q.offset.unwrap_or(0);
@@ -822,13 +823,13 @@ pub async fn get_delivery(
         .filter(CTaskAction::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Action")?;
+        .or_not_found(Resource::Action)?;
 
     let r = ETaskActionDelivery::find_by_id(delivery_id)
         .filter(CTaskActionDelivery::ActionId.eq(action_id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Delivery")?;
+        .or_not_found(Resource::Delivery)?;
 
     Ok(ok_json(DeliveryDetail {
         request_body: r.request_body.clone(),

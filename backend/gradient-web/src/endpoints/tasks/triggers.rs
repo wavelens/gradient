@@ -9,6 +9,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
@@ -238,7 +239,7 @@ pub async fn read(
         .filter(CTaskTrigger::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Trigger")?;
+        .or_not_found(Resource::Trigger)?;
 
     let integrations =
         load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&row)).await?;
@@ -270,7 +271,7 @@ pub async fn update(
         .filter(CTaskTrigger::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Trigger")?;
+        .or_not_found(Resource::Trigger)?;
 
     if let Some(ref cfg) = body.config {
         cfg.validate()
@@ -319,7 +320,7 @@ pub async fn delete_one(
         .filter(CTaskTrigger::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Trigger")?;
+        .or_not_found(Resource::Trigger)?;
 
     let active: ATaskTrigger = row.into();
     active.delete(&state.web_db).await?;
@@ -352,7 +353,7 @@ pub async fn fire_now(
         .filter(CTaskTrigger::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Trigger")?;
+        .or_not_found(Resource::Trigger)?;
 
     if !row.active {
         return Err(WebError::bad_request("trigger is inactive"));
