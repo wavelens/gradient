@@ -351,14 +351,14 @@
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.log.burstBytesPerMin` | int | `8388608` | `GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN` | Build log bytes forwarded per build within any minute. The worker stops forwarding a build's log past this limit. The build itself continues. |
+| `worker.log.burstBytesPerMin` | unsigned int | `8388608` | `GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN` | Build log bytes forwarded per build within any minute. The worker stops forwarding a build's log past this limit. The build itself continues. |
 | `worker.log.fetchFromStore` | bool | `true` | `GRADIENT_WORKER_LOG_FETCH_FROM_STORE` | Whether to forward the stored build log of a derivation already built locally and therefore producing no new log. |
 | `worker.log.level.build` | null or one of `trace` `debug` `info` `warn` `error` | `null` | `GRADIENT_WORKER_LOG_LEVEL_BUILD` | Log level of the builder. `null` uses `worker.log.level.default`. |
 | `worker.log.level.default` | one of `trace` `debug` `info` `warn` `error` | `"info"` | `GRADIENT_WORKER_LOG_LEVEL_DEFAULT` | Default log level. |
 | `worker.log.level.eval` | null or one of `trace` `debug` `info` `warn` `error` | `null` | `GRADIENT_WORKER_LOG_LEVEL_EVAL` | Log level of the evaluator. `null` uses `worker.log.level.default`. |
 | `worker.log.level.proto` | null or one of `trace` `debug` `info` `warn` `error` | `null` | `GRADIENT_WORKER_LOG_LEVEL_PROTO` | Log level of the protocol layer. `null` uses `worker.log.level.default`. |
-| `worker.log.sustainedBytesPerHour` | int | `67108864` | `GRADIENT_WORKER_LOG_SUSTAINED_BYTES_PER_HOUR` | Build log bytes forwarded per build within any hour. |
-| `worker.log.traceDir` | null or string | `null` | `GRADIENT_WORKER_LOG_TRACE_DIR` | Directory receiving every closed stage span of the worker and its eval subprocesses as JSON lines, one file per process. `null` disables span tracing. |
+| `worker.log.sustainedBytesPerHour` | unsigned int | `67108864` | `GRADIENT_WORKER_LOG_SUSTAINED_BYTES_PER_HOUR` | Build log bytes forwarded per build within any hour. |
+| `worker.log.traceDir` | null or path | `null` | `GRADIENT_WORKER_LOG_TRACE_DIR` | Directory receiving every closed stage span of the worker and its eval subprocesses as JSON lines, one file per process. `null` disables span tracing. |
 
 ## `worker.nar`
 
