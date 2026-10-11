@@ -24,7 +24,7 @@
     "field": "peers_file",
     "flag": "peers-file",
     "env": "GRADIENT_WORKER_PEERS_FILE",
-    "type": "Option<String>",
+    "type": "Option<PathBuf>",
     "description": "File of peer tokens for challenge-response authentication with the server, one\n`peer_id:token` per line. Lines starting with `#` are ignored.\n\n```\n<uuid>:<token>\n*:<token>\n```\n\nThe peer ID `*` matches any UUID in the server's challenge. Each token is a 48 byte\nrandom secret, for example from {command}`openssl rand -base64 48`, registered through\n`POST /api/v1/projects/{project}/workers`. Pin a project UUID with\n{option}`services.gradient.state.projects.<name>.id` to reference it here.\n\n`null` connects in open mode, where the server accepts the worker without a token.",
     "default": null,
     "values": []
@@ -34,7 +34,7 @@
     "field": "base_dir",
     "flag": "base-dir",
     "env": "GRADIENT_WORKER_BASE_DIR",
-    "type": "String",
+    "type": "PathBuf",
     "description": "Directory holding the worker's state.",
     "default": "/var/lib/gradient-worker",
     "values": []
@@ -137,7 +137,7 @@
     "field": "accepted_server_tokens_file",
     "flag": "accepted-server-tokens-file",
     "env": "GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE",
-    "type": "Option<String>",
+    "type": "Option<PathBuf>",
     "description": "File of token hashes a server must present when it connects to this worker, one\n`peer_id:hash` per line. Lines starting with `#` are ignored. A hash is an argon2 PHC\nstring or the lowercase SHA-256 hex digest of the token, for example from\n{command}`printf %s \"$TOKEN\" | sha256sum`. The peer ID `*` matches any peer. The file\nis only read with {option}`services.gradient.worker.discoverable`.\n\n`null` accepts every server, and the worker logs a warning at start.",
     "default": null,
     "values": []
@@ -242,7 +242,7 @@
     "field": "cpu_core_score",
     "flag": "system-cpu-core-score",
     "env": "GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE",
-    "type": "Option<u32>",
+    "type": "Option<NonZeroU32>",
     "description": "Single-core speed score advertised to the scheduler, higher is faster. `null`\nbenchmarks the host at startup.",
     "default": null,
     "values": []
@@ -262,7 +262,7 @@
     "field": "max_connections",
     "flag": "nix-daemon-max-connections",
     "env": "GRADIENT_WORKER_NIX_DAEMON_MAX_CONNECTIONS",
-    "type": "usize",
+    "type": "NonZeroUsize",
     "description": "Maximum connections to the local Nix daemon. Each build holds one for its whole run\nplus up to 8 for parallel NAR imports. The rest is headroom for path checks.",
     "default": "32",
     "values": []
@@ -272,7 +272,7 @@
     "field": "max_concurrent",
     "flag": "eval-max-concurrent",
     "env": "GRADIENT_WORKER_EVAL_MAX_CONCURRENT",
-    "type": "u32",
+    "type": "NonZeroU32",
     "description": "Maximum simultaneous evaluations.",
     "default": "1",
     "values": []
@@ -282,9 +282,9 @@
     "field": "fork_workers",
     "flag": "eval-fork-workers",
     "env": "GRADIENT_WORKER_EVAL_FORK_WORKERS",
-    "type": "usize",
+    "type": "Option<NonZeroUsize>",
     "description": "Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` sizes\nthe pool to the host's core count, capped at 16.",
-    "default": "16",
+    "default": null,
     "values": []
   },
   {
@@ -292,7 +292,7 @@
     "field": "max_rss",
     "flag": "eval-max-rss",
     "env": "GRADIENT_WORKER_EVAL_MAX_RSS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit\nrestart after their call and free the Nix heap. A call may grow past the limit, with\n{option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.\nKeep it above a typical evaluation's heap.",
     "default": "2147483648",
     "values": []
@@ -325,7 +325,7 @@
     "field": "max_concurrent",
     "flag": "build-max-concurrent",
     "env": "GRADIENT_WORKER_BUILD_MAX_CONCURRENT",
-    "type": "u32",
+    "type": "NonZeroU32",
     "description": "Maximum simultaneous builds.",
     "default": "32",
     "values": []
@@ -335,7 +335,7 @@
     "field": "max_cores",
     "flag": "build-max-cores",
     "env": "GRADIENT_WORKER_BUILD_MAX_CORES",
-    "type": "Option<u32>",
+    "type": "Option<NonZeroU32>",
     "description": "CPU cores a single build can use, passed as `--cores`. `null` uses all cores.",
     "default": null,
     "values": []
@@ -345,7 +345,7 @@
     "field": "cgroup",
     "flag": "build-cgroup",
     "env": "GRADIENT_WORKER_BUILD_CGROUP",
-    "type": "Option<std::path::PathBuf>",
+    "type": "Option<PathBuf>",
     "description": "Cgroup directory of {file}`nix-daemon.service`, the parent of the build cgroups. The worker\nis reading the peak memory of each running build from it and sending the values with its\nheartbeat. The scheduler is reserving the larger of the predicted and the reported peak.\nThe build cgroups need {option}`services.gradient.worker.build.metrics` and Gradient's\nNix fork on the daemon. `null` reports nothing.",
     "default": null,
     "values": []
@@ -355,7 +355,7 @@
     "field": "max_concurrent_uploads",
     "flag": "nar-max-concurrent-uploads",
     "env": "GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS",
-    "type": "u32",
+    "type": "NonZeroU32",
     "description": "Upload requests over 1 MiB the worker keeps open at once, waiting for a server grant or\ntransferring. One job holds at most half. Smaller uploads have a window of 128 of their\nown. The server's upload budget decides how many run. This limit bounds worker memory.",
     "default": "16",
     "values": []
@@ -458,7 +458,7 @@
     "field": "trace_dir",
     "flag": "log-trace-dir",
     "env": "GRADIENT_WORKER_LOG_TRACE_DIR",
-    "type": "Option<std::path::PathBuf>",
+    "type": "Option<PathBuf>",
     "description": "Directory receiving every closed stage span of the worker and its eval subprocesses as\nJSON lines, one file per process. `null` disables span tracing.",
     "default": null,
     "values": []

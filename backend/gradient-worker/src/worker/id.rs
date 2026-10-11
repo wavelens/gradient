@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::path::Path;
+
 use anyhow::{Context, Result};
 use tracing::info;
 
-pub(super) fn load_or_generate_id(data_dir: &str, id_override: Option<&str>) -> Result<String> {
+pub(super) fn load_or_generate_id(data_dir: &Path, id_override: Option<&str>) -> Result<String> {
     use std::fs;
-    use std::path::Path;
 
     if let Some(raw) = id_override {
         let id = raw.trim().to_owned();
@@ -19,10 +20,10 @@ pub(super) fn load_or_generate_id(data_dir: &str, id_override: Option<&str>) -> 
         return Ok(id);
     }
 
-    let dir = Path::new(data_dir);
-    fs::create_dir_all(dir).with_context(|| format!("create data directory '{}'", data_dir))?;
+    fs::create_dir_all(data_dir)
+        .with_context(|| format!("create data directory '{}'", data_dir.display()))?;
 
-    let id_path = dir.join("worker-id");
+    let id_path = data_dir.join("worker-id");
 
     if id_path.exists() {
         let raw = fs::read_to_string(&id_path)
@@ -53,8 +54,8 @@ mod tests {
     #[test]
     fn load_or_generate_id_creates_new() {
         let dir = temp_dir();
-        let data_dir = dir.path().to_string_lossy().to_string();
-        let id = load_or_generate_id(&data_dir, None).expect("should generate id");
+        let data_dir = dir.path();
+        let id = load_or_generate_id(data_dir, None).expect("should generate id");
         id.parse::<uuid::Uuid>()
             .expect("generated id must be a valid UUID");
         let id_path = dir.path().join("worker-id");
@@ -68,8 +69,8 @@ mod tests {
         let id_path = dir.path().join("worker-id");
         let known_id = uuid::Uuid::now_v7().to_string();
         fs::write(&id_path, &known_id).unwrap();
-        let data_dir = dir.path().to_string_lossy().to_string();
-        let loaded = load_or_generate_id(&data_dir, None).expect("should read existing id");
+        let data_dir = dir.path();
+        let loaded = load_or_generate_id(data_dir, None).expect("should read existing id");
         assert_eq!(loaded, known_id);
     }
 
@@ -78,8 +79,8 @@ mod tests {
         let dir = temp_dir();
         let id_path = dir.path().join("worker-id");
         fs::write(&id_path, "not-a-uuid").unwrap();
-        let data_dir = dir.path().to_string_lossy().to_string();
-        let result = load_or_generate_id(&data_dir, None);
+        let data_dir = dir.path();
+        let result = load_or_generate_id(data_dir, None);
         assert!(result.is_err(), "invalid UUID in file should return Err");
     }
 
@@ -90,17 +91,17 @@ mod tests {
         let file_id = uuid::Uuid::now_v7().to_string();
         fs::write(&id_path, &file_id).unwrap();
         let override_id = uuid::Uuid::now_v7().to_string();
-        let data_dir = dir.path().to_string_lossy().to_string();
+        let data_dir = dir.path();
         let result =
-            load_or_generate_id(&data_dir, Some(&override_id)).expect("override should work");
+            load_or_generate_id(data_dir, Some(&override_id)).expect("override should work");
         assert_eq!(result, override_id, "override must win over file");
     }
 
     #[test]
     fn load_or_generate_id_override_invalid_uuid_fails() {
         let dir = temp_dir();
-        let data_dir = dir.path().to_string_lossy().to_string();
-        let result = load_or_generate_id(&data_dir, Some("not-a-uuid"));
+        let data_dir = dir.path();
+        let result = load_or_generate_id(data_dir, Some("not-a-uuid"));
         assert!(result.is_err(), "invalid override UUID should return Err");
     }
 }

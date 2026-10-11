@@ -8,6 +8,8 @@ mod options;
 
 pub use options::*;
 
+use std::num::{NonZeroU32, NonZeroUsize};
+
 use gradient_wire::types::GradientCapabilities;
 
 pub fn host_system() -> String {
@@ -19,13 +21,19 @@ pub fn host_system() -> String {
     format!("{arch}-{os}")
 }
 
+/// The pool is capped at 16 workers because each one may hold `eval.max_rss` resident.
+fn default_fork_workers() -> NonZeroUsize {
+    let cores = std::thread::available_parallelism().map_or(4, NonZeroUsize::get);
+    NonZeroUsize::new(cores.min(16)).unwrap_or(NonZeroUsize::MIN)
+}
+
 impl WorkerConfig {
     pub fn peer_tokens(&self) -> Vec<(String, String)> {
         let raw = if let Some(path) = &self.peers_file {
             match std::fs::read_to_string(path) {
                 Ok(s) => s,
                 Err(e) => {
-                    tracing::warn!(path, error = %e, "failed to read peers file; connecting in open mode");
+                    tracing::warn!(path = %path.display(), error = %e, "failed to read peers file; connecting in open mode");
                     return vec![];
                 }
             }
@@ -65,31 +73,37 @@ impl WorkerConfig {
         match std::fs::read_to_string(path) {
             Ok(raw) => Some(parse_token_hashes(&raw)),
             Err(e) => {
-                tracing::warn!(path, error = %e, "failed to read accepted server tokens file; rejecting every server");
+                tracing::warn!(path = %path.display(), error = %e, "failed to read accepted server tokens file; rejecting every server");
                 Some(Vec::new())
             }
         }
     }
 
     pub fn nar_partial_dir(&self) -> std::path::PathBuf {
-        std::path::Path::new(&self.base_dir).join("nar-partial")
+        self.base_dir.join("nar-partial")
     }
 
     pub fn eval_cache_dir(&self) -> String {
-        self.eval
-            .cache_dir
-            .clone()
-            .unwrap_or_else(|| format!("{}/eval-cache", self.base_dir))
+        self.eval.cache_dir.clone().unwrap_or_else(|| {
+            self.base_dir
+                .join("eval-cache")
+                .to_string_lossy()
+                .into_owned()
+        })
+    }
+
+    pub fn fork_workers(&self) -> NonZeroUsize {
+        self.eval.fork_workers.unwrap_or_else(default_fork_workers)
     }
 
     pub fn build_cores(&self) -> u32 {
-        self.build.max_cores.unwrap_or(0)
+        self.build.max_cores.map_or(0, NonZeroU32::get)
     }
 
     pub fn cpu_core_score(&self) -> u32 {
         self.system
             .cpu_core_score
-            .unwrap_or_else(crate::metrics::cpu_core_score)
+            .map_or_else(crate::metrics::cpu_core_score, NonZeroU32::get)
     }
 
     pub fn capabilities(&self) -> GradientCapabilities {
@@ -228,11 +242,7 @@ mod tests {
 
     #[test]
     fn peer_tokens_from_file() {
-        let path = std::env::temp_dir()
-            .join(format!("gradient-test-peers-{}", std::process::id()))
-            .to_str()
-            .unwrap()
-            .to_owned();
+        let path = std::env::temp_dir().join(format!("gradient-test-peers-{}", std::process::id()));
         std::fs::write(&path, format!("peer-file:{TOK64}")).unwrap();
 
         let cfg = WorkerConfig {
@@ -261,7 +271,7 @@ mod tests {
         )
         .unwrap();
         let cfg = WorkerConfig {
-            accepted_server_tokens_file: Some(path.to_string_lossy().into_owned()),
+            accepted_server_tokens_file: Some(path.clone()),
             ..Default::default()
         };
 
