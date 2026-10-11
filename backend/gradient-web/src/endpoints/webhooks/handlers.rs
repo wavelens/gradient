@@ -6,7 +6,7 @@
 
 use super::refusal::WebhookRefusal;
 use super::scope::{Verb, WebhookOwner};
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
@@ -15,7 +15,7 @@ use axum::Json;
 use axum::extract::{Query, State};
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
-use gradient_db::{DbContext, WebDb};
+use gradient_db::WebDb;
 use gradient_entity::webhook::WebhookScope;
 use gradient_types::events::{Envelope, EventFilter, webhook};
 use gradient_types::ids::PendingDeliveryId;
@@ -163,24 +163,6 @@ async fn owned_webhook(db: &WebDb, owner: &WebhookOwner) -> WebResult<MWebhook> 
         .or_not_found(Resource::Webhook)
 }
 
-async fn audit(
-    db: &DbContext,
-    owner: &WebhookOwner,
-    verb: Verb,
-    info: &RequestInfo,
-    metadata: serde_json::Value,
-) {
-    audit_record(
-        db,
-        Some(owner.user.id),
-        owner.action(verb),
-        owner.event_owner(),
-        info,
-        Some(metadata),
-    )
-    .await;
-}
-
 pub async fn list_webhooks(
     State(state): ApiState,
     owner: WebhookOwner,
@@ -195,7 +177,7 @@ pub async fn list_webhooks(
 
 pub async fn create_webhook(
     State(state): ApiState,
-    info: RequestInfo,
+    audit: Audit,
     owner: WebhookOwner,
     Json(body): Json<CreateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<CreateWebhookResponse>>> {
@@ -232,14 +214,13 @@ pub async fn create_webhook(
     .await
     .map_err(|e| WebError::from_db_err(e, Resource::Webhook))?;
 
-    audit(
-        &state.db(),
-        &owner,
-        Verb::Create,
-        &info,
-        json!({ "webhook_id": row.id, "name": row.name }),
-    )
-    .await;
+    audit
+        .write(
+            owner.action(Verb::Create),
+            owner.event_owner(),
+            json!({ "webhook_id": row.id, "name": row.name }),
+        )
+        .await;
     Ok(ok_json(CreateWebhookResponse {
         webhook: row.into(),
         secret,
@@ -257,7 +238,7 @@ pub async fn read_webhook(
 
 pub async fn update_webhook(
     State(state): ApiState,
-    info: RequestInfo,
+    audit: Audit,
     owner: WebhookOwner,
     Json(body): Json<UpdateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
@@ -298,39 +279,37 @@ pub async fn update_webhook(
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::Webhook))?;
 
-    audit(
-        &state.db(),
-        &owner,
-        Verb::Update,
-        &info,
-        json!({ "webhook_id": row.id, "fields": fields }),
-    )
-    .await;
+    audit
+        .write(
+            owner.action(Verb::Update),
+            owner.event_owner(),
+            json!({ "webhook_id": row.id, "fields": fields }),
+        )
+        .await;
     Ok(ok_json(WebhookResponse::from(row)))
 }
 
 pub async fn delete_webhook(
     State(state): ApiState,
-    info: RequestInfo,
+    audit: Audit,
     owner: WebhookOwner,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
     let row = owned_webhook(&state.web_db, &owner).await?;
     let (id, name) = (row.id, row.name.clone());
     row.into_active_model().delete(&state.web_db).await?;
-    audit(
-        &state.db(),
-        &owner,
-        Verb::Delete,
-        &info,
-        json!({ "webhook_id": id, "name": name }),
-    )
-    .await;
+    audit
+        .write(
+            owner.action(Verb::Delete),
+            owner.event_owner(),
+            json!({ "webhook_id": id, "name": name }),
+        )
+        .await;
     Ok(ok_json(json!({ "deleted": true })))
 }
 
 pub async fn rotate_secret(
     State(state): ApiState,
-    info: RequestInfo,
+    audit: Audit,
     owner: WebhookOwner,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
     let row = owned_webhook(&state.web_db, &owner).await?;
@@ -340,14 +319,13 @@ pub async fn rotate_secret(
     active.secret = Set(encrypted);
     active.updated_at = Set(gradient_types::now());
     active.update(&state.web_db).await?;
-    audit(
-        &state.db(),
-        &owner,
-        Verb::Update,
-        &info,
-        json!({ "webhook_id": id, "rotated": true }),
-    )
-    .await;
+    audit
+        .write(
+            owner.action(Verb::Update),
+            owner.event_owner(),
+            json!({ "webhook_id": id, "rotated": true }),
+        )
+        .await;
     Ok(ok_json(json!({ "secret": secret })))
 }
 

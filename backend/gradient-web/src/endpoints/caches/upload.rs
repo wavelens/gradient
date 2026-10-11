@@ -5,7 +5,7 @@
 
 use super::admit::{admit, admit_nar};
 use super::refusal::CacheRefusal;
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::scope::{CacheScope, Requires, can};
@@ -39,11 +39,9 @@ pub struct NarinfoPart {
 }
 
 pub async fn nars_upload(
-    CacheScope {
-        cache, user, db, ..
-    }: CacheScope<Requires<can::WriteStore>>,
+    CacheScope { cache, .. }: CacheScope<Requires<can::WriteStore>>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> WebResult<impl IntoResponse> {
@@ -169,22 +167,7 @@ pub async fn nars_upload(
         });
     }
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheNarUpload,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(json!({
-            "cache_id": cache.id.to_string(),
-            "cache_name": cache.name,
-            "store_path": narinfo.store_path,
-            "created": outcome.created,
-        })),
-    )
+    audit.write(Action::CacheNarUpload, EventOwner::cache(cache.id), json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "store_path": narinfo.store_path, "created": outcome.created, }))
     .await;
 
     Ok((
@@ -290,15 +273,9 @@ pub async fn nar_chunk(
 }
 
 pub async fn nar_finalize(
-    CacheScope {
-        cache,
-        user,
-        db,
-        params,
-        ..
-    }: CacheScope<Requires<can::WriteStore>>,
+    CacheScope { cache, params, .. }: CacheScope<Requires<can::WriteStore>>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     axum::Json(narinfo): axum::Json<NarinfoPart>,
 ) -> WebResult<impl IntoResponse> {
     let store_hash: String = params.param("hash")?;
@@ -369,23 +346,7 @@ pub async fn nar_finalize(
         });
     }
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheNarUpload,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(json!({
-            "cache_id": cache.id.to_string(),
-            "cache_name": cache.name,
-            "store_path": narinfo.store_path,
-            "created": outcome.created,
-            "chunked": true,
-        })),
-    )
+    audit.write(Action::CacheNarUpload, EventOwner::cache(cache.id), json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "store_path": narinfo.store_path, "created": outcome.created, "chunked": true, }))
     .await;
 
     Ok((

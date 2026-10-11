@@ -5,7 +5,7 @@
  */
 
 use super::refusal::CacheRefusal;
-use crate::audit::{RequestInfo, changed_fields, record as audit_record};
+use crate::audit::{Audit, changed_fields};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
@@ -123,7 +123,7 @@ pub async fn get(
 
 pub async fn put(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     JsonBody(body): JsonBody<MakeCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -194,21 +194,13 @@ pub async fn put(
 
     tx.commit().await?;
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::CacheCreate,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "cache_id": cache.id.to_string(),
-            "name": cache.name,
-        })),
-    )
-    .await;
+    audit
+        .write(
+            Action::CacheCreate,
+            EventOwner::cache(cache.id),
+            serde_json::json!({ "cache_id": cache.id.to_string(), "name": cache.name, }),
+        )
+        .await;
 
     Ok(ok_json(cache.id.to_string()))
 }
@@ -270,11 +262,9 @@ pub async fn get_cache(
 }
 
 pub async fn patch_cache(
-    CacheScope {
-        cache, user, db, ..
-    }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
+    CacheScope { cache, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     JsonBody(body): JsonBody<PatchCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache_id = cache.id;
@@ -356,27 +346,16 @@ pub async fn patch_cache(
         }
     }
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheUpdate,
-        EventOwner {
-            cache: Some(cache_id),
-            ..Default::default()
-        },
-        &info,
-        Some(fields),
-    )
-    .await;
+    audit
+        .write(Action::CacheUpdate, EventOwner::cache(cache_id), fields)
+        .await;
 
     Ok(ok_json("Cache updated".to_string()))
 }
 
 pub async fn delete_cache(
-    CacheScope {
-        cache, user, db, ..
-    }: CacheScope<RequiresUnmanaged<can::DeleteCache>>,
-    info: RequestInfo,
+    CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::DeleteCache>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache_id = cache.id;
     let cache_name = cache.name.clone();
@@ -393,14 +372,7 @@ pub async fn delete_cache(
     let acache: ACache = cache.into();
     acache.delete(&db.web_db).await?;
 
-    audit_record(&db, Some(user.id), Action::CacheDelete, EventOwner { cache: Some(cache_id), ..Default::default() },
-        &info,
-        Some(serde_json::json!({
-            "cache_id": cache_id.to_string(),
-            "cache_name": cache_name,
-            "subscribing_projects": subscribing_projects.iter().map(|o| o.to_string()).collect::<Vec<_>>(),
-        })),
-    ).await;
+    audit.write(Action::CacheDelete, EventOwner::cache(cache_id), serde_json::json!({ "cache_id": cache_id.to_string(), "cache_name": cache_name, "subscribing_projects": subscribing_projects.iter().map(|o| o.to_string()).collect::<Vec<_>>(), })).await;
 
     Ok(ok_json("Cache deleted".to_string()))
 }

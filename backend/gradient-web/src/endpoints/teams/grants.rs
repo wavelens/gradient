@@ -6,7 +6,7 @@
 
 use super::refusal::TeamRefusal;
 use crate::access::{Caller, ProjectAccess, has_cache_permission, has_permission, load_project};
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::teams::workers::{reauth_team_workers, withdraw_team_workers};
 use crate::error::{WebError, WebResult};
@@ -224,7 +224,7 @@ pub async fn get_project_teams(
 
 pub async fn post_project_team(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
@@ -278,10 +278,7 @@ pub async fn post_project_team(
 
     let payload =
         serde_json::json!({ "team_id": team.id.to_string(), "project_id": project.id.to_string() });
-    let owner = EventOwner {
-        project: Some(project.id),
-        ..Default::default()
-    };
+    let owner = EventOwner::project(project.id);
 
     if !is_team_admin(&state.web_db, &user, team.id).await? {
         MTeamProjectRequest {
@@ -298,15 +295,7 @@ pub async fn post_project_team(
         .insert(&state.web_db)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::TeamRequest))?;
-        audit_record(
-            &db,
-            Some(user.id),
-            Action::TeamRequestCreate,
-            owner,
-            &info,
-            Some(payload),
-        )
-        .await;
+        audit.write(Action::TeamRequestCreate, owner, payload).await;
         return Ok(ok_json("Request sent".to_string()));
     }
 
@@ -327,21 +316,13 @@ pub async fn post_project_team(
         grant_workers(&state.web_db, &scheduler, team.id, project.id).await?;
     }
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamGrantCreate,
-        owner,
-        &info,
-        Some(payload),
-    )
-    .await;
+    audit.write(Action::TeamGrantCreate, owner, payload).await;
     Ok(ok_json("Team granted".to_string()))
 }
 
 pub async fn patch_project_team(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
@@ -400,20 +381,14 @@ pub async fn patch_project_team(
         _ => {}
     }
 
-    audit_record(&db,
-        Some(user.id),
-        Action::TeamGrantUpdate,
-        EventOwner { project: Some(project.id), ..Default::default() },
-        &info,
-        Some(serde_json::json!({ "team_id": team.id.to_string(), "project_id": project.id.to_string() })),
-    )
+    audit.write(Action::TeamGrantUpdate, EventOwner::project(project.id), serde_json::json!({ "team_id": team.id.to_string(), "project_id": project.id.to_string() }))
     .await;
     Ok(ok_json("Team grant updated".to_string()))
 }
 
 pub async fn delete_project_team(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
@@ -467,13 +442,7 @@ pub async fn delete_project_team(
         take_workers(&state.web_db, &scheduler, team.id, project.id).await?;
     }
 
-    audit_record(&db,
-        Some(user.id),
-        Action::TeamGrantRemove,
-        EventOwner { project: Some(project.id), ..Default::default() },
-        &info,
-        Some(serde_json::json!({ "team_id": team.id.to_string(), "project_id": project.id.to_string() })),
-    )
+    audit.write(Action::TeamGrantRemove, EventOwner::project(project.id), serde_json::json!({ "team_id": team.id.to_string(), "project_id": project.id.to_string() }))
     .await;
     Ok(ok_json("Team grant removed".to_string()))
 }
@@ -542,7 +511,7 @@ pub async fn post_cache_team(
     CacheScope {
         cache, user, db, ..
     }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
-    info: RequestInfo,
+    audit: Audit,
     Json(body): Json<GrantCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let team = find_team(&db.web_db, &body.team).await?;
@@ -553,10 +522,7 @@ pub async fn post_cache_team(
 
     let payload =
         serde_json::json!({ "team_id": team.id.to_string(), "cache_id": cache.id.to_string() });
-    let owner = EventOwner {
-        cache: Some(cache.id),
-        ..Default::default()
-    };
+    let owner = EventOwner::cache(cache.id);
 
     if !is_team_admin(&db.web_db, &user, team.id).await? {
         MTeamCacheRequest {
@@ -571,15 +537,7 @@ pub async fn post_cache_team(
         .insert(&db.web_db)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::TeamRequest))?;
-        audit_record(
-            &db,
-            Some(user.id),
-            Action::TeamRequestCreate,
-            owner,
-            &info,
-            Some(payload),
-        )
-        .await;
+        audit.write(Action::TeamRequestCreate, owner, payload).await;
         return Ok(ok_json("Request sent".to_string()));
     }
 
@@ -595,27 +553,15 @@ pub async fn post_cache_team(
     .insert(&db.web_db)
     .await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamGrantCreate,
-        owner,
-        &info,
-        Some(payload),
-    )
-    .await;
+    audit.write(Action::TeamGrantCreate, owner, payload).await;
     Ok(ok_json("Team granted".to_string()))
 }
 
 pub async fn patch_cache_team(
     CacheScope {
-        cache,
-        user,
-        db,
-        params,
-        ..
+        cache, db, params, ..
     }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
-    info: RequestInfo,
+    audit: Audit,
     Json(body): Json<PatchCacheGrantRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let team: String = params.param("team")?;
@@ -630,26 +576,19 @@ pub async fn patch_cache_team(
     active.role = Set(role);
     active.update(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamGrantUpdate,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(
+    audit
+        .write(
+            Action::TeamGrantUpdate,
+            EventOwner::cache(cache.id),
             serde_json::json!({ "team_id": team.id.to_string(), "cache_id": cache.id.to_string() }),
-        ),
-    )
-    .await;
+        )
+        .await;
     Ok(ok_json("Team grant updated".to_string()))
 }
 
 pub async fn delete_cache_team(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path((cache, team)): Path<(String, String)>,
@@ -696,19 +635,12 @@ pub async fn delete_cache_team(
     };
     grant.into_active_model().delete(&state.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamGrantRemove,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(
+    audit
+        .write(
+            Action::TeamGrantRemove,
+            EventOwner::cache(cache.id),
             serde_json::json!({ "team_id": team.id.to_string(), "cache_id": cache.id.to_string() }),
-        ),
-    )
-    .await;
+        )
+        .await;
     Ok(ok_json("Team grant removed".to_string()))
 }

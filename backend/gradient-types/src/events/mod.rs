@@ -36,6 +36,38 @@ pub struct EventOwner {
     pub cache: Option<CacheId>,
 }
 
+impl EventOwner {
+    pub fn project(project: ProjectId) -> Self {
+        Self {
+            project: Some(project),
+            ..Self::default()
+        }
+    }
+
+    pub fn task(project: ProjectId, task: TaskId) -> Self {
+        Self {
+            project: Some(project),
+            task: Some(task),
+            ..Self::default()
+        }
+    }
+
+    pub fn project_cache(project: ProjectId, cache: CacheId) -> Self {
+        Self {
+            project: Some(project),
+            cache: Some(cache),
+            ..Self::default()
+        }
+    }
+
+    pub fn cache(cache: CacheId) -> Self {
+        Self {
+            cache: Some(cache),
+            ..Self::default()
+        }
+    }
+}
+
 pub trait EventKind: Serialize {
     const NAME: &'static str;
     const DURABLE: bool;

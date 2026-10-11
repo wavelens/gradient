@@ -5,7 +5,7 @@
 
 use super::helpers::delete_nar_from_cache;
 use super::refusal::CacheRefusal;
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
@@ -302,37 +302,15 @@ pub async fn available(
 }
 
 pub async fn delete(
-    CacheScope {
-        cache,
-        user,
-        db,
-        params,
-        ..
-    }: CacheScope<Requires<can::WriteStore>>,
+    CacheScope { cache, params, .. }: CacheScope<Requires<can::WriteStore>>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
 ) -> WebResult<impl IntoResponse> {
     let hash: String = params.param("hash")?;
 
     let (cp, outcome) =
         delete_nar_from_cache(&state.nar_storage, &state.graph, cache.id, &hash).await?;
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheNarDelete,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "cache_id": cache.id.to_string(),
-            "cache_name": cache.name,
-            "hash": hash,
-            "store_path": cp.store_path(),
-            "ref_counted_others": outcome.ref_counted_others,
-        })),
-    )
+    audit.write(Action::CacheNarDelete, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "hash": hash, "store_path": cp.store_path(), "ref_counted_others": outcome.ref_counted_others, }))
     .await;
     Ok(StatusCode::NO_CONTENT)
 }

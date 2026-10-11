@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::endpoints::teams::grants::grant_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, role_names};
@@ -222,13 +222,9 @@ pub async fn get_team_requests(
 
 pub async fn post_approve_team_request(
     TeamScope {
-        team,
-        user,
-        db,
-        params,
-        ..
+        team, db, params, ..
     }: TeamScope<Admin>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let request_id: Uuid = params.param("request_id")?;
@@ -260,13 +256,7 @@ pub async fn post_approve_team_request(
         if workers {
             grant_workers(&db.web_db, &scheduler, team.id, project).await?;
         }
-        audit_record(&db,
-            Some(user.id),
-            Action::TeamRequestApprove,
-            EventOwner { project: Some(project), ..Default::default() },
-            &info,
-            Some(serde_json::json!({ "team_id": team.id.to_string(), "project_id": project.to_string() })),
-        )
+        audit.write(Action::TeamRequestApprove, EventOwner::project(project), serde_json::json!({ "team_id": team.id.to_string(), "project_id": project.to_string() }))
         .await;
         return Ok(ok_json("Request approved".to_string()));
     }
@@ -293,30 +283,21 @@ pub async fn post_approve_team_request(
     request.into_active_model().delete(&tx).await?;
     tx.commit().await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamRequestApprove,
-        EventOwner {
-            cache: Some(cache),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({ "team_id": team.id.to_string(), "cache_id": cache.to_string() })),
-    )
-    .await;
+    audit
+        .write(
+            Action::TeamRequestApprove,
+            EventOwner::cache(cache),
+            serde_json::json!({ "team_id": team.id.to_string(), "cache_id": cache.to_string() }),
+        )
+        .await;
     Ok(ok_json("Request approved".to_string()))
 }
 
 pub async fn delete_team_request(
     TeamScope {
-        team,
-        user,
-        db,
-        params,
-        ..
+        team, db, params, ..
     }: TeamScope<Admin>,
-    info: RequestInfo,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let request_id: Uuid = params.param("request_id")?;
 
@@ -328,10 +309,7 @@ pub async fn delete_team_request(
     {
         let project = request.project;
         request.into_active_model().delete(&db.web_db).await?;
-        EventOwner {
-            project: Some(project),
-            ..Default::default()
-        }
+        EventOwner::project(project)
     } else {
         let request = ETeamCacheRequest::find_by_id(TeamCacheRequestId::new(request_id))
             .filter(CTeamCacheRequest::Team.eq(team.id))
@@ -340,19 +318,10 @@ pub async fn delete_team_request(
             .or_not_found(Resource::Request)?;
         let cache = request.cache;
         request.into_active_model().delete(&db.web_db).await?;
-        EventOwner {
-            cache: Some(cache),
-            ..Default::default()
-        }
+        EventOwner::cache(cache)
     };
 
-    audit_record(&db,
-        Some(user.id),
-        Action::TeamRequestDeny,
-        owner,
-        &info,
-        Some(serde_json::json!({ "team_id": team.id.to_string(), "request_id": request_id.to_string() })),
-    )
+    audit.write(Action::TeamRequestDeny, owner, serde_json::json!({ "team_id": team.id.to_string(), "request_id": request_id.to_string() }))
     .await;
     Ok(ok_json("Request denied".to_string()))
 }

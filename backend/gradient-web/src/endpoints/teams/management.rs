@@ -6,7 +6,7 @@
 
 use super::refusal::TeamRefusal;
 use super::workers::withdraw_team_workers;
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult, require_create_permission, require_superuser};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
@@ -152,7 +152,7 @@ pub async fn get_team_name_available(
 
 pub async fn put_team(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     JsonBody(body): JsonBody<MakeTeamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -193,15 +193,13 @@ pub async fn put_team(
     .await?;
     tx.commit().await?;
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::TeamCreate,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "team_id": team.id.to_string(), "name": team.name })),
-    )
-    .await;
+    audit
+        .write(
+            Action::TeamCreate,
+            EventOwner::default(),
+            serde_json::json!({ "team_id": team.id.to_string(), "name": team.name }),
+        )
+        .await;
 
     Ok(ok_json(team.id.to_string()))
 }
@@ -222,7 +220,7 @@ pub async fn get_team_evaluations(
 
 pub async fn patch_team(
     TeamScope { team, user, db, .. }: TeamScope<AdminUnmanaged>,
-    info: RequestInfo,
+    audit: Audit,
     JsonBody(body): JsonBody<PatchTeamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if body.oidc_group.is_some()
@@ -262,22 +260,20 @@ pub async fn patch_team(
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::ScimGroup))?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamUpdate,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "team_id": team_id.to_string() })),
-    )
-    .await;
+    audit
+        .write(
+            Action::TeamUpdate,
+            EventOwner::default(),
+            serde_json::json!({ "team_id": team_id.to_string() }),
+        )
+        .await;
 
     Ok(ok_json("Team updated".to_string()))
 }
 
 pub async fn delete_team(
-    TeamScope { team, user, db, .. }: TeamScope<AdminUnmanaged>,
-    info: RequestInfo,
+    TeamScope { team, db, .. }: TeamScope<AdminUnmanaged>,
+    audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let workers = gradient_db::teams::team_worker_ids(&db.web_db, team.id).await?;
@@ -290,15 +286,13 @@ pub async fn delete_team(
     team.into_active_model().delete(&db.web_db).await?;
     withdraw_team_workers(&scheduler, &workers, &projects).await;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TeamDelete,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "team_id": team_id.to_string() })),
-    )
-    .await;
+    audit
+        .write(
+            Action::TeamDelete,
+            EventOwner::default(),
+            serde_json::json!({ "team_id": team_id.to_string() }),
+        )
+        .await;
 
     Ok(ok_json("Team deleted".to_string()))
 }

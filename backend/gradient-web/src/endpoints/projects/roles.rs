@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
@@ -105,10 +105,8 @@ pub async fn get_project_roles(
 }
 
 pub async fn post_project_role(
-    ProjectScope {
-        project, user, db, ..
-    }: ProjectScope<RequiresUnmanaged<can::ManageRoles>>,
-    info: RequestInfo,
+    ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageRoles>>,
+    audit: Audit,
     JsonBody(body): JsonBody<CreateRoleRequest>,
 ) -> WebResult<Json<BaseResponse<RoleResponse>>> {
     let mask = parse_permission_list(&body.permissions, "GET /projects/{project}/roles")?;
@@ -139,22 +137,7 @@ pub async fn post_project_role(
     .insert(&db.web_db)
     .await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::ProjectRoleCreate,
-        EventOwner {
-            project: Some(project.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "project_id": project.id.to_string(),
-            "role_id": role.id.to_string(),
-            "name": role.name,
-            "permission_mask": mask,
-        })),
-    )
+    audit.write(Action::ProjectRoleCreate, EventOwner::project(project.id), serde_json::json!({ "project_id": project.id.to_string(), "role_id": role.id.to_string(), "name": role.name, "permission_mask": mask, }))
     .await;
 
     Ok(ok_json(RoleResponse::from(role)))
@@ -177,12 +160,11 @@ pub async fn get_project_role(
 pub async fn patch_project_role(
     ProjectScope {
         project,
-        user,
         db,
         params,
         ..
     }: ProjectScope<RequiresUnmanaged<can::ManageRoles>>,
-    info: RequestInfo,
+    audit: Audit,
     JsonBody(body): JsonBody<PatchRoleRequest>,
 ) -> WebResult<Json<BaseResponse<RoleResponse>>> {
     let role_id: RoleId = params.param("role_id")?;
@@ -227,24 +209,7 @@ pub async fn patch_project_role(
 
     let updated = active.update(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::ProjectRoleUpdate,
-        EventOwner {
-            project: Some(project.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "project_id": project.id.to_string(),
-            "role_id": updated.id.to_string(),
-            "previous_name": previous_name,
-            "previous_permission_mask": previous_mask,
-            "new_name": updated.name,
-            "new_permission_mask": updated.permission,
-        })),
-    )
+    audit.write(Action::ProjectRoleUpdate, EventOwner::project(project.id), serde_json::json!({ "project_id": project.id.to_string(), "role_id": updated.id.to_string(), "previous_name": previous_name, "previous_permission_mask": previous_mask, "new_name": updated.name, "new_permission_mask": updated.permission, }))
     .await;
 
     Ok(ok_json(RoleResponse::from(updated)))
@@ -253,12 +218,11 @@ pub async fn patch_project_role(
 pub async fn delete_project_role(
     ProjectScope {
         project,
-        user,
         db,
         params,
         ..
     }: ProjectScope<RequiresUnmanaged<can::ManageRoles>>,
-    info: RequestInfo,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let role_id: RoleId = params.param("role_id")?;
 
@@ -288,21 +252,7 @@ pub async fn delete_project_role(
     let role_name = role.name.clone();
     role.into_active_model().delete(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::ProjectRoleDelete,
-        EventOwner {
-            project: Some(project.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "project_id": project.id.to_string(),
-            "role_id": role_id.to_string(),
-            "name": role_name,
-        })),
-    )
+    audit.write(Action::ProjectRoleDelete, EventOwner::project(project.id), serde_json::json!({ "project_id": project.id.to_string(), "role_id": role_id.to_string(), "name": role_name, }))
     .await;
 
     Ok(ok_json(true))

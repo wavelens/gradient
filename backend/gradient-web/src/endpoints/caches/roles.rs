@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
@@ -103,10 +103,8 @@ pub async fn get_cache_roles(
 }
 
 pub async fn post_cache_role(
-    CacheScope {
-        cache, user, db, ..
-    }: CacheScope<RequiresUnmanaged<can::ManageCacheRoles>>,
-    info: RequestInfo,
+    CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheRoles>>,
+    audit: Audit,
     JsonBody(body): JsonBody<CreateCacheRoleRequest>,
 ) -> WebResult<Json<BaseResponse<CacheRoleResponse>>> {
     let mask = parse_cache_permission_list(&body.permissions, "GET /caches/{cache}/roles")?;
@@ -135,22 +133,7 @@ pub async fn post_cache_role(
     .insert(&db.web_db)
     .await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheRoleCreate,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "cache_id": cache.id.to_string(),
-            "role_id": role.id.to_string(),
-            "name": role.name,
-            "permission_mask": mask,
-        })),
-    )
+    audit.write(Action::CacheRoleCreate, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "role_id": role.id.to_string(), "name": role.name, "permission_mask": mask, }))
     .await;
 
     Ok(ok_json(CacheRoleResponse::from(role)))
@@ -169,13 +152,9 @@ pub async fn get_cache_role(
 
 pub async fn patch_cache_role(
     CacheScope {
-        cache,
-        user,
-        db,
-        params,
-        ..
+        cache, db, params, ..
     }: CacheScope<RequiresUnmanaged<can::ManageCacheRoles>>,
-    info: RequestInfo,
+    audit: Audit,
     JsonBody(body): JsonBody<PatchCacheRoleRequest>,
 ) -> WebResult<Json<BaseResponse<CacheRoleResponse>>> {
     let role_id: RoleId = params.param("role_id")?;
@@ -220,24 +199,7 @@ pub async fn patch_cache_role(
 
     let updated = active.update(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheRoleUpdate,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "cache_id": cache.id.to_string(),
-            "role_id": updated.id.to_string(),
-            "previous_name": previous_name,
-            "previous_permission_mask": previous_mask,
-            "new_name": updated.name,
-            "new_permission_mask": updated.permission,
-        })),
-    )
+    audit.write(Action::CacheRoleUpdate, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "role_id": updated.id.to_string(), "previous_name": previous_name, "previous_permission_mask": previous_mask, "new_name": updated.name, "new_permission_mask": updated.permission, }))
     .await;
 
     Ok(ok_json(CacheRoleResponse::from(updated)))
@@ -245,13 +207,9 @@ pub async fn patch_cache_role(
 
 pub async fn delete_cache_role(
     CacheScope {
-        cache,
-        user,
-        db,
-        params,
-        ..
+        cache, db, params, ..
     }: CacheScope<RequiresUnmanaged<can::ManageCacheRoles>>,
-    info: RequestInfo,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let role_id: RoleId = params.param("role_id")?;
 
@@ -281,21 +239,7 @@ pub async fn delete_cache_role(
     let role_name = role.name.clone();
     role.into_active_model().delete(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheRoleDelete,
-        EventOwner {
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "cache_id": cache.id.to_string(),
-            "role_id": role_id.to_string(),
-            "name": role_name,
-        })),
-    )
+    audit.write(Action::CacheRoleDelete, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "role_id": role_id.to_string(), "name": role_name, }))
     .await;
 
     Ok(ok_json(true))

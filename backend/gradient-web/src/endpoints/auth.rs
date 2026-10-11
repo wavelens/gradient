@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::authorization::{
     cookie_value, create_session_and_token, oidc_login_create, oidc_login_verify, session_claims,
     update_last_login,
@@ -135,7 +135,7 @@ pub struct CheckUsernameRequest {
 
 pub async fn post_basic_register(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     JsonBody(body): JsonBody<MakeUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if !state.config.registration.enable || state.config.oidc.as_ref().is_some_and(|o| o.required) {
@@ -216,15 +216,14 @@ pub async fn post_basic_register(
         );
     }
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::Register,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "username": user.username })),
-    )
-    .await;
+    audit
+        .write_as(
+            Some(user.id),
+            Action::Register,
+            EventOwner::default(),
+            serde_json::json!({ "username": user.username }),
+        )
+        .await;
 
     if state
         .config
@@ -269,10 +268,9 @@ pub async fn post_basic_register(
 
 pub async fn post_basic_login(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Json(body): Json<MakeLoginRequest>,
 ) -> WebResult<Response> {
-    let db = state.db();
     if state.config.oidc.as_ref().is_some_and(|o| o.required) {
         return Err(WebError::oauth_required());
     }
@@ -288,15 +286,13 @@ pub async fn post_basic_login(
     {
         Some(u) => u,
         None => {
-            audit_record(
-                &db,
-                None,
-                Action::LoginFailure,
-                EventOwner::default(),
-                &info,
-                Some(serde_json::json!({ "loginname": body.loginname })),
-            )
-            .await;
+            audit
+                .write(
+                    Action::LoginFailure,
+                    EventOwner::default(),
+                    serde_json::json!({ "loginname": body.loginname }),
+                )
+                .await;
             return Err(WebError::invalid_credentials());
         }
     };
@@ -304,15 +300,14 @@ pub async fn post_basic_login(
     let user_password = user.password.clone().ok_or_else(WebError::oauth_required)?;
 
     if verify_password(body.password, &user_password).is_err() {
-        audit_record(
-            &db,
-            Some(user.id),
-            Action::LoginFailure,
-            EventOwner::default(),
-            &info,
-            None,
-        )
-        .await;
+        audit
+            .write_as(
+                Some(user.id),
+                Action::LoginFailure,
+                EventOwner::default(),
+                None,
+            )
+            .await;
         return Err(WebError::invalid_credentials());
     }
 
@@ -336,8 +331,8 @@ pub async fn post_basic_login(
         &state.jwt_secret,
         user.id,
         body.remember_me,
-        info.user_agent.clone(),
-        info.ip.clone(),
+        audit.info().user_agent.clone(),
+        audit.info().ip.clone(),
     )
     .await
     .map_err(|_| WebError::failed_to_generate_token())?;
@@ -347,15 +342,14 @@ pub async fn post_basic_login(
         .await
         .map_err(|_| WebError::failed_to_update_user())?;
 
-    audit_record(
-        &db,
-        Some(user_id),
-        Action::LoginSuccess,
-        EventOwner::default(),
-        &info,
-        None,
-    )
-    .await;
+    audit
+        .write_as(
+            Some(user_id),
+            Action::LoginSuccess,
+            EventOwner::default(),
+            None,
+        )
+        .await;
 
     let cookie = jwt_cookie(&token, body.remember_me, use_tls);
     let res = BaseResponse {
@@ -398,7 +392,7 @@ fn oidc_failure(stage: &'static str) -> impl FnOnce(anyhow::Error) -> WebError {
 
 pub async fn get_oauth_authorize(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     headers: axum::http::HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
@@ -422,21 +416,20 @@ pub async fn get_oauth_authorize(
         &state.jwt_secret,
         user.id,
         false,
-        info.user_agent.clone(),
-        info.ip.clone(),
+        audit.info().user_agent.clone(),
+        audit.info().ip.clone(),
     )
     .await
     .map_err(|_| WebError::failed_to_generate_token())?;
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::LoginSuccess,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "method": "oidc" })),
-    )
-    .await;
+    audit
+        .write_as(
+            Some(user.id),
+            Action::LoginSuccess,
+            EventOwner::default(),
+            serde_json::json!({ "method": "oidc" }),
+        )
+        .await;
 
     let res = BaseResponse {
         error: false,
@@ -501,7 +494,7 @@ pub async fn get_oidc_login(
 
 pub async fn get_oidc_callback(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     headers: axum::http::HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
@@ -521,21 +514,20 @@ pub async fn get_oidc_callback(
         &state.jwt_secret,
         user.id,
         false,
-        info.user_agent.clone(),
-        info.ip.clone(),
+        audit.info().user_agent.clone(),
+        audit.info().ip.clone(),
     )
     .await
     .map_err(|_| WebError::failed_to_generate_token())?;
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::LoginSuccess,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "method": "oidc" })),
-    )
-    .await;
+    audit
+        .write_as(
+            Some(user.id),
+            Action::LoginSuccess,
+            EventOwner::default(),
+            serde_json::json!({ "method": "oidc" }),
+        )
+        .await;
 
     let session_cookie = jwt_cookie(&token, false, use_tls);
     let clear_csrf = oidc_csrf_clear_cookie(use_tls);
@@ -552,7 +544,7 @@ pub async fn get_oidc_callback(
 
 pub async fn post_logout(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     headers: HeaderMap,
 ) -> WebResult<Response> {
     let secure = if state.config.server.use_tls {
@@ -574,15 +566,14 @@ pub async fn post_logout(
             let _ = active.update(&state.web_db).await;
         }
 
-        audit_record(
-            &state.db(),
-            Some(user_id),
-            Action::Logout,
-            EventOwner::default(),
-            &info,
-            Some(serde_json::json!({ "session_id": session_id.to_string() })),
-        )
-        .await;
+        audit
+            .write_as(
+                Some(user_id),
+                Action::Logout,
+                EventOwner::default(),
+                serde_json::json!({ "session_id": session_id.to_string() }),
+            )
+            .await;
     }
 
     let res = BaseResponse {
@@ -802,7 +793,7 @@ pub struct CliDeviceInfoResponse {
 
 pub async fn post_cli_device_start(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<CliDeviceStartResponse>>> {
     let device_code = generate_device_code();
     let user_code = loop {
@@ -826,23 +817,21 @@ pub async fn post_cli_device_start(
         user_code: user_code.clone(),
         created_at: now,
         expires_at,
-        user_agent: info.user_agent.clone(),
-        ip: info.ip.clone(),
+        user_agent: audit.info().user_agent.clone(),
+        ip: audit.info().ip.clone(),
         ..Default::default()
     }
     .into_active_model();
 
     row.insert(&state.web_db).await?;
 
-    audit_record(
-        &state.db(),
-        None,
-        Action::CliDeviceStart,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "user_code": user_code })),
-    )
-    .await;
+    audit
+        .write(
+            Action::CliDeviceStart,
+            EventOwner::default(),
+            serde_json::json!({ "user_code": user_code }),
+        )
+        .await;
 
     let base = state.config.server.serve_url.trim_end_matches('/');
     let verification_uri = format!("{}/account/cli-authorize", base);
@@ -920,7 +909,7 @@ pub async fn get_cli_device_info(
 
 pub async fn post_cli_device_authorize(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Json(body): Json<CliDeviceAuthorizeRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -944,23 +933,20 @@ pub async fn post_cli_device_authorize(
     active.authorized_at = Set(Some(now));
     active.update(&state.web_db).await?;
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::CliDeviceAuthorize,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "user_code": body.user_code })),
-    )
-    .await;
+    audit
+        .write(
+            Action::CliDeviceAuthorize,
+            EventOwner::default(),
+            serde_json::json!({ "user_code": body.user_code }),
+        )
+        .await;
 
     Ok(ok_json("Device authorized".to_string()))
 }
 
 pub async fn post_cli_device_deny(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
-    Extension(user): Extension<MUser>,
+    audit: Audit,
     Json(body): Json<CliDeviceAuthorizeRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let row = find_active_user_code(&state.web_db, &body.user_code).await?;
@@ -970,15 +956,13 @@ pub async fn post_cli_device_deny(
     active.denied_at = Set(Some(now));
     active.update(&state.web_db).await?;
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::CliDeviceDeny,
-        EventOwner::default(),
-        &info,
-        Some(serde_json::json!({ "user_code": body.user_code })),
-    )
-    .await;
+    audit
+        .write(
+            Action::CliDeviceDeny,
+            EventOwner::default(),
+            serde_json::json!({ "user_code": body.user_code }),
+        )
+        .await;
 
     Ok(ok_json("Device denied".to_string()))
 }

@@ -5,7 +5,7 @@
  */
 
 use crate::access::project_admin_emails;
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::Audit;
 use crate::endpoints::projects::settings::mode_label;
 use crate::endpoints::projects::workers::reauth_project_workers;
 use crate::error::{WebError, WebResult};
@@ -159,7 +159,7 @@ pub async fn post_approve_subscription_request(
         ..
     }: CacheScope<RequiresUnmanaged<can::ManageCacheSubscriptions>>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project: String = params.param("project")?;
@@ -197,21 +197,7 @@ pub async fn post_approve_subscription_request(
         );
     }
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheSubscriptionApprove,
-        EventOwner {
-            project: Some(project.id),
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "cache_id": cache.id.to_string(),
-            "project_id": project.id.to_string(),
-        })),
-    )
+    audit.write(Action::CacheSubscriptionApprove, EventOwner::project_cache(project.id, cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "project_id": project.id.to_string(), }))
     .await;
 
     notify_project_admins(
@@ -236,7 +222,7 @@ pub async fn delete_subscription_request(
         ..
     }: CacheScope<RequiresUnmanaged<can::ManageCacheSubscriptions>>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project: String = params.param("project")?;
 
@@ -244,21 +230,7 @@ pub async fn delete_subscription_request(
     let mode = request.mode.clone();
     request.into_active_model().delete(&state.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::CacheSubscriptionDeny,
-        EventOwner {
-            project: Some(project.id),
-            cache: Some(cache.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "cache_id": cache.id.to_string(),
-            "project_id": project.id.to_string(),
-        })),
-    )
+    audit.write(Action::CacheSubscriptionDeny, EventOwner::project_cache(project.id, cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "project_id": project.id.to_string(), }))
     .await;
 
     notify_project_admins(

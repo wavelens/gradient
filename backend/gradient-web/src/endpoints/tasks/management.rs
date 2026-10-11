@@ -8,7 +8,7 @@ use super::TaskResponse;
 use super::auto_attach;
 use super::refusal::TaskRefusal;
 use crate::access::{Caller, ProjectAccess, has_permission, load_project};
-use crate::audit::{RequestInfo, changed_fields, record as audit_record};
+use crate::audit::{Audit, changed_fields};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
@@ -187,7 +187,7 @@ pub async fn get(
 
 pub async fn put(
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(project): Path<String>,
@@ -283,22 +283,13 @@ pub async fn put(
         );
     }
 
-    audit_record(
-        &state.db(),
-        Some(user.id),
-        Action::TaskCreate,
-        EventOwner {
-            project: Some(project.id),
-            task: Some(task.id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "task_id": task.id.to_string(),
-            "name": task.name,
-        })),
-    )
-    .await;
+    audit
+        .write(
+            Action::TaskCreate,
+            EventOwner::task(project.id, task.id),
+            serde_json::json!({ "task_id": task.id.to_string(), "name": task.name, }),
+        )
+        .await;
 
     let res = BaseResponse {
         error: false,
@@ -376,22 +367,12 @@ pub async fn get_task(
 }
 
 pub async fn patch_task(
-    TaskScope {
-        project,
-        task,
-        user,
-        db,
-        ..
-    }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    TaskScope { project, task, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
     state: State<Arc<ServerState>>,
-    info: RequestInfo,
+    audit: Audit,
     JsonBody(body): JsonBody<PatchTaskRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let owner = EventOwner {
-        project: Some(project.id),
-        task: Some(task.id),
-        ..Default::default()
-    };
+    let owner = EventOwner::task(project.id, task.id);
     let fields = changed_fields([
         ("name", body.name.is_some()),
         ("display_name", body.display_name.is_some()),
@@ -441,15 +422,7 @@ pub async fn patch_task(
     atask.force_evaluation = Set(true);
     atask.update(&state.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TaskUpdate,
-        owner,
-        &info,
-        Some(fields),
-    )
-    .await;
+    audit.write(Action::TaskUpdate, owner, fields).await;
 
     Ok(ok_json("Task updated".to_string()))
 }
@@ -534,33 +507,17 @@ pub async fn delete_task(
     TaskScope {
         project: project_row,
         task,
-        user,
         db,
         ..
     }: TaskScope<RequiresUnmanaged<can::EditTask>>,
-    info: RequestInfo,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let task_id = task.id;
     let task_name = task.name.clone();
     let atask: ATask = task.into();
     atask.delete(&db.web_db).await?;
 
-    audit_record(
-        &db,
-        Some(user.id),
-        Action::TaskDelete,
-        EventOwner {
-            project: Some(project_row.id),
-            task: Some(task_id),
-            ..Default::default()
-        },
-        &info,
-        Some(serde_json::json!({
-            "project_id": project_row.id.to_string(),
-            "task_id": task_id.to_string(),
-            "task_name": task_name,
-        })),
-    )
+    audit.write(Action::TaskDelete, EventOwner::task(project_row.id, task_id), serde_json::json!({ "project_id": project_row.id.to_string(), "task_id": task_id.to_string(), "task_name": task_name, }))
     .await;
 
     let res = BaseResponse {
