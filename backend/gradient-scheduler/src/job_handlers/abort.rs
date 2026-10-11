@@ -7,16 +7,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_db::status::{BuildRefusal, update_evaluation_status};
+use gradient_db::status::{BuildRefusal, EvaluationWarning, update_evaluation_status};
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::evaluation_message::MessageLevel;
 use gradient_graph::Transition;
 use gradient_types::*;
 use tracing::{info, warn};
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
-use crate::unbuildable::{Unbuildable, unbuildable_warning};
+use crate::unbuildable::Unbuildable;
 
 fn aborted(evaluation_id: EvaluationId, marked: Result<MEvaluation, sea_orm::DbErr>) -> bool {
     match marked {
@@ -119,14 +118,12 @@ impl Scheduler {
         }
 
         info!(%evaluation_id, unmet = ?unbuildable.unmet, "aborting evaluation: no connected worker provides its systems");
-        gradient_db::status::record_evaluation_message(
-            &self.state.db(),
-            evaluation_id,
-            MessageLevel::Warning,
-            unbuildable_warning(&unbuildable.unmet),
-            Some("scheduler".to_owned()),
-        )
+        EvaluationWarning::NoWorker {
+            unmet: &unbuildable.unmet,
+        }
+        .report(&self.state.worker_db, evaluation_id)
         .await;
+
         let shared_builds = self.abort_evaluation_shared_builds(evaluation_id).await;
         self.log_aborted_jobs(evaluation_id, shared_builds).await;
     }

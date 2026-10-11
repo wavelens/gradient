@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::evaluation_message::EvaluationFailure;
 use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
 use crate::state_machine::EvalStateMachine;
@@ -168,8 +169,7 @@ pub async fn update_evaluation_status_with_error(
     ctx: &DbContext,
     evaluation: MEvaluation,
     status: EvaluationStatus,
-    error_message: String,
-    source: Option<String>,
+    failure: &EvaluationFailure<'_>,
 ) -> Result<MEvaluation, DbErr> {
     if matches!(
         evaluation.status,
@@ -178,14 +178,15 @@ pub async fn update_evaluation_status_with_error(
         return Ok(evaluation);
     }
 
-    debug!(evaluation_id = %evaluation.id, status = ?status, error = %error_message, ?source, "Updating evaluation status with error");
+    let source = failure.source();
+    debug!(evaluation_id = %evaluation.id, status = ?status, error = %failure, source, "Updating evaluation status with error");
 
     let msg = MEvaluationMessage {
         id: EvaluationMessageId::now_v7(),
         evaluation: evaluation.id,
         level: MessageLevel::Error,
-        message: error_message,
-        source,
+        message: failure.to_string(),
+        source: Some(source.to_owned()),
         created_at: gradient_types::now(),
     }
     .into_active_model();

@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use gradient_core::ServerState;
+use gradient_db::status::EvaluationWarning;
 use gradient_entity::StorePath;
 use gradient_graph::UpstreamHit;
 use gradient_types::*;
@@ -163,30 +164,16 @@ async fn warn_unanswered(
     unanswered: &HashMap<String, Vec<CacheUpstreamId>>,
     id_to_url: &HashMap<CacheUpstreamId, String>,
 ) {
-    let mut outputs_by_url: HashMap<&str, usize> = HashMap::new();
-    for url in unanswered
+    let urls: BTreeSet<&str> = unanswered
         .values()
         .flatten()
         .filter_map(|id| id_to_url.get(id))
-    {
-        *outputs_by_url.entry(url.as_str()).or_default() += 1;
-    }
+        .map(String::as_str)
+        .collect();
 
-    for (url, outputs) in outputs_by_url {
-        warn!(upstream = url, outputs, evaluation = %evaluation.id, "upstream cache did not answer; asking again later instead of building");
-        let message = format!(
-            "upstream cache {url} did not answer; outputs it may serve wait for it instead of being built. Deactivate the upstream to build them"
-        );
-        if let Err(e) = gradient_db::status::insert_evaluation_message_once(
-            &state.worker_db,
-            evaluation.id,
-            MessageLevel::Warning,
-            message,
-            Some(crate::probe::HEALTH_NAME.to_owned()),
-        )
-        .await
-        {
-            warn!(error = %e, upstream = url, "failed to record the unanswered upstream warning");
-        }
+    for url in urls {
+        EvaluationWarning::UpstreamUnanswered { url }
+            .report(&state.worker_db, evaluation.id)
+            .await;
     }
 }

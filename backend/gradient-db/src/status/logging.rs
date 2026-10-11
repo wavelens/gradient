@@ -177,7 +177,7 @@ pub async fn record_phase_events(
     Ok(())
 }
 
-pub async fn insert_evaluation_message<C: ConnectionTrait>(
+pub(super) async fn insert_evaluation_message<C: ConnectionTrait>(
     db: &C,
     evaluation_id: EvaluationId,
     level: MessageLevel,
@@ -198,7 +198,7 @@ pub async fn insert_evaluation_message<C: ConnectionTrait>(
     Ok(())
 }
 
-pub async fn insert_evaluation_message_once<C: ConnectionTrait>(
+pub(super) async fn insert_evaluation_message_once<C: ConnectionTrait>(
     db: &C,
     evaluation_id: EvaluationId,
     level: MessageLevel,
@@ -217,15 +217,25 @@ pub async fn insert_evaluation_message_once<C: ConnectionTrait>(
     insert_evaluation_message(db, evaluation_id, level, message, source).await
 }
 
-pub async fn record_evaluation_message(
+pub async fn insert_worker_message<C: ConnectionTrait>(
+    db: &C,
+    evaluation_id: EvaluationId,
+    level: MessageLevel,
+    message: String,
+    source: String,
+) -> Result<(), sea_orm::DbErr> {
+    insert_evaluation_message(db, evaluation_id, level, message, Some(source)).await
+}
+
+pub async fn report_worker_message(
     ctx: &DbContext,
     evaluation_id: EvaluationId,
     level: MessageLevel,
     message: String,
-    source: Option<String>,
+    source: String,
 ) {
     if let Err(e) =
-        insert_evaluation_message(&ctx.worker_db, evaluation_id, level, message, source).await
+        insert_worker_message(&ctx.worker_db, evaluation_id, level, message, source).await
     {
         error!(error = %e, %evaluation_id, "Failed to insert evaluation_message");
     }

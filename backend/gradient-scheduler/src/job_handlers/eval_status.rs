@@ -240,12 +240,12 @@ impl Scheduler {
             }
         };
 
-        gradient_db::status::insert_evaluation_message(
+        gradient_db::status::insert_worker_message(
             &self.state.worker_db,
             evaluation_id,
             entity_level,
             message,
-            Some(source),
+            source,
         )
         .await
         .map_err(Into::into)

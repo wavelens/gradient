@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Context, Result, anyhow};
 use gradient_db::{
     DbContext, WorkerDb,
-    status::{record_evaluation_message, update_evaluation_status_with_error},
+    status::{EvaluationFailure, report_worker_message, update_evaluation_status_with_error},
 };
 use gradient_entity::StorePath;
 use gradient_entity::build::BuildStatus;
@@ -803,23 +803,23 @@ impl BatchWriter<'_> {
     #[tracing::instrument(level = "debug", skip_all)]
     async fn record_eval_messages(&self, warnings: &[String], errors: &[String]) {
         for warning in warnings {
-            record_evaluation_message(
+            report_worker_message(
                 self.ctx,
                 self.evaluation_id,
                 MessageLevel::Warning,
                 warning.clone(),
-                Some("nix-eval".to_string()),
+                "nix-eval".to_owned(),
             )
             .await;
         }
 
         for error in errors {
-            record_evaluation_message(
+            report_worker_message(
                 self.ctx,
                 self.evaluation_id,
                 MessageLevel::Error,
                 error.clone(),
-                Some("nix-eval".to_string()),
+                "nix-eval".to_owned(),
             )
             .await;
         }
@@ -1233,8 +1233,7 @@ pub(crate) async fn fail_evaluation(ctx: &DbContext, evaluation: EvaluationId, m
             ctx,
             eval,
             EvaluationStatus::Failed,
-            message.to_owned(),
-            Some("db-insert".to_string()),
+            &EvaluationFailure::GraphInsert(message),
         )
         .await
     {
