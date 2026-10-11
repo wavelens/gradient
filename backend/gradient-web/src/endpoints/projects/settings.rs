@@ -17,7 +17,9 @@ use crate::permissions::Permission;
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
+use gradient_ci::CiContext;
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_notify::{SubscriptionEvent, SubscriptionMail};
 use gradient_scheduler::Scheduler;
@@ -60,7 +62,7 @@ pub async fn post_project_public(
     Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -84,7 +86,7 @@ pub async fn delete_project_public(
     Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -108,7 +110,7 @@ pub async fn get_project_subscribe(
     Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<CacheSubscriptionItem>>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -175,8 +177,9 @@ pub async fn post_project_subscribe_cache(
     Path((project, cache)): Path<(String, String)>,
     body: Option<Json<SubscribeCacheRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let project = load_project(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -188,7 +191,7 @@ pub async fn post_project_subscribe_cache(
     .await?;
 
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -228,7 +231,7 @@ pub async fn post_project_subscribe_cache(
 
     let may_approve = user.superuser
         || has_cache_permission(
-            &state,
+            &state.web_db,
             user.id,
             cache.id,
             CachePermission::ManageCacheSubscriptions,
@@ -249,7 +252,7 @@ pub async fn post_project_subscribe_cache(
         .insert(&state.web_db)
         .await?;
 
-        notify_cache_admins(&state, &project, &cache, &user, &mode).await;
+        notify_cache_admins(&state.ci(), &project, &cache, &user, &mode).await;
 
         return Ok(ok_json("Subscription requested".to_string()));
     }
@@ -269,7 +272,7 @@ pub async fn post_project_subscribe_cache(
     .insert(&state.web_db)
     .await?;
 
-    reauth_project_workers(&state, &scheduler, project.id).await;
+    reauth_project_workers(&state.web_db, &scheduler, project.id).await;
 
     // Re-queue the evaluations parked with `WaitingReason::NoCache`. Only ReadWrite and WriteOnly
     // subscriptions unblock builds. ReadOnly subscriptions leave the project without a push target.
@@ -283,23 +286,23 @@ pub async fn post_project_subscribe_cache(
         );
     }
 
-    enqueue_backfill_signatures(&state, project.id, cache.id).await;
+    enqueue_backfill_signatures(&state.web_db, project.id, cache.id).await;
 
     Ok(ok_json("Cache subscribed".to_string()))
 }
 
 async fn notify_cache_admins(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     project: &MProject,
     cache: &MCache,
     requester: &MUser,
     mode: &CacheSubscriptionMode,
 ) {
-    if !state.email.is_enabled() {
+    if !ci.email.is_enabled() {
         return;
     }
 
-    let recipients = match cache_admin_emails(state, cache.id).await {
+    let recipients = match cache_admin_emails(&ci.db.web_db, cache.id).await {
         Ok(list) => list,
         Err(e) => {
             tracing::warn!(error = %e, "failed to resolve cache admin recipients");
@@ -307,7 +310,7 @@ async fn notify_cache_admins(
         }
     };
 
-    if let Err(e) = state
+    if let Err(e) = ci
         .email
         .send_subscription_mail(
             &recipients,
@@ -319,7 +322,7 @@ async fn notify_cache_admins(
                 actor: &requester.username,
                 link: format!(
                     "{}/caches/{}/subscriptions",
-                    state.config.server.serve_url, cache.name
+                    ci.db.config.server.serve_url, cache.name
                 ),
             },
         )
@@ -337,14 +340,9 @@ pub fn mode_label(mode: &CacheSubscriptionMode) -> &'static str {
     }
 }
 
-async fn enqueue_backfill_signatures(
-    state: &ServerState,
-    project_id: ProjectId,
-    cache_id: CacheId,
-) {
+async fn enqueue_backfill_signatures(db: &WebDb, project_id: ProjectId, cache_id: CacheId) {
     let drv_ids = match gradient_db::projects::derivations::derivation_ids_for_project(
-        &state.web_db,
-        project_id,
+        db, project_id,
     )
     .await
     {
@@ -362,7 +360,7 @@ async fn enqueue_backfill_signatures(
     let outputs = match EDerivationOutput::find()
         .filter(CDerivationOutput::Derivation.is_in(drv_ids))
         .filter(CDerivationOutput::CachedPath.is_not_null())
-        .all(&state.web_db)
+        .all(db)
         .await
     {
         Ok(v) => v,
@@ -402,7 +400,7 @@ async fn enqueue_backfill_signatures(
                 .do_nothing()
                 .to_owned(),
             )
-            .exec(&state.web_db)
+            .exec(db)
             .await;
         if let Err(e) = res
             && !matches!(e, sea_orm::DbErr::RecordNotInserted)
@@ -418,8 +416,9 @@ pub async fn delete_project_subscribe_cache(
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, cache)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let project = load_project(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -431,7 +430,7 @@ pub async fn delete_project_subscribe_cache(
     .await?;
 
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,

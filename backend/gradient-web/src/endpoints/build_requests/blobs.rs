@@ -17,6 +17,8 @@ use axum::Json;
 use axum::extract::multipart::Field;
 use axum::extract::{Multipart, Path, State};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
+use gradient_storage::NarStore;
 use gradient_types::ids::{BuildRequestBlobId, ProjectId, UploadSessionId};
 use gradient_types::input::decode_blake3_hex;
 use gradient_types::{AUploadSession, BaseResponse, EUploadSession, MBuildRequestBlob, MUser, now};
@@ -60,7 +62,7 @@ pub async fn post_blobs(
 
     let api_key_ref = api_key.as_ref();
     if !has_permission(
-        &state,
+        &state.web_db,
         user.id,
         session.project,
         Permission::TriggerEvaluation,
@@ -85,7 +87,7 @@ pub async fn post_blobs(
     {
         let blob = verified_blob(field, &missing).await?;
         missing.remove(&blob.name);
-        store_blob(&state, session.project, blob).await?;
+        store_blob(&state.web_db, &state.nar_storage, session.project, blob).await?;
     }
 
     let remaining = missing.len();
@@ -132,10 +134,14 @@ async fn verified_blob(field: Field<'_>, missing: &HashSet<String>) -> WebResult
     })
 }
 
-async fn store_blob(state: &ServerState, project: ProjectId, blob: VerifiedBlob) -> WebResult<()> {
+async fn store_blob(
+    db: &WebDb,
+    nar_storage: &NarStore,
+    project: ProjectId,
+    blob: VerifiedBlob,
+) -> WebResult<()> {
     let size = blob.data.len() as i64;
-    state
-        .nar_storage
+    nar_storage
         .put_blob(project.into_inner(), &blob.hash, blob.data)
         .await
         .context("persist blob")?;
@@ -150,7 +156,7 @@ async fn store_blob(state: &ServerState, project: ProjectId, blob: VerifiedBlob)
         last_used_at: stored_at,
     }
     .into_active_model()
-    .insert(&state.web_db)
+    .insert(db)
     .await;
 
     match inserted {

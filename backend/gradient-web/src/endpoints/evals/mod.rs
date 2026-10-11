@@ -28,10 +28,9 @@ use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::resource::Resource;
-use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_types::*;
 use sea_orm::EntityTrait;
-use std::sync::Arc;
 
 /// Every failure is answered with `not_found(Resource::Evaluation)`. Callers cannot distinguish missing
 /// from forbidden.
@@ -44,13 +43,13 @@ pub(super) struct EvalAccessContext {
 
 impl EvalAccessContext {
     pub(super) async fn load(
-        state: &Arc<ServerState>,
+        db: &WebDb,
         evaluation_id: EvaluationId,
         maybe_user: &Option<MUser>,
         api_key: Option<&ApiKeyContext>,
     ) -> WebResult<Self> {
         let evaluation = EEvaluation::find_by_id(evaluation_id)
-            .one(&state.web_db)
+            .one(db)
             .await?
             .or_not_found(Resource::Evaluation)?;
 
@@ -58,23 +57,20 @@ impl EvalAccessContext {
             tracing::warn!(%evaluation_id, "evaluation has no task");
             WebError::data_inconsistency(Resource::Evaluation)
         })?;
-        let task = ETask::find_by_id(task_id)
-            .one(&state.web_db)
-            .await?
-            .ok_or_else(|| {
-                tracing::warn!(
-                    %task_id,
-                    %evaluation_id,
-                    "Task not found for evaluation",
-                );
-                WebError::data_inconsistency(Resource::Evaluation)
-            })?;
+        let task = ETask::find_by_id(task_id).one(db).await?.ok_or_else(|| {
+            tracing::warn!(
+                %task_id,
+                %evaluation_id,
+                "Task not found for evaluation",
+            );
+            WebError::data_inconsistency(Resource::Evaluation)
+        })?;
         let project_id = task.project;
         let task_name = Some(task.name);
         let task_display_name = Some(task.display_name);
 
         let project = EProject::find_by_id(project_id)
-            .one(&state.web_db)
+            .one(db)
             .await?
             .ok_or_else(|| {
                 tracing::warn!(%project_id, "Project not found");
@@ -85,7 +81,7 @@ impl EvalAccessContext {
             true
         } else {
             match maybe_user {
-                Some(user) => is_project_member(state, user.id, project.id, api_key).await?,
+                Some(user) => is_project_member(db, user.id, project.id, api_key).await?,
                 None => false,
             }
         };

@@ -74,8 +74,8 @@ pub fn fingerprint(public_key: &str) -> Result<String, ssh_key::Error> {
     Ok(key.fingerprint(ssh_key::HashAlg::Sha256).to_string())
 }
 
-fn require_ssh(state: &ServerState) -> WebResult<()> {
-    if state.config.ssh.enable {
+fn require_ssh(config: &RuntimeConfig) -> WebResult<()> {
+    if config.ssh.enable {
         Ok(())
     } else {
         Err(SshKeyRefusal::SshDisabled.into())
@@ -86,7 +86,7 @@ pub async fn get_ssh_keys(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Vec<SshKeyInfo>>>> {
-    require_ssh(&state)?;
+    require_ssh(&state.config)?;
     let keys = EUserSshKey::find()
         .filter(CUserSshKey::User.eq(user.id))
         .order_by_desc(CUserSshKey::CreatedAt)
@@ -104,7 +104,7 @@ pub async fn post_ssh_key(
     Json(body): Json<CreateSshKeyRequest>,
 ) -> WebResult<Json<BaseResponse<SshKeyInfo>>> {
     forbid_via_api_key(&api_key)?;
-    require_ssh(&state)?;
+    require_ssh(&state.config)?;
     let name = body.name.trim();
     if name.is_empty() {
         return Err(SharedRefusal::EmptyField("name").into());
@@ -135,7 +135,7 @@ pub async fn post_ssh_key(
     .await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::SshKeyCreate,
         EventOwner::default(),
@@ -158,7 +158,7 @@ pub async fn delete_ssh_key(
     Path(ssh_key_id): Path<UserSshKeyId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     forbid_via_api_key(&api_key)?;
-    require_ssh(&state)?;
+    require_ssh(&state.config)?;
     let key = EUserSshKey::find_by_id(ssh_key_id)
         .one(&state.web_db)
         .await?
@@ -168,7 +168,7 @@ pub async fn delete_ssh_key(
     let key_id = key.id;
     key.delete(&state.web_db).await?;
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::SshKeyDelete,
         EventOwner::default(),

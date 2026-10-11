@@ -16,6 +16,7 @@ use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_notify::{InvitationMail, InviteScope, generate_token};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -45,16 +46,16 @@ pub struct RemoveUserRequest {
     pub user: String,
 }
 
-async fn find_user_by_username(state: &Arc<ServerState>, username: &str) -> WebResult<MUser> {
+async fn find_user_by_username(db: &WebDb, username: &str) -> WebResult<MUser> {
     EUser::find()
         .filter(CUser::Username.eq(username))
-        .one(&state.web_db)
+        .one(db)
         .await?
         .or_not_found(Resource::User)
 }
 
 async fn find_project_membership(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     project_id: ProjectId,
     user_id: UserId,
 ) -> WebResult<Option<MProjectUser>> {
@@ -64,12 +65,12 @@ async fn find_project_membership(
                 .add(CProjectUser::Project.eq(project_id))
                 .add(CProjectUser::User.eq(user_id)),
         )
-        .one(&state.web_db)
+        .one(db)
         .await?)
 }
 
 async fn find_project_invitation(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     project_id: ProjectId,
     user_id: UserId,
 ) -> WebResult<Option<MProjectInvitation>> {
@@ -79,7 +80,7 @@ async fn find_project_invitation(
                 .add(CProjectInvitation::Project.eq(project_id))
                 .add(CProjectInvitation::User.eq(user_id)),
         )
-        .one(&state.web_db)
+        .one(db)
         .await?)
 }
 
@@ -90,7 +91,7 @@ pub async fn get_project_users(
     Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<StringListItem>>>> {
     let project = load_project(
-        &state.0,
+        &state.0.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
@@ -138,8 +139,9 @@ pub async fn post_project_users(
     Path(project): Path<String>,
     Json(body): Json<AddUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let project = load_project(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -149,16 +151,16 @@ pub async fn post_project_users(
         },
     )
     .await?;
-    let target_user = find_user_by_username(&state, &body.user).await?;
+    let target_user = find_user_by_username(&state.web_db, &body.user).await?;
 
-    if find_project_membership(&state, project.id, target_user.id)
+    if find_project_membership(&state.web_db, project.id, target_user.id)
         .await?
         .is_some()
     {
         return Err(WebError::already_exists(Resource::ProjectMembership));
     }
 
-    if find_project_invitation(&state, project.id, target_user.id)
+    if find_project_invitation(&state.web_db, project.id, target_user.id)
         .await?
         .is_some()
     {
@@ -189,7 +191,7 @@ pub async fn post_project_users(
         .await?;
 
         audit_record(
-            &state,
+            &db,
             Some(user.id),
             Action::ProjectMemberAdd,
             EventOwner {
@@ -248,7 +250,7 @@ pub async fn post_project_users(
     }
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::ProjectInvitationCreate,
         EventOwner {
@@ -275,8 +277,9 @@ pub async fn patch_project_users(
     Path(project): Path<String>,
     Json(body): Json<AddUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let project = load_project(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -286,9 +289,9 @@ pub async fn patch_project_users(
         },
     )
     .await?;
-    let target_user = find_user_by_username(&state, &body.user).await?;
+    let target_user = find_user_by_username(&state.web_db, &body.user).await?;
 
-    let membership = find_project_membership(&state, project.id, target_user.id)
+    let membership = find_project_membership(&state.web_db, project.id, target_user.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Project))?;
 
@@ -310,7 +313,7 @@ pub async fn patch_project_users(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::ProjectMemberRoleChange,
         EventOwner {
@@ -338,8 +341,9 @@ pub async fn delete_project_users(
     Path(project): Path<String>,
     Json(body): Json<RemoveUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let project = load_project(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -349,9 +353,9 @@ pub async fn delete_project_users(
         },
     )
     .await?;
-    let target_user = find_user_by_username(&state, &body.user).await?;
+    let target_user = find_user_by_username(&state.web_db, &body.user).await?;
 
-    let membership = find_project_membership(&state, project.id, target_user.id)
+    let membership = find_project_membership(&state.web_db, project.id, target_user.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Project))?;
 
@@ -359,7 +363,7 @@ pub async fn delete_project_users(
     active.delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::ProjectMemberRemove,
         EventOwner {

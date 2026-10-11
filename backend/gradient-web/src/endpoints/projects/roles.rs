@@ -18,6 +18,7 @@ use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::input::check_index_name;
@@ -75,13 +76,9 @@ pub struct PatchRoleRequest {
     pub permissions: Option<Vec<String>>,
 }
 
-async fn load_project_role(
-    state: &Arc<ServerState>,
-    project_id: ProjectId,
-    role_id: RoleId,
-) -> WebResult<MRole> {
+async fn load_project_role(db: &WebDb, project_id: ProjectId, role_id: RoleId) -> WebResult<MRole> {
     let role = ERole::find_by_id(role_id)
-        .one(&state.web_db)
+        .one(db)
         .await?
         .or_not_found(Resource::Role)?;
 
@@ -102,7 +99,7 @@ pub async fn get_project_roles(
     Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<RoleListResponse>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -135,8 +132,9 @@ pub async fn post_project_role(
     Path(project): Path<String>,
     Json(body): Json<CreateRoleRequest>,
 ) -> WebResult<Json<BaseResponse<RoleResponse>>> {
+    let db = state.db();
     let project = load_project(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -180,7 +178,7 @@ pub async fn post_project_role(
     .await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::ProjectRoleCreate,
         EventOwner {
@@ -207,7 +205,7 @@ pub async fn get_project_role(
     Path((project, role_id)): Path<(String, RoleId)>,
 ) -> WebResult<Json<BaseResponse<RoleResponse>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -216,7 +214,7 @@ pub async fn get_project_role(
         },
     )
     .await?;
-    let role = load_project_role(&state, project.id, role_id).await?;
+    let role = load_project_role(&state.web_db, project.id, role_id).await?;
     Ok(ok_json(RoleResponse::from(role)))
 }
 
@@ -228,8 +226,9 @@ pub async fn patch_project_role(
     Path((project, role_id)): Path<(String, RoleId)>,
     Json(body): Json<PatchRoleRequest>,
 ) -> WebResult<Json<BaseResponse<RoleResponse>>> {
+    let db = state.db();
     let project = load_project(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -240,7 +239,7 @@ pub async fn patch_project_role(
     )
     .await?;
 
-    let role = load_project_role(&state, project.id, role_id).await?;
+    let role = load_project_role(&state.web_db, project.id, role_id).await?;
 
     if is_builtin_role(role.id) {
         return Err(SharedRefusal::BuiltinRole(Change::Modify).into());
@@ -284,7 +283,7 @@ pub async fn patch_project_role(
     let updated = active.update(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::ProjectRoleUpdate,
         EventOwner {
@@ -313,8 +312,9 @@ pub async fn delete_project_role(
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, role_id)): Path<(String, RoleId)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
+    let db = state.db();
     let project = load_project(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -325,7 +325,7 @@ pub async fn delete_project_role(
     )
     .await?;
 
-    let role = load_project_role(&state, project.id, role_id).await?;
+    let role = load_project_role(&state.web_db, project.id, role_id).await?;
 
     if is_builtin_role(role.id) {
         return Err(SharedRefusal::BuiltinRole(Change::Delete).into());
@@ -352,7 +352,7 @@ pub async fn delete_project_role(
     role.into_active_model().delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::ProjectRoleDelete,
         EventOwner {

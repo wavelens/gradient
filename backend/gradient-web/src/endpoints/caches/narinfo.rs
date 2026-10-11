@@ -15,6 +15,7 @@ use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
 use gradient_core::upstream::UpstreamProbe;
 use gradient_core::upstream_source::substitutes_from;
+use gradient_db::WebDb;
 use gradient_db::caches::upstream::pull_through_upstream_caches;
 use gradient_sources::{CacheSigner, get_hash_from_url};
 use gradient_types::events::cache::NarinfoServed;
@@ -55,8 +56,16 @@ pub async fn nix_cache_info(
     Path(cache): Path<String>,
     Query(flag): Query<JsonFlag>,
 ) -> WebResult<Response> {
-    let client_ip = cache_client_ip(&state, &headers, peer);
-    let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
+    let client_ip = cache_client_ip(&state.config, &headers, peer);
+    let ctx = CacheContext::load(
+        &state.web_db,
+        &state.jwt_secret,
+        &state.memory.last_used_stamps,
+        &headers,
+        client_ip,
+        cache,
+    )
+    .await?;
 
     let priority = match (ctx.cache.local_priority, peer) {
         (Some(p), Some(addr)) if p != 0 => {
@@ -94,8 +103,16 @@ pub async fn gradient_cache_info(
     Path(cache): Path<String>,
     Query(flag): Query<JsonFlag>,
 ) -> WebResult<Response> {
-    let client_ip = cache_client_ip(&state, &headers, peer);
-    CacheContext::load(&state, &headers, client_ip, cache).await?;
+    let client_ip = cache_client_ip(&state.config, &headers, peer);
+    CacheContext::load(
+        &state.web_db,
+        &state.jwt_secret,
+        &state.memory.last_used_stamps,
+        &headers,
+        client_ip,
+        cache,
+    )
+    .await?;
 
     let info = GradientCacheInfo {
         gradient_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -131,11 +148,24 @@ pub async fn path(
     let path_hash =
         get_hash_from_url(path.clone()).map_err(|_| WebError::not_found(Resource::Path))?;
 
-    let client_ip = cache_client_ip(&state, &headers, peer);
-    let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
+    let client_ip = cache_client_ip(&state.config, &headers, peer);
+    let ctx = CacheContext::load(
+        &state.web_db,
+        &state.jwt_secret,
+        &state.memory.last_used_stamps,
+        &headers,
+        client_ip,
+        cache,
+    )
+    .await?;
 
-    if let Ok(path_info) =
-        get_nar_by_hash(Arc::clone(&state), ctx.cache.clone(), path_hash.clone()).await
+    if let Ok(path_info) = get_nar_by_hash(
+        &state.web_db,
+        &state.config,
+        ctx.cache.clone(),
+        path_hash.clone(),
+    )
+    .await
     {
         state.events.publish(NarinfoServed {
             cache: ctx.cache.id,
@@ -150,7 +180,7 @@ pub async fn path(
         return Ok(with_narinfo_headers(response, "HIT"));
     }
 
-    let rewritten = fetch_from_upstream(&state, &ctx.cache, &path_hash).await;
+    let rewritten = fetch_from_upstream(&state.web_db, &state.config, &ctx.cache, &path_hash).await;
     if let Some(body) = rewritten {
         state.events.publish(NarinfoServed {
             cache: ctx.cache.id,
@@ -222,11 +252,12 @@ fn rewrite_nar_url(body: &str, upstream: CacheUpstreamId) -> String {
 }
 
 async fn fetch_from_upstream(
-    state: &Arc<ServerState>,
+    db: &WebDb,
+    config: &RuntimeConfig,
     cache: &MCache,
     path_hash: &str,
 ) -> Option<String> {
-    let upstream_caches: Vec<UpstreamProbe> = pull_through_upstream_caches(&state.web_db, cache)
+    let upstream_caches: Vec<UpstreamProbe> = pull_through_upstream_caches(db, cache)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -251,9 +282,9 @@ async fn fetch_from_upstream(
     let body = rewrite_nar_url(&found.body, found.upstream);
 
     let signer = match CacheSigner::from_cache(
-        &state.config.secrets.crypt_file,
+        &config.secrets.crypt_file,
         cache,
-        &state.config.server.serve_url,
+        &config.server.serve_url,
     ) {
         Ok(signer) => signer,
         Err(e) => {

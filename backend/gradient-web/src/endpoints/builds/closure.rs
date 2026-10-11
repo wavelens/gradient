@@ -223,7 +223,8 @@ pub async fn get_build_closure(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx =
+        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
     let graph = build_closure_graph(&state.web_db, vec![ctx.build_job.derivation]).await?;
     Ok(ok_json(graph))
 }
@@ -234,8 +235,8 @@ pub async fn get_eval_closure(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
-    let _ctx =
-        EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+    let _ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+        .await?;
 
     let roots: Vec<DerivationId> = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation_id))
@@ -303,7 +304,8 @@ pub async fn get_build_runtime_closure(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx =
+        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
     let seeds = gradient_db::graph::runtime_closure::output_hashes_for_drvs(
         &state.web_db,
         &[ctx.build_job.derivation],
@@ -320,8 +322,8 @@ pub async fn get_eval_runtime_closure(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
-    let _ctx =
-        EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+    let _ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+        .await?;
 
     let roots: Vec<DerivationId> = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation_id))

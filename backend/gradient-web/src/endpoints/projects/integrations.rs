@@ -192,7 +192,7 @@ pub async fn get_integrations(
     Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<IntegrationResponse>>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -223,7 +223,7 @@ pub async fn get_integration_summaries(
     Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<IntegrationSummaryResponse>>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -253,7 +253,7 @@ pub async fn put_integration(
     Json(body): Json<CreateIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -394,7 +394,7 @@ pub async fn get_integration(
     Path((project, integration_id)): Path<(String, IntegrationId)>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -404,7 +404,8 @@ pub async fn get_integration(
         },
     )
     .await?;
-    let integration = load_integration_in_project(&state, project.id, integration_id).await?;
+    let integration =
+        load_integration_in_project(&state.web_db, project.id, integration_id).await?;
     Ok(ok_json(
         integration_response(&state.web_db, integration).await?,
     ))
@@ -418,7 +419,7 @@ pub async fn patch_integration(
     Json(body): Json<PatchIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -428,7 +429,8 @@ pub async fn patch_integration(
         },
     )
     .await?;
-    let integration = load_integration_in_project(&state, project.id, integration_id).await?;
+    let integration =
+        load_integration_in_project(&state.web_db, project.id, integration_id).await?;
     reject_managed_integration(&integration)?;
     if integration.git_host_type == GitHostType::GitHub {
         return Err(ProjectRefusal::GitHubIntegrationNotEditable.into());
@@ -517,7 +519,7 @@ pub async fn delete_integration(
     Path((project, integration_id)): Path<(String, IntegrationId)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -527,7 +529,8 @@ pub async fn delete_integration(
         },
     )
     .await?;
-    let integration = load_integration_in_project(&state, project.id, integration_id).await?;
+    let integration =
+        load_integration_in_project(&state.web_db, project.id, integration_id).await?;
     reject_managed_integration(&integration)?;
     if integration.git_host_type == GitHostType::GitHub {
         let txn = state.web_db.inner().begin().await?;

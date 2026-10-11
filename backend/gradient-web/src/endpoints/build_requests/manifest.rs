@@ -50,7 +50,7 @@ pub async fn post_manifest(
     Json(body): Json<ManifestRequest>,
 ) -> WebResult<Json<BaseResponse<ManifestResponse>>> {
     let project = load_project(
-        &state.0,
+        &state.0.db(),
         Caller::User(&user),
         api_key.as_ref(),
         body.project.clone(),

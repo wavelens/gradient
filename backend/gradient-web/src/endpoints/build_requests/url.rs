@@ -49,7 +49,7 @@ pub async fn post_url(
     Json(body): Json<UrlRequest>,
 ) -> WebResult<Json<BaseResponse<DispatchResponse>>> {
     let project = load_project(
-        &state.0,
+        &state.0.db(),
         Caller::User(&user),
         api_key.as_ref(),
         body.project,
@@ -107,7 +107,7 @@ pub async fn post_url(
 
     let response = queue_build_request(
         &tx,
-        &state.0,
+        &state.0.config,
         project.id,
         &user,
         BuildRequestSource {

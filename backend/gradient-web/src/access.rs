@@ -12,8 +12,8 @@ use crate::permissions::{
 };
 use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
-use gradient_core::ServerState;
 use gradient_db::lookup::{get_any_cache_by_name, get_any_project_by_name, get_any_task_by_name};
+use gradient_db::{DbContext, WebDb};
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
 use gradient_types::ids::{CacheId, IntegrationId, ProjectId, UserId};
 use gradient_types::{
@@ -23,7 +23,6 @@ use gradient_types::{
     TeamRole,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
-use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
 enum AccessRefusal {
@@ -108,7 +107,7 @@ pub enum CacheAccess {
 }
 
 pub async fn load_project(
-    state: &Arc<ServerState>,
+    db: &DbContext,
     caller: Caller<'_>,
     api_key: Option<&ApiKeyContext>,
     project_name: String,
@@ -123,7 +122,7 @@ pub async fn load_project(
         _ => Resource::Project,
     };
 
-    let project = get_any_project_by_name(&state.db(), project_name)
+    let project = get_any_project_by_name(db, project_name)
         .await?
         .or_not_found(label)?;
 
@@ -131,7 +130,7 @@ pub async fn load_project(
         ProjectAccess::Readable { .. } => {
             if !project.public {
                 let visible = match caller.user_id() {
-                    Some(uid) => is_project_member(state, uid, project.id, api_key).await?,
+                    Some(uid) => is_project_member(&db.web_db, uid, project.id, api_key).await?,
                     None => false,
                 };
                 if !visible {
@@ -141,7 +140,7 @@ pub async fn load_project(
         }
         ProjectAccess::Member { reject_managed } => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            if !is_project_member(state, uid, project.id, api_key).await? {
+            if !is_project_member(&db.web_db, uid, project.id, api_key).await? {
                 return Err(WebError::not_found(label));
             }
             if reject_managed {
@@ -153,7 +152,8 @@ pub async fn load_project(
             reject_managed,
         } => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            require_project_permission(state, uid, project.id, permission, label, api_key).await?;
+            require_project_permission(&db.web_db, uid, project.id, permission, label, api_key)
+                .await?;
             if reject_managed {
                 reject_managed_project(&project)?;
             }
@@ -164,7 +164,7 @@ pub async fn load_project(
 }
 
 pub async fn load_task(
-    state: &Arc<ServerState>,
+    db: &DbContext,
     caller: Caller<'_>,
     api_key: Option<&ApiKeyContext>,
     project_name: String,
@@ -177,7 +177,7 @@ pub async fn load_task(
 
     let label = Resource::Task;
 
-    let (project, task) = get_any_task_by_name(&state.db(), project_name, task_name)
+    let (project, task) = get_any_task_by_name(db, project_name, task_name)
         .await?
         .or_not_found(label)?;
 
@@ -185,7 +185,7 @@ pub async fn load_task(
         TaskAccess::Readable => {
             if !project.public {
                 let visible = match caller.user_id() {
-                    Some(uid) => is_project_member(state, uid, project.id, api_key).await?,
+                    Some(uid) => is_project_member(&db.web_db, uid, project.id, api_key).await?,
                     None => false,
                 };
                 if !visible {
@@ -195,7 +195,7 @@ pub async fn load_task(
         }
         TaskAccess::Member => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            if !is_project_member(state, uid, project.id, api_key).await? {
+            if !is_project_member(&db.web_db, uid, project.id, api_key).await? {
                 return Err(WebError::not_found(label));
             }
         }
@@ -204,7 +204,8 @@ pub async fn load_task(
             reject_managed,
         } => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            require_project_permission(state, uid, project.id, permission, label, api_key).await?;
+            require_project_permission(&db.web_db, uid, project.id, permission, label, api_key)
+                .await?;
             if reject_managed && task.managed {
                 return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Task).into());
             }
@@ -215,7 +216,7 @@ pub async fn load_task(
 }
 
 pub async fn load_cache(
-    state: &Arc<ServerState>,
+    db: &DbContext,
     caller: Caller<'_>,
     api_key: Option<&ApiKeyContext>,
     cache_name: String,
@@ -223,7 +224,7 @@ pub async fn load_cache(
 ) -> WebResult<MCache> {
     let label = Resource::Cache;
 
-    let cache = get_any_cache_by_name(&state.db(), cache_name)
+    let cache = get_any_cache_by_name(db, cache_name)
         .await?
         .or_not_found(label)?;
 
@@ -239,8 +240,9 @@ pub async fn load_cache(
             if !cache.public {
                 let visible = match caller.user_id() {
                     Some(uid) => {
-                        is_cache_member(state, uid, cache.id, api_key).await?
-                            || is_cache_project_subscriber(state, uid, cache.id, api_key).await?
+                        is_cache_member(&db.web_db, uid, cache.id, api_key).await?
+                            || is_cache_project_subscriber(&db.web_db, uid, cache.id, api_key)
+                                .await?
                     }
                     None => false,
                 };
@@ -251,7 +253,7 @@ pub async fn load_cache(
         }
         CacheAccess::Member { reject_managed } => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            if !is_cache_member(state, uid, cache.id, api_key).await? {
+            if !is_cache_member(&db.web_db, uid, cache.id, api_key).await? {
                 return Err(WebError::not_found(label));
             }
             if reject_managed {
@@ -263,7 +265,7 @@ pub async fn load_cache(
             reject_managed,
         } => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            require_cache_permission(state, uid, cache.id, permission, label, api_key).await?;
+            require_cache_permission(&db.web_db, uid, cache.id, permission, label, api_key).await?;
             if reject_managed {
                 reject_managed_cache(&cache)?;
             }
@@ -273,13 +275,10 @@ pub async fn load_cache(
     Ok(cache)
 }
 
-pub async fn visible_cache_condition(
-    state: &Arc<ServerState>,
-    user_id: UserId,
-) -> WebResult<Condition> {
+pub async fn visible_cache_condition(db: &WebDb, user_id: UserId) -> WebResult<Condition> {
     let project_ids: Vec<ProjectId> = EProjectAccess::find()
         .filter(CProjectAccess::User.eq(user_id))
-        .all(&state.web_db)
+        .all(db)
         .await?
         .into_iter()
         .map(|m| m.project)
@@ -290,7 +289,7 @@ pub async fn visible_cache_condition(
     } else {
         EProjectCache::find()
             .filter(CProjectCache::Project.is_in(project_ids))
-            .all(&state.web_db)
+            .all(db)
             .await?
             .into_iter()
             .map(|oc| oc.cache)
@@ -303,20 +302,20 @@ pub async fn visible_cache_condition(
 }
 
 pub async fn load_integration_in_project(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     project_id: ProjectId,
     integration_id: IntegrationId,
 ) -> WebResult<MIntegration> {
     EIntegration::find()
         .filter(CIntegration::Id.eq(integration_id))
         .filter(CIntegration::Project.eq(project_id))
-        .one(&state.web_db)
+        .one(db)
         .await?
         .or_not_found(Resource::Integration)
 }
 
 pub async fn is_project_member(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user_id: UserId,
     project_id: ProjectId,
     api_key: Option<&ApiKeyContext>,
@@ -327,11 +326,11 @@ pub async fn is_project_member(
     {
         return Ok(false);
     }
-    Ok(gradient_db::access::reaches_project(&state.web_db, project_id, user_id).await?)
+    Ok(gradient_db::access::reaches_project(db, project_id, user_id).await?)
 }
 
 pub async fn load_project_membership(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user_id: UserId,
     project_id: ProjectId,
 ) -> WebResult<Option<MProjectUser>> {
@@ -341,26 +340,26 @@ pub async fn load_project_membership(
                 .add(CProjectUser::Project.eq(project_id))
                 .add(CProjectUser::User.eq(user_id)),
         )
-        .one(&state.web_db)
+        .one(db)
         .await?)
 }
 
 pub async fn has_permission(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user_id: UserId,
     project_id: ProjectId,
     permission: Permission,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
     Ok(
-        load_membership_with_permissions(state, user_id, project_id, api_key)
+        load_membership_with_permissions(db, user_id, project_id, api_key)
             .await?
             .is_some_and(|mask| mask_grants(mask, permission)),
     )
 }
 
 pub async fn load_membership_with_permissions(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user_id: UserId,
     project_id: ProjectId,
     api_key: Option<&ApiKeyContext>,
@@ -371,8 +370,7 @@ pub async fn load_membership_with_permissions(
     {
         return Ok(None);
     }
-    let Some(mask) =
-        gradient_db::access::project_permission_mask(&state.web_db, project_id, user_id).await?
+    let Some(mask) = gradient_db::access::project_permission_mask(db, project_id, user_id).await?
     else {
         return Ok(None);
     };
@@ -383,14 +381,14 @@ pub async fn load_membership_with_permissions(
 }
 
 async fn require_project_permission(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user_id: UserId,
     project_id: ProjectId,
     permission: Permission,
     not_found_label: Resource,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<()> {
-    let mask = load_membership_with_permissions(state, user_id, project_id, api_key)
+    let mask = load_membership_with_permissions(db, user_id, project_id, api_key)
         .await?
         .ok_or_else(|| WebError::not_found(not_found_label))?;
 
@@ -409,7 +407,7 @@ fn reject_managed_project(project: &MProject) -> WebResult<()> {
 }
 
 async fn is_cache_member(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user_id: UserId,
     cache_id: CacheId,
     _api_key: Option<&ApiKeyContext>,
@@ -417,20 +415,20 @@ async fn is_cache_member(
     Ok(ECacheAccess::find()
         .filter(CCacheAccess::Cache.eq(cache_id))
         .filter(CCacheAccess::User.eq(user_id))
-        .one(&state.web_db)
+        .one(db)
         .await?
         .is_some())
 }
 
 async fn is_cache_project_subscriber(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user_id: UserId,
     cache_id: CacheId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
     let subscriber_projects: Vec<ProjectId> = EProjectCache::find()
         .filter(CProjectCache::Cache.eq(cache_id))
-        .all(&state.web_db)
+        .all(db)
         .await?
         .into_iter()
         .map(|oc| oc.project)
@@ -450,32 +448,28 @@ async fn is_cache_project_subscriber(
     let member = EProjectAccess::find()
         .filter(CProjectAccess::User.eq(user_id))
         .filter(CProjectAccess::Project.is_in(allowed))
-        .one(&state.web_db)
+        .one(db)
         .await?;
     Ok(member.is_some())
 }
 
 pub async fn effective_cache_mask(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user_id: UserId,
     cache_id: CacheId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<Option<i64>> {
-    if let Some(mask) = cache_role_mask(state, user_id, cache_id).await? {
+    if let Some(mask) = cache_role_mask(db, user_id, cache_id).await? {
         return Ok(Some(mask));
     }
-    if is_cache_project_subscriber(state, user_id, cache_id, api_key).await? {
+    if is_cache_project_subscriber(db, user_id, cache_id, api_key).await? {
         return Ok(Some(crate::permissions::cache_view_mask()));
     }
     Ok(None)
 }
 
-async fn cache_role_mask(
-    state: &Arc<ServerState>,
-    user_id: UserId,
-    cache_id: CacheId,
-) -> WebResult<Option<i64>> {
-    Ok(gradient_db::access::cache_permission_mask(&state.web_db, cache_id, user_id).await?)
+async fn cache_role_mask(db: &WebDb, user_id: UserId, cache_id: CacheId) -> WebResult<Option<i64>> {
+    Ok(gradient_db::access::cache_permission_mask(db, cache_id, user_id).await?)
 }
 
 fn cache_mask_allows(
@@ -491,13 +485,13 @@ fn cache_mask_allows(
 }
 
 pub async fn has_cache_permission(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user_id: UserId,
     cache_id: CacheId,
     permission: CachePermission,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
-    let Some(role_mask) = cache_role_mask(state, user_id, cache_id).await? else {
+    let Some(role_mask) = cache_role_mask(db, user_id, cache_id).await? else {
         return Ok(false);
     };
 
@@ -505,14 +499,14 @@ pub async fn has_cache_permission(
 }
 
 async fn require_cache_permission(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user_id: UserId,
     cache_id: CacheId,
     permission: CachePermission,
     label: Resource,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<()> {
-    let role_mask = cache_role_mask(state, user_id, cache_id)
+    let role_mask = cache_role_mask(db, user_id, cache_id)
         .await?
         .ok_or_else(|| WebError::not_found(label))?;
 
@@ -526,46 +520,40 @@ async fn require_cache_permission(
     Ok(())
 }
 
-pub async fn project_admin_emails(
-    state: &Arc<ServerState>,
-    project_id: ProjectId,
-) -> WebResult<Vec<String>> {
+pub async fn project_admin_emails(db: &WebDb, project_id: ProjectId) -> WebResult<Vec<String>> {
     let admin_ids: Vec<UserId> = EProjectUser::find()
         .filter(CProjectUser::Project.eq(project_id))
         .filter(CProjectUser::Role.eq(BASE_ROLE_ADMIN_ID))
-        .all(&state.web_db)
+        .all(db)
         .await?
         .into_iter()
         .map(|m| m.user)
         .collect();
 
-    admin_emails(state, admin_ids).await
+    admin_emails(db, admin_ids).await
 }
 
-pub async fn cache_admin_emails(
-    state: &Arc<ServerState>,
-    cache_id: CacheId,
-) -> WebResult<Vec<String>> {
+pub async fn cache_admin_emails(db: &WebDb, cache_id: CacheId) -> WebResult<Vec<String>> {
     let admin_ids: Vec<UserId> = ECacheUser::find()
         .filter(CCacheUser::Cache.eq(cache_id))
         .filter(CCacheUser::Role.eq(BASE_CACHE_ROLE_ADMIN_ID))
-        .all(&state.web_db)
+        .all(db)
         .await?
         .into_iter()
         .map(|m| m.user)
         .collect();
 
-    admin_emails(state, admin_ids).await
+    admin_emails(db, admin_ids).await
 }
 
-async fn admin_emails(state: &Arc<ServerState>, ids: Vec<UserId>) -> WebResult<Vec<String>> {
+async fn admin_emails(db: &WebDb, ids: Vec<UserId>) -> WebResult<Vec<String>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
 
     Ok(EUser::find()
         .filter(CUser::Id.is_in(ids))
-        .all(&state.web_db)
+        .all(db)
         .await?
         .into_iter()
         .filter(|u| u.active && !u.email.is_empty())
@@ -594,7 +582,7 @@ pub enum TeamAccess {
 }
 
 pub async fn load_team(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user: &MUser,
     api_key: Option<&ApiKeyContext>,
     team_name: String,
@@ -606,10 +594,10 @@ pub async fn load_team(
 
     let team = ETeam::find()
         .filter(CTeam::Name.eq(team_name))
-        .one(&state.web_db)
+        .one(db)
         .await?
         .or_not_found(Resource::Team)?;
-    let role = gradient_db::teams::team_role_of(&state.web_db, team.id, user.id).await?;
+    let role = gradient_db::teams::team_role_of(db, team.id, user.id).await?;
 
     match (access, role) {
         (_, None) if !user.superuser => return Err(WebError::not_found(Resource::Team)),
@@ -634,6 +622,8 @@ pub async fn load_team(
 mod tests {
     use super::*;
     use crate::authorization::ApiKeyContext;
+    use gradient_core::ServerState;
+    use std::sync::Arc;
 
     use gradient_fixtures::mock::{all_statements, mock_db};
 
@@ -769,7 +759,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let r = load_project(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-project".into(),
@@ -791,7 +781,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_project(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-project".into(),
@@ -814,7 +804,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_project(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-project".into(),
@@ -836,7 +826,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_project(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-project".into(),
@@ -863,7 +853,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let r = load_project(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-project".into(),
@@ -889,7 +879,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_project(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-project".into(),
@@ -914,7 +904,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let r = load_project(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-project".into(),
@@ -933,7 +923,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let r = load_project(
-                &state,
+                &state.db(),
                 Caller::Anon,
                 None,
                 "test-project".into(),
@@ -954,7 +944,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_project(
-                &state,
+                &state.db(),
                 Caller::Anon,
                 None,
                 "test-project".into(),
@@ -984,7 +974,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let r = load_task(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-project".into(),
@@ -1012,7 +1002,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_task(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-project".into(),
@@ -1041,7 +1031,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_task(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-project".into(),
@@ -1067,7 +1057,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_task(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-project".into(),
@@ -1110,7 +1100,7 @@ mod tests {
                 reject_managed: true,
             };
             let err = load_project(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 Some(&key),
                 "test-project".into(),
@@ -1140,7 +1130,7 @@ mod tests {
                 reject_managed: false,
             };
             let err = load_project(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 Some(&key),
                 "test-project".into(),
@@ -1173,7 +1163,7 @@ mod tests {
                 reject_managed: false,
             };
             let r = load_project(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 Some(&key),
                 "test-project".into(),
@@ -1195,7 +1185,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let r = load_project(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-project".into(),
@@ -1268,7 +1258,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let r = load_cache(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-cache".into(),
@@ -1290,7 +1280,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_cache(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-cache".into(),
@@ -1313,7 +1303,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let r = load_cache(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-cache".into(),
@@ -1338,7 +1328,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_cache(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-cache".into(),
@@ -1386,7 +1376,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let r = load_cache(
-                &state,
+                &state.db(),
                 Caller::Anon,
                 None,
                 "test-cache".into(),
@@ -1409,7 +1399,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_cache(
-                &state,
+                &state.db(),
                 Caller::Anon,
                 None,
                 "test-cache".into(),
@@ -1431,7 +1421,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let r = load_cache(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-cache".into(),
@@ -1455,7 +1445,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_cache(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 None,
                 "test-cache".into(),
@@ -1490,7 +1480,7 @@ mod tests {
                 .append_query_results([vec![cache_role_fixture()]])
                 .into_connection();
             let state = make_state(db);
-            let mask = effective_cache_mask(&state, user.id, cache_fixture(false).id, None)
+            let mask = effective_cache_mask(&state.web_db, user.id, cache_fixture(false).id, None)
                 .await
                 .expect("query ok")
                 .expect("member has a mask");
@@ -1508,7 +1498,7 @@ mod tests {
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
                 .into_connection();
             let state = make_state(db);
-            let mask = effective_cache_mask(&state, user.id, cache_fixture(false).id, None)
+            let mask = effective_cache_mask(&state.web_db, user.id, cache_fixture(false).id, None)
                 .await
                 .expect("query ok")
                 .expect("subscriber gets view-only mask");
@@ -1525,7 +1515,7 @@ mod tests {
                 .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
                 .into_connection();
             let state = make_state(db);
-            let mask = effective_cache_mask(&state, user.id, cache_fixture(false).id, None)
+            let mask = effective_cache_mask(&state.web_db, user.id, cache_fixture(false).id, None)
                 .await
                 .expect("query ok");
             assert!(mask.is_none(), "outsider must not get a cache mask");
@@ -1544,7 +1534,7 @@ mod tests {
                 .into_connection();
             let state = make_state(db);
             let err = load_cache(
-                &state,
+                &state.db(),
                 Caller::User(&user),
                 Some(&api_key),
                 "test-cache".into(),
@@ -1569,7 +1559,7 @@ mod tests {
                 .append_query_results([vec![project_cache_fixture()]])
                 .into_connection();
             let state = make_state(db);
-            let cond = visible_cache_condition(&state, user.id)
+            let cond = visible_cache_condition(&state.web_db, user.id)
                 .await
                 .expect("condition builds");
             let stmt = ECache::find().filter(cond).build(DatabaseBackend::Postgres);
@@ -1591,7 +1581,7 @@ mod tests {
                 .append_query_results([Vec::<gradient_entity::project_user::Model>::new()])
                 .into_connection();
             let state = make_state(db);
-            let cond = visible_cache_condition(&state, user.id)
+            let cond = visible_cache_condition(&state.web_db, user.id)
                 .await
                 .expect("condition builds");
             let stmt = ECache::find().filter(cond).build(DatabaseBackend::Postgres);
@@ -1621,7 +1611,7 @@ mod tests {
         let (state, db) = make_state_with_log(mock);
 
         load_project(
-            &state,
+            &state.db(),
             Caller::User(&user),
             None,
             "private".into(),

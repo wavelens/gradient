@@ -11,6 +11,7 @@ use axum::extract::{ConnectInfo, FromRequestParts};
 use axum::http::HeaderMap;
 use axum::http::request::Parts;
 use gradient_core::ServerState;
+use gradient_db::DbContext;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::{Action, Audited};
 use gradient_types::*;
@@ -62,7 +63,7 @@ impl FromRequestParts<Arc<ServerState>> for RequestInfo {
 }
 
 pub async fn record(
-    state: &ServerState,
+    db: &DbContext,
     user_id: Option<UserId>,
     action: Action,
     owner: EventOwner,
@@ -91,18 +92,17 @@ pub async fn record(
     }
     .into_active_model();
 
-    if let Err(e) = EAuditLog::insert(row).exec(&state.web_db).await {
+    if let Err(e) = EAuditLog::insert(row).exec(&db.web_db).await {
         tracing::warn!(event, error = %e, "failed to write audit_log entry");
     }
 
-    state
-        .record(Audited {
-            action,
-            user: user_id,
-            owner,
-            metadata,
-        })
-        .await;
+    db.record(Audited {
+        action,
+        user: user_id,
+        owner,
+        metadata,
+    })
+    .await;
 }
 
 pub fn changed_fields<const N: usize>(fields: [(&str, bool); N]) -> serde_json::Value {
@@ -137,7 +137,7 @@ mod tests {
         };
 
         record(
-            &state,
+            &state.db(),
             Some(user),
             Action::ProjectDelete,
             owner,

@@ -13,7 +13,9 @@ use axum::Extension;
 use axum::extract::{Path, State};
 use axum_streams::StreamBodyAs;
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_entity::build::BuildStatus;
+use gradient_storage::LogStorage;
 use gradient_types::*;
 use gradient_util::log_lines::PrefixedLines;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -24,19 +26,19 @@ use tracing::error;
 use super::EvalAccessContext;
 
 async fn eval_shared_build_jobs(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     evaluation: EvaluationId,
 ) -> Result<Vec<(MDerivationBuild, String)>, WebError> {
     let jobs = EBuildJob::find()
         .filter(CBuildJob::Evaluation.eq(evaluation))
-        .all(&state.web_db)
+        .all(db)
         .await?;
 
     let shared_build_ids: Vec<DerivationBuildId> =
         jobs.iter().map(|j| j.derivation_build).collect();
     let shared_builds: HashMap<DerivationBuildId, MDerivationBuild> = EDerivationBuild::find()
         .filter(CDerivationBuild::Id.is_in(shared_build_ids))
-        .all(&state.web_db)
+        .all(db)
         .await?
         .into_iter()
         .map(|a| (a.id, a))
@@ -45,7 +47,7 @@ async fn eval_shared_build_jobs(
     let drv_ids: Vec<DerivationId> = jobs.iter().map(|j| j.derivation).collect();
     let names: HashMap<DerivationId, String> = EDerivation::find()
         .filter(CDerivation::Id.is_in(drv_ids))
-        .all(&state.web_db)
+        .all(db)
         .await?
         .into_iter()
         .map(|d| (d.id, d.name))
@@ -80,19 +82,17 @@ impl Followed {
 }
 
 async fn read_new_lines(
-    state: &ServerState,
+    db: &WebDb,
+    log_storage: &Arc<dyn LogStorage>,
     shared_build: DerivationBuildId,
     followed: &mut Followed,
     finished: bool,
 ) -> Vec<String> {
-    let log = match gradient_db::scheduling::build_attempt::latest_attempt_id(
-        &state.web_db,
-        shared_build,
-    )
-    .await
-    .unwrap_or(None)
+    let log = match gradient_db::scheduling::build_attempt::latest_attempt_id(db, shared_build)
+        .await
+        .unwrap_or(None)
     {
-        Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
+        Some(key) => log_storage.read(key).await.unwrap_or_default(),
         None => String::new(),
     };
 
@@ -116,10 +116,15 @@ pub async fn post_evaluation_builds(
     Path(evaluation_id): Path<EvaluationId>,
 ) -> Result<StreamBodyAs<'static>, WebError> {
     let api_key_ref = api_key.as_ref();
-    let ctx =
-        EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        &Some(user.clone()),
+        api_key_ref,
+    )
+    .await?;
 
-    if !is_project_member(&state, user.id, ctx.project_id, api_key_ref).await? {
+    if !is_project_member(&state.web_db, user.id, ctx.project_id, api_key_ref).await? {
         return Err(WebError::not_found(Resource::Evaluation));
     }
 
@@ -130,7 +135,7 @@ pub async fn post_evaluation_builds(
         let mut first = true;
 
         loop {
-            let current = match eval_shared_build_jobs(&state, evaluation.id).await {
+            let current = match eval_shared_build_jobs(&state.web_db, evaluation.id).await {
                 Ok(jobs) => jobs,
                 Err(e) => {
                     error!(error = %e, "Failed to query builds");
@@ -158,7 +163,7 @@ pub async fn post_evaluation_builds(
                     continue;
                 }
 
-                let lines = read_new_lines(&state, shared_build.id, entry, finished).await;
+                let lines = read_new_lines(&state.web_db, &state.log_storage, shared_build.id, entry, finished).await;
                 if !lines.is_empty() {
                     yield lines.join("\n") + "\n";
                 }

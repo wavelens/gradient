@@ -16,6 +16,7 @@ use crate::resource::Resource;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
@@ -207,10 +208,10 @@ impl Invitation {
     }
 }
 
-async fn find_invitation(state: &Arc<ServerState>, token: &str) -> WebResult<Invitation> {
+async fn find_invitation(db: &WebDb, token: &str) -> WebResult<Invitation> {
     if let Some(row) = EProjectInvitation::find()
         .filter(CProjectInvitation::Token.eq(token))
-        .one(&state.web_db)
+        .one(db)
         .await?
     {
         return Ok(Invitation::Project(row));
@@ -218,7 +219,7 @@ async fn find_invitation(state: &Arc<ServerState>, token: &str) -> WebResult<Inv
 
     if let Some(row) = ECacheInvitation::find()
         .filter(CCacheInvitation::Token.eq(token))
-        .one(&state.web_db)
+        .one(db)
         .await?
     {
         return Ok(Invitation::Cache(row));
@@ -226,19 +227,15 @@ async fn find_invitation(state: &Arc<ServerState>, token: &str) -> WebResult<Inv
 
     ETeamInvitation::find()
         .filter(CTeamInvitation::Token.eq(token))
-        .one(&state.web_db)
+        .one(db)
         .await?
         .map(Invitation::Team)
         .ok_or_else(|| WebError::not_found(Resource::Invitation))
 }
 
 /// The session must belong to the invitee. A forwarded mail is useless to anybody else.
-async fn claim_invitation(
-    state: &Arc<ServerState>,
-    user: &MUser,
-    token: &str,
-) -> WebResult<Invitation> {
-    let invitation = find_invitation(state, token).await?;
+async fn claim_invitation(db: &WebDb, user: &MUser, token: &str) -> WebResult<Invitation> {
+    let invitation = find_invitation(db, token).await?;
 
     match evaluate_invite(
         invitation.invitee(),
@@ -251,13 +248,13 @@ async fn claim_invitation(
         InviteDecision::Expired => {
             match invitation {
                 Invitation::Project(i) => {
-                    i.into_active_model().delete(&state.web_db).await?;
+                    i.into_active_model().delete(db).await?;
                 }
                 Invitation::Cache(i) => {
-                    i.into_active_model().delete(&state.web_db).await?;
+                    i.into_active_model().delete(db).await?;
                 }
                 Invitation::Team(i) => {
-                    i.into_active_model().delete(&state.web_db).await?;
+                    i.into_active_model().delete(db).await?;
                 }
             }
 
@@ -272,7 +269,7 @@ pub async fn post_accept_invite(
     Extension(user): Extension<MUser>,
     Json(body): Json<InviteTokenRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let invitation = claim_invitation(&state, &user, &body.token).await?;
+    let invitation = claim_invitation(&state.web_db, &user, &body.token).await?;
     let tx = state.web_db.inner().begin().await?;
 
     let (action, owner, payload) = match invitation {
@@ -382,7 +379,15 @@ pub async fn post_accept_invite(
     };
 
     tx.commit().await?;
-    audit_record(&state, Some(user.id), action, owner, &info, Some(payload)).await;
+    audit_record(
+        &state.db(),
+        Some(user.id),
+        action,
+        owner,
+        &info,
+        Some(payload),
+    )
+    .await;
 
     Ok(ok_json("Invitation accepted".to_string()))
 }
@@ -393,7 +398,7 @@ pub async fn post_decline_invite(
     Extension(user): Extension<MUser>,
     Json(body): Json<InviteTokenRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let invitation = claim_invitation(&state, &user, &body.token).await?;
+    let invitation = claim_invitation(&state.web_db, &user, &body.token).await?;
 
     let (action, owner, payload) = match invitation {
         Invitation::Project(inv) => {
@@ -425,7 +430,15 @@ pub async fn post_decline_invite(
         }
     };
 
-    audit_record(&state, Some(user.id), action, owner, &info, Some(payload)).await;
+    audit_record(
+        &state.db(),
+        Some(user.id),
+        action,
+        owner,
+        &info,
+        Some(payload),
+    )
+    .await;
 
     Ok(ok_json("Invitation declined".to_string()))
 }

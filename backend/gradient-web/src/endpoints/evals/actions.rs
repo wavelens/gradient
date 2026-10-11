@@ -31,11 +31,16 @@ pub async fn post_evaluation(
     Json(body): Json<MakeEvaluationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let api_key_ref = api_key.as_ref();
-    let ctx =
-        EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        &Some(user.clone()),
+        api_key_ref,
+    )
+    .await?;
 
     // Mutations require explicit project membership even on a public project.
-    if !is_project_member(&state, user.id, ctx.project_id, api_key_ref).await? {
+    if !is_project_member(&state.web_db, user.id, ctx.project_id, api_key_ref).await? {
         return Err(WebError::not_found(Resource::Evaluation));
     }
 
@@ -53,9 +58,14 @@ pub async fn post_evaluation_retry(
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let api_key_ref = api_key.as_ref();
-    let ctx =
-        EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
-    if !is_project_member(&state, user.id, ctx.project_id, api_key_ref).await? {
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        &Some(user.clone()),
+        api_key_ref,
+    )
+    .await?;
+    if !is_project_member(&state.web_db, user.id, ctx.project_id, api_key_ref).await? {
         return Err(WebError::not_found(Resource::Evaluation));
     }
 

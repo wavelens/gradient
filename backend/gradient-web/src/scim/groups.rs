@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::WebDb;
 use std::sync::Arc;
 
 use axum::Json;
@@ -33,19 +34,19 @@ fn scim_json(status: StatusCode, body: impl serde::Serialize) -> Response {
     }
 }
 
-async fn team_for_group(state: &Arc<ServerState>, group: &str) -> ScimResult<MTeam> {
+async fn team_for_group(db: &WebDb, group: &str) -> ScimResult<MTeam> {
     ETeam::find()
         .filter(CTeam::ScimGroup.eq(group))
-        .one(state.web_db.inner())
+        .one(db.inner())
         .await?
         .ok_or_else(|| ScimError::not_found("group not found"))
 }
 
-async fn group_resource(state: &Arc<ServerState>, team: &MTeam) -> ScimResult<GroupResource> {
+async fn group_resource(db: &WebDb, team: &MTeam) -> ScimResult<GroupResource> {
     let group = team.scim_group.clone().unwrap_or_default();
     let members = ETeamUser::find()
         .filter(CTeamUser::Team.eq(team.id))
-        .all(state.web_db.inner())
+        .all(db.inner())
         .await?
         .into_iter()
         .map(|membership| GroupMember {
@@ -91,7 +92,7 @@ pub async fn list(
 
     let mut resources = Vec::with_capacity(teams.len());
     for team in &teams {
-        resources.push(group_resource(&state, team).await?);
+        resources.push(group_resource(&state.web_db, team).await?);
     }
     let total = resources.len();
     Ok(scim_json(
@@ -104,10 +105,10 @@ pub async fn get(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<String>,
 ) -> ScimResult<impl IntoResponse> {
-    let team = team_for_group(&state, &id).await?;
+    let team = team_for_group(&state.web_db, &id).await?;
     Ok(scim_json(
         StatusCode::OK,
-        group_resource(&state, &team).await?,
+        group_resource(&state.web_db, &team).await?,
     ))
 }
 
@@ -116,7 +117,7 @@ pub async fn patch(
     Path(id): Path<String>,
     Json(body): Json<PatchRequest>,
 ) -> ScimResult<impl IntoResponse> {
-    let team = team_for_group(&state, &id).await?;
+    let team = team_for_group(&state.web_db, &id).await?;
     for op in &body.operations {
         let path = op.path.as_deref().unwrap_or("").to_ascii_lowercase();
         if !path.is_empty() && !path.starts_with("members") {
@@ -127,12 +128,12 @@ pub async fn patch(
         match op.op.to_ascii_lowercase().as_str() {
             "add" | "replace" => {
                 for uid in &member_ids {
-                    add_member(&state, team.id, uid).await?;
+                    add_member(&state.web_db, team.id, uid).await?;
                 }
             }
             "remove" => {
                 for uid in member_ids_for_remove(op, &member_ids) {
-                    remove_member(&state, team.id, &uid).await?;
+                    remove_member(&state.web_db, team.id, &uid).await?;
                 }
             }
             _ => {}
@@ -141,7 +142,7 @@ pub async fn patch(
 
     Ok(scim_json(
         StatusCode::OK,
-        group_resource(&state, &team).await?,
+        group_resource(&state.web_db, &team).await?,
     ))
 }
 
@@ -173,9 +174,9 @@ fn member_ids_for_remove(op: &PatchOperation, parsed: &[String]) -> Vec<String> 
         .collect()
 }
 
-async fn add_member(state: &Arc<ServerState>, team: TeamId, uid: &str) -> ScimResult<()> {
+async fn add_member(web_db: &WebDb, team: TeamId, uid: &str) -> ScimResult<()> {
     let user = parse_uid(uid)?;
-    let db = state.web_db.inner();
+    let db = web_db.inner();
     let existing = ETeamUser::find()
         .filter(CTeamUser::Team.eq(team))
         .filter(CTeamUser::User.eq(user))
@@ -196,13 +197,13 @@ async fn add_member(state: &Arc<ServerState>, team: TeamId, uid: &str) -> ScimRe
     Ok(())
 }
 
-async fn remove_member(state: &Arc<ServerState>, team: TeamId, uid: &str) -> ScimResult<()> {
+async fn remove_member(db: &WebDb, team: TeamId, uid: &str) -> ScimResult<()> {
     let user = parse_uid(uid)?;
     ETeamUser::delete_many()
         .filter(CTeamUser::Team.eq(team))
         .filter(CTeamUser::User.eq(user))
         .filter(CTeamUser::Source.eq(TeamMemberSource::Group))
-        .exec(state.web_db.inner())
+        .exec(db.inner())
         .await?;
     Ok(())
 }

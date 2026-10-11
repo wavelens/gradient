@@ -31,7 +31,8 @@ pub async fn get_evaluation(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<EvaluationResponse>>> {
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+        .await?;
     let evaluation = ctx.evaluation;
 
     let commit_hash = ECommit::find_by_id(evaluation.commit)
@@ -207,7 +208,8 @@ pub async fn get_evaluation_builds(
     Path(evaluation_id): Path<EvaluationId>,
     Query(query): Query<BuildsQuery>,
 ) -> WebResult<Json<BaseResponse<PaginatedBuilds>>> {
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+        .await?;
     let evaluation = ctx.evaluation;
 
     let jobs = EBuildJob::find()
@@ -379,7 +381,8 @@ pub async fn get_evaluation_messages(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationMessageResponse>>>> {
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+        .await?;
     let evaluation = ctx.evaluation;
 
     let messages = EEvaluationMessage::find()

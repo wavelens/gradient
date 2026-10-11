@@ -25,7 +25,7 @@ pub async fn get_cache_key(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -53,7 +53,7 @@ pub async fn get_cache_public_key(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         cache,

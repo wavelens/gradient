@@ -72,7 +72,8 @@ pub async fn get_artefacts(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<ArtefactTree>>> {
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+        .await?;
     let evaluation = ctx.evaluation;
 
     let entry_points = EEntryPoint::find()

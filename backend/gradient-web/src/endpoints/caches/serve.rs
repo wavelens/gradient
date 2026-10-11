@@ -30,9 +30,18 @@ pub async fn serve(
     headers: HeaderMap,
     Path((cache, hash, rel_path)): Path<(String, String, String)>,
 ) -> WebResult<Response> {
-    let client_ip = cache_client_ip(&state, &headers, peer);
-    let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
-    let (_effective_hash, _size, stream) = fetch_nar_stream(&state, ctx.cache.id, &hash).await?;
+    let client_ip = cache_client_ip(&state.config, &headers, peer);
+    let ctx = CacheContext::load(
+        &state.web_db,
+        &state.jwt_secret,
+        &state.memory.last_used_stamps,
+        &headers,
+        client_ip,
+        cache,
+    )
+    .await?;
+    let (_effective_hash, _size, stream) =
+        fetch_nar_stream(&state.web_db, &state.nar_storage, ctx.cache.id, &hash).await?;
     let reader = nar_reader_from_stream(stream);
 
     match extract_path_from_reader(reader, &rel_path).await {

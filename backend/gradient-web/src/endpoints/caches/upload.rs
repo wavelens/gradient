@@ -50,8 +50,9 @@ pub async fn nars_upload(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> WebResult<impl IntoResponse> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache_name,
@@ -67,8 +68,13 @@ pub async fn nars_upload(
         .get(header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
         .unwrap_or(max);
-    let permit = admit(&state, declared.min(max)).await?;
-    let upload_store = upload_partial_store(&state)?;
+    let permit = admit(
+        &state.config,
+        &state.memory.upload_admission,
+        declared.min(max),
+    )
+    .await?;
+    let upload_store = upload_partial_store(&state.config)?;
     let stage_key = format!("{}/oneshot-{}", cache.id, uuid::Uuid::now_v7());
 
     let mut narinfo: Option<NarinfoPart> = None;
@@ -137,7 +143,8 @@ pub async fn nars_upload(
 
     permit.committed();
     let claim = admit_nar(
-        &state,
+        &state.config,
+        &state.memory.upload_admission,
         &narinfo_hash(&narinfo.store_path),
         narinfo.file_size as u64,
     )
@@ -179,7 +186,7 @@ pub async fn nars_upload(
     }
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheNarUpload,
         EventOwner {
@@ -220,10 +227,8 @@ pub struct ChunkQuery {
     offset: u64,
 }
 
-fn upload_partial_store(state: &ServerState) -> WebResult<PartialStore> {
-    Ok(PartialStore::new(
-        state.config.server.nar_upload_partial_dir(),
-    )?)
+fn upload_partial_store(config: &RuntimeConfig) -> WebResult<PartialStore> {
+    Ok(PartialStore::new(config.server.nar_upload_partial_dir())?)
 }
 
 async fn stage_nar_field(
@@ -269,7 +274,7 @@ pub async fn nar_chunk(
     body: Bytes,
 ) -> WebResult<impl IntoResponse> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache_name,
@@ -286,7 +291,7 @@ pub async fn nar_chunk(
         return Err(CacheRefusal::NarTooLarge { max }.into());
     }
 
-    let store = upload_partial_store(&state)?;
+    let store = upload_partial_store(&state.config)?;
     let key = format!("{}/{store_hash}", cache.id);
     // An `offset == 0` append is truncating any stale prefix. Abandoned partials are left to the
     // deep GC.
@@ -295,7 +300,12 @@ pub async fn nar_chunk(
     // length is reported for the caller to resync.
     let staged = store.received_len(&key, &store_hash).await?;
     let received = if offset == 0 || offset == staged {
-        let permit = admit(&state, body.len() as u64).await?;
+        let permit = admit(
+            &state.config,
+            &state.memory.upload_admission,
+            body.len() as u64,
+        )
+        .await?;
         store.append(&key, &store_hash, offset, &body).await?;
         permit.committed();
         offset + body.len() as u64
@@ -314,8 +324,9 @@ pub async fn nar_finalize(
     Path((cache_name, store_hash)): Path<(String, String)>,
     axum::Json(narinfo): axum::Json<NarinfoPart>,
 ) -> WebResult<impl IntoResponse> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache_name,
@@ -327,7 +338,7 @@ pub async fn nar_finalize(
     .await?;
     require_safe_hash(&store_hash)?;
 
-    let store = upload_partial_store(&state)?;
+    let store = upload_partial_store(&state.config)?;
     let key = format!("{}/{store_hash}", cache.id);
     let staged = store.staged_len(&key).await;
     if staged as i64 != narinfo.file_size {
@@ -339,7 +350,8 @@ pub async fn nar_finalize(
     }
 
     let claim = admit_nar(
-        &state,
+        &state.config,
+        &state.memory.upload_admission,
         &narinfo_hash(&narinfo.store_path),
         narinfo.file_size as u64,
     )
@@ -391,7 +403,7 @@ pub async fn nar_finalize(
     }
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheNarUpload,
         EventOwner {

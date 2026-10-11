@@ -25,7 +25,7 @@ pub async fn get_project_ssh(
     Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -48,7 +48,7 @@ pub async fn post_project_ssh(
     Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,

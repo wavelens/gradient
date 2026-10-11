@@ -14,8 +14,10 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_core::ServerState;
 use gradient_core::upstream_source::{fetch_upstream_log, substitution_sources};
+use gradient_db::WebDb;
 use gradient_db::caches::upstream::pull_through_upstream_caches;
 use gradient_sources::parse_drv_hash_name;
+use gradient_storage::LogStorage;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -28,10 +30,18 @@ pub async fn log(
     headers: HeaderMap,
     Path((cache, drv)): Path<(String, String)>,
 ) -> WebResult<Response> {
-    let client_ip = cache_client_ip(&state, &headers, peer);
-    let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
+    let client_ip = cache_client_ip(&state.config, &headers, peer);
+    let ctx = CacheContext::load(
+        &state.web_db,
+        &state.jwt_secret,
+        &state.memory.last_used_stamps,
+        &headers,
+        client_ip,
+        cache,
+    )
+    .await?;
 
-    if let Some(body) = local_log(&state, &ctx, &drv).await? {
+    if let Some(body) = local_log(&state.web_db, &state.log_storage, &ctx, &drv).await? {
         return log_response(body, "HIT");
     }
 
@@ -45,7 +55,8 @@ pub async fn log(
 /// Failed builds are not excluded on purpose. A rebuild that failed after the first success is
 /// still carrying the most recent log.
 async fn local_log(
-    state: &Arc<ServerState>,
+    db: &WebDb,
+    log_storage: &Arc<dyn LogStorage>,
     ctx: &CacheContext,
     drv: &str,
 ) -> WebResult<Option<String>> {
@@ -53,29 +64,26 @@ async fn local_log(
         return Ok(None);
     };
 
-    let Some(derivation) =
-        cache_served_derivation(state, ctx.cache.id, &drv_hash, &drv_name).await?
+    let Some(derivation) = cache_served_derivation(db, ctx.cache.id, &drv_hash, &drv_name).await?
     else {
         return Ok(None);
     };
 
     let Some(shared_build) = EDerivationBuild::find()
         .filter(CDerivationBuild::Derivation.eq(derivation))
-        .one(&state.web_db)
+        .one(db)
         .await?
     else {
         return Ok(None);
     };
 
     let Some(key) =
-        gradient_db::scheduling::build_attempt::latest_attempt_id(&state.web_db, shared_build.id)
-            .await?
+        gradient_db::scheduling::build_attempt::latest_attempt_id(db, shared_build.id).await?
     else {
         return Ok(None);
     };
 
-    Ok(state
-        .log_storage
+    Ok(log_storage
         .read(key)
         .await
         .ok()

@@ -60,12 +60,13 @@ pub async fn get_evaluation_report(
 ) -> WebResult<Response> {
     let user_id = user.id;
     let maybe_user = Some(user);
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+        .await?;
     let opts = query.options();
 
     if report_requires_manage_workers(&opts) {
         let allowed = crate::access::has_permission(
-            &state,
+            &state.web_db,
             user_id,
             ctx.project_id,
             Permission::ManageWorkers,

@@ -12,20 +12,21 @@ use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_types::*;
 use std::sync::Arc;
 
 use super::BuildAccessContext;
 
 async fn load_member_build(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user: &MUser,
     api_key: &MaybeApiKey,
     build_id: BuildJobId,
 ) -> WebResult<BuildAccessContext> {
     let api_key_ref = api_key.as_ref();
-    let ctx = BuildAccessContext::load(state, build_id, &Some(user.clone()), api_key_ref).await?;
-    if !is_project_member(state, user.id, ctx.project.id, api_key_ref).await? {
+    let ctx = BuildAccessContext::load(db, build_id, &Some(user.clone()), api_key_ref).await?;
+    if !is_project_member(db, user.id, ctx.project.id, api_key_ref).await? {
         return Err(WebError::not_found(Resource::Build));
     }
 
@@ -39,7 +40,7 @@ pub async fn post_build_abort(
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = load_member_build(&state, &user, &api_key, build_id).await?;
+    let ctx = load_member_build(&state.web_db, &user, &api_key, build_id).await?;
 
     scheduler
         .abort_build(ctx.build_job.evaluation, ctx.shared_build.id)
@@ -55,7 +56,7 @@ pub async fn post_build_retry(
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = load_member_build(&state, &user, &api_key, build_id).await?;
+    let ctx = load_member_build(&state.web_db, &user, &api_key, build_id).await?;
 
     scheduler
         .retry_build(ctx.build_job.evaluation, ctx.shared_build.id)
@@ -71,7 +72,7 @@ pub async fn post_build_prioritize(
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     require_superuser(&user)?;
-    let ctx = BuildAccessContext::load_unguarded(&state, build_id).await?;
+    let ctx = BuildAccessContext::load_unguarded(&state.web_db, build_id).await?;
 
     scheduler.prioritize_build(ctx.shared_build.id).await?;
 

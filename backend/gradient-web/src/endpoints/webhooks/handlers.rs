@@ -15,6 +15,7 @@ use axum::Json;
 use axum::extract::{Query, State};
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
+use gradient_db::{DbContext, WebDb};
 use gradient_entity::webhook::WebhookScope;
 use gradient_types::events::{Envelope, EventFilter, webhook};
 use gradient_types::ids::PendingDeliveryId;
@@ -140,38 +141,37 @@ fn check_url(url: &str) -> WebResult<()> {
     Ok(())
 }
 
-fn new_secret(state: &ServerState) -> WebResult<(String, String)> {
+fn new_secret(config: &RuntimeConfig) -> WebResult<(String, String)> {
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use rand::RngExt as _;
 
     let mut raw = [0u8; 32];
     rand::rng().fill(&mut raw);
     let plaintext = format!("whs_{}", URL_SAFE_NO_PAD.encode(raw));
-    let key =
-        load_secret_bytes(&state.config.secrets.crypt_file).context("load the encryption key")?;
+    let key = load_secret_bytes(&config.secrets.crypt_file).context("load the encryption key")?;
     let encrypted =
         encrypt_action_secret(&plaintext, key.expose()).context("encrypt the action secret")?;
     Ok((plaintext, encrypted))
 }
 
-async fn owned_webhook(state: &ServerState, owner: &WebhookOwner) -> WebResult<MWebhook> {
+async fn owned_webhook(db: &WebDb, owner: &WebhookOwner) -> WebResult<MWebhook> {
     let id: WebhookId = owner.param("id")?;
     EWebhook::find_by_id(id)
         .filter(owner.rows())
-        .one(&state.web_db)
+        .one(db)
         .await?
         .or_not_found(Resource::Webhook)
 }
 
 async fn audit(
-    state: &ServerState,
+    db: &DbContext,
     owner: &WebhookOwner,
     verb: Verb,
     info: &RequestInfo,
     metadata: serde_json::Value,
 ) {
     audit_record(
-        state,
+        db,
         Some(owner.user.id),
         owner.action(verb),
         owner.event_owner(),
@@ -210,7 +210,7 @@ pub async fn create_webhook(
         return Err(WebError::already_exists(Resource::Webhook));
     }
 
-    let (secret, encrypted) = new_secret(&state)?;
+    let (secret, encrypted) = new_secret(&state.config)?;
     let now = gradient_types::now();
     let row = MWebhook {
         id: WebhookId::now_v7(),
@@ -233,7 +233,7 @@ pub async fn create_webhook(
     .map_err(|e| WebError::from_db_err(e, Resource::Webhook))?;
 
     audit(
-        &state,
+        &state.db(),
         &owner,
         Verb::Create,
         &info,
@@ -251,7 +251,7 @@ pub async fn read_webhook(
     owner: WebhookOwner,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
     Ok(ok_json(WebhookResponse::from(
-        owned_webhook(&state, &owner).await?,
+        owned_webhook(&state.web_db, &owner).await?,
     )))
 }
 
@@ -261,7 +261,7 @@ pub async fn update_webhook(
     owner: WebhookOwner,
     Json(body): Json<UpdateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    let row = owned_webhook(&state, &owner).await?;
+    let row = owned_webhook(&state.web_db, &owner).await?;
     if let Some(url) = &body.url {
         check_url(url)?;
     }
@@ -299,7 +299,7 @@ pub async fn update_webhook(
         .map_err(|e| WebError::from_db_err(e, Resource::Webhook))?;
 
     audit(
-        &state,
+        &state.db(),
         &owner,
         Verb::Update,
         &info,
@@ -314,11 +314,11 @@ pub async fn delete_webhook(
     info: RequestInfo,
     owner: WebhookOwner,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
-    let row = owned_webhook(&state, &owner).await?;
+    let row = owned_webhook(&state.web_db, &owner).await?;
     let (id, name) = (row.id, row.name.clone());
     row.into_active_model().delete(&state.web_db).await?;
     audit(
-        &state,
+        &state.db(),
         &owner,
         Verb::Delete,
         &info,
@@ -333,15 +333,15 @@ pub async fn rotate_secret(
     info: RequestInfo,
     owner: WebhookOwner,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
-    let row = owned_webhook(&state, &owner).await?;
-    let (secret, encrypted) = new_secret(&state)?;
+    let row = owned_webhook(&state.web_db, &owner).await?;
+    let (secret, encrypted) = new_secret(&state.config)?;
     let id = row.id;
     let mut active = row.into_active_model();
     active.secret = Set(encrypted);
     active.updated_at = Set(gradient_types::now());
     active.update(&state.web_db).await?;
     audit(
-        &state,
+        &state.db(),
         &owner,
         Verb::Update,
         &info,
@@ -355,7 +355,7 @@ pub async fn test_webhook(
     State(state): ApiState,
     owner: WebhookOwner,
 ) -> WebResult<Json<BaseResponse<DeliveryListItem>>> {
-    let hook = owned_webhook(&state, &owner).await?;
+    let hook = owned_webhook(&state.web_db, &owner).await?;
     let envelope = Envelope::now(webhook::Ping { webhook: hook.id }.into());
     let delivery = gradient_ci::webhooks::deliver(
         &state.ci(),
@@ -373,7 +373,7 @@ pub async fn list_deliveries(
     owner: WebhookOwner,
     Query(q): Query<DeliveryListQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem>>>> {
-    let hook = owned_webhook(&state, &owner).await?;
+    let hook = owned_webhook(&state.web_db, &owner).await?;
     let rows = EWebhookDelivery::find()
         .filter(CWebhookDelivery::WebhookId.eq(hook.id))
         .order_by(CWebhookDelivery::DeliveredAt, Order::Desc)
@@ -388,7 +388,7 @@ pub async fn get_delivery(
     State(state): ApiState,
     owner: WebhookOwner,
 ) -> WebResult<Json<BaseResponse<DeliveryDetail>>> {
-    let hook = owned_webhook(&state, &owner).await?;
+    let hook = owned_webhook(&state.web_db, &owner).await?;
     let delivery_id: WebhookDeliveryId = owner.param("delivery_id")?;
     let r = EWebhookDelivery::find_by_id(delivery_id)
         .filter(CWebhookDelivery::WebhookId.eq(hook.id))

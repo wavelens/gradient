@@ -10,8 +10,9 @@ use super::commands::{
 };
 use super::installation::resolve_github_app_targets;
 use super::payloads::GithubCheckRunRequestedAction;
+use gradient_ci::CiContext;
 use gradient_ci::{APPROVAL_ACTION_ID, find_approval_gated_eval, unpark_approval};
-use gradient_core::ServerState;
+use gradient_db::{DbContext, WebDb};
 use gradient_git_host::{ParsedPullRequestEvent, ParsedPullRequestReviewEvent};
 use gradient_scheduler::Scheduler;
 use gradient_types::events::evaluation;
@@ -40,7 +41,7 @@ impl From<&ParsedPullRequestEvent> for PullRequestApprovalContext {
 }
 
 pub(super) async fn handle_github_check_run(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     _scheduler: &Arc<Scheduler>,
     body: &[u8],
 ) {
@@ -77,7 +78,7 @@ pub(super) async fn handle_github_check_run(
     };
 
     let check_id = payload.check_run.id;
-    let Some(eval) = find_eval_by_check_id(state, check_id).await else {
+    let Some(eval) = find_eval_by_check_id(&ci.db.web_db, check_id).await else {
         warn!(
             check_run_id = check_id,
             "GitHub check_run.requested_action: no evaluation with matching repo_check_id"
@@ -88,7 +89,7 @@ pub(super) async fn handle_github_check_run(
         return;
     };
 
-    if !sender_is_trusted(state, task_id, owner, repo, sender.login).await {
+    if !sender_is_trusted(ci, task_id, owner, repo, sender.login).await {
         warn!(
             evaluation_id = %eval.id,
             sender = %sender.login,
@@ -97,14 +98,14 @@ pub(super) async fn handle_github_check_run(
         return;
     }
 
-    match unpark_approval(&state.web_db, eval.id).await {
+    match unpark_approval(&ci.db.web_db, eval.id).await {
         Ok(Some(unparked)) => {
             info!(
                 evaluation_id = %eval.id,
                 sender = %sender.login,
                 "PR approval gate cleared via GitHub action"
             );
-            on_approval_granted(state, &unparked).await;
+            on_approval_granted(&ci.db, &unparked).await;
         }
         Ok(None) => {
             warn!(
@@ -116,20 +117,19 @@ pub(super) async fn handle_github_check_run(
     }
 }
 
-pub(super) async fn on_approval_granted(state: &Arc<ServerState>, eval: &MEvaluation) {
+pub(super) async fn on_approval_granted(db: &DbContext, eval: &MEvaluation) {
     let Some(task_id) = eval.task else {
         return;
     };
-    state
-        .record(evaluation::Reported {
-            evaluation_id: eval.id,
-            phase: evaluation::Phase::ApprovalGranted,
-            status: i16::from(eval.status),
-            task: Some(task_id),
-            ..Default::default()
-        })
-        .await;
-    state.record_evaluation_created(eval).await;
+    db.record(evaluation::Reported {
+        evaluation_id: eval.id,
+        phase: evaluation::Phase::ApprovalGranted,
+        status: i16::from(eval.status),
+        task: Some(task_id),
+        ..Default::default()
+    })
+    .await;
+    db.record_evaluation_created(eval).await;
 }
 
 gradient_db::sql! {
@@ -144,7 +144,7 @@ gradient_db::sql! {
         params = [Int(123456)];
 }
 
-async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Option<MEvaluation> {
+async fn find_eval_by_check_id(db: &WebDb, check_id: i64) -> Option<MEvaluation> {
     // `evaluation.check_run_ids` is a JSON map per check-context name. Any stored id can match the
     // clicked check.
     use sea_orm::FromQueryResult;
@@ -156,13 +156,13 @@ async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Optio
 
     let row =
         Row::find_by_statement(EVAL_BY_CHECK_RUN_ID.bind([sea_orm::Value::BigInt(Some(check_id))]))
-            .one(&state.web_db)
+            .one(db)
             .await
             .ok()
             .flatten()?;
 
     EEvaluation::find_by_id(gradient_entity::ids::EvaluationId::new(row.id))
-        .one(&state.web_db)
+        .one(db)
         .await
         .ok()
         .flatten()
@@ -170,13 +170,13 @@ async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Optio
 
 /// The trust probe is failing closed on any error.
 pub(super) async fn sender_is_trusted(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     task_id: TaskId,
     owner: &str,
     repo: &str,
     sender: &str,
 ) -> bool {
-    let reporter = match gradient_ci::actions::reporter_for_task(&state.ci(), task_id).await {
+    let reporter = match gradient_ci::actions::reporter_for_task(ci, task_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return false,
         Err(e) => {
@@ -194,17 +194,17 @@ pub(super) async fn sender_is_trusted(
 }
 
 async fn unpark_pr_approval_eval(
-    state: &Arc<ServerState>,
+    db: &DbContext,
     task_id: TaskId,
     pr_number: u64,
 ) -> Option<MEvaluation> {
-    let eval = find_approval_gated_eval(&state.web_db, task_id, pr_number)
+    let eval = find_approval_gated_eval(&db.web_db, task_id, pr_number)
         .await
         .ok()
         .flatten()?;
-    match unpark_approval(&state.web_db, eval.id).await {
+    match unpark_approval(&db.web_db, eval.id).await {
         Ok(Some(unparked)) => {
-            on_approval_granted(state, &unparked).await;
+            on_approval_granted(db, &unparked).await;
             Some(unparked)
         }
         Ok(None) => None,
@@ -216,7 +216,7 @@ async fn unpark_pr_approval_eval(
 }
 
 pub(super) async fn handle_pull_request_review(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     git_host: GitHostType,
     integration_id: Option<IntegrationId>,
     body: &[u8],
@@ -270,7 +270,8 @@ pub(super) async fn handle_pull_request_review(
                 format!("git@github.com:{owner_repo}.git"),
             ];
             let targets =
-                resolve_github_app_targets(state, installation_id, &repo_urls, client_ip).await;
+                resolve_github_app_targets(&ci.db.web_db, installation_id, &repo_urls, client_ip)
+                    .await;
             if targets.is_empty() {
                 warn!(installation_id, %owner_repo, "pull_request_review (github): no integration matched");
                 return;
@@ -280,17 +281,17 @@ pub(super) async fn handle_pull_request_review(
     };
 
     for integration_id in &integration_ids {
-        let task_ids = match active_task_ids_for_integration(state, *integration_id).await {
+        let task_ids = match active_task_ids_for_integration(&ci.db.web_db, *integration_id).await {
             Ok(rows) => rows,
             Err(e) => {
                 warn!(error = %e, "pull_request_review: failed to load task list");
                 continue;
             }
         };
-        let Some(probe_task) = first_task_with_reporter(state, &task_ids).await else {
+        let Some(probe_task) = first_task_with_reporter(ci, &task_ids).await else {
             continue;
         };
-        if !sender_is_trusted(state, probe_task, owner, repo, &reviewer).await {
+        if !sender_is_trusted(ci, probe_task, owner, repo, &reviewer).await {
             warn!(
                 %integration_id,
                 pr_number,
@@ -300,7 +301,7 @@ pub(super) async fn handle_pull_request_review(
             continue;
         }
         for task_id in &task_ids {
-            if let Some(unparked) = unpark_pr_approval_eval(state, *task_id, pr_number).await {
+            if let Some(unparked) = unpark_pr_approval_eval(&ci.db, *task_id, pr_number).await {
                 info!(
                     evaluation_id = %unparked.id,
                     pr_number,

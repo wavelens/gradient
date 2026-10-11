@@ -8,11 +8,12 @@ use super::approval::{PullRequestApprovalContext, on_approval_granted, sender_is
 use super::fanout::trigger_pr_for_integration;
 use super::installation::resolve_github_app_targets;
 use super::payloads::CommentPayload;
+use gradient_ci::CiContext;
 use gradient_ci::{
     find_approval_gated_eval, set_evaluation_source_comment, unpark_approval,
     unpark_approval_with_wildcard,
 };
-use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_scheduler::Scheduler;
 use gradient_types::triggers::TriggerType;
 use gradient_types::wildcard::Wildcard;
@@ -73,7 +74,7 @@ fn parse_comment_event(git_host: GitHostType, body: &[u8]) -> Option<CommentEven
 }
 
 pub(super) async fn handle_issue_comment(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     git_host: GitHostType,
     integration_id: Option<IntegrationId>,
@@ -105,24 +106,17 @@ pub(super) async fn handle_issue_comment(
     };
 
     let Some(integration_ids) =
-        resolve_comment_integrations(state, integration_id, body, &owner_repo, client_ip).await
+        resolve_comment_integrations(&ci.db.web_db, integration_id, body, &owner_repo, client_ip)
+            .await
     else {
         return;
     };
 
-    let wildcard_override = match resolve_wildcard_override(
-        state,
-        &cmd,
-        &integration_ids,
-        owner,
-        repo,
-        pr_number,
-    )
-    .await
-    {
-        Ok(w) => w,
-        Err(()) => return,
-    };
+    let wildcard_override =
+        match resolve_wildcard_override(ci, &cmd, &integration_ids, owner, repo, pr_number).await {
+            Ok(w) => w,
+            Err(()) => return,
+        };
 
     let reaction_target = event.comment_id.map(|id| gradient_ci::ReactionTarget {
         owner: owner.to_string(),
@@ -134,7 +128,7 @@ pub(super) async fn handle_issue_comment(
     let mut action_taken = false;
     for integration_id in &integration_ids {
         let route = CommentRoute {
-            state,
+            ci,
             scheduler,
             integration_id: *integration_id,
             cmd: &cmd,
@@ -158,7 +152,7 @@ pub(super) async fn handle_issue_comment(
 }
 
 async fn resolve_comment_integrations(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     integration_id: Option<IntegrationId>,
     body: &[u8],
     owner_repo: &str,
@@ -176,7 +170,7 @@ async fn resolve_comment_integrations(
         format!("https://github.com/{owner_repo}.git"),
         format!("git@github.com:{owner_repo}.git"),
     ];
-    let targets = resolve_github_app_targets(state, installation_id, &repo_urls, client_ip).await;
+    let targets = resolve_github_app_targets(db, installation_id, &repo_urls, client_ip).await;
     if targets.is_empty() {
         warn!(installation_id, %owner_repo, "comment webhook (github): no integration matched");
         return None;
@@ -185,7 +179,7 @@ async fn resolve_comment_integrations(
 }
 
 async fn resolve_wildcard_override(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     cmd: &GradientCommand,
     integration_ids: &[IntegrationId],
     owner: &str,
@@ -202,15 +196,14 @@ async fn resolve_wildcard_override(
         Ok(_) => Ok(Some(raw.clone())),
         Err(e) => {
             warn!(wildcard = %raw, error = %e, "/gradient run wildcard rejected");
-            post_wildcard_error_comment(state, integration_ids, owner, repo, pr_number, raw, &e)
-                .await;
+            post_wildcard_error_comment(ci, integration_ids, owner, repo, pr_number, raw, &e).await;
             Err(())
         }
     }
 }
 
 struct CommentRoute<'a> {
-    state: &'a Arc<ServerState>,
+    ci: &'a CiContext,
     scheduler: &'a Arc<Scheduler>,
     integration_id: IntegrationId,
     cmd: &'a GradientCommand,
@@ -223,14 +216,15 @@ struct CommentRoute<'a> {
 }
 
 async fn handle_comment_for_integration(ctx: &CommentRoute<'_>) -> bool {
-    let task_ids = match active_task_ids_for_integration(ctx.state, ctx.integration_id).await {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(error = %e, "comment webhook: failed to load task list");
-            return false;
-        }
-    };
-    let Some(probe_task) = first_task_with_reporter(ctx.state, &task_ids).await else {
+    let task_ids =
+        match active_task_ids_for_integration(&ctx.ci.db.web_db, ctx.integration_id).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(error = %e, "comment webhook: failed to load task list");
+                return false;
+            }
+        };
+    let Some(probe_task) = first_task_with_reporter(ctx.ci, &task_ids).await else {
         warn!(
             integration_id = %ctx.integration_id,
             pr_number = ctx.pr_number,
@@ -240,14 +234,14 @@ async fn handle_comment_for_integration(ctx: &CommentRoute<'_>) -> bool {
         return false;
     };
     let is_maintainer =
-        sender_is_trusted(ctx.state, probe_task, ctx.owner, ctx.repo, ctx.sender).await;
+        sender_is_trusted(ctx.ci, probe_task, ctx.owner, ctx.repo, ctx.sender).await;
     if let Some(target) = ctx.reaction_target {
         let kind = if is_maintainer {
             gradient_ci::ReactionKind::Eyes
         } else {
             gradient_ci::ReactionKind::Confused
         };
-        fire_reaction_via_task(ctx.state, probe_task, target, kind).await;
+        fire_reaction_via_task(ctx.ci, probe_task, target, kind).await;
     }
     if !is_maintainer {
         warn!(
@@ -272,13 +266,13 @@ async fn unpark_existing_approvals(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) 
     let mut unparked_any = false;
     for task_id in task_ids {
         let Ok(Some(eval)) =
-            find_approval_gated_eval(&ctx.state.web_db, *task_id, ctx.pr_number).await
+            find_approval_gated_eval(&ctx.ci.db.web_db, *task_id, ctx.pr_number).await
         else {
             continue;
         };
         let unpark_result = match ctx.wildcard_override {
-            None => unpark_approval(&ctx.state.web_db, eval.id).await,
-            Some(w) => unpark_approval_with_wildcard(&ctx.state.web_db, eval.id, w).await,
+            None => unpark_approval(&ctx.ci.db.web_db, eval.id).await,
+            Some(w) => unpark_approval_with_wildcard(&ctx.ci.db.web_db, eval.id, w).await,
         };
         match unpark_result {
             Ok(Some(unparked)) => {
@@ -297,12 +291,12 @@ async fn unpark_existing_approvals(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) 
                         "comment_id": target.comment_id,
                     });
                     if let Err(e) =
-                        set_evaluation_source_comment(&ctx.state.web_db, unparked.id, json).await
+                        set_evaluation_source_comment(&ctx.ci.db.web_db, unparked.id, json).await
                     {
                         warn!(error = %e, evaluation_id = %unparked.id, "stamp source_comment on unparked eval failed");
                     }
                 }
-                on_approval_granted(ctx.state, &unparked).await;
+                on_approval_granted(&ctx.ci.db, &unparked).await;
                 unparked_any = true;
             }
             Ok(None) => {}
@@ -318,7 +312,7 @@ async fn unpark_existing_approvals(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) 
 /// as the approval, even on a fork PR.
 async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bool {
     let Some(snapshot) =
-        fetch_pr_snapshot(ctx.state, task_ids, ctx.owner, ctx.repo, ctx.pr_number).await
+        fetch_pr_snapshot(ctx.ci, task_ids, ctx.owner, ctx.repo, ctx.pr_number).await
     else {
         warn!(
             integration_id = %ctx.integration_id,
@@ -350,7 +344,7 @@ async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bo
     });
     let event_repo_urls = [format!("https://github.com/{}/{}", ctx.owner, ctx.repo)];
     let outcome = trigger_pr_for_integration(
-        ctx.state,
+        ctx.ci,
         ctx.scheduler,
         ctx.integration_id,
         &event_repo_urls,
@@ -387,12 +381,12 @@ async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bo
 }
 
 async fn fire_reaction_via_task(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     task_id: TaskId,
     target: &gradient_ci::ReactionTarget,
     kind: gradient_ci::ReactionKind,
 ) {
-    let reporter = match gradient_ci::actions::reporter_for_task(&state.ci(), task_id).await {
+    let reporter = match gradient_ci::actions::reporter_for_task(ci, task_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return,
         Err(e) => {
@@ -406,11 +400,11 @@ async fn fire_reaction_via_task(
 }
 
 pub(super) async fn first_task_with_reporter(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     task_ids: &[TaskId],
 ) -> Option<TaskId> {
     for task_id in task_ids {
-        if let Ok(Some(_)) = gradient_ci::actions::reporter_for_task(&state.ci(), *task_id).await {
+        if let Ok(Some(_)) = gradient_ci::actions::reporter_for_task(ci, *task_id).await {
             return Some(*task_id);
         }
     }
@@ -418,14 +412,14 @@ pub(super) async fn first_task_with_reporter(
 }
 
 async fn fetch_pr_snapshot(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     task_ids: &[TaskId],
     owner: &str,
     repo: &str,
     pr_number: u64,
 ) -> Option<gradient_ci::PullRequestSnapshot> {
     for task_id in task_ids {
-        let reporter = match gradient_ci::actions::reporter_for_task(&state.ci(), *task_id).await {
+        let reporter = match gradient_ci::actions::reporter_for_task(ci, *task_id).await {
             Ok(Some(r)) => r,
             _ => continue,
         };
@@ -441,7 +435,7 @@ async fn fetch_pr_snapshot(
 }
 
 async fn post_wildcard_error_comment(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     integration_ids: &[IntegrationId],
     owner: &str,
     repo: &str,
@@ -455,7 +449,7 @@ async fn post_wildcard_error_comment(
     );
 
     for integration_id in integration_ids {
-        let task_ids = match active_task_ids_for_integration(state, *integration_id).await {
+        let task_ids = match active_task_ids_for_integration(&ci.db.web_db, *integration_id).await {
             Ok(rows) => rows,
             Err(e) => {
                 warn!(error = %e, %integration_id, "/gradient run wildcard: failed to load tasks for reply comment");
@@ -463,8 +457,7 @@ async fn post_wildcard_error_comment(
             }
         };
         for task_id in task_ids {
-            let reporter = match gradient_ci::actions::reporter_for_task(&state.ci(), task_id).await
-            {
+            let reporter = match gradient_ci::actions::reporter_for_task(ci, task_id).await {
                 Ok(Some(r)) => r,
                 Ok(None) => continue,
                 Err(e) => {
@@ -562,7 +555,7 @@ gradient_db::sql! {
 }
 
 pub(super) async fn active_task_ids_for_integration(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     integration_id: IntegrationId,
 ) -> Result<Vec<TaskId>, sea_orm::DbErr> {
     let stmt = ACTIVE_TASK_IDS_FOR_INTEGRATION.bind([
@@ -575,7 +568,7 @@ pub(super) async fn active_task_ids_for_integration(
         task: TaskId,
     }
     TaskRow::find_by_statement(stmt)
-        .all(&state.web_db)
+        .all(db)
         .await
         .map(|rows| rows.into_iter().map(|r| r.task).collect())
 }

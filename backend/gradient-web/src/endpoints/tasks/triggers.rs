@@ -18,6 +18,7 @@ use axum::{Extension, Json, Router};
 use chrono::Utc;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::ServerState;
+use gradient_graph::Graph;
 use gradient_graph::Transition;
 use gradient_scheduler::Scheduler;
 use gradient_sources::resolve_head;
@@ -150,7 +151,7 @@ pub async fn list(
     Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<Vec<TriggerOut>>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -181,7 +182,7 @@ pub async fn create(
     Json(body): Json<CreateBody>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -227,7 +228,7 @@ pub async fn read(
     Path((project, task, id)): Path<(String, String, TaskTriggerId)>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -256,7 +257,7 @@ pub async fn update(
     Json(body): Json<UpdateBody>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -305,7 +306,7 @@ pub async fn delete_one(
     Path((project, task, id)): Path<(String, String, TaskTriggerId)>,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -337,8 +338,9 @@ pub async fn fire_now(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path((project, task, id)): Path<(String, String, TaskTriggerId)>,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
+    let db = state.db();
     let (_project, proj) = load_task(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -371,7 +373,7 @@ pub async fn fire_now(
         });
 
     let (commit_hash, commit_message, author_name) =
-        resolve_head(&state.db(), &proj, branch_for_fire.as_deref())
+        resolve_head(&db, &proj, branch_for_fire.as_deref())
             .await
             .context("resolve the branch head")?;
 
@@ -422,7 +424,7 @@ pub async fn fire_now(
         } => {
             if let Some(aborted_id) = aborted_evaluation {
                 let shared_builds = if hard_abort {
-                    abort_eval_shared_builds(&state, aborted_id).await
+                    abort_eval_shared_builds(&state.graph, aborted_id).await
                 } else {
                     Vec::new()
                 };
@@ -448,11 +450,10 @@ pub async fn fire_now(
 }
 
 async fn abort_eval_shared_builds(
-    state: &Arc<ServerState>,
+    graph: &Arc<Graph>,
     evaluation: EvaluationId,
 ) -> Vec<DerivationBuildId> {
-    match state
-        .graph
+    match graph
         .transition(Transition::AbortEvaluationSharedBuilds { evaluation })
         .await
     {

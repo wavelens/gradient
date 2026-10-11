@@ -16,7 +16,9 @@ use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
+use gradient_ci::CiContext;
 use gradient_core::ServerState;
+use gradient_db::DbContext;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_notify::{SubscriptionEvent, SubscriptionMail};
 use gradient_scheduler::Scheduler;
@@ -47,7 +49,7 @@ pub async fn get_cache_subscription_requests(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<SubscriptionRequestItem>>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -101,11 +103,11 @@ pub async fn get_cache_subscription_requests(
 }
 
 async fn load_request(
-    state: &Arc<ServerState>,
+    db: &DbContext,
     cache_id: CacheId,
     project_name: String,
 ) -> WebResult<(MProject, MCacheSubscriptionRequest)> {
-    let project = gradient_db::lookup::get_any_project_by_name(&state.db(), project_name)
+    let project = gradient_db::lookup::get_any_project_by_name(db, project_name)
         .await?
         .ok_or_else(|| WebError::not_found(Resource::SubscriptionRequest))?;
 
@@ -115,7 +117,7 @@ async fn load_request(
                 .add(CCacheSubscriptionRequest::Cache.eq(cache_id))
                 .add(CCacheSubscriptionRequest::Project.eq(project.id)),
         )
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .ok_or_else(|| WebError::not_found(Resource::SubscriptionRequest))?;
 
@@ -123,18 +125,18 @@ async fn load_request(
 }
 
 async fn notify_project_admins(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     project: &MProject,
     cache: &MCache,
     actor: &MUser,
     mode: &CacheSubscriptionMode,
     event: SubscriptionEvent,
 ) {
-    if !state.email.is_enabled() {
+    if !ci.email.is_enabled() {
         return;
     }
 
-    let recipients = match project_admin_emails(state, project.id).await {
+    let recipients = match project_admin_emails(&ci.db.web_db, project.id).await {
         Ok(list) => list,
         Err(e) => {
             tracing::warn!(error = %e, "failed to resolve project admin recipients");
@@ -142,7 +144,7 @@ async fn notify_project_admins(
         }
     };
 
-    if let Err(e) = state
+    if let Err(e) = ci
         .email
         .send_subscription_mail(
             &recipients,
@@ -154,7 +156,7 @@ async fn notify_project_admins(
                 actor: &actor.username,
                 link: format!(
                     "{}/project/{}/caches",
-                    state.config.server.serve_url, project.name
+                    ci.db.config.server.serve_url, project.name
                 ),
             },
         )
@@ -172,8 +174,9 @@ pub async fn post_approve_subscription_request(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path((cache, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -184,7 +187,7 @@ pub async fn post_approve_subscription_request(
     )
     .await?;
 
-    let (project, request) = load_request(&state, cache.id, project).await?;
+    let (project, request) = load_request(&db, cache.id, project).await?;
     let mode = request.mode.clone();
 
     let tx = state.web_db.inner().begin().await?;
@@ -200,7 +203,7 @@ pub async fn post_approve_subscription_request(
     .await?;
     tx.commit().await?;
 
-    reauth_project_workers(&state, &scheduler, project.id).await;
+    reauth_project_workers(&state.web_db, &scheduler, project.id).await;
 
     let unparks_builds = matches!(
         mode,
@@ -218,7 +221,7 @@ pub async fn post_approve_subscription_request(
     }
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheSubscriptionApprove,
         EventOwner {
@@ -235,7 +238,7 @@ pub async fn post_approve_subscription_request(
     .await;
 
     notify_project_admins(
-        &state,
+        &state.ci(),
         &project,
         &cache,
         &user,
@@ -254,8 +257,9 @@ pub async fn delete_subscription_request(
     Extension(api_key): Extension<MaybeApiKey>,
     Path((cache, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -266,12 +270,12 @@ pub async fn delete_subscription_request(
     )
     .await?;
 
-    let (project, request) = load_request(&state, cache.id, project).await?;
+    let (project, request) = load_request(&db, cache.id, project).await?;
     let mode = request.mode.clone();
     request.into_active_model().delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheSubscriptionDeny,
         EventOwner {
@@ -288,7 +292,7 @@ pub async fn delete_subscription_request(
     .await;
 
     notify_project_admins(
-        &state,
+        &state.ci(),
         &project,
         &cache,
         &user,

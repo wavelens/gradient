@@ -16,6 +16,7 @@ use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_notify::{InvitationMail, InviteScope, generate_token};
 use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
 use gradient_types::events::EventOwner;
@@ -46,16 +47,16 @@ pub struct RemoveCacheMemberRequest {
     pub user: String,
 }
 
-async fn find_user_by_username(state: &Arc<ServerState>, username: &str) -> WebResult<MUser> {
+async fn find_user_by_username(db: &WebDb, username: &str) -> WebResult<MUser> {
     EUser::find()
         .filter(CUser::Username.eq(username))
-        .one(&state.web_db)
+        .one(db)
         .await?
         .or_not_found(Resource::User)
 }
 
 async fn find_cache_membership(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     cache_id: CacheId,
     user_id: UserId,
 ) -> WebResult<Option<MCacheUser>> {
@@ -65,12 +66,12 @@ async fn find_cache_membership(
                 .add(CCacheUser::Cache.eq(cache_id))
                 .add(CCacheUser::User.eq(user_id)),
         )
-        .one(&state.web_db)
+        .one(db)
         .await?)
 }
 
 async fn find_cache_invitation(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     cache_id: CacheId,
     user_id: UserId,
 ) -> WebResult<Option<MCacheInvitation>> {
@@ -80,7 +81,7 @@ async fn find_cache_invitation(
                 .add(CCacheInvitation::Cache.eq(cache_id))
                 .add(CCacheInvitation::User.eq(user_id)),
         )
-        .one(&state.web_db)
+        .one(db)
         .await?)
 }
 
@@ -91,7 +92,7 @@ pub async fn get_cache_members(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<CacheMemberItem>>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -146,8 +147,9 @@ pub async fn post_cache_member(
     Path(cache): Path<String>,
     Json(body): Json<AddCacheMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -157,16 +159,16 @@ pub async fn post_cache_member(
         },
     )
     .await?;
-    let target_user = find_user_by_username(&state, &body.user).await?;
+    let target_user = find_user_by_username(&state.web_db, &body.user).await?;
 
-    if find_cache_membership(&state, cache.id, target_user.id)
+    if find_cache_membership(&state.web_db, cache.id, target_user.id)
         .await?
         .is_some()
     {
         return Err(WebError::already_exists(Resource::CacheMembership));
     }
 
-    if find_cache_invitation(&state, cache.id, target_user.id)
+    if find_cache_invitation(&state.web_db, cache.id, target_user.id)
         .await?
         .is_some()
     {
@@ -199,7 +201,7 @@ pub async fn post_cache_member(
         .await?;
 
         audit_record(
-            &state,
+            &db,
             Some(user.id),
             Action::CacheMemberCreate,
             EventOwner {
@@ -258,7 +260,7 @@ pub async fn post_cache_member(
     }
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheInvitationCreate,
         EventOwner {
@@ -285,8 +287,9 @@ pub async fn patch_cache_member(
     Path(cache): Path<String>,
     Json(body): Json<AddCacheMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -296,9 +299,9 @@ pub async fn patch_cache_member(
         },
     )
     .await?;
-    let target_user = find_user_by_username(&state, &body.user).await?;
+    let target_user = find_user_by_username(&state.web_db, &body.user).await?;
 
-    let membership = find_cache_membership(&state, cache.id, target_user.id)
+    let membership = find_cache_membership(&state.web_db, cache.id, target_user.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Cache))?;
 
@@ -322,7 +325,7 @@ pub async fn patch_cache_member(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheMemberUpdate,
         EventOwner {
@@ -350,8 +353,9 @@ pub async fn delete_cache_member(
     Path(cache): Path<String>,
     Json(body): Json<RemoveCacheMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -361,9 +365,9 @@ pub async fn delete_cache_member(
         },
     )
     .await?;
-    let target_user = find_user_by_username(&state, &body.user).await?;
+    let target_user = find_user_by_username(&state.web_db, &body.user).await?;
 
-    let membership = find_cache_membership(&state, cache.id, target_user.id)
+    let membership = find_cache_membership(&state.web_db, cache.id, target_user.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Cache))?;
 
@@ -382,7 +386,7 @@ pub async fn delete_cache_member(
     active.delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheMemberDelete,
         EventOwner {

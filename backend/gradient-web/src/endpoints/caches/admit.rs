@@ -3,58 +3,73 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::time::Duration;
-
-use gradient_core::ServerState;
+use gradient_storage::admission::UploadAdmission;
 use gradient_storage::admission::{Admission, HeldPermit, ObjectKey};
+use gradient_types::RuntimeConfig;
+use std::sync::Arc;
+use std::time::Duration;
 
 use crate::error::{WebError, WebResult};
 
-pub(super) async fn admit(state: &ServerState, size: u64) -> WebResult<HeldPermit> {
-    admit_within(state, size, rest_wait(state)).await
+pub(super) async fn admit(
+    config: &RuntimeConfig,
+    upload_admission: &Arc<UploadAdmission>,
+    size: u64,
+) -> WebResult<HeldPermit> {
+    admit_within(upload_admission, size, rest_wait(config)).await
 }
 
 pub(super) async fn admit_nar(
-    state: &ServerState,
+    config: &RuntimeConfig,
+    upload_admission: &Arc<UploadAdmission>,
     hash: &str,
     size: u64,
 ) -> WebResult<Option<HeldPermit>> {
-    admit_nar_within(state, hash, size, rest_wait(state)).await
+    admit_nar_within(upload_admission, hash, size, rest_wait(config)).await
 }
 
-fn rest_wait(state: &ServerState) -> Duration {
-    Duration::from_secs(state.config.upload.rest_wait_secs.get())
+fn rest_wait(config: &RuntimeConfig) -> Duration {
+    Duration::from_secs(config.upload.rest_wait_secs.get())
 }
 
-async fn admit_within(state: &ServerState, size: u64, wait: Duration) -> WebResult<HeldPermit> {
+async fn admit_within(
+    upload_admission: &Arc<UploadAdmission>,
+    size: u64,
+    wait: Duration,
+) -> WebResult<HeldPermit> {
     let object = ObjectKey::Rest(uuid::Uuid::now_v7().to_string());
-    match admit_object(state, object, size, wait).await? {
+    match admit_object(upload_admission, object, size, wait).await? {
         Admission::Granted(permit) => Ok(permit),
         Admission::AlreadyCommitted => Err(WebError::UploadBusy { retry_after: wait }),
     }
 }
 
 async fn admit_nar_within(
-    state: &ServerState,
+    upload_admission: &Arc<UploadAdmission>,
     hash: &str,
     size: u64,
     wait: Duration,
 ) -> WebResult<Option<HeldPermit>> {
-    match admit_object(state, ObjectKey::Nar(hash.to_owned()), size, wait).await? {
+    match admit_object(
+        upload_admission,
+        ObjectKey::Nar(hash.to_owned()),
+        size,
+        wait,
+    )
+    .await?
+    {
         Admission::Granted(permit) => Ok(Some(permit)),
         Admission::AlreadyCommitted => Ok(None),
     }
 }
 
 async fn admit_object(
-    state: &ServerState,
+    upload_admission: &Arc<UploadAdmission>,
     object: ObjectKey,
     size: u64,
     wait: Duration,
 ) -> WebResult<Admission> {
-    state
-        .memory
-        .upload_admission
+    upload_admission
         .admit("rest", object, size, wait)
         .await
         .ok_or(WebError::UploadBusy { retry_after: wait })
@@ -72,13 +87,15 @@ mod tests {
     async fn a_rest_upload_waits_for_a_permit_and_gives_up_busy() {
         let state = test_state(empty_db());
         let mut held = Vec::new();
-        while let Ok(permit) = admit_within(&state, 1, Duration::from_millis(50)).await {
+        while let Ok(permit) =
+            admit_within(&state.memory.upload_admission, 1, Duration::from_millis(50)).await
+        {
             held.push(permit);
         }
         assert_eq!(held.len(), 16, "the test state admits 16 uploads");
         held.pop();
         assert!(
-            admit_within(&state, 1, Duration::from_secs(1))
+            admit_within(&state.memory.upload_admission, 1, Duration::from_secs(1))
                 .await
                 .is_ok()
         );
@@ -94,7 +111,12 @@ mod tests {
             panic!("the holder leads the path");
         };
 
-        let waiting = admit_nar_within(&state, &hash, 1, Duration::from_secs(5));
+        let waiting = admit_nar_within(
+            &state.memory.upload_admission,
+            &hash,
+            1,
+            Duration::from_secs(5),
+        );
         tokio::pin!(waiting);
         assert!(
             tokio::time::timeout(Duration::from_millis(200), &mut waiting)

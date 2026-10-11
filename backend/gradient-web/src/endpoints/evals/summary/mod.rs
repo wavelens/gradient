@@ -79,7 +79,8 @@ pub async fn get_evaluation_summary(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<EvaluationFailureSummary>>> {
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+        .await?;
     let db = &state.web_db;
     let loaded = LoadedEvaluation::load(db, ctx.evaluation.id).await?;
     let compared = match ctx.evaluation.previous {

@@ -12,6 +12,7 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
     Model as MWorkerRegistration,
@@ -156,12 +157,8 @@ pub(crate) fn encrypt_for_dialing(
         .transpose()
 }
 
-pub(crate) async fn reauth_project_workers(
-    state: &ServerState,
-    scheduler: &Scheduler,
-    project: ProjectId,
-) {
-    match gradient_db::projects::workers::worker_ids_for_project(&state.web_db, project).await {
+pub(crate) async fn reauth_project_workers(db: &WebDb, scheduler: &Scheduler, project: ProjectId) {
+    match gradient_db::projects::workers::worker_ids_for_project(db, project).await {
         Ok(workers) => {
             for worker_id in &workers {
                 scheduler.request_reauth(worker_id).await;
@@ -182,7 +179,7 @@ pub async fn post_project_worker(
     Json(body): Json<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<RegisterWorkerResponse>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -199,7 +196,7 @@ pub async fn post_project_worker(
         return Err(ProjectRefusal::WorkerIdBelongsToTeamWorker.into());
     }
     if body.url.as_deref().is_some_and(|u| !u.trim().is_empty()) {
-        ensure_dialable_worker_id(&state, &worker_id_str).await?;
+        ensure_dialable_worker_id(&state.web_db, &worker_id_str).await?;
     }
 
     let (token, return_token) = crate::endpoints::worker_tokens::issue(body.token)?;
@@ -247,13 +244,13 @@ pub async fn post_project_worker(
     }))
 }
 
-async fn ensure_dialable_worker_id(state: &ServerState, worker_id: &str) -> WebResult<()> {
-    let team_worker = gradient_db::teams::workers::is_team_worker(&state.web_db, worker_id).await?;
+async fn ensure_dialable_worker_id(db: &WebDb, worker_id: &str) -> WebResult<()> {
+    let team_worker = gradient_db::teams::workers::is_team_worker(db, worker_id).await?;
 
     let gradient_ci = EWorkerRegistration::find()
         .filter(worker_registration::Column::WorkerId.eq(worker_id))
         .filter(worker_registration::Column::GradientCi.eq(true))
-        .one(&state.web_db)
+        .one(db)
         .await?
         .is_some();
     if team_worker || gradient_ci {
@@ -285,7 +282,7 @@ pub async fn get_project_workers(
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<ProjectWorkerEntry>>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -296,7 +293,7 @@ pub async fn get_project_workers(
     .await?;
     let manages_workers = user.superuser
         || has_permission(
-            &state,
+            &state.web_db,
             user.id,
             project.id,
             Permission::ManageWorkers,
@@ -404,7 +401,7 @@ pub async fn get_project_worker_metrics(
     Extension(api_key): Extension<MaybeApiKey>,
 ) -> WebResult<Json<BaseResponse<WorkerMetricsResponse>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -510,7 +507,7 @@ pub async fn post_project_worker_test(
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<WorkerTestResponse>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -543,7 +540,7 @@ pub async fn patch_project_worker(
     Json(body): Json<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -621,7 +618,7 @@ pub async fn delete_project_worker(
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,

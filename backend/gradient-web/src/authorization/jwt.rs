@@ -5,11 +5,11 @@
  */
 
 use super::api_key::{ApiKeyContext, DecodedRequest};
-use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use chrono::{Duration, Utc};
-use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_types::*;
+use gradient_util::debounce::Debounce;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::distr::{Alphanumeric, SampleString};
 use sea_orm::{
@@ -18,9 +18,9 @@ use sea_orm::{
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
 use std::time::Instant;
 use tracing::warn;
+use uuid::Uuid;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Cliams {
@@ -68,34 +68,35 @@ pub fn extract_bearer_or_cookie(headers: &HeaderMap) -> Option<&str> {
 }
 
 pub(super) fn sign_claims<T: Serialize>(
-    state: &ServerState,
+    jwt_secret: &SecretString,
     claims: &T,
 ) -> jsonwebtoken::errors::Result<String> {
     encode(
         &Header::default(),
         claims,
-        &EncodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
+        &EncodingKey::from_secret(jwt_secret.expose().as_bytes()),
     )
 }
 
 pub(super) fn verify_claims<T: DeserializeOwned>(
-    state: &ServerState,
+    jwt_secret: &SecretString,
     token: &str,
 ) -> jsonwebtoken::errors::Result<T> {
     decode::<T>(
         token,
-        &DecodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
+        &DecodingKey::from_secret(jwt_secret.expose().as_bytes()),
         &Validation::default(),
     )
     .map(|data| data.claims)
 }
 
-pub fn session_claims(state: &ServerState, headers: &HeaderMap) -> Option<Cliams> {
-    verify_claims(state, extract_bearer_or_cookie(headers)?).ok()
+pub fn session_claims(jwt_secret: &SecretString, headers: &HeaderMap) -> Option<Cliams> {
+    verify_claims(jwt_secret, extract_bearer_or_cookie(headers)?).ok()
 }
 
 pub async fn create_session_and_token(
-    state: State<Arc<ServerState>>,
+    db: &WebDb,
+    jwt_secret: &SecretString,
     user_id: UserId,
     remember_me: bool,
     user_agent: Option<String>,
@@ -124,7 +125,7 @@ pub async fn create_session_and_token(
     .into_active_model();
 
     session
-        .insert(&state.web_db)
+        .insert(db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -135,22 +136,24 @@ pub async fn create_session_and_token(
         jti: session_id,
     };
 
-    let token = sign_claims(&state, &claim).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let token = sign_claims(jwt_secret, &claim).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok((session_id, token))
 }
 
 pub async fn decode_jwt(
-    state: State<Arc<ServerState>>,
+    db: &WebDb,
+    jwt_secret: &SecretString,
+    last_used_stamps: &Debounce<Uuid>,
     jwt: String,
 ) -> Result<DecodedRequest, StatusCode> {
     if let Some(raw) = jwt.strip_prefix("GRAD") {
-        return decode_api_key(state, raw).await;
+        return decode_api_key(db, last_used_stamps, raw).await;
     }
 
-    let claims: Cliams = verify_claims(&state, &jwt).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let claims: Cliams = verify_claims(jwt_secret, &jwt).map_err(|_| StatusCode::UNAUTHORIZED)?;
     let session = ESession::find_by_id(claims.jti)
-        .one(&state.web_db)
+        .one(db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
@@ -160,15 +163,11 @@ pub async fn decode_jwt(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    if state
-        .memory
-        .last_used_stamps
-        .due(session.id.into_inner(), Instant::now())
-    {
+    if last_used_stamps.due(session.id.into_inner(), Instant::now()) {
         let mut active: ASession = session.into();
         active.last_used_at = Set(now);
 
-        if let Err(e) = active.update(&state.web_db).await {
+        if let Err(e) = active.update(db).await {
             warn!(error = %e, "session last_used_at stamp failed");
         }
     }
@@ -177,13 +176,14 @@ pub async fn decode_jwt(
 }
 
 async fn decode_api_key(
-    state: State<Arc<ServerState>>,
+    db: &WebDb,
+    last_used_stamps: &Debounce<Uuid>,
     raw: &str,
 ) -> Result<DecodedRequest, StatusCode> {
     let key_hash = hash_api_key(raw);
     let api_key = EApi::find()
         .filter(CApi::Key.eq(key_hash))
-        .one(&state.web_db)
+        .one(db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
@@ -208,15 +208,11 @@ async fn decode_api_key(
 
     let user_id = api_key.owned_by;
 
-    if state
-        .memory
-        .last_used_stamps
-        .due(api_key.id.into_inner(), Instant::now())
-    {
+    if last_used_stamps.due(api_key.id.into_inner(), Instant::now()) {
         let mut active: AApi = api_key.into();
         active.last_used_at = Set(now);
 
-        if let Err(e) = active.save(&state.web_db).await {
+        if let Err(e) = active.save(db).await {
             warn!(error = %e, "api key last_used_at stamp failed");
         }
     }
@@ -225,7 +221,7 @@ async fn decode_api_key(
 }
 
 pub fn encode_download_token(
-    state: State<Arc<ServerState>>,
+    jwt_secret: &SecretString,
     derivation: DerivationId,
     evaluation: EvaluationId,
 ) -> Result<String, StatusCode> {
@@ -239,14 +235,14 @@ pub fn encode_download_token(
         evaluation,
     };
 
-    sign_claims(&state, &claim).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    sign_claims(jwt_secret, &claim).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 pub async fn decode_download_token(
-    state: State<Arc<ServerState>>,
+    jwt_secret: &SecretString,
     token: String,
 ) -> Result<DownloadClaims, StatusCode> {
-    verify_claims(&state, &token).map_err(|_| StatusCode::UNAUTHORIZED)
+    verify_claims(jwt_secret, &token).map_err(|_| StatusCode::UNAUTHORIZED)
 }
 
 pub fn generate_api_key() -> String {

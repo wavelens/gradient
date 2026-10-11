@@ -23,17 +23,20 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_db::lookup::get_any_project_by_name;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH;
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_sources::{get_commit_info, head_commit};
+use gradient_storage::NarStore;
 use gradient_storage::nar_extract::{
     ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
 };
 use gradient_types::input::{hex_to_vec, vec_to_hex};
 use gradient_types::*;
+use gradient_util::latest::Latest;
 use sea_orm::sea_query::extension::postgres::PgExpr;
 use sea_orm::sea_query::{Expr, Query as SeaQuery};
 use sea_orm::{
@@ -53,14 +56,15 @@ pub struct EvaluateRequest {
 }
 
 pub(super) async fn evaluations_to_summaries(
-    state: &Arc<ServerState>,
+    web_db: &WebDb,
+    eval_progress: &Latest<EvaluationId, EvaluationProgress>,
     evaluations: Vec<MEvaluation>,
 ) -> Result<Vec<EvaluationSummary>, WebError> {
     if evaluations.is_empty() {
         return Ok(Vec::new());
     }
 
-    let db = &state.web_db;
+    let db = web_db;
     let eval_ids: Vec<EvaluationId> = evaluations.iter().map(|e| e.id).collect();
 
     let trigger_ids: Vec<TaskTriggerId> = evaluations.iter().filter_map(|e| e.trigger).collect();
@@ -179,7 +183,7 @@ pub(super) async fn evaluations_to_summaries(
             finished_at: evaluation.finished_at,
             updated_at: evaluation.updated_at,
             progress: live_progress(
-                &state.memory.eval_progress,
+                eval_progress,
                 evaluation.id,
                 evaluation.status,
                 Instant::now(),
@@ -206,8 +210,9 @@ pub async fn post_task_evaluate(
     Path((project, task)): Path<(String, String)>,
     body: Option<Json<EvaluateRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let (_project, task) = load_task(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -248,7 +253,7 @@ pub async fn post_task_evaluate(
 
     let (commit_hash, commit_message, author_name) = match pinned {
         Some(commit_hash) => {
-            let commit = get_commit_info(&state.db(), &task, &commit_hash)
+            let commit = get_commit_info(&db, &task, &commit_hash)
                 .await
                 .map_err(|e| TaskRefusal::CommitLookupFailed {
                     reason: e.to_string(),
@@ -256,7 +261,7 @@ pub async fn post_task_evaluate(
             (commit_hash, commit.message, commit.author_name)
         }
         None => {
-            let head = head_commit(&state.db(), &task, None).await.map_err(|e| {
+            let head = head_commit(&db, &task, None).await.map_err(|e| {
                 SharedRefusal::RepositoryStateFetchFailed {
                     reason: e.to_string(),
                 }
@@ -326,7 +331,7 @@ pub async fn get_task_evaluations(
     Query(params): Query<EvaluationsQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationSummary>>>> {
     let (_project, task) = load_task(
-        &state,
+        &state.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
@@ -394,7 +399,9 @@ pub async fn get_task_evaluations(
         None => query.limit(limit).all(&state.web_db).await?,
     };
 
-    let summaries = evaluations_to_summaries(&state.0, evaluations).await?;
+    let summaries =
+        evaluations_to_summaries(&state.0.web_db, &state.0.memory.eval_progress, evaluations)
+            .await?;
 
     Ok(ok_json(summaries))
 }
@@ -407,7 +414,7 @@ pub async fn get_task_details(
 ) -> WebResult<Json<BaseResponse<TaskDetailsResponse>>> {
     let api_key_ref = api_key.as_ref();
     let (project, task) = load_task(
-        &state,
+        &state.db(),
         Caller::from(&maybe_user),
         api_key_ref,
         project,
@@ -423,7 +430,9 @@ pub async fn get_task_details(
         .all(&state.web_db)
         .await?;
 
-    let evaluation_summaries = evaluations_to_summaries(&state.0, evaluations).await?;
+    let evaluation_summaries =
+        evaluations_to_summaries(&state.0.web_db, &state.0.memory.eval_progress, evaluations)
+            .await?;
 
     let (building, queued) =
         gradient_db::task_board::task_queue_summary(&state.web_db, task.id).await?;
@@ -431,7 +440,7 @@ pub async fn get_task_details(
     let (can_edit, can_trigger) = match &maybe_user {
         Some(user) => (
             has_permission(
-                &state,
+                &state.web_db,
                 user.id,
                 project.id,
                 Permission::EditTask,
@@ -439,7 +448,7 @@ pub async fn get_task_details(
             )
             .await?,
             has_permission(
-                &state,
+                &state.web_db,
                 user.id,
                 project.id,
                 Permission::TriggerEvaluation,
@@ -572,7 +581,7 @@ pub async fn get_task_entry_points(
     Query(params): Query<EntryPointsQuery>,
 ) -> WebResult<Json<BaseResponse<PaginatedEntryPoints>>> {
     let (_project, task) = load_task(
-        &state,
+        &state.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
@@ -622,7 +631,7 @@ pub async fn get_task_entry_points(
         }));
     }
 
-    let data = EntryPointRelatedData::load(&state, &evaluation, &entry_points).await?;
+    let data = EntryPointRelatedData::load(&state.web_db, &evaluation, &entry_points).await?;
 
     Ok(ok_json(PaginatedEntryPoints {
         entry_points: data.build_summaries(&entry_points),
@@ -662,11 +671,11 @@ fn output_paths_by_derivation(
 
 impl EntryPointRelatedData {
     async fn load(
-        state: &Arc<ServerState>,
+        web_db: &WebDb,
         evaluation: &MEvaluation,
         entry_points: &[MEntryPoint],
     ) -> WebResult<Self> {
-        let db = &state.web_db;
+        let db = web_db;
         let eval_id = evaluation.id;
         let drv_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
 
@@ -829,7 +838,8 @@ pub struct EntryPointDownloadQuery {
 }
 
 async fn serve_hydra_artifact(
-    state: &Arc<ServerState>,
+    web_db: &WebDb,
+    nar_storage: &NarStore,
     build_outputs: Vec<MDerivationOutput>,
     filename: &str,
 ) -> WebResult<Option<Response>> {
@@ -838,7 +848,7 @@ async fn serve_hydra_artifact(
         return Ok(None);
     }
 
-    let db = &state.web_db;
+    let db = web_db;
     let rows = match gradient_db::fetch_in_chunks(&output_ids, |chunk| async move {
         EBuildProduct::find()
             .filter(CBuildProduct::DerivationOutput.is_in(chunk))
@@ -887,7 +897,7 @@ async fn serve_hydra_artifact(
             .map(str::to_owned)
             .unwrap_or_else(|| product.path.trim_start_matches('/').to_owned());
 
-        let (_size, stream) = match state.nar_storage.get_stream(hash).await {
+        let (_size, stream) = match nar_storage.get_stream(hash).await {
             Ok(Some(s)) => s,
             Ok(None) => continue,
             Err(e) => {
@@ -944,9 +954,14 @@ pub async fn get_entry_point_download(
         .or_not_found(Resource::Task)?;
 
     let (resolved_user, resolved_key) = if let Some(token_str) = params.token {
-        let decoded = crate::authorization::decode_jwt(State(Arc::clone(&state)), token_str)
-            .await
-            .map_err(|_| SharedRefusal::InvalidToken)?;
+        let decoded = crate::authorization::decode_jwt(
+            &state.web_db,
+            &state.jwt_secret,
+            &state.memory.last_used_stamps,
+            token_str,
+        )
+        .await
+        .map_err(|_| SharedRefusal::InvalidToken)?;
         if let Some(ctx) = decoded.api_key_context()
             && !crate::ip_allowlist::is_allowed(client_ip, &ctx.allowed_ips)
         {
@@ -963,7 +978,9 @@ pub async fn get_entry_point_download(
     if !project.public {
         match resolved_user {
             Some(ref user) => {
-                if !is_project_member(&state, user.id, project.id, resolved_key.as_ref()).await? {
+                if !is_project_member(&state.web_db, user.id, project.id, resolved_key.as_ref())
+                    .await?
+                {
                     return Err(WebError::not_found(Resource::Task));
                 }
             }
@@ -1001,7 +1018,14 @@ pub async fn get_entry_point_download(
         .all(&state.web_db)
         .await?;
 
-    match serve_hydra_artifact(&state, build_outputs, &params.filename).await? {
+    match serve_hydra_artifact(
+        &state.web_db,
+        &state.nar_storage,
+        build_outputs,
+        &params.filename,
+    )
+    .await?
+    {
         Some(response) => Ok(response),
         None => Err(WebError::not_found(Resource::File)),
     }

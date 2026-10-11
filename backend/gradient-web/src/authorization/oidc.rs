@@ -6,10 +6,11 @@
 
 use super::jwt::{sign_claims, verify_claims};
 use anyhow::{Context, Result, bail};
-use axum::extract::State;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
+use gradient_state::PendingProjectMemberships;
 use gradient_types::input::load_secret;
 use gradient_types::*;
 use jsonwebtoken::{DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
@@ -20,7 +21,6 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use url::Url;
 
@@ -102,23 +102,23 @@ async fn fetch_jwks(http_client: &reqwest::Client, jwks_uri: &str) -> Result<Jwk
     Ok(jwks)
 }
 
-pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<OidcAuthRequest> {
-    let oidc = state
-        .config
+pub async fn oidc_login_create(
+    config: &RuntimeConfig,
+    http: &reqwest::Client,
+    jwt_secret: &SecretString,
+) -> Result<OidcAuthRequest> {
+    let oidc = config
         .oidc
         .clone()
         .context("OIDC is not enabled or not fully configured")?;
 
-    let metadata = get_oidc_metadata(&state.http, &oidc.discovery_url).await?;
+    let metadata = get_oidc_metadata(http, &oidc.discovery_url).await?;
 
     let auth_endpoint = metadata["authorization_endpoint"]
         .as_str()
         .context("no authorization_endpoint in OIDC metadata")?;
 
-    let redirect_uri = format!(
-        "{}/api/v1/auth/oidc/callback",
-        state.config.server.serve_url
-    );
+    let redirect_uri = format!("{}/api/v1/auth/oidc/callback", config.server.serve_url);
     let scope = oidc.scopes.join(" ");
 
     let csrf_state = random_url_safe(32);
@@ -134,7 +134,7 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<OidcAut
         nonce: nonce.clone(),
         pkce_verifier,
     };
-    let cookie_value = sign_claims(&state, &claims).context("sign OIDC CSRF cookie")?;
+    let cookie_value = sign_claims(jwt_secret, &claims).context("sign OIDC CSRF cookie")?;
 
     let params = vec![
         ("response_type", "code"),
@@ -157,7 +157,7 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<OidcAut
 }
 
 pub async fn oidc_login_verify(
-    state: State<Arc<ServerState>>,
+    state: &ServerState,
     authorization_code: String,
     state_query: String,
     csrf_cookie: String,
@@ -168,8 +168,8 @@ pub async fn oidc_login_verify(
         .clone()
         .context("OIDC is not enabled or not fully configured")?;
 
-    let csrf: CsrfClaims =
-        verify_claims(&state, &csrf_cookie).context("invalid or expired OIDC CSRF cookie")?;
+    let csrf: CsrfClaims = verify_claims(&state.jwt_secret, &csrf_cookie)
+        .context("invalid or expired OIDC CSRF cookie")?;
 
     if csrf
         .state
@@ -242,7 +242,12 @@ pub async fn oidc_login_verify(
         _ => bail!("OIDC nonce mismatch"),
     }
 
-    create_or_update_user(state, claims).await
+    create_or_update_user(
+        &state.web_db,
+        &state.memory.pending_project_memberships,
+        claims,
+    )
+    .await
 }
 
 async fn verify_id_token(
@@ -272,7 +277,8 @@ async fn verify_id_token(
 }
 
 async fn create_or_update_user(
-    state: State<Arc<ServerState>>,
+    db: &WebDb,
+    pending_project_memberships: &PendingProjectMemberships,
     claims: IdTokenClaims,
 ) -> Result<MUser> {
     let display_name = claims.name.clone().unwrap_or_else(|| claims.sub.clone());
@@ -283,8 +289,7 @@ async fn create_or_update_user(
         .unwrap_or_else(|| claims.sub.clone());
     let groups = claims.groups.clone();
 
-    let tx = state
-        .web_db
+    let tx = db
         .inner()
         .begin()
         .await
@@ -370,7 +375,7 @@ async fn create_or_update_user(
 
         if let Err(e) = gradient_state::apply_pending_project_memberships(
             &tx,
-            &state.memory.pending_project_memberships,
+            pending_project_memberships,
             &user.username,
             user_id,
         )
@@ -414,7 +419,7 @@ async fn create_or_update_user(
 
     if let Err(e) = gradient_state::apply_pending_project_memberships(
         &tx,
-        &state.memory.pending_project_memberships,
+        pending_project_memberships,
         &user.username,
         user.id,
     )

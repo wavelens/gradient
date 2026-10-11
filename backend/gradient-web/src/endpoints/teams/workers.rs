@@ -20,6 +20,7 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_scheduler::Scheduler;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -74,24 +75,20 @@ pub async fn withdraw_team_workers(
     }
 }
 
-async fn granted_projects(state: &Arc<ServerState>, team: TeamId) -> WebResult<HashSet<ProjectId>> {
+async fn granted_projects(db: &WebDb, team: TeamId) -> WebResult<HashSet<ProjectId>> {
     Ok(
-        gradient_db::teams::workers::projects_granted_with_workers(&state.web_db, team)
+        gradient_db::teams::workers::projects_granted_with_workers(db, team)
             .await?
             .into_iter()
             .collect(),
     )
 }
 
-async fn find_team_worker(
-    state: &Arc<ServerState>,
-    team: TeamId,
-    worker_id: &str,
-) -> WebResult<MTeamWorker> {
+async fn find_team_worker(db: &WebDb, team: TeamId, worker_id: &str) -> WebResult<MTeamWorker> {
     ETeamWorker::find()
         .filter(CTeamWorker::Team.eq(team))
         .filter(CTeamWorker::WorkerId.eq(worker_id))
-        .one(&state.web_db)
+        .one(db)
         .await?
         .or_not_found(Resource::TeamWorker)
 }
@@ -103,7 +100,14 @@ pub async fn get_team_workers(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(team): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamWorkerEntry>>>> {
-    let (team, role) = load_team(&state, &user, api_key.as_ref(), team, TeamAccess::Member).await?;
+    let (team, role) = load_team(
+        &state.web_db,
+        &user,
+        api_key.as_ref(),
+        team,
+        TeamAccess::Member,
+    )
+    .await?;
     let failures = (user.superuser || role == Some(TeamRole::Admin))
         .then_some(&*scheduler.connection_failures);
     let live_workers = live_workers(scheduler.workers_info().await);
@@ -143,7 +147,7 @@ pub async fn post_team_worker(
     Json(body): Json<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<RegisteredTeamWorker>>> {
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -194,14 +198,14 @@ pub async fn post_team_worker(
     .await?;
 
     scheduler.request_reauth(&worker_id).await;
-    for project in granted_projects(&state, team.id).await? {
+    for project in granted_projects(&state.web_db, team.id).await? {
         if let Err(e) = gradient_ci::unpark_no_workers_for_project(&state.web_db, project).await {
             tracing::warn!(error = %e, project_id = %project, "failed to unpark evaluations after a team worker registration");
         }
     }
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::TeamWorkerCreate,
         EventOwner::default(),
@@ -226,7 +230,7 @@ pub async fn patch_team_worker(
     Json(body): Json<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -235,7 +239,7 @@ pub async fn patch_team_worker(
         },
     )
     .await?;
-    let worker = find_team_worker(&state, team.id, &worker_id).await?;
+    let worker = find_team_worker(&state.web_db, team.id, &worker_id).await?;
     if worker.managed && patch_edits_managed_fields(&body) {
         return Err(SharedRefusal::WorkerManagedByState.into());
     }
@@ -263,7 +267,7 @@ pub async fn patch_team_worker(
         withdraw_team_workers(
             &scheduler,
             &workers,
-            &granted_projects(&state, team.id).await?,
+            &granted_projects(&state.web_db, team.id).await?,
         )
         .await;
     } else {
@@ -271,7 +275,7 @@ pub async fn patch_team_worker(
     }
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::TeamWorkerUpdate,
         EventOwner::default(),
@@ -292,7 +296,7 @@ pub async fn delete_team_worker(
     Path((team, worker_id)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -301,18 +305,18 @@ pub async fn delete_team_worker(
         },
     )
     .await?;
-    let worker = find_team_worker(&state, team.id, &worker_id).await?;
+    let worker = find_team_worker(&state.web_db, team.id, &worker_id).await?;
     if worker.managed {
         return Err(SharedRefusal::WorkerManagedByState.into());
     }
 
-    let projects = granted_projects(&state, team.id).await?;
+    let projects = granted_projects(&state.web_db, team.id).await?;
     worker.into_active_model().delete(&state.web_db).await?;
     withdraw_team_workers(&scheduler, std::slice::from_ref(&worker_id), &projects).await;
     scheduler.connection_failures.clear(&worker_id);
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::TeamWorkerDelete,
         EventOwner::default(),

@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use chrono::DateTime;
+use gradient_db::WebDb;
+use gradient_storage::admission::UploadAdmission;
 use std::sync::{Arc, LazyLock};
 
 use axum::extract::{MatchedPath, State};
@@ -498,18 +501,20 @@ fn render_uploads(registry: &Registry, uploads: &gradient_storage::admission::Ad
 }
 
 pub(crate) async fn collect(
-    state: &Arc<ServerState>,
+    db: &WebDb,
+    started_at: DateTime<Utc>,
+    upload_admission: &UploadAdmission,
     scheduler: &Scheduler,
 ) -> WebResult<Observations> {
     let rows: Vec<CountRow> = CountRow::find_by_statement(OBSERVATIONS.stmt())
-        .all(&state.web_db)
+        .all(db)
         .await
         .map_err(WebError::from)?;
 
     let mut obs = Observations {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime_seconds: (Utc::now() - state.started_at).num_milliseconds() as f64 / 1000.0,
-        uploads: state.memory.upload_admission.stats(),
+        uptime_seconds: (Utc::now() - started_at).num_milliseconds() as f64 / 1000.0,
+        uploads: upload_admission.stats(),
         ..Default::default()
     };
 
@@ -597,7 +602,14 @@ pub async fn get_metrics(
     State(state): State<Arc<ServerState>>,
     axum::Extension(scheduler): axum::Extension<Arc<Scheduler>>,
 ) -> Response {
-    match collect(&state, &scheduler).await {
+    match collect(
+        &state.web_db,
+        state.started_at,
+        &state.memory.upload_admission,
+        &scheduler,
+    )
+    .await
+    {
         Ok(obs) => {
             let body = format!("{}{}", render(&obs), gather_http());
             (

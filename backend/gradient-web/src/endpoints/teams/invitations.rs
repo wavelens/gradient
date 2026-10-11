@@ -32,7 +32,7 @@ pub async fn get_team_invitations(
     Path(team): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<PendingInvitationItem>>>> {
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -78,7 +78,7 @@ pub async fn delete_team_invitation(
     Json(body): Json<RevokeInvitationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -104,7 +104,7 @@ pub async fn delete_team_invitation(
     invitation.into_active_model().delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::TeamInvitationRevoke,
         EventOwner::default(),

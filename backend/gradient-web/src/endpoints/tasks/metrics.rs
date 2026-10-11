@@ -13,6 +13,7 @@ use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_db::graph::{
     closure::transitive_closure_reachable,
     runtime_closure::{output_hashes_for_drvs, runtime_closure_size},
@@ -48,7 +49,7 @@ pub async fn get_task_metrics(
     Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<TaskMetricsResponse>>> {
     let project = load_project(
-        &state.0,
+        &state.0.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
@@ -167,16 +168,13 @@ struct DerivationMetrics {
     runtime_closure_size_bytes: Option<i64>,
 }
 
-async fn derivation_metrics(
-    state: &Arc<ServerState>,
-    derivation: DerivationId,
-) -> WebResult<DerivationMetrics> {
-    let closure = transitive_closure_reachable(&state.web_db, &[derivation]).await?;
+async fn derivation_metrics(db: &WebDb, derivation: DerivationId) -> WebResult<DerivationMetrics> {
+    let closure = transitive_closure_reachable(db, &[derivation]).await?;
     let dependencies_count = (closure.len() as i64).saturating_sub(1);
-    let output_size_bytes = sum_output_sizes(&state.web_db, vec![derivation]).await?;
-    let closure_size_bytes = sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
-    let seeds = output_hashes_for_drvs(&state.web_db, &[derivation]).await?;
-    let runtime = runtime_closure_size(&state.web_db, &seeds).await?;
+    let output_size_bytes = sum_output_sizes(db, vec![derivation]).await?;
+    let closure_size_bytes = sum_output_sizes(db, closure.into_iter().collect()).await?;
+    let seeds = output_hashes_for_drvs(db, &[derivation]).await?;
+    let runtime = runtime_closure_size(db, &seeds).await?;
 
     Ok(DerivationMetrics {
         dependencies_count,
@@ -219,7 +217,7 @@ pub async fn get_entry_point_metrics(
     Query(params): Query<EntryPointMetricsQuery>,
 ) -> WebResult<Json<BaseResponse<EntryPointMetricsResponse>>> {
     let project = load_project(
-        &state.0,
+        &state.0.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
@@ -294,7 +292,7 @@ pub async fn get_entry_point_metrics(
         let metrics = match by_derivation.get(&ep.derivation) {
             Some(m) => *m,
             None => {
-                let m = derivation_metrics(&state.0, ep.derivation).await?;
+                let m = derivation_metrics(&state.0.web_db, ep.derivation).await?;
                 by_derivation.insert(ep.derivation, m);
                 m
             }
