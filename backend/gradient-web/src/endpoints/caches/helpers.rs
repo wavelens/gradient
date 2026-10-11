@@ -11,6 +11,7 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::Engine;
@@ -409,7 +410,7 @@ pub async fn fetch_nar_stream(
         .nar_storage
         .open(&effective_hash, 0)
         .await
-        .map_err(|e| WebError::internal(format!("Failed to read NAR: {}", e)))?
+        .context("Failed to read NAR")?
         .or_not_found(Resource::Path)?;
     let (size, stream) = match source {
         NarSource::Hot(bytes) => {
@@ -441,7 +442,7 @@ pub(super) async fn delete_nar_from_cache(
             hash: hash.to_owned(),
         })
         .await
-        .map_err(|e| WebError::internal(e.to_string()))?;
+        .context("demote the cache claim")?;
     let cached_path = report.cached_path.or_not_found(Resource::Nar)?;
     state.nar_storage.hot().invalidate(hash);
 

@@ -140,7 +140,7 @@ async fn product_response(
         }
         Err(e) => {
             tracing::error!(%build_id, %filename, hash, error = %e, "Failed to fetch NAR");
-            return Err(WebError::internal("Failed to fetch NAR"));
+            return Err(anyhow::anyhow!("Failed to fetch NAR").into());
         }
     };
 
@@ -163,7 +163,7 @@ async fn product_response(
         }
         Err(e) => {
             tracing::error!(%build_id, %filename, %rel, error = %e, "Failed to extract path from NAR");
-            Err(WebError::internal("Failed to extract path from NAR"))
+            Err(anyhow::anyhow!("Failed to extract path from NAR").into())
         }
     }
 }

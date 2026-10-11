@@ -10,6 +10,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -83,7 +84,7 @@ pub async fn post_evaluation_retry(
                 scope: gradient_db::graph::repair::RepairScope::Retry(retried.id),
             })
             .await
-            .map_err(|e| WebError::internal(format!("the retry did not reach the graph: {e}")))?;
+            .context("the retry did not reach the graph")?;
     }
 
     Ok(ok_json(retried.id.to_string()))
@@ -104,7 +105,7 @@ pub async fn post_evaluation_prioritize(
     scheduler
         .prioritize_evaluation(evaluation.id)
         .await
-        .map_err(|e| WebError::internal(e.to_string()))?;
+        .context("prioritize the evaluation")?;
 
     Ok(ok_json("Success".to_string()))
 }

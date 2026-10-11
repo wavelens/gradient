@@ -9,6 +9,7 @@ use super::refusal::CacheRefusal;
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::body::Body;
 use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, header};
@@ -59,7 +60,8 @@ pub async fn nar(
         )
         .header(header::CONTENT_LENGTH, size)
         .body(Body::from_stream(stream))
-        .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
+        .context("Failed to build response")
+        .map_err(Into::into)
 }
 
 pub async fn upstream_nar(
@@ -95,7 +97,8 @@ pub async fn upstream_nar(
     }
     builder
         .body(Body::from_stream(object.body))
-        .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
+        .context("Failed to build response")
+        .map_err(Into::into)
 }
 
 /// A client is caching a narinfo and never refetching it. Removing an upstream row must not 404

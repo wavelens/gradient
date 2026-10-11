@@ -7,6 +7,7 @@ use super::helpers::{CacheContext, cache_client_ip, cache_served_derivation};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
@@ -93,5 +94,6 @@ fn log_response(body: String, cache_status: &'static str) -> WebResult<Response>
             HeaderValue::from_static("*"),
         )
         .body(Body::from(body))
-        .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
+        .context("Failed to build response")
+        .map_err(Into::into)
 }

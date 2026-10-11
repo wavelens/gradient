@@ -7,10 +7,11 @@
 use super::refusal::TaskRefusal;
 use crate::access::{Caller, TaskAccess, load_task};
 use crate::authorization::MaybeApiKey;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
@@ -372,7 +373,7 @@ pub async fn fire_now(
     let (commit_hash, commit_message, author_name) =
         resolve_head(&state.db(), &proj, branch_for_fire.as_deref())
             .await
-            .map_err(|e| WebError::internal(e.to_string()))?;
+            .context("resolve the branch head")?;
 
     if let Err(e) = gradient_ci::trigger::maybe_trigger_input_update(
         &state.web_db,
@@ -401,7 +402,7 @@ pub async fn fire_now(
 
     let outcome = apply_trigger(&state.web_db, &proj, input)
         .await
-        .map_err(|e| WebError::internal(e.to_string()))?;
+        .context("apply the trigger")?;
 
     {
         let now = gradient_types::now();

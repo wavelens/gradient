@@ -7,6 +7,7 @@ use super::helpers::{CacheContext, cache_client_ip, fetch_nar_stream};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
@@ -48,7 +49,8 @@ pub async fn serve(
                 )
                 .header(header::CONTENT_LENGTH, size)
                 .body(Body::from(contents))
-                .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
+                .context("Failed to build response")
+                .map_err(Into::into)
         }
         Ok(Extracted::Directory { tar_zst }) => {
             let basename = rel_path
@@ -66,11 +68,10 @@ pub async fn serve(
                     HeaderValue::from_str(&disp).unwrap_or(HeaderValue::from_static("attachment")),
                 )
                 .body(Body::from(tar_zst))
-                .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
+                .context("Failed to build response")
+                .map_err(Into::into)
         }
         Err(ExtractError::NotFound) => Err(WebError::not_found(Resource::Path)),
-        Err(ExtractError::Io(e)) => {
-            Err(WebError::internal(format!("NAR extraction failed: {}", e)))
-        }
+        Err(ExtractError::Io(e)) => Err(anyhow::anyhow!("NAR extraction failed: {}", e).into()),
     }
 }

@@ -5,7 +5,8 @@
 
 use super::helpers::{CacheContext, cache_client_ip, fetch_nar_stream};
 use crate::client_ip::OptionalPeer;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
+use anyhow::Context;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
@@ -56,9 +57,7 @@ pub async fn ls(
     let (_effective_hash, _size, stream) = fetch_nar_stream(&state, ctx.cache.id, &hash).await?;
     let reader = nar_reader_from_stream(stream);
 
-    let root = walk_nar(reader)
-        .await
-        .map_err(|e| WebError::internal(format!("NAR walk failed: {}", e)))?;
+    let root = walk_nar(reader).await.context("NAR walk failed")?;
 
     Ok(Json(NarList { version: 1, root }).into_response())
 }

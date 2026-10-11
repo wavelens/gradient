@@ -236,10 +236,6 @@ impl IntoResponse for WebError {
 }
 
 impl WebError {
-    pub fn internal(msg: impl Into<String>) -> Self {
-        Self::Internal(AnyhowError::msg(msg.into()))
-    }
-
     pub fn invalid_name(name: Resource) -> Self {
         Self::BadRequest(ErrorCode::INVALID_NAME, format!("Invalid {}", name))
     }

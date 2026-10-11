@@ -12,6 +12,7 @@ use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
 use crate::permissions::CachePermission;
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -152,10 +153,7 @@ pub async fn put(
     }
 
     let (private_key, public_key) = generate_signing_key(&state.config.secrets.crypt_file)
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to generate signing key");
-            WebError::internal("Failed to generate signing key")
-        })?;
+        .context("Failed to generate signing key")?;
 
     let tx = state.web_db.inner().begin().await?;
 
@@ -257,10 +255,7 @@ pub async fn get_cache(
         cache.clone(),
         state.config.server.serve_url.clone(),
     )
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to derive public key");
-        WebError::internal("Failed to derive public key")
-    })?;
+    .context("Failed to derive public key")?;
 
     let can_edit = match &maybe_user {
         Some(u) => gradient_db::access::cache_permission_mask(&state.web_db, cache.id, u.id)

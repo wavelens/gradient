@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use anyhow::Context;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -14,7 +15,7 @@ use gradient_types::BaseResponse;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::ok_json;
 
 #[derive(Deserialize)]
@@ -39,7 +40,7 @@ pub async fn set_draining(
     } else {
         gradient_db::evaluations::draining::unpark_draining_evals(&state.worker_db).await
     }
-    .map_err(|e| WebError::internal(format!("draining transition failed: {e}")))?;
+    .context("draining transition failed")?;
 
     info!(enabled = req.enabled, evaluations, "draining toggled");
 

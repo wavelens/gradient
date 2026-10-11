@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use anyhow::Context;
 use std::sync::Arc;
 
 use axum::extract::State;
@@ -149,8 +150,8 @@ pub async fn post_connection(
     let target = authorize_target(&state, &user, &api_key, &body).await?;
     let token = ConnectionToken::parse(&body.token)
         .map_err(|e| GradientCiConnectionRefusal::InvalidConnectionToken(e.to_string()))?;
-    let url = proto_url(&state.config.gradient_ci.url)
-        .ok_or_else(|| WebError::internal("gradientCi.url is not a valid URL"))?;
+    let url =
+        proto_url(&state.config.gradient_ci.url).context("gradientCi.url is not a valid URL")?;
     ensure_unclaimed(&state, &target, &token.worker_id).await?;
     let stored = StoredToken::new(&state.config.secrets.crypt_file, &token.secret)?;
     match target {

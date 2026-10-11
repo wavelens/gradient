@@ -5,8 +5,9 @@
  */
 
 use super::refusal::AdminRefusal;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::ok_json;
+use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
@@ -35,7 +36,7 @@ pub async fn export_state(
 
     let config = export::export_state(&state.web_db)
         .await
-        .map_err(|e| WebError::internal(format!("export_state: {e}")))?;
+        .context("export_state")?;
     let redacted = export::redact(&config);
 
     Ok(match format {

@@ -12,6 +12,7 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::extract::Query;
 use axum::extract::{Path, State};
 use axum::{Extension, Json, Router};
@@ -91,9 +92,11 @@ fn default_true() -> bool {
 }
 
 fn encrypt_secret(state: &ServerState, plain: &str) -> WebResult<String> {
-    let key = load_secret_bytes(&state.config.secrets.crypt_file)
-        .map_err(|e| WebError::internal(e.to_string()))?;
-    encrypt_action_secret(plain, key.expose()).map_err(|e| WebError::internal(e.to_string()))
+    let key =
+        load_secret_bytes(&state.config.secrets.crypt_file).context("load the encryption key")?;
+    encrypt_action_secret(plain, key.expose())
+        .context("encrypt the action secret")
+        .map_err(Into::into)
 }
 
 async fn validate_mail_teams(
@@ -305,10 +308,8 @@ pub async fn create_action(
         task: proj.id,
         name: body.name,
         action_type: stored_config.action_type(),
-        config: serde_json::to_value(&stored_config)
-            .map_err(|e| WebError::internal(e.to_string()))?,
-        events: serde_json::to_value(&body.events)
-            .map_err(|e| WebError::internal(e.to_string()))?,
+        config: serde_json::to_value(&stored_config).context("serialize the action config")?,
+        events: serde_json::to_value(&body.events).context("serialize the action events")?,
         active: body.active,
         created_by: user.id,
         created_at: now,
@@ -448,7 +449,7 @@ pub async fn update_action(
 
     if let Some(new_cfg) = body.config {
         let stored: ActionConfig = serde_json::from_value(active.config.as_ref().clone())
-            .map_err(|e| WebError::internal(e.to_string()))?;
+            .context("parse the stored action config")?;
         let mut stored_cfg = new_cfg;
         if let Some(slot) = stored_cfg.secret_mut()
             && let Some(plain) = slot.take()
@@ -459,15 +460,14 @@ pub async fn update_action(
         }
 
         active.config =
-            Set(serde_json::to_value(&stored_cfg).map_err(|e| WebError::internal(e.to_string()))?);
+            Set(serde_json::to_value(&stored_cfg).context("serialize the action config")?);
     }
 
     if let Some(name) = body.name {
         active.name = Set(name);
     }
     if let Some(evs) = body.events {
-        active.events =
-            Set(serde_json::to_value(&evs).map_err(|e| WebError::internal(e.to_string()))?);
+        active.events = Set(serde_json::to_value(&evs).context("serialize the action events")?);
     }
     if let Some(a) = body.active {
         active.active = Set(a);
@@ -597,7 +597,7 @@ pub async fn test_action(
     ) {
         gradient_ci::actions::verify_git_host_action(&state.ci(), &action, &proj.repository)
             .await
-            .map_err(|e| WebError::internal(format!("test fire failed: {}", e)))?;
+            .context("test fire failed")?;
 
         return Ok(ok_json(serde_json::Value::Null));
     }
@@ -633,7 +633,7 @@ pub async fn test_action(
     });
     gradient_ci::actions::execute_action(&state.ci(), action, &event, envelope)
         .await
-        .map_err(|e| WebError::internal(format!("test fire failed: {}", e)))?;
+        .context("test fire failed")?;
 
     Ok(ok_json(serde_json::Value::Null))
 }
@@ -678,13 +678,13 @@ pub async fn regenerate_token(
     let encrypted = encrypt_secret(&state, &plaintext_token)?;
 
     let mut cfg: ActionConfig = serde_json::from_value(existing.config.clone())
-        .map_err(|e| WebError::internal(e.to_string()))?;
+        .context("parse the stored action config")?;
     if let ActionConfig::SendWebRequest { token: t, .. } = &mut cfg {
         *t = Some(encrypted);
     }
 
     let mut am: ATaskAction = existing.into();
-    am.config = Set(serde_json::to_value(&cfg).map_err(|e| WebError::internal(e.to_string()))?);
+    am.config = Set(serde_json::to_value(&cfg).context("serialize the action config")?);
     am.updated_at = Set(Utc::now().naive_utc());
     am.update(&state.web_db)
         .await

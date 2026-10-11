@@ -7,6 +7,7 @@
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::{
     Json,
     extract::{Path, State},
@@ -54,7 +55,7 @@ pub async fn list_tasks(
 ) -> WebResult<Json<BaseResponse<Vec<AdminTaskDto>>>> {
     let rows = admin_tasks::list_recent(&state.worker_db, 50)
         .await
-        .map_err(|e| WebError::internal(format!("list_recent: {e}")))?;
+        .context("list_recent")?;
     Ok(ok_json(rows.into_iter().map(AdminTaskDto::from).collect()))
 }
 
@@ -64,7 +65,7 @@ pub async fn get_task(
 ) -> WebResult<Json<BaseResponse<AdminTaskDto>>> {
     let row = admin_tasks::get(&state.worker_db, task_id)
         .await
-        .map_err(|e| WebError::internal(format!("get_task: {e}")))?
+        .context("get_task")?
         .ok_or_else(|| WebError::not_found(Resource::AdminTask))?;
     Ok(ok_json(AdminTaskDto::from(row)))
 }

@@ -13,6 +13,7 @@ use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::{Refusal, RefusalStatus};
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::Extension;
 use axum::Json;
 use axum::body::Body;
@@ -371,7 +372,7 @@ pub async fn post_basic_login(
     let mut response = Json(res).into_response();
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&cookie).map_err(|_| WebError::internal("Bad cookie"))?,
+        HeaderValue::from_str(&cookie).context("Bad cookie")?,
     );
     Ok(response)
 }
@@ -456,8 +457,7 @@ pub async fn get_oauth_authorize(
     let mut response = Json(res).into_response();
     response.headers_mut().append(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&oidc_csrf_clear_cookie(use_tls))
-            .map_err(|_| WebError::internal("Bad cookie"))?,
+        HeaderValue::from_str(&oidc_csrf_clear_cookie(use_tls)).context("Bad cookie")?,
     );
     Ok(response)
 }
@@ -480,7 +480,7 @@ pub async fn post_oauth_authorize(state: State<Arc<ServerState>>) -> WebResult<R
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
         HeaderValue::from_str(&oidc_csrf_set_cookie(&req.cookie_value, use_tls))
-            .map_err(|_| WebError::internal("Bad cookie"))?,
+            .context("Bad cookie")?,
     );
     Ok(response)
 }
@@ -506,10 +506,8 @@ pub async fn get_oidc_login(
             oidc_csrf_set_cookie(&req.cookie_value, use_tls),
         )
         .body(Body::empty())
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to build HTTP response");
-            WebError::internal("Failed to build redirect response")
-        })
+        .context("Failed to build redirect response")
+        .map_err(Into::into)
 }
 
 pub async fn get_oidc_callback(
@@ -563,10 +561,8 @@ pub async fn get_oidc_callback(
         .header("Set-Cookie", &session_cookie)
         .header("Set-Cookie", &clear_csrf)
         .body(Body::empty())
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to build HTTP response");
-            WebError::internal("Failed to build redirect response")
-        })
+        .context("Failed to build redirect response")
+        .map_err(Into::into)
 }
 
 pub async fn post_logout(
@@ -611,7 +607,7 @@ pub async fn post_logout(
     let mut response = Json(res).into_response();
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&clear_cookie).map_err(|_| WebError::internal("Bad cookie"))?,
+        HeaderValue::from_str(&clear_cookie).context("Bad cookie")?,
     );
     Ok(response)
 }
@@ -747,7 +743,7 @@ pub async fn post_resend_verification(
             &state.config.server.serve_url,
         )
         .await
-        .map_err(|e| WebError::internal(format!("Failed to send verification email: {}", e)))?;
+        .context("Failed to send verification email")?;
 
     tx.commit().await?;
 
