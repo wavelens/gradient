@@ -41,6 +41,7 @@ pub(super) async fn record_nar_push_metric(
 
     let bucket = gradient_db::metrics::cache_traffic::minute_bucket(gradient_types::now());
     state
+        .memory
         .cache_traffic
         .record(project_cache.cache, bucket, bytes);
 

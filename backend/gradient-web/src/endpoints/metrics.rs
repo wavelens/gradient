@@ -509,7 +509,7 @@ pub(crate) async fn collect(
     let mut obs = Observations {
         version: env!("CARGO_PKG_VERSION").to_string(),
         uptime_seconds: (Utc::now() - state.started_at).num_milliseconds() as f64 / 1000.0,
-        uploads: state.upload_admission.stats(),
+        uploads: state.memory.upload_admission.stats(),
         ..Default::default()
     };
 

@@ -782,12 +782,12 @@ pub fn create_router_with_scheduler(
     state.shutdown.supervise(ChildSpec::pass(
         gradient_db::metrics::cache_traffic::CacheMetricFlush::new(
             state.db(),
-            Arc::clone(&state.cache_traffic),
+            Arc::clone(&state.memory.cache_traffic),
         ),
     ));
     gradient_db::metrics::cache_traffic::flush_on_shutdown(
         state.db(),
-        Arc::clone(&state.cache_traffic),
+        Arc::clone(&state.memory.cache_traffic),
     );
     state.shutdown.supervise(ChildSpec::pass(
         gradient_db::metrics::infra::InfraMetricFlush::new(state.db()),

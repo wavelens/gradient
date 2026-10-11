@@ -1257,7 +1257,7 @@ async fn a_lost_build_claim_hands_its_shared_build_back_to_the_startable_set() {
     assert!(scheduler.active_job("jbuild").await.is_none());
     assert!(scheduler.pending_job("jbuild").await.is_none());
     assert_eq!(
-        scheduler.state.startable_set.take().entered,
+        scheduler.state.memory.db.startable_set.take().entered,
         HashSet::from([derivation])
     );
 }
@@ -1282,6 +1282,8 @@ async fn a_build_that_left_queued_leaves_the_tracker() {
 
     scheduler
         .state
+        .memory
+        .db
         .startable_set
         .record(&[gradient_db::status::TransitionChange {
             derivation,
@@ -1309,6 +1311,8 @@ async fn admission_reads_only_the_shared_builds_that_moved() {
 
     scheduler
         .state
+        .memory
+        .db
         .startable_set
         .record(&[gradient_db::status::TransitionChange {
             derivation,
@@ -2011,12 +2015,12 @@ async fn a_ready_cluster_on_idle_workers_is_assigned_then_started() {
 
     let j1 = assigned(&drain(&mut w1)).expect("w1 assigned");
     let j2 = assigned(&drain(&mut w2)).expect("w2 assigned");
-    let first = scheduler.take_prepared(&j1).expect("prepared");
+    let first = scheduler.take_prepared(&j1).await.expect("prepared");
     assert_eq!(
         first.membership.hold_secs,
         30 + crate::cluster::CLUSTER_HOLD_MARGIN_SECS
     );
-    assert!(scheduler.take_prepared(&j2).is_some());
+    assert!(scheduler.take_prepared(&j2).await.is_some());
 
     scheduler.cluster_member_accepted(&j1).await;
     assert!(
@@ -2144,6 +2148,7 @@ async fn a_signal_reaches_the_other_members_of_a_started_attempt() {
     let j2 = assigned(&drain(&mut w2)).expect("w2");
     let attempt = scheduler
         .take_prepared(&j1)
+        .await
         .expect("prepared")
         .membership
         .attempt;
@@ -2162,7 +2167,7 @@ async fn a_signal_reaches_the_other_members_of_a_started_attempt() {
     );
 }
 
-fn open_attempt(scheduler: &Scheduler, attempt: ClusterAttemptId, keys: &[&str]) {
+async fn open_attempt(scheduler: &Scheduler, attempt: ClusterAttemptId, keys: &[&str]) {
     let cluster = ClusterJobId::now_v7();
     let members = keys
         .iter()
@@ -2177,35 +2182,38 @@ fn open_attempt(scheduler: &Scheduler, attempt: ClusterAttemptId, keys: &[&str])
             settled: false,
         })
         .collect();
-    scheduler.attempts.lock().open(
-        attempt,
-        crate::cluster::AttemptState {
-            cluster,
-            parked: crate::cluster::PendingCluster {
-                id: cluster,
-                same_zone: false,
-                queued_at: gradient_types::now(),
-                expected: 0,
-                members: Vec::new(),
-                not_before: None,
+    scheduler
+        .attempts
+        .open(
+            attempt,
+            crate::cluster::AttemptState {
+                cluster,
+                parked: crate::cluster::PendingCluster {
+                    id: cluster,
+                    same_zone: false,
+                    queued_at: gradient_types::now(),
+                    expected: 0,
+                    members: Vec::new(),
+                    not_before: None,
+                },
+                members,
+                roster: Vec::new(),
+                deadline: std::time::Instant::now(),
+                started: true,
+                all_accepted: false,
+                verdict: None,
+                resolving: false,
+                resolution: None,
+                resolved_at: None,
             },
-            members,
-            roster: Vec::new(),
-            deadline: std::time::Instant::now(),
-            started: true,
-            all_accepted: false,
-            verdict: None,
-            resolving: false,
-            resolution: None,
-            resolved_at: None,
-        },
-    );
+        )
+        .await;
 }
 
 #[tokio::test]
 async fn an_attempt_member_counts_as_tracked() {
     let scheduler = test_scheduler().await;
-    open_attempt(&scheduler, ClusterAttemptId::now_v7(), &["eval:a"]);
+    open_attempt(&scheduler, ClusterAttemptId::now_v7(), &["eval:a"]).await;
 
     let untracked = scheduler
         .untracked(vec!["eval:a".into(), "eval:b".into()])
@@ -2399,7 +2407,7 @@ async fn an_already_built_import_answers_at_once() {
         import_result(&mut signals).await,
         import_answer(gradient_wire::types::ImportOutcome::Completed)
     );
-    assert!(!scheduler.has_import_waits());
+    assert!(!scheduler.has_import_waits().await);
 }
 
 #[tokio::test]
@@ -2425,7 +2433,7 @@ async fn an_unknown_import_answers_unknown() {
             drv_path: IMPORTED.into()
         })
     );
-    assert!(!scheduler.has_import_waits());
+    assert!(!scheduler.has_import_waits().await);
 }
 
 #[tokio::test]
@@ -2457,7 +2465,10 @@ async fn a_waiting_import_answers_with_its_build_once_the_build_failed() {
         )
         .await
         .unwrap();
-    assert!(scheduler.has_import_waits(), "the import still builds");
+    assert!(
+        scheduler.has_import_waits().await,
+        "the import still builds"
+    );
 
     scheduler.settle_import_waits().await.unwrap();
 
@@ -2469,7 +2480,7 @@ async fn a_waiting_import_answers_with_its_build_once_the_build_failed() {
             status: "FailedPermanent".into(),
         })
     );
-    assert!(!scheduler.has_import_waits());
+    assert!(!scheduler.has_import_waits().await);
 }
 
 async fn request_the_import(scheduler: &Scheduler) {
@@ -2506,7 +2517,7 @@ async fn an_import_aborted_in_an_earlier_evaluation_is_queued_again_and_waits() 
     request_the_import(&scheduler).await;
 
     assert!(
-        scheduler.has_import_waits(),
+        scheduler.has_import_waits().await,
         "the requeued import builds again instead of failing at once"
     );
     assert!(
@@ -2536,7 +2547,7 @@ async fn a_reproducible_import_failure_still_answers_failed() {
             status: "FailedPermanent".into(),
         })
     );
-    assert!(!scheduler.has_import_waits());
+    assert!(!scheduler.has_import_waits().await);
 }
 
 #[tokio::test]
@@ -2559,5 +2570,5 @@ async fn an_import_without_an_entry_point_answers_failed_instead_of_waiting() {
             status: "no entry point recorded for the import".into(),
         })
     );
-    assert!(!scheduler.has_import_waits());
+    assert!(!scheduler.has_import_waits().await);
 }

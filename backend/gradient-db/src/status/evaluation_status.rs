@@ -175,7 +175,7 @@ async fn report_evaluation_status(
         },
     )
     .await?;
-    ctx.delivery_wake.notify_one();
+    ctx.wake.delivery.notify_one();
 
     record_phase_event(
         &ctx.worker_db,

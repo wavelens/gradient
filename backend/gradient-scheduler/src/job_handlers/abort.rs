@@ -179,7 +179,10 @@ impl Scheduler {
             warn!(error = %e, "failed to close the dispatch rows of reaped aborts");
         }
 
-        for job_id in reaped.iter().filter(|j| self.attempt_of(j).is_some()) {
+        for job_id in &reaped {
+            if self.attempt_of(job_id).await.is_none() {
+                continue;
+            }
             let report = crate::cluster::MemberReport::Aborted { job: None };
             if let Err(e) = self.on_cluster_member_closed(job_id, report).await {
                 warn!(error = %e, %job_id, "settling a reaped cluster member failed");
@@ -195,7 +198,7 @@ impl Scheduler {
         evaluation_id: EvaluationId,
         aborted_shared_builds: Vec<DerivationBuildId>,
     ) -> Vec<(String, String)> {
-        self.drop_import_waits(evaluation_id);
+        self.drop_import_waits(evaluation_id).await;
         self.call(|reply| SchedulerMsg::AbortEvaluation {
             evaluation_id,
             aborted_shared_builds,

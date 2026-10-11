@@ -209,7 +209,7 @@ pub async fn post_basic_register(
 
     if let Err(e) = gradient_state::apply_pending_project_memberships(
         &state.web_db,
-        &state.pending_project_memberships,
+        &state.memory.pending_project_memberships,
         &user.username,
         user.id,
     )

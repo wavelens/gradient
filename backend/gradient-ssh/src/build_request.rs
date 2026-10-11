@@ -202,7 +202,7 @@ async fn evaluation_for(session: &Session, drv_paths: &[String]) -> anyhow::Resu
     Ok(Target {
         task: task.id,
         evaluation,
-        hold: state.held_evaluations.hold(evaluation),
+        hold: state.memory.db.held_evaluations.hold(evaluation).await,
     })
 }
 
@@ -507,9 +507,25 @@ mod tests {
             .expect("target");
 
         assert_eq!(target.evaluation, running.id);
-        assert!(session.state.held_evaluations.holds(running.id));
+        assert!(
+            session
+                .state
+                .memory
+                .db
+                .held_evaluations
+                .holds(running.id)
+                .await
+        );
         drop(target);
-        assert!(!session.state.held_evaluations.holds(running.id));
+        assert!(
+            !session
+                .state
+                .memory
+                .db
+                .held_evaluations
+                .holds(running.id)
+                .await
+        );
     }
 
     #[tokio::test]
@@ -529,7 +545,15 @@ mod tests {
             .expect("target");
 
         assert_eq!(target.evaluation, created.id);
-        assert!(session.state.held_evaluations.holds(created.id));
+        assert!(
+            session
+                .state
+                .memory
+                .db
+                .held_evaluations
+                .holds(created.id)
+                .await
+        );
     }
 
     #[test]

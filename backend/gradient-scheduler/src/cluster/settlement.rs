@@ -206,12 +206,13 @@ mod tests {
     use gradient_types::ids::{ClusterJobId, ProjectId};
     use std::time::Instant;
 
-    fn book_with<const N: usize>(
+    async fn book_with<const N: usize>(
         attempt: ClusterAttemptId,
+        started: bool,
         members: [AttemptMember; N],
     ) -> AttemptBook {
         let cluster = ClusterJobId::now_v7();
-        let mut book = AttemptBook::default();
+        let book = AttemptBook::default();
         book.open(
             attempt,
             AttemptState {
@@ -227,14 +228,15 @@ mod tests {
                 members: members.into(),
                 roster: Vec::new(),
                 deadline: Instant::now(),
-                started: true,
+                started,
                 all_accepted: false,
                 verdict: None,
                 resolving: false,
                 resolution: None,
                 resolved_at: None,
             },
-        );
+        )
+        .await;
         book
     }
 
@@ -371,63 +373,72 @@ mod tests {
         assert_eq!(verdict(&members), Some(Fate::Abort));
     }
 
-    #[test]
-    fn a_report_racing_the_resolution_is_disposed_late() {
+    #[tokio::test]
+    async fn a_report_racing_the_resolution_is_disposed_late() {
         let attempt = ClusterAttemptId::now_v7();
-        let mut book = book_with(
+        let book = book_with(
             attempt,
+            true,
             [member("a", false, None), member("b", false, None)],
-        );
+        )
+        .await;
 
         assert!(matches!(
-            book.record("a", failed(BuildFailureKind::Permanent)),
+            book.record("a", failed(BuildFailureKind::Permanent)).await,
             Recorded::Decided(_, Fate::Retry)
         ));
         let resolution = Resolution {
             fate: Fate::Retry,
             requeued: true,
         };
-        let (reports, survivors) = book.drain(attempt, resolution);
+        let (reports, survivors) = book.drain(attempt, resolution).await;
         assert_eq!(reports.len(), 1);
         assert_eq!(survivors.len(), 1);
 
-        assert!(matches!(book.record("b", completed()), Recorded::Late(r, _) if r == resolution));
-        assert_eq!(book.attempt_of("b"), None);
+        assert!(
+            matches!(book.record("b", completed()).await, Recorded::Late(r, _) if r == resolution)
+        );
+        assert_eq!(book.attempt_of("b").await, None);
     }
 
-    #[test]
-    fn the_entry_outlives_an_unreleased_survivor() {
+    #[tokio::test]
+    async fn the_entry_outlives_an_unreleased_survivor() {
         let attempt = ClusterAttemptId::now_v7();
-        let mut book = book_with(
+        let book = book_with(
             attempt,
+            true,
             [member("a", false, None), member("b", false, None)],
-        );
-        book.record("a", failed(BuildFailureKind::Permanent));
-        let (_, survivors) = book.drain(
-            attempt,
-            Resolution {
-                fate: Fate::Retry,
-                requeued: true,
-            },
-        );
+        )
+        .await;
+        book.record("a", failed(BuildFailureKind::Permanent)).await;
+        let (_, survivors) = book
+            .drain(
+                attempt,
+                Resolution {
+                    fate: Fate::Retry,
+                    requeued: true,
+                },
+            )
+            .await;
 
         assert_eq!(survivors[0].job_id, "b");
-        assert_eq!(book.attempt_of("b"), Some(attempt));
-        book.settle(attempt, "b");
-        assert_eq!(book.attempt_of("b"), None);
+        assert_eq!(book.attempt_of("b").await, Some(attempt));
+        book.settle(attempt, "b").await;
+        assert_eq!(book.attempt_of("b").await, None);
     }
 
-    #[test]
-    fn an_unstarted_attempt_hands_a_failure_to_the_prepare_path() {
+    #[tokio::test]
+    async fn an_unstarted_attempt_hands_a_failure_to_the_prepare_path() {
         let attempt = ClusterAttemptId::now_v7();
-        let mut book = book_with(
+        let book = book_with(
             attempt,
+            false,
             [member("a", false, None), member("b", false, None)],
-        );
-        book.get_mut(attempt).expect("open").started = false;
+        )
+        .await;
 
         assert!(matches!(
-            book.record("a", MemberReport::Lost { job: job() }),
+            book.record("a", MemberReport::Lost { job: job() }).await,
             Recorded::Preparing { worker, .. } if worker == "w-a"
         ));
     }

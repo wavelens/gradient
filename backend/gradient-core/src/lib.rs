@@ -10,12 +10,12 @@ pub mod upstream_source;
 
 pub use gradient_graph::Graph;
 pub use state_root::{
-    AppState, BUILD_PROGRESS_TTL, EVAL_PROGRESS_TTL, LAST_USED_STAMP_INTERVAL, ServerState,
-    build_progress, eval_progress, last_used_stamps,
+    AppState, BUILD_PROGRESS_TTL, EVAL_PROGRESS_TTL, InstanceMemory, LAST_USED_STAMP_INTERVAL,
+    ServerState, build_progress, eval_progress, last_used_stamps,
 };
 
 use gradient_db::{
-    CacheDb, WebDb, WorkerDb,
+    CacheDb, DbMemory, WebDb, WorkerDb,
     connection::{connect_cache_db, connect_db, connect_web_db},
 };
 use gradient_notify::EmailService;
@@ -89,7 +89,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     )
     .await
     .map_err(|e| InitError::StateLoad(e.to_string()))?;
-    let pending_project_memberships = Arc::new(state_result.pending);
+    let pending_project_memberships = state_result.pending;
 
     if let Some(max) = cli.eval.keep_evaluations_max() {
         let over_limit = ETask::find()
@@ -211,28 +211,30 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         log_storage,
         email,
         nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http,
-        upstream_query: Arc::new(tokio::sync::Semaphore::new(upstream_query_concurrency)),
-        nar_downloads: Arc::new(tokio::sync::Semaphore::new(nar_downloads)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(upload_limits),
         git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
         shutdown: Shutdown::new(),
-        last_used_stamps: last_used_stamps(),
-        build_progress: build_progress(),
-        eval_progress: eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
         jwt_secret,
         started_at: chrono::Utc::now(),
-        pending_project_memberships,
         events: gradient_types::EventBus::default(),
-        delivery_wake: Arc::new(tokio::sync::Notify::new()),
-        eval_assign_wake: Arc::new(tokio::sync::Notify::new()),
+        wake: Default::default(),
         graph: Graph::new(),
-        probe_requests: gradient_db::ProbeRequests::channel(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
+        memory: InstanceMemory {
+            db: DbMemory {
+                probe_requests: gradient_db::ProbeRequests::channel(),
+                ..Default::default()
+            },
+            last_used_stamps: last_used_stamps(),
+            cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
+            build_progress: build_progress(),
+            eval_progress: eval_progress(),
+            github_app_install_url: Default::default(),
+            manifest_state: Default::default(),
+            pending_credentials: Default::default(),
+            pending_project_memberships,
+            upstream_query: Arc::new(tokio::sync::Semaphore::new(upstream_query_concurrency)),
+            nar_downloads: Arc::new(tokio::sync::Semaphore::new(nar_downloads)),
+            upload_admission: gradient_storage::admission::UploadAdmission::new(upload_limits),
+        },
     }))
 }

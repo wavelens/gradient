@@ -136,7 +136,7 @@ pub async fn get_evaluation(
             .await?
             .contains(&evaluation.id);
     let progress = live_progress(
-        &state.eval_progress,
+        &state.memory.eval_progress,
         evaluation.id,
         evaluation.status,
         Instant::now(),

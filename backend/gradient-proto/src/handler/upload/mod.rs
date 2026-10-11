@@ -444,7 +444,7 @@ mod tests {
                 target: GrantTarget::Skip
             }
         ));
-        assert_eq!(state.upload_admission.in_flight(), 0);
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
     }
 
     #[tokio::test]
@@ -479,7 +479,7 @@ mod tests {
                 outcome: UploadOutcome::Rejected { .. }
             }
         ));
-        assert_eq!(state.upload_admission.in_flight(), 0);
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
     }
 
     #[tokio::test]
@@ -498,7 +498,7 @@ mod tests {
                 target: GrantTarget::Passthrough { resume_offset: 0 }
             }
         ));
-        assert_eq!(state.upload_admission.in_flight(), 1);
+        assert_eq!(state.memory.upload_admission.in_flight(), 1);
     }
 
     #[tokio::test]
@@ -540,7 +540,7 @@ mod tests {
                 outcome: UploadOutcome::Rejected { .. }
             }
         ));
-        assert_eq!(state.upload_admission.in_flight(), 0);
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
     }
 
     #[tokio::test]
@@ -565,7 +565,7 @@ mod tests {
                 outcome: UploadOutcome::Retry { .. }
             }
         ));
-        assert_eq!(state.upload_admission.in_flight(), 0);
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
     }
 
     /// The worker's writer is draining the control lane first, and `UploadFinished` can overtake
@@ -634,7 +634,7 @@ mod tests {
             .await;
         ctx.on_upload_request(JOB.into(), 2, nar('g'), 8, uploads)
             .await;
-        assert_eq!(state.upload_admission.in_flight(), 2);
+        assert_eq!(state.memory.upload_admission.in_flight(), 2);
 
         let failed = ClientMessage::JobFailed {
             job_id: JOB.into(),
@@ -648,7 +648,7 @@ mod tests {
         };
         ctx.handle(failed, uploads).await;
 
-        assert_eq!(state.upload_admission.in_flight(), 0);
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
         assert!(uploads.table.is_empty());
     }
 }

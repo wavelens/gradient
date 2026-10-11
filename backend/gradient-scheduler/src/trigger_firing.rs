@@ -120,7 +120,7 @@ pub(crate) async fn fire_once(scheduler: &Scheduler) -> anyhow::Result<()> {
     }
 
     enqueue_trigger_fires(&state.worker_db, &due).await?;
-    state.delivery_wake.notify_one();
+    state.wake.delivery.notify_one();
     Ok(())
 }
 

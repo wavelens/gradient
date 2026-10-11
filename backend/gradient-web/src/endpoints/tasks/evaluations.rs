@@ -179,7 +179,7 @@ pub(super) async fn evaluations_to_summaries(
             finished_at: evaluation.finished_at,
             updated_at: evaluation.updated_at,
             progress: live_progress(
-                &state.eval_progress,
+                &state.memory.eval_progress,
                 evaluation.id,
                 evaluation.status,
                 Instant::now(),

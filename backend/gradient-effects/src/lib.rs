@@ -104,7 +104,7 @@ async fn spawn(
         loop {
             tokio::select! {
                 () = child.cancel.cancelled() => break,
-                () = state.delivery_wake.notified() => {
+                () = state.wake.delivery.notified() => {
                     if waker.cast(EffectsMsg::Wake).is_err() {
                         warn!("the effects actor is gone; stopping the delivery waker");
                         break;

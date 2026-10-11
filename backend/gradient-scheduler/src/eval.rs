@@ -111,7 +111,7 @@ pub async fn probe_outputs(
     let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
     let batch = gradient_core::upstream::probe_batch(
         endpoints,
-        Arc::clone(&state.upstream_query),
+        Arc::clone(&state.memory.upstream_query),
         to_probe,
     )
     .await;

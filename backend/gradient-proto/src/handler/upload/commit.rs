@@ -256,7 +256,7 @@ mod tests {
         gradient_storage::admission::AdmissionSession,
         gradient_storage::admission::UploadPermit,
     ) {
-        let (session, mut rx) = state.upload_admission.open_session("test");
+        let (session, mut rx) = state.memory.upload_admission.open_session("test");
         session.request(1, ObjectKey::Nar("c".repeat(32)), 3, false);
         let Some(Admitted::Granted { permit, .. }) = rx.recv().await else {
             panic!("granted")
@@ -310,7 +310,7 @@ mod tests {
                 outcome: UploadOutcome::Rejected { .. }
             }
         ));
-        assert_eq!(state.upload_admission.in_flight(), 0);
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
     }
 
     #[tokio::test]
@@ -443,7 +443,7 @@ mod tests {
         tokio::pin!(commit);
 
         let freed = async {
-            while state.upload_admission.in_flight() != 0 {
+            while state.memory.upload_admission.in_flight() != 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
         };
@@ -456,7 +456,7 @@ mod tests {
         .await
         .expect("the budget is back once the bytes are stored");
 
-        let (other, mut other_rx) = state.upload_admission.open_session("other");
+        let (other, mut other_rx) = state.memory.upload_admission.open_session("other");
         other.request(2, ObjectKey::Nar("c".repeat(32)), 3, false);
         tokio::select! {
             () = &mut commit => panic!("the graph has not recorded the upload yet"),

@@ -5,9 +5,11 @@
  */
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
+use gradient_util::sync::Mutex;
 use gradient_wire::types::ImportOutcome;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,11 +49,11 @@ impl ImportAnswer {
 }
 
 #[derive(Debug, Default)]
-pub struct ImportWaits {
+struct Waits {
     waits: Vec<ImportWait>,
 }
 
-impl ImportWaits {
+impl Waits {
     pub fn is_empty(&self) -> bool {
         self.waits.is_empty()
     }
@@ -141,6 +143,69 @@ impl ImportWaits {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct ImportWaits(Arc<Mutex<Waits>>);
+
+impl ImportWaits {
+    pub async fn is_empty(&self) -> bool {
+        self.0.lock().is_empty()
+    }
+
+    pub async fn register_and_settle(
+        &self,
+        wait: ImportWait,
+        statuses: &HashMap<DerivationBuildId, BuildStatus>,
+    ) -> Vec<ImportAnswer> {
+        let mut waits = self.0.lock();
+        waits.register(wait);
+        waits.settle(statuses)
+    }
+
+    pub async fn waited_builds(&self) -> Vec<DerivationBuildId> {
+        self.0.lock().waited_builds()
+    }
+
+    pub async fn waited_builds_and_evaluations(
+        &self,
+    ) -> Option<(Vec<DerivationBuildId>, Vec<EvaluationId>)> {
+        let waits = self.0.lock();
+        if waits.is_empty() {
+            return None;
+        }
+
+        Some((waits.waited_builds(), waits.waiting_evaluations()))
+    }
+
+    pub async fn overdue_builds(&self, before: chrono::NaiveDateTime) -> Vec<DerivationBuildId> {
+        self.0.lock().overdue_builds(before)
+    }
+
+    pub async fn drop_finished_and_settle(
+        &self,
+        finished: &HashSet<EvaluationId>,
+        statuses: &HashMap<DerivationBuildId, BuildStatus>,
+    ) -> Vec<ImportAnswer> {
+        let mut waits = self.0.lock();
+        waits.drop_evaluations(finished);
+        waits.settle(statuses)
+    }
+
+    pub async fn answer_unbuildable(
+        &self,
+        unbuildable: &HashMap<DerivationBuildId, String>,
+        waiting_for_workers: &HashSet<EvaluationId>,
+        before: chrono::NaiveDateTime,
+    ) -> Vec<ImportAnswer> {
+        self.0
+            .lock()
+            .answer_unbuildable(unbuildable, waiting_for_workers, before)
+    }
+
+    pub async fn drop_evaluations(&self, evaluations: &HashSet<EvaluationId>) -> usize {
+        self.0.lock().drop_evaluations(evaluations)
+    }
+}
+
 fn outcome(
     wait: &ImportWait,
     statuses: &HashMap<DerivationBuildId, BuildStatus>,
@@ -190,7 +255,7 @@ mod tests {
     #[test]
     fn the_last_terminal_build_settles_the_request_with_the_first_failure() {
         let (a, b, c) = (imported("a.drv"), imported("b.drv"), imported("c.drv"));
-        let mut waits = ImportWaits::default();
+        let mut waits = Waits::default();
         waits.register(wait(
             EvaluationId::now_v7(),
             vec![a.clone(), b.clone(), c.clone()],
@@ -221,7 +286,7 @@ mod tests {
     #[test]
     fn a_substituted_import_completes_and_a_retried_import_keeps_waiting() {
         let (a, b) = (imported("a.drv"), imported("b.drv"));
-        let mut waits = ImportWaits::default();
+        let mut waits = Waits::default();
         waits.register(wait(EvaluationId::now_v7(), vec![a.clone(), b.clone()]));
 
         let mut statuses = HashMap::from([
@@ -249,7 +314,7 @@ mod tests {
     fn an_aborted_evaluation_drops_its_waits() {
         let (aborted, live) = (EvaluationId::now_v7(), EvaluationId::now_v7());
         let (a, b) = (imported("a.drv"), imported("b.drv"));
-        let mut waits = ImportWaits::default();
+        let mut waits = Waits::default();
         waits.register(wait(aborted, vec![a.clone()]));
         waits.register(wait(live, vec![b.clone()]));
 
@@ -267,7 +332,7 @@ mod tests {
     fn an_overdue_import_no_worker_can_build_fails_with_the_reason() {
         let (a, b) = (imported("a.drv"), imported("b.drv"));
         let (patient, impatient) = (EvaluationId::now_v7(), EvaluationId::now_v7());
-        let mut waits = ImportWaits::default();
+        let mut waits = Waits::default();
         let fresh = wait(impatient, vec![b.clone()]);
         let old = |evaluation| ImportWait {
             since: fresh.since - chrono::Duration::minutes(10),

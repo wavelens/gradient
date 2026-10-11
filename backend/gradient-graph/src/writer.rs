@@ -188,7 +188,7 @@ impl Actor for GraphWriter {
 }
 
 fn ask_probe(st: &GraphState, result: anyhow::Result<Vec<DerivationId>>) -> anyhow::Result<()> {
-    result.map(|gained| st.ctx.probe_requests.send(gained))
+    result.map(|gained| st.ctx.memory.probe_requests.send(gained))
 }
 
 async fn queue_flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
@@ -427,8 +427,8 @@ where
         .await
         .context("statement timeout")?;
     let scoped = ctx.in_transaction(Arc::clone(&tx));
-    let startable_set = scoped.startable_set.clone();
-    let probe_requests = scoped.probe_requests.clone();
+    let startable_set = scoped.memory.startable_set.clone();
+    let probe_requests = scoped.memory.probe_requests.clone();
     let outcome = tokio::time::timeout(budget, work(scoped)).await;
     let tx =
         Arc::try_unwrap(tx).map_err(|_| anyhow!("a transaction handle escaped its message"))?;
@@ -440,7 +440,7 @@ where
             }
 
             tx.commit().await.context("commit")?;
-            ctx.delivery_wake.notify_one();
+            ctx.wake.delivery.notify_one();
             startable_set.publish();
             probe_requests.publish();
             Ok(value)

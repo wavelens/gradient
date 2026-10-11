@@ -351,6 +351,7 @@ async fn github_app_install_url(state: &ServerState) -> Option<String> {
         gradient_git_host::github_app::get_install_url(&state.http, app.app_id, &pem).await
     };
     state
+        .memory
         .github_app_install_url
         .get_or_try_init(|| async {
             tokio::time::timeout(GITHUB_APP_LOOKUP_TIMEOUT, lookup)

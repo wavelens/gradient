@@ -10,6 +10,7 @@ pub mod build;
 pub mod buildability;
 pub mod cluster;
 pub mod connection_failures;
+pub mod draining;
 pub mod eval;
 pub mod history;
 pub mod import_waits;
@@ -30,7 +31,7 @@ mod unbuildable;
 mod worker_lifecycle;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::AtomicU64;
 
 use gradient_core::ServerState;
 use gradient_types::*;
@@ -60,14 +61,13 @@ pub struct Scheduler {
     pub(crate) policy: Arc<dyn gradient_pool::score::ScoringPolicy>,
     pub(crate) instance: Arc<arc_swap::ArcSwap<gradient_pool::score::InstanceContext>>,
     pub(crate) eval_history: Arc<arc_swap::ArcSwap<crate::instance::EvalHistory>>,
-    pub draining: Arc<AtomicBool>,
+    pub draining: draining::Draining,
     pub(crate) assessments: Arc<std::sync::Mutex<assessment_memo::AssessmentMemo>>,
     pub(crate) cluster_wake: Arc<tokio::sync::Notify>,
-    pub(crate) prepared:
-        Arc<gradient_util::sync::Mutex<std::collections::HashMap<String, cluster::PreparedMember>>>,
-    pub(crate) attempts: Arc<gradient_util::sync::Mutex<cluster::AttemptBook>>,
+    pub(crate) prepared: cluster::PreparedMembers,
+    pub(crate) attempts: cluster::AttemptBook,
     pub connection_failures: Arc<connection_failures::ConnectionFailures>,
-    pub(crate) import_waits: Arc<gradient_util::sync::Mutex<import_waits::ImportWaits>>,
+    pub(crate) import_waits: import_waits::ImportWaits,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -91,13 +91,13 @@ impl Scheduler {
             eval_history: Arc::new(arc_swap::ArcSwap::from_pointee(
                 crate::instance::EvalHistory::default(),
             )),
-            draining: Arc::new(AtomicBool::new(false)),
+            draining: draining::Draining::default(),
             assessments: Arc::default(),
             cluster_wake: Arc::new(tokio::sync::Notify::new()),
-            prepared: Arc::default(),
-            attempts: Arc::default(),
+            prepared: cluster::PreparedMembers::default(),
+            attempts: cluster::AttemptBook::default(),
             connection_failures: Arc::default(),
-            import_waits: Arc::default(),
+            import_waits: import_waits::ImportWaits::default(),
         }
     }
 
@@ -181,7 +181,7 @@ impl Scheduler {
 
     pub fn start(self: &Arc<Self>) {
         let scheduler = Arc::downgrade(self);
-        self.state.startable_set.on_move(move || {
+        self.state.memory.db.startable_set.on_move(move || {
             if let Some(scheduler) = scheduler.upgrade() {
                 scheduler.kick_assigner();
             }
@@ -261,10 +261,14 @@ impl Scheduler {
             .await
             .unwrap_or_default();
 
-        untracked
-            .into_iter()
-            .filter(|key| self.attempt_of(key).is_none())
-            .collect()
+        let mut unowned = Vec::with_capacity(untracked.len());
+        for key in untracked {
+            if self.attempt_of(&key).await.is_none() {
+                unowned.push(key);
+            }
+        }
+
+        unowned
     }
 
     pub(crate) async fn lasting_ram_shortages(&self) -> Vec<gradient_graph::RamShortage> {

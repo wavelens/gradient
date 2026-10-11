@@ -303,7 +303,7 @@ impl Actor for SessionActor {
                 }
             }
             SessionMsg::Signal(SessionSignal::ClusterAssign { job_id }) => {
-                let Some(prepared) = st.scheduler.take_prepared(&job_id) else {
+                let Some(prepared) = st.scheduler.take_prepared(&job_id).await else {
                     return Ok(());
                 };
                 let (mut ctx, _) = split_uploads(st);
@@ -438,7 +438,7 @@ fn open_uploads(
     peer_id: &str,
     myself: &ActorRef<SessionMsg>,
 ) -> anyhow::Result<UploadSession> {
-    let (admission, mut admitted) = state.upload_admission.open_session(peer_id);
+    let (admission, mut admitted) = state.memory.upload_admission.open_session(peer_id);
     let uploads = UploadSession {
         admission,
         table: UploadTable::default(),

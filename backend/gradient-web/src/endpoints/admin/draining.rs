@@ -6,7 +6,6 @@
 
 use anyhow::Context;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use axum::{Extension, Json, extract::State};
 use gradient_core::ServerState;
@@ -33,7 +32,7 @@ pub async fn set_draining(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(req): Json<SetDrainingRequest>,
 ) -> WebResult<Json<BaseResponse<DrainingResponse>>> {
-    scheduler.draining.store(req.enabled, Ordering::Relaxed);
+    scheduler.draining.set(req.enabled).await;
 
     let evaluations = if req.enabled {
         gradient_db::evaluations::draining::park_active_evals(&state.worker_db).await

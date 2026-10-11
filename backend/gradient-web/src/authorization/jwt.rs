@@ -161,6 +161,7 @@ pub async fn decode_jwt(
     }
 
     if state
+        .memory
         .last_used_stamps
         .due(session.id.into_inner(), Instant::now())
     {
@@ -208,6 +209,7 @@ async fn decode_api_key(
     let user_id = api_key.owned_by;
 
     if state
+        .memory
         .last_used_stamps
         .due(api_key.id.into_inner(), Instant::now())
     {

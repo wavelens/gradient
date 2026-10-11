@@ -7,6 +7,7 @@
 mod credentials;
 mod entities;
 mod lookups;
+mod pending;
 mod reconciliation;
 
 use crate::config::StateConfiguration;
@@ -16,7 +17,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
     IntoActiveModel, QueryFilter, Set,
 };
-use std::collections::HashMap;
 use std::path::Path;
 
 pub(crate) use credentials::{
@@ -26,15 +26,9 @@ pub(crate) use lookups::{
     inbound_integrations_by_name, lookup_id, outbound_integrations_by_name, parse_integration_kind,
 };
 
+pub use pending::{PendingProjectMembership, PendingProjectMemberships};
+
 pub(crate) type DynError = Box<dyn std::error::Error>;
-
-#[derive(Debug, Clone)]
-pub struct PendingProjectMembership {
-    pub project: ProjectId,
-    pub role: RoleId,
-}
-
-pub type PendingProjectMemberships = HashMap<String, Vec<PendingProjectMembership>>;
 
 pub struct StateApplyResult {
     pub pending: PendingProjectMemberships,
@@ -57,14 +51,14 @@ pub(super) async fn apply_state_to_database(
         email_enabled,
     };
 
-    let mut pending: PendingProjectMemberships = HashMap::new();
+    let pending = PendingProjectMemberships::default();
 
     app.apply_users(&config.users).await?;
     // Teams must exist before projects, for their new-project grants (the local worker's `server`).
     let team_ids = app.apply_teams(&config.teams).await?;
     app.apply_projects_without_members(&config.projects).await?;
     app.apply_roles(&config.roles).await?;
-    app.apply_project_members(&config.projects, &mut pending)
+    app.apply_project_members(&config.projects, &pending)
         .await?;
     // Integrations must land before tasks. Task triggers and `git_host_status_report` actions are
     // resolving integrations by name at apply time (#332).
@@ -94,11 +88,8 @@ pub async fn apply_pending_project_memberships<C: ConnectionTrait>(
     username: &str,
     user_id: UserId,
 ) -> Result<usize, sea_orm::DbErr> {
-    let Some(entries) = pending.get(username) else {
-        return Ok(0);
-    };
     let mut applied = 0usize;
-    for entry in entries {
+    for entry in pending.of_user(username).await {
         let existing = project_user::Entity::find()
             .filter(project_user::Column::Project.eq(entry.project))
             .filter(project_user::Column::User.eq(user_id))

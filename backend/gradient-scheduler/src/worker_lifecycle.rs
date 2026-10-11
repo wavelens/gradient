@@ -285,7 +285,7 @@ impl Scheduler {
 
     pub async fn refresh_waiting_state(&self) -> Result<()> {
         let workers = self.board_workers().await;
-        let draining = self.draining.load(std::sync::atomic::Ordering::Relaxed);
+        let draining = self.draining.is_draining().await;
         let unbuildables =
             build::refresh_waiting_state(&self.state, &self.assessments, &workers, draining)
                 .await?;

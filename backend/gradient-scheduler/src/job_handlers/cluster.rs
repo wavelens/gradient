@@ -88,19 +88,19 @@ impl Scheduler {
     }
 
     pub async fn plan_clusters(self: &Arc<Self>) -> anyhow::Result<()> {
-        let overdue = self.attempts.lock().overdue(Instant::now());
+        let overdue = self.attempts.overdue(Instant::now()).await;
         for attempt in overdue {
             self.fail_prepare(attempt).await;
         }
-        let pending = self.attempts.lock().pending_verdicts();
+        let pending = self.attempts.pending_verdicts().await;
         for (attempt, fate) in pending {
             if let Err(e) = self.resolve_attempt(attempt, fate).await {
                 warn!(error = %e, %attempt, "resolving a cluster attempt failed; retrying");
             }
         }
         self.attempts
-            .lock()
-            .expire_resolved(Instant::now(), RESOLVED_ATTEMPT_TTL);
+            .expire_resolved(Instant::now(), RESOLVED_ATTEMPT_TTL)
+            .await;
         self.abort_dead_clusters().await?;
 
         let mut snapshot = self.cluster_snapshot().await;
@@ -165,7 +165,7 @@ impl Scheduler {
         let cluster_id = cluster.id;
         // The book is owning the attempt from here on. A pass dropped mid-commit is leaving the
         // attempt to its deadline instead of stranding the cluster.
-        self.open_attempt(attempt, cluster, &seats);
+        self.open_attempt(attempt, cluster, &seats).await;
 
         let now = gradient_types::now();
         let claim = ClusterClaim {
@@ -195,7 +195,7 @@ impl Scheduler {
         true
     }
 
-    fn open_attempt(
+    async fn open_attempt(
         &self,
         attempt: ClusterAttemptId,
         cluster: PendingCluster,
@@ -230,26 +230,28 @@ impl Scheduler {
                 settled: false,
             })
             .collect();
-        self.attempts.lock().open(
-            attempt,
-            AttemptState {
-                cluster: cluster.id,
-                parked: cluster,
-                members,
-                roster,
-                deadline: Instant::now() + Duration::from_secs(timeout),
-                started: false,
-                all_accepted: false,
-                verdict: None,
-                resolving: false,
-                resolution: None,
-                resolved_at: None,
-            },
-        );
+        self.attempts
+            .open(
+                attempt,
+                AttemptState {
+                    cluster: cluster.id,
+                    parked: cluster,
+                    members,
+                    roster,
+                    deadline: Instant::now() + Duration::from_secs(timeout),
+                    started: false,
+                    all_accepted: false,
+                    verdict: None,
+                    resolving: false,
+                    resolution: None,
+                    resolved_at: None,
+                },
+            )
+            .await;
     }
 
     async fn hand_back(&self, attempt: ClusterAttemptId) {
-        let Some(state) = self.attempts.lock().take(attempt) else {
+        let Some(state) = self.attempts.take(attempt).await else {
             return;
         };
         let seats = state
@@ -266,7 +268,7 @@ impl Scheduler {
     }
 
     async fn back_off(&self, attempt: ClusterAttemptId) {
-        let Some(state) = self.attempts.lock().take(attempt) else {
+        let Some(state) = self.attempts.take(attempt).await else {
             return;
         };
         self.restore_parked(attempt, state).await;
@@ -326,13 +328,15 @@ impl Scheduler {
                 assignment_record: seat.record,
                 pending: seat.job,
             };
-            self.prepared.lock().insert(
-                seat.key.clone(),
-                PreparedMember {
-                    assignment,
-                    membership,
-                },
-            );
+            self.prepared
+                .insert(
+                    seat.key.clone(),
+                    PreparedMember {
+                        assignment,
+                        membership,
+                    },
+                )
+                .await;
             signals.push((
                 seat.worker,
                 SessionSignal::ClusterAssign { job_id: seat.key },
@@ -341,8 +345,8 @@ impl Scheduler {
         self.signal_workers(signals).await;
     }
 
-    pub fn take_prepared(&self, job_id: &str) -> Option<PreparedMember> {
-        self.prepared.lock().remove(job_id)
+    pub async fn take_prepared(&self, job_id: &str) -> Option<PreparedMember> {
+        self.prepared.take(job_id).await
     }
 
     pub async fn cluster_member_accepted(&self, job_id: &str) {
@@ -351,7 +355,7 @@ impl Scheduler {
             attempt,
             workers,
             roster,
-        } = self.attempts.lock().accept(job_id)
+        } = self.attempts.accept(job_id).await
         else {
             return;
         };
@@ -363,7 +367,7 @@ impl Scheduler {
         .await
         {
             Ok(true) => {
-                let Some(decided) = self.attempts.lock().mark_started(attempt) else {
+                let Some(decided) = self.attempts.mark_started(attempt).await else {
                     return;
                 };
                 let signals = workers
@@ -392,7 +396,7 @@ impl Scheduler {
     }
 
     pub async fn cluster_member_released(&self, job_id: &str) -> bool {
-        let Some(attempt) = self.attempts.lock().preparing(job_id) else {
+        let Some(attempt) = self.attempts.preparing(job_id).await else {
             return false;
         };
         if self.is_aborting(job_id).await {
@@ -404,7 +408,7 @@ impl Scheduler {
     }
 
     pub async fn cluster_member_rejected(&self, job_id: &str) -> bool {
-        let Some(attempt) = self.attempts.lock().attempt_of(job_id) else {
+        let Some(attempt) = self.attempts.attempt_of(job_id).await else {
             return false;
         };
         self.fail_prepare(attempt).await;
@@ -413,7 +417,7 @@ impl Scheduler {
     }
 
     pub async fn fail_prepare(&self, attempt: ClusterAttemptId) {
-        let Some(state) = self.attempts.lock().take(attempt) else {
+        let Some(state) = self.attempts.take(attempt).await else {
             return;
         };
         if let Err(e) = gradient_db::scheduling::cluster::fail_prepare_attempt(
@@ -429,21 +433,19 @@ impl Scheduler {
             let mut state = state;
             state.started = false;
             state.all_accepted = false;
-            self.attempts.lock().open(attempt, state);
+            self.attempts.open(attempt, state).await;
             return;
         }
 
+        let job_ids: Vec<String> = state.members.iter().map(|m| m.job_id.clone()).collect();
+        self.prepared.forget(&job_ids).await;
         let mut signals = Vec::with_capacity(state.members.len());
-        {
-            let mut prepared = self.prepared.lock();
-            for m in &state.members {
-                prepared.remove(&m.job_id);
-                let abort = SessionSignal::AbortCluster {
-                    attempt: attempt.to_string(),
-                    reason: "cluster prepare failed".into(),
-                };
-                signals.push((m.worker.clone(), abort));
-            }
+        for m in &state.members {
+            let abort = SessionSignal::AbortCluster {
+                attempt: attempt.to_string(),
+                reason: "cluster prepare failed".into(),
+            };
+            signals.push((m.worker.clone(), abort));
         }
         self.signal_workers(signals).await;
         self.restore_parked(attempt, state).await;
@@ -461,8 +463,8 @@ impl Scheduler {
         };
         let Some(route) = self
             .attempts
-            .lock()
             .route(attempt_id, from_worker, to.as_ref())
+            .await
         else {
             debug!(%from_worker, %attempt, "cluster signal dropped");
             return;

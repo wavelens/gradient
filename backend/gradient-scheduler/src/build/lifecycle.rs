@@ -179,6 +179,8 @@ pub(crate) async fn requeue_cluster_members(state: &Arc<ServerState>, jobs: &[Pe
         warn!(error = %e, "requeue of cluster member builds did not reach the graph writer");
     }
     state
+        .memory
+        .db
         .startable_set
         .enter(jobs.iter().filter_map(|j| match j {
             PendingJob::Build(b) => Some(b.derivation),

@@ -464,10 +464,7 @@ impl Pass for RamShortageSweep {
 }
 
 async fn ram_shortage_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
-    if scheduler
-        .draining
-        .load(std::sync::atomic::Ordering::Relaxed)
-    {
+    if scheduler.draining.is_draining().await {
         return Ok(());
     }
 

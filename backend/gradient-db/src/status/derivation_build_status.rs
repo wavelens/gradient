@@ -219,7 +219,7 @@ pub async fn announce_entry_point_statuses(
         )
         .await?;
     }
-    ctx.delivery_wake.notify_one();
+    ctx.wake.delivery.notify_one();
 
     Ok(())
 }
