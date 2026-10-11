@@ -253,16 +253,6 @@
     ]
   },
   {
-    "group": "gradient_ci",
-    "field": "url",
-    "flag": "gradient-ci-url",
-    "env": "GRADIENT_GRADIENT_CI_URL",
-    "type": "String",
-    "description": "Address of Gradient.CI Servers. \"Connect\" links to `<url>/connect`. New connections go\nto the host and port of this address at `/proto`, over `wss://` for `https://` and\n`ws://` for `http://`.",
-    "default": "https://servers.gradient.ci",
-    "values": []
-  },
-  {
     "group": "sentry",
     "field": "enable",
     "flag": "sentry-enable",

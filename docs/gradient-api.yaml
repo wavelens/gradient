@@ -11787,7 +11787,7 @@ components:
           description: Whether the Gradient.CI Servers offer (Connect, Enable) is shown (`gradientCi.enable`)
         gradient_ci_url:
           type: string
-          description: Address of Gradient.CI Servers (`gradientCi.url`)
+          description: Address of Gradient.CI Servers
         logo_url:
           type: string
           nullable: true

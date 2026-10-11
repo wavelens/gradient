@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use anyhow::Context;
 use std::sync::Arc;
 
 use axum::extract::State;
@@ -146,8 +145,7 @@ pub async fn post_connection(
     let target = authorize_target(&state, &user, &api_key, &body).await?;
     let token = ConnectionToken::parse(&body.token)
         .map_err(|e| GradientCiConnectionRefusal::InvalidConnectionToken(e.to_string()))?;
-    let url =
-        proto_url(&state.config.gradient_ci.url).context("gradientCi.url is not a valid URL")?;
+    let url = gradient_types::consts::GRADIENT_CI_PROTO_URL.to_owned();
     ensure_unclaimed(&state, &target, &token.worker_id).await?;
     let stored = StoredToken::new(&state.config.secrets.crypt_file, &token.secret)?;
     match target {
@@ -204,20 +202,6 @@ async fn authorize_target(
             Ok(Target::Project(project))
         }
     }
-}
-
-fn proto_url(service_url: &str) -> Option<String> {
-    let parsed = url::Url::parse(service_url).ok()?;
-    let scheme = match parsed.scheme() {
-        "https" => "wss",
-        "http" => "ws",
-        _ => return None,
-    };
-    let host = parsed.host_str()?;
-    Some(match parsed.port() {
-        Some(port) => format!("{scheme}://{host}:{port}/proto"),
-        None => format!("{scheme}://{host}/proto"),
-    })
 }
 
 async fn ensure_unclaimed(state: &ServerState, target: &Target, worker_id: &str) -> WebResult<()> {
@@ -440,19 +424,6 @@ mod tests {
             ConnectionToken::parse(&format!("gci1_{ID}_se\ncret")).err(),
             Some(TokenFormatError::Secret)
         );
-    }
-
-    #[test]
-    fn the_connection_dials_the_service_host_with_the_matching_websocket_scheme() {
-        assert_eq!(
-            proto_url("https://servers.gradient.ci").as_deref(),
-            Some("wss://servers.gradient.ci/proto")
-        );
-        assert_eq!(
-            proto_url("http://localhost:3200/").as_deref(),
-            Some("ws://localhost:3200/proto")
-        );
-        assert_eq!(proto_url("not a url"), None);
     }
 
     #[test]

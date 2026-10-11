@@ -11,6 +11,8 @@ use std::sync::LazyLock;
 use uuid::uuid;
 
 pub const PORT_RANGE: RangeInclusive<usize> = 1..=65535;
+pub const GRADIENT_CI_URL: &str = "https://servers.gradient.ci";
+pub const GRADIENT_CI_PROTO_URL: &str = "wss://servers.gradient.ci/proto";
 
 pub const NAR_CHUNK_BYTES_RANGE: RangeInclusive<u64> = 4 * 1024..=4 * 1024 * 1024;
 

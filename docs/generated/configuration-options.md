@@ -106,7 +106,6 @@
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `gradientCi.enable` | bool | `true` | `GRADIENT_GRADIENT_CI_ENABLE` | Whether to enable the Gradient.CI Servers offer on the workers pages. |
-| `gradientCi.url` | string | `"https://servers.gradient.ci"` | `GRADIENT_GRADIENT_CI_URL` | Address of Gradient.CI Servers. "Connect" links to `<url>/connect`. New connections go to the host and port of this address at `/proto`, over `wss://` for `https://` and `ws://` for `http://`. |
 
 ## `http`
 
