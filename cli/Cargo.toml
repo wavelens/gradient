@@ -46,8 +46,8 @@ toml       = { version = "1.0" }
 uuid       = { version = "1", features = ["serde"] }
 
 # Spec-driven type generation, build script of connector
-prettyplease = { version = "0.2" }
-syn          = { version = "2", features = ["full"] }
+prettyplease = { version = "0.3" }
+syn          = { version = "3", features = ["full"] }
 typify       = { version = "0.8" }
 yaml_serde   = { version = "0.10" }
 
@@ -145,6 +145,4 @@ tempfile   = { workspace = true }
 wiremock   = { workspace = true }
 
 [patch.crates-io]
-# gradient-eval (the `eval` feature) needs the nix-bindings fork; without this
-# the requirement would resolve to upstream, which lacks the fork's eval API.
 nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/eval-metrics-stats" }
