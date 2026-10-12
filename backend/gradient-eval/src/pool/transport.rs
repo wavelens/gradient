@@ -1,0 +1,664 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use anyhow::{Context, Result};
+use std::collections::HashSet;
+use std::path::Path;
+use std::process::Stdio;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
+use tracing::{debug, trace, warn};
+
+use crate::ipc::{
+    AttrError, DiscoveryShard, EVAL_IPC_VERSION, EvalRequest, EvalResponse, MAX_FRAME_BYTES,
+    ResolvedItem, decode_response, encode_request,
+};
+use crate::stats::StatsDelta;
+
+use super::download::{DownloadSink, DownloadSlot, forward_nix_log};
+use super::import::{ImportBuilder, RefuseImports};
+use super::live_thunks::LiveThunks;
+use super::lock;
+
+/// Match upstream Nix's `initNix` `setStackSize(64 MiB)`: 8 MiB stacks overflow in the libstdc++
+/// `std::regex` executor behind `builtins.match`.
+const EVAL_WORKER_STACK_BYTES: u64 = 64 * 1024 * 1024;
+
+const EVAL_WORKER_OOM_SCORE_ADJ: &str = "600";
+
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
+
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+
+const EXIT_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+pub(super) struct SpawnConfig<'a> {
+    pub(super) cache_dir: &'a str,
+    pub(super) trace_dir: Option<&'a str>,
+    pub(super) metrics: bool,
+}
+
+/// The subprocess is this binary re-executed, so the flags and the cache home form the contract
+/// with `run_eval_worker`.
+fn eval_subprocess_command(exe: &Path, config: &SpawnConfig<'_>) -> Command {
+    let mut command = Command::new(exe);
+    command.arg("--eval-subprocess");
+    if config.metrics {
+        command.arg("--eval-metrics");
+    }
+    command.env("NIX_CACHE_HOME", config.cache_dir);
+    if let Some(dir) = config.trace_dir {
+        command.env("GRADIENT_WORKER_LOG_TRACE_DIR", dir);
+    }
+    for &(k, v) in eval_worker_stats_env(config.metrics) {
+        command.env(k, v);
+    }
+    command
+}
+
+/// libnixexpr's `Counter`s stay inert without `NIX_SHOW_STATS`: `total_thunks` and `fn_calls`
+/// report 0. Route the dump to `/dev/null`, out of the parent's stderr.
+fn eval_worker_stats_env(metrics: bool) -> &'static [(&'static str, &'static str)] {
+    if metrics {
+        &[
+            ("NIX_SHOW_STATS", "1"),
+            ("NIX_SHOW_STATS_PATH", "/dev/null"),
+        ]
+    } else {
+        &[]
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalErrorResponse(String);
+
+impl std::fmt::Display for EvalErrorResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "eval worker: {}", self.0)
+    }
+}
+
+impl std::error::Error for EvalErrorResponse {}
+
+#[derive(Debug, Default)]
+pub(super) struct Listing {
+    pub(super) items: Vec<ResolvedItem>,
+    pub(super) deferred: Vec<DiscoveryShard>,
+    pub(super) warnings: Vec<String>,
+    pub(super) errors: Vec<AttrError>,
+    pub(super) stats: Option<StatsDelta>,
+}
+
+pub(super) struct EvalWorker {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    /// Discard a worker dropped mid-exchange: its leftover frame on the wire is the next
+    /// request's answer.
+    in_flight: bool,
+    pid_guard: PidGuard,
+    thunks: Arc<LiveThunks>,
+    downloads: DownloadSlot,
+}
+
+pub(super) struct PidGuard {
+    pub(super) live: Option<Arc<Mutex<HashSet<u32>>>>,
+    pub(super) pid: Option<u32>,
+}
+
+impl Drop for PidGuard {
+    fn drop(&mut self) {
+        if let (Some(live), Some(pid)) = (&self.live, self.pid) {
+            lock(live).remove(&pid);
+        }
+    }
+}
+
+impl EvalWorker {
+    pub(super) async fn spawn(
+        config: &SpawnConfig<'_>,
+        live: Arc<Mutex<HashSet<u32>>>,
+        thunks: Arc<LiveThunks>,
+    ) -> Result<Self> {
+        let exe = std::env::current_exe().context("locate current executable")?;
+        trace!(exe = %exe.display(), "spawning eval worker subprocess");
+        let mut command = eval_subprocess_command(&exe, config);
+
+        // SAFETY: a closure body in the forked child before `exec`, async-signal-safe by
+        // construction: building an `rlimit` and calling `setrlimit`, both signal-safe.
+        #[cfg(unix)]
+        unsafe {
+            command.pre_exec(|| {
+                let lim = libc::rlimit {
+                    rlim_cur: EVAL_WORKER_STACK_BYTES,
+                    rlim_max: EVAL_WORKER_STACK_BYTES,
+                };
+                if libc::setrlimit(libc::RLIMIT_STACK, &lim) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+
+        let mut worker = Self::from_command(command, thunks)?;
+
+        if let Some(pid) = worker.pid_guard.pid {
+            lock(&live).insert(pid);
+        }
+        worker.pid_guard.live = Some(live);
+
+        #[cfg(target_os = "linux")]
+        if let Some(pid) = worker.child.id() {
+            let path = format!("/proc/{pid}/oom_score_adj");
+            if let Err(e) = std::fs::write(&path, EVAL_WORKER_OOM_SCORE_ADJ) {
+                warn!(pid, error = %e, "failed to set oom_score_adj for eval worker");
+            }
+        }
+
+        worker.expect_handshake().await?;
+
+        Ok(worker)
+    }
+
+    pub(super) fn from_command(mut command: Command, thunks: Arc<LiveThunks>) -> Result<Self> {
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let mut child = command.spawn().context("spawn eval worker subprocess")?;
+        let pid = child.id();
+        let stdin = child.stdin.take().context("worker stdin missing")?;
+        let stdout = BufReader::new(child.stdout.take().context("worker stdout missing")?);
+        let stderr = child.stderr.take().context("worker stderr missing")?;
+        let downloads = DownloadSlot::default();
+        forward_stderr(stderr, Arc::clone(&downloads));
+        Ok(Self {
+            child,
+            stdin,
+            stdout,
+            in_flight: false,
+            pid_guard: PidGuard { live: None, pid },
+            thunks,
+            downloads,
+        })
+    }
+
+    async fn expect_handshake(&mut self) -> Result<()> {
+        let mut version = [0u8; 1];
+        tokio::time::timeout(HANDSHAKE_TIMEOUT, self.stdout.read_exact(&mut version))
+            .await
+            .context("eval worker handshake timed out")?
+            .context("read eval worker handshake")?;
+        anyhow::ensure!(
+            version[0] == EVAL_IPC_VERSION,
+            "eval worker IPC version mismatch: parent {EVAL_IPC_VERSION}, subprocess {} (binary replaced mid-run?)",
+            version[0]
+        );
+        Ok(())
+    }
+
+    pub(super) fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+
+    pub(super) fn spawned_pid(&self) -> u32 {
+        self.pid_guard.pid.unwrap_or_default()
+    }
+
+    pub(super) fn is_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+
+    pub(super) fn in_flight(&self) -> bool {
+        self.in_flight
+    }
+
+    async fn send(&mut self, req: &EvalRequest) -> Result<()> {
+        self.in_flight = true;
+        trace!(pid = self.child.id(), ?req, "sending eval worker request");
+        let payload = encode_request(req).context("encode eval worker request")?;
+        self.stdin
+            .write_all(&u32::try_from(payload.len())?.to_le_bytes())
+            .await
+            .context("write to eval worker stdin")?;
+        self.stdin
+            .write_all(&payload)
+            .await
+            .context("write to eval worker stdin")?;
+        self.stdin.flush().await.context("flush eval worker stdin")
+    }
+
+    async fn recv(&mut self, imports: &dyn ImportBuilder) -> Result<EvalResponse> {
+        loop {
+            match self.recv_frame().await? {
+                EvalResponse::Stats { delta } => {
+                    self.thunks.tick(self.spawned_pid(), delta.nr_thunks)
+                }
+                EvalResponse::NeedsBuild { derived_paths } => {
+                    let error = tokio::select! {
+                        built = imports.build_imports(derived_paths) => built.err(),
+                        status = self.child.wait() => anyhow::bail!(
+                            "eval worker exited during an import: {}",
+                            status.map_or_else(|e| e.to_string(), |s| s.to_string())
+                        ),
+                    };
+                    self.send(&EvalRequest::BuildDone { error }).await?;
+                }
+                other => return Ok(other),
+            }
+        }
+    }
+
+    async fn recv_frame(&mut self) -> Result<EvalResponse> {
+        let mut len_buf = [0u8; 4];
+        if let Err(e) = self.stdout.read_exact(&mut len_buf).await {
+            anyhow::bail!("eval worker closed pipe ({})", self.describe_death(e).await);
+        }
+
+        let len = u32::from_le_bytes(len_buf);
+        anyhow::ensure!(
+            len <= MAX_FRAME_BYTES,
+            "eval worker frame length {len} exceeds MAX_FRAME_BYTES (corrupt stream?)"
+        );
+
+        let mut payload = vec![0u8; len as usize];
+        self.stdout
+            .read_exact(&mut payload)
+            .await
+            .context("read eval worker response frame")?;
+
+        trace!(
+            pid = self.child.id(),
+            bytes = payload.len(),
+            "received eval worker response"
+        );
+        decode_response(&payload).context("decode eval worker response")
+    }
+
+    async fn describe_death(&mut self, read_err: std::io::Error) -> String {
+        let pid = self.child.id();
+        let status = match tokio::time::timeout(EXIT_PROBE_TIMEOUT, self.child.wait()).await {
+            Ok(Ok(s)) => format!("{s}"),
+            Ok(Err(e)) => format!("wait error: {e}"),
+            Err(_) => {
+                let mut diag = String::from("still alive after 2s");
+                if let Some(p) = pid {
+                    if let Ok(target) = std::fs::read_link(format!("/proc/{p}/fd/1")) {
+                        diag.push_str(&format!("; /proc/{p}/fd/1 -> {}", target.display()));
+                    }
+                    if let Ok(state) = std::fs::read_to_string(format!("/proc/{p}/status"))
+                        && let Some(line) = state.lines().find(|l| l.starts_with("State:"))
+                    {
+                        diag.push_str(&format!("; {line}"));
+                    }
+                    if let Ok(wchan) = std::fs::read_to_string(format!("/proc/{p}/wchan")) {
+                        diag.push_str(&format!("; wchan={}", wchan.trim()));
+                    }
+                }
+                diag
+            }
+        };
+        format!("pid={pid:?}, read error={read_err}, exit={status}")
+    }
+
+    async fn call<T>(
+        &mut self,
+        req: EvalRequest,
+        what: &'static str,
+        imports: &dyn ImportBuilder,
+        extract: impl FnOnce(EvalResponse) -> std::result::Result<T, Box<EvalResponse>>,
+    ) -> Result<T> {
+        self.send(&req).await?;
+        let resp = self.recv(imports).await?;
+        self.in_flight = false;
+        match extract(resp) {
+            Ok(v) => Ok(v),
+            Err(other) => match *other {
+                EvalResponse::Err { message } => Err(EvalErrorResponse(message).into()),
+                other => anyhow::bail!("eval worker: unexpected response to {what}: {other:?}"),
+            },
+        }
+    }
+
+    pub(super) async fn plan(
+        &mut self,
+        repository: String,
+        wildcards: Vec<String>,
+        input_overrides: Vec<(String, String)>,
+        imports: &dyn ImportBuilder,
+    ) -> Result<(Vec<DiscoveryShard>, Vec<AttrError>)> {
+        self.call(
+            EvalRequest::Plan {
+                repository,
+                wildcards,
+                input_overrides,
+            },
+            "Plan",
+            imports,
+            |resp| match resp {
+                EvalResponse::PlanOk { shards, errors } => Ok((shards, errors)),
+                other => Err(Box::new(other)),
+            },
+        )
+        .await
+    }
+
+    pub(super) async fn list(
+        &mut self,
+        repository: String,
+        wildcards: Vec<String>,
+        only: Option<Vec<String>>,
+        input_overrides: Vec<(String, String)>,
+        imports: &dyn ImportBuilder,
+    ) -> Result<Listing> {
+        self.call(
+            EvalRequest::List {
+                repository,
+                wildcards,
+                only,
+                input_overrides,
+            },
+            "List",
+            imports,
+            |resp| match resp {
+                EvalResponse::ListOk {
+                    items,
+                    deferred,
+                    warnings,
+                    errors,
+                    stats,
+                } => Ok(Listing {
+                    items,
+                    deferred,
+                    warnings,
+                    errors,
+                    stats,
+                }),
+                other => Err(Box::new(other)),
+            },
+        )
+        .await
+    }
+
+    pub(super) async fn fingerprint(
+        &mut self,
+        repository: String,
+        input_overrides: Vec<(String, String)>,
+    ) -> Result<Option<String>> {
+        self.call(
+            EvalRequest::Fingerprint {
+                repository,
+                input_overrides,
+            },
+            "Fingerprint",
+            &RefuseImports("the fingerprint"),
+            |resp| match resp {
+                EvalResponse::FingerprintOk { fingerprint } => Ok(fingerprint),
+                other => Err(Box::new(other)),
+            },
+        )
+        .await
+    }
+
+    pub(super) async fn checkpoint(
+        &mut self,
+        repository: String,
+        input_overrides: Vec<(String, String)>,
+    ) -> Result<()> {
+        self.call(
+            EvalRequest::Checkpoint {
+                repository,
+                input_overrides,
+            },
+            "Checkpoint",
+            &RefuseImports("the eval-cache checkpoint"),
+            |resp| match resp {
+                EvalResponse::CheckpointOk => Ok(()),
+                other => Err(Box::new(other)),
+            },
+        )
+        .await
+    }
+
+    pub(super) async fn fetch_input(
+        &mut self,
+        locked: String,
+        git_ssh_command: Option<String>,
+        sink: Arc<dyn DownloadSink>,
+    ) -> Result<String> {
+        *lock(&self.downloads) = Some(sink);
+        let fetched = self
+            .call(
+                EvalRequest::FetchInput {
+                    locked,
+                    git_ssh_command,
+                },
+                "FetchInput",
+                &RefuseImports("an input fetch"),
+                |resp| match resp {
+                    EvalResponse::FetchOk { store_path } => Ok(store_path),
+                    other => Err(Box::new(other)),
+                },
+            )
+            .await;
+        *lock(&self.downloads) = None;
+        fetched
+    }
+
+    pub(super) async fn shutdown(mut self) {
+        let pid = self.child.id();
+        trace!(pid, "sending Shutdown to eval worker");
+        if let Err(e) = self.send(&EvalRequest::Shutdown).await {
+            debug!(pid, error = %e, "failed to write Shutdown to eval worker");
+            return;
+        }
+        drop(self.stdin);
+        trace!(pid, "Shutdown sent; waiting for eval worker to exit");
+        match tokio::time::timeout(SHUTDOWN_GRACE, self.child.wait()).await {
+            Ok(Ok(status)) => trace!(pid, ?status, "eval worker exited cleanly"),
+            Ok(Err(e)) => debug!(pid, error = %e, "waiting on eval worker exit failed"),
+            Err(_) => warn!(
+                pid,
+                "eval worker did not exit within the shutdown grace period; will be killed"
+            ),
+        }
+    }
+
+    pub(super) fn rss_bytes(&self) -> u64 {
+        self.child
+            .id()
+            .and_then(super::memory::rss_of_pid)
+            .unwrap_or(0)
+    }
+
+    #[cfg(test)]
+    pub(super) fn child_mut(&mut self) -> &mut Child {
+        &mut self.child
+    }
+}
+
+fn forward_stderr(stderr: ChildStderr, downloads: DownloadSlot) {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "drains the child's stderr and ends at its EOF"
+    )]
+    tokio::spawn(forward_nix_log(BufReader::new(stderr), downloads, |text| {
+        eprintln!("{text}")
+    }));
+}
+
+impl std::fmt::Debug for EvalWorker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EvalWorker")
+            .field("pid", &self.child.id())
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ipc::{decode_request, encode_response};
+
+    struct RecordingImports(Mutex<Vec<Vec<String>>>);
+
+    #[async_trait::async_trait]
+    impl ImportBuilder for RecordingImports {
+        async fn build_imports(&self, derived_paths: Vec<String>) -> Result<(), String> {
+            lock(&self.0).push(derived_paths);
+            Err("no builder here".into())
+        }
+    }
+
+    fn framed(payload: &[u8]) -> Vec<u8> {
+        let mut frame = u32::try_from(payload.len())
+            .expect("frame fits")
+            .to_le_bytes()
+            .to_vec();
+        frame.extend_from_slice(payload);
+        frame
+    }
+
+    fn temp_file(tag: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "gradient-transport-test-{}-{tag}",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).expect("write temp file");
+        path
+    }
+
+    #[tokio::test]
+    async fn recv_answers_a_build_request_and_returns_the_final_frame() {
+        let plan = EvalRequest::Plan {
+            repository: "repo".into(),
+            wildcards: vec![],
+            input_overrides: vec![],
+        };
+        let expected_answer = EvalRequest::BuildDone {
+            error: Some("no builder here".into()),
+        };
+        let plan_len = framed(&encode_request(&plan).unwrap()).len();
+        let answer_len = framed(&encode_request(&expected_answer).unwrap()).len();
+        let needs = temp_file(
+            "needs",
+            &framed(
+                &encode_response(&EvalResponse::NeedsBuild {
+                    derived_paths: vec!["/nix/store/aaaa-src.drv^out".into()],
+                })
+                .unwrap(),
+            ),
+        );
+        let done = temp_file(
+            "done",
+            &framed(
+                &encode_response(&EvalResponse::PlanOk {
+                    shards: vec![],
+                    errors: vec![],
+                })
+                .unwrap(),
+            ),
+        );
+        let answer = std::env::temp_dir().join(format!(
+            "gradient-transport-test-{}-answer",
+            std::process::id()
+        ));
+
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg(format!(
+            "head -c {plan_len} >/dev/null; cat '{}'; head -c {answer_len} >'{}'; cat '{}'; cat >/dev/null",
+            needs.display(),
+            answer.display(),
+            done.display()
+        ));
+        let mut worker = EvalWorker::from_command(cmd, Arc::default()).expect("spawn sh");
+        let imports = RecordingImports(Mutex::new(Vec::new()));
+
+        let (shards, errors) = worker
+            .plan("repo".into(), vec![], vec![], &imports)
+            .await
+            .expect("the final frame after the build request");
+
+        assert!(shards.is_empty() && errors.is_empty());
+        assert_eq!(
+            imports.0.into_inner().unwrap_or_default(),
+            vec![vec!["/nix/store/aaaa-src.drv^out".to_string()]]
+        );
+        let written = std::fs::read(&answer).expect("the answer frame");
+        let back = decode_request(&written[4..]).expect("a request frame");
+        assert!(
+            matches!(&back, EvalRequest::BuildDone { error } if error.as_deref() == Some("no builder here")),
+            "{back:?}"
+        );
+        assert!(!worker.in_flight(), "the call ended in lockstep");
+    }
+
+    #[test]
+    fn the_spawned_command_asks_for_the_eval_subprocess() {
+        let plain = eval_subprocess_command(
+            Path::new("/usr/bin/gradient"),
+            &SpawnConfig {
+                cache_dir: "/tmp/cache",
+                trace_dir: None,
+                metrics: false,
+            },
+        );
+        let args: Vec<String> = plain
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, vec!["--eval-subprocess".to_string()]);
+        assert!(
+            plain.as_std().get_envs().any(
+                |(k, v)| k == "NIX_CACHE_HOME" && v == Some(std::ffi::OsStr::new("/tmp/cache"))
+            )
+        );
+        assert!(
+            !plain
+                .as_std()
+                .get_envs()
+                .any(|(k, _)| k == "NIX_SHOW_STATS")
+        );
+
+        let metrics = eval_subprocess_command(
+            Path::new("/usr/bin/gradient"),
+            &SpawnConfig {
+                cache_dir: "/tmp/cache",
+                trace_dir: Some("/tmp/trace"),
+                metrics: true,
+            },
+        );
+        let args: Vec<String> = metrics
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            vec![
+                "--eval-subprocess".to_string(),
+                "--eval-metrics".to_string()
+            ]
+        );
+        assert!(
+            metrics
+                .as_std()
+                .get_envs()
+                .any(|(k, v)| k == "GRADIENT_WORKER_LOG_TRACE_DIR"
+                    && v == Some(std::ffi::OsStr::new("/tmp/trace")))
+        );
+        assert!(
+            metrics
+                .as_std()
+                .get_envs()
+                .any(|(k, v)| k == "NIX_SHOW_STATS" && v == Some(std::ffi::OsStr::new("1")))
+        );
+    }
+}
