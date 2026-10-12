@@ -84,17 +84,56 @@ impl std::fmt::Display for JobAborted {
 }
 impl std::error::Error for JobAborted {}
 
-pub(super) fn looks_like_oom(msg: &str) -> bool {
-    let l = msg.to_ascii_lowercase();
-    l.contains("out of memory")
-        || l.contains("cannot allocate memory")
-        || l.contains("oom-killer")
-        || l.contains("killed")
+/// The Nix log tail: 25 lines, so the last 40 lines hold any diagnosis.
+const TAIL_LINES: usize = 40;
+/// `Cannot build '<drv>'.` and `Reason: ...` sit above the log tail.
+const HEAD_LINES: usize = 8;
+
+fn tail_of(msg: &str) -> &str {
+    match msg.rmatch_indices('\n').nth(TAIL_LINES - 1) {
+        Some((at, _)) => &msg[at + 1..],
+        None => msg,
+    }
 }
 
-/// These signatures are describing the store or the daemon, not the derivation.
-/// Treating them as `Permanent` would strand the build, because `Permanent` is never re-thawed.
-/// Everything wanting that build would then cascade to `DependencyFailed`.
+/// A 60k line log scans only its header and its tail.
+fn diagnosis_lines(msg: &str) -> impl Iterator<Item = &str> {
+    msg.lines().take(HEAD_LINES).chain(tail_of(msg).lines())
+}
+
+pub(super) fn looks_like_oom(msg: &str) -> bool {
+    diagnosis_lines(msg).any(|line| {
+        let l = line.to_ascii_lowercase();
+        l.contains("out of memory")
+            || l.contains("cannot allocate memory")
+            || l.contains("oom-killer")
+            || l.contains("killed")
+    }) || exit_code_two(msg)
+}
+
+/// Nix output for a builder that the OOM killer ended: `exit code 2`, or `Exit Code 2` alone.
+fn exit_code_two(msg: &str) -> bool {
+    diagnosis_lines(msg).any(|line| {
+        let l = line.to_ascii_lowercase();
+        let named = l.match_indices("exit code 2").any(|(at, _)| {
+            !l[at + "exit code 2".len()..].starts_with(|c: char| c.is_ascii_digit())
+        });
+
+        named || ends_in_a_lone_two(line)
+    })
+}
+
+fn ends_in_a_lone_two(line: &str) -> bool {
+    line.trim_end()
+        .rsplit_once(' ')
+        .is_some_and(|(head, tail)| {
+            tail == "2" && (head.contains("error") || head.contains("failed"))
+        })
+}
+
+/// These signatures describe the store or the daemon, not the derivation.
+/// A `Permanent` failure can never re-thaw, so that class can strand the build.
+/// Everything wanting that build can then cascade to `DependencyFailed`.
 const INFRA_FAILURE_SIGNATURES: &[&str] = &[
     "is not valid",
     "does not exist in the store",
@@ -107,8 +146,10 @@ const INFRA_FAILURE_SIGNATURES: &[&str] = &[
 ];
 
 pub(super) fn looks_like_infra_failure(msg: &str) -> bool {
-    let l = msg.to_ascii_lowercase();
-    INFRA_FAILURE_SIGNATURES.iter().any(|s| l.contains(s))
+    diagnosis_lines(msg).any(|line| {
+        let l = line.to_ascii_lowercase();
+        INFRA_FAILURE_SIGNATURES.iter().any(|s| l.contains(s))
+    })
 }
 
 pub(super) fn classify_build_error(msg: &str) -> BuildFailureKind {
@@ -211,6 +252,59 @@ mod tests {
         assert!(looks_like_oom("Killed"));
         assert!(looks_like_oom("oom-killer: invoked"));
         assert!(!looks_like_oom("error: undefined reference to `foo'"));
+    }
+
+    #[test]
+    fn an_oom_exit_code_two_stays_retryable() {
+        for msg in [
+            "error: builder for '/nix/store/x-y.drv' failed with exit code 2",
+            "error: builder for '/nix/store/x-y.drv' failed with exit code 2; last 10 log lines:",
+            "Cannot build '/nix/store/x-y.drv'.\nReason: builder failed with exit code 2.\nOutput paths:\n  /nix/store/z-y",
+            "failed with exit code 2 ",
+            "Exit Code 2",
+        ] {
+            assert_eq!(
+                classify_build_error(msg),
+                BuildFailureKind::Transient,
+                "an OOM kill must stay retryable: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn any_other_exit_code_stays_permanent() {
+        for msg in [
+            "error: builder for '/nix/store/x-y.drv' failed with exit code 25",
+            "error: builder for '/nix/store/x-y-1.2.drv' failed with exit code 1",
+            "make: *** [Makefile:42: all] Error 2",
+        ] {
+            assert_eq!(
+                classify_build_error(msg),
+                BuildFailureKind::Permanent,
+                "a deterministic failure must not be retried: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_long_log_reads_only_its_header_and_its_tail() {
+        let filler = "compiling foo-1.0\n".repeat(60_000);
+
+        let tail = format!("{filler}gcc: fatal error: Killed\n");
+        assert!(looks_like_oom(&tail), "the diagnosis sits in the tail");
+
+        let head = format!("error: cannot connect to daemon\n{filler}");
+        assert!(
+            looks_like_infra_failure(&head),
+            "the daemon header counts as well"
+        );
+
+        let mut lines: Vec<String> = (0..60_000).map(|i| format!("compiling foo-{i}")).collect();
+        lines[1_000] = "Killed".to_string();
+        assert!(
+            !looks_like_oom(&lines.join("\n")),
+            "a signature between the header and the tail is out of the window"
+        );
     }
 
     #[test]
