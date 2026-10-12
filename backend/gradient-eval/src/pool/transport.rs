@@ -147,11 +147,6 @@ impl EvalWorker {
 
         let mut worker = Self::from_command(command, thunks)?;
 
-        if let Some(pid) = worker.pid_guard.pid {
-            lock(&live).insert(pid);
-        }
-        worker.pid_guard.live = Some(live);
-
         #[cfg(target_os = "linux")]
         if let Some(pid) = worker.child.id() {
             let path = format!("/proc/{pid}/oom_score_adj");
@@ -161,6 +156,13 @@ impl EvalWorker {
         }
 
         worker.expect_handshake().await?;
+
+        // Register the pid after the handshake: a kill mid-handshake is a spawn error, not an
+        // attribute error.
+        if let Some(pid) = worker.pid_guard.pid {
+            lock(&live).insert(pid);
+        }
+        worker.pid_guard.live = Some(live);
 
         Ok(worker)
     }

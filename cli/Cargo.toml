@@ -28,7 +28,7 @@ gradient-eval = { path = "../backend/gradient-eval" }
 
 # Async / runtime
 futures = { version = "0.3" }
-tokio   = { version = "1.50", features = ["macros", "process", "rt-multi-thread", "time"] }
+tokio   = { version = "1.50", features = ["macros", "process", "rt-multi-thread", "time", "io-util", "sync"] }
 
 # HTTP / TLS
 reqwest              = { version = "0.13", features = ["multipart"] }

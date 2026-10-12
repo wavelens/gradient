@@ -113,6 +113,12 @@ impl EvalPool {
         imports: &dyn ImportBuilder,
         found: FoundItems<'_>,
     ) -> Result<Discovery> {
+        let requested = attrs.clone();
+        let listed = Mutex::new(HashSet::<String>::new());
+        let recording = |items: Vec<ResolvedItem>| {
+            lock(&listed).extend(items.iter().map(|item| item.attr.clone()));
+            found(items);
+        };
         let calls: Vec<DiscoveryCall> = attrs
             .into_iter()
             .map(|attr| DiscoveryCall {
@@ -120,8 +126,22 @@ impl EvalPool {
                 only: None,
             })
             .collect();
-        self.run_calls(repository, calls, &[], overrides, imports, found)
-            .await
+        let mut discovery = self
+            .run_calls(repository, calls, &[], overrides, imports, &recording)
+            .await?;
+
+        let listed = listed.into_inner().unwrap_or_default();
+        for attr in requested {
+            let reported = discovery.errors.iter().any(|error| error.attr == attr);
+            if !listed.contains(&attr) && !reported {
+                discovery.errors.push(AttrError {
+                    message: format!("target '{attr}' matched no derivations in the flake"),
+                    attr,
+                });
+            }
+        }
+        discovery.errors.sort_unstable();
+        Ok(discovery)
     }
 
     /// Plan, then list every shard over the pool, splitting crashed batches.
@@ -413,6 +433,35 @@ mod tests {
 
         assert_eq!(lock(&found).len(), 1);
         assert!(discovery.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_concrete_attribute_that_matches_nothing_is_reported() {
+        let pool = pool(1);
+        pool.workers.push_for_test(replying_worker(
+            &EvalResponse::ListOk {
+                items: vec![],
+                deferred: vec![],
+                warnings: vec![],
+                errors: vec![],
+                stats: None,
+            },
+            "empty-list",
+        ));
+
+        let discovery = pool
+            .list_attrs(
+                "repo".into(),
+                vec!["packages.x86_64-linux.nope".into()],
+                &[],
+                &RefuseImports("the test"),
+                &|_| {},
+            )
+            .await
+            .expect("list");
+
+        assert_eq!(discovery.errors.len(), 1, "{:?}", discovery.errors);
+        assert_eq!(discovery.errors[0].attr, "packages.x86_64-linux.nope");
     }
 
     struct NullSink;
