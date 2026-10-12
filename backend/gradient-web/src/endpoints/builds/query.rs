@@ -22,12 +22,13 @@ use std::time::Instant;
 
 use super::BuildAccessContext;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct BuildWithOutputs {
     pub id: BuildJobId,
     pub evaluation: EvaluationId,
     pub status: gradient_entity::build::BuildStatus,
     pub derivation_path: String,
+    #[schema(value_type = String)]
     pub architecture: gradient_entity::server::Architecture,
     pub worker: Option<String>,
     pub dispatched_job: Option<DispatchedJobId>,
@@ -50,6 +51,16 @@ fn running_progress(
         .flatten()
 }
 
+#[utoipa::path(
+    get,
+    path = "/builds/{build}",
+    operation_id = "getBuild",
+    tag = "builds",
+    summary = "Get build",
+    description = "Returns full build details including status, derivation path, architecture, assigned server, and output store paths.\n\n**Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.",
+    params(("build" = BuildJobId, Path)),
+    responses((status = OK, description = "Build with outputs", body = BuildWithOutputs), WebError)
+)]
 pub async fn get_build(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

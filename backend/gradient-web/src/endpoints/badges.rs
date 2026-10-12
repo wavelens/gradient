@@ -26,7 +26,8 @@ use crate::resource::Resource;
 use gradient_core::ServerState;
 use gradient_types::*;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct BadgeParams {
     #[serde(default = "default_style")]
     pub style: BadgeStyle,
@@ -36,7 +37,7 @@ pub struct BadgeParams {
     pub token: Option<String>,
 }
 
-#[derive(Deserialize, Debug, Clone, Copy)]
+#[derive(Deserialize, Debug, Clone, Copy, utoipa::ToSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum BadgeStyle {
     Flat,
@@ -243,6 +244,16 @@ async fn badge_status_for_latest_eval(
     Ok((eval.map(|e| e.status), has_failed))
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/{project}/{task}/badge",
+    operation_id = "getTaskBadge",
+    tag = "tasks",
+    summary = "Task status badge (SVG)",
+    description = "Returns a shields.io-compatible SVG badge reflecting the task's latest\nevaluation status. Designed to be embedded in GitHub READMEs, Grafana\ndashboards, or any tool that renders SVG images from a URL.\n\n**Badge colours:**\n| Status | Colour | Label |\n|--------|--------|-------|\n| No evaluation yet | grey | `unknown` |\n| Queued / Evaluating / Building | blue | `queued` / `evaluating` / `building` |\n| Completed, all entry-point builds passed | green | `passing` |\n| Completed, some entry-point builds failed | amber | `partial` |\n| Failed | red | `failing` |\n| Aborted | yellow | `aborted` |\n\n**Authentication:**\n- **Public projects** - no credentials required. Embed the URL directly.\n- **Private projects** - supply `?token=GRADxxxx` (API key) or a JWT so the\n  image can be fetched by external services without a session cookie.\n\nResponses include `Cache-Control: no-cache` so badge aggregator CDNs always\nfetch the live status rather than serving a stale image.",
+    params(("project" = String, Path), ("task" = String, Path), BadgeParams),
+    responses((status = OK, description = "SVG badge image.", body = String, content_type = "image/svg+xml"), WebError)
+)]
 pub async fn get_task_badge(
     state: State<Arc<ServerState>>,
     axum::Extension(MaybeUser(maybe_user)): axum::Extension<MaybeUser>,

@@ -11,4 +11,4 @@ mod filter;
 pub mod groups;
 pub mod users;
 
-pub use error::{ScimError, ScimResult};
+pub use error::{ScimError, ScimErrorBody, ScimResult};

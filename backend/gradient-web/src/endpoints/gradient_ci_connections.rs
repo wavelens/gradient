@@ -57,14 +57,14 @@ const DISPLAY_NAME: &str = "Gradient.CI Servers";
 const ONE_CONNECTION_PER_TEAM: &str = "idx_team_worker_one_gradient_ci";
 const PREFIX: &str = "gci1_";
 
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone, Copy, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionScope {
     Team,
     Project,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct ConnectionRequest {
     pub scope: ConnectionScope,
     pub team: Option<String>,
@@ -72,7 +72,7 @@ pub struct ConnectionRequest {
     pub token: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ConnectionResponse {
     pub worker_id: String,
 }
@@ -130,6 +130,16 @@ impl StoredToken {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/gradient-ci/connections",
+    operation_id = "connectGradientCi",
+    tag = "workers",
+    summary = "Connect Gradient.CI Servers",
+    description = "Stores a connection token pasted from servers.gradient.ci. `scope = project` creates a\nworker registration for the project (same permission as registering a worker);\n`scope = team` creates a worker of the team (Admin in the team). The server\ndials `wss://<gradientCi.url host>/proto` within 15 s, a team connection only once a\nproject grants the team its workers. Turned off by `gradientCi.enable = false`.",
+    request_body = ConnectionRequest,
+    responses((status = OK, description = "Connection stored", body = ConnectionResponse), WebError)
+)]
 pub async fn post_connection(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

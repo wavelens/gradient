@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
     Serialize,
     IntoPrimitive,
     TryFromPrimitive,
+    utoipa::ToSchema,
 )]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum BuildStatus {

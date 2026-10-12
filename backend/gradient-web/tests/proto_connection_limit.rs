@@ -28,6 +28,8 @@ fn make_server(limiter: Arc<ProtoLimiter>) -> TestServer {
     let state = test_state(empty_db());
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
     let app = proto_router()
+        .split_for_parts()
+        .0
         .with_state(Arc::clone(&state))
         .layer(Extension(scheduler))
         .layer(Extension(limiter))

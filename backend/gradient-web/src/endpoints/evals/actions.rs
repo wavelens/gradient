@@ -23,6 +23,17 @@ use std::sync::Arc;
 use super::EvalAccessContext;
 use super::types::MakeEvaluationRequest;
 
+#[utoipa::path(
+    post,
+    path = "/evals/{evaluation}",
+    operation_id = "postEvaluation",
+    tag = "evals",
+    summary = "Evaluation action",
+    description = "Performs an action on the evaluation. Currently the only supported action is\n`\"abort\"`, which cancels all in-progress and queued builds.",
+    params(("evaluation" = EvaluationId, Path)),
+    request_body = MakeEvaluationRequest,
+    responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_evaluation(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -52,6 +63,16 @@ pub async fn post_evaluation(
     Ok(ok_json("Success".to_string()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/evals/{evaluation}/retry",
+    operation_id = "retryEvaluation",
+    tag = "evaluations",
+    summary = "Retry evaluation",
+    description = "Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Requires project membership. Answers 409 while the evaluation or another evaluation of its task is running.",
+    params(("evaluation" = EvaluationId, Path)),
+    responses((status = OK, description = "UUID of the new evaluation", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_evaluation_retry(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -101,6 +122,16 @@ pub async fn post_evaluation_retry(
     Ok(ok_json(retried.id.to_string()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/evals/{evaluation}/prioritize",
+    operation_id = "prioritizeEvaluation",
+    tag = "evals",
+    summary = "Prioritize evaluation",
+    description = "Hands out every build of an active evaluation, including builds it has not resolved yet, ahead of unprioritized work. Requires a superuser (`403` with `code: \"superuser_required\"` otherwise). A finished evaluation is left unchanged; a failed or aborted one loses its priority.",
+    params(("evaluation" = EvaluationId, Path)),
+    responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_evaluation_prioritize(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

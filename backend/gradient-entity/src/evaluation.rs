@@ -25,6 +25,7 @@ use crate::ids::{CommitId, EvaluationId, TaskId, TaskTriggerId, UserId};
     Serialize,
     IntoPrimitive,
     TryFromPrimitive,
+    utoipa::ToSchema,
 )]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum EvaluationStatus {
@@ -309,6 +310,7 @@ pub enum EvalCacheStatus {
     Serialize,
     IntoPrimitive,
     TryFromPrimitive,
+    utoipa::ToSchema,
 )]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 #[serde(rename_all = "snake_case")]

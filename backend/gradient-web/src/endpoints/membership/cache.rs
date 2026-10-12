@@ -27,7 +27,7 @@ use serde::Serialize;
 
 pub struct CacheOwner;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct CacheRoleOwner {
     cache: Option<CacheId>,
 }

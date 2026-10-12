@@ -34,7 +34,7 @@ pub(super) struct Failure {
     pub newly_failing: bool,
 }
 
-#[derive(Serialize, Debug, Default, PartialEq, Eq)]
+#[derive(Serialize, Debug, Default, PartialEq, Eq, utoipa::ToSchema)]
 pub struct PackageCounts {
     pub total: usize,
     pub built: usize,

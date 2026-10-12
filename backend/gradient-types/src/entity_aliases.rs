@@ -14,7 +14,7 @@ use uuid::Uuid;
 pub use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 pub use gradient_entity::{STORE_DIR, StorePath};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ListItem {
     pub id: Uuid,
     pub name: String,

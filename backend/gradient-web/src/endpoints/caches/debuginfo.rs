@@ -25,7 +25,7 @@ use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 struct DebugInfoRedirect {
     archive: String,
     member: String,
@@ -41,6 +41,16 @@ impl From<DebugInfoTarget> for DebugInfoRedirect {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/cache/{cache}/debuginfo/{build_id}",
+    operation_id = "getDebugInfo",
+    tag = "nix-cache",
+    summary = "Debug info",
+    description = "DWARF debug info for an ELF build id, in the Nix `index-debug-info` format. Indexed from `separateDebugInfo` outputs; a miss falls through to the upstream caches. `X-Cache` reports `HIT` or `MISS`.",
+    params(("cache" = String, Path), ("build_id" = String, Path)),
+    responses((status = OK, description = "Debug info redirect", body = DebugInfoRedirect), WebError)
+)]
 pub async fn debuginfo(
     state: State<Arc<ServerState>>,
     OptionalPeer(peer): OptionalPeer,

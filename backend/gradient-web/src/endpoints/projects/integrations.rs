@@ -9,6 +9,7 @@
 
 use super::refusal::ProjectRefusal;
 use crate::access::{load_integration_in_project, reject_managed_integration};
+use crate::api_spec::ProjectPath;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
@@ -31,7 +32,7 @@ use sea_orm::{IntoActiveModel, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct IntegrationResponse {
     pub id: IntegrationId,
     pub project: ProjectId,
@@ -104,7 +105,7 @@ fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>
     Ok(Some(out))
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct CreateIntegrationRequest {
     pub name: IntegrationName,
     #[serde(default)]
@@ -119,7 +120,7 @@ pub struct CreateIntegrationRequest {
     pub installation_id: Option<i64>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct IntegrationSummaryResponse {
     pub id: IntegrationId,
     pub name: String,
@@ -140,7 +141,7 @@ impl From<MIntegration> for IntegrationSummaryResponse {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct PatchIntegrationRequest {
     pub name: Option<IntegrationName>,
     pub display_name: Option<String>,
@@ -177,6 +178,16 @@ fn kind_to_str(k: IntegrationKind) -> &'static str {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/projects/{project}/integrations",
+    operation_id = "listProjectIntegrations",
+    tag = "integrations",
+    summary = "List integrations",
+    description = "List all inbound and outbound integrations in this project.",
+    params(ProjectPath),
+    responses((status = OK, description = "List of integrations", body = Vec<IntegrationResponse>), WebError)
+)]
 pub async fn get_integrations(
     ProjectScope { project, db, .. }: ProjectScope<Requires<can::ManageIntegrations>>,
 ) -> WebResult<Json<BaseResponse<Vec<IntegrationResponse>>>> {
@@ -190,6 +201,16 @@ pub async fn get_integrations(
     Ok(ok_json(out))
 }
 
+#[utoipa::path(
+    get,
+    path = "/projects/{project}/integrations/summary",
+    operation_id = "listProjectIntegrationSummaries",
+    tag = "integrations",
+    summary = "List integration summaries (credential-free)",
+    description = "List integrations as credential-free summaries. Available to **any\nproject member**, in contrast to the full listing which requires\n`ManageIntegrations`.\n\nThe response excludes `secret`, `endpoint_url`, `access_token`, and\nthe `has_secret` / `has_access_token` booleans so non-admin members\ncannot fingerprint credential state. Intended for UIs that only need\nan integration's name and Git host type - e.g. populating the trigger\ncreate/edit dropdown for users who hold `EditTask` but not\n`ManageIntegrations`.",
+    params(ProjectPath),
+    responses((status = OK, description = "List of integration summaries", body = Vec<IntegrationSummaryResponse>), WebError)
+)]
 pub async fn get_integration_summaries(
     ProjectScope { project, db, .. }: ProjectScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<IntegrationSummaryResponse>>>> {
@@ -202,6 +223,17 @@ pub async fn get_integration_summaries(
     ))
 }
 
+#[utoipa::path(
+    put,
+    path = "/projects/{project}/integrations",
+    operation_id = "createProjectIntegration",
+    tag = "integrations",
+    summary = "Create integration",
+    description = "Creates a named inbound or outbound integration. `secret` and\n`access_token` are stored encrypted and never returned in responses.\nName is unique within `(project, kind)`.\n\nOne **inbound** integration can serve Gitea/Forgejo/GitLab\nsimultaneously - the caller picks the Git host path segment in the webhook\nURL (`/hooks/gitea/...`, `/hooks/forgejo/...`, `/hooks/gitlab/...`).\nThe stored `git_host_type` is display metadata only for inbound.\n\n`git_host_type: \"github\"` integrations are creatable by supplying\n`installation_id`. The server App must be configured (else `400`);\nthe installation id is validated against the App (invalid id returns\n`400`). An inbound and outbound integration pair is created\nautomatically, named `github-<account>`. Multiple installations per project\nare supported (one per GitHub account).",
+    params(ProjectPath),
+    request_body = CreateIntegrationRequest,
+    responses((status = OK, description = "Integration created", body = IntegrationResponse), WebError)
+)]
 pub async fn put_integration(
     ProjectScope { project, user, .. }: ProjectScope<RequiresUnmanaged<can::ManageIntegrations>>,
     state: State<Arc<ServerState>>,
@@ -321,6 +353,15 @@ pub async fn put_integration(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/projects/{project}/integrations/{id}",
+    operation_id = "getProjectIntegration",
+    tag = "integrations",
+    summary = "Get integration",
+    params(ProjectPath, ("id" = IntegrationId, Path)),
+    responses((status = OK, description = "Integration", body = IntegrationResponse), WebError)
+)]
 pub async fn get_integration(
     ProjectScope {
         project,
@@ -337,6 +378,17 @@ pub async fn get_integration(
     ))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/projects/{project}/integrations/{id}",
+    operation_id = "patchProjectIntegration",
+    tag = "integrations",
+    summary = "Update integration",
+    description = "Patch-updates an integration. Omit a field to leave it unchanged.\nPass an empty string for `secret` or `access_token` to **clear** it.\n\n`git_host_type=github` rows are managed by the App and installation; PATCH\nrejects them with `400`. Delete the row to remove the integration.\nState-managed integrations are rejected with `403`.",
+    params(ProjectPath, ("id" = IntegrationId, Path)),
+    request_body = PatchIntegrationRequest,
+    responses((status = OK, description = "Updated integration", body = IntegrationResponse), WebError)
+)]
 pub async fn patch_integration(
     ProjectScope {
         project, params, ..
@@ -429,6 +481,16 @@ pub async fn patch_integration(
     Ok(ok_json(integration_response(&state.web_db, updated).await?))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/projects/{project}/integrations/{id}",
+    operation_id = "deleteProjectIntegration",
+    tag = "integrations",
+    summary = "Delete integration",
+    description = "Deletes an integration. Any task `task_integration` rows referencing it are cleared via `ON DELETE SET NULL`. `git_host_type=github` rows can be deleted; deleting removes the installation binding for that account. State-managed integrations are rejected with `403`, other integrations of a state-managed project can be deleted.",
+    params(ProjectPath, ("id" = IntegrationId, Path)),
+    responses((status = OK, description = "Deleted", body = bool, content_type = "application/json"), WebError)
+)]
 pub async fn delete_integration(
     ProjectScope {
         project,

@@ -25,6 +25,7 @@ use crate::ids::{EvaluationId, ProjectId, TaskId, UserId};
     Serialize,
     IntoPrimitive,
     TryFromPrimitive,
+    utoipa::ToSchema,
 )]
 #[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
 #[serde(rename_all = "snake_case")]

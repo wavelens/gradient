@@ -6,16 +6,17 @@
 
 use super::DeletedResponse;
 use super::refusal::TaskRefusal;
+use crate::api_spec::TaskPath;
 use crate::audit::Audit;
-use crate::endpoints::webhooks::{DeliveryDetail, DeliveryListItem};
+use crate::endpoints::webhooks::{ActionDeliveryItem, DeliveryDetail, DeliveryListItem};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
 use crate::scope::{Member, Requires, TaskScope, can};
 use anyhow::Context;
+use axum::Json;
 use axum::extract::Query;
 use axum::extract::State;
-use axum::{Json, Router};
 use chrono::Utc;
 use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_action_secret;
@@ -31,29 +32,20 @@ use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
-pub fn router() -> Router<Arc<ServerState>> {
-    Router::new()
-        .route("/", axum::routing::get(list_actions).post(create_action))
-        .route(
-            "/{id}",
-            axum::routing::get(read_action)
-                .patch(update_action)
-                .delete(delete_action),
-        )
-        .route("/{id}/test", axum::routing::post(test_action))
-        .route(
-            "/{id}/regenerate-token",
-            axum::routing::post(regenerate_token),
-        )
-        .route("/{id}/deliveries", axum::routing::get(list_deliveries))
-        .route(
-            "/{id}/deliveries/{delivery_id}",
-            axum::routing::get(get_delivery),
-        )
+pub fn router() -> OpenApiRouter<Arc<ServerState>> {
+    OpenApiRouter::new()
+        .routes(routes!(list_actions, create_action))
+        .routes(routes!(read_action, update_action, delete_action))
+        .routes(routes!(test_action))
+        .routes(routes!(regenerate_token))
+        .routes(routes!(list_deliveries))
+        .routes(routes!(get_delivery))
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct ActionResponse {
     pub id: TaskActionId,
     pub name: String,
@@ -100,14 +92,14 @@ impl From<MTaskAction> for ActionResponse {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct CreateActionResponse {
     pub action: ActionResponse,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct CreateActionRequest {
     pub name: String,
     pub config: ActionConfig,
@@ -174,6 +166,15 @@ fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
     Ok(())
 }
 
+#[utoipa::path(
+    get,
+    path = "/",
+    operation_id = "listTaskActions",
+    tag = "actions",
+    summary = "List task actions",
+    params(TaskPath),
+    responses((status = OK, description = "List of actions", body = Vec<ActionResponse>), WebError)
+)]
 pub async fn list_actions(
     TaskScope { task: proj, db, .. }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<ActionResponse>>>> {
@@ -182,6 +183,16 @@ pub async fn list_actions(
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/",
+    operation_id = "createTaskAction",
+    tag = "actions",
+    summary = "Create task action",
+    params(TaskPath),
+    request_body = CreateActionRequest,
+    responses((status = OK, description = "Action created; token present only for send_web_request", body = CreateActionResponse), WebError)
+)]
 pub async fn create_action(
     TaskScope {
         project,
@@ -289,7 +300,7 @@ pub async fn create_action(
     }))
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct UpdateActionRequest {
     pub name: Option<String>,
     pub config: Option<ActionConfig>,
@@ -297,6 +308,15 @@ pub struct UpdateActionRequest {
     pub active: Option<bool>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/{id}",
+    operation_id = "getTaskAction",
+    tag = "actions",
+    summary = "Get task action",
+    params(TaskPath, ("id" = TaskActionId, Path)),
+    responses((status = OK, description = "Action (token stripped)", body = ActionResponse), WebError)
+)]
 pub async fn read_action(
     TaskScope {
         task: proj,
@@ -314,6 +334,16 @@ pub async fn read_action(
     Ok(ok_json(ActionResponse::from(row)))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/{id}",
+    operation_id = "updateTaskAction",
+    tag = "actions",
+    summary = "Update task action",
+    params(TaskPath, ("id" = TaskActionId, Path)),
+    request_body = UpdateActionRequest,
+    responses((status = OK, description = "Action updated", body = ActionResponse), WebError)
+)]
 pub async fn update_action(
     TaskScope {
         project,
@@ -426,6 +456,15 @@ async fn record_action_event(audit: &Audit, action: Action, project: ProjectId, 
     audit.write(action, owner, metadata).await;
 }
 
+#[utoipa::path(
+    delete,
+    path = "/{id}",
+    operation_id = "deleteTaskAction",
+    tag = "actions",
+    summary = "Delete task action",
+    params(TaskPath, ("id" = TaskActionId, Path)),
+    responses((status = OK, description = "Action deleted", body = DeletedResponse), WebError)
+)]
 pub async fn delete_action(
     TaskScope {
         project,
@@ -449,6 +488,16 @@ pub async fn delete_action(
     Ok(ok_json(DeletedResponse::deleted()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/{id}/test",
+    operation_id = "testTaskAction",
+    tag = "actions",
+    summary = "Fire action now (synthetic test)",
+    description = "Fires the action immediately with a synthetic test event, bypassing event matching. Git host integration actions (`git_host_status_report`, `open_pr`) instead perform a non-mutating connectivity check against the task's repository, since a synthetic status/PR posted against a placeholder commit is always rejected by the Git host.",
+    params(TaskPath, ("id" = TaskActionId, Path)),
+    responses((status = OK, description = "Action fired", body = serde_json::Value), WebError)
+)]
 pub async fn test_action(
     TaskScope {
         task: proj, params, ..
@@ -515,6 +564,16 @@ pub async fn test_action(
     Ok(ok_json(serde_json::Value::Null))
 }
 
+#[utoipa::path(
+    post,
+    path = "/{id}/regenerate-token",
+    operation_id = "regenerateActionToken",
+    tag = "actions",
+    summary = "Regenerate send_web_request token",
+    description = "Invalidates the current token and returns a new one in plaintext. Only valid for send_web_request actions.",
+    params(TaskPath, ("id" = TaskActionId, Path)),
+    responses((status = OK, description = "New token (one-time reveal)", body = serde_json::Value), WebError)
+)]
 pub async fn regenerate_token(
     TaskScope {
         task: proj, params, ..
@@ -557,12 +616,22 @@ pub async fn regenerate_token(
     Ok(ok_json(serde_json::json!({ "token": plaintext_token })))
 }
 
-#[derive(Deserialize, Debug)]
-pub struct DeliveryListQuery {
+#[derive(Deserialize, Debug, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ActionDeliveryListQuery {
     pub limit: Option<u64>,
     pub offset: Option<u64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/{id}/deliveries",
+    operation_id = "listActionDeliveries",
+    tag = "actions",
+    summary = "List action deliveries",
+    params(TaskPath, ("id" = TaskActionId, Path), ActionDeliveryListQuery),
+    responses((status = OK, description = "Paginated delivery list", body = Vec<ActionDeliveryItem>), WebError)
+)]
 pub async fn list_deliveries(
     TaskScope {
         task: proj,
@@ -570,7 +639,7 @@ pub async fn list_deliveries(
         params,
         ..
     }: TaskScope<Member>,
-    Query(q): Query<DeliveryListQuery>,
+    Query(q): Query<ActionDeliveryListQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem<TaskActionDeliveryId>>>>> {
     let id: TaskActionId = params.param("id")?;
 
@@ -586,6 +655,15 @@ pub async fn list_deliveries(
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/{id}/deliveries/{delivery_id}",
+    operation_id = "getActionDelivery",
+    tag = "actions",
+    summary = "Get action delivery detail",
+    params(TaskPath, ("id" = TaskActionId, Path), ("delivery_id" = TaskActionDeliveryId, Path)),
+    responses((status = OK, description = "Delivery with request/response bodies", body = DeliveryDetail<TaskActionDeliveryId>), WebError)
+)]
 pub async fn get_delivery(
     TaskScope {
         task: proj,

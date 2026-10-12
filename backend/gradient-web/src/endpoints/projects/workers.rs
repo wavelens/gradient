@@ -5,6 +5,7 @@
  */
 
 use crate::access::has_permission;
+use crate::api_spec::ProjectPath;
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::State;
@@ -37,7 +38,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct RegisterWorkerRequest {
     pub worker_id: String,
     pub url: Option<String>,
@@ -51,14 +52,14 @@ pub struct RegisterWorkerRequest {
     pub enable_build: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct RegisterWorkerResponse {
     pub peer_id: ProjectId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ProjectWorkerEntry {
     pub worker_id: String,
     pub display_name: String,
@@ -126,7 +127,7 @@ impl ProjectWorkerEntry {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct WorkerConnection {
     pub connected: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -144,7 +145,7 @@ pub(crate) fn worker_connection(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct PatchWorkerRequest {
     pub active: Option<bool>,
     pub display_name: Option<String>,
@@ -160,7 +161,7 @@ pub(crate) fn patch_edits_managed_fields(body: &PatchWorkerRequest) -> bool {
         || body.enable_build.is_some()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct WorkerLiveInfo {
     pub capabilities: GradientCapabilities,
     pub architectures: Vec<String>,
@@ -212,6 +213,17 @@ pub(crate) async fn reauth_project_workers(db: &WebDb, scheduler: &Scheduler, pr
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/projects/{project}/workers",
+    operation_id = "registerProjectWorker",
+    tag = "workers",
+    summary = "Register a worker under a project",
+    description = "Registers a worker ID under this project as a peer. Returns a one-time\nplaintext token that the worker operator must add to their worker config.\nThe token is shown only once - it cannot be retrieved later.",
+    params(ProjectPath),
+    request_body = RegisterWorkerRequest,
+    responses((status = OK, description = "Worker registered", body = RegisterWorkerResponse), WebError)
+)]
 pub async fn post_project_worker(
     ProjectScope { project, user, .. }: ProjectScope<Member>,
     state: State<Arc<ServerState>>,
@@ -301,6 +313,16 @@ pub(crate) fn live_workers(
     workers.into_iter().map(|w| (w.id.clone(), w)).collect()
 }
 
+#[utoipa::path(
+    get,
+    path = "/projects/{project}/workers",
+    operation_id = "listProjectWorkers",
+    tag = "workers",
+    summary = "List registered workers for a project",
+    description = "Returns all workers registered under this project (peer), merged with\nlive status from the scheduler for currently connected workers, plus the\nworkers of every team the project grants its workers (`team` set, read-only here).\nLive fields (`architectures`, `system_features`, etc.) are only populated\nfor build-capable workers that have sent `WorkerCapabilities`.",
+    params(ProjectPath),
+    responses((status = OK, description = "Worker list", body = Vec<ProjectWorkerEntry>), WebError)
+)]
 pub async fn get_project_workers(
     ProjectScope {
         project,
@@ -355,7 +377,7 @@ pub async fn get_project_workers(
     Ok(ok_json(entries))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct WorkerSamplePoint {
     pub at: NaiveDateTime,
     pub cpu_usage_pct: Option<f32>,
@@ -386,7 +408,7 @@ impl From<gradient_entity::worker_sample::Model> for WorkerSamplePoint {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct WorkerConnectionEntry {
     pub connected_at: NaiveDateTime,
     pub disconnected_at: Option<NaiveDateTime>,
@@ -401,7 +423,7 @@ impl From<gradient_entity::worker_connection::Model> for WorkerConnectionEntry {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct WorkerMetricsResponse {
     pub worker_id: String,
     pub display_name: String,
@@ -410,6 +432,16 @@ pub struct WorkerMetricsResponse {
     pub jobs_dispatched: u64,
 }
 
+#[utoipa::path(
+    get,
+    path = "/projects/{project}/workers/{worker_id}/metrics",
+    operation_id = "getProjectWorkerMetrics",
+    tag = "board",
+    summary = "Per-worker metrics",
+    description = "Live-metric sample time-series (CPU, RAM, disk, upload, download, load), connect/disconnect history, and total assigned-job count for one worker. Project members only, and only for a worker registered in the project or enabled for it as a base worker; the telemetry covers everything the worker did, not only this project's jobs.",
+    params(ProjectPath, ("worker_id" = String, Path)),
+    responses((status = OK, description = "Worker statistics", body = WorkerMetricsResponse), WebError)
+)]
 pub async fn get_project_worker_metrics(
     ProjectScope {
         project, params, ..
@@ -467,7 +499,7 @@ pub async fn get_project_worker_metrics(
     }))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct WorkerTestResponse {
     pub ok: bool,
     pub connected: bool,
@@ -488,6 +520,16 @@ fn worker_test_result(connected: bool, authorized_for_project: bool) -> (bool, S
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/projects/{project}/workers/{worker_id}/test",
+    operation_id = "testProjectWorker",
+    tag = "workers",
+    summary = "Test worker connectivity and authorization",
+    description = "Checks whether the worker is currently connected and whether it has\nsuccessfully authorized for the given project. Useful for\nverifying worker setup without waiting for a real job.",
+    params(ProjectPath, ("worker_id" = String, Path)),
+    responses((status = OK, description = "Test result", body = WorkerTestResponse), WebError)
+)]
 pub async fn post_project_worker_test(
     ProjectScope {
         project, params, ..
@@ -510,6 +552,17 @@ pub async fn post_project_worker_test(
     }))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/projects/{project}/workers/{worker_id}",
+    operation_id = "patchProjectWorker",
+    tag = "workers",
+    summary = "Activate or deactivate a worker registration",
+    description = "Sets the `active` flag on a worker registration. Deactivating a worker\ntriggers an immediate re-auth request, causing the worker to be disconnected\nif it is currently connected. Active jobs may be aborted.\nA state-managed worker accepts only `active` and answers `409` for other fields.\nThe next server start restores the declared value. A team worker answers `409`;\nit is changed on its team.",
+    params(ProjectPath, ("worker_id" = String, Path)),
+    request_body = PatchWorkerRequest,
+    responses((status = OK, description = "Worker updated", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn patch_project_worker(
     ProjectScope {
         project,
@@ -581,6 +634,16 @@ pub async fn patch_project_worker(
     Ok(ok_json(format!("worker '{}' updated", worker_id)))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/projects/{project}/workers/{worker_id}",
+    operation_id = "deleteProjectWorker",
+    tag = "workers",
+    summary = "Unregister a worker from a project",
+    description = "Removes the worker registration. The worker may still be connected until\nit disconnects naturally - it will not be able to reconnect after that.\nA team worker answers `409`; it is deleted on its team.",
+    params(ProjectPath, ("worker_id" = String, Path)),
+    responses((status = OK, description = "Worker unregistered", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_project_worker(
     ProjectScope {
         project,

@@ -5,6 +5,7 @@
  */
 
 use super::refusal::CacheRefusal;
+use crate::api_spec::CachePath;
 use crate::audit::{Audit, changed_fields};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
@@ -31,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct MakeCacheRequest {
     pub name: CacheName,
     pub display_name: CacheDisplayName,
@@ -46,7 +47,7 @@ pub struct MakeCacheRequest {
     pub pull_through: Option<bool>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct CacheResponse {
     pub id: CacheId,
     pub name: String,
@@ -87,7 +88,7 @@ impl CacheResponse {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct PatchCacheRequest {
     pub name: Option<CacheName>,
     pub display_name: Option<String>,
@@ -105,6 +106,16 @@ fn validate_max_storage_gb(value: i32) -> WebResult<()> {
     Ok(())
 }
 
+#[utoipa::path(
+    get,
+    path = "/caches/available",
+    operation_id = "checkCacheNameAvailable",
+    tag = "caches",
+    summary = "Check cache name availability",
+    description = "Returns `true` if no cache with the given name exists, `false` if it is already taken.",
+    params(("name" = String, Query)),
+    responses((status = OK, description = "Availability result", body = bool, content_type = "application/json"), WebError)
+)]
 pub async fn get_cache_name_available(
     state: State<Arc<ServerState>>,
     Query(params): Query<HashMap<String, String>>,
@@ -119,11 +130,23 @@ pub async fn get_cache_name_available(
     Ok(ok_json(!exists))
 }
 
+type PaginatedCache = Paginated<MCache>;
+
+#[utoipa::path(
+    get,
+    path = "/caches",
+    operation_id = "listCaches",
+    tag = "caches",
+    summary = "List caches",
+    description = "Returns a paginated list of binary caches the current user owns or can access through a project subscription.",
+    params(PaginationParams),
+    responses((status = OK, description = "Paginated cache list", body = PaginatedCache), WebError)
+)]
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Query(params): Query<PaginationParams>,
-) -> WebResult<Json<BaseResponse<Paginated<Vec<MCache>>>>> {
+) -> WebResult<Json<BaseResponse<Paginated<MCache>>>> {
     let condition = crate::access::visible_cache_condition(&state.web_db, user.id).await?;
     let listing = crate::helpers::paginate(
         gradient_db::caches::ordered_by_name(condition),
@@ -135,6 +158,16 @@ pub async fn get(
     Ok(ok_json(listing))
 }
 
+#[utoipa::path(
+    put,
+    path = "/caches",
+    operation_id = "createCache",
+    tag = "caches",
+    summary = "Create cache",
+    description = "Creates a new binary cache with an auto-generated signing key.",
+    request_body = MakeCacheRequest,
+    responses((status = OK, description = "Cache UUID", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn put(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -219,6 +252,15 @@ pub async fn put(
     Ok(ok_json(cache.id.to_string()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/caches/public",
+    operation_id = "listPublicCaches",
+    tag = "caches",
+    summary = "List public caches",
+    description = "Returns every public cache. Does not require authentication.",
+    responses((status = OK, description = "Public cache list", body = Vec<MCache>), WebError)
+)]
 pub async fn get_public_caches(
     state: State<Arc<ServerState>>,
 ) -> WebResult<Json<BaseResponse<Vec<MCache>>>> {
@@ -227,6 +269,16 @@ pub async fn get_public_caches(
     Ok(ok_json(caches))
 }
 
+#[utoipa::path(
+    get,
+    path = "/caches/{cache}",
+    operation_id = "getCache",
+    tag = "caches",
+    summary = "Get cache",
+    description = "Returns cache details. Public caches are visible to anyone. A private cache is visible to its cache members and to members of any project subscribed to it (matching the visibility of `GET /caches`); other callers receive `404`.",
+    params(CachePath),
+    responses((status = OK, description = "Cache details", body = CacheResponse), WebError)
+)]
 pub async fn get_cache(
     CacheScope {
         cache,
@@ -256,6 +308,17 @@ pub async fn get_cache(
     Ok(ok_json(CacheResponse::new(cache, public_key, can_edit)))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/caches/{cache}",
+    operation_id = "patchCache",
+    tag = "caches",
+    summary = "Update cache",
+    description = "Updates one or more cache fields. Requires `manageCacheSettings`. Managed caches cannot be edited via the API.",
+    params(CachePath),
+    request_body = PatchCacheRequest,
+    responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn patch_cache(
     CacheScope { cache, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
     state: State<Arc<ServerState>>,
@@ -344,6 +407,16 @@ pub async fn patch_cache(
     Ok(ok_json("Cache updated".to_string()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/caches/{cache}",
+    operation_id = "deleteCache",
+    tag = "caches",
+    summary = "Delete cache",
+    description = "Deletes the cache. Requires `deleteCache`. Managed caches cannot be deleted via the API.",
+    params(CachePath),
+    responses((status = OK, description = "Deleted", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_cache(
     CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::DeleteCache>>,
     audit: Audit,
@@ -366,6 +439,16 @@ pub async fn delete_cache(
     Ok(ok_json("Cache deleted".to_string()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/caches/{cache}/active",
+    operation_id = "enableCache",
+    tag = "caches",
+    summary = "Enable cache",
+    description = "Also allowed on a state-managed cache. The next server start restores the declared `active` value.",
+    params(CachePath),
+    responses((status = OK, description = "Enabled", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_cache_active(
     CacheScope { cache, db, .. }: CacheScope<Requires<can::ManageCacheSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -374,6 +457,16 @@ pub async fn post_cache_active(
     Ok(ok_json("Cache enabled".to_string()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/caches/{cache}/active",
+    operation_id = "disableCache",
+    tag = "caches",
+    summary = "Disable cache",
+    description = "Also allowed on a state-managed cache. The next server start restores the declared `active` value.",
+    params(CachePath),
+    responses((status = OK, description = "Disabled", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_cache_active(
     CacheScope { cache, db, .. }: CacheScope<Requires<can::ManageCacheSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -382,6 +475,16 @@ pub async fn delete_cache_active(
     Ok(ok_json("Cache disabled".to_string()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/caches/{cache}/public",
+    operation_id = "makeCachePublic",
+    tag = "caches",
+    summary = "Make cache public",
+    description = "Makes the cache readable without authentication, by the API and by Nix clients.",
+    params(CachePath),
+    responses((status = OK, description = "Cache is now public", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_cache_public(
     CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -390,6 +493,16 @@ pub async fn post_cache_public(
     Ok(ok_json("Cache is now public".to_string()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/caches/{cache}/public",
+    operation_id = "makeCachePrivate",
+    tag = "caches",
+    summary = "Make cache private",
+    description = "Requires credentials to read the cache, by the API and by Nix clients.",
+    params(CachePath),
+    responses((status = OK, description = "Cache is now private", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_cache_public(
     CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {

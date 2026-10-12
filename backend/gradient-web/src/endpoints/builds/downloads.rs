@@ -5,6 +5,7 @@
  */
 
 use super::refusal::BuildReadRefusal;
+use crate::api_spec::Binary;
 use crate::authorization::{MaybeApiKey, MaybeUser, decode_download_token, encode_download_token};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -153,7 +154,7 @@ async fn product_response(
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct BuildProduct {
     pub file_type: String,
     pub subtype: String,
@@ -174,11 +175,22 @@ impl From<MBuildProduct> for BuildProduct {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct DownloadQuery {
     token: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/builds/{build}/downloads",
+    operation_id = "getBuildDownloads",
+    tag = "builds",
+    summary = "List build artefacts",
+    description = "Returns downloadable artefacts declared in the build's\n`nix-support/hydra-build-products` file. Each entry has a file type,\nfilename, Nix store path, and file size in bytes.\n\nAccessible without authentication when the owning project is public.\n\n**Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.",
+    params(("build" = BuildJobId, Path)),
+    responses((status = OK, description = "Build artefacts", body = Vec<BuildProduct>), WebError)
+)]
 pub async fn get_build_downloads(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -197,6 +209,16 @@ pub async fn get_build_downloads(
     Ok(ok_json(products))
 }
 
+#[utoipa::path(
+    get,
+    path = "/builds/{build}/download-token",
+    operation_id = "getBuildDownloadToken",
+    tag = "builds",
+    summary = "Generate a short-lived download token",
+    description = "Returns a signed JWT that is valid for **1 hour** and grants access to all\nartefact downloads for the specified build. Pass it as `?token=<value>` on\n`GET /builds/{build}/download/{filename}` to share a link without exposing\nlong-lived credentials.\n\nRequires the caller to be a member of the project that owns the build.",
+    params(("build" = BuildJobId, Path)),
+    responses((status = OK, description = "Download token", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn get_build_download_token(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -232,6 +254,16 @@ async fn load_with_download_token(
     Ok(ctx)
 }
 
+#[utoipa::path(
+    get,
+    path = "/builds/{build}/download/{filename}",
+    operation_id = "downloadBuildArtefact",
+    tag = "builds",
+    summary = "Download build artefact",
+    description = "Streams a build artefact. When the build product is a regular file the\nresponse carries the file's contents and a `Content-Type` derived from\nthe extension. When the build product points to a directory inside the\noutput, the response is a zstd-compressed tar archive of the subtree;\n`Content-Type` is `application/zstd` and `Content-Disposition`'s\n`filename` ends in `.tar.zst`. Clients should rely on the\n`Content-Disposition` header for the suggested filename in either case.\n\nAccess is granted when **any** of the following is satisfied:\n1. The owning project is public - no credentials required.\n2. `?token=<download_token>` - a short-lived per-build token from\n   `GET /builds/{build}/download-token` (1 h validity, safe to embed in URLs).\n3. `jwt_token` cookie or `Authorization: Bearer` header and the caller is a\n   member of the owning project, or of any project with a build of the\n   same derivation.",
+    params(("build" = BuildJobId, Path), ("filename" = String, Path), DownloadQuery),
+    responses((status = OK, description = "File contents (regular file) or zstd-compressed tar archive (directory).", content((Binary = "application/octet-stream"), (Binary = "application/zstd"))), WebError)
+)]
 pub async fn get_build_download(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

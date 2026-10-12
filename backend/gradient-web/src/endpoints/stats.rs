@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::api_spec::CachePath;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::scope::{CacheScope, Readable};
@@ -18,21 +19,21 @@ use gradient_util::telemetry::metric;
 use serde::Serialize;
 use std::sync::Arc;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct CacheMetricPoint {
     pub time: String,
     pub bytes: i64,
     pub requests: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct StorageMetricPoint {
     pub time: String,
     pub packages: i64,
     pub bytes: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct CacheStatsResponse {
     pub total_bytes: i64,
     pub total_nar_bytes: i64,
@@ -104,6 +105,16 @@ async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
         .collect())
 }
 
+#[utoipa::path(
+    get,
+    path = "/caches/{cache}/stats",
+    operation_id = "getCacheStats",
+    tag = "caches",
+    summary = "Get cache statistics",
+    description = "Returns bandwidth and hit statistics for the cache. Visible to anyone for public caches, and to cache members or members of any project subscribed to a private cache (matching `GET /caches/{cache}`); other callers receive `404`.",
+    params(CachePath),
+    responses((status = OK, description = "Cache statistics", body = CacheStatsResponse), WebError)
+)]
 pub async fn get_cache_stats(
     CacheScope { cache, .. }: CacheScope<Readable>,
     state: State<Arc<ServerState>>,

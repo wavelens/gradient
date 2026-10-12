@@ -7,7 +7,7 @@
 mod analysis;
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -30,7 +30,7 @@ const FAILURES_SHOWN: usize = 100;
 const BLOCKED_SHOWN: usize = 20;
 const FIXED_SHOWN: usize = 100;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct EvaluationFailureSummary {
     pub compared_with: Option<ComparedEvaluation>,
     pub packages: PackageCounts,
@@ -41,17 +41,18 @@ pub struct EvaluationFailureSummary {
     pub fixed_total: usize,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct ComparedEvaluation {
     pub id: EvaluationId,
     pub commit: String,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct FailedBuildSummary {
     pub build_id: BuildJobId,
     pub name: String,
     pub derivation_path: String,
+    #[schema(value_type = String)]
     pub architecture: gradient_entity::server::Architecture,
     pub status: BuildStatus,
     pub attributes: Vec<String>,
@@ -60,7 +61,7 @@ pub struct FailedBuildSummary {
     pub newly_failing: bool,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct FailedAttributeReport {
     pub attr: String,
     pub message: String,
@@ -83,6 +84,16 @@ struct LoadedEvaluation {
     failed_attributes: Vec<FailedAttribute>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/evals/{evaluation}/summary",
+    operation_id = "getEvaluationSummary",
+    tag = "evals",
+    summary = "Summarise what went wrong in an evaluation",
+    description = "Returns the builds that failed themselves, each with the packages it\nblocks, the attributes that failed to evaluate, and the packages fixed\nsince the previous evaluation. A build that only failed because a\ndependency failed is not listed; it is counted under the build that\ncaused it.\n\n`newly_failing` and `fixed` compare against the evaluation in\n`compared_with`. Without a previous evaluation `compared_with` is\n`null`, every `newly_failing` is `false` and `fixed` is empty.",
+    params(("evaluation" = EvaluationId, Path)),
+    responses((status = OK, description = "Failure summary of the evaluation.", body = EvaluationFailureSummary), WebError)
+)]
 pub async fn get_evaluation_summary(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

@@ -13,7 +13,7 @@ use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::client_ip::ClientIp;
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use gradient_core::ServerState;
 use gradient_wire::session::frame::SAFE_INFLIGHT_MESSAGE_SIZE;
 use gradient_wire::{PerIpLimiter, ProtoLimiter};
@@ -21,6 +21,16 @@ use gradient_wire::{PerIpLimiter, ProtoLimiter};
 #[allow(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
+)]
+#[utoipa::path(
+    get,
+    path = "/cache/{cache}/proto",
+    operation_id = "cacheProtoWebSocket",
+    tag = "nix-cache",
+    summary = "Cache proto WebSocket",
+    description = "Read-only, cache-scoped WebSocket with the `/proto` wire format. Accepts only `CacheQuery` (Normal and Pull) and `NarRequest`. Public caches allow anonymous sessions (`GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE`), capped per IP by `GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP`; private caches need `Authorization: Bearer GRAD<key>`.",
+    params(("cache" = String, Path)),
+    responses((status = SWITCHING_PROTOCOLS, description = "Switching Protocols - WebSocket upgrade successful"), WebError)
 )]
 pub async fn cache_proto(
     State(state): State<Arc<ServerState>>,

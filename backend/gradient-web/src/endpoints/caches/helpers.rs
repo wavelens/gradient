@@ -302,7 +302,8 @@ pub(super) fn cache_client_ip(
     resolve_client_ip(headers, peer_ip, &config.network.trusted_proxies)
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct JsonFlag {
     pub json: Option<String>,
 }

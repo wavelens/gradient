@@ -9,7 +9,7 @@ use gradient_types::consts::INVITATION_VALIDITY_DAYS;
 use gradient_types::ids::UserId;
 use serde::Serialize;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum InviteKind {
     Project,
@@ -47,7 +47,7 @@ pub fn invitation_expiry(now: NaiveDateTime) -> NaiveDateTime {
     now + Duration::days(INVITATION_VALIDITY_DAYS)
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct InviteItem {
     pub kind: InviteKind,
     pub token: String,

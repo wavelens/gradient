@@ -2521,6 +2521,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "utoipa",
  "uuid",
  "wiremock",
 ]
@@ -2590,6 +2591,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+ "utoipa",
  "uuid",
  "webpki-roots",
  "wiremock",
@@ -2655,6 +2657,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "utoipa",
  "uuid",
 ]
 
@@ -2824,6 +2827,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "utoipa",
 ]
 
 [[package]]
@@ -2860,6 +2864,8 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.30.0",
  "tracing",
+ "utoipa",
+ "utoipa-axum",
  "uuid",
 ]
 
@@ -2913,6 +2919,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "utoipa",
  "uuid",
  "wiremock",
 ]
@@ -3275,6 +3282,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.30.0",
  "tracing",
+ "utoipa",
  "uuid",
 ]
 

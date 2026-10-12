@@ -11,6 +11,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use utoipa::openapi::{RefOr, Schema};
+use utoipa::{PartialSchema, ToSchema};
 
 pub trait NameKind {
     const RESOURCE: Resource;
@@ -164,6 +166,14 @@ macro_rules! checked_name {
                 f.write_str(&self.0)
             }
         }
+
+        impl<K: NameKind> PartialSchema for $type<K> {
+            fn schema() -> RefOr<Schema> {
+                String::schema()
+            }
+        }
+
+        impl<K: NameKind> ToSchema for $type<K> {}
 
         impl<K: NameKind> Serialize for $type<K> {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

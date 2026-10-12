@@ -7,7 +7,9 @@
 use crate::codec::Proto;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
-#[derive(Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Default)]
+#[derive(
+    Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Default, utoipa::ToSchema,
+)]
 pub struct GradientCapabilities {
     pub core: bool,
     pub federate: bool,

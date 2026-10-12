@@ -6,20 +6,20 @@
 
 mod admit;
 pub mod build_log;
-mod debuginfo;
+pub(crate) mod debuginfo;
 mod helpers;
-mod keys;
-mod management;
-mod nar;
-mod narinfo;
-mod narlist;
-mod nars;
-mod proto;
+pub(crate) mod keys;
+pub(crate) mod management;
+pub(crate) mod nar;
+pub(crate) mod narinfo;
+pub(crate) mod narlist;
+pub(crate) mod nars;
+pub(crate) mod proto;
 mod refusal;
-mod serve;
+pub(crate) mod serve;
 pub mod subscriptions;
-mod upload;
-mod upstream_caches;
+pub(crate) mod upload;
+pub(crate) mod upstream_caches;
 
 pub use self::build_log::log;
 pub use self::debuginfo::debuginfo;
@@ -38,7 +38,7 @@ pub use self::nars::{
 };
 pub use self::proto::cache_proto;
 pub use self::serve::serve;
-pub use self::upload::{nar_chunk, nar_finalize, nars_upload};
+pub use self::upload::{NarUploadForm, nar_chunk, nar_finalize, nars_upload};
 pub use self::upstream_caches::{
     delete_cache_upstream, get_upstream_caches, patch_cache_upstream, post_cache_upstream_test,
     put_cache_upstream,

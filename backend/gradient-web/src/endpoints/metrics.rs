@@ -238,7 +238,7 @@ fn gather_http() -> String {
     encode_text(&HTTP_METRICS.registry)
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct HttpRouteStat {
     pub method: String,
     pub route: String,
@@ -316,7 +316,7 @@ pub(crate) fn http_snapshot() -> Vec<HttpRouteStat> {
     out
 }
 
-#[derive(serde::Serialize, Default)]
+#[derive(serde::Serialize, Default, utoipa::ToSchema)]
 pub struct ProcessStat {
     pub resident_memory_bytes: f64,
     pub virtual_memory_bytes: f64,
@@ -529,6 +529,15 @@ pub async fn metrics_auth(
     next.run(request).await
 }
 
+#[utoipa::path(
+    get,
+    path = "/metrics",
+    operation_id = "getMetrics",
+    tag = "general",
+    summary = "Prometheus metrics",
+    description = "Prometheus exposition endpoint. Disabled (404) until an operator\nconfigures `GRADIENT_METRICS_TOKEN_FILE`. Requires a Bearer token\nmatching the contents of that file. Returns the standard Prometheus\ntext format (version 0.0.4) with build, evaluation, scheduler, and\ncache metrics.",
+    responses((status = OK, description = "Prometheus exposition (text/plain; version=0.0.4)", body = String, content_type = "text/plain"), (status = 401, description = "Missing or invalid bearer token"), (status = 404, description = "Metrics endpoint not configured on this server"))
+)]
 pub async fn get_metrics(
     State(state): State<Arc<ServerState>>,
     axum::Extension(scheduler): axum::Extension<Arc<Scheduler>>,

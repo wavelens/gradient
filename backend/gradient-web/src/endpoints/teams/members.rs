@@ -5,6 +5,7 @@
  */
 
 use super::refusal::TeamRefusal;
+use crate::api_spec::TeamPath;
 use crate::audit::Audit;
 use crate::endpoints::membership::find_user_by_username;
 use crate::error::{WebError, WebResult};
@@ -25,7 +26,7 @@ use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct TeamMemberItem {
     pub user: String,
     pub name: String,
@@ -44,13 +45,13 @@ impl TeamMemberItem {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct TeamMemberRequest {
     pub user: String,
     pub role: TeamRole,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct RemoveTeamMemberRequest {
     pub user: String,
 }
@@ -85,6 +86,15 @@ async fn ensure_not_last_admin(
     Ok(())
 }
 
+#[utoipa::path(
+    get,
+    path = "/teams/{team}/members",
+    operation_id = "listTeamMembers",
+    tag = "teams",
+    summary = "List team members",
+    params(TeamPath),
+    responses((status = OK, description = "OK", body = Vec<TeamMemberItem>), WebError)
+)]
 pub async fn get_team_members(
     TeamScope { team, db, .. }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamMemberItem>>>> {
@@ -99,6 +109,17 @@ pub async fn get_team_members(
     ))
 }
 
+#[utoipa::path(
+    post,
+    path = "/teams/{team}/members",
+    operation_id = "addTeamMember",
+    tag = "teams",
+    summary = "Invite team member",
+    description = "Needs Admin in the team. The user joins after accepting the invitation (`Invitation sent`); a superuser adds the member directly (`User added`).",
+    params(TeamPath),
+    request_body = TeamMemberRequest,
+    responses((status = OK, description = "Invitation sent, or member added when the caller is a superuser", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_team_members(
     TeamScope { team, user, .. }: TeamScope<Admin>,
     state: State<Arc<ServerState>>,
@@ -191,6 +212,17 @@ pub async fn post_team_members(
     Ok(ok_json("Invitation sent".to_string()))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/teams/{team}/members",
+    operation_id = "patchTeamMember",
+    tag = "teams",
+    summary = "Change team member role",
+    description = "Needs Admin in the team.",
+    params(TeamPath),
+    request_body = TeamMemberRequest,
+    responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn patch_team_members(
     TeamScope { team, db, .. }: TeamScope<Admin>,
     audit: Audit,
@@ -224,6 +256,17 @@ pub async fn patch_team_members(
     Ok(ok_json("User role updated".to_string()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/teams/{team}/members",
+    operation_id = "removeTeamMember",
+    tag = "teams",
+    summary = "Remove team member",
+    description = "Needs Admin in the team.",
+    params(TeamPath),
+    request_body = RemoveTeamMemberRequest,
+    responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_team_members(
     TeamScope { team, db, .. }: TeamScope<Admin>,
     audit: Audit,

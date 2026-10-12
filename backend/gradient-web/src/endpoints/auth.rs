@@ -108,7 +108,7 @@ impl Refusal for AuthRefusal {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct MakeLoginRequest {
     pub loginname: String,
     pub password: String,
@@ -116,7 +116,7 @@ pub struct MakeLoginRequest {
     pub remember_me: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct MakeUserRequest {
     pub username: String,
     pub name: UserDisplayName,
@@ -124,11 +124,21 @@ pub struct MakeUserRequest {
     pub password: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct CheckUsernameRequest {
     pub username: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/basic/register",
+    operation_id = "registerUser",
+    tag = "auth",
+    summary = "Register a new user",
+    description = "Creates a new user account. Fails if registration is disabled (OIDC-only mode)\nor if the username/email is already taken. When email verification is enabled,\na verification email is sent and login is blocked until the address is confirmed.",
+    request_body = MakeUserRequest,
+    responses((status = OK, description = "User created", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_basic_register(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -255,6 +265,16 @@ pub async fn post_basic_register(
     Ok(Json(res))
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/basic/login",
+    operation_id = "loginUser",
+    tag = "auth",
+    summary = "Login with username/password",
+    description = "Validates credentials and returns a signed JWT. Pass the token as\n`Authorization: Bearer <token>` on subsequent requests.\n`loginname` accepts either the username or the email address.\nSet `remember_me: true` for a long-lived token.",
+    request_body = MakeLoginRequest,
+    responses((status = OK, description = "JWT token", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_basic_login(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -377,6 +397,16 @@ fn oidc_failure(stage: &'static str) -> impl FnOnce(anyhow::Error) -> WebError {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/auth/oauth/authorize",
+    operation_id = "oauthAuthorizeGet",
+    tag = "auth",
+    summary = "OAuth2 callback (GET)",
+    description = "Handles the authorization code returned by the OAuth2/OIDC provider. Verifies the\n`state` parameter against the `oidc_csrf` cookie set by `POST /auth/oauth/authorize`,\nexchanges the code for tokens, verifies the ID token signature against the provider's\nJWKS, and binds the session to the user identified by `(iss, sub)`.",
+    params(("code" = String, Query), ("state" = String, Query)),
+    responses((status = OK, description = "JWT token", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn get_oauth_authorize(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -431,6 +461,15 @@ pub async fn get_oauth_authorize(
     Ok(response)
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/oauth/authorize",
+    operation_id = "oauthAuthorizePost",
+    tag = "auth",
+    summary = "Get OAuth2 authorization URL",
+    description = "Returns the authorization URL to redirect the user to for OIDC login and sets a\nshort-lived `oidc_csrf` cookie carrying the signed `state` and `nonce` values that\nmust be presented on the callback. Requires OIDC to be enabled.",
+    responses((status = OK, description = "Authorization URL", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_oauth_authorize(state: State<Arc<ServerState>>) -> WebResult<Response> {
     if state.config.oidc.is_none() {
         return Err(WebError::oauth_disabled());
@@ -454,6 +493,15 @@ pub async fn post_oauth_authorize(state: State<Arc<ServerState>>) -> WebResult<R
     Ok(response)
 }
 
+#[utoipa::path(
+    get,
+    path = "/auth/oidc/login",
+    operation_id = "oidcLogin",
+    tag = "auth",
+    summary = "OIDC login redirect",
+    description = "Redirects the browser to the OIDC provider's authorization endpoint (HTTP 302) using\nPKCE (S256), and sets a short-lived `oidc_csrf` cookie carrying the signed `state`,\n`nonce`, and PKCE verifier that must be returned on the callback.",
+    responses((status = FOUND, description = "Redirect to OIDC provider"), WebError)
+)]
 pub async fn get_oidc_login(
     state: State<Arc<ServerState>>,
     Query(_query): Query<HashMap<String, String>>,
@@ -479,6 +527,16 @@ pub async fn get_oidc_login(
         .map_err(Into::into)
 }
 
+#[utoipa::path(
+    get,
+    path = "/auth/oidc/callback",
+    operation_id = "oidcCallback",
+    tag = "auth",
+    summary = "OIDC callback",
+    description = "Handles the OIDC provider redirect. Verifies the `state` parameter against the\n`oidc_csrf` cookie, exchanges the authorization code for tokens, verifies the ID\ntoken signature using the provider's JWKS (validating `iss`, `aud`, `exp`, and\n`nonce`), and binds the session to the user identified by `(iss, sub)`. Sets the\n`jwt_token` session cookie and clears `oidc_csrf`.",
+    params(("code" = String, Query), ("state" = String, Query)),
+    responses((status = FOUND, description = "Redirect to frontend with session cookie set"), WebError)
+)]
 pub async fn get_oidc_callback(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -529,6 +587,15 @@ pub async fn get_oidc_callback(
         .map_err(Into::into)
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/logout",
+    operation_id = "logout",
+    tag = "auth",
+    summary = "Logout",
+    description = "Invalidates the current session (no-op for stateless JWTs; present for API completeness).",
+    responses((status = OK, description = "Logged out", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_logout(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -587,6 +654,16 @@ fn jwt_cookie(token: &str, remember_me: bool, use_tls: bool) -> String {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/check-username",
+    operation_id = "checkUsername",
+    tag = "auth",
+    summary = "Check username availability",
+    description = "Returns `error: false` if the username is valid and not taken, `error: true` otherwise (non-2xx status is not used - always inspect the `error` field).",
+    request_body = CheckUsernameRequest,
+    responses((status = OK, description = "Availability result", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_check_username(
     state: State<Arc<ServerState>>,
     Json(body): Json<CheckUsernameRequest>,
@@ -615,6 +692,16 @@ pub struct VerifyEmailRequest {
     pub token: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/auth/verify-email",
+    operation_id = "verifyEmail",
+    tag = "auth",
+    summary = "Verify email address",
+    description = "Consumes the one-time token sent in the verification email. Only available when `email_verification_enabled` is true.",
+    params(("token" = String, Query)),
+    responses((status = OK, description = "Email verified", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn get_verify_email(
     state: State<Arc<ServerState>>,
     Query(query): Query<HashMap<String, String>>,
@@ -651,6 +738,16 @@ pub async fn get_verify_email(
     Ok(ok_json("Email verified successfully".to_string()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/resend-verification",
+    operation_id = "resendVerification",
+    tag = "auth",
+    summary = "Resend verification email",
+    description = "Issues a fresh verification token and sends a new email. Only available when email verification is enabled.",
+    request_body = CheckUsernameRequest,
+    responses((status = OK, description = "Email sent", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_resend_verification(
     state: State<Arc<ServerState>>,
     Json(body): Json<CheckUsernameRequest>,
@@ -735,7 +832,7 @@ fn hash_device_code(raw: &str) -> String {
     hex::encode(h.finalize())
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct CliDeviceStartResponse {
     pub device_code: String,
     pub user_code: String,
@@ -745,22 +842,23 @@ pub struct CliDeviceStartResponse {
     pub interval: u64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct CliDevicePollRequest {
     pub device_code: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct CliDeviceAuthorizeRequest {
     pub user_code: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct CliDeviceUserCodeQuery {
     pub user_code: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct CliDeviceInfoResponse {
     pub user_code: String,
     pub expires_at: chrono::NaiveDateTime,
@@ -779,6 +877,15 @@ impl From<MCliDeviceAuthorization> for CliDeviceInfoResponse {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/cli/start",
+    operation_id = "cliDeviceStart",
+    tag = "auth",
+    summary = "Start a CLI device-authorization flow",
+    description = "Mints a `device_code` (returned once, opaque to the server thereafter) and a short,\nhuman-friendly `user_code` that the CLI shows in the terminal and the user confirms\nin the browser at `verification_uri_complete`. The CLI polls `/auth/cli/poll` until\nthe browser-side flow completes.",
+    responses((status = OK, description = "Device flow started", body = CliDeviceStartResponse), WebError)
+)]
 pub async fn post_cli_device_start(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -835,6 +942,16 @@ pub async fn post_cli_device_start(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/cli/poll",
+    operation_id = "cliDevicePoll",
+    tag = "auth",
+    summary = "Poll a pending CLI device authorization",
+    description = "Exchanges a `device_code` for a session token once the browser-side flow has been\napproved. Returns `cli_auth_pending` while the user hasn't yet clicked Authorize,\n`cli_auth_denied` if they explicitly denied, and `cli_auth_expired` once the device\ncode lifetime elapses.",
+    request_body = CliDevicePollRequest,
+    responses((status = OK, description = "Authorized - session token returned", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_cli_device_poll(
     state: State<Arc<ServerState>>,
     Json(body): Json<CliDevicePollRequest>,
@@ -887,6 +1004,16 @@ async fn refusal_for_settled_code(db: &WebDb, user_code: &str) -> WebError {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/auth/cli/info",
+    operation_id = "cliDeviceInfo",
+    tag = "auth",
+    summary = "Look up a pending CLI device authorization",
+    description = "Returns metadata about a pending `user_code` so the browser-side UI can confirm what is being authorized.",
+    params(CliDeviceUserCodeQuery),
+    responses((status = OK, description = "Device info", body = CliDeviceInfoResponse), WebError)
+)]
 pub async fn get_cli_device_info(
     state: State<Arc<ServerState>>,
     Query(query): Query<CliDeviceUserCodeQuery>,
@@ -895,6 +1022,16 @@ pub async fn get_cli_device_info(
     Ok(ok_json(CliDeviceInfoResponse::from(row)))
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/cli/authorize",
+    operation_id = "cliDeviceAuthorize",
+    tag = "auth",
+    summary = "Authorize a pending CLI device session",
+    description = "Marks the device authorization identified by `user_code` as approved, minting a JWT\nsession token (remember_me=true, 30-day lifetime) bound to the calling user. The\ntoken is returned to the CLI on its next `/auth/cli/poll` request.",
+    request_body = CliDeviceAuthorizeRequest,
+    responses((status = OK, description = "Authorized", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_cli_device_authorize(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -933,6 +1070,15 @@ pub async fn post_cli_device_authorize(
     Ok(ok_json("Device authorized".to_string()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/cli/deny",
+    operation_id = "cliDeviceDeny",
+    tag = "auth",
+    summary = "Deny a pending CLI device session",
+    request_body = CliDeviceAuthorizeRequest,
+    responses((status = OK, description = "Denied", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_cli_device_deny(
     state: State<Arc<ServerState>>,
     audit: Audit,

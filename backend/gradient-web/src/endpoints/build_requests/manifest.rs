@@ -8,7 +8,7 @@ use super::refusal::BuildRequestRefusal;
 use super::types::ManifestEntry;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use anyhow::Context;
@@ -24,18 +24,28 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct ManifestRequest {
     pub project: String,
     pub files: Vec<ManifestEntry>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct ManifestResponse {
     pub session: UploadSessionId,
     pub missing: Vec<String>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/build-requests/manifest",
+    operation_id = "postBuildRequestManifest",
+    tag = "build-requests",
+    summary = "Submit a build-request file manifest",
+    description = "Step 1 of the `gradient build` flow. Posts the list of git-tracked files\nin the working tree, each addressed by BLAKE3 content hash. The server\nreturns an `UploadSession` plus the subset of hashes it does not yet\nhave on disk; the client uploads those via `POST\n/build-requests/{session}/blobs` and then finalises with `POST\n/build-requests/{session}/dispatch`.\n\nThe combined `size` of all files must not exceed `MAX_BUILD_REQUEST_SIZE`\n(20 MiB). Paths must be relative, free of `.`/`..` components, free of\nnull bytes, and unique within the manifest.",
+    request_body = ManifestRequest,
+    responses((status = OK, description = "Session created", body = ManifestResponse), WebError)
+)]
 pub async fn post_manifest(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

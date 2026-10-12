@@ -35,7 +35,7 @@ pub async fn paginate<'db, C, P>(
     query: P,
     db: &'db C,
     params: &PaginationParams,
-) -> WebResult<Paginated<Vec<<P::Selector as SelectorTrait>::Item>>>
+) -> WebResult<Paginated<<P::Selector as SelectorTrait>::Item>>
 where
     C: ConnectionTrait,
     P: PaginatorTrait<'db, C>,

@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{CommitId, UserId};
 
-#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(
+    Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize, utoipa::ToSchema,
+)]
+#[schema(as = Commit)]
 #[sea_orm(table_name = "commit")]
 pub struct Model {
     #[sea_orm(primary_key)]

@@ -5,7 +5,7 @@
 
 use super::helpers::{CacheContext, cache_client_ip, fetch_nar_stream};
 use crate::client_ip::OptionalPeer;
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use anyhow::Context;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -22,13 +22,13 @@ use std::sync::Arc;
 
 type DirFrame = (Option<String>, BTreeMap<String, Box<FileTree>>);
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct NarList {
     version: u16,
     root: FileTree,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum FileTree {
     Regular {
@@ -42,10 +42,21 @@ pub enum FileTree {
         target: String,
     },
     Directory {
+        #[schema(no_recursion)]
         entries: BTreeMap<String, Box<FileTree>>,
     },
 }
 
+#[utoipa::path(
+    get,
+    path = "/cache/{cache}/ls/{hash}",
+    operation_id = "getNarListing",
+    tag = "nix-cache",
+    summary = "NAR listing",
+    description = "File tree of a NAR in the nix-serve `.ls` v1 schema.",
+    params(("cache" = String, Path), ("hash" = String, Path)),
+    responses((status = OK, description = "NAR listing", body = NarList), WebError)
+)]
 pub async fn ls(
     state: State<Arc<ServerState>>,
     OptionalPeer(peer): OptionalPeer,

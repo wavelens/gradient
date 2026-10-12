@@ -5,8 +5,9 @@
 
 use super::helpers::delete_nar_from_cache;
 use super::refusal::CacheRefusal;
+use crate::api_spec::CachePath;
 use crate::audit::Audit;
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
 use crate::scope::{CacheScope, Readable, Requires, can};
@@ -26,8 +27,9 @@ use std::sync::Arc;
 
 // axum's urlencoded query decoder cannot deserialize integer fields through a flattened struct.
 // Pagination is a dedicated `Query<PaginationParams>` extractor for this reason.
-#[derive(Debug, Deserialize, Default)]
-pub struct ListQuery {
+#[derive(Debug, Deserialize, Default, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct NarListQuery {
     pub hash: Option<String>,
     pub package: Option<String>,
     #[serde(default)]
@@ -36,7 +38,7 @@ pub struct ListQuery {
     pub order: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct NarDetail {
     pub hash: String,
     pub store_path: String,
@@ -75,7 +77,7 @@ impl NarDetail {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct NarStats {
     pub total_nars: i64,
     pub total_nar_size: i64,
@@ -96,7 +98,7 @@ impl From<CacheTotals> for NarStats {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct NarAvailable {
     pub available: bool,
 }
@@ -104,11 +106,23 @@ pub struct NarAvailable {
 const DEFAULT_PER_PAGE: u64 = 50;
 const MAX_PER_PAGE: u64 = 200;
 
+type PaginatedNarSummary = Paginated<NarSummary>;
+
+#[utoipa::path(
+    get,
+    path = "/caches/{cache}/nars",
+    operation_id = "listCacheNars",
+    tag = "caches",
+    summary = "List cached NARs",
+    description = "Returns a paginated list of NARs (cached store paths) currently signed by this cache.\nPublic caches allow anonymous access; otherwise requires `readStore`.",
+    params(CachePath, NarListQuery, PaginationParams),
+    responses((status = OK, description = "Paginated NAR list", body = PaginatedNarSummary), WebError)
+)]
 pub async fn list(
     CacheScope { cache, db, .. }: CacheScope<Readable>,
-    Query(q): Query<ListQuery>,
+    Query(q): Query<NarListQuery>,
     Query(pagination): Query<PaginationParams>,
-) -> WebResult<Json<BaseResponse<Paginated<Vec<NarSummary>>>>> {
+) -> WebResult<Json<BaseResponse<Paginated<NarSummary>>>> {
     let per_page = pagination
         .per_page
         .unwrap_or(DEFAULT_PER_PAGE)
@@ -142,6 +156,16 @@ pub async fn list(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/caches/{cache}/nars/{hash}",
+    operation_id = "getCacheNar",
+    tag = "caches",
+    summary = "Get NAR detail",
+    description = "Returns full metadata for a NAR signed by this cache, including references,\nderiver, content-addressed flag, fetch count, and signature presence.\nPublic caches allow anonymous access; otherwise requires `readStore`.",
+    params(CachePath, ("hash" = String, Path)),
+    responses((status = OK, description = "NAR detail", body = NarDetail), WebError)
+)]
 pub async fn show(
     CacheScope {
         cache, db, params, ..
@@ -160,6 +184,16 @@ pub async fn show(
     Ok(ok_json(NarDetail::new(cp, sig, references)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/caches/{cache}/nars/stats",
+    operation_id = "getCacheNarStats",
+    tag = "caches",
+    summary = "NAR aggregate statistics",
+    description = "Returns aggregate counts and sizes for all NARs signed by this cache.\nPublic caches allow anonymous access; otherwise requires `readStore`.",
+    params(CachePath),
+    responses((status = OK, description = "NAR aggregates", body = NarStats), WebError)
+)]
 pub async fn stats(
     CacheScope { cache, db, .. }: CacheScope<Readable>,
 ) -> WebResult<Json<BaseResponse<NarStats>>> {
@@ -170,6 +204,16 @@ pub async fn stats(
     Ok(ok_json(NarStats::from(row)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/caches/{cache}/nars/available",
+    operation_id = "getCacheNarAvailable",
+    tag = "caches",
+    summary = "Check whether a NAR is available",
+    description = "Returns `{ available: true }` when this cache currently holds a signature\nrow for the given store-path hash. Cheaper than a `GET /nars/{hash}` round-trip\nfor clients that only need a yes/no answer.",
+    params(CachePath, ("hash" = String, Query)),
+    responses((status = OK, description = "Availability flag", body = NarAvailable), WebError)
+)]
 pub async fn available(
     CacheScope { cache, db, .. }: CacheScope<Readable>,
     Query(q): Query<std::collections::HashMap<String, String>>,
@@ -189,6 +233,16 @@ pub async fn available(
     Ok(ok_json(NarAvailable { available: exists }))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/caches/{cache}/nars/{hash}",
+    operation_id = "deleteCacheNar",
+    tag = "caches",
+    summary = "Delete a NAR from this cache",
+    description = "Removes this cache's signature row for the given store-path hash. The delete\nis ref-counted: when other caches still hold the same NAR, only this cache's\nsignature is dropped. When this is the last cache holding the NAR, the\n`cached_path` row is removed in the same transaction, any matching\n`derivation_output.is_cached` rows are flipped to `false`, and the NAR\nblob is garbage-collected asynchronously after the response. Requires\n`writeStore`. Allowed on state-managed caches - NAR content is operational\ndata, distinct from cache configuration.",
+    params(CachePath, ("hash" = String, Path)),
+    responses((status = NO_CONTENT, description = "NAR removed from this cache"), WebError)
+)]
 pub async fn delete(
     CacheScope { cache, params, .. }: CacheScope<Requires<can::WriteStore>>,
     state: State<Arc<ServerState>>,

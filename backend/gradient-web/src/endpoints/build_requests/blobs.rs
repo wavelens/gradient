@@ -6,6 +6,7 @@
 
 use super::refusal::BuildRequestRefusal;
 use crate::access::has_permission;
+use crate::api_spec::Binary;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, is_unique_violation};
 use crate::helpers::ok_json;
@@ -27,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct BlobsResponse {
     pub uploaded: usize,
     pub remaining: usize,
@@ -39,6 +40,17 @@ struct VerifiedBlob {
     data: Vec<u8>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/build-requests/{session}/blobs",
+    operation_id = "postBuildRequestBlobs",
+    tag = "build-requests",
+    summary = "Upload missing blobs for an upload session",
+    description = "Step 2. Sends one or more blobs as multipart parts. Each part's\n**field name** is the 64-character lowercase hex BLAKE3 hash, and the\npart body is the raw file bytes. The server verifies each blob's hash,\nrejects any hash that isn't in the session's `missing` set, persists\naccepted blobs under `nar_storage`, and removes them from `missing`.\n\nThe route's body limit is `MAX_BUILD_REQUEST_SIZE` (20 MiB).",
+    params(("session" = UploadSessionId, Path)),
+    request_body(content = std::collections::BTreeMap<String, Binary>, content_type = "multipart/form-data"),
+    responses((status = OK, description = "Blobs accepted", body = BlobsResponse), WebError)
+)]
 pub async fn post_blobs(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

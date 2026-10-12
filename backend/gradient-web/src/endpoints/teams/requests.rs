@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::api_spec::TeamPath;
 use crate::audit::Audit;
 use crate::endpoints::teams::grants::grant_workers;
 use crate::error::{WebError, WebResult};
@@ -24,7 +25,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct TeamProjectGrant {
     pub project: String,
     pub display_name: String,
@@ -45,7 +46,7 @@ impl TeamProjectGrant {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct TeamCacheGrant {
     pub cache: String,
     pub display_name: String,
@@ -62,20 +63,20 @@ impl TeamCacheGrant {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct TeamGrants {
     pub projects: Vec<TeamProjectGrant>,
     pub caches: Vec<TeamCacheGrant>,
 }
 
-#[derive(Serialize, Clone, Copy)]
+#[derive(Serialize, Clone, Copy, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RequestKind {
     Project,
     Cache,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct TeamRequestItem {
     pub id: Uuid,
     pub kind: RequestKind,
@@ -136,6 +137,16 @@ async fn cache_role_names(db: &WebDb, ids: Vec<RoleId>) -> WebResult<HashMap<Rol
         .collect())
 }
 
+#[utoipa::path(
+    get,
+    path = "/teams/{team}/grants",
+    operation_id = "listTeamGrants",
+    tag = "teams",
+    summary = "List team grants",
+    description = "Projects and caches that grant the team.",
+    params(TeamPath),
+    responses((status = OK, description = "OK", body = TeamGrants), WebError)
+)]
 pub async fn get_team_grants(
     TeamScope { team, db, .. }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<TeamGrants>>> {
@@ -190,6 +201,16 @@ pub async fn get_team_grants(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/teams/{team}/requests",
+    operation_id = "listTeamRequests",
+    tag = "teams",
+    summary = "List grant requests",
+    description = "Needs Admin in the team. Newest first.",
+    params(TeamPath),
+    responses((status = OK, description = "OK", body = Vec<TeamRequestItem>), WebError)
+)]
 pub async fn get_team_requests(
     TeamScope { team, db, .. }: TeamScope<Admin>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamRequestItem>>>> {
@@ -257,6 +278,16 @@ pub async fn get_team_requests(
     Ok(ok_json(items))
 }
 
+#[utoipa::path(
+    post,
+    path = "/teams/{team}/requests/{request_id}",
+    operation_id = "approveTeamRequest",
+    tag = "teams",
+    summary = "Approve grant request",
+    description = "Needs Admin in the team. The grant becomes active.",
+    params(TeamPath, ("request_id" = Uuid, Path)),
+    responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_approve_team_request(
     TeamScope {
         team, db, params, ..
@@ -340,6 +371,16 @@ pub async fn post_approve_team_request(
     Ok(ok_json("Request approved".to_string()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/teams/{team}/requests/{request_id}",
+    operation_id = "denyTeamRequest",
+    tag = "teams",
+    summary = "Deny grant request",
+    description = "Needs Admin in the team.",
+    params(TeamPath, ("request_id" = Uuid, Path)),
+    responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_team_request(
     TeamScope {
         team, db, params, ..

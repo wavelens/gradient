@@ -6,6 +6,7 @@
 
 use super::helpers::{CacheContext, cache_client_ip};
 use super::refusal::CacheRefusal;
+use crate::api_spec::Binary;
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::resource::Resource;
@@ -28,6 +29,16 @@ use sea_orm::ConnectionTrait;
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[utoipa::path(
+    get,
+    path = "/cache/{cache}/nar/{path}",
+    operation_id = "getNar",
+    tag = "nix-cache",
+    summary = "NAR",
+    description = "Compressed NAR archive of a store path.",
+    params(("cache" = String, Path), ("path" = String, Path)),
+    responses((status = OK, description = "NAR stream", body = Binary, content_type = "application/x-nix-nar"), WebError)
+)]
 pub async fn nar(
     state: State<Arc<ServerState>>,
     OptionalPeer(peer): OptionalPeer,
@@ -84,6 +95,16 @@ pub async fn nar(
         .map_err(Into::into)
 }
 
+#[utoipa::path(
+    get,
+    path = "/cache/{cache}/nar/upstream/{upstream_id}/{path}",
+    operation_id = "getUpstreamNar",
+    tag = "nix-cache",
+    summary = "Upstream NAR",
+    description = "Streams a NAR from an upstream of the cache. Any upstream serving the same path is tried when the named one is gone.",
+    params(("cache" = String, Path), ("upstream_id" = Uuid, Path), ("path" = String, Path)),
+    responses((status = OK, description = "NAR stream", body = Binary, content_type = "application/x-nix-nar"), WebError)
+)]
 pub async fn upstream_nar(
     state: State<Arc<ServerState>>,
     OptionalPeer(peer): OptionalPeer,

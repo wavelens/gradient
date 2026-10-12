@@ -23,7 +23,7 @@ use gradient_types::*;
 use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct RoleResponse<F> {
     pub id: RoleId,
     pub name: String,
@@ -34,19 +34,19 @@ pub struct RoleResponse<F> {
     pub permissions: Vec<&'static str>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct RoleListResponse<F> {
     pub roles: Vec<RoleResponse<F>>,
     pub available_permissions: Vec<PermissionEntry>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct CreateRoleRequest {
     pub name: RoleName,
     pub permissions: Vec<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct PatchRoleRequest {
     pub name: Option<RoleName>,
     pub permissions: Option<Vec<String>>,

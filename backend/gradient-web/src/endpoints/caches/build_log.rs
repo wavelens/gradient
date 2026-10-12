@@ -22,6 +22,16 @@ use std::sync::Arc;
 
 /// A pull-through cache is substituting paths it never built (#547). The upstream caches are asked
 /// for the log when this cache does not hold it.
+#[utoipa::path(
+    get,
+    path = "/cache/{cache}/log/{drv}",
+    operation_id = "getCacheBuildLog",
+    tag = "nix-cache",
+    summary = "Build log",
+    description = "Build log read by `nix log`. Serves this cache's own log, otherwise the first upstream hit. `X-Cache` reports `HIT` or `MISS`.",
+    params(("cache" = String, Path), ("drv" = String, Path)),
+    responses((status = OK, description = "Build log", body = String, content_type = "text/plain"), WebError)
+)]
 pub async fn log(
     state: State<Arc<ServerState>>,
     OptionalPeer(peer): OptionalPeer,

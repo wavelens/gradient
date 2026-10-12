@@ -6,6 +6,7 @@
 
 use super::refusal::ProjectRefusal;
 use crate::access::{CacheAccess, Caller, cache_admin_emails, has_cache_permission, load_cache};
+use crate::api_spec::ProjectPath;
 use crate::endpoints::projects::workers::reauth_project_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -29,19 +30,19 @@ use std::sync::Arc;
 
 const SIGNATURE_INSERT_CHUNK: usize = 1_000;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct SubscribeCacheRequest {
     pub mode: Option<CacheSubscriptionMode>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum SubscriptionStatus {
     Active,
     Pending,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct CacheSubscriptionItem {
     pub id: CacheId,
     pub name: String,
@@ -49,6 +50,16 @@ pub struct CacheSubscriptionItem {
     pub status: SubscriptionStatus,
 }
 
+#[utoipa::path(
+    post,
+    path = "/projects/{project}/public",
+    operation_id = "makeProjectPublic",
+    tag = "projects",
+    summary = "Make project public",
+    description = "Makes the project, its tasks, evaluations and builds readable without authentication. Requires the manage-project-settings permission; rejects state-managed projects.",
+    params(ProjectPath),
+    responses((status = OK, description = "Project is now public", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_project_public(
     ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -57,6 +68,16 @@ pub async fn post_project_public(
     Ok(ok_json("Project is now public".to_string()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/projects/{project}/public",
+    operation_id = "makeProjectPrivate",
+    tag = "projects",
+    summary = "Make project private",
+    description = "Restricts the project to its members. Requires the manage-project-settings permission; rejects state-managed projects.",
+    params(ProjectPath),
+    responses((status = OK, description = "Project is now private", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_project_public(
     ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -65,6 +86,16 @@ pub async fn delete_project_public(
     Ok(ok_json("Project is now private".to_string()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/projects/{project}/subscribe",
+    operation_id = "listProjectSubscriptions",
+    tag = "projects",
+    summary = "List cache subscriptions",
+    description = "Returns the binary caches this project currently uses as substituters.",
+    params(ProjectPath),
+    responses((status = OK, description = "Subscribed caches", body = Vec<CacheSubscriptionItem>), WebError)
+)]
 pub async fn get_project_subscribe(
     ProjectScope { project, db, .. }: ProjectScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<CacheSubscriptionItem>>>> {
@@ -110,6 +141,17 @@ pub async fn get_project_subscribe(
     Ok(ok_json(subscribed))
 }
 
+#[utoipa::path(
+    post,
+    path = "/projects/{project}/subscribe/{cache}",
+    operation_id = "subscribeProjectToCache",
+    tag = "projects",
+    summary = "Subscribe to cache, or request a subscription",
+    description = "Requires `manageSubscriptions` on the project, and the cache must be\nvisible to the caller.\n\nWhen the caller also holds `manageCacheSubscriptions` on the cache, or is\na superuser, the cache is added to the project's substituters\nimmediately. Otherwise a **subscription request** is recorded instead and\nthe response message is `Subscription requested`; a cache admin then\napproves it through\n`POST /caches/{cache}/subscription-requests/{project}`.",
+    params(ProjectPath, ("cache" = String, Path)),
+    request_body = Option<SubscribeCacheRequest>,
+    responses((status = OK, description = "Subscribed, or subscription requested", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_project_subscribe_cache(
     ProjectScope {
         project,
@@ -326,6 +368,16 @@ async fn enqueue_backfill_signatures(db: &WebDb, project_id: ProjectId, cache_id
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/projects/{project}/subscribe/{cache}",
+    operation_id = "unsubscribeProjectFromCache",
+    tag = "projects",
+    summary = "Unsubscribe from cache, or cancel a pending request",
+    description = "Removes a binary cache from the project's substituters. When no\nsubscription exists but a request is still pending, the request is\ncancelled instead. Requires `manageSubscriptions` on the project.",
+    params(ProjectPath, ("cache" = String, Path)),
+    responses((status = OK, description = "Unsubscribed, or subscription request cancelled", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_project_subscribe_cache(
     ProjectScope {
         project,

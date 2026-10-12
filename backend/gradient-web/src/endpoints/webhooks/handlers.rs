@@ -5,9 +5,13 @@
  */
 
 use super::refusal::WebhookRefusal;
-use super::responses::{CreateWebhookResponse, DeliveryDetail, DeliveryListItem, WebhookResponse};
+use super::responses::{
+    CreateWebhookResponse, DeliveryDetail, DeliveryListItem, RotatedSecret, WebhookDeliveryItem,
+    WebhookResponse,
+};
 use super::scope::{Verb, WebhookOwner};
 use crate::audit::Audit;
+use crate::endpoints::tasks::DeletedResponse;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
@@ -30,7 +34,7 @@ use std::sync::Arc;
 
 type ApiState = State<Arc<ServerState>>;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct CreateWebhookRequest {
     pub name: String,
     pub url: String,
@@ -40,7 +44,7 @@ pub struct CreateWebhookRequest {
     pub active: bool,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct UpdateWebhookRequest {
     pub name: Option<String>,
     pub url: Option<String>,
@@ -48,8 +52,9 @@ pub struct UpdateWebhookRequest {
     pub active: Option<bool>,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct DeliveryListQuery {
+#[derive(Deserialize, Debug, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct WebhookDeliveryListQuery {
     pub limit: Option<u64>,
     pub offset: Option<u64>,
 }
@@ -88,6 +93,15 @@ async fn owned_webhook(db: &WebDb, owner: &WebhookOwner) -> WebResult<MWebhook> 
         .or_not_found(Resource::Webhook)
 }
 
+#[utoipa::path(
+    get,
+    path = "/",
+    operation_id = "list{Owner}Webhooks",
+    tag = "webhooks",
+    summary = "List {owner} webhooks",
+    description = "Requires {requires}.",
+    responses((status = OK, description = "Webhooks", body = Vec<WebhookResponse>), WebError)
+)]
 pub async fn list_webhooks(
     State(state): ApiState,
     owner: WebhookOwner,
@@ -96,6 +110,16 @@ pub async fn list_webhooks(
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/",
+    operation_id = "create{Owner}Webhook",
+    tag = "webhooks",
+    summary = "Create a {owner} webhook",
+    description = "Requires {requires}. The response carries the signing `secret` once; it is\nnever returned again (use `rotate-secret` to replace it).",
+    request_body = CreateWebhookRequest,
+    responses((status = OK, description = "Created webhook and its secret", body = CreateWebhookResponse), WebError)
+)]
 pub async fn create_webhook(
     State(state): ApiState,
     audit: Audit,
@@ -146,6 +170,15 @@ pub async fn create_webhook(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/{id}",
+    operation_id = "read{Owner}Webhook",
+    tag = "webhooks",
+    summary = "Read a {owner} webhook",
+    params(("id" = WebhookId, Path)),
+    responses((status = OK, description = "Webhook", body = WebhookResponse), WebError)
+)]
 pub async fn read_webhook(
     State(state): ApiState,
     owner: WebhookOwner,
@@ -155,6 +188,16 @@ pub async fn read_webhook(
     )))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/{id}",
+    operation_id = "update{Owner}Webhook",
+    tag = "webhooks",
+    summary = "Update a {owner} webhook",
+    params(("id" = WebhookId, Path)),
+    request_body = UpdateWebhookRequest,
+    responses((status = OK, description = "Updated webhook", body = WebhookResponse), WebError)
+)]
 pub async fn update_webhook(
     State(state): ApiState,
     audit: Audit,
@@ -207,11 +250,20 @@ pub async fn update_webhook(
     Ok(ok_json(WebhookResponse::from(row)))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/{id}",
+    operation_id = "delete{Owner}Webhook",
+    tag = "webhooks",
+    summary = "Delete a {owner} webhook",
+    params(("id" = WebhookId, Path)),
+    responses((status = OK, description = "Deleted", body = DeletedResponse), WebError)
+)]
 pub async fn delete_webhook(
     State(state): ApiState,
     audit: Audit,
     owner: WebhookOwner,
-) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
+) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
     let row = owned_webhook(&state.web_db, &owner).await?;
     let (id, name) = (row.id, row.name.clone());
     gradient_db::webhooks::delete(&state.web_db, row).await?;
@@ -222,14 +274,23 @@ pub async fn delete_webhook(
             json!({ "webhook_id": id, "name": name }),
         )
         .await;
-    Ok(ok_json(json!({ "deleted": true })))
+    Ok(ok_json(DeletedResponse::deleted()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/{id}/rotate-secret",
+    operation_id = "rotate{Owner}WebhookSecret",
+    tag = "webhooks",
+    summary = "Replace a {owner} webhook's signing secret",
+    params(("id" = WebhookId, Path)),
+    responses((status = OK, description = "The new secret, shown once", body = RotatedSecret), WebError)
+)]
 pub async fn rotate_secret(
     State(state): ApiState,
     audit: Audit,
     owner: WebhookOwner,
-) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
+) -> WebResult<Json<BaseResponse<RotatedSecret>>> {
     let row = owned_webhook(&state.web_db, &owner).await?;
     let (secret, encrypted) = new_secret(&state.config)?;
     let id = row.id;
@@ -244,9 +305,19 @@ pub async fn rotate_secret(
             json!({ "webhook_id": id, "rotated": true }),
         )
         .await;
-    Ok(ok_json(json!({ "secret": secret })))
+    Ok(ok_json(RotatedSecret { secret }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/{id}/test",
+    operation_id = "test{Owner}Webhook",
+    tag = "webhooks",
+    summary = "Send a `webhook.ping` to a {owner} webhook",
+    description = "Delivers immediately (no retry) and returns the recorded delivery.",
+    params(("id" = WebhookId, Path)),
+    responses((status = OK, description = "Recorded delivery", body = DeliveryListItem<WebhookDeliveryId>), WebError)
+)]
 pub async fn test_webhook(
     State(state): ApiState,
     owner: WebhookOwner,
@@ -264,10 +335,19 @@ pub async fn test_webhook(
     Ok(ok_json(DeliveryListItem::from(delivery)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/{id}/deliveries",
+    operation_id = "list{Owner}WebhookDeliveries",
+    tag = "webhooks",
+    summary = "List a {owner} webhook's deliveries",
+    params(WebhookDeliveryListQuery, ("id" = WebhookId, Path)),
+    responses((status = OK, description = "Deliveries, newest first", body = Vec<WebhookDeliveryItem>), WebError)
+)]
 pub async fn list_deliveries(
     State(state): ApiState,
     owner: WebhookOwner,
-    Query(q): Query<DeliveryListQuery>,
+    Query(q): Query<WebhookDeliveryListQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem<WebhookDeliveryId>>>>> {
     let hook = owned_webhook(&state.web_db, &owner).await?;
     let rows = gradient_db::webhooks::deliveries_of(
@@ -280,6 +360,15 @@ pub async fn list_deliveries(
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/{id}/deliveries/{delivery_id}",
+    operation_id = "get{Owner}WebhookDelivery",
+    tag = "webhooks",
+    summary = "Read one {owner} webhook delivery with bodies",
+    params(("id" = WebhookId, Path), ("delivery_id" = WebhookDeliveryId, Path)),
+    responses((status = OK, description = "Delivery", body = DeliveryDetail<WebhookDeliveryId>), WebError)
+)]
 pub async fn get_delivery(
     State(state): ApiState,
     owner: WebhookOwner,

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use anyhow::Context;
 use axum::http::StatusCode;
@@ -17,12 +17,21 @@ use serde::Serialize;
 use std::sync::Arc;
 use tracing::info;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct StartDeepGcResponse {
     pub task_id: AdminTaskId,
     pub status: &'static str,
 }
 
+#[utoipa::path(
+    post,
+    path = "/maintenance/deep-gc",
+    operation_id = "startDeepGc",
+    tag = "admin",
+    summary = "Request a deep GC round",
+    description = "Requests a reconciliation between the database and every storage\nbackend (NAR files, build-request blobs, build logs, upload partials),\nrun without pausing between units. Returns `202` immediately with the\ntask id; poll `GET /admin/tasks/{task_id}` for progress and final state.\n\nWhen a `deep_gc` round is already `pending` or `running`, that round\nstarts over from its first unit and its id is returned.\n\nRequires `superuser`.",
+    responses((status = ACCEPTED, description = "Round requested", body = StartDeepGcResponse), WebError)
+)]
 pub async fn start_deep_gc(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

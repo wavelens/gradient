@@ -5,7 +5,7 @@
  */
 
 use super::live::live_stream;
-use crate::error::{WebResult, require_superuser};
+use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use axum::extract::ws::{WebSocketUpgrade, rejection::WebSocketUpgradeRejection};
 use axum::extract::{Query, State};
@@ -17,12 +17,23 @@ use gradient_types::{BaseResponse, MUser};
 use serde::Deserialize;
 use std::sync::Arc;
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug, Default, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct FirehoseQuery {
     pub events: Option<String>,
 }
 
 /// The upgrade is checked after the caller. A non-superuser is getting 403 rather than 426.
+#[utoipa::path(
+    get,
+    path = "/metrics/events",
+    operation_id = "getEventsFirehose",
+    tag = "board",
+    summary = "Stream every event (websocket, debug only)",
+    description = "Should not be used for production! Best-effort, in-process, per server\ninstance, drops on lag. Use webhooks.\n\nUpgrades to a websocket that sends one `EventEnvelope` JSON object per\ntext frame. A subscriber that falls behind receives\n`{\"event\":\"stream.lagged\",\"content\":{\"skipped\":N}}` and keeps streaming.\nSuperuser only.",
+    params(FirehoseQuery),
+    responses((status = SWITCHING_PROTOCOLS, description = "Switching to websocket; every frame is an `EventEnvelope`."), WebError)
+)]
 pub async fn firehose_ws(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -60,6 +71,15 @@ fn lag_frame(skipped: u64) -> Option<String> {
     )
 }
 
+#[utoipa::path(
+    get,
+    path = "/events/catalog",
+    operation_id = "getEventsCatalog",
+    tag = "board",
+    summary = "List every event name",
+    description = "Every event Gradient emits. `durable` events are delivered to webhooks and\ntask actions; the others only reach `/metrics/events`. Names ending in\n`*` are families (`proto.client.*`).",
+    responses((status = OK, description = "Event catalog", body = Vec<CatalogEntry>), WebError)
+)]
 pub async fn get_catalog(
     Extension(_user): Extension<MUser>,
 ) -> Json<BaseResponse<Vec<CatalogEntry>>> {

@@ -9,7 +9,7 @@ use chrono::NaiveDateTime;
 use sea_orm::{ConnectionTrait, DbErr, QueryResult};
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct WorkerNet {
     pub worker_id: Option<String>,
     pub worker_name: Option<String>,

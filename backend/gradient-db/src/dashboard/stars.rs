@@ -16,13 +16,13 @@ pub enum StarKind {
     Cache,
 }
 
-#[derive(Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Default, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
 pub struct StarredTask {
     pub project: String,
     pub task: String,
 }
 
-#[derive(Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Default, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
 pub struct StarredNames {
     pub projects: Vec<String>,
     pub tasks: Vec<StarredTask>,

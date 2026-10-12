@@ -39,13 +39,13 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::fs;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, utoipa::ToSchema)]
 pub struct InputOverrideBody {
     pub input_name: String,
     pub url: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, utoipa::ToSchema)]
 pub struct DispatchRequest {
     #[serde(default)]
     pub target: Option<String>,
@@ -55,7 +55,7 @@ pub struct DispatchRequest {
     pub input_overrides: Vec<InputOverrideBody>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct DispatchResponse {
     pub evaluation: EvaluationId,
     pub task: TaskId,
@@ -63,6 +63,17 @@ pub struct DispatchResponse {
     pub cache: Option<String>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/build-requests/{session}/dispatch",
+    operation_id = "postBuildRequestDispatch",
+    tag = "build-requests",
+    summary = "Finalise an upload session and queue an evaluation",
+    description = "Step 3. After all `missing` blobs have been uploaded, the client posts\nhere to materialise `/nix/store/<hash>-source` from the staged files,\nsign it with the project's cache key, lazily create the per-project reserved\n`build-request` task on first use, and queue a new evaluation\ntargeting the supplied `target` attribute path (or the task's\nwildcard when omitted).",
+    params(("session" = UploadSessionId, Path)),
+    request_body = DispatchRequest,
+    responses((status = OK, description = "Evaluation queued", body = DispatchResponse), WebError)
+)]
 pub async fn post_dispatch(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

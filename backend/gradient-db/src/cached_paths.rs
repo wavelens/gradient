@@ -257,7 +257,7 @@ impl NarOrder {
     }
 }
 
-#[derive(Debug, Serialize, FromQueryResult)]
+#[derive(Debug, Serialize, FromQueryResult, utoipa::ToSchema)]
 pub struct NarSummary {
     pub hash: String,
     pub store_path: String,

@@ -34,7 +34,7 @@ use gradient_types::triggers::ConcurrencyPolicy;
 use gradient_types::{EvaluationProgress, MTask, TaskTriggerId, TriggerType};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct TaskResponse {
     pub id: TaskId,
     pub project: ProjectId,
@@ -92,7 +92,7 @@ impl TaskResponse {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct EntryPointSummary {
     pub id: EntryPointId,
     pub build_id: BuildJobId,
@@ -101,6 +101,7 @@ pub struct EntryPointSummary {
     pub build_status: gradient_entity::build::BuildStatus,
     pub has_artefacts: bool,
     pub outputs: std::collections::BTreeMap<String, String>,
+    #[schema(value_type = String)]
     pub architecture: gradient_entity::server::Architecture,
     pub build_time_ms: Option<i64>,
     pub build_started_at: Option<chrono::NaiveDateTime>,
@@ -111,7 +112,7 @@ pub struct EntryPointSummary {
     pub created_at: chrono::NaiveDateTime,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, utoipa::ToSchema)]
 pub struct FailedAttributeSummary {
     pub eval: String,
     pub message: String,
@@ -126,14 +127,14 @@ impl From<FailedAttribute> for FailedAttributeSummary {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, utoipa::ToSchema)]
 pub struct PaginatedEntryPoints {
     pub entry_points: Vec<EntryPointSummary>,
     pub total: u64,
     pub failed_attributes: Vec<FailedAttributeSummary>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct EvaluationTriggerSummary {
     pub id: TaskTriggerId,
     #[serde(rename = "type")]
@@ -157,7 +158,7 @@ impl DeletedResponse {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct EvaluationSummary {
     pub id: EvaluationId,
     pub commit: String,
@@ -183,7 +184,7 @@ pub struct EvaluationSummary {
     pub expected_thunks: Option<u64>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct TaskDetailsResponse {
     pub id: TaskId,
     pub name: String,
@@ -259,7 +260,7 @@ pub fn bar_segment(status: BuildStatus) -> Option<BarSegment> {
     })
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, utoipa::ToSchema)]
 pub struct BuildStatusCounts {
     pub completed: i64,
     pub failed: i64,
@@ -287,7 +288,7 @@ impl BuildStatusCounts {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, utoipa::ToSchema)]
 pub struct QueueSummary {
     pub building: i64,
     pub queued: i64,

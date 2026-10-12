@@ -10,7 +10,7 @@ use gradient_entity::build::BuildStatus;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BuildProgress {
     pub phase: BuildProgressPhase,
     pub bytes_done: u64,
@@ -19,7 +19,7 @@ pub struct BuildProgress {
     pub paths_total: Option<u32>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BuildProgressPhase {
     Download,

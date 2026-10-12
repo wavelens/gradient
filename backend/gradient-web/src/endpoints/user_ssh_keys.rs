@@ -39,7 +39,7 @@ impl Refusal for SshKeyRefusal {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct SshKeyInfo {
     pub id: UserSshKeyId,
     pub name: String,
@@ -60,7 +60,7 @@ impl From<MUserSshKey> for SshKeyInfo {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct CreateSshKeyRequest {
     pub name: String,
     pub public_key: String,
@@ -79,6 +79,15 @@ fn require_ssh(config: &RuntimeConfig) -> WebResult<()> {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/user/ssh-keys",
+    operation_id = "getUserSshKeys",
+    tag = "user",
+    summary = "List SSH keys",
+    description = "Returns the SSH public keys of the authenticated user. Each key may log in\nto the Nix daemon over SSH (`ssh-ng://<project>@<host>`). `404` when SSH is disabled.",
+    responses((status = OK, description = "List of SSH keys", body = Vec<SshKeyInfo>), WebError)
+)]
 pub async fn get_ssh_keys(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -89,6 +98,16 @@ pub async fn get_ssh_keys(
     Ok(ok_json(keys.into_iter().map(SshKeyInfo::from).collect()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/user/ssh-keys",
+    operation_id = "createUserSshKey",
+    tag = "user",
+    summary = "Add SSH key",
+    description = "Adds an OpenSSH public key. A key can belong to one user only.",
+    request_body = CreateSshKeyRequest,
+    responses((status = OK, description = "Key added", body = SshKeyInfo), WebError)
+)]
 pub async fn post_ssh_key(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -133,6 +152,15 @@ pub async fn post_ssh_key(
     Ok(ok_json(inserted.into()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/user/ssh-keys/{ssh_key_id}",
+    operation_id = "deleteUserSshKey",
+    tag = "user",
+    summary = "Delete SSH key",
+    params(("ssh_key_id" = UserSshKeyId, Path)),
+    responses((status = OK, description = "Key deleted", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_ssh_key(
     state: State<Arc<ServerState>>,
     audit: Audit,

@@ -8,7 +8,7 @@ use crate::authorization::MaybeUser;
 use crate::endpoints::metrics::{
     HttpRouteStat, Observations, ProcessStat, collect, http_snapshot, process_snapshot,
 };
-use crate::error::{WebResult, require_superuser};
+use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
 use axum::extract::{Query, State};
@@ -23,7 +23,8 @@ use sea_orm::ConnectionTrait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct WindowParams {
     pub window_hours: Option<i64>,
 }
@@ -32,7 +33,7 @@ fn window_clause(p: &WindowParams) -> i64 {
     p.window_hours.unwrap_or(24).clamp(1, 24 * 90)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct SeriesPoint {
     pub bucket_start: String,
     pub count: i64,
@@ -59,7 +60,7 @@ async fn infra_series(
     Ok(rows.into_iter().map(SeriesPoint::from).collect())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct CacheTotals {
     pub bytes: i64,
     pub nar_bytes: i64,
@@ -80,14 +81,14 @@ impl From<&Observations> for CacheTotals {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct BoardCacheStats {
     pub totals: CacheTotals,
     pub traffic: Vec<SeriesPoint>,
     pub storage: Vec<SeriesPoint>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct BoardUpstreamCache {
     pub upstream_id: String,
     pub display_name: String,
@@ -99,11 +100,21 @@ pub struct BoardUpstreamCache {
     pub hit_rate_series: Vec<SeriesPoint>,
 }
 
-#[derive(Serialize, Default)]
+#[derive(Serialize, Default, utoipa::ToSchema)]
 pub struct BoardUpstreamCacheStats {
     pub upstream_caches: Vec<BoardUpstreamCache>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/cache",
+    operation_id = "getBoardCache",
+    tag = "board",
+    summary = "Cache statistics",
+    description = "Cache totals plus hourly traffic and storage-growth series, aggregated across caches (anonymized infra view).",
+    params(WindowParams),
+    responses((status = OK, description = "Cache statistics", body = BoardCacheStats), WebError)
+)]
 pub async fn get_board_cache(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
@@ -136,6 +147,16 @@ fn upstream_host(url: &str) -> String {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/cache/upstream-caches",
+    operation_id = "getBoardUpstreamCaches",
+    tag = "board",
+    summary = "Per-URL cache latency and narinfo hit-rate",
+    description = "Per-upstream-URL trailing latency, narinfo hit-rate, and request counts with hourly series. Metrics are per URL: the same URL registered under several caches/projects contributes to one series; `display_name` is the URL host. Project-scoped: superusers see all URLs; members see the URLs used by their projects plus public projects. Each series' `url` is the caller's own upstream, so it is returned unmasked. The entries are returned as `upstream_caches`.",
+    params(WindowParams),
+    responses((status = OK, description = "Per-upstream cache performance", body = BoardUpstreamCacheStats), WebError)
+)]
 pub async fn get_board_upstream_caches(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -265,13 +286,23 @@ pub async fn get_board_upstream_caches(
     Ok(ok_json(BoardUpstreamCacheStats { upstream_caches }))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct BoardNetworkStats {
     pub nar_egress: Vec<SeriesPoint>,
     pub workers: Vec<WorkerNet>,
     pub http: Vec<HttpRouteStat>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/network",
+    operation_id = "getBoardNetwork",
+    tag = "board",
+    summary = "Network & API statistics",
+    description = "NAR egress series, per-worker latest upload, download and disk speeds with the worker's `worker_name` (project-scoped), and per-route HTTP latency/throughput (superuser-only).",
+    params(WindowParams),
+    responses((status = OK, description = "Network statistics", body = BoardNetworkStats), WebError)
+)]
 pub async fn get_board_network(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -299,7 +330,7 @@ pub async fn get_board_network(
     }))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct BoardFleetPoint {
     pub bucket_start: String,
     pub connected: i64,
@@ -322,6 +353,16 @@ impl From<worker_samples::FleetCount> for BoardFleetPoint {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/fleet",
+    operation_id = "getBoardFleet",
+    tag = "board",
+    summary = "Worker fleet time-series",
+    description = "Hourly connected / draining / by-capability worker counts derived from worker samples, scoped to the caller's projects.",
+    params(WindowParams),
+    responses((status = OK, description = "Fleet time-series", body = Vec<BoardFleetPoint>), WebError)
+)]
 pub async fn get_board_fleet(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -350,18 +391,28 @@ const DURATION_BANDS: &[&str] = &[
     "<10s", "10-30s", "30-60s", "1-3m", "3-10m", "10-30m", ">30m",
 ];
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct HeatmapBand {
     pub band: &'static str,
     pub counts: Vec<i64>,
 }
 
-#[derive(Serialize, Default)]
+#[derive(Serialize, Default, utoipa::ToSchema)]
 pub struct DurationsHeatmap {
     pub times: Vec<String>,
     pub bands: Vec<HeatmapBand>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/durations/heatmap",
+    operation_id = "getBoardDurationsHeatmap",
+    tag = "board",
+    summary = "Build-duration heatmap",
+    description = "2D build-duration distribution (duration band × hour) computed on demand from builds, scoped to the caller's projects.",
+    params(WindowParams),
+    responses((status = OK, description = "Duration heatmap", body = DurationsHeatmap), WebError)
+)]
 pub async fn get_board_durations_heatmap(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -424,7 +475,7 @@ pub async fn get_board_durations_heatmap(
     }))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct SupervisedLoop {
     pub name: String,
     pub restarts: u32,
@@ -450,7 +501,7 @@ fn loops_view(
         .collect()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct BoardHealth {
     pub version: String,
     pub uptime_seconds: f64,
@@ -474,7 +525,7 @@ pub struct BoardHealth {
     pub hot_nar_cache: HotNarCacheHealth,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct HotNarCacheHealth {
     pub entries: u64,
     pub bytes: u64,
@@ -495,6 +546,15 @@ impl From<gradient_storage::HotNarStats> for HotNarCacheHealth {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/health",
+    operation_id = "getBoardHealth",
+    tag = "board",
+    summary = "System health (superuser)",
+    description = "Process/runtime snapshot, pipeline rollup lag, HTTP route stats, and the instance `draining` flag. Superuser only.",
+    responses((status = OK, description = "System health", body = BoardHealth), WebError)
+)]
 pub async fn get_board_health(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

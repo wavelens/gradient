@@ -25,7 +25,7 @@ use serde::Serialize;
 
 pub struct ProjectOwner;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct ProjectRoleOwner {
     project: Option<ProjectId>,
 }

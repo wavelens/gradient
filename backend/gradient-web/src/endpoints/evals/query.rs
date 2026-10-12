@@ -26,6 +26,16 @@ use super::{EvalAccessContext, live_progress, live_progress_status};
 use crate::endpoints::tasks::EvaluationTriggerSummary;
 use gradient_entity::build::BuildStatus;
 
+#[utoipa::path(
+    get,
+    path = "/evals/{evaluation}",
+    operation_id = "getEvaluation",
+    tag = "evals",
+    summary = "Get evaluation",
+    description = "Returns the evaluation record including status, commit, and timestamps.",
+    params(("evaluation" = EvaluationId, Path)),
+    responses((status = OK, description = "Evaluation", body = EvaluationResponse), WebError)
+)]
 pub async fn get_evaluation(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -183,6 +193,16 @@ fn status_rank(status: BuildStatus) -> u32 {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/evals/{evaluation}/builds",
+    operation_id = "listEvaluationBuilds",
+    tag = "evals",
+    summary = "List evaluation builds",
+    description = "Returns `.drv` builds associated with the evaluation, sorted by status\n(Building, then Queued, then FailedTransient/FailedPermanent/FailedTimeout, then Aborted/DependencyFailed, then Completed/Substituted, then Skipped),\nthen by display name. Supports optional `limit` and `offset` query parameters\nfor pagination, and an optional `scope` to restrict the list to one\npackage's build-time dependency closure.\n\nEach item is a per-evaluation `build_job`; its `id` is used for log,\ndownloads, and dependency-graph endpoints. The build *state* (status,\ntiming, log) comes from the global `derivation_build` row, a shared build for\nevery evaluation that needs the same derivation, so a derivation is\nbuilt once and the outcome is reused across evaluations and projects.",
+    params(("evaluation" = EvaluationId, Path), BuildsQuery),
+    responses((status = OK, description = "Paginated build list, ordered by build status (running, then failed,\naborted, queued, finished), then by dependency layer (`depth`), then\nby derivation name within a layer - so within one status the entry\npoint heads the list and every build precedes the builds it needs.", body = PaginatedBuilds), WebError)
+)]
 pub async fn get_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -340,6 +360,16 @@ pub async fn get_evaluation_builds(
     Ok(Json(res))
 }
 
+#[utoipa::path(
+    get,
+    path = "/evals/{evaluation}/messages",
+    operation_id = "listEvaluationMessages",
+    tag = "evals",
+    summary = "List evaluation messages",
+    description = "Returns all structured messages (errors, warnings, notices) recorded during\nthe evaluation. Each message carries a `level`, a human-readable `message`,\nand an optional `source` tag that identifies where the message originated\n(e.g. `\"flake-prefetch\"`, `\"nix-eval\"`, `\"nix-eval:<attr>\"`, `\"db-insert\"`).\nMessages scoped to specific entry points list their entry-point UUIDs in\nthe `entry_points` array; evaluation-wide messages have an empty array.",
+    params(("evaluation" = EvaluationId, Path)),
+    responses((status = OK, description = "Message list", body = Vec<EvaluationMessageResponse>), WebError)
+)]
 pub async fn get_evaluation_messages(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

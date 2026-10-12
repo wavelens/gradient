@@ -5,7 +5,7 @@
  */
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -20,7 +20,7 @@ use super::BuildAccessContext;
 
 const GRAPH_NODE_CAP: usize = 500;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
 pub struct DependencyGraphNode {
     pub id: DerivationId,
     pub build: Option<BuildJobId>,
@@ -31,7 +31,7 @@ pub struct DependencyGraphNode {
     pub updated_at: chrono::NaiveDateTime,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
 pub struct DependencyEdge {
     pub source: DerivationId,
     pub target: DerivationId,
@@ -46,7 +46,7 @@ impl From<MDerivationDependency> for DependencyEdge {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct BuildGraph {
     pub root: DerivationId,
     pub nodes: Vec<DependencyGraphNode>,
@@ -132,6 +132,16 @@ async fn graph_nodes<C: ConnectionTrait>(
         .collect())
 }
 
+#[utoipa::path(
+    get,
+    path = "/builds/{build}/graph",
+    operation_id = "getBuildGraph",
+    tag = "builds",
+    summary = "Get dependency graph",
+    description = "Returns the full transitive dependency graph rooted at the given build's derivation\nvia BFS over the recorded derivation dependencies, capped at 500 nodes. Node ids are\nderivation UUIDs; `build` is the build of the same evaluation, or null for a\nderivation that evaluation does not list. Each edge `source -> target` means\n`source` must be built before `target`.\n\n**Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.",
+    params(("build" = BuildJobId, Path)),
+    responses((status = OK, description = "Dependency graph", body = BuildGraph), WebError)
+)]
 pub async fn get_build_graph(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

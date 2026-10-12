@@ -5,13 +5,11 @@
  */
 
 pub mod cache;
+pub mod endpoints;
 pub mod invitations;
 pub mod members;
 pub mod project;
 pub mod roles;
-
-pub use self::cache::CacheOwner;
-pub use self::project::ProjectOwner;
 
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;

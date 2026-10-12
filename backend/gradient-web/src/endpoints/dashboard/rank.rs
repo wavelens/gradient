@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Tier {
     StarredActive,
@@ -34,7 +34,7 @@ impl Tier {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Filter {
     All,
@@ -42,14 +42,14 @@ pub enum Filter {
     Starred,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct Outcomes {
     pub ok: i64,
     pub failing: i64,
     pub total: i64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, utoipa::ToSchema)]
 pub struct Latest {
     pub id: EvaluationId,
     pub status: EvaluationStatus,
@@ -89,7 +89,7 @@ impl From<TaskFactsRow> for TaskFacts {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, utoipa::ToSchema)]
 pub struct HistoryBar {
     pub id: EvaluationId,
     pub status: EvaluationStatus,
@@ -108,7 +108,7 @@ impl From<HistoryRow> for HistoryBar {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, utoipa::ToSchema)]
 pub struct TaskRow {
     pub project: String,
     pub task: String,
@@ -161,7 +161,7 @@ impl TaskRow {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct Counts {
     pub all: usize,
     pub failing: usize,

@@ -136,10 +136,11 @@ pub struct UpdateTriggerRequest {
 #[utoipa::path(
     get,
     path = "/",
+    operation_id = "listTaskTriggers",
     tag = "triggers",
-    summary = "List the triggers of a task",
+    summary = "List task triggers",
     params(TaskPath),
-    responses((status = OK, body = Vec<TriggerOut>), WebError)
+    responses((status = OK, description = "List of triggers", body = Vec<TriggerOut>), WebError)
 )]
 pub async fn list(
     TaskScope { task: proj, db, .. }: TaskScope<Member>,
@@ -158,11 +159,12 @@ pub async fn list(
 #[utoipa::path(
     post,
     path = "/",
+    operation_id = "createTaskTrigger",
     tag = "triggers",
-    summary = "Create a trigger",
+    summary = "Create task trigger",
     params(TaskPath),
     request_body = CreateTriggerRequest,
-    responses((status = OK, body = TriggerOut), WebError)
+    responses((status = OK, description = "Trigger created", body = TriggerOut), WebError)
 )]
 pub async fn create(
     TaskScope { task: proj, db, .. }: TaskScope<Requires<can::ManageTriggers>>,
@@ -196,10 +198,11 @@ pub async fn create(
 #[utoipa::path(
     get,
     path = "/{id}",
+    operation_id = "getTaskTrigger",
     tag = "triggers",
-    summary = "Read a trigger",
+    summary = "Get task trigger",
     params(TaskPath, ("id" = TaskTriggerId, Path)),
-    responses((status = OK, body = TriggerOut), WebError)
+    responses((status = OK, description = "Trigger", body = TriggerOut), WebError)
 )]
 pub async fn read(
     TaskScope {
@@ -223,11 +226,12 @@ pub async fn read(
 #[utoipa::path(
     patch,
     path = "/{id}",
+    operation_id = "updateTaskTrigger",
     tag = "triggers",
-    summary = "Update a trigger",
+    summary = "Update task trigger",
     params(TaskPath, ("id" = TaskTriggerId, Path)),
     request_body = UpdateTriggerRequest,
-    responses((status = OK, body = TriggerOut), WebError)
+    responses((status = OK, description = "Trigger updated", body = TriggerOut), WebError)
 )]
 pub async fn update(
     TaskScope {
@@ -270,10 +274,11 @@ pub async fn update(
 #[utoipa::path(
     delete,
     path = "/{id}",
+    operation_id = "deleteTaskTrigger",
     tag = "triggers",
-    summary = "Delete a trigger",
+    summary = "Delete task trigger",
     params(TaskPath, ("id" = TaskTriggerId, Path)),
-    responses((status = OK, body = DeletedResponse), WebError)
+    responses((status = OK, description = "Trigger deleted", body = DeletedResponse), WebError)
 )]
 pub async fn delete_one(
     TaskScope {
@@ -297,10 +302,12 @@ pub async fn delete_one(
 #[utoipa::path(
     post,
     path = "/{id}/test",
+    operation_id = "testTaskTrigger",
     tag = "triggers",
-    summary = "Fire a trigger now",
+    summary = "Manually fire trigger",
+    description = "Resolves the task HEAD and applies the trigger immediately, bypassing commit dedup. Returns the apply outcome.",
     params(TaskPath, ("id" = TaskTriggerId, Path)),
-    responses((status = OK, body = serde_json::Value), WebError)
+    responses((status = OK, description = "Trigger apply outcome", body = serde_json::Value), WebError)
 )]
 pub async fn fire_now(
     TaskScope {

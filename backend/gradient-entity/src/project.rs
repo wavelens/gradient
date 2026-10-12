@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{ProjectId, UserId};
 
-#[derive(Clone, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(
+    Clone, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize, utoipa::ToSchema,
+)]
+#[schema(as = Project)]
 #[sea_orm(table_name = "project")]
 pub struct Model {
     #[sea_orm(primary_key)]

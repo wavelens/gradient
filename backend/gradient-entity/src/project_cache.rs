@@ -10,7 +10,16 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{CacheId, ProjectCacheId, ProjectId};
 
 #[derive(
-    Debug, Clone, Default, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize,
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    utoipa::ToSchema,
 )]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum CacheSubscriptionMode {

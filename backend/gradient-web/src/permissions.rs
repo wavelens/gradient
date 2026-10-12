@@ -34,7 +34,7 @@ impl Refusal for PermissionRefusal {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct PermissionEntry {
     pub id: &'static str,
     pub mutating: bool,

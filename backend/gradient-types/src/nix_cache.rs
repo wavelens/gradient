@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct NixCacheInfo {
     #[serde(rename = "WantMassQuery")]
     pub want_mass_query: bool,
@@ -30,7 +30,7 @@ impl NixCacheInfo {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct NixPathInfo {
     #[serde(rename = "StorePath")]
     pub store_path: String,
@@ -104,7 +104,7 @@ pub struct BuildOutputPath {
     pub signatures: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct GradientCacheInfo {
     #[serde(rename = "GradientVersion")]
     pub gradient_version: String,

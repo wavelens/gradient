@@ -46,14 +46,25 @@ async fn group_resource(db: &WebDb, team: &MTeam) -> ScimResult<GroupResource> {
     Ok(GroupResource::new(team, memberships))
 }
 
-#[derive(serde::Deserialize)]
-pub struct ListQuery {
+#[derive(serde::Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct GroupListQuery {
     pub filter: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/Groups",
+    operation_id = "scimListGroups",
+    tag = "scim",
+    summary = "List SCIM groups",
+    description = "Lists SCIM groups. A SCIM group is a team with `scim_group` set, and its\nmembers are the team's members; groups are not created through SCIM. Supports the `displayName eq \"...\"` filter.",
+    params(GroupListQuery),
+    responses((status = OK, description = "Group list", body = super::dto::ListResponse<GroupResource>, content_type = "application/scim+json"), ScimError)
+)]
 pub async fn list(
     State(state): State<Arc<ServerState>>,
-    Query(q): Query<ListQuery>,
+    Query(q): Query<GroupListQuery>,
 ) -> ScimResult<impl IntoResponse> {
     let group = match q.filter.as_deref().and_then(parse_eq_filter) {
         Some((attr, val)) if attr == "displayname" => Some(val),
@@ -79,6 +90,16 @@ pub async fn list(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/Groups/{id}",
+    operation_id = "scimGetGroup",
+    tag = "scim",
+    summary = "Get a SCIM group",
+    description = "Unknown group names return 404.",
+    params(("id" = String, Path)),
+    responses((status = OK, description = "Group", body = GroupResource, content_type = "application/scim+json"), ScimError)
+)]
 pub async fn get(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<String>,
@@ -90,6 +111,17 @@ pub async fn get(
     ))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/Groups/{id}",
+    operation_id = "scimPatchGroup",
+    tag = "scim",
+    summary = "Patch SCIM group membership",
+    description = "Adds or removes members of the team whose `scim_group` matches. Added users\njoin as Members. Unknown group names return 404.",
+    params(("id" = String, Path)),
+    request_body(content = PatchRequest, content_type = "application/scim+json"),
+    responses((status = OK, description = "Group patched", body = GroupResource, content_type = "application/scim+json"), ScimError)
+)]
 pub async fn patch(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<String>,

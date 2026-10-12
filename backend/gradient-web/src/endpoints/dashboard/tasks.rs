@@ -7,7 +7,7 @@
 use super::rank::{
     Counts, Filter, HistoryBar, Outcomes, Paging, TaskFacts, TaskRow, counts, history_len, rank,
 };
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
@@ -19,7 +19,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct TasksQuery {
     pub filter: Option<Filter>,
     pub page: Option<u64>,
@@ -27,7 +28,7 @@ pub struct TasksQuery {
     pub history: Option<u64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TasksPage {
     pub filter: Filter,
     pub counts: Counts,
@@ -125,6 +126,16 @@ pub async fn load_page<C: ConnectionTrait>(
     })
 }
 
+#[utoipa::path(
+    get,
+    path = "/dashboard/tasks",
+    operation_id = "getDashboardTasks",
+    tag = "dashboard",
+    summary = "Ranked task table of the current user",
+    description = "Tasks of the viewer's projects plus starred tasks of public projects, PR-triggered evaluations excluded.\nRanked by tier (`starred_active`, `active`, `starred`, `team`, `member`), then newest latest evaluation first.\nActive means a non-PR evaluation in the last 14 days. `counts` always covers every task; `total` is the number of tasks matching `filter`.",
+    params(TasksQuery),
+    responses((status = OK, description = "One page of ranked tasks", body = TasksPage), WebError)
+)]
 pub async fn get_tasks(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
