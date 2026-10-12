@@ -193,9 +193,21 @@ mod tests {
                 "error": false,
                 "message": {
                     "items": [
-                        {"id": "1", "name": "alpha"},
-                        {"id": "2", "name": "beta"},
-                        {"id": "3", "name": "alfa"}
+                        {"id": "00000000-0000-0000-0000-000000000001", "name": "alpha", "display_name": "alpha",
+                         "description": "", "active": true, "priority": 50,
+                         "max_storage_gb": 0, "public_key": "", "public": false,
+                         "pull_through": false, "created_by": "00000000-0000-0000-0000-000000000002",
+                         "created_at": "2026-05-21T08:53:21", "managed": true},
+                        {"id": "00000000-0000-0000-0000-000000000003", "name": "beta", "display_name": "beta",
+                         "description": "", "active": true, "priority": 50,
+                         "max_storage_gb": 0, "public_key": "", "public": false,
+                         "pull_through": false, "created_by": "00000000-0000-0000-0000-000000000002",
+                         "created_at": "2026-05-21T08:53:21", "managed": true},
+                        {"id": "00000000-0000-0000-0000-000000000004", "name": "alfa", "display_name": "alfa",
+                         "description": "", "active": true, "priority": 50,
+                         "max_storage_gb": 0, "public_key": "", "public": false,
+                         "pull_through": false, "created_by": "00000000-0000-0000-0000-000000000002",
+                         "created_at": "2026-05-21T08:53:21", "managed": true}
                     ],
                     "total": 3, "page": 1, "per_page": 50
                 }
@@ -221,8 +233,14 @@ mod tests {
                 "error": false,
                 "message": {
                     "items": [
-                        {"id": "1", "name": "acme"},
-                        {"id": "2", "name": "acorn"}
+                        {"id": "00000000-0000-0000-0000-000000000005", "name": "acme", "display_name": "acme",
+                         "description": "", "hide_build_requests": false, "managed": true,
+                         "public": false, "running_evaluations": 0,
+                         "created_by": "00000000-0000-0000-0000-000000000006", "created_at": "2026-05-21T08:53:21"},
+                        {"id": "00000000-0000-0000-0000-000000000007", "name": "acorn", "display_name": "acorn",
+                         "description": "", "hide_build_requests": false, "managed": true,
+                         "public": false, "running_evaluations": 0,
+                         "created_by": "00000000-0000-0000-0000-000000000006", "created_at": "2026-05-21T08:53:21"}
                     ],
                     "total": 2, "page": 1, "per_page": 50
                 }
@@ -244,7 +262,16 @@ mod tests {
             serde_json::json!({
                 "error": false,
                 "message": {
-                    "items": [{"id": "1", "name": "web"}],
+                    "items": [{
+                        "id": "00000000-0000-0000-0000-000000000008", "name": "web", "display_name": "web",
+                        "description": "", "active": true, "can_edit": true,
+                        "can_trigger": true, "concurrency": "skip",
+                        "created_at": "2026-05-21T08:53:21", "created_by": "00000000-0000-0000-0000-000000000009",
+                        "force_evaluation": false, "keep_evaluations": 0, "managed": true,
+                        "project": "00000000-0000-0000-0000-000000000010", "repository": "https://example.com/repo.git",
+                        "retry_failed_builds": false, "sign_cache": false,
+                        "wait_for_workers": false, "wildcard": "*"
+                    }],
                     "total": 1, "page": 1, "per_page": 50
                 }
             }),
@@ -266,7 +293,8 @@ mod tests {
                 "message": [
                     {
                         "worker_id": "builder-1", "display_name": "Builder One",
-                        "registered_at": "now", "active": true, "url": null,
+                        "registered_at": "now", "active": true, "connected": true,
+                        "gradient_ci": false, "url": null,
                         "created_by": null, "enable_fetch": true, "enable_eval": true,
                         "enable_build": true, "live": null
                     }
