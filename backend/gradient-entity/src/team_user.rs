@@ -10,7 +10,17 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{TeamId, TeamUserId, UserId};
 
 #[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, EnumIter, DeriveActiveEnum, Deserialize, Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    EnumIter,
+    DeriveActiveEnum,
+    Deserialize,
+    Serialize,
+    utoipa::ToSchema,
 )]
 #[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
 #[serde(rename_all = "lowercase")]
@@ -23,7 +33,17 @@ pub enum TeamRole {
 }
 
 #[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, EnumIter, DeriveActiveEnum, Deserialize, Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    EnumIter,
+    DeriveActiveEnum,
+    Deserialize,
+    Serialize,
+    utoipa::ToSchema,
 )]
 #[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
 #[serde(rename_all = "lowercase")]

@@ -9,12 +9,12 @@ use gradient_types::ids::*;
 use gradient_types::{EvaluationProgress, MEntryPoint, MEvaluationMessage, WaitingReason};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct MakeEvaluationRequest {
     pub method: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct BuildItem {
     pub id: BuildJobId,
     pub name: String,
@@ -29,21 +29,22 @@ pub struct BuildItem {
     pub ifd: bool,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct PaginatedBuilds {
     pub builds: Vec<BuildItem>,
     pub total: usize,
     pub active_count: usize,
 }
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug, Default, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct BuildsQuery {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
     pub scope: Option<BuildJobId>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct EvaluationResponse {
     pub id: EvaluationId,
     pub task: Option<TaskId>,
@@ -74,7 +75,7 @@ pub struct EvaluationResponse {
     pub expected_thunks: Option<u64>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct EntryPointBrief {
     pub id: EntryPointId,
     pub eval: String,
@@ -94,7 +95,7 @@ impl EntryPointBrief {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct EvaluationMessageResponse {
     pub id: EvaluationMessageId,
     pub level: gradient_entity::evaluation_message::MessageLevel,

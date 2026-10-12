@@ -147,14 +147,14 @@ pub struct Progress {
 }
 firehose!(Progress, names::EVALUATION_PROGRESS);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EvaluationProgress {
     Fetching { inputs: Vec<InputFetch> },
     Evaluating { thunks: u64 },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct InputFetch {
     pub name: String,
     pub state: InputFetchState,
@@ -162,7 +162,7 @@ pub struct InputFetch {
     pub expected_bytes: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub enum InputFetchState {
     Queued,
     Fetching,

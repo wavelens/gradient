@@ -3,6 +3,7 @@ extends: relaxed
 ignore: |
   frontend/node_modules/
   pnpm-lock.yaml
+  docs/gradient-api.yaml
 
 rules:
   line-length: disable

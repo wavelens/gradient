@@ -103,7 +103,7 @@ impl WorkerNames {
     }
 }
 
-#[derive(Serialize, Clone, Default)]
+#[derive(Serialize, Clone, Default, utoipa::ToSchema)]
 pub struct BoardProject {
     pub id: Uuid,
     pub name: String,
@@ -131,7 +131,7 @@ pub async fn board_projects<C: ConnectionTrait>(
         .collect())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct JobEvaluationView {
     pub repository: String,
     pub commit: String,

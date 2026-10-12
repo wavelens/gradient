@@ -41,6 +41,16 @@ fn with_narinfo_headers(mut response: Response, cache_status: &'static str) -> R
     response
 }
 
+#[utoipa::path(
+    get,
+    path = "/cache/{cache}",
+    operation_id = "getCacheRoot",
+    tag = "nix-cache",
+    summary = "Cache root",
+    description = "Redirects to `nix-cache-info`.",
+    params(("cache" = String, Path)),
+    responses((status = FOUND, description = "Redirect to `/cache/{cache}/nix-cache-info`"))
+)]
 pub async fn cache_root(Path(cache): Path<String>) -> Response {
     (
         StatusCode::FOUND,
@@ -49,6 +59,16 @@ pub async fn cache_root(Path(cache): Path<String>) -> Response {
         .into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/cache/{cache}/nix-cache-info",
+    operation_id = "getNixCacheInfo",
+    tag = "nix-cache",
+    summary = "Nix cache info",
+    description = "Cache metadata read by Nix substituters. `Priority` is the cache priority, or the local priority for clients in `GRADIENT_HTTP_LOCAL_IPS`.",
+    params(("cache" = String, Path), JsonFlag),
+    responses((status = OK, description = "Cache metadata", content((String = "text/x-nix-cache-info"), (NixCacheInfo = "application/json"))), WebError)
+)]
 pub async fn nix_cache_info(
     state: State<Arc<ServerState>>,
     OptionalPeer(peer): OptionalPeer,
@@ -96,6 +116,16 @@ pub async fn nix_cache_info(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/cache/{cache}/gradient-cache-info",
+    operation_id = "getGradientCacheInfo",
+    tag = "nix-cache",
+    summary = "Gradient cache info",
+    description = "Gradient version and server URL behind this cache, for clients probing a substituter. Sends `Access-Control-Allow-Origin: *`.",
+    params(("cache" = String, Path), JsonFlag),
+    responses((status = OK, description = "Gradient metadata", content((String = "text/x-gradient-cache-info"), (GradientCacheInfo = "application/json"))), WebError)
+)]
 pub async fn gradient_cache_info(
     state: State<Arc<ServerState>>,
     OptionalPeer(peer): OptionalPeer,
@@ -131,6 +161,16 @@ pub async fn gradient_cache_info(
     Ok(response)
 }
 
+#[utoipa::path(
+    get,
+    path = "/cache/{cache}/{path}",
+    operation_id = "getNarinfo",
+    tag = "nix-cache",
+    summary = "Narinfo",
+    description = "Path info of a store path. A miss here is looked up in the cache's upstream caches, re-signed with the cache key. `X-Cache` reports `HIT` (ours) or `MISS` (upstream).",
+    params(("cache" = String, Path), ("path" = String, Path), JsonFlag),
+    responses((status = OK, description = "Narinfo", content((String = "text/x-nix-narinfo"), (NixPathInfo = "application/json"))), WebError)
+)]
 pub async fn path(
     state: State<Arc<ServerState>>,
     OptionalPeer(peer): OptionalPeer,

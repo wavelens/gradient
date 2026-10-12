@@ -4,6 +4,7 @@
  */
 
 use super::helpers::{CacheContext, cache_client_ip, fetch_nar_stream};
+use crate::api_spec::Binary;
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::resource::Resource;
@@ -24,6 +25,16 @@ fn hardened(builder: axum::http::response::Builder) -> axum::http::response::Bui
         .fold(builder, |b, (name, value)| b.header(name, value))
 }
 
+#[utoipa::path(
+    get,
+    path = "/cache/{cache}/serve/{hash}/{path}",
+    operation_id = "serveNarFile",
+    tag = "nix-cache",
+    summary = "Serve file",
+    description = "A single file of a NAR (content type from the file name), or a directory as `tar.zst`. Responses carry sandboxing headers.",
+    params(("cache" = String, Path), ("hash" = String, Path), ("path" = String, Path)),
+    responses((status = OK, description = "File or directory archive", content((Binary = "application/octet-stream"), (Binary = "application/zstd"))), WebError)
+)]
 pub async fn serve(
     state: State<Arc<ServerState>>,
     OptionalPeer(peer): OptionalPeer,

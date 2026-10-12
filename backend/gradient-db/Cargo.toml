@@ -38,6 +38,7 @@ serde_json        = { workspace = true }
 thiserror         = { workspace = true }
 tokio             = { workspace = true, features = ["sync", "rt", "macros", "time"] }
 tracing           = { workspace = true }
+utoipa            = { workspace = true }
 uuid              = { workspace = true }
 
 [dev-dependencies]

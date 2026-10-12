@@ -26,7 +26,7 @@ impl ResourceMetric {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ExpensiveResource {
     pub derivation: Uuid,
     pub project: Uuid,
@@ -124,7 +124,7 @@ pub async fn expensive_derivations<C: ConnectionTrait>(
         .collect())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ExpensiveEval {
     pub evaluation: Uuid,
     pub project: Uuid,

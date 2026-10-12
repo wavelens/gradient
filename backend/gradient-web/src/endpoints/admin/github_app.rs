@@ -17,19 +17,20 @@ use gradient_types::{BaseResponse, MUser};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Deserialize, Default, Debug)]
-pub struct ManifestRequest {
+#[derive(Deserialize, Default, Debug, utoipa::ToSchema)]
+pub struct GithubAppManifestRequest {
     pub host: Option<String>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct GithubAppManifestResponse {
     pub manifest: serde_json::Value,
     pub post_url: String,
     pub state: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct CallbackQuery {
     pub code: String,
     pub state: String,
@@ -56,10 +57,20 @@ pub fn validate_host(host: &str) -> Result<(), WebError> {
     Ok(())
 }
 
+#[utoipa::path(
+    post,
+    path = "/github-app/manifest",
+    operation_id = "createGithubAppManifest",
+    tag = "admin",
+    summary = "Build GitHub App manifest",
+    description = "Builds a GitHub App manifest pre-filled with this server's URLs,\npermissions, and events, and returns a one-shot CSRF state token plus\nthe GitHub URL the browser should POST the manifest to.\n\nRequires `superuser`. The state token is consumed by the matching\n`GET /admin/github-app/callback` invocation; it expires after 10\nminutes.",
+    request_body = GithubAppManifestRequest,
+    responses((status = OK, description = "Manifest, post URL, and CSRF state", body = GithubAppManifestResponse), WebError)
+)]
 pub async fn request_manifest(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Json(body): Json<ManifestRequest>,
+    Json(body): Json<GithubAppManifestRequest>,
 ) -> WebResult<Json<BaseResponse<GithubAppManifestResponse>>> {
     let host = body.host.unwrap_or_else(default_host);
     validate_host(&host)?;
@@ -75,6 +86,16 @@ pub async fn request_manifest(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/admin/github-app/callback",
+    operation_id = "githubAppManifestCallback",
+    tag = "admin",
+    summary = "GitHub App manifest callback",
+    description = "Receives the redirect from GitHub after the operator submits the\nmanifest. Validates the `state` token, exchanges the temporary `code`\nfor the App's permanent credentials, stashes them in a one-shot\nin-memory store per superuser who initiated the manifest\nflow, and redirects the browser to `/admin/github-app?ready=1`.\n\n**Unauthenticated** - GitHub redirects the operator's browser here\nfrom `https://github.com/...` and that cross-site navigation does not\ncarry a bearer token. CSRF and identity binding are provided by the\none-shot `state` token issued at `POST /admin/github-app/manifest`,\nwhich is bound to the initiating superuser at issuance.",
+    params(CallbackQuery),
+    responses((status = FOUND, description = "Redirect to `/admin/github-app?ready=1` on success."), WebError)
+)]
 pub async fn callback(
     State(state): State<Arc<ServerState>>,
     Query(q): Query<CallbackQuery>,
@@ -104,6 +125,15 @@ pub async fn callback(
     Ok(Redirect::to("/admin/github-app?ready=1"))
 }
 
+#[utoipa::path(
+    get,
+    path = "/github-app/credentials",
+    operation_id = "getGithubAppCredentials",
+    tag = "admin",
+    summary = "Fetch pending GitHub App credentials",
+    description = "One-shot retrieval of the credentials produced by the most recent\nsuccessful manifest exchange. Calling this endpoint **consumes** the\npending credentials; a second call returns `404`. Pending entries\nalso expire 10 minutes after creation.\n\nRequires `superuser`.",
+    responses((status = OK, description = "GitHub App credentials (returned exactly once)", body = gradient_ci::github_app_manifest::ManifestResult), WebError)
+)]
 pub async fn credentials(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

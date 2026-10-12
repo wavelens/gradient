@@ -40,11 +40,20 @@ impl Refusal for InviteRefusal {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct InviteTokenRequest {
     pub token: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/user/invites",
+    operation_id = "listUserInvites",
+    tag = "user",
+    summary = "List my pending invitations",
+    description = "Project and cache invitations addressed to the authenticated user,\nnewest first.",
+    responses((status = OK, description = "Pending invitations", body = Vec<InviteItem>), WebError)
+)]
 pub async fn get_user_invites(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -277,6 +286,16 @@ async fn claim_invitation(db: &WebDb, user: &MUser, token: &str) -> WebResult<In
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/user/invites/accept",
+    operation_id = "acceptUserInvite",
+    tag = "user",
+    summary = "Accept an invitation",
+    description = "Redeems an invitation token and creates the membership. The token must\naddress the authenticated user: a token forwarded to somebody else\nanswers `404`, so the mailed link is a convenience and never the trust\nboundary. An expired invitation answers `410` and is discarded.",
+    request_body = InviteTokenRequest,
+    responses((status = OK, description = "Invitation accepted", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_accept_invite(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -405,6 +424,16 @@ pub async fn post_accept_invite(
     Ok(ok_json("Invitation accepted".to_string()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/user/invites/decline",
+    operation_id = "declineUserInvite",
+    tag = "user",
+    summary = "Decline an invitation",
+    description = "Discards an invitation addressed to the authenticated user. The same\ntoken and expiry rules as accept apply.",
+    request_body = InviteTokenRequest,
+    responses((status = OK, description = "Invitation declined", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_decline_invite(
     state: State<Arc<ServerState>>,
     audit: Audit,

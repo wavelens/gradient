@@ -38,17 +38,28 @@ fn scim_json(status: StatusCode, body: impl serde::Serialize) -> Response {
     }
 }
 
-#[derive(Deserialize)]
-pub struct ListQuery {
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct UserListQuery {
     pub filter: Option<String>,
     #[serde(rename = "startIndex")]
     pub start_index: Option<i64>,
     pub count: Option<i64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/Users",
+    operation_id = "scimListUsers",
+    tag = "scim",
+    summary = "List / filter SCIM users",
+    description = "Lists managed (SCIM-provisioned) users. Supports the `userName eq \"...\"`\nand `externalId eq \"...\"` filter subset plus `startIndex`/`count` pagination.",
+    params(UserListQuery),
+    responses((status = OK, description = "User list", body = super::dto::ListResponse<UserResource>, content_type = "application/scim+json"), ScimError)
+)]
 pub async fn list(
     State(state): State<Arc<ServerState>>,
-    Query(q): Query<ListQuery>,
+    Query(q): Query<UserListQuery>,
 ) -> ScimResult<impl IntoResponse> {
     let db = state.web_db.inner();
     let filter = match q.filter.as_deref() {
@@ -86,6 +97,15 @@ pub async fn list(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/Users/{id}",
+    operation_id = "scimGetUser",
+    tag = "scim",
+    summary = "Get a SCIM user",
+    params(("id" = String, Path)),
+    responses((status = OK, description = "User", body = UserResource, content_type = "application/scim+json"), ScimError)
+)]
 pub async fn get(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<String>,
@@ -94,6 +114,16 @@ pub async fn get(
     Ok(scim_json(StatusCode::OK, UserResource::from(&u)))
 }
 
+#[utoipa::path(
+    post,
+    path = "/Users",
+    operation_id = "scimCreateUser",
+    tag = "scim",
+    summary = "Provision a SCIM user",
+    description = "Creates a passwordless `managed` user. Login happens later via OIDC (claimable path). `userName` conflicts return 409.",
+    request_body(content = UserRequest, content_type = "application/scim+json"),
+    responses((status = CREATED, description = "User created", body = UserResource, content_type = "application/scim+json"), ScimError)
+)]
 pub async fn create(
     State(state): State<Arc<ServerState>>,
     Json(body): Json<UserRequest>,
@@ -142,6 +172,16 @@ pub async fn create(
     Ok(scim_json(StatusCode::CREATED, UserResource::from(&u)))
 }
 
+#[utoipa::path(
+    put,
+    path = "/Users/{id}",
+    operation_id = "scimReplaceUser",
+    tag = "scim",
+    summary = "Replace a SCIM user",
+    params(("id" = String, Path)),
+    request_body(content = UserRequest, content_type = "application/scim+json"),
+    responses((status = OK, description = "User replaced", body = UserResource, content_type = "application/scim+json"), ScimError)
+)]
 pub async fn replace(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<String>,
@@ -168,6 +208,17 @@ pub async fn replace(
     Ok(scim_json(StatusCode::OK, UserResource::from(&u)))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/Users/{id}",
+    operation_id = "scimPatchUser",
+    tag = "scim",
+    summary = "Patch a SCIM user",
+    description = "Applies a SCIM PatchOp. Typically toggles `active` for deactivation/reactivation.",
+    params(("id" = String, Path)),
+    request_body(content = PatchRequest, content_type = "application/scim+json"),
+    responses((status = OK, description = "User patched", body = UserResource, content_type = "application/scim+json"), ScimError)
+)]
 pub async fn patch(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<String>,
@@ -187,6 +238,16 @@ pub async fn patch(
     Ok(scim_json(StatusCode::OK, UserResource::from(&u)))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/Users/{id}",
+    operation_id = "scimDeleteUser",
+    tag = "scim",
+    summary = "Deprovision a SCIM user",
+    description = "Soft-disables the user (`active=false`) by default; hard-deletes (cascade)\nwhen `GRADIENT_SCIM_HARD_DELETE=true`.",
+    params(("id" = String, Path)),
+    responses((status = NO_CONTENT, description = "User deprovisioned"), ScimError)
+)]
 pub async fn delete(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<String>,

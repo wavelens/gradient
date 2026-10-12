@@ -8,7 +8,7 @@ use gradient_entity::webhook::WebhookScope;
 use gradient_types::*;
 use serde::Serialize;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct WebhookResponse {
     pub id: WebhookId,
     pub scope: WebhookScope,
@@ -39,13 +39,18 @@ impl From<MWebhook> for WebhookResponse {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct RotatedSecret {
+    pub secret: String,
+}
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct CreateWebhookResponse {
     pub webhook: WebhookResponse,
     pub secret: String,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct DeliveryListItem<Id> {
     pub id: Id,
     pub event: String,
@@ -56,13 +61,16 @@ pub struct DeliveryListItem<Id> {
     pub delivered_at: chrono::NaiveDateTime,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct DeliveryDetail<Id> {
     #[serde(flatten)]
     pub item: DeliveryListItem<Id>,
     pub request_body: String,
     pub response_body: Option<String>,
 }
+
+pub type WebhookDeliveryItem = DeliveryListItem<WebhookDeliveryId>;
+pub type ActionDeliveryItem = DeliveryListItem<TaskActionDeliveryId>;
 
 impl From<MWebhookDelivery> for DeliveryListItem<WebhookDeliveryId> {
     fn from(r: MWebhookDelivery) -> Self {

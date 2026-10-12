@@ -12,7 +12,7 @@ use gradient_scheduler::Scheduler;
 use gradient_types::{BaseResponse, MUser};
 use std::sync::Arc;
 
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::refusal::{Refusal, RefusalStatus};
 
@@ -30,6 +30,15 @@ impl Refusal for WorkerRefusal {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/workers",
+    operation_id = "listWorkers",
+    tag = "admin",
+    summary = "List connected workers",
+    description = "Returns all workers currently connected to the server via the `/proto`\nWebSocket, including their capabilities and assigned job counts.\n\nRequires the caller to have the `superuser` flag, unless the server\nis started with `GRADIENT_PUBLIC_STATS=true`.",
+    responses((status = OK, description = "Worker list", body = Vec<WorkerInfo>), WebError)
+)]
 pub async fn get_workers(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

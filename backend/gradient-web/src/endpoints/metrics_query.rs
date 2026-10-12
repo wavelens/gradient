@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct MetricMeta {
     pub key: &'static str,
     pub kind: &'static str,
@@ -90,11 +90,21 @@ const CATALOG: &[MetricMeta] = &[
     },
 ];
 
+#[utoipa::path(
+    get,
+    path = "/metrics/catalog",
+    operation_id = "getMetricsCatalog",
+    tag = "board",
+    summary = "Metric catalog",
+    description = "Lists the queryable metrics with their kind, unit, and dimensions.",
+    responses((status = OK, description = "Catalog of available metrics", body = Vec<MetricMeta>), WebError)
+)]
 pub async fn get_metrics_catalog() -> WebResult<Json<BaseResponse<Vec<&'static MetricMeta>>>> {
     Ok(ok_json(CATALOG.iter().collect()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct MetricQueryParams {
     pub metric: String,
     pub granularity: Option<String>,
@@ -103,7 +113,7 @@ pub struct MetricQueryParams {
     pub project: Option<Uuid>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct MetricPoint {
     pub bucket_start: String,
     pub count: i64,
@@ -130,6 +140,16 @@ impl From<gradient_db::metrics::series::BucketStats> for MetricPoint {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/metrics/query",
+    operation_id = "getMetricsQuery",
+    tag = "board",
+    summary = "Query a metric time-series",
+    description = "Returns time-bucketed points for a metric from `metric_rollup`, masked to\nthe caller's scope (superuser = all projects, member = own + public projects,\nanonymous = public projects). Unknown metrics or out-of-scope projects return 404.",
+    params(MetricQueryParams),
+    responses((status = OK, description = "Time-series points", body = Vec<MetricPoint>), WebError)
+)]
 pub async fn get_metrics_query(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

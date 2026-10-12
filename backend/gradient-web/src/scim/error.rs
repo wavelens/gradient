@@ -8,6 +8,9 @@ use axum::Json;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
+use std::collections::BTreeMap;
+use utoipa::openapi::{Content, Ref, RefOr, ResponseBuilder};
+use utoipa::{IntoResponses, ToSchema};
 
 pub const SCIM_CONTENT_TYPE: &str = "application/scim+json";
 
@@ -53,13 +56,34 @@ impl ScimError {
     }
 }
 
-#[derive(Serialize)]
-struct ScimErrorBody {
+#[derive(Serialize, ToSchema)]
+pub struct ScimErrorBody {
     schemas: [&'static str; 1],
     status: String,
     #[serde(skip_serializing_if = "Option::is_none", rename = "scimType")]
     scim_type: Option<&'static str>,
     detail: String,
+}
+
+impl IntoResponses for ScimError {
+    fn responses() -> BTreeMap<String, RefOr<utoipa::openapi::Response>> {
+        [
+            (400, "Unsupported filter or invalid value"),
+            (401, "Missing or invalid SCIM bearer token"),
+            (404, "Resource not found"),
+            (409, "Resource already exists (uniqueness)"),
+        ]
+        .into_iter()
+        .map(|(status, description)| {
+            let content = Content::new(Some(Ref::from_schema_name(ScimErrorBody::name())));
+            let response = ResponseBuilder::new()
+                .description(description)
+                .content(SCIM_CONTENT_TYPE, content)
+                .build();
+            (status.to_string(), RefOr::T(response))
+        })
+        .collect()
+    }
 }
 
 impl IntoResponse for ScimError {
@@ -68,7 +92,7 @@ impl IntoResponse for ScimError {
             tracing::error!(detail = %self.detail, "SCIM error");
         }
 
-        let body = ScimErrorBody {
+        let body = crate::scim::ScimErrorBody {
             schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"],
             status: self.status.as_u16().to_string(),
             scim_type: self.scim_type,

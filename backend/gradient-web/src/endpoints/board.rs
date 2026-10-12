@@ -38,7 +38,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct DispatchedJobSummary {
     pub id: Uuid,
     pub kind: i16,
@@ -74,13 +74,13 @@ impl DispatchedJobSummary {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct DispatchedJobsResponse {
     pub jobs: Vec<DispatchedJobSummary>,
     pub other_running: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct PendingJobSummary {
     pub kind: i16,
     pub project: Uuid,
@@ -91,12 +91,21 @@ pub struct PendingJobSummary {
     pub subject: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct PendingJobsResponse {
     pub jobs: Vec<PendingJobSummary>,
     pub other_pending: u64,
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/jobs/pending",
+    operation_id = "getBoardPendingJobs",
+    tag = "board",
+    summary = "Pending (unassigned) jobs",
+    description = "Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count.",
+    responses((status = OK, description = "Pending jobs plus other_pending count", body = PendingJobsResponse), WebError)
+)]
 pub async fn get_pending_jobs(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -138,6 +147,15 @@ pub async fn get_pending_jobs(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/jobs/dispatched",
+    operation_id = "getBoardDispatchedJobs",
+    tag = "board",
+    summary = "Live assigned jobs",
+    description = "In-flight assigned jobs visible to the caller; out-of-scope jobs collapse to an aggregate `other_running` count.",
+    responses((status = OK, description = "Assigned jobs plus other_running count", body = DispatchedJobsResponse), WebError)
+)]
 pub async fn get_dispatched_jobs(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -192,7 +210,7 @@ pub async fn get_dispatched_jobs(
     }))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct DecisionCandidateView {
     pub id: Uuid,
     pub job_id: String,
@@ -205,7 +223,7 @@ pub struct DecisionCandidateView {
     pub won: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct AssignDecisionView {
     pub at: String,
     pub worker_id: String,
@@ -215,6 +233,15 @@ pub struct AssignDecisionView {
     pub candidates: Vec<DecisionCandidateView>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/jobs/decisions",
+    operation_id = "getBoardDispatchDecisions",
+    tag = "board",
+    summary = "Recent assignment decisions (all candidate scores)",
+    description = "Bounded ring of the most recent assignment decisions, each with every scored candidate including the rejected/negative ones the scheduler passed over. For tuning scoring rules. Superuser-only, as candidates span all projects.",
+    responses((status = OK, description = "Recent assignment decisions, most recent first", body = Vec<AssignDecisionView>), WebError)
+)]
 pub async fn get_assign_decisions(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -269,7 +296,7 @@ pub async fn get_assign_decisions(
     Ok(ok_json(views))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct AttemptSummary {
     pub dispatched_job_id: Option<Uuid>,
     pub substitute: bool,
@@ -292,7 +319,7 @@ impl From<build_attempt::Model> for AttemptSummary {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct JobPhaseView {
     pub seq: i32,
     pub parent_seq: Option<i32>,
@@ -326,7 +353,7 @@ async fn job_phases<C: ConnectionTrait>(db: &C, job: DispatchedJobId) -> Vec<Job
         .collect()
 }
 
-#[derive(Serialize, Debug, Default, PartialEq, Eq)]
+#[derive(Serialize, Debug, Default, PartialEq, Eq, utoipa::ToSchema)]
 pub struct ReportGap {
     pub worker_elapsed_ms: Option<i64>,
     pub worker_tail_ms: Option<i64>,
@@ -351,7 +378,7 @@ fn report_gap(
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct JobDerivationView {
     pub build: Option<Uuid>,
     pub derivation_build: Uuid,
@@ -424,7 +451,7 @@ async fn job_derivations<C: ConnectionTrait>(
         .collect()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct DispatchedJobDetail {
     pub id: Uuid,
     pub kind: i16,
@@ -457,6 +484,16 @@ pub struct DispatchedJobDetail {
     pub passed_over: bool,
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/jobs/{id}",
+    operation_id = "getBoardJob",
+    tag = "board",
+    summary = "Assigned job detail",
+    description = "Full assignment record incl. per-rule scoring breakdown, job/worker/instance contexts. Runner-up candidates are superuser-only.",
+    params(("id" = Uuid, Path)),
+    responses((status = OK, description = "Job detail", body = DispatchedJobDetail), WebError)
+)]
 pub async fn get_dispatched_job(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -649,7 +686,7 @@ async fn eval_job_evaluation<C: ConnectionTrait>(
     job_evaluation(db, evaluation).await
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct BoardWorker {
     pub id: Option<String>,
     pub name: Option<String>,
@@ -666,6 +703,15 @@ pub struct BoardWorker {
     pub ram_total_mb: Option<i64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/workers",
+    operation_id = "getBoardWorkers",
+    tag = "board",
+    summary = "Connected workers",
+    description = "Connected workers with capability and live load. `projects` lists the served projects visible to the caller; a worker serving none of them has its identity and metrics masked for non-superusers. Each project is `{ id, name, display_name }`. The worker's `name` is its display name from a registration in a project the caller can see.",
+    responses((status = OK, description = "Connected workers", body = Vec<BoardWorker>), WebError)
+)]
 pub async fn get_board_workers(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -728,7 +774,7 @@ pub async fn get_board_workers(
     Ok(ok_json(out))
 }
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq, utoipa::ToSchema)]
 pub struct LoadBucket {
     pub key: String,
     pub in_flight: u32,
@@ -747,7 +793,7 @@ impl From<(String, (u32, u32, u32))> for LoadBucket {
     }
 }
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq, utoipa::ToSchema)]
 pub struct WorkerLoad {
     pub by_capability: Vec<LoadBucket>,
     pub by_architecture: Vec<LoadBucket>,
@@ -835,6 +881,15 @@ fn aggregate_worker_load(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/workers/load",
+    operation_id = "getBoardWorkerLoad",
+    tag = "board",
+    summary = "Fleet load by capability, architecture, and feature",
+    description = "Real per-dimension fleet load: for each capability (eval/fetch/build), architecture, and system feature, the in-flight job count against the summed slot capacity of the workers that can serve it. Answers whether the fleet is eval-, build-, or architecture-bound rather than showing one blended busy %. Scoped to the caller's projects (superusers see the whole fleet). Each bucket carries `{ key, in_flight, capacity, workers }`; busy % = in_flight / capacity.",
+    responses((status = OK, description = "Fleet load breakdowns", body = WorkerLoad), WebError)
+)]
 pub async fn get_board_worker_load(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -859,11 +914,22 @@ pub async fn get_board_worker_load(
     )))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ExpensiveParams {
     pub window_days: Option<i64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/jobs/expensive",
+    operation_id = "getBoardExpensiveJobs",
+    tag = "board",
+    summary = "Most expensive builds",
+    description = "Top 20 completed derivation builds by build time, one row per derivation build. The time is the worker-measured `derivation_metric.build_time_ms`, falling back to the latest attempt's start and finish stamps when no metric exists. Project-scoped; `worker_name` is shown only when the worker is registered by a project the caller can see.",
+    params(ExpensiveParams),
+    responses((status = OK, description = "Top builds by build time", body = Vec<ExpensiveBuild>), WebError)
+)]
 pub async fn get_expensive_jobs(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -886,20 +952,21 @@ pub async fn get_expensive_jobs(
     Ok(ok_json(out))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ScoringParams {
     pub window_hours: Option<i64>,
     pub limit: Option<u64>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ScoreBucket {
     pub lo: f64,
     pub hi: f64,
     pub count: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct RuleContribution {
     pub rule: String,
     pub avg: f64,
@@ -907,7 +974,7 @@ pub struct RuleContribution {
     pub max: f64,
 }
 
-#[derive(Serialize, Default)]
+#[derive(Serialize, Default, utoipa::ToSchema)]
 pub struct ScoringSummary {
     pub sample_size: i64,
     pub score_min: f64,
@@ -917,12 +984,21 @@ pub struct ScoringSummary {
     pub rules: Vec<RuleContribution>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct RuleDescription {
     pub rule: String,
     pub description: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/scoring/rules",
+    operation_id = "getBoardScoringRules",
+    tag = "board",
+    summary = "Scoring rule catalog",
+    description = "Static name and human-readable description for every scheduler scoring rule, used by the board UI to explain rule names.",
+    responses((status = OK, description = "Rule catalog", body = Vec<RuleDescription>), WebError)
+)]
 pub async fn get_scoring_rules() -> WebResult<Json<BaseResponse<Vec<RuleDescription>>>> {
     let rules = gradient_pool::score::rule_catalog()
         .into_iter()
@@ -935,6 +1011,16 @@ pub async fn get_scoring_rules() -> WebResult<Json<BaseResponse<Vec<RuleDescript
     Ok(ok_json(rules))
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/scoring/summary",
+    operation_id = "getBoardScoringSummary",
+    tag = "board",
+    summary = "Aggregate scoring summary",
+    description = "Score histogram and mean per-rule contribution over recently assigned jobs, masked to the caller's projects.",
+    params(ScoringParams),
+    responses((status = OK, description = "Scoring summary", body = ScoringSummary), WebError)
+)]
 pub async fn get_scoring_summary(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1040,6 +1126,16 @@ pub async fn get_scoring_summary(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/expensive/top-projects",
+    operation_id = "getBoardTopProjects",
+    tag = "board",
+    summary = "Top projects by build time (superuser)",
+    description = "Projects ranked by cumulative completed-build time in a window. Each derivation build counts once per project that built it, timed like `/board/jobs/expensive`; `build_count` counts derivation builds. Superuser only.",
+    params(ExpensiveParams),
+    responses((status = OK, description = "Top projects", body = Vec<TopProjectBuildTime>), WebError)
+)]
 pub async fn get_top_projects_by_buildtime(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -1053,12 +1149,23 @@ pub async fn get_top_projects_by_buildtime(
     Ok(ok_json(out))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ResourceParams {
     pub metric: String,
     pub window_days: Option<i64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/jobs/expensive-by-resource",
+    operation_id = "getBoardExpensiveByResource",
+    tag = "board",
+    summary = "Most expensive builds by resource",
+    description = "Top 20 derivations by a captured per-build resource (peak RAM, CPU time or total disk bytes) from each derivation's latest `derivation_metric` row in the window, skipping zero values. Project-scoped; `worker_name` is shown only when the worker is registered by a project the caller can see.",
+    params(ResourceParams),
+    responses((status = OK, description = "Top builds by resource", body = Vec<ExpensiveResource>), WebError)
+)]
 pub async fn get_expensive_by_resource(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1088,6 +1195,15 @@ pub async fn get_expensive_by_resource(
     Ok(ok_json(out))
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/live",
+    operation_id = "boardLive",
+    tag = "board",
+    summary = "Job Board live events (WebSocket)",
+    description = "Upgrades to a WebSocket streaming JSON board events (`queue_depth`,\n`job_dispatched`, `worker_connected`, `worker_disconnected`). Per-project\nevents are masked to the caller's scope; `worker_connected` reaches members\nof any project the worker serves and names none of them.",
+    responses((status = SWITCHING_PROTOCOLS, description = "Switching Protocols - WebSocket upgrade successful"), WebError)
+)]
 pub async fn board_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1161,12 +1277,23 @@ fn mask_event(env: &Envelope, scope: &MetricsScope) -> Option<String> {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct EvalResourceParams {
     pub metric: String,
     pub window_days: Option<i64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/evals/expensive-by-resource",
+    operation_id = "getBoardExpensiveEvalsByResource",
+    tag = "board",
+    summary = "Most expensive evaluations by resource",
+    description = "Top evaluations by a captured per-eval resource (peak RSS/heap, thunks, fn calls, allocated bytes, or total eval time) from `evaluation_metric`. Project-scoped through the evaluation's task.",
+    params(EvalResourceParams),
+    responses((status = OK, description = "Top evaluations by resource", body = Vec<ExpensiveEval>), WebError)
+)]
 pub async fn get_expensive_evals_by_resource(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1196,7 +1323,7 @@ pub async fn get_expensive_evals_by_resource(
     Ok(ok_json(out))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct FlakeGraphNode {
     pub path: String,
     pub parent: Option<String>,
@@ -1223,6 +1350,16 @@ impl From<flake_output_node::Model> for FlakeGraphNode {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/evals/{evaluation}/flake-graph",
+    operation_id = "getEvalFlakeGraph",
+    tag = "evals",
+    summary = "Get the walked flake output graph for an evaluation",
+    description = "Returns the flake output nodes walked during evaluation, each with its\nattribute path, parent, name, kind, and (for derivations) the `.drv` path.",
+    params(("evaluation" = EvaluationId, Path)),
+    responses((status = OK, description = "Flake output graph", body = Vec<FlakeGraphNode>), WebError)
+)]
 pub async fn get_eval_flake_graph(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

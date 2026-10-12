@@ -17,6 +17,16 @@ use std::sync::Arc;
 
 /// Anything unreachable is mapped to `404`. The endpoint must never confirm or deny a commit the
 /// caller cannot see.
+#[utoipa::path(
+    get,
+    path = "/commits/{commit}",
+    operation_id = "getCommit",
+    tag = "commits",
+    summary = "Get commit",
+    description = "Returns commit metadata (message, hash, author). Visibility follows the\ncommit's reachability: the caller must be a member of a project\nthat owns an evaluation (or direct build) referencing the commit, or\nthat project must be public. Anonymous callers may read commits\nreachable through public projects only. All other cases return\n`404` so existence isn't leaked.",
+    params(("commit" = CommitId, Path)),
+    responses((status = OK, description = "Commit", body = MCommit), WebError)
+)]
 pub async fn get_commit(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

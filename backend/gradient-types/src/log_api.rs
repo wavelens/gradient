@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LogChunkMeta {
     pub index: u32,
     pub line_start: u64,
@@ -15,7 +15,7 @@ pub struct LogChunkMeta {
     pub byte_len: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LogChunkIndex {
     pub total_chunks: u32,
     pub total_lines: u64,
@@ -23,7 +23,7 @@ pub struct LogChunkIndex {
     pub chunks: Vec<LogChunkMeta>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LogSearchHit {
     pub line_number: u64,
     pub chunk_index: u32,

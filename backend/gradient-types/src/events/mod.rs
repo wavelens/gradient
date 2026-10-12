@@ -90,7 +90,7 @@ pub trait EventKind: Serialize {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct CatalogEntry {
     pub name: &'static str,
     pub durable: bool,

@@ -5,10 +5,11 @@
  */
 
 use super::members::role_label;
+use crate::api_spec::TeamPath;
 use crate::audit::Audit;
 use crate::endpoints::membership::find_user_by_username;
 use crate::endpoints::membership::invitations::{PendingInvitationItem, RevokeInvitationRequest};
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::refusal::SharedRefusal;
 use crate::scope::{Admin, TeamScope};
@@ -17,6 +18,16 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 
+#[utoipa::path(
+    get,
+    path = "/teams/{team}/invitations",
+    operation_id = "listTeamInvitations",
+    tag = "teams",
+    summary = "List pending team invitations",
+    description = "Needs Admin in the team.",
+    params(TeamPath),
+    responses((status = OK, description = "OK", body = Vec<PendingInvitationItem>), WebError)
+)]
 pub async fn get_team_invitations(
     TeamScope { team, db, .. }: TeamScope<Admin>,
 ) -> WebResult<Json<BaseResponse<Vec<PendingInvitationItem>>>> {
@@ -38,6 +49,17 @@ pub async fn get_team_invitations(
     Ok(ok_json(items))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/teams/{team}/invitations",
+    operation_id = "revokeTeamInvitation",
+    tag = "teams",
+    summary = "Revoke team invitation",
+    description = "Needs Admin in the team.",
+    params(TeamPath),
+    request_body = RevokeInvitationRequest,
+    responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_team_invitation(
     TeamScope { team, db, .. }: TeamScope<Admin>,
     audit: Audit,

@@ -5,6 +5,7 @@
  */
 
 use super::refusal::TeamRefusal;
+use crate::api_spec::TeamPath;
 use crate::audit::Audit;
 use crate::endpoints::projects::workers::{
     PatchWorkerRequest, RegisterWorkerRequest, WorkerConnection, encrypt_for_dialing, live_workers,
@@ -30,7 +31,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct TeamWorkerEntry {
     pub worker_id: String,
     pub display_name: String,
@@ -65,7 +66,7 @@ impl TeamWorkerEntry {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct RegisteredTeamWorker {
     pub team: TeamId,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -106,6 +107,16 @@ async fn find_team_worker(db: &WebDb, team: TeamId, worker_id: &str) -> WebResul
         .or_not_found(Resource::TeamWorker)
 }
 
+#[utoipa::path(
+    get,
+    path = "/teams/{team}/workers",
+    operation_id = "listTeamWorkers",
+    tag = "teams",
+    summary = "List team workers",
+    description = "A team worker serves every project that grants the team its workers. `last_error` is shown to team Admins.",
+    params(TeamPath),
+    responses((status = OK, description = "OK", body = Vec<TeamWorkerEntry>), WebError)
+)]
 pub async fn get_team_workers(
     TeamScope {
         team,
@@ -130,6 +141,17 @@ pub async fn get_team_workers(
     Ok(ok_json(entries))
 }
 
+#[utoipa::path(
+    post,
+    path = "/teams/{team}/workers",
+    operation_id = "registerTeamWorker",
+    tag = "teams",
+    summary = "Register team worker",
+    description = "Needs Admin in the team. The worker answers the server challenge with `<team id>:<token>` or `*:<token>` in its peers file. `token` is returned only when the server generated it.",
+    params(TeamPath),
+    request_body = RegisterWorkerRequest,
+    responses((status = OK, description = "OK", body = RegisteredTeamWorker), WebError)
+)]
 pub async fn post_team_worker(
     TeamScope { team, user, .. }: TeamScope<Admin>,
     state: State<Arc<ServerState>>,
@@ -198,6 +220,17 @@ pub async fn post_team_worker(
     }))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/teams/{team}/workers/{worker_id}",
+    operation_id = "patchTeamWorker",
+    tag = "teams",
+    summary = "Change team worker",
+    description = "Needs Admin in the team. Deactivating aborts the worker's running jobs of the granted projects.",
+    params(TeamPath, ("worker_id" = String, Path)),
+    request_body = PatchWorkerRequest,
+    responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn patch_team_worker(
     TeamScope {
         team, db, params, ..
@@ -254,6 +287,16 @@ pub async fn patch_team_worker(
     Ok(ok_json("ok".to_string()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/teams/{team}/workers/{worker_id}",
+    operation_id = "deleteTeamWorker",
+    tag = "teams",
+    summary = "Delete team worker",
+    description = "Needs Admin in the team.",
+    params(TeamPath, ("worker_id" = String, Path)),
+    responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_team_worker(
     TeamScope {
         team, db, params, ..

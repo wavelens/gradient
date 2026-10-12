@@ -39,12 +39,17 @@ pub mod webhooks;
 pub mod worker_tokens;
 pub mod workers;
 
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use axum::extract::{Json, State};
 use gradient_core::ServerState;
 use gradient_types::{BaseResponse, CreatePermission};
 use serde::Serialize;
 use std::sync::Arc;
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ChunkReceived {
+    pub received: u64,
+}
 
 /// `sandbox` is dropping a build-controlled response into a unique opaque origin. Its script is
 /// reaching the API as nobody. A same-origin `fetch` would otherwise carry the session cookie and
@@ -112,6 +117,15 @@ pub async fn handle_404() -> crate::error::WebError {
     crate::error::WebError::from(refusal::EndpointRefusal::UnknownRoute)
 }
 
+#[utoipa::path(
+    get,
+    path = "/health",
+    operation_id = "getHealth",
+    tag = "general",
+    summary = "Health check",
+    description = "Returns `200 ALIVE` when the server is running. Does not require authentication.",
+    responses((status = OK, description = "Server is alive", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn get_health() -> WebResult<Json<BaseResponse<String>>> {
     let res = BaseResponse {
         error: false,
@@ -121,7 +135,7 @@ pub async fn get_health() -> WebResult<Json<BaseResponse<String>>> {
     Ok(Json(res))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ServerConfig {
     pub version: String,
     pub oidc_enabled: bool,
@@ -141,6 +155,15 @@ pub struct ServerConfig {
     pub logo_url: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/config",
+    operation_id = "getConfig",
+    tag = "general",
+    summary = "Server configuration",
+    description = "Returns feature flags for the frontend (OIDC enabled, registration disabled, email verification).",
+    responses((status = OK, description = "Server configuration", body = ServerConfig), WebError)
+)]
 pub async fn get_config(
     State(state): State<Arc<ServerState>>,
 ) -> WebResult<Json<BaseResponse<ServerConfig>>> {

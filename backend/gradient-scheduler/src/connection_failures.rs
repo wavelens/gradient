@@ -10,14 +10,14 @@ use chrono::NaiveDateTime;
 use gradient_util::sync::Mutex;
 use serde::Serialize;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionDirection {
     Outbound,
     Inbound,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct ConnectionFailure {
     pub reason: String,
     pub at: NaiveDateTime,

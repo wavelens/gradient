@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::api_spec::ProjectPath;
 use crate::audit::{Audit, changed_fields};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{ok_json, paginate};
@@ -29,7 +30,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct MakeProjectRequest {
     pub name: ProjectName,
     pub display_name: ProjectDisplayName,
@@ -38,7 +39,7 @@ pub struct MakeProjectRequest {
     pub hide_build_requests: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct PatchProjectRequest {
     pub name: Option<ProjectName>,
     pub display_name: Option<String>,
@@ -46,7 +47,7 @@ pub struct PatchProjectRequest {
     pub hide_build_requests: Option<bool>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ProjectSummary {
     pub id: ProjectId,
     pub name: String,
@@ -81,7 +82,7 @@ impl ProjectSummary {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ProjectResponse {
     pub id: ProjectId,
     pub name: String,
@@ -123,6 +124,16 @@ impl ProjectResponse {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/projects/available",
+    operation_id = "checkProjectNameAvailable",
+    tag = "projects",
+    summary = "Check project name availability",
+    description = "Returns `true` if no project with the given name exists, `false` if it is already taken.",
+    params(("name" = String, Query)),
+    responses((status = OK, description = "Availability result", body = bool, content_type = "application/json"), WebError)
+)]
 pub async fn get_project_name_available(
     state: State<Arc<ServerState>>,
     Query(params): Query<HashMap<String, String>>,
@@ -137,11 +148,23 @@ pub async fn get_project_name_available(
     Ok(ok_json(!exists))
 }
 
+type PaginatedProjectSummary = Paginated<ProjectSummary>;
+
+#[utoipa::path(
+    get,
+    path = "/projects",
+    operation_id = "listProjects",
+    tag = "projects",
+    summary = "List projects",
+    description = "Returns all projects the current user is a member of.",
+    params(PaginationParams),
+    responses((status = OK, description = "Project list", body = PaginatedProjectSummary), WebError)
+)]
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Query(params): Query<PaginationParams>,
-) -> WebResult<Json<BaseResponse<Paginated<Vec<ProjectSummary>>>>> {
+) -> WebResult<Json<BaseResponse<Paginated<ProjectSummary>>>> {
     let listing = paginate(
         gradient_db::projects::reachable_by_user(user.id),
         &state.web_db,
@@ -165,6 +188,16 @@ pub async fn get(
     Ok(ok_json(listing))
 }
 
+#[utoipa::path(
+    put,
+    path = "/projects",
+    operation_id = "createProject",
+    tag = "projects",
+    summary = "Create project",
+    description = "Creates a new project owned by the current user.",
+    request_body = MakeProjectRequest,
+    responses((status = OK, description = "Project UUID", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn put(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -244,15 +277,36 @@ pub async fn put(
     }))
 }
 
+type PaginatedProject = Paginated<MProject>;
+
+#[utoipa::path(
+    get,
+    path = "/projects/public",
+    operation_id = "listPublicProjects",
+    tag = "projects",
+    summary = "List public projects",
+    description = "Returns a paginated list of all public projects, ordered by name. Does not require authentication.",
+    params(PaginationParams),
+    responses((status = OK, description = "Paginated public project list", body = PaginatedProject), WebError)
+)]
 pub async fn get_public_projects(
     state: State<Arc<ServerState>>,
     Query(params): Query<PaginationParams>,
-) -> WebResult<Json<BaseResponse<Paginated<Vec<MProject>>>>> {
+) -> WebResult<Json<BaseResponse<Paginated<MProject>>>> {
     let listing = paginate(gradient_db::projects::all_public(), &state.web_db, &params).await?;
 
     Ok(ok_json(listing))
 }
 
+#[utoipa::path(
+    get,
+    path = "/projects/{project}",
+    operation_id = "getProject",
+    tag = "projects",
+    summary = "Get project",
+    params(ProjectPath),
+    responses((status = OK, description = "Project details", body = ProjectResponse), WebError)
+)]
 pub async fn get_project(
     ProjectScope {
         project,
@@ -311,6 +365,17 @@ async fn github_app_install_url(
         .cloned()
 }
 
+#[utoipa::path(
+    patch,
+    path = "/projects/{project}",
+    operation_id = "patchProject",
+    tag = "projects",
+    summary = "Update project",
+    description = "Updates one or more project fields. Managed projects cannot\nbe edited via the API. Requires the caller to hold the **admin** role\nin the project.",
+    params(ProjectPath),
+    request_body = PatchProjectRequest,
+    responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn patch_project(
     ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
     audit: Audit,
@@ -365,6 +430,16 @@ pub async fn patch_project(
     Ok(Json(res))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/projects/{project}",
+    operation_id = "deleteProject",
+    tag = "projects",
+    summary = "Delete project",
+    description = "Permanently deletes the project and all its resources. Requires\nthe caller to hold the **admin** role in the project.",
+    params(ProjectPath),
+    responses((status = OK, description = "Deleted", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_project(
     ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::DeleteProject>>,
     audit: Audit,

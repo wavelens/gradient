@@ -5,7 +5,7 @@
  */
 
 use crate::endpoints::board_metrics::WindowParams;
-use crate::error::{WebResult, require_superuser};
+use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
@@ -17,7 +17,7 @@ use sea_orm::ConnectionTrait;
 use serde::Serialize;
 use std::sync::Arc;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct LabelledPoint {
     pub bucket_start: String,
     pub count: i64,
@@ -25,13 +25,13 @@ pub struct LabelledPoint {
     pub max: f64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct LabelledSeries {
     pub label: String,
     pub points: Vec<LabelledPoint>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct BoardStorage {
     pub granularity: &'static str,
     pub op_latency: Vec<LabelledSeries>,
@@ -42,6 +42,16 @@ pub struct BoardStorage {
     pub serve_failures: Vec<LabelledSeries>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/storage",
+    operation_id = "getBoardStorage",
+    tag = "board",
+    summary = "Storage and transport health series (superuser)",
+    description = "Per-label rollup series for NAR storage call latency and errors, worker protocol lane fill and send stalls, NAR serve queue depth and serve failures. Windows up to 6 h read minute buckets, up to 168 h hour buckets, longer windows day buckets. Superuser only.",
+    params(WindowParams),
+    responses((status = OK, description = "Storage and transport health series", body = BoardStorage), WebError)
+)]
 pub async fn get_board_storage(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

@@ -5,6 +5,7 @@
  */
 
 use crate::access::project_admin_emails;
+use crate::api_spec::CachePath;
 use crate::audit::Audit;
 use crate::endpoints::projects::settings::mode_label;
 use crate::endpoints::projects::workers::reauth_project_workers;
@@ -30,7 +31,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct SubscriptionRequestItem {
     pub project: String,
     pub project_display_name: String,
@@ -51,6 +52,16 @@ impl SubscriptionRequestItem {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/caches/{cache}/subscription-requests",
+    operation_id = "listCacheSubscriptionRequests",
+    tag = "caches",
+    summary = "List subscription requests",
+    description = "Projects that have asked to subscribe to this cache and are waiting for\na decision. Requires `manageCacheSubscriptions`.",
+    params(CachePath),
+    responses((status = OK, description = "Pending requests, newest first", body = Vec<SubscriptionRequestItem>), WebError)
+)]
 pub async fn get_cache_subscription_requests(
     CacheScope { cache, db, .. }: CacheScope<Requires<can::ManageCacheSubscriptions>>,
 ) -> WebResult<Json<BaseResponse<Vec<SubscriptionRequestItem>>>> {
@@ -148,6 +159,16 @@ async fn notify_project_admins(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/caches/{cache}/subscription-requests/{project}",
+    operation_id = "approveCacheSubscriptionRequest",
+    tag = "caches",
+    summary = "Approve a subscription request",
+    description = "Turns the pending request into a real subscription, using the mode the\nproject asked for, and re-queues any evaluation parked for want of a\ncache. Requires `manageCacheSubscriptions`.",
+    params(CachePath, ("project" = String, Path)),
+    responses((status = OK, description = "Subscription approved", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_approve_subscription_request(
     CacheScope {
         cache,
@@ -215,6 +236,16 @@ pub async fn post_approve_subscription_request(
     Ok(ok_json("Subscription approved".to_string()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/caches/{cache}/subscription-requests/{project}",
+    operation_id = "denyCacheSubscriptionRequest",
+    tag = "caches",
+    summary = "Deny a subscription request",
+    description = "Requires `manageCacheSubscriptions`.",
+    params(CachePath, ("project" = String, Path)),
+    responses((status = OK, description = "Subscription request denied", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_subscription_request(
     CacheScope {
         cache,

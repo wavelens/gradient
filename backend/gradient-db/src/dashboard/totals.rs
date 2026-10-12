@@ -19,7 +19,7 @@ pub struct Totals {
     pub queue_wait_p50_ms: i64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
 pub struct ActivityDay {
     pub date: NaiveDate,
     pub evaluations: i64,

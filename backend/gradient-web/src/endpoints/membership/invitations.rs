@@ -15,7 +15,7 @@ use gradient_db::WebDb;
 use gradient_types::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PendingInvitationItem {
     pub user: String,
     pub name: String,
@@ -44,7 +44,7 @@ impl PendingInvitationItem {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct RevokeInvitationRequest {
     pub user: String,
 }

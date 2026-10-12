@@ -12,7 +12,7 @@ use sea_orm::{
 };
 use serde::Serialize;
 
-#[derive(Debug, FromQueryResult, Serialize)]
+#[derive(Debug, FromQueryResult, Serialize, utoipa::ToSchema)]
 pub struct TeamEvaluation {
     pub id: EvaluationId,
     pub project: String,

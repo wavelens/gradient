@@ -9,7 +9,7 @@ use crate::access::{
 };
 use crate::audit::Audit;
 use crate::authorization::MaybeApiKey;
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::resource::Resource;
 use axum::extract::{Path, State};
@@ -121,6 +121,15 @@ async fn cache_target(
     })
 }
 
+#[utoipa::path(
+    get,
+    path = "/user/stars",
+    operation_id = "getUserStars",
+    tag = "user",
+    summary = "List starred projects, tasks and caches",
+    description = "Returns the names of everything the current user starred and can still read (the visibility of `/search`, no superuser bypass), each list sorted by name. A target the user lost access to is hidden, not unstarred.",
+    responses((status = OK, description = "Starred names grouped by kind", body = StarredNames), WebError)
+)]
 pub async fn get_stars(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -128,6 +137,16 @@ pub async fn get_stars(
     Ok(ok_json(starred_names(&state.web_db, user.id).await?))
 }
 
+#[utoipa::path(
+    put,
+    path = "/user/stars/projects/{project}",
+    operation_id = "starProject",
+    tag = "user",
+    summary = "Star a project",
+    description = "Idempotent. `message` is `true`, the project is starred afterwards.",
+    params(("project" = String, Path)),
+    responses((status = OK, description = "Project starred", body = bool, content_type = "application/json"), WebError)
+)]
 pub async fn put_project_star(
     State(state): State<Arc<ServerState>>,
     audit: Audit,
@@ -140,6 +159,16 @@ pub async fn put_project_star(
     apply(&db, &user, &audit, target, Op::Star).await
 }
 
+#[utoipa::path(
+    delete,
+    path = "/user/stars/projects/{project}",
+    operation_id = "unstarProject",
+    tag = "user",
+    summary = "Unstar a project",
+    description = "Idempotent, also for a project that was never starred. `message` is `false`.",
+    params(("project" = String, Path)),
+    responses((status = OK, description = "Project unstarred", body = bool, content_type = "application/json"), WebError)
+)]
 pub async fn delete_project_star(
     State(state): State<Arc<ServerState>>,
     audit: Audit,
@@ -152,6 +181,16 @@ pub async fn delete_project_star(
     apply(&db, &user, &audit, target, Op::Unstar).await
 }
 
+#[utoipa::path(
+    put,
+    path = "/user/stars/tasks/{project}/{task}",
+    operation_id = "starTask",
+    tag = "user",
+    summary = "Star a task",
+    description = "Idempotent. `message` is `true`, the task is starred afterwards.",
+    params(("project" = String, Path), ("task" = String, Path)),
+    responses((status = OK, description = "Task starred", body = bool, content_type = "application/json"), WebError)
+)]
 pub async fn put_task_star(
     State(state): State<Arc<ServerState>>,
     audit: Audit,
@@ -164,6 +203,16 @@ pub async fn put_task_star(
     apply(&db, &user, &audit, target, Op::Star).await
 }
 
+#[utoipa::path(
+    delete,
+    path = "/user/stars/tasks/{project}/{task}",
+    operation_id = "unstarTask",
+    tag = "user",
+    summary = "Unstar a task",
+    description = "Idempotent, also for a task that was never starred. `message` is `false`.",
+    params(("project" = String, Path), ("task" = String, Path)),
+    responses((status = OK, description = "Task unstarred", body = bool, content_type = "application/json"), WebError)
+)]
 pub async fn delete_task_star(
     State(state): State<Arc<ServerState>>,
     audit: Audit,
@@ -176,6 +225,16 @@ pub async fn delete_task_star(
     apply(&db, &user, &audit, target, Op::Unstar).await
 }
 
+#[utoipa::path(
+    put,
+    path = "/user/stars/caches/{cache}",
+    operation_id = "starCache",
+    tag = "user",
+    summary = "Star a cache",
+    description = "Idempotent. `message` is `true`, the cache is starred afterwards.",
+    params(("cache" = String, Path)),
+    responses((status = OK, description = "Cache starred", body = bool, content_type = "application/json"), WebError)
+)]
 pub async fn put_cache_star(
     State(state): State<Arc<ServerState>>,
     audit: Audit,
@@ -188,6 +247,16 @@ pub async fn put_cache_star(
     apply(&db, &user, &audit, target, Op::Star).await
 }
 
+#[utoipa::path(
+    delete,
+    path = "/user/stars/caches/{cache}",
+    operation_id = "unstarCache",
+    tag = "user",
+    summary = "Unstar a cache",
+    description = "Idempotent, also for a cache that was never starred. `message` is `false`.",
+    params(("cache" = String, Path)),
+    responses((status = OK, description = "Cache unstarred", body = bool, content_type = "application/json"), WebError)
+)]
 pub async fn delete_cache_star(
     State(state): State<Arc<ServerState>>,
     audit: Audit,

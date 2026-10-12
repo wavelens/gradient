@@ -6,6 +6,7 @@
 
 use super::refusal::TeamRefusal;
 use crate::access::{Caller, ProjectAccess, has_cache_permission, has_permission, load_project};
+use crate::api_spec::{CachePath, ProjectPath};
 use crate::audit::Audit;
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::teams::workers::{reauth_team_workers, withdraw_team_workers};
@@ -29,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct TeamGrantEntry {
     pub team: String,
     pub display_name: String,
@@ -52,7 +53,7 @@ impl TeamGrantEntry {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct GrantProjectRequest {
     pub team: String,
     pub role: Option<String>,
@@ -62,20 +63,20 @@ pub struct GrantProjectRequest {
     pub workers: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct PatchProjectGrantRequest {
     pub role: Option<String>,
     pub users: Option<bool>,
     pub workers: Option<bool>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct GrantCacheRequest {
     pub team: String,
     pub role: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct PatchCacheGrantRequest {
     pub role: String,
 }
@@ -162,6 +163,16 @@ fn project_role_name(roles: &HashMap<RoleId, String>, role: Option<RoleId>) -> O
     role.and_then(|id| roles.get(&id).cloned())
 }
 
+#[utoipa::path(
+    get,
+    path = "/projects/{project}/teams",
+    operation_id = "listProjectTeams",
+    tag = "teams",
+    summary = "List project team grants",
+    description = "Includes pending requests.",
+    params(ProjectPath),
+    responses((status = OK, description = "OK", body = Vec<TeamGrantEntry>), WebError)
+)]
 pub async fn get_project_teams(
     ProjectScope { project, db, .. }: ProjectScope<Readable>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamGrantEntry>>>> {
@@ -206,6 +217,17 @@ pub async fn get_project_teams(
     Ok(ok_json(items))
 }
 
+#[utoipa::path(
+    post,
+    path = "/projects/{project}/teams",
+    operation_id = "grantProjectTeam",
+    tag = "teams",
+    summary = "Grant a team on a project",
+    description = "Needs `manageMembers` when the grant includes users and `manageWorkers` when it includes workers.\nA grant is active at once when the caller is Admin in the team (or a superuser).\nOtherwise a request waits for a team Admin and the answer is `Request sent`.",
+    params(("project" = String, Path)),
+    request_body = GrantProjectRequest,
+    responses((status = OK, description = "`Team granted` or `Request sent`", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_project_team(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -307,6 +329,17 @@ pub async fn post_project_team(
     Ok(ok_json("Team granted".to_string()))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/projects/{project}/teams/{team}",
+    operation_id = "patchProjectTeam",
+    tag = "teams",
+    summary = "Change a project team grant",
+    description = "Needs the project permission of the changed part. Turning workers on also needs Admin in the team.",
+    params(("project" = String, Path), ("team" = String, Path)),
+    request_body = PatchProjectGrantRequest,
+    responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn patch_project_team(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -376,6 +409,16 @@ pub async fn patch_project_team(
     Ok(ok_json("Team grant updated".to_string()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/projects/{project}/teams/{team}",
+    operation_id = "removeProjectTeam",
+    tag = "teams",
+    summary = "Remove a project team grant",
+    description = "Allowed for Admin in the team, or on the project for `manageWorkers` when the grant includes only workers and `manageMembers` otherwise. Removing workers aborts their running jobs of the project.\nWithout a grant, the pending request is withdrawn instead.",
+    params(("project" = String, Path), ("team" = String, Path)),
+    responses((status = OK, description = "`Team grant removed` or `Request withdrawn`", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_project_team(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -440,6 +483,16 @@ fn cache_role_name(roles: &HashMap<RoleId, String>, role: RoleId) -> Option<Stri
     roles.get(&role).cloned()
 }
 
+#[utoipa::path(
+    get,
+    path = "/caches/{cache}/teams",
+    operation_id = "listCacheTeams",
+    tag = "teams",
+    summary = "List cache team grants",
+    description = "Includes pending requests.",
+    params(CachePath),
+    responses((status = OK, description = "OK", body = Vec<TeamGrantEntry>), WebError)
+)]
 pub async fn get_cache_teams(
     CacheScope { cache, db, .. }: CacheScope<Requires<can::ViewCache>>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamGrantEntry>>>> {
@@ -477,6 +530,17 @@ pub async fn get_cache_teams(
     Ok(ok_json(items))
 }
 
+#[utoipa::path(
+    post,
+    path = "/caches/{cache}/teams",
+    operation_id = "grantCacheTeam",
+    tag = "teams",
+    summary = "Grant a team on a cache",
+    description = "Needs `manageCacheMembers`.\nA grant is active at once when the caller is Admin in the team (or a superuser).\nOtherwise a request waits for a team Admin and the answer is `Request sent`.",
+    params(CachePath),
+    request_body = GrantCacheRequest,
+    responses((status = OK, description = "`Team granted` or `Request sent`", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_cache_team(
     CacheScope {
         cache, user, db, ..
@@ -533,6 +597,17 @@ pub async fn post_cache_team(
     Ok(ok_json("Team granted".to_string()))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/caches/{cache}/teams/{team}",
+    operation_id = "patchCacheTeam",
+    tag = "teams",
+    summary = "Change a cache team grant",
+    description = "Needs `manageCacheMembers`.",
+    params(CachePath, ("team" = String, Path)),
+    request_body = PatchCacheGrantRequest,
+    responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn patch_cache_team(
     CacheScope {
         cache, db, params, ..
@@ -562,6 +637,16 @@ pub async fn patch_cache_team(
     Ok(ok_json("Team grant updated".to_string()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/caches/{cache}/teams/{team}",
+    operation_id = "removeCacheTeam",
+    tag = "teams",
+    summary = "Remove a cache team grant",
+    description = "Allowed for `manageCacheMembers` on the cache or Admin in the team.\nWithout a grant, the pending request is withdrawn instead.",
+    params(("cache" = String, Path), ("team" = String, Path)),
+    responses((status = OK, description = "`Team grant removed` or `Request withdrawn`", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_cache_team(
     state: State<Arc<ServerState>>,
     audit: Audit,

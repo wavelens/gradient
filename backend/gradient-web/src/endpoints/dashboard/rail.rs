@@ -5,7 +5,7 @@
  */
 
 use super::rank::Tier;
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::State;
 use axum::{Extension, Json};
@@ -18,7 +18,7 @@ use gradient_types::*;
 use serde::Serialize;
 use std::sync::Arc;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct RailTask {
     pub name: String,
     pub status: Option<EvaluationStatus>,
@@ -33,7 +33,7 @@ impl From<&RailTaskRow> for RailTask {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct RailProject {
     pub name: String,
     pub display_name: String,
@@ -60,7 +60,7 @@ impl RailProject {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct RailCache {
     pub name: String,
     pub display_name: String,
@@ -79,7 +79,7 @@ impl From<RailCacheRow> for RailCache {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct Rail {
     pub projects: Vec<RailProject>,
     pub caches: Vec<RailCache>,
@@ -109,6 +109,15 @@ pub fn build_rail(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/dashboard/rail",
+    operation_id = "getDashboardRail",
+    tag = "dashboard",
+    summary = "Sidebar rail of the current user",
+    description = "Projects: member projects plus starred public ones, sorted by tier (`starred_active`, `active`, `starred`, `team`, `member`), then name.\nActive means a non-PR evaluation in the last 14 days; `status` is the latest non-PR evaluation's status or `null`.\n`tasks` is present only on `starred_active` projects and omitted otherwise.\nCaches: those the viewer created, is a member of or reaches through a member project, plus starred public ones; starred first, then name. Superusers get no extra caches here.",
+    responses((status = OK, description = "Rail projects and caches", body = Rail), WebError)
+)]
 pub async fn get_rail(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

@@ -31,7 +31,6 @@ pub mod scope;
 
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, MatchedPath};
-use axum::routing::{get, post, put};
 use axum::{Router, middleware};
 use bytes::Bytes;
 use governor::middleware::NoOpMiddleware;
@@ -52,10 +51,8 @@ use tower_http::trace::TraceLayer;
 use tracing::Span;
 use uuid::Uuid;
 
-use endpoints::membership::ProjectOwner;
-use endpoints::{admin, *};
+use endpoints::{handle_404, metrics};
 use gradient_core::{InitError, ServerState};
-use gradient_proto::proto_router;
 use gradient_scheduler::Scheduler;
 use gradient_util::supervision::ChildSpec;
 use gradient_wire::{PerIpLimiter, ProtoLimiter};
@@ -195,204 +192,28 @@ pub fn create_router_with_scheduler(
         authorization::authorize,
     ));
 
-    let optional_api = Router::new()
-        .route("/projects/{project}", get(projects::get_project))
-        .route(
-            "/projects/{project}/users",
-            get(membership::members::list::<ProjectOwner>),
-        )
-        .route(
-            "/projects/{project}/teams",
-            get(endpoints::teams::grants::get_project_teams),
-        )
-        .route("/tasks/{project}", get(tasks::get))
-        .route("/tasks/{project}/{task}", get(tasks::get_task))
-        .route(
-            "/tasks/{project}/{task}/evaluations",
-            get(tasks::get_task_evaluations),
-        )
-        .route(
-            "/tasks/{project}/{task}/details",
-            get(tasks::get_task_details),
-        )
-        .route(
-            "/tasks/{project}/{task}/entry-points",
-            get(tasks::get_task_entry_points),
-        )
-        .route(
-            "/tasks/{project}/{task}/metrics",
-            get(tasks::get_task_metrics),
-        )
-        .route(
-            "/tasks/{project}/{task}/entry-point-metrics",
-            get(tasks::get_entry_point_metrics),
-        )
-        .route(
-            "/tasks/{project}/{task}/entry-point-downloads",
-            get(tasks::get_entry_point_download),
-        )
-        .route("/tasks/{project}/{task}/badge", get(badges::get_task_badge))
-        .route("/evals/{evaluation}", get(evals::get_evaluation))
-        .route(
-            "/evals/{evaluation}/messages",
-            get(evals::get_evaluation_messages),
-        )
-        .route(
-            "/evals/{evaluation}/builds",
-            get(evals::get_evaluation_builds),
-        )
-        .route(
-            "/evals/{evaluation}/summary",
-            get(evals::get_evaluation_summary),
-        )
-        .route("/evals/{evaluation}/artefacts", get(evals::get_artefacts))
-        .route("/evals/{evaluation}/closure", get(builds::get_eval_closure))
-        .route(
-            "/evals/{evaluation}/flake-graph",
-            get(board::get_eval_flake_graph),
-        )
-        .route(
-            "/evals/{evaluation}/runtime-closure",
-            get(builds::get_eval_runtime_closure),
-        )
-        .route("/builds/{build}", get(builds::get_build))
-        .route("/builds/{build}/log", get(builds::get_build_log))
-        .route(
-            "/builds/{build}/log/chunks",
-            get(builds::get_build_log_chunks),
-        )
-        .route(
-            "/builds/{build}/log/chunk/{index}",
-            get(builds::get_build_log_chunk),
-        )
-        .route(
-            "/builds/{build}/log/lines",
-            get(builds::get_build_log_lines),
-        )
-        .route(
-            "/builds/{build}/log/search",
-            get(builds::get_build_log_search),
-        )
-        .route("/builds/{build}/graph", get(builds::get_build_graph))
-        .route("/builds/{build}/closure", get(builds::get_build_closure))
-        .route(
-            "/builds/{build}/runtime-closure",
-            get(builds::get_build_runtime_closure),
-        )
-        .route(
-            "/builds/{build}/downloads",
-            get(builds::get_build_downloads),
-        )
-        .route(
-            "/builds/{build}/download/{filename}",
-            get(builds::get_build_download),
-        )
-        .route("/commits/{commit}", get(commits::get_commit))
-        .route("/caches/{cache}", get(caches::get_cache))
-        .route(
-            "/caches/{cache}/public-key",
-            get(caches::get_cache_public_key),
-        )
-        .route(
-            "/caches/{cache}/upstream-caches",
-            get(caches::get_upstream_caches),
-        )
-        .route("/caches/{cache}/stats", get(stats::get_cache_stats))
-        .route("/caches/{cache}/nars", get(caches::nars_list))
-        .route("/caches/{cache}/nars/stats", get(caches::nars_stats))
-        .route(
-            "/caches/{cache}/nars/available",
-            get(caches::nars_available),
-        )
-        .route("/caches/{cache}/nars/{hash}", get(caches::nars_show))
-        .route("/metrics/catalog", get(metrics_query::get_metrics_catalog))
-        .route("/metrics/query", get(metrics_query::get_metrics_query))
-        .route(
-            "/metrics/tasks/{project}/{task}/evaluations",
-            get(tasks::get_task_metrics),
-        )
-        .route(
-            "/metrics/tasks/{project}/{task}/entry-point",
-            get(tasks::get_entry_point_metrics),
-        )
-        .route("/board/jobs/dispatched", get(board::get_dispatched_jobs))
-        .route("/board/jobs/pending", get(board::get_pending_jobs))
-        .route("/board/jobs/expensive", get(board::get_expensive_jobs))
-        .route(
-            "/board/jobs/expensive-by-resource",
-            get(board::get_expensive_by_resource),
-        )
-        .route(
-            "/board/evals/expensive-by-resource",
-            get(board::get_expensive_evals_by_resource),
-        )
-        .route("/board/jobs/{id}", get(board::get_dispatched_job))
-        .route("/board/scoring/summary", get(board::get_scoring_summary))
-        .route("/board/scoring/rules", get(board::get_scoring_rules))
-        .route("/board/cache", get(board_metrics::get_board_cache))
-        .route(
-            "/board/cache/upstream-caches",
-            get(board_metrics::get_board_upstream_caches),
-        )
-        .route("/board/network", get(board_metrics::get_board_network))
-        .route("/board/fleet", get(board_metrics::get_board_fleet))
-        .route(
-            "/board/durations/heatmap",
-            get(board_metrics::get_board_durations_heatmap),
-        )
-        .route("/board/workers", get(board::get_board_workers))
-        .route("/board/workers/load", get(board::get_board_worker_load))
-        .route("/board/live", get(board::board_live_ws))
-        .route("/board/cache/live", get(live::cache_live_ws))
-        .route("/tasks/{project}/{task}/live", get(live::task_live_ws))
-        .route("/evals/{evaluation}/live", get(live::evaluation_live_ws))
-        .route("/builds/{build}/live", get(live::build_live_ws))
-        .route_layer(middleware::from_fn_with_state(
-            Arc::clone(&state),
-            authorization::authorize_optional,
-        ));
+    let (optional_api, _) = routes::optional_api().split_for_parts();
+    let optional_api = optional_api.route_layer(middleware::from_fn_with_state(
+        Arc::clone(&state),
+        authorization::authorize_optional,
+    ));
 
-    let auth_sensitive = Router::new()
-        .route("/auth/basic/login", post(auth::post_basic_login))
-        .route("/auth/basic/register", post(auth::post_basic_register))
-        .route("/auth/check-username", post(auth::post_check_username))
-        .route("/auth/verify-email", get(auth::get_verify_email))
-        .route(
-            "/auth/resend-verification",
-            post(auth::post_resend_verification),
-        )
-        .route(
-            "/auth/oauth/authorize",
-            get(auth::get_oauth_authorize).post(auth::post_oauth_authorize),
-        )
-        .route("/auth/oidc/login", get(auth::get_oidc_login))
-        .route("/auth/oidc/callback", get(auth::get_oidc_callback))
-        .route("/auth/cli/start", post(auth::post_cli_device_start))
-        .route("/auth/cli/poll", post(auth::post_cli_device_poll))
-        .route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(6), 5)?));
+    let (auth_sensitive, _) = routes::auth_sensitive().split_for_parts();
+    let auth_sensitive =
+        auth_sensitive.route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(6), 5)?));
 
-    let webhook_routes = Router::new()
-        .route("/hooks/github", post(git_host_hooks::github_app_webhook))
-        .route(
-            "/hooks/{git_host}/{project}/{integration_name}",
-            post(git_host_hooks::git_host_webhook),
-        )
-        .route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(1), 30)?));
+    let (webhook_routes, _) = routes::webhook_routes().split_for_parts();
+    let webhook_routes =
+        webhook_routes.route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(1), 30)?));
+
+    let (open_api, _) = routes::open_api().split_for_parts();
 
     let api = Router::new()
         .merge(auth_api)
         .merge(optional_api)
         .merge(auth_sensitive)
         .merge(webhook_routes)
-        .route("/projects/public", get(projects::get_public_projects))
-        .route("/caches/public", get(caches::get_public_caches))
-        .route("/auth/logout", post(auth::post_logout))
-        .route("/health", get(get_health))
-        .route("/config", get(get_config))
-        .route(
-            "/admin/github-app/callback",
-            get(admin::github_app::callback),
-        );
+        .merge(open_api);
 
     scheduler.start();
     state.shutdown.supervise(ChildSpec::pass(
@@ -436,21 +257,8 @@ pub fn create_router_with_scheduler(
 
     let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_connections.get()));
 
-    let cache_upload_api = Router::new()
-        .route(
-            "/caches/{cache}/nars",
-            post(caches::nars_upload).layer(DefaultBodyLimit::max(
-                state.config.nar.max_upload_size.get(),
-            )),
-        )
-        .route(
-            "/caches/{cache}/nars/{hash}/chunk",
-            put(caches::nar_chunk).layer(DefaultBodyLimit::max(NAR_UPLOAD_CHUNK_LIMIT)),
-        )
-        .route(
-            "/caches/{cache}/nars/{hash}/finalize",
-            post(caches::nar_finalize),
-        )
+    let (cache_upload_api, _) = routes::cache_upload_api(&limits).split_for_parts();
+    let cache_upload_api = cache_upload_api
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize,
@@ -473,17 +281,22 @@ pub fn create_router_with_scheduler(
 
     let mut app = Router::new()
         .nest("/api/v1", api)
-        .merge(proto_router().route_layer(GovernorLayer::new(rate_limit(
-            Duration::from_millis(200),
-            150,
-        )?)))
+        .merge(
+            routes::proto_api()
+                .split_for_parts()
+                .0
+                .route_layer(GovernorLayer::new(rate_limit(
+                    Duration::from_millis(200),
+                    150,
+                )?)),
+        )
         .layer(axum::Extension(Arc::clone(&scheduler)))
         .layer(axum::Extension(Arc::clone(&proto_limiter)))
         .layer(axum::Extension(Arc::clone(&sessions)));
 
     if state.config.metrics.is_some() {
-        let metrics_route = Router::new()
-            .route("/metrics", get(endpoints::metrics::get_metrics))
+        let (metrics_route, _) = routes::metrics_api().split_for_parts();
+        let metrics_route = metrics_route
             .route_layer(middleware::from_fn_with_state(
                 Arc::clone(&state),
                 endpoints::metrics::metrics_auth,
@@ -494,40 +307,20 @@ pub fn create_router_with_scheduler(
     }
 
     let nar_cache_limit = || rate_limit(Duration::from_millis(20), 3000);
-    let cache_routes = Router::new()
-        .route("/cache/{cache}", get(caches::cache_root))
-        .route("/cache/{cache}/", get(caches::cache_root))
-        .route(
-            "/cache/{cache}/gradient-cache-info",
-            get(caches::gradient_cache_info),
-        )
-        .route("/cache/{cache}/nix-cache-info", get(caches::nix_cache_info))
-        .route(
-            "/cache/{cache}/debuginfo/{build_id}",
-            get(caches::debuginfo),
-        )
-        .route("/cache/{cache}/{path}", get(caches::path))
-        .route(
-            "/cache/{cache}/nar/upstream/{upstream_id}/{*path}",
-            get(caches::upstream_nar),
-        )
-        .route("/cache/{cache}/nar/{path}", get(caches::nar))
-        .route_layer(GovernorLayer::new(nar_cache_limit()?));
+    let (cache_routes, _) = routes::cache_routes().split_for_parts();
+    let cache_routes = cache_routes.route_layer(GovernorLayer::new(nar_cache_limit()?));
 
-    let cache_inspect = Router::new()
-        .route("/cache/{cache}/ls/{hash}", get(caches::ls))
-        .route("/cache/{cache}/serve/{hash}/{*path}", get(caches::serve))
-        .route_layer(GovernorLayer::new(rate_limit(
-            Duration::from_millis(333),
-            180,
-        )?));
+    let (cache_inspect, _) = routes::cache_inspect().split_for_parts();
+    let cache_inspect = cache_inspect.route_layer(GovernorLayer::new(rate_limit(
+        Duration::from_millis(333),
+        180,
+    )?));
 
-    let cache_log = Router::new()
-        .route("/cache/{cache}/log/{drv}", get(caches::log))
-        .route_layer(GovernorLayer::new(rate_limit(
-            Duration::from_millis(333),
-            900,
-        )?));
+    let (cache_log, _) = routes::cache_log().split_for_parts();
+    let cache_log = cache_log.route_layer(GovernorLayer::new(rate_limit(
+        Duration::from_millis(333),
+        900,
+    )?));
 
     let cache_per_ip = Arc::new(PerIpLimiter::new(
         state
@@ -536,8 +329,8 @@ pub fn create_router_with_scheduler(
             .anonymous_cache_max_connections_per_ip
             .get(),
     ));
-    let cache_proto_route = Router::new()
-        .route("/cache/{cache}/proto", get(caches::cache_proto))
+    let (cache_proto_route, _) = routes::cache_proto_route().split_for_parts();
+    let cache_proto_route = cache_proto_route
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize_optional,
@@ -554,30 +347,11 @@ pub fn create_router_with_scheduler(
         .merge(cache_proto_route);
 
     if state.config.scim.is_some() {
-        let scim_routes = Router::new()
-            .route(
-                "/ServiceProviderConfig",
-                get(scim::discovery::service_provider_config),
-            )
-            .route("/ResourceTypes", get(scim::discovery::resource_types))
-            .route("/Schemas", get(scim::discovery::schemas))
-            .route("/Users", get(scim::users::list).post(scim::users::create))
-            .route(
-                "/Users/{id}",
-                get(scim::users::get)
-                    .put(scim::users::replace)
-                    .patch(scim::users::patch)
-                    .delete(scim::users::delete),
-            )
-            .route("/Groups", get(scim::groups::list))
-            .route(
-                "/Groups/{id}",
-                get(scim::groups::get).patch(scim::groups::patch),
-            )
-            .route_layer(middleware::from_fn_with_state(
-                Arc::clone(&state),
-                authorization::authorize_scim,
-            ));
+        let (scim_routes, _) = routes::scim_routes().split_for_parts();
+        let scim_routes = scim_routes.route_layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            authorization::authorize_scim,
+        ));
         app = app.nest("/scim/v2", scim_routes);
     }
 

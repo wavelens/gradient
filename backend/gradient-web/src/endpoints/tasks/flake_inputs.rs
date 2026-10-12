@@ -6,27 +6,29 @@
 
 use super::DeletedResponse;
 use super::refusal::TaskRefusal;
+use crate::api_spec::TaskPath;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{Member, RequiresUnmanaged, TaskScope, can};
-use axum::routing::get;
-use axum::{Json, Router};
+use axum::Json;
 use chrono::Utc;
 use gradient_core::ServerState;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
-pub fn router() -> Router<Arc<ServerState>> {
-    Router::new()
-        .route("/", get(list).post(create))
-        .route("/{id}", get(read).patch(update).delete(delete_one))
+pub fn router() -> OpenApiRouter<Arc<ServerState>> {
+    OpenApiRouter::new()
+        .routes(routes!(list, create))
+        .routes(routes!(read, update, delete_one))
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct FlakeInputOverrideOut {
     pub id: FlakeInputOverrideId,
     pub task: TaskId,
@@ -49,14 +51,14 @@ impl From<MTaskFlakeInputOverride> for FlakeInputOverrideOut {
     }
 }
 
-#[derive(Deserialize, Debug)]
-pub struct CreateBody {
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
+pub struct CreateFlakeInputOverrideRequest {
     pub input_name: String,
     pub url: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct UpdateBody {
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
+pub struct UpdateFlakeInputOverrideRequest {
     pub input_name: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_optional_string")]
     pub url: Option<Option<String>>,
@@ -98,6 +100,15 @@ fn validate_url(url: &Option<String>) -> WebResult<()> {
     Ok(())
 }
 
+#[utoipa::path(
+    get,
+    path = "/",
+    operation_id = "listFlakeInputOverrides",
+    tag = "flake-inputs",
+    summary = "List flake input overrides",
+    params(TaskPath),
+    responses((status = OK, description = "List of flake input overrides", body = Vec<FlakeInputOverrideOut>), WebError)
+)]
 pub async fn list(
     TaskScope { task: proj, db, .. }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<FlakeInputOverrideOut>>>> {
@@ -106,9 +117,19 @@ pub async fn list(
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/",
+    operation_id = "createFlakeInputOverride",
+    tag = "flake-inputs",
+    summary = "Create a flake input override",
+    params(TaskPath),
+    request_body = CreateFlakeInputOverrideRequest,
+    responses((status = OK, description = "Flake input override created", body = FlakeInputOverrideOut), WebError)
+)]
 pub async fn create(
     TaskScope { task: proj, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
-    Json(body): Json<CreateBody>,
+    Json(body): Json<CreateFlakeInputOverrideRequest>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
     validate_input_name(&body.input_name)?;
     validate_url(&body.url)?;
@@ -142,6 +163,15 @@ pub async fn create(
     Ok(ok_json(row.into()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/{id}",
+    operation_id = "getFlakeInputOverride",
+    tag = "flake-inputs",
+    summary = "Get a flake input override",
+    params(TaskPath, ("id" = FlakeInputOverrideId, Path)),
+    responses((status = OK, description = "Flake input override", body = FlakeInputOverrideOut), WebError)
+)]
 pub async fn read(
     TaskScope {
         task: proj,
@@ -159,6 +189,16 @@ pub async fn read(
     Ok(ok_json(row.into()))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/{id}",
+    operation_id = "updateFlakeInputOverride",
+    tag = "flake-inputs",
+    summary = "Update a flake input override",
+    params(TaskPath, ("id" = FlakeInputOverrideId, Path)),
+    request_body = UpdateFlakeInputOverrideRequest,
+    responses((status = OK, description = "Flake input override updated", body = FlakeInputOverrideOut), WebError)
+)]
 pub async fn update(
     TaskScope {
         task: proj,
@@ -166,7 +206,7 @@ pub async fn update(
         params,
         ..
     }: TaskScope<RequiresUnmanaged<can::EditTask>>,
-    Json(body): Json<UpdateBody>,
+    Json(body): Json<UpdateFlakeInputOverrideRequest>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
     let id: FlakeInputOverrideId = params.param("id")?;
 
@@ -217,6 +257,15 @@ pub async fn update(
     Ok(ok_json(updated.into()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/{id}",
+    operation_id = "deleteFlakeInputOverride",
+    tag = "flake-inputs",
+    summary = "Delete a flake input override",
+    params(TaskPath, ("id" = FlakeInputOverrideId, Path)),
+    responses((status = OK, description = "Flake input override deleted", body = DeletedResponse), WebError)
+)]
 pub async fn delete_one(
     TaskScope {
         task: proj,

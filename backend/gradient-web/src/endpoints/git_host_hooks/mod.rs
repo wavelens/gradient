@@ -49,6 +49,17 @@ use fanout::{
 use gradient_git_host::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome};
 use installation::{handle_github_installation, resolve_github_app_targets};
 
+#[utoipa::path(
+    post,
+    path = "/hooks/github",
+    operation_id = "githubAppWebhook",
+    tag = "git-host-webhooks",
+    summary = "Receive GitHub App webhook",
+    description = "Receives events from a configured GitHub App. Payloads are authenticated using\n`X-Hub-Signature-256` HMAC-SHA256 verification against the configured\n`GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.\n\n**Handled events:**\n- `push` / `pull_request` / `release` - trigger an evaluation on any task whose\n  repository URL matches the matching trigger. A `push` carrying an\n  all-zero `after` SHA (a branch/tag deletion or a Git host \"test\" delivery)\n  is accepted as a `200` no-op rather than rejected.\n- `check_run` - the \"Approve and Run\" action clears a fork-PR approval gate.\n- `issue_comment` - `/gradient run` / `/gradient approve` maintainer commands.\n- `pull_request_review` - a maintainer's approving review clears a fork-PR approval gate.\n- `installation` / `installation_repositories` - stores or clears the GitHub App\n  `installation_id` on the matching Gradient project.\n- `ping` - always returns 200.\n\nThis endpoint is unauthenticated (verified via HMAC signature).",
+    params(("X-GitHub-Event" = String, Header), ("X-Hub-Signature-256" = String, Header)),
+    request_body(content = serde_json::Value, content_type = "application/json"),
+    responses((status = OK, description = "Webhook processed (may include zero queued evaluations)", body = IncomingWebhookResponse), WebError)
+)]
 pub async fn github_app_webhook(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
@@ -322,6 +333,17 @@ async fn route_github_app_release(
     combined
 }
 
+#[utoipa::path(
+    post,
+    path = "/hooks/{git_host}/{project}/{integration_name}",
+    operation_id = "gitHostWebhook",
+    tag = "git-host-webhooks",
+    summary = "Receive Git host push webhook",
+    description = "Receives push events for a named inbound integration.\nAuthenticated via the integration's stored HMAC secret.\n\nSignature header by Git host:\n- `gitea` / `forgejo`: `X-Gitea-Signature` (HMAC-SHA256 hex)\n- `gitlab`: `X-Gitlab-Token` (plain token comparison)\n\nOn a matching push, queues an evaluation for every active task whose\n`task_integration.inbound_integration` points at this row and whose\nrepository URL matches the webhook payload's clone URL.\n\nA push carrying an all-zero `after` SHA (a branch/tag deletion or a\nGit host \"test\" delivery) is accepted as a `200` no-op rather than rejected.\n\nThis endpoint is unauthenticated (verified via Git host specific signature).",
+    params(("git_host" = String, Path), ("project" = String, Path), ("integration_name" = String, Path)),
+    request_body(content = serde_json::Value, content_type = "application/json"),
+    responses((status = OK, description = "Webhook processed (may include zero queued evaluations)", body = IncomingWebhookResponse), WebError)
+)]
 pub async fn git_host_webhook(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,

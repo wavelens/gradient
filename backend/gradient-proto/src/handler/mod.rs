@@ -26,16 +26,16 @@ mod upload;
 
 use std::sync::Arc;
 
-use axum::Router;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Extension, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use gradient_wire::ProtoLimiter;
 use gradient_wire::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 pub use cache_session::handle_cache_socket;
 pub use handles::SessionHandles;
@@ -44,10 +44,22 @@ pub use sessions::SessionsHandle;
 
 const RETRY_AFTER: HeaderValue = HeaderValue::from_static("10");
 
-pub fn proto_router() -> Router<Arc<ServerState>> {
-    Router::new().route("/proto", get(ws_upgrade))
+pub fn proto_router() -> OpenApiRouter<Arc<ServerState>> {
+    OpenApiRouter::new().routes(routes!(ws_upgrade))
 }
 
+#[utoipa::path(
+    get,
+    path = "/proto",
+    operation_id = "protoWebSocket",
+    tag = "general",
+    summary = "Binary WebSocket protocol endpoint",
+    description = "Upgrades the connection to a WebSocket carrying binary frames encoded\nby the `Proto` derive of `gradient-wire`. The upgrade always succeeds; a\nserver with `GRADIENT_PROTO_DISCOVERABLE=false` then rejects the\nhandshake of a worker it did not dial itself with a `403` reject frame.\n\n**Protocol flow**\n1. Both sides send an 8-byte version frame (`GRAD`, oldest and newest\n   supported version as `u16` little-endian) and encode every later\n   frame for the highest shared version. Without one, the WebSocket\n   closes with code `1002` and the reason.\n2. Client sends `ClientMessage::InitConnection { capabilities, id }`.\n3. Server responds with `ServerMessage::AuthChallenge`, then\n   `ServerMessage::InitAck { capabilities, .. }` with the negotiated\n   capabilities.",
+    responses(
+        (status = SWITCHING_PROTOCOLS, description = "Switching Protocols - WebSocket upgrade successful"),
+        (status = SERVICE_UNAVAILABLE, description = "Connection limit (`GRADIENT_PROTO_MAX_CONNECTIONS`) reached; retry after `Retry-After`")
+    )
+)]
 async fn ws_upgrade(
     ws: WebSocketUpgrade,
     State(state): State<Arc<ServerState>>,

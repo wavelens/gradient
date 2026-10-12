@@ -5,7 +5,7 @@
  */
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -19,7 +19,7 @@ use super::EvalAccessContext;
 
 const IS_IN_CHUNK: usize = 10_000;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct ArtefactTree {
     pub evaluation: EvaluationId,
     pub created_at: chrono::NaiveDateTime,
@@ -36,7 +36,7 @@ impl ArtefactTree {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct EntryPointArtefacts {
     pub attr: String,
     pub derivation: String,
@@ -44,7 +44,7 @@ pub struct EntryPointArtefacts {
     pub outputs: Vec<OutputArtefacts>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct OutputArtefacts {
     pub name: String,
     pub store_path: String,
@@ -61,7 +61,7 @@ impl OutputArtefacts {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct ProductArtefact {
     pub id: BuildProductId,
     #[serde(rename = "type")]
@@ -85,6 +85,16 @@ impl From<MBuildProduct> for ProductArtefact {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/evals/{evaluation}/artefacts",
+    operation_id = "listEvaluationArtefacts",
+    tag = "evals",
+    summary = "List evaluation artefacts",
+    description = "Returns the artefact tree for an evaluation: entry points grouped by\nderivation, derivation outputs grouped under each entry point, and\n`build_product` rows grouped under each output. Consumed by the CLI's\n`gradient download` picker so users can choose what to fetch without\nfirst listing builds.\n\nEntry points are sorted by `attr`, outputs by `name`, products by `path`.",
+    params(("evaluation" = EvaluationId, Path)),
+    responses((status = OK, description = "Artefact tree", body = ArtefactTree), WebError)
+)]
 pub async fn get_artefacts(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

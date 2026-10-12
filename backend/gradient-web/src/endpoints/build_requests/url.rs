@@ -10,7 +10,7 @@ use super::dispatch::{
 use super::refusal::BuildRequestRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use crate::refusal::SharedRefusal;
@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 const COMMIT_HASH_BYTES: usize = 20;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct UrlRequest {
     pub project: String,
     pub url: String,
@@ -42,6 +42,16 @@ pub struct UrlRequest {
     pub input_overrides: Vec<InputOverrideBody>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/build-requests/url",
+    operation_id = "postBuildRequestUrl",
+    tag = "build-requests",
+    summary = "Queue a build request against a remote repository",
+    description = "The no-upload build request: the source is already published at a URL, so\nonly the URL and a revision are posted and the worker fetches the flake\nitself. Use this to build one attribute of a repository on demand -\na deployment tool resolving a commit, for instance - without creating a\ntask for it.\n\nExecutes on the project's reserved `build-request` task, created lazily on\nfirst use and shared by every build request in the project, so no task is\ncreated per job. Evaluations queued here are `concurrent`: build requests\nare independent one-shot jobs and never queue behind or abort each other.\n\nSupply `rev` for an exact commit, `ref` for a branch or tag the server\nresolves first, or neither to take the repository's default branch. SSH\nURLs are authenticated with the project's deploy key. Local paths\n(`file://`) are rejected.\n\nRequires the `TriggerEvaluation` permission on the project. This lets a\ncaller have Gradient fetch and evaluate an arbitrary remote flake on the\nbuild fleet - the same capability the source-upload flows already grant.",
+    request_body = UrlRequest,
+    responses((status = OK, description = "Evaluation queued", body = DispatchResponse), WebError)
+)]
 pub async fn post_url(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

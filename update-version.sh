@@ -97,8 +97,7 @@ echo "updated the pnpm dependency hash in nix/packages/gradient-frontend.nix"
 # ── OpenAPI spec ─────────────────────────────────────────────────────────────
 
 OPENAPI_SPEC="$REPO_ROOT/docs/gradient-api.yaml"
-OPENAPI_VERSION='^  version: [0-9]\+\.[0-9]\+\.[0-9]\+\(-[0-9A-Za-z.]\+\)\?$'
-sed -i "0,/$OPENAPI_VERSION/{s/$OPENAPI_VERSION/  version: $VERSION/}" "$OPENAPI_SPEC"
+cargo run --manifest-path "$REPO_ROOT/backend/Cargo.toml" --features api-spec --bin gradient-api-spec > "$OPENAPI_SPEC"
 echo "updated docs/gradient-api.yaml"
 
 echo ""

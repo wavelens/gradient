@@ -99,6 +99,16 @@ async fn read_new_lines(
     lines
 }
 
+#[utoipa::path(
+    post,
+    path = "/evals/{evaluation}/builds",
+    operation_id = "streamEvaluationLogs",
+    tag = "evals",
+    summary = "Stream evaluation logs",
+    description = "Open a streaming NDJSON response: replay the stored logs of all builds\nfirst, then follow the derivations still building. A derivation-name\nprefix opens each line. Keep the stream open until the evaluation itself\nhas reached Completed, Failed or Aborted, not merely until no build is\npending, so an evaluation without builds yet still has its stream.\nEvaluation-level messages are not part of this stream. Fetch them from\n`GET /evals/{evaluation}/messages`.\n\nChunks hold no more than 256 KiB each, split at a line end. Empty strings\narrive as keepalives after 15 seconds without output. Ignore them.",
+    params(("evaluation" = EvaluationId, Path)),
+    responses((status = OK, description = "NDJSON log stream", body = String, content_type = "application/x-ndjson"), WebError)
+)]
 pub async fn post_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

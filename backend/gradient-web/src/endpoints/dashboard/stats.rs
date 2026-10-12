@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
 use axum::extract::State;
@@ -16,7 +16,7 @@ use gradient_types::*;
 use serde::Serialize;
 use std::sync::Arc;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct OnlineWorkerLoad {
     pub online: usize,
     pub busy_pct: u8,
@@ -37,7 +37,7 @@ impl OnlineWorkerLoad {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DashboardStats {
     pub cpu_time_ms: i64,
     pub cpu_time_ms_7d: i64,
@@ -62,6 +62,15 @@ async fn visible_slots(scheduler: &Scheduler, scope: &MetricsScope) -> Vec<(i64,
         .collect()
 }
 
+#[utoipa::path(
+    get,
+    path = "/dashboard/stats",
+    operation_id = "getDashboardStats",
+    tag = "dashboard",
+    summary = "Stat tiles of the current user",
+    description = "Totals over the projects the viewer may see (all for a superuser, public plus member projects otherwise).\n`builds_completed` counts recorded derivation metrics; `queue_wait_p50_ms` is the median wait for a worker over the last 24 hours.\n`cache_size_bytes` sums the stored size of each cache the viewer created or reaches through a project membership (all caches for a superuser); each size is recounted every metrics rollup pass, and a path held by two caches counts in both.\n`workers` covers connected workers of visible projects only: `busy_pct` is assigned jobs over summed capacity, capped at 100.",
+    responses((status = OK, description = "Dashboard stat tiles", body = DashboardStats), WebError)
+)]
 pub async fn get_stats(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

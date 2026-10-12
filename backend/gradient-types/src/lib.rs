@@ -61,7 +61,9 @@ use chrono::NaiveDateTime;
 use clap::Parser;
 use gradient_derive::config_group;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use std::borrow::Cow;
+use utoipa::openapi::{ArrayBuilder, ObjectBuilder, Ref, RefOr, Schema};
+use utoipa::{PartialSchema, ToSchema};
 
 #[inline]
 pub fn now() -> NaiveDateTime {
@@ -132,16 +134,45 @@ pub struct BaseResponse<T> {
     pub message: T,
 }
 
-#[derive(Serialize, Deserialize, Debug, ToSchema)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Paginated<T> {
-    pub items: T,
+    pub items: Vec<T>,
     pub total: u64,
     pub page: u64,
     pub per_page: u64,
 }
 
-impl<T> Paginated<Vec<T>> {
-    pub fn map<U, F: FnMut(T) -> U>(self, f: F) -> Paginated<Vec<U>> {
+impl<T: ToSchema> PartialSchema for Paginated<T> {
+    fn schema() -> RefOr<Schema> {
+        ObjectBuilder::new()
+            .property(
+                "items",
+                ArrayBuilder::new().items(Ref::from_schema_name(T::name())),
+            )
+            .required("items")
+            .property("total", u64::schema())
+            .required("total")
+            .property("page", u64::schema())
+            .required("page")
+            .property("per_page", u64::schema())
+            .required("per_page")
+            .into()
+    }
+}
+
+impl<T: ToSchema> ToSchema for Paginated<T> {
+    fn name() -> Cow<'static, str> {
+        Cow::Owned(format!("Paginated_{}", T::name()))
+    }
+
+    fn schemas(schemas: &mut Vec<(String, RefOr<Schema>)>) {
+        schemas.push((T::name().into_owned(), T::schema()));
+        T::schemas(schemas);
+    }
+}
+
+impl<T> Paginated<T> {
+    pub fn map<U, F: FnMut(T) -> U>(self, f: F) -> Paginated<U> {
         Paginated {
             items: self.items.into_iter().map(f).collect(),
             total: self.total,
@@ -151,7 +182,8 @@ impl<T> Paginated<Vec<T>> {
     }
 }
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug, Default, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct PaginationParams {
     pub page: Option<u64>,
     pub per_page: Option<u64>,

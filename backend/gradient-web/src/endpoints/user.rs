@@ -81,7 +81,7 @@ impl Refusal for UserRefusal {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct UserInfoResponse {
     pub id: String,
     pub username: String,
@@ -102,12 +102,12 @@ impl From<&MUser> for UserInfoResponse {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct ApiKeyRequest {
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct CreateApiKeyRequest {
     pub name: String,
     #[serde(default)]
@@ -121,7 +121,7 @@ pub struct CreateApiKeyRequest {
     pub allowed_ips: Option<Vec<String>>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct PatchApiKeyRequest {
     pub name: Option<String>,
     pub permissions: Option<Vec<String>>,
@@ -141,7 +141,7 @@ where
     Ok(Some(Option::<T>::deserialize(de)?))
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct ApiKeyInfo {
     pub id: String,
     pub name: String,
@@ -175,14 +175,14 @@ impl ApiKeyInfo {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct ApiKeyPermissionsResponse {
     pub available_permissions: Vec<PermissionEntry>,
     #[serde(rename = "availableCache")]
     pub available_cache: Vec<PermissionEntry>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct DeleteUserRequest {
     #[serde(default)]
     pub password: Option<String>,
@@ -190,7 +190,7 @@ pub struct DeleteUserRequest {
     pub confirm_username: Option<String>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct SessionInfo {
     pub id: String,
     pub user_agent: Option<String>,
@@ -217,7 +217,7 @@ impl SessionInfo {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct AuditLogEntry {
     pub id: String,
     pub event: String,
@@ -240,14 +240,14 @@ impl From<MAuditLog> for AuditLogEntry {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct PatchUserSettingsRequest {
     pub username: Option<String>,
     pub name: Option<UserDisplayName>,
     pub email: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct GetUserSettingsResponse {
     pub username: String,
     pub name: String,
@@ -268,7 +268,7 @@ impl From<&MUser> for GetUserSettingsResponse {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct UserSearchResult {
     pub id: String,
     pub username: String,
@@ -285,6 +285,16 @@ impl From<MUser> for UserSearchResult {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/user/search",
+    operation_id = "searchUsers",
+    tag = "user",
+    summary = "Search users by username",
+    description = "Returns up to 10 users whose username contains the given query string. Used for autocomplete in member and ownership dialogs.",
+    params(("q" = String, Query)),
+    responses((status = OK, description = "Matching users", body = Vec<UserSearchResult>), WebError)
+)]
 pub async fn get_search(
     state: State<Arc<ServerState>>,
     Query(params): Query<HashMap<String, String>>,
@@ -298,6 +308,15 @@ pub async fn get_search(
     Ok(ok_json(results))
 }
 
+#[utoipa::path(
+    get,
+    path = "/user",
+    operation_id = "getUser",
+    tag = "user",
+    summary = "Get current user",
+    description = "Returns the id, username, display name, and email of the authenticated user.",
+    responses((status = OK, description = "User info", body = UserInfoResponse), WebError)
+)]
 pub async fn get(
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<UserInfoResponse>>> {
@@ -311,6 +330,16 @@ pub async fn get(
     Ok(Json(res))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/user",
+    operation_id = "deleteUser",
+    tag = "user",
+    summary = "Delete current user",
+    description = "Permanently deletes the authenticated user and all associated data.\nRequires re-authentication: password-auth users must supply their\ncurrent password in `password`; OIDC-auth users must echo their\nusername in `confirm_username`.",
+    request_body = DeleteUserRequest,
+    responses((status = OK, description = "User deleted", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -424,6 +453,15 @@ fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>
     Ok(Some(out))
 }
 
+#[utoipa::path(
+    get,
+    path = "/user/keys/permissions",
+    operation_id = "getUserKeyPermissions",
+    tag = "user",
+    summary = "List API-key permission catalogue",
+    description = "Returns the full set of capabilities a user-managed API key may grant.\nUsed by the create / edit dialog to populate the permission checkbox list.",
+    responses((status = OK, description = "Permission catalogue", body = ApiKeyPermissionsResponse), WebError)
+)]
 pub async fn get_key_permissions() -> WebResult<Json<BaseResponse<ApiKeyPermissionsResponse>>> {
     Ok(ok_json(ApiKeyPermissionsResponse {
         available_permissions: available_permissions(),
@@ -431,6 +469,15 @@ pub async fn get_key_permissions() -> WebResult<Json<BaseResponse<ApiKeyPermissi
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/user/keys",
+    operation_id = "getUserKeys",
+    tag = "user",
+    summary = "List API keys",
+    description = "Returns all API keys belonging to the authenticated user, including\ncreation, last-used, expiry, and revocation timestamps.",
+    responses((status = OK, description = "List of API keys", body = Vec<ApiKeyInfo>), WebError)
+)]
 pub async fn get_keys(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -448,6 +495,16 @@ pub async fn get_keys(
     Ok(ok_json(infos))
 }
 
+#[utoipa::path(
+    post,
+    path = "/user/keys",
+    operation_id = "createUserKey",
+    tag = "user",
+    summary = "Create API key",
+    description = "Creates a new API key. The full key (prefixed with `GRAD`) is returned once -\nit cannot be retrieved again. Use it as `Authorization: Bearer GRAD<key>`.\nPass `expires_in_days` to make the key auto-expire; omit for no expiry.\nA cache-pinned key may only grant cache permissions the caller already\nholds; members of a project subscribed to the cache are treated as\nread-only, so they can mint read-only cache keys.",
+    request_body = CreateApiKeyRequest,
+    responses((status = OK, description = "New API key", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_keys(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -531,6 +588,17 @@ pub async fn post_keys(
     }))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/user/keys/{api_id}",
+    operation_id = "patchUserKey",
+    tag = "user",
+    summary = "Update an API key's configurable options",
+    description = "Edit the key's name, permission set, or project pin in place.\nPermissions replace the existing set wholesale. State-managed keys\ncannot be edited. Cannot be called from an API-key-authenticated\nrequest - sessions only.",
+    params(("api_id" = ApiId, Path)),
+    request_body = PatchApiKeyRequest,
+    responses((status = OK, description = "Updated key", body = ApiKeyInfo), WebError)
+)]
 pub async fn patch_key(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -595,6 +663,16 @@ pub async fn patch_key(
     Ok(ok_json(ApiKeyInfo::new(updated, &project_names)))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/user/keys",
+    operation_id = "deleteUserKey",
+    tag = "user",
+    summary = "Delete API key",
+    description = "Deletes the API key with the given name. State-managed keys cannot be deleted.",
+    request_body = ApiKeyRequest,
+    responses((status = OK, description = "Key deleted", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_keys(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -630,6 +708,16 @@ pub async fn delete_keys(
     Ok(Json(res))
 }
 
+#[utoipa::path(
+    post,
+    path = "/user/keys/{api_id}/revoke",
+    operation_id = "revokeUserKey",
+    tag = "user",
+    summary = "Revoke an API key",
+    description = "Marks the key as revoked without deleting the row, so audit trails are\npreserved. A revoked key fails authentication immediately.",
+    params(("api_id" = ApiId, Path)),
+    responses((status = OK, description = "Key revoked", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_key_revoke(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -663,6 +751,15 @@ pub async fn post_key_revoke(
     Ok(ok_json("API-Key revoked".to_string()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/user/sessions",
+    operation_id = "getUserSessions",
+    tag = "user",
+    summary = "List active sessions",
+    description = "Returns the caller's non-revoked, non-expired sessions. Each entry\ncarries the user-agent and IP captured at login plus a `current` flag\nidentifying the session backing this request.",
+    responses((status = OK, description = "Active sessions", body = Vec<SessionInfo>), WebError)
+)]
 pub async fn get_sessions(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
@@ -682,6 +779,16 @@ pub async fn get_sessions(
     Ok(ok_json(sessions))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/user/sessions/{session_id}",
+    operation_id = "deleteUserSession",
+    tag = "user",
+    summary = "Revoke a session",
+    description = "Revokes a single session, immediately invalidating its JWT. Useful for\nsigning out a lost device without changing the password.",
+    params(("session_id" = SessionId, Path)),
+    responses((status = OK, description = "Session revoked", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_session(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -710,11 +817,23 @@ pub async fn delete_session(
     Ok(ok_json("Session revoked".to_string()))
 }
 
+type PaginatedAuditLogEntry = Paginated<AuditLogEntry>;
+
+#[utoipa::path(
+    get,
+    path = "/user/audit-log",
+    operation_id = "getUserAuditLog",
+    tag = "user",
+    summary = "Audit log for the current user",
+    description = "Paginated list of audit events recorded for the caller (login,\nlogout, API-key lifecycle, session revocation, account deletion).",
+    params(PaginationParams),
+    responses((status = OK, description = "Audit entries", body = PaginatedAuditLogEntry), WebError)
+)]
 pub async fn get_audit_log(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Query(params): Query<PaginationParams>,
-) -> WebResult<Json<BaseResponse<Paginated<Vec<AuditLogEntry>>>>> {
+) -> WebResult<Json<BaseResponse<Paginated<AuditLogEntry>>>> {
     let listing = paginate(
         gradient_db::audit_log::of_user(user.id),
         &state.web_db,
@@ -726,6 +845,15 @@ pub async fn get_audit_log(
     Ok(ok_json(listing))
 }
 
+#[utoipa::path(
+    get,
+    path = "/user/settings",
+    operation_id = "getUserSettings",
+    tag = "user",
+    summary = "Get user settings",
+    description = "Returns the username, display name, and email of the current user.",
+    responses((status = OK, description = "User settings", body = GetUserSettingsResponse), WebError)
+)]
 pub async fn get_settings(
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<GetUserSettingsResponse>>> {
@@ -737,6 +865,16 @@ pub async fn get_settings(
     Ok(Json(res))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/user/settings",
+    operation_id = "patchUserSettings",
+    tag = "user",
+    summary = "Update user settings",
+    description = "Updates one or more user profile fields. Only fields that are present in the\nrequest body are changed. Managed users (created via NixOS config) cannot be\nmodified through the API.",
+    request_body = PatchUserSettingsRequest,
+    responses((status = OK, description = "Settings updated", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn patch_settings(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

@@ -10,7 +10,7 @@ use sea_orm::{ConnectionTrait, DbErr, QueryResult};
 use serde::Serialize;
 use uuid::Uuid;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ExpensiveBuild {
     pub build_id: Uuid,
     pub project: Uuid,
@@ -131,7 +131,7 @@ pub async fn expensive_builds<C: ConnectionTrait>(
     Ok(rows.into_iter().map(ExpensiveBuild::from).collect())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct TopProjectBuildTime {
     pub project: Uuid,
     pub project_name: String,

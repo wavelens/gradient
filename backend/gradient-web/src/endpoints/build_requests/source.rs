@@ -9,8 +9,10 @@ use super::dispatch::{
 };
 use super::refusal::BuildRequestRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
+use crate::api_spec::Binary;
 use crate::authorization::MaybeApiKey;
-use crate::error::WebResult;
+use crate::endpoints::ChunkReceived;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use anyhow::Context;
@@ -24,14 +26,32 @@ use gradient_storage::source_nar::source_nar_from_bytes;
 use gradient_types::RuntimeConfig;
 use gradient_types::{BaseResponse, MUser};
 use serde::Deserialize;
-use serde_json::json;
 use std::sync::Arc;
 
-#[derive(Deserialize)]
+#[derive(utoipa::ToSchema)]
+pub struct SourceUploadForm {
+    #[schema(value_type = String, format = Binary)]
+    pub nar: Vec<u8>,
+    pub target: Option<String>,
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct SourceQuery {
     pub project: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/build-requests/source",
+    operation_id = "postBuildRequestSource",
+    tag = "build-requests",
+    summary = "Upload a pre-packed source NAR and queue an evaluation (single-shot)",
+    description = "One-shot alternative to the manifest/blob flow for clients built with\nthe `nix` feature. The client NAR-packs the git-tracked source itself\nand uploads it here; the server computes the `/nix/store/<hash>-source`\npath, signs it, lazily creates the per-project `build-request` task, and\nqueues an evaluation. The whole NAR is one request, bounded by\n`max_source_upload_size`; large sources should use the chunked\n`POST /build-requests/source/{upload}/chunk` + `finalize` flow instead.",
+    params(SourceQuery),
+    request_body(content = SourceUploadForm, content_type = "multipart/form-data"),
+    responses((status = OK, description = "Evaluation queued", body = DispatchResponse), WebError)
+)]
 pub async fn post_source(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -103,12 +123,13 @@ pub async fn post_source(
     Ok(ok_json(response))
 }
 
-#[derive(Deserialize)]
-pub struct ChunkQuery {
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct SourceChunkQuery {
     offset: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct SourceFinalize {
     #[serde(default)]
     pub target: Option<String>,
@@ -131,13 +152,24 @@ fn require_safe_upload_id(upload: &str) -> WebResult<()> {
     Ok(())
 }
 
+#[utoipa::path(
+    put,
+    path = "/build-requests/source/{upload}/chunk",
+    operation_id = "putBuildRequestSourceChunk",
+    tag = "build-requests",
+    summary = "Append a chunk of a source NAR to a staged upload",
+    description = "Streams a large source NAR to the server in slices so no single request\nhits a body limit. `upload` is a client-chosen id (the CLI uses the NAR's\ncontent hash, which makes a retry resumable). `offset` must equal the\nbytes already received (`0` starts fresh); a mismatch appends nothing and\nreturns the authoritative `received` so the client resumes. The staged\ntotal is bounded by `max_source_upload_size`. Finalise with\n`POST /build-requests/source/{upload}/finalize`.",
+    params(("upload" = String, Path), SourceChunkQuery),
+    request_body(content = Binary, content_type = "application/octet-stream"),
+    responses((status = OK, description = "Chunk staged; returns total bytes received so far.", body = ChunkReceived), WebError)
+)]
 pub async fn source_chunk(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(upload): Path<String>,
-    Query(ChunkQuery { offset }): Query<ChunkQuery>,
+    Query(SourceChunkQuery { offset }): Query<SourceChunkQuery>,
     body: Bytes,
-) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
+) -> WebResult<Json<BaseResponse<ChunkReceived>>> {
     require_safe_upload_id(&upload)?;
 
     let max = u64::try_from(state.config.http.max_source_upload_size.get()).unwrap_or(u64::MAX);
@@ -155,9 +187,20 @@ pub async fn source_chunk(
         staged
     };
 
-    Ok(ok_json(json!({ "received": received })))
+    Ok(ok_json(ChunkReceived { received }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/build-requests/source/{upload}/finalize",
+    operation_id = "postBuildRequestSourceFinalize",
+    tag = "build-requests",
+    summary = "Finalise a chunked source upload and queue an evaluation",
+    description = "Reassembles the staged source NAR for `upload`, computes its\n`/nix/store/<hash>-source` path, signs it, lazily creates the per-project\n`build-request` task, queues an evaluation, and drops the partial.",
+    params(("upload" = String, Path), SourceQuery),
+    request_body = SourceFinalize,
+    responses((status = OK, description = "Evaluation queued", body = DispatchResponse), WebError)
+)]
 pub async fn source_finalize(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

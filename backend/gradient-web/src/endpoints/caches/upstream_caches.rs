@@ -6,6 +6,7 @@
 
 use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache, reject_managed_cache};
+use crate::api_spec::CachePath;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
@@ -25,7 +26,7 @@ use sea_orm::IntoActiveModel;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AddUpstreamRequest {
     Internal {
@@ -47,7 +48,7 @@ pub enum AddUpstreamRequest {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct UpstreamCacheItem {
     pub id: CacheUpstreamId,
     pub display_name: String,
@@ -78,7 +79,7 @@ impl From<MCacheUpstream> for UpstreamCacheItem {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct PatchUpstreamRequest {
     pub display_name: Option<String>,
     pub mode: Option<CacheSubscriptionMode>,
@@ -150,6 +151,16 @@ async fn load_upstream(
         .or_not_found(Resource::UpstreamCache)
 }
 
+#[utoipa::path(
+    get,
+    path = "/caches/{cache}/upstream-caches",
+    operation_id = "listUpstreamCaches",
+    tag = "caches",
+    summary = "List upstream caches",
+    description = "Returns all upstream caches configured for this cache (both internal Gradient caches and external binary caches), including each upstream's `public_key` so clients can trust pull-through paths. Follows the same visibility as `GET /caches/{cache}`: public caches are readable by anyone, private caches only by members and subscribed projects.",
+    params(CachePath),
+    responses((status = OK, description = "List of upstream entries", body = Vec<UpstreamCacheItem>), WebError)
+)]
 pub async fn get_upstream_caches(
     CacheScope { cache, db, .. }: CacheScope<Readable>,
 ) -> WebResult<Json<BaseResponse<Vec<UpstreamCacheItem>>>> {
@@ -162,6 +173,17 @@ pub async fn get_upstream_caches(
     Ok(ok_json(upstream_caches))
 }
 
+#[utoipa::path(
+    put,
+    path = "/caches/{cache}/upstream-caches",
+    operation_id = "addUpstreamCache",
+    tag = "caches",
+    summary = "Add upstream cache",
+    description = "Adds an upstream cache. Three types are supported, selected by the `type` discriminator:\n\n- **internal** - another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.\n- **gradient_proto** - a remote Gradient cache accessed via the binary WebSocket protocol (`/cache/{cache}/proto`). Supports optional `api_key` (stored encrypted at rest; write-only - never returned by the API) and pull mode.\n- **http** - an arbitrary Nix binary cache URL. Always ReadOnly.\n\nRequires `manageUpstreamCaches`.",
+    params(CachePath),
+    request_body = AddUpstreamRequest,
+    responses((status = OK, description = "Upstream added - returns the new upstream UUID", body = CacheUpstreamId), WebError)
+)]
 pub async fn put_cache_upstream(
     CacheScope {
         cache,
@@ -251,6 +273,17 @@ pub async fn put_cache_upstream(
     Ok(ok_json(inserted.id))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/caches/{cache}/upstream-caches/{id}",
+    operation_id = "patchUpstreamCache",
+    tag = "caches",
+    summary = "Update upstream cache",
+    description = "Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;\n`url` and `public_key` may be updated. For internal upstream caches only `mode` and `display_name` apply.\n`active` toggles any upstream cache. An inactive upstream cache is kept but never queried.\nA state-managed cache accepts only `active`, and the next server start restores the declared value.\nRequires `manageUpstreamCaches`.",
+    params(CachePath, ("id" = CacheUpstreamId, Path)),
+    request_body = PatchUpstreamRequest,
+    responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn patch_cache_upstream(
     CacheScope {
         cache, db, params, ..
@@ -290,7 +323,7 @@ pub async fn patch_cache_upstream(
     Ok(ok_json("Upstream updated".to_string()))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct UpstreamTestResponse {
     pub ok: bool,
     pub http1: ProtocolProbe,
@@ -315,6 +348,16 @@ impl UpstreamTestResponse {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/caches/{cache}/upstream-caches/{id}/test",
+    operation_id = "testUpstreamCache",
+    tag = "caches",
+    summary = "Test an HTTP upstream cache over HTTP/1.1 and HTTP/2",
+    description = "Fetches the upstream cache's `nix-cache-info` twice in parallel, once over HTTP/1.1 only and once\nover HTTP/2 only, and reports each result. A probe passes on a 2xx body with a `StoreDir:` line.\nDoes not change the upstream cache's `http1_only` pin. Only `http` upstream caches can be tested.\nRequires `manageUpstreamCaches`; state-managed caches may be tested.",
+    params(CachePath, ("id" = CacheUpstreamId, Path)),
+    responses((status = OK, description = "Test result", body = UpstreamTestResponse), WebError)
+)]
 pub async fn post_cache_upstream_test(
     CacheScope {
         cache, db, params, ..
@@ -335,6 +378,15 @@ pub async fn post_cache_upstream_test(
     Ok(ok_json(UpstreamTestResponse::new(http1, http2)))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/caches/{cache}/upstream-caches/{id}",
+    operation_id = "deleteUpstreamCache",
+    tag = "caches",
+    summary = "Remove upstream cache",
+    params(CachePath, ("id" = CacheUpstreamId, Path)),
+    responses((status = OK, description = "Removed", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_cache_upstream(
     CacheScope {
         cache, db, params, ..

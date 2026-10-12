@@ -19,6 +19,15 @@ fn scim(body: serde_json::Value) -> Response {
         .into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/ServiceProviderConfig",
+    operation_id = "scimServiceProviderConfig",
+    tag = "scim",
+    summary = "SCIM service provider configuration",
+    description = "Advertises supported SCIM features (patch, filter, no bulk/sort/etag/change-password).",
+    responses((status = OK, description = "Service provider configuration", body = serde_json::Value, content_type = "application/scim+json"), (status = 401, description = "Missing or invalid SCIM bearer token", body = crate::scim::ScimErrorBody, content_type = "application/scim+json"))
+)]
 pub async fn service_provider_config() -> impl IntoResponse {
     scim(json!({
         "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
@@ -36,6 +45,15 @@ pub async fn service_provider_config() -> impl IntoResponse {
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/ResourceTypes",
+    operation_id = "scimResourceTypes",
+    tag = "scim",
+    summary = "SCIM resource types",
+    description = "Lists the supported resource types (User, Group).",
+    responses((status = OK, description = "Resource types", body = serde_json::Value, content_type = "application/scim+json"), (status = 401, description = "Missing or invalid SCIM bearer token", body = crate::scim::ScimErrorBody, content_type = "application/scim+json"))
+)]
 pub async fn resource_types() -> impl IntoResponse {
     scim(json!([
         {"schemas":["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],"id":"User","name":"User","endpoint":"/Users","schema":"urn:ietf:params:scim:schemas:core:2.0:User"},
@@ -43,6 +61,15 @@ pub async fn resource_types() -> impl IntoResponse {
     ]))
 }
 
+#[utoipa::path(
+    get,
+    path = "/Schemas",
+    operation_id = "scimSchemas",
+    tag = "scim",
+    summary = "SCIM schemas",
+    description = "Lists the supported core schemas (User, Group).",
+    responses((status = OK, description = "Schemas", body = serde_json::Value, content_type = "application/scim+json"), (status = 401, description = "Missing or invalid SCIM bearer token", body = crate::scim::ScimErrorBody, content_type = "application/scim+json"))
+)]
 pub async fn schemas() -> impl IntoResponse {
     scim(json!([
         {"id":"urn:ietf:params:scim:schemas:core:2.0:User","name":"User"},

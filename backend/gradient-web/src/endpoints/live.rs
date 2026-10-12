@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::api_spec::TaskPath;
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::scope::{Readable, TaskScope};
 use axum::Extension;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -66,6 +67,16 @@ fn frame(env: &Envelope) -> Option<String> {
     Some(env.to_line())
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/{project}/{task}/live",
+    operation_id = "taskLive",
+    tag = "tasks",
+    summary = "Task live updates (WebSocket)",
+    description = "Upgrades to a WebSocket emitting `evaluation_status_changed`,\n`build_status_changed`, `evaluation_progress` and `evaluation_activity`\nevents for this task, so the task page refetches on change instead of\npolling. `evaluation_progress` fires as builds and entry-points are\npersisted during the evaluation phase, before any build changes status,\nso the build/dependency totals grow live. `evaluation_activity` carries\nan `EvaluationProgress` snapshot at most once per second while the\nevaluation fetches or evaluates. Requires read access.",
+    params(TaskPath),
+    responses((status = SWITCHING_PROTOCOLS, description = "Switching Protocols - WebSocket upgrade successful"), WebError)
+)]
 pub async fn task_live_ws(
     TaskScope { task, .. }: TaskScope<Readable>,
     State(state): State<Arc<ServerState>>,
@@ -127,6 +138,16 @@ fn task_frame(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/evals/{evaluation}/live",
+    operation_id = "evaluationLive",
+    tag = "evals",
+    summary = "Evaluation live updates (WebSocket)",
+    description = "Upgrades to a WebSocket emitting `evaluation_status_changed`,\n`build_status_changed`, `evaluation_progress` and `evaluation_activity`\nevents for this evaluation. `evaluation_progress` fires as builds and\nentry-points are persisted during the evaluation phase so the build\nlist grows live. `evaluation_activity` carries an `EvaluationProgress`\nsnapshot at most once per second while the evaluation fetches or\nevaluates. Requires read access.",
+    params(("evaluation" = EvaluationId, Path)),
+    responses((status = SWITCHING_PROTOCOLS, description = "Switching Protocols - WebSocket upgrade successful"), WebError)
+)]
 pub async fn evaluation_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -153,6 +174,16 @@ pub async fn evaluation_live_ws(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/builds/{build}/live",
+    operation_id = "buildLive",
+    tag = "builds",
+    summary = "Build live updates (WebSocket)",
+    description = "Upgrades to a WebSocket emitting `build_status_changed` events\n(`build_id`, `derivation_build`, `evaluation_id`, `status`) for every\nbuild in this build's evaluation (covers its dependency graph), and\n`build_progress` events (`derivation_build`, `phase`, `bytes_done`,\n`bytes_total`, `paths_done`, `paths_total`) while this build prefetches\nits inputs, fetches a Substitute or Download, or uploads its outputs.\nRequires read access.",
+    params(("build" = BuildJobId, Path)),
+    responses((status = SWITCHING_PROTOCOLS, description = "Switching Protocols - WebSocket upgrade successful"), WebError)
+)]
 pub async fn build_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -203,6 +234,15 @@ fn eval_frame(env: &Envelope, eval_id: EvaluationId) -> Option<String> {
     belongs.then(|| env.to_line())
 }
 
+#[utoipa::path(
+    get,
+    path = "/board/cache/live",
+    operation_id = "boardCacheLive",
+    tag = "board",
+    summary = "Cache change pings (WebSocket)",
+    description = "Upgrades to a WebSocket emitting a content-free `{\"type\":\"cache_changed\"}`\nping whenever cache contents or stats change. Subscribers refetch their\nown scope-filtered `GET /board/cache` view.",
+    responses((status = SWITCHING_PROTOCOLS, description = "Switching Protocols - WebSocket upgrade successful"), WebError)
+)]
 pub async fn cache_live_ws(
     State(state): State<Arc<ServerState>>,
     ws: WebSocketUpgrade,

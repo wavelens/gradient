@@ -6,7 +6,7 @@
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::EvalAccessContext;
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -20,7 +20,7 @@ use super::BuildAccessContext;
 
 const CLOSURE_NODE_CAP: usize = 1000;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
 pub struct ClosureNode {
     pub id: String,
     pub name: String,
@@ -50,7 +50,7 @@ impl From<&MCachedPath> for ClosureNode {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
 pub struct ClosureEdge {
     pub source: String,
     pub target: String,
@@ -65,7 +65,7 @@ impl From<MDerivationDependency> for ClosureEdge {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
 pub struct ClosureGraph {
     pub roots: Vec<String>,
     pub total_size_bytes: Option<i64>,
@@ -235,6 +235,16 @@ fn spanning_order<'a>(
     order
 }
 
+#[utoipa::path(
+    get,
+    path = "/builds/{build}/closure",
+    operation_id = "getBuildClosure",
+    tag = "builds",
+    summary = "Get closure size graph",
+    description = "Returns the full dependency closure of the build's derivation with per-node\nuncompressed NAR sizes and an exact `total_size_bytes` over the whole closure.\nThe `nodes`/`edges` lists are capped with `truncated` set when the cap is hit:\nthe heaviest subtrees are kept, each still linked to a root. `total_size_bytes`\nstays exact regardless. Intended\nfor the closure Sankey view and size-trimming tooling.\n\n**Access:** Same as the dependency graph endpoint.",
+    params(("build" = BuildJobId, Path)),
+    responses((status = OK, description = "Closure size graph", body = ClosureGraph), WebError)
+)]
 pub async fn get_build_closure(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -247,6 +257,16 @@ pub async fn get_build_closure(
     Ok(ok_json(graph))
 }
 
+#[utoipa::path(
+    get,
+    path = "/evals/{evaluation}/closure",
+    operation_id = "getEvalClosure",
+    tag = "evals",
+    summary = "Get closure size graph for an evaluation",
+    description = "Returns the union dependency closure of all the evaluation's entry-point\nbuilds with per-node uncompressed NAR sizes and an exact `total_size_bytes`.\nSame shape as `/builds/{build}/closure`.",
+    params(("evaluation" = EvaluationId, Path)),
+    responses((status = OK, description = "Closure size graph", body = ClosureGraph), WebError)
+)]
 pub async fn get_eval_closure(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -307,6 +327,16 @@ where
     Ok(closure_graph(roots, total_size_bytes, nodes, edges))
 }
 
+#[utoipa::path(
+    get,
+    path = "/builds/{build}/runtime-closure",
+    operation_id = "getBuildRuntimeClosure",
+    tag = "builds",
+    summary = "Get runtime closure size graph",
+    description = "Like `/builds/{build}/closure` but walks runtime store-path references\n(narinfo `References:`) from the build's outputs instead of build-time\ndependencies. Only as complete as the cached outputs; node ids are\nstore-path hashes. Same `ClosureGraph` shape.",
+    params(("build" = BuildJobId, Path)),
+    responses((status = OK, description = "Runtime closure size graph", body = ClosureGraph), WebError)
+)]
 pub async fn get_build_runtime_closure(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -325,6 +355,16 @@ pub async fn get_build_runtime_closure(
     Ok(ok_json(graph))
 }
 
+#[utoipa::path(
+    get,
+    path = "/evals/{evaluation}/runtime-closure",
+    operation_id = "getEvalRuntimeClosure",
+    tag = "evals",
+    summary = "Get runtime closure size graph for an evaluation",
+    description = "Union runtime reference closure of all the evaluation's entry-point build\noutputs. Runtime counterpart of `/evals/{evaluation}/closure`.",
+    params(("evaluation" = EvaluationId, Path)),
+    responses((status = OK, description = "Runtime closure size graph", body = ClosureGraph), WebError)
+)]
 pub async fn get_eval_runtime_closure(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

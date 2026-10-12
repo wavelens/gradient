@@ -10,6 +10,7 @@ use super::{
     FailedAttributeSummary, PaginatedEntryPoints, QueueSummary, TaskDetailsResponse,
 };
 use crate::access::{has_permission, is_project_member};
+use crate::api_spec::{Binary, TaskPath};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::{live_progress, live_progress_status};
 use crate::endpoints::{archive_headers, build_product_headers};
@@ -46,7 +47,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, utoipa::ToSchema)]
 pub struct EvaluateRequest {
     pub commit: Option<String>,
     pub attr: Option<String>,
@@ -177,6 +178,17 @@ fn first_line_truncated(s: &str, max: usize) -> Option<String> {
     Some(line.chars().take(max).collect())
 }
 
+#[utoipa::path(
+    post,
+    path = "/tasks/{project}/{task}/evaluate",
+    operation_id = "triggerEvaluation",
+    tag = "tasks",
+    summary = "Trigger evaluation",
+    description = "Queues a new evaluation for the task and returns its UUID in `message`,\nso a caller can follow the run it just started (`GET /evals/{id}`, or the\n`GET /evals/{id}/live` stream). `POST /evals/{evaluation}/retry` re-runs\nthe failed builds of a finished evaluation.\n\nReturns `400` with `code: \"repository_unreachable\"` when the repository\ncannot be fetched (DNS failure, authentication failure, unreachable host,\nbad URL, …) - the message includes the underlying git error.",
+    params(TaskPath),
+    request_body = Option<EvaluateRequest>,
+    responses((status = OK, description = "Evaluation UUID", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_task_evaluate(
     TaskScope { task, user, db, .. }: TaskScope<Requires<can::TriggerEvaluation>>,
     state: State<Arc<ServerState>>,
@@ -281,6 +293,16 @@ pub async fn post_task_evaluate(
     Ok(ok_json(eval.id.to_string()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/{project}/{task}/evaluations",
+    operation_id = "getTaskEvaluations",
+    tag = "tasks",
+    summary = "List and search evaluations",
+    description = "Returns the `keep_evaluations` most recent evaluations for the task,\nnewest first. The `commit`, `status` and `attr` filters combine (AND) to\nanswer \"has this attribute at this commit been evaluated, and is it still\nrunning?\" without walking the whole history.\n\n`attr` matches an evaluation's **wildcard**, not its entry points. The\nwildcard is set when the evaluation row is created, so the filter answers\nwhile the evaluation is still `Queued` or `EvaluatingFlake`; entry points\ndo not exist until derivations have resolved. The flip side is that a\nmatch means the attribute was *in scope*, not that it exists in the flake\nor that it built - read `/tasks/{project}/{task}/entry-points` for that.",
+    params(TaskPath, EvaluationsQuery),
+    responses((status = OK, description = "List of evaluation summaries", body = Vec<EvaluationSummary>), WebError)
+)]
 pub async fn get_task_evaluations(
     TaskScope { task, .. }: TaskScope<Readable>,
     state: State<Arc<ServerState>>,
@@ -346,6 +368,16 @@ pub async fn get_task_evaluations(
     Ok(ok_json(summaries))
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/{project}/{task}/details",
+    operation_id = "getTaskDetails",
+    tag = "tasks",
+    summary = "Get task details",
+    description = "Returns aggregated task data including the latest evaluation, recent evaluation history, and current entry points.",
+    params(TaskPath),
+    responses((status = OK, description = "Task details", body = TaskDetailsResponse), WebError)
+)]
 pub async fn get_task_details(
     TaskScope {
         project,
@@ -405,7 +437,8 @@ pub async fn get_task_details(
     Ok(Json(res))
 }
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug, Default, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct EvaluationsQuery {
     pub limit: Option<u64>,
     pub before: Option<EvaluationId>,
@@ -448,7 +481,8 @@ fn parse_status_filter(raw: &str) -> WebResult<Vec<EvaluationStatus>> {
 const ENTRY_POINTS_PAGE: u64 = 25;
 const ENTRY_POINTS_PAGE_MAX: u64 = 500;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct EntryPointsQuery {
     pub evaluation_id: Option<EvaluationId>,
     pub limit: Option<u64>,
@@ -465,6 +499,16 @@ fn page_bounds(limit: Option<u64>, offset: Option<u64>) -> (u64, u64) {
     (limit, offset.unwrap_or(0))
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/{project}/{task}/entry-points",
+    operation_id = "listTaskEntryPoints",
+    tag = "tasks",
+    summary = "List entry points",
+    description = "Returns the root builds (entry points) for the task from the last evaluation by default. Pass `evaluation_id` to retrieve entry points from a specific evaluation instead.",
+    params(TaskPath, EntryPointsQuery),
+    responses((status = OK, description = "Entry points", body = PaginatedEntryPoints), WebError)
+)]
 pub async fn get_task_entry_points(
     TaskScope { task, db, .. }: TaskScope<Readable>,
     Query(params): Query<EntryPointsQuery>,
@@ -679,7 +723,8 @@ impl EntryPointRelatedData {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct EntryPointDownloadQuery {
     pub eval: String,
     pub filename: String,
@@ -775,6 +820,16 @@ async fn serve_hydra_artifact(
     Ok(None)
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/{project}/{task}/entry-point-downloads",
+    operation_id = "downloadEntryPointOutput",
+    tag = "tasks",
+    summary = "Download newest-commit entry point build output",
+    description = "Serves the named file from `nix-support/hydra-build-products` for the build of\nthe given entry point in the task's **newest-commit evaluation**\n(`task.last_evaluation`). Designed as a stable permalink - retriggering an\nolder commit does not shadow the latest one. Returns `404` if no evaluation\nhas been recorded yet, or if the entry point / file is missing from the\nnewest evaluation.\n\nAuthentication:\n- **Public projects** - no credentials required.\n- **Private projects** - supply `?token=GRADxxxx` (API key) or a JWT, **or**\n  authenticate via `Authorization: Bearer` header / `jwt_token` session cookie.\n\nThe `eval` value may contain double-quoted Nix attribute segments\n(e.g. `packages.\"x86_64-linux\".hello`). URL-encode `\"` as `%22`.",
+    params(("project" = String, Path), ("task" = String, Path), EntryPointDownloadQuery),
+    responses((status = OK, description = "File contents with appropriate `Content-Type` and `Content-Disposition` headers.", body = Binary, content_type = "application/octet-stream"), WebError)
+)]
 pub async fn get_entry_point_download(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

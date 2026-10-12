@@ -19,7 +19,7 @@ use gradient_types::{BaseResponse, MAdminTask};
 use serde::Serialize;
 use std::sync::Arc;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct AdminTaskDto {
     pub id: AdminTaskId,
     pub kind: &'static str,
@@ -50,6 +50,15 @@ impl From<MAdminTask> for AdminTaskDto {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks",
+    operation_id = "listAdminTasks",
+    tag = "admin",
+    summary = "List recent admin tasks",
+    description = "Returns the 50 newest admin tasks ordered by `created_at` descending.\nRequires `superuser`.",
+    responses((status = OK, description = "Admin task list", body = Vec<AdminTaskDto>), WebError)
+)]
 pub async fn list_tasks(
     State(state): State<Arc<ServerState>>,
 ) -> WebResult<Json<BaseResponse<Vec<AdminTaskDto>>>> {
@@ -59,6 +68,15 @@ pub async fn list_tasks(
     Ok(ok_json(rows.into_iter().map(AdminTaskDto::from).collect()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/{task_id}",
+    operation_id = "getAdminTask",
+    tag = "admin",
+    summary = "Get one admin task",
+    params(("task_id" = AdminTaskId, Path)),
+    responses((status = OK, description = "Admin task", body = AdminTaskDto), WebError)
+)]
 pub async fn get_task(
     State(state): State<Arc<ServerState>>,
     Path(task_id): Path<AdminTaskId>,

@@ -8,6 +8,7 @@ use super::TaskResponse;
 use super::auto_attach;
 use super::refusal::TaskRefusal;
 use crate::access::{Caller, ProjectAccess, has_permission, load_project};
+use crate::api_spec::{ProjectPath, TaskPath};
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
@@ -36,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct MakeTaskRequest {
     pub name: TaskName,
     pub display_name: TaskDisplayName,
@@ -53,7 +54,7 @@ pub struct MakeTaskRequest {
     pub retry_failed_builds: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct PatchTaskRequest {
     pub name: Option<TaskName>,
     pub display_name: Option<String>,
@@ -67,11 +68,21 @@ pub struct PatchTaskRequest {
     pub retry_failed_builds: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct TransferOwnershipRequest {
     pub project: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/{project}/available",
+    operation_id = "checkTaskNameAvailable",
+    tag = "tasks",
+    summary = "Check task name availability",
+    description = "Returns `true` if no task with the given name exists in the project, `false` if it is already taken.",
+    params(("project" = String, Path), ("name" = String, Query)),
+    responses((status = OK, description = "Availability result", body = bool, content_type = "application/json"), WebError)
+)]
 pub async fn get_task_name_available(
     state: State<Arc<ServerState>>,
     Path(project): Path<String>,
@@ -90,6 +101,18 @@ pub async fn get_task_name_available(
     Ok(ok_json(!exists))
 }
 
+type PaginatedTaskResponse = Paginated<TaskResponse>;
+
+#[utoipa::path(
+    get,
+    path = "/tasks/{project}",
+    operation_id = "listTasks",
+    tag = "tasks",
+    summary = "List tasks",
+    description = "Returns all tasks in the given project with full details.",
+    params(ProjectPath, PaginationParams),
+    responses((status = OK, description = "Task list", body = PaginatedTaskResponse), WebError)
+)]
 pub async fn get(
     ProjectScope {
         project,
@@ -99,7 +122,7 @@ pub async fn get(
         ..
     }: ProjectScope<Readable>,
     Query(params): Query<PaginationParams>,
-) -> WebResult<Json<BaseResponse<Paginated<Vec<TaskResponse>>>>> {
+) -> WebResult<Json<BaseResponse<Paginated<TaskResponse>>>> {
     let api_key_ref = api_key.as_ref();
 
     let (can_edit, can_trigger) = match &maybe_user {
@@ -154,6 +177,17 @@ pub async fn get(
     Ok(ok_json(listing))
 }
 
+#[utoipa::path(
+    put,
+    path = "/tasks/{project}",
+    operation_id = "createTask",
+    tag = "tasks",
+    summary = "Create task",
+    description = "Creates a new task in the project. `wildcard` is a Nix attribute selector such as `packages.x86_64-linux` or `checks`.",
+    params(("project" = String, Path)),
+    request_body = MakeTaskRequest,
+    responses((status = OK, description = "Task UUID", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn put(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -259,6 +293,15 @@ pub async fn put(
     Ok(Json(res))
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/{project}/{task}",
+    operation_id = "getTask",
+    tag = "tasks",
+    summary = "Get task",
+    params(TaskPath),
+    responses((status = OK, description = "Task details", body = TaskResponse), WebError)
+)]
 pub async fn get_task(
     TaskScope {
         project,
@@ -309,6 +352,17 @@ pub async fn get_task(
     )))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/tasks/{project}/{task}",
+    operation_id = "patchTask",
+    tag = "tasks",
+    summary = "Update task",
+    description = "Updates one or more task fields.",
+    params(TaskPath),
+    request_body = PatchTaskRequest,
+    responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn patch_task(
     TaskScope { project, task, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
     state: State<Arc<ServerState>>,
@@ -442,6 +496,15 @@ impl<'a> TaskPatcher<'a> {
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/tasks/{project}/{task}",
+    operation_id = "deleteTask",
+    tag = "tasks",
+    summary = "Delete task",
+    params(TaskPath),
+    responses((status = OK, description = "Deleted", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_task(
     TaskScope {
         project: project_row,
@@ -466,6 +529,16 @@ pub async fn delete_task(
     Ok(Json(res))
 }
 
+#[utoipa::path(
+    post,
+    path = "/tasks/{project}/{task}/active",
+    operation_id = "enableTask",
+    tag = "tasks",
+    summary = "Enable task",
+    description = "Sets the task's active flag to true so it will be evaluated on new commits. Requires Admin or Write role; rejects state-managed tasks.",
+    params(TaskPath),
+    responses((status = OK, description = "Enabled", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_task_active(
     TaskScope { task, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -481,6 +554,16 @@ pub async fn post_task_active(
     Ok(Json(res))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/tasks/{project}/{task}/active",
+    operation_id = "disableTask",
+    tag = "tasks",
+    summary = "Disable task",
+    description = "Sets the task's active flag to false, pausing automatic evaluations. Requires Admin or Write role; rejects state-managed tasks.",
+    params(TaskPath),
+    responses((status = OK, description = "Disabled", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_task_active(
     TaskScope { task, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -496,6 +579,16 @@ pub async fn delete_task_active(
     Ok(Json(res))
 }
 
+#[utoipa::path(
+    post,
+    path = "/tasks/{project}/{task}/check-repository",
+    operation_id = "checkTaskRepository",
+    tag = "tasks",
+    summary = "Check repository accessibility",
+    description = "Tests whether Gradient can clone the task's repository using the project's SSH key. Requires Admin or Write role; rejects state-managed tasks.\nReturns `400` with `code: \"repository_unreachable\"` and the underlying git error when the repository cannot be fetched.",
+    params(TaskPath),
+    responses((status = OK, description = "Repository is accessible", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_task_check_repository(
     TaskScope { task, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -513,6 +606,17 @@ pub async fn post_task_check_repository(
     Ok(Json(res))
 }
 
+#[utoipa::path(
+    post,
+    path = "/tasks/{project}/{task}/transfer",
+    operation_id = "transferTask",
+    tag = "tasks",
+    summary = "Move task to another project",
+    description = "Moves the task into the project named in the body. Allowed for the task owner or a member with the edit-task permission, who also needs the create-task permission in the target project. Rejects state-managed tasks and target projects.",
+    params(TaskPath),
+    request_body = TransferOwnershipRequest,
+    responses((status = OK, description = "Task moved", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn post_task_transfer(
     TaskScope {
         project,

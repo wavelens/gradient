@@ -25,6 +25,16 @@ use super::BuildAccessContext;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
+#[utoipa::path(
+    get,
+    path = "/builds/{build}/log",
+    operation_id = "getBuildLog",
+    tag = "builds",
+    summary = "Get build log",
+    description = "Returns the complete build log as a single string. Empty string if no log is available yet.\n\nA `Substituted` build (its outputs came from a cache) has no log of its\nown, so the log of the most recent prior build of the same derivation is\nreturned instead. The chunk/lines endpoints fall back the same way.\n\n**Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.",
+    params(("build" = BuildJobId, Path)),
+    responses((status = OK, description = "Build log", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn get_build_log(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -41,6 +51,16 @@ pub async fn get_build_log(
     Ok(ok_json(log))
 }
 
+#[utoipa::path(
+    post,
+    path = "/builds/{build}/log",
+    operation_id = "streamBuildLog",
+    tag = "builds",
+    summary = "Stream build log",
+    description = "Open a streaming NDJSON response: emit the full existing log first, then\nstream new chunks as they arrive. Close the stream once the build has left\nthe `Building` state. Chunks hold no more than 256 KiB each, split at a\nline end. Empty strings arrive as keepalives after 15 seconds without\noutput. Ignore them.",
+    params(("build" = BuildJobId, Path)),
+    responses((status = OK, description = "NDJSON log stream", body = String, content_type = "application/x-ndjson"), WebError)
+)]
 pub async fn post_build_log(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

@@ -8,7 +8,7 @@ use gradient_types::MTask;
 use gradient_types::ids::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IncomingWebhookResponse {
     pub event: String,
     pub repository_urls: Vec<String>,
@@ -33,7 +33,7 @@ impl IncomingWebhookResponse {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct QueuedEvaluation {
     pub task_id: TaskId,
     pub task_name: String,
@@ -52,7 +52,7 @@ impl QueuedEvaluation {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct SkippedTask {
     pub task_id: TaskId,
     pub task_name: String,

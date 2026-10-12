@@ -136,7 +136,7 @@ async fn read_capped(mut stream: BoxStream<'static, reqwest::Result<Bytes>>) -> 
     Some(body)
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
 pub struct ProtocolProbe {
     pub ok: bool,
     pub status: Option<u16>,

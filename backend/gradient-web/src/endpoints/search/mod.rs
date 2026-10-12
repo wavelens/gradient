@@ -6,7 +6,7 @@
 
 pub mod classify;
 
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
@@ -21,14 +21,15 @@ use sea_orm::{ConnectionTrait, DbErr};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct SearchQuery {
     #[serde(default)]
     pub q: String,
     pub limit: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HitKind {
     Project,
@@ -38,7 +39,7 @@ pub enum HitKind {
     Commit,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct SearchHit {
     pub kind: HitKind,
     pub label: String,
@@ -147,6 +148,16 @@ pub async fn search<C: ConnectionTrait>(
     Ok(hits)
 }
 
+#[utoipa::path(
+    get,
+    path = "/search",
+    operation_id = "getSearch",
+    tag = "dashboard",
+    summary = "Typed search for the command palette",
+    description = "Classifies `q` and performs every lookup it could mean. The name lookup always takes place, and a project named like a commit hash is still found.\n- Store path or bare 32-char nix32 hash: NARs of that hash in readable caches (`nar`, at most 10).\n- 7 to 40 hex characters: evaluations of commits with that prefix in readable projects, newest first, PR-triggered ones included (`commit`, at most 5).\n- Any text: projects, tasks and caches whose name or display name contains it, at most `limit` per kind, starred first.\nAn empty `q` returns the user's starred projects, tasks and caches, labelled by display name like name hits.\nVisibility matches the rest of the API: a project is readable when public or the user is a member; a cache when public, created by, shared with or subscribed to by a project of the user. There is no superuser bypass, so every hit opens a readable page.\nResults are ordered NAR hits, commit hits, then name hits (starred first, then kind, then name).",
+    params(SearchQuery),
+    responses((status = OK, description = "Search hits with the frontend route each one navigates to", body = Vec<SearchHit>), WebError)
+)]
 pub async fn get_search(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

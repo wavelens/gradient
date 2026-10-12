@@ -6,6 +6,7 @@
 
 use super::refusal::TeamRefusal;
 use super::workers::withdraw_team_workers;
+use crate::api_spec::TeamPath;
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult, require_create_permission, require_superuser};
 use crate::helpers::ok_json;
@@ -27,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct TeamSummary {
     pub name: String,
     pub display_name: String,
@@ -44,7 +45,7 @@ impl TeamSummary {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct TeamResponse {
     pub id: TeamId,
     pub name: String,
@@ -78,13 +79,13 @@ impl TeamResponse {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct MakeTeamRequest {
     pub name: TeamName,
     pub display_name: TeamDisplayName,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct PatchTeamRequest {
     pub display_name: Option<TeamDisplayName>,
     pub new_project_users: Option<bool>,
@@ -114,6 +115,15 @@ fn blank_to_none(value: String) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+#[utoipa::path(
+    get,
+    path = "/teams",
+    operation_id = "listTeams",
+    tag = "teams",
+    summary = "List my teams",
+    description = "Teams the caller is a member of, with the caller's role, sorted by name.",
+    responses((status = OK, description = "OK", body = Vec<TeamSummary>), WebError)
+)]
 pub async fn get_teams(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -129,6 +139,15 @@ pub async fn get_teams(
     Ok(ok_json(items))
 }
 
+#[utoipa::path(
+    get,
+    path = "/teams/available",
+    operation_id = "teamNameAvailable",
+    tag = "teams",
+    summary = "Check a team name",
+    params(("name" = String, Query)),
+    responses((status = OK, description = "Whether the name is valid and free", body = bool, content_type = "application/json"), WebError)
+)]
 pub async fn get_team_name_available(
     state: State<Arc<ServerState>>,
     Query(params): Query<HashMap<String, String>>,
@@ -143,6 +162,16 @@ pub async fn get_team_name_available(
     Ok(ok_json(!taken))
 }
 
+#[utoipa::path(
+    put,
+    path = "/teams",
+    operation_id = "createTeam",
+    tag = "teams",
+    summary = "Create team",
+    description = "Creates a team and makes the caller its Admin. Who may create teams is set by `--permissions-create-team`.",
+    request_body = MakeTeamRequest,
+    responses((status = OK, description = "Team created", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn put_team(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -197,12 +226,32 @@ pub async fn put_team(
     Ok(ok_json(team.id.to_string()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/teams/{team}",
+    operation_id = "getTeam",
+    tag = "teams",
+    summary = "Get team",
+    description = "Members of the team and superusers can read it.",
+    params(TeamPath),
+    responses((status = OK, description = "OK", body = TeamResponse), WebError)
+)]
 pub async fn get_team(
     TeamScope { team, role, .. }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<TeamResponse>>> {
     Ok(ok_json(TeamResponse::new(team, role)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/teams/{team}/evaluations",
+    operation_id = "getTeamEvaluations",
+    tag = "teams",
+    summary = "List recent team evaluations",
+    description = "The ten newest evaluations of projects granting the team with users. Members of the team and superusers can read it.",
+    params(TeamPath),
+    responses((status = OK, description = "OK", body = Vec<gradient_db::teams::evaluations::TeamEvaluation>), WebError)
+)]
 pub async fn get_team_evaluations(
     TeamScope { team, db, .. }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<gradient_db::teams::evaluations::TeamEvaluation>>>> {
@@ -211,6 +260,17 @@ pub async fn get_team_evaluations(
     ))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/teams/{team}",
+    operation_id = "patchTeam",
+    tag = "teams",
+    summary = "Change team",
+    description = "Needs Admin in the team. Only superusers set `oidc_group`, `scim_group` and the `new_project_*` fields. State-managed teams refuse changes.",
+    params(TeamPath),
+    request_body = PatchTeamRequest,
+    responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn patch_team(
     TeamScope { team, user, db, .. }: TeamScope<AdminUnmanaged>,
     audit: Audit,
@@ -263,6 +323,16 @@ pub async fn patch_team(
     Ok(ok_json("Team updated".to_string()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/teams/{team}",
+    operation_id = "deleteTeam",
+    tag = "teams",
+    summary = "Delete team",
+    description = "Needs Admin in the team. Deletes its grants, requests, invitations and workers; connected team workers lose those projects.",
+    params(TeamPath),
+    responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
+)]
 pub async fn delete_team(
     TeamScope { team, db, .. }: TeamScope<AdminUnmanaged>,
     audit: Audit,

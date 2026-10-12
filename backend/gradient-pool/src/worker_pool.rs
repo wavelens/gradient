@@ -430,7 +430,7 @@ impl WorkerPool {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct WorkerInfo {
     pub id: String,
     pub capabilities: GradientCapabilities,

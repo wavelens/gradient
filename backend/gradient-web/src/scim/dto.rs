@@ -13,7 +13,7 @@ pub const USER_SCHEMA: &str = "urn:ietf:params:scim:schemas:core:2.0:User";
 pub const GROUP_SCHEMA: &str = "urn:ietf:params:scim:schemas:core:2.0:Group";
 pub const LIST_SCHEMA: &str = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ListResponse<T> {
     pub schemas: [&'static str; 1],
     #[serde(rename = "totalResults")]
@@ -38,13 +38,13 @@ impl<T> ListResponse<T> {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct Meta {
     #[serde(rename = "resourceType")]
     pub resource_type: &'static str,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct UserResource {
     pub schemas: [&'static str; 1],
     pub id: String,
@@ -83,20 +83,20 @@ impl From<&UserModel> for UserResource {
     }
 }
 
-#[derive(Serialize, Default)]
+#[derive(Serialize, Default, utoipa::ToSchema)]
 pub struct NameResource {
     #[serde(rename = "formatted")]
     pub formatted: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, utoipa::ToSchema)]
 pub struct EmailResource {
     pub value: String,
     #[serde(default)]
     pub primary: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct UserRequest {
     #[serde(rename = "userName")]
     pub user_name: String,
@@ -112,7 +112,7 @@ pub struct UserRequest {
     pub active: bool,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, utoipa::ToSchema)]
 pub struct NameRequest {
     #[serde(default)]
     pub formatted: Option<String>,
@@ -126,7 +126,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct GroupResource {
     pub schemas: [&'static str; 1],
     pub id: String,
@@ -151,7 +151,7 @@ impl GroupResource {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, utoipa::ToSchema)]
 pub struct GroupMember {
     pub value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -167,13 +167,13 @@ impl From<MTeamUser> for GroupMember {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct PatchRequest {
     #[serde(rename = "Operations")]
     pub operations: Vec<PatchOperation>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct PatchOperation {
     pub op: String,
     #[serde(default)]

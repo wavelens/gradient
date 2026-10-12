@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{CacheId, UserId};
 
-#[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize, utoipa::ToSchema)]
+#[schema(as = Cache)]
 #[sea_orm(table_name = "cache")]
 pub struct Model {
     #[sea_orm(primary_key)]

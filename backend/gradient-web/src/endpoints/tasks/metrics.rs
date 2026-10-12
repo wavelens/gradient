@@ -7,7 +7,7 @@
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::builds::closure::sum_output_sizes;
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct TaskMetricPoint {
     pub evaluation_id: EvaluationId,
     pub created_at: chrono::NaiveDateTime,
@@ -36,12 +36,22 @@ pub struct TaskMetricPoint {
     pub dependencies_count: i64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct TaskMetricsResponse {
     pub keep_evaluations: i32,
     pub points: Vec<TaskMetricPoint>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/{project}/{task}/metrics",
+    operation_id = "getTaskMetrics",
+    tag = "tasks",
+    summary = "Get task metrics",
+    description = "Returns per-evaluation metric points for the last `keep_evaluations` completed evaluations.",
+    params(("project" = String, Path), ("task" = String, Path)),
+    responses((status = OK, description = "Task metrics", body = TaskMetricsResponse), WebError)
+)]
 pub async fn get_task_metrics(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -172,12 +182,13 @@ async fn derivation_metrics(db: &WebDb, derivation: DerivationId) -> WebResult<D
     })
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct EntryPointMetricsQuery {
     pub eval: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct EntryPointMetricPoint {
     pub evaluation_id: EvaluationId,
     pub build_id: BuildJobId,
@@ -190,13 +201,23 @@ pub struct EntryPointMetricPoint {
     pub dependencies_count: i64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct EntryPointMetricsResponse {
     pub eval: String,
     pub keep_evaluations: i32,
     pub points: Vec<EntryPointMetricPoint>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/{project}/{task}/entry-point-metrics",
+    operation_id = "getEntryPointMetrics",
+    tag = "tasks",
+    summary = "Get entry point metrics",
+    description = "Returns per-evaluation build metrics for a single entry point identified by its\nNix attribute path (`eval`), covering the last `keep_evaluations` completed evaluations.\n\nThe `eval` value is the full Nix attribute path as stored in the database, which may\ncontain double-quoted segments for attribute names with special characters\n(e.g. `packages.\"x86_64-linux\".hello`). URL-encode `\"` as `%22` in query strings.",
+    params(("project" = String, Path), ("task" = String, Path), EntryPointMetricsQuery),
+    responses((status = OK, description = "Entry point metrics", body = EntryPointMetricsResponse), WebError)
+)]
 pub async fn get_entry_point_metrics(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -383,4 +404,43 @@ mod tests {
         let total = sum_output_sizes(&db, vec![drv_id]).await.unwrap();
         assert_eq!(total, None);
     }
+}
+
+#[utoipa::path(
+    get,
+    path = "/metrics/tasks/{project}/{task}/evaluations",
+    operation_id = "getTaskEvaluationMetrics",
+    tag = "board",
+    summary = "Per-evaluation task metrics",
+    description = "Per-evaluation series (build time, eval time, output/closure sizes, dependencies) for the task's recent completed evaluations.",
+    params(("project" = String, Path), ("task" = String, Path)),
+    responses((status = OK, description = "Per-evaluation metric points", body = TaskMetricsResponse), WebError)
+)]
+pub async fn task_evaluation_metrics(
+    state: State<Arc<ServerState>>,
+    maybe_user: Extension<MaybeUser>,
+    api_key: Extension<MaybeApiKey>,
+    path: Path<(String, String)>,
+) -> WebResult<Json<BaseResponse<TaskMetricsResponse>>> {
+    get_task_metrics(state, maybe_user, api_key, path).await
+}
+
+#[utoipa::path(
+    get,
+    path = "/metrics/tasks/{project}/{task}/entry-point",
+    operation_id = "getEntryPointEvaluationMetrics",
+    tag = "board",
+    summary = "Per-evaluation entry-point metrics",
+    description = "Per-evaluation build metrics for a single entry point identified by its `eval` attribute path.",
+    params(("project" = String, Path), ("task" = String, Path), EntryPointMetricsQuery),
+    responses((status = OK, description = "Per-evaluation entry-point metric points", body = EntryPointMetricsResponse), WebError)
+)]
+pub async fn task_entry_point_metrics(
+    state: State<Arc<ServerState>>,
+    maybe_user: Extension<MaybeUser>,
+    api_key: Extension<MaybeApiKey>,
+    path: Path<(String, String)>,
+    query: Query<EntryPointMetricsQuery>,
+) -> WebResult<Json<BaseResponse<EntryPointMetricsResponse>>> {
+    get_entry_point_metrics(state, maybe_user, api_key, path, query).await
 }

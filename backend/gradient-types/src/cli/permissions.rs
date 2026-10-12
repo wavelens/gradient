@@ -8,7 +8,9 @@ use clap::{Args, ValueEnum};
 use gradient_derive::config_group;
 use serde::{Deserialize, Serialize};
 
-#[derive(ValueEnum, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    ValueEnum, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, utoipa::ToSchema,
+)]
 #[serde(rename_all = "lowercase")]
 #[value(rename_all = "lowercase")]
 pub enum CreatePermission {
