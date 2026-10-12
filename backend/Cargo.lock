@@ -2720,11 +2720,16 @@ name = "gradient-eval"
 version = "2.0.0-rc.1"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "futures",
  "libc",
+ "nix 0.31.3",
  "nix-bindings",
  "rkyv",
  "serde",
  "serde_json",
+ "sysinfo",
+ "tokio",
  "tracing",
 ]
 

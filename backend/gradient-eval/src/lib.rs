@@ -10,6 +10,7 @@ mod frames;
 pub mod ipc;
 pub mod jobs;
 pub mod nix_eval;
+pub mod pool;
 pub mod stats;
 pub mod wildcard_walk;
 
