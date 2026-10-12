@@ -97,7 +97,7 @@ gradient login https://gradient.example.com
 | `gradient download [FLAKE_REF]` | `--evaluation <EVALUATION>`, `--task <TASK>`, `--products <PRODUCTS>`, `--out <OUT>` | Download evaluation artefacts |
 | `gradient builds graph <ID>` | `--interactive` | Show a build's dependency graph |
 | `gradient builds log <ID>` | `--interactive`, `--lines <LINES>`, `--search <SEARCH>`, `--case` | View a build's log |
-| `gradient eval <PATTERN>...` | - | Evaluate a flake to derivations locally, one JSON line per attribute. Only in `gradient-cli-full`, see [below](#local-evaluation) |
+| `gradient eval <PATTERN>...` | `--workers <N>`, `--max-rss <MiB>`, `--max-memory <MiB>` | Evaluate a flake to derivations locally, a JSON line per attribute. Only in `gradient-cli-full`, see [below](#local-evaluation) |
 
 ## Caches
 
@@ -128,11 +128,11 @@ gradient login https://gradient.example.com
 | Command | Options | Description |
 |---|---|---|
 | `gradient generate apikey` | - | Generate an API token and the digest for a declarative `api_keys.<name>.key_file`, see [API Key Files](../concepts/declarative-state.md#api-key-files) |
-| `gradient mcp` | `--control` | Serve this Gradient instance to MCP clients over stdio |
+| `gradient mcp` | `--control` | This Gradient instance to MCP clients over stdio |
 
 ## Interactive Mode
 
-`-i` will open a full-screen view instead of plain output. `--json` will ignore the flag.
+`-i` for a full-screen view instead of plain output. `--json` off.
 
 | Command | View | Keys |
 |---|---|---|
@@ -142,16 +142,24 @@ gradient login https://gradient.example.com
 
 ## Download Filters
 
-`gradient download` will pick an evaluation and its build products interactively. `--evaluation` and `--products all` (or `1,3-5`) are skipping the pickers. A positional `'#packages.x86_64-linux.app'` (comma-separated for more) can select by attribute instead of `--products`.
+An interactive choice of evaluation and build products in `gradient download`. `--evaluation` and `--products all` (or `1,3-5`) are skipping the pickers. A positional `'#packages.x86_64-linux.app'` (comma-separated for more) can select by attribute instead of `--products`.
 
 ## Local Evaluation
 
-`gradient eval` can start the worker's evaluator locally, like `nix-eval-jobs`. The output is one JSON line per attribute with `attr`, `attrPath` and `drvPath`, or `error` for a failed attribute.
+`gradient eval` can start the worker's evaluator locally, like `nix-eval-jobs`. A JSON line per attribute with `attr`, `attrPath` and `drvPath`, or `error` for a failed attribute.
 
 ```sh
 gradient eval 'packages.x86_64-linux.*'             # the flake in the current directory
-gradient eval .#hello                              # one attribute, as fast as nix eval
+gradient eval .#hello                              # a concrete attribute, as fast as nix eval
 gradient eval 'github:NixOS/patchelf#hydraJobs.*'  # any flake ref before the #
 ```
 
-`gradient eval` will treat a local flake inside a Git checkout like `nix eval .`. Only tracked files are reaching the store.
+Local flakes inside a Git checkout behave like `nix eval .`. Only tracked files are reaching the store.
+
+| Flag | Default | Behavior |
+|---|---|---|
+| `--workers <N>` | core count, capped at 16 | Evaluation subprocesses in the pool |
+| `--max-rss <MiB>` | `2048` | Ceiling on the resident memory of an idle subprocess between calls |
+| `--max-memory <MiB>` | unset | Ceiling on the resident memory of the whole pool |
+
+A pool of subprocesses, a subprocess per `--workers`. The pool's eval cache, in the user's cache directory, separate from `nix eval`.
