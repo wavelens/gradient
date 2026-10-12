@@ -21,7 +21,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { EMPTY, Observable, Subject, catchError, debounceTime, distinctUntilChanged, map, switchMap } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
-import { DashboardFilter, TasksPage } from '@core/models';
+import { Filter, TasksPage } from '@core/models';
 import { evaluationPhase } from '@shared/evaluation';
 import {
   ButtonComponent,
@@ -36,7 +36,7 @@ import { formatDuration, relativeTime } from '@shared/text';
 import { EvaluationHistoryComponent } from '../evaluation-history/evaluation-history.component';
 import { barsThatFit } from '../format';
 
-const FILTERS: { key: DashboardFilter; label: string }[] = [
+const FILTERS: { key: Filter; label: string }[] = [
   { key: 'starred', label: 'Starred' },
   { key: 'all', label: 'All' },
   { key: 'failing', label: 'Failing' },
@@ -46,7 +46,7 @@ const TOP = 10;
 const PAGE_SIZE = 25;
 const RESIZE_DEBOUNCE_MS = 150;
 
-function parseFilter(value: string | null): DashboardFilter | null {
+function parseFilter(value: string | null): Filter | null {
   return FILTERS.find((x) => x.key === value)?.key ?? null;
 }
 
@@ -78,7 +78,7 @@ export class DashboardTaskTableComponent implements OnInit {
   private requests = new Subject<void>();
 
   // null leaves the choice to the server: starred once the user starred a task, all otherwise.
-  filter = signal<DashboardFilter | null>(null);
+  filter = signal<Filter | null>(null);
   page = signal(1);
   expanded = signal(false);
   history = signal(barsThatFit(HISTORY_COLUMN_PX));
@@ -126,7 +126,7 @@ export class DashboardTaskTableComponent implements OnInit {
       .subscribe(() => this.fitHistory());
   }
 
-  select(f: DashboardFilter): void {
+  select(f: Filter): void {
     this.router.navigate([], { relativeTo: this.route, queryParams: { filter: f }, queryParamsHandling: 'merge' });
   }
 
@@ -146,8 +146,8 @@ export class DashboardTaskTableComponent implements OnInit {
     return d ? Math.max(1, Math.ceil(d.total / PAGE_SIZE)) : 1;
   }
 
-  delta(d: number | null): string {
-    if (d === null) return '-';
+  delta(d?: number | null): string {
+    if (d == null) return '-';
     return d > 0 ? `+${d}` : d < 0 ? String(d) : '0';
   }
 

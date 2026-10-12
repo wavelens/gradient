@@ -9,11 +9,11 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EvaluationLogComponent } from './evaluation-log.component';
-import { BuildItem, EvaluationsService } from '@core/services/evaluations.service';
+import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { Subject, of } from 'rxjs';
-import { Evaluation, EvaluationStatus, User } from '@core/models';
+import { UserInfoResponse, BuildItem, EvaluationResponse, EvaluationStatus } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 
 function build(id: string, name: string, status = 'Completed', depth = 0): BuildItem {
@@ -392,7 +392,7 @@ describe('EvaluationLogComponent', () => {
     it('opens on a right-click anywhere on the build row, for that row', () => {
       const { fixture, cmp } = setup();
       fixture.detectChanges();
-      cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as Evaluation);
+      cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
       cmp.visibleBuilds.set([target({ id: 'b1' }), target({ id: 'b2', dispatched_job: 'job-2' })]);
       fixture.detectChanges();
 
@@ -408,7 +408,7 @@ describe('EvaluationLogComponent', () => {
     it('opens the same menu from the row\'s three dots, without selecting the row', () => {
       const { fixture, cmp } = setup();
       fixture.detectChanges();
-      cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as Evaluation);
+      cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
       cmp.visibleBuilds.set([target({ id: 'b1' }), target({ id: 'b2' })]);
       fixture.detectChanges();
       const select = vi.spyOn(cmp, 'selectBuild');
@@ -430,7 +430,7 @@ describe('EvaluationLogComponent', () => {
       }
 
       function asSuperuser(cmp: EvaluationLogComponent): EvaluationLogComponent {
-        vi.spyOn(TestBed.inject(AuthService), 'user').mockReturnValue({ superuser: true } as User);
+        vi.spyOn(TestBed.inject(AuthService), 'user').mockReturnValue({ superuser: true } as UserInfoResponse);
         return cmp;
       }
 
@@ -465,7 +465,7 @@ describe('EvaluationLogComponent', () => {
         const { cmp } = setup();
         const prioritize = vi.spyOn(TestBed.inject(EvaluationsService), 'prioritizeBuild').mockReturnValue(of('Success'));
         vi.spyOn(TestBed.inject(EvaluationsService), 'getEvaluation')
-          .mockReturnValue(of({ id: 'eval-1', status: 'Building', created_at: '2026-01-01T00:00:00' } as Evaluation));
+          .mockReturnValue(of({ id: 'eval-1', status: 'Building', created_at: '2026-01-01T00:00:00' } as EvaluationResponse));
         const reload = vi.spyOn(cmp, 'loadBuilds').mockImplementation(() => {});
         open(asSuperuser(cmp), target({ status: 'Building' })).get('Prioritize')!.command!();
         expect(prioritize).toHaveBeenCalledWith('b1');
@@ -476,7 +476,7 @@ describe('EvaluationLogComponent', () => {
     describe('abort and retry', () => {
       function inEvaluation(cmp: EvaluationLogComponent, status: EvaluationStatus, canTrigger = true): EvaluationLogComponent {
         cmp.access.set({ managed: false, canEdit: false, canTrigger });
-        cmp.evaluation.set({ id: 'eval-1', status, created_at: '2026-01-01T00:00:00', trigger: null } as Evaluation);
+        cmp.evaluation.set({ id: 'eval-1', status, created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
         return cmp;
       }
 
@@ -688,7 +688,7 @@ describe('EvaluationLogComponent', () => {
   describe('evaluation progress', () => {
     const rows = (name: string) => [{ name, state: 'Fetching' as const, downloaded_bytes: 1, expected_bytes: 0 }];
 
-    function setupLive(progress: Evaluation['progress'], status = 'Fetching', builds: BuildItem[] = []) {
+    function setupLive(progress: EvaluationResponse['progress'], status = 'Fetching', builds: BuildItem[] = []) {
       const frames = new Subject<LiveEvent>();
       const getEvaluation = vi.fn(() => of({
         id: 'eval-1', status, created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',

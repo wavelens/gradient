@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { ClosureGraph } from '@core/services/evaluations.service';
+import { ClosureGraph } from '@core/models';
 
 const OTHERS_PREFIX = '__others__:';
 

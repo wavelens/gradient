@@ -134,9 +134,6 @@
               @if (worker.team) {
                 <gr-badge severity="info">Team {{ worker.team }}</gr-badge>
               }
-              @if (worker.managed) {
-                <gr-badge severity="info">Managed</gr-badge>
-              }
               @if (worker.live?.draining) {
                 <gr-badge severity="warning">Draining</gr-badge>
               }
@@ -183,7 +180,7 @@
       size="small"
       class="worker-action-btn"
       [disabled]="deletingId() !== null || togglingId() !== null || testingId() !== null || renaming()"
-      [appManagedDisable]="rowAccess(worker)"
+      [appManagedDisable]="access()"
       (click)="openRenameDialog(worker)"
     ></button>
     <button

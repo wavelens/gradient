@@ -8,11 +8,7 @@ import { ChangeDetectionStrategy, Component, input, model } from '@angular/core'
 import { FormsModule } from '@angular/forms';
 import { BadgeComponent, CheckboxComponent } from '@gradient/ui/ui';
 import { permissionLabel } from '@shared/text';
-
-export interface PickablePermission {
-  id: string;
-  mutating: boolean;
-}
+import { PermissionEntry } from '@core/models';
 
 @Component({
   selector: 'app-permission-picker',
@@ -40,7 +36,7 @@ export interface PickablePermission {
   styleUrl: './permission-picker.component.scss',
 })
 export class PermissionPickerComponent {
-  permissions = input.required<readonly PickablePermission[]>();
+  permissions = input.required<readonly PermissionEntry[]>();
   selection = model<Record<string, boolean>>({});
 
   protected readonly label = permissionLabel;

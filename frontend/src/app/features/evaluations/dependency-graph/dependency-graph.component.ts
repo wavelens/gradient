@@ -21,7 +21,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { auditTime, filter } from 'rxjs/operators';
-import { EvaluationsService, BuildGraph } from '@core/services/evaluations.service';
+import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveService } from '@core/services/live.service';
 import {
   BadgeComponent,
@@ -32,6 +32,7 @@ import {
 } from '@gradient/ui/ui';
 import { formatDuration } from '@shared/text';
 import { longestPathDepths } from './dependency-depths';
+import { BuildGraph, DependencyEdge, DependencyGraphNode } from '@core/models';
 
 const CARD_W = 200;
 const CARD_H = 78;
@@ -39,21 +40,9 @@ const H_GAP = 32;
 const V_GAP = 90;
 const ACTIVE_STATUSES = ['Building', 'Queued', 'Created'];
 
-interface LayoutNode {
-  id: string;
-  build: string | null;
-  name: string;
-  path: string;
-  status: string | null;
-  created_at: string;
-  updated_at: string;
+interface LayoutNode extends DependencyGraphNode {
   x: number;
   y: number;
-}
-
-interface LayoutEdge {
-  source: string; // dependency (child in tree - lower level)
-  target: string; // dependent  (parent in tree - higher level)
 }
 
 @Component({
@@ -100,7 +89,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   private hoveredId: string | null = null;
 
   private layoutNodes: LayoutNode[] = [];
-  private layoutEdges: LayoutEdge[] = [];
+  private layoutEdges: DependencyEdge[] = [];
   private nodeMap = new Map<string, LayoutNode>();
 
   // DOM refs (imperative)
@@ -564,16 +553,16 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  private isActive(status: string | null): boolean {
-    return status !== null && ACTIVE_STATUSES.includes(status);
+  private isActive(status?: string | null): boolean {
+    return status != null && ACTIVE_STATUSES.includes(status);
   }
 
-  statusLabel(status: string | null): string {
+  statusLabel(status?: string | null): string {
     return status ?? 'No build';
   }
 
   private calcDuration(node: LayoutNode): string {
-    if (node.status === null) return '';
+    if (node.status == null) return '';
     const isActive = this.isActive(node.status);
     const toUtc = (s: string) => new Date(s.includes('Z') || s.includes('+') ? s : s + 'Z').getTime();
     const startMs = toUtc(node.created_at);
@@ -582,7 +571,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     return Number.isNaN(elapsed) || elapsed < 0 ? '' : formatDuration(elapsed);
   }
 
-  nodeColor(status: string | null): string {
+  nodeColor(status?: string | null): string {
     switch (status) {
       case 'Completed':         return '#22c55e';
       case 'Substituted':       return '#22c55e';
@@ -611,7 +600,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     { label: 'Skipped', tone: 'idle' },
   ];
 
-  statusSeverity(status: string | null): BadgeSeverity {
+  statusSeverity(status?: string | null): BadgeSeverity {
     switch (this.statusClass(status)) {
       case 'status-success': return 'success';
       case 'status-danger': return 'danger';
@@ -620,7 +609,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     }
   }
 
-  statusClass(status: string | null): string {
+  statusClass(status?: string | null): string {
     switch (status) {
       case 'Completed':
       case 'Substituted':       return 'status-success';

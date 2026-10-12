@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { UserService } from '@core/services/user.service';
-import { Session } from '@core/models';
+import { SessionInfo } from '@core/models';
 import { deviceName } from '@shared/text';
 import {
   BadgeComponent,
@@ -43,7 +43,7 @@ export class SessionsComponent implements OnInit {
 
   loading = signal(true);
   revokingId = signal<string | null>(null);
-  sessions = signal<Session[]>([]);
+  sessions = signal<SessionInfo[]>([]);
   errorMessage = signal<string | null>(null);
 
   ngOnInit(): void {
@@ -64,7 +64,7 @@ export class SessionsComponent implements OnInit {
     });
   }
 
-  revoke(s: Session): void {
+  revoke(s: SessionInfo): void {
     if (s.current) {
       return;
     }

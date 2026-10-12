@@ -11,9 +11,9 @@ import { of } from 'rxjs';
 import { TeamOverviewComponent } from './team-overview.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
-import { Team, TeamEvaluation } from '@core/models';
+import { TeamResponse, TeamEvaluation } from '@core/models';
 
-const team: Team = {
+const team: TeamResponse = {
   id: 't1',
   name: 'platform',
   display_name: 'Platform',

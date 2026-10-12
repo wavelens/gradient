@@ -12,7 +12,7 @@ import { BoardLiveJobsComponent } from './live-jobs.component';
 import { BoardService } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
 import { AuthService } from '@core/services/auth.service';
-import { AssignmentDecisionView, AssignedJobSummary, PendingJobSummary } from '@core/services/board.service';
+import { PendingJobSummary, DispatchedJobSummary, AssignDecisionView } from '@core/models';
 
 function authAs(superuser: boolean) {
   return { provide: AuthService, useValue: { user: () => ({ superuser }) } };
@@ -52,7 +52,7 @@ function setup(): ComponentFixture<BoardLiveJobsComponent> {
   return fixture;
 }
 
-const ASSIGNED: AssignedJobSummary = {
+const ASSIGNED: DispatchedJobSummary = {
   id: 'd1abc123-0000-0000-0000-000000000001',
   kind: 1,
   project: 'o1',
@@ -65,7 +65,7 @@ const ASSIGNED: AssignedJobSummary = {
   subject: 'hello-2.12.1',
 };
 
-function setupWithAssigned(assigned: AssignedJobSummary[]): ComponentFixture<BoardLiveJobsComponent> {
+function setupWithAssigned(assigned: DispatchedJobSummary[]): ComponentFixture<BoardLiveJobsComponent> {
   TestBed.configureTestingModule({
     imports: [BoardLiveJobsComponent],
     providers: [
@@ -130,7 +130,7 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
 
 // Shaped by AssignmentDecisionView so the compiler catches drift: the server
 // sends a per-candidate `id` and `won`, not just a decision-level `winner`.
-const DECISIONS: AssignmentDecisionView[] = [
+const DECISIONS: AssignDecisionView[] = [
   {
     at: '2026-06-08T00:00:00Z',
     worker_id: 'w1',

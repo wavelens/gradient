@@ -5,14 +5,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { Worker } from './worker.model';
 import { connectWaitState, gradientCiConnectUrl, gradientCiEntry, listedWorkers } from './gradient-ci.model';
+import type { ProjectWorkerEntry } from './api.generated';
 
-function worker(overrides: Partial<Worker>): Worker {
+function worker(overrides: Partial<ProjectWorkerEntry>): ProjectWorkerEntry {
   return {
     worker_id: 'w1',
     display_name: 'Builder',
-    managed: false,
+    registered_at: '2026-01-01T00:00:00',
     active: true,
     gradient_ci: false,
     connected: false,

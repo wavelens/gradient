@@ -10,21 +10,21 @@ import * as echarts from 'echarts/core';
 import { CustomChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
-import { JobPhase } from '@core/services/board.service';
 import { EmptyStateComponent } from '@gradient/ui/ui';
 import { resolveChartTheme } from '@shared/ui';
 import { ThemeService } from '@core/services/theme.service';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';
+import { JobPhaseView } from '@core/models';
 
 echarts.use([CustomChart, GridComponent, TooltipComponent, SVGRenderer]);
 
 /// How deeply each span is nested, by walking `parent_seq` to the root.
-export function depths(phases: JobPhase[]): number[] {
+export function depths(phases: JobPhaseView[]): number[] {
   const bySeq = new Map(phases.map(p => [p.seq, p]));
   return phases.map(p => {
     let depth = 0;
     let cur = p;
-    while (cur.parent_seq !== null) {
+    while (cur.parent_seq != null) {
       const parent = bySeq.get(cur.parent_seq);
       if (!parent || parent === cur) { break; }
       cur = parent;
@@ -46,7 +46,7 @@ export interface PhaseRow {
   bytes: number;
 }
 
-export function phaseRows(phases: JobPhase[]): PhaseRow[] {
+export function phaseRows(phases: JobPhaseView[]): PhaseRow[] {
   if (phases.length === 0) { return []; }
 
   const depth = depths(phases);
@@ -122,7 +122,7 @@ export function phaseLabel(phase: string): string {
   styleUrl: './job-timeline.component.scss',
 })
 export class JobTimelineComponent implements OnDestroy {
-  readonly phases = input.required<JobPhase[]>();
+  readonly phases = input.required<JobPhaseView[]>();
 
   private readonly chartRef = viewChild<ElementRef<HTMLElement>>('chart');
   private readonly theme = inject(ThemeService);

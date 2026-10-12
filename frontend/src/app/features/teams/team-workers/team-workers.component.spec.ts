@@ -14,11 +14,11 @@ import { TeamWorkersComponent } from './team-workers.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
-import { Team, TeamWorker } from '@core/models';
+import { TeamResponse, TeamWorkerEntry } from '@core/models';
 
-const team = { id: 't1', name: 'platform', display_name: 'Platform', managed: false, role: 'admin' } as Team;
+const team = { id: 't1', name: 'platform', display_name: 'Platform', managed: false, role: 'admin' } as TeamResponse;
 
-const connection: TeamWorker = {
+const connection: TeamWorkerEntry = {
   worker_id: 'g1',
   display_name: 'Gradient.CI Servers',
   registered_at: '2026-10-05T12:00:00',

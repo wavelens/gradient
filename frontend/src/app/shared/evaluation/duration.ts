@@ -36,8 +36,8 @@ export function parseUtcTimestamp(ts: string): number {
 interface EvaluationTimes {
   status: EvaluationStatus;
   created_at: string;
-  started_at: string | null;
-  finished_at: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
   updated_at: string;
 }
 
@@ -53,8 +53,8 @@ export function evaluationDuration(evaluation: EvaluationTimes, nowMs: number): 
 
 interface BuildTimes {
   status: string;
-  build_time_ms: number | null;
-  build_started_at: string | null;
+  build_time_ms?: number | null;
+  build_started_at?: string | null;
 }
 
 export function buildDuration(build: BuildTimes, nowMs: number): number | null {

@@ -9,12 +9,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import {
-  CachesService,
-  NarListResponse,
-  NarStats,
-  NarSummary,
-} from '@core/services/caches.service';
+import { CachesService } from '@core/services/caches.service';
 import {
   ButtonComponent,
   CardGridComponent,
@@ -32,6 +27,7 @@ import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
 import { formatBytes, formatCount, relativeTime } from '@shared/text';
 import { narSearchText, parseNarSearch } from './nar-search';
+import { NarSummary, NarStats, Paginated } from '@core/models';
 
 type SortKey = 'created_at' | 'nar_size' | 'last_fetched_at';
 type SortOrder = 'asc' | 'desc';
@@ -121,7 +117,7 @@ export class CacheNarsComponent implements OnInit {
       page: this.page(),
       per_page: this.perPage(),
     }).subscribe({
-      next: (r: NarListResponse) => {
+      next: (r: Paginated<NarSummary[]>) => {
         this.rows.set(r.items);
         this.total.set(r.total);
         this.loading.set(false);

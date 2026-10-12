@@ -10,7 +10,14 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
-import { Team, TeamEvaluation, TeamGrants, TeamMember, TeamRequest, TeamWorker } from '@core/models';
+import {
+  TeamResponse,
+  TeamMemberItem,
+  TeamWorkerEntry,
+  TeamGrants,
+  TeamRequestItem,
+  TeamEvaluation,
+} from '@core/models';
 import { evaluationPhase } from '@shared/evaluation';
 import { StatusIconComponent } from '@shared/ui';
 import {
@@ -53,11 +60,11 @@ export class TeamOverviewComponent implements OnInit {
 
   teamName = '';
   breadcrumb = computed(() => this.crumbs.team(this.teamName));
-  team = signal<Team | null>(null);
-  members = signal<TeamMember[]>([]);
-  workers = signal<TeamWorker[]>([]);
+  team = signal<TeamResponse | null>(null);
+  members = signal<TeamMemberItem[]>([]);
+  workers = signal<TeamWorkerEntry[]>([]);
   grants = signal<TeamGrants>({ projects: [], caches: [] });
-  requests = signal<TeamRequest[]>([]);
+  requests = signal<TeamRequestItem[]>([]);
   evaluations = signal<TeamEvaluation[]>([]);
   readonly evaluationPhase = evaluationPhase;
   loading = signal(true);
@@ -87,14 +94,14 @@ export class TeamOverviewComponent implements OnInit {
     this.loadGrants();
   }
 
-  grantMeta(grant: { role: string | null; users: boolean; workers: boolean }): string {
+  grantMeta(grant: { role?: string | null; users: boolean; workers: boolean }): string {
     const parts: string[] = [];
     if (grant.users) parts.push(`Users as ${grant.role ?? 'unknown role'}`);
     if (grant.workers) parts.push('Workers');
     return parts.join(' · ');
   }
 
-  requestMeta(request: TeamRequest): string {
+  requestMeta(request: TeamRequestItem): string {
     return [request.kind, request.target, this.grantMeta(request)].filter((part) => part).join(' · ');
   }
 

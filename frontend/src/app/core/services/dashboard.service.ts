@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { ActivityDay, DashboardFilter, DashboardStats, Rail, TasksPage } from '@core/models';
+import { Activity, DashboardStats, Filter, TasksPage, Rail } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class DashboardService {
@@ -17,13 +17,13 @@ export class DashboardService {
     return this.api.get<DashboardStats>('dashboard/stats');
   }
 
-  tasks(filter: DashboardFilter | null, page: number, perPage: number, history: number): Observable<TasksPage> {
+  tasks(filter: Filter | null, page: number, perPage: number, history: number): Observable<TasksPage> {
     const chosen = filter ? `filter=${filter}&` : '';
     return this.api.get<TasksPage>(`dashboard/tasks?${chosen}page=${page}&per_page=${perPage}&history=${history}`);
   }
 
-  activity(): Observable<{ days: ActivityDay[] }> {
-    return this.api.get<{ days: ActivityDay[] }>('dashboard/activity');
+  activity(): Observable<Activity> {
+    return this.api.get<Activity>('dashboard/activity');
   }
 
   rail(): Observable<Rail> {

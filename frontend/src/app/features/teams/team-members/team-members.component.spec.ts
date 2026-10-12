@@ -11,9 +11,9 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of, throwError } from 'rxjs';
 import { TeamMembersComponent } from './team-members.component';
 import { TeamsService } from '@core/services/teams.service';
-import { Team, TeamMember } from '@core/models';
+import { TeamResponse, TeamMemberItem } from '@core/models';
 
-const team: Team = {
+const team: TeamResponse = {
   id: 't1',
   name: 'platform',
   display_name: 'Platform',
@@ -26,7 +26,7 @@ const team: Team = {
   new_project_role: null,
 };
 
-const members: TeamMember[] = [
+const members: TeamMemberItem[] = [
   { user: 'alice', name: 'Alice', role: 'admin', source: 'api' },
   { user: 'bob', name: 'Bob', role: 'member', source: 'group' },
   { user: 'dave', name: 'Dave', role: 'member', source: 'state' },

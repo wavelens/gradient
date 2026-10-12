@@ -30,7 +30,7 @@ import {
 } from '@gradient/ui/ui';
 import { EvalStatusBadgeComponent, LabelHelpComponent, StarButtonComponent } from '@shared/ui';
 import { slugify } from '@shared/text';
-import { Project, StarTarget, Task } from '@core/models';
+import { StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 
 const RESERVED_TASK_NAMES = ['build-request'];
 
@@ -71,8 +71,8 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   private nameCheck$ = new Subject<string>();
 
   loading = signal(true);
-  project = signal<Project | null>(null);
-  tasks = signal<Task[]>([]);
+  project = signal<ProjectResponse | null>(null);
+  tasks = signal<TaskResponse[]>([]);
   tasksTotal = signal(0);
   tasksPage = signal(1);
   showCreateDialog = signal(false);

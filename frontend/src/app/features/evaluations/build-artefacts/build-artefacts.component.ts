@@ -6,7 +6,7 @@
 
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { EvaluationsService, BuildProduct, isHtmlArtefact } from '@core/services/evaluations.service';
+import { EvaluationsService, isHtmlArtefact } from '@core/services/evaluations.service';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import {
@@ -20,6 +20,7 @@ import {
 } from '@gradient/ui/ui';
 import { environment } from '@environments/environment';
 import { formatBytes } from '@shared/text';
+import { BuildProduct } from '@core/models';
 
 @Component({
   selector: 'app-build-artefacts',

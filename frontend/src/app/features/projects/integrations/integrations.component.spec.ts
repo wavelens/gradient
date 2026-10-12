@@ -13,9 +13,9 @@ import { IntegrationsComponent } from './integrations.component';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
-import { AccessState, Integration } from '@core/models';
+import { AccessState, IntegrationResponse } from '@core/models';
 
-const baseIntegration: Integration = {
+const baseIntegration: IntegrationResponse = {
   id: 'i1',
   project: 'o',
   name: 'gitea-prod',
@@ -31,7 +31,7 @@ const baseIntegration: Integration = {
   managed: false,
 };
 
-const githubOutbound: Integration = {
+const githubOutbound: IntegrationResponse = {
   id: 'g1',
   project: 'o',
   name: 'github-app',
@@ -49,7 +49,7 @@ const githubOutbound: Integration = {
   managed: false,
 };
 
-const githubInbound: Integration = {
+const githubInbound: IntegrationResponse = {
   ...githubOutbound,
   id: 'g2',
   kind: 'inbound',
@@ -63,7 +63,7 @@ function activatedRouteStub() {
 
 function setup(
   access: AccessState,
-  integrations: Integration[],
+  integrations: IntegrationResponse[],
   githubAppAvailable = false,
   githubAppInstallUrl: string | null = null,
 ): ComponentFixture<IntegrationsComponent> {

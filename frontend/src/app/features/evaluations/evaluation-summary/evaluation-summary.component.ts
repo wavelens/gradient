@@ -8,9 +8,13 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { forkJoin } from 'rxjs';
-import type { Evaluation } from '@core/models';
+import type {
+  FailedBuildSummary,
+  EvaluationResponse,
+  EvaluationFailureSummary,
+} from '@core/models';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { EvaluationFailureSummary, EvaluationsService, FailedBuildSummary } from '@core/services/evaluations.service';
+import { EvaluationsService } from '@core/services/evaluations.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -68,7 +72,7 @@ export class EvaluationSummaryComponent implements OnInit {
 
   project = '';
   evaluationId = '';
-  evaluation = signal<Evaluation | null>(null);
+  evaluation = signal<EvaluationResponse | null>(null);
   summary = signal<EvaluationFailureSummary | null>(null);
   loading = signal(true);
 
@@ -140,7 +144,7 @@ export class EvaluationSummaryComponent implements OnInit {
     });
   }
 
-  private rememberTaskName(evaluation: Evaluation): void {
+  private rememberTaskName(evaluation: EvaluationResponse): void {
     if (!evaluation.task_name || !evaluation.task_display_name) return;
     this.crumbs.rememberTask(this.project, evaluation.task_name, evaluation.task_display_name);
   }

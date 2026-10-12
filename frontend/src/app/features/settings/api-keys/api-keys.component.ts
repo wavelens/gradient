@@ -11,8 +11,6 @@ import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
-import { ApiKey } from '@core/models';
-import { PermissionDescriptor } from '@core/models/permission.model';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -32,7 +30,7 @@ import {
   TooltipDirective,
 } from '@gradient/ui/ui';
 import { ManagedDisableDirective } from '@shared/access';
-import { AccessState } from '@core/models';
+import { AccessState, ApiKeyInfo, PermissionEntry } from '@core/models';
 import { permissionLabel } from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
 
@@ -84,9 +82,9 @@ export class ApiKeysComponent implements OnInit {
   deletingId = signal<string | null>(null);
   revokingId = signal<string | null>(null);
 
-  keys = signal<ApiKey[]>([]);
-  availablePermissions = signal<PermissionDescriptor[]>([]);
-  availableCachePermissions = signal<PermissionDescriptor[]>([]);
+  keys = signal<ApiKeyInfo[]>([]);
+  availablePermissions = signal<PermissionEntry[]>([]);
+  availableCachePermissions = signal<PermissionEntry[]>([]);
   projectOptions = signal<SelectOption[]>([{ label: 'Any project', value: null }]);
   cacheOptions = signal<SelectOption[]>([]);
 
@@ -97,7 +95,7 @@ export class ApiKeysComponent implements OnInit {
   ];
 
   showDialog = signal(false);
-  editingKey = signal<ApiKey | null>(null);
+  editingKey = signal<ApiKeyInfo | null>(null);
   showKeyDialog = signal(false);
   createdKeyValue = signal('');
   errorMessage = signal<string | null>(null);
@@ -162,17 +160,13 @@ export class ApiKeysComponent implements OnInit {
     this.showDialog.set(true);
   }
 
-  openEditDialog(key: ApiKey): void {
+  openEditDialog(key: ApiKeyInfo): void {
     this.editingKey.set(key);
     this.formName = key.name;
     this.formExpiresInDays = null;
     this.formPermissions = this.permissionTemplate(false);
     for (const p of key.permissions) this.formPermissions[p] = true;
-    if (key.cache) {
-      this.formScope = 'cache';
-      this.formCache = key.cache;
-      this.formProject = null;
-    } else if (key.project) {
+    if (key.project) {
       this.formScope = 'project';
       this.formProject = key.project;
       this.formCache = null;
@@ -204,7 +198,7 @@ export class ApiKeysComponent implements OnInit {
     if (!isCacheScope) this.formPermissions['viewProject'] = true;
   }
 
-  activePermissions(): PermissionDescriptor[] {
+  activePermissions(): PermissionEntry[] {
     return this.formScope === 'cache' ? this.availableCachePermissions() : this.availablePermissions();
   }
 
@@ -242,7 +236,6 @@ export class ApiKeysComponent implements OnInit {
           name,
           permissions: perms,
           project,
-          cache,
           allowed_ips: allowedIps,
         })
         .subscribe({
@@ -276,7 +269,7 @@ export class ApiKeysComponent implements OnInit {
     }
   }
 
-  revokeKey(key: ApiKey): void {
+  revokeKey(key: ApiKeyInfo): void {
     this.revokingId.set(key.id);
     this.userService.revokeApiKey(key.id).subscribe({
       next: () => {
@@ -287,7 +280,7 @@ export class ApiKeysComponent implements OnInit {
     });
   }
 
-  deleteKey(key: ApiKey): void {
+  deleteKey(key: ApiKeyInfo): void {
     this.deletingId.set(key.id);
     this.userService.deleteApiKey(key.name).subscribe({
       next: () => {
@@ -299,18 +292,17 @@ export class ApiKeysComponent implements OnInit {
   }
 
 
-  permissionTooltip(key: ApiKey): string {
+  permissionTooltip(key: ApiKeyInfo): string {
     if (key.permissions.length === 0) return 'No permissions';
     return key.permissions.map(permissionLabel).join(', ');
   }
 
-  scopeBadge(key: ApiKey): string {
-    if (key.cache) return key.cache;
+  scopeBadge(key: ApiKeyInfo): string {
     if (key.project) return key.project;
     return 'Any project';
   }
 
-  rowAccess(key: ApiKey): AccessState {
+  rowAccess(key: ApiKeyInfo): AccessState {
     return { managed: key.managed, canEdit: true, canTrigger: true };
   }
 }

@@ -8,7 +8,12 @@ import { ChangeDetectionStrategy, Component, DestroyRef, inject, input, model, o
 import { FormsModule } from '@angular/forms';
 import { Observable, Subscription, catchError, interval, of, switchMap } from 'rxjs';
 import { ButtonComponent, DialogComponent, FormFieldComponent, InputDirective, MessageBannerComponent } from '@gradient/ui/ui';
-import { ConnectionStatus, GradientCiScope, connectWaitState, gradientCiConnectUrl } from '@core/models';
+import {
+  connectWaitState,
+  gradientCiConnectUrl,
+  ConnectionScope,
+  WorkerConnection,
+} from '@core/models';
 import { ConfigService } from '@core/services/config.service';
 import { WorkersService } from '@core/services/workers.service';
 
@@ -28,11 +33,11 @@ export class GradientCiConnectComponent {
   private workersService = inject(WorkersService);
 
   visible = model(false);
-  scope = input.required<GradientCiScope>();
+  scope = input.required<ConnectionScope>();
   team = input<string | undefined>(undefined);
   project = input<string | undefined>(undefined);
   label = input.required<string>();
-  statusOf = input.required<(workerId: string) => Observable<ConnectionStatus | undefined>>();
+  statusOf = input.required<(workerId: string) => Observable<WorkerConnection | undefined>>();
   changed = output<void>();
 
   token = '';
@@ -100,7 +105,7 @@ export class GradientCiConnectComponent {
       .subscribe((status) => this.onStatus(status, Date.now() - started));
   }
 
-  private onStatus(status: ConnectionStatus | undefined, elapsedMs: number): void {
+  private onStatus(status: WorkerConnection | undefined, elapsedMs: number): void {
     const state = connectWaitState(status, elapsedMs);
     if (state === 'waiting') return;
     this.changed.emit();

@@ -9,16 +9,16 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ConfigService } from '@core/services/config.service';
 import {
-  Action,
   ACTION_TYPE_LABEL,
-  ActionConfig,
   ActionType,
-  CreateActionRequest,
   GIT_HOST_STATUS_EVENTS,
-  PrGenerator,
-  PrGranularity,
-  PrVerifyGate,
+  ActionResponse,
+  CreateActionRequest,
   UpdateActionRequest,
+  PatchGeneratorKind,
+  PrGranularity,
+  VerifyGate,
+  ActionConfig,
 } from '@core/models';
 import { ActionEventsComponent } from './action-events.component';
 import {
@@ -66,7 +66,7 @@ export class ActionFormComponent implements OnChanges {
   private config = inject(ConfigService);
 
   mode = input<FormMode>('create');
-  existing = input<Action | null>(null);
+  existing = input<ActionResponse | null>(null);
   outboundIntegrations = input<IntegrationOption[]>([]);
   open = input<boolean>(false);
   error = input<string | null>(null);
@@ -97,15 +97,15 @@ export class ActionFormComponent implements OnChanges {
   roomId = signal('');
   secretValue = signal('');
   integrationId = signal('');
-  prGenerator = signal<PrGenerator>('flake_lock');
+  prGenerator = signal<PatchGeneratorKind>('flake_lock');
   prGranularity = signal<PrGranularity>('per_run');
-  prVerifyGate = signal<PrVerifyGate>('build');
+  prVerifyGate = signal<VerifyGate>('build');
   prBranchPattern = signal('gradient/flake-lock-update');
   prTitleTemplate = signal('');
   prBodyTemplate = signal('');
   prUpdateExisting = signal(true);
 
-  readonly generatorOptions: { label: string; value: PrGenerator }[] = [
+  readonly generatorOptions: { label: string; value: PatchGeneratorKind }[] = [
     { label: 'Flake Lock', value: 'flake_lock' },
   ];
 
@@ -114,7 +114,7 @@ export class ActionFormComponent implements OnChanges {
     { label: 'Per Input', value: 'per_input' },
   ];
 
-  readonly verifyGateOptions: { label: string; value: PrVerifyGate }[] = [
+  readonly verifyGateOptions: { label: string; value: VerifyGate }[] = [
     { label: 'None', value: 'none' },
     { label: 'Eval', value: 'eval' },
     { label: 'Build', value: 'build' },
@@ -164,9 +164,10 @@ export class ActionFormComponent implements OnChanges {
     if (this.mode() === 'edit' && cur) {
       this.name.set(cur.name);
       this.active.set(cur.active);
-      this.type.set(cur.action_type);
+      const config = cur.config as ActionConfig;
+      this.type.set(config.type);
       this.events.set([...cur.events]);
-      this.applyConfigToForm(cur.config);
+      this.applyConfigToForm(config);
       this.tokenValue.set('');
       this.secretValue.set('');
     } else {
@@ -214,13 +215,14 @@ export class ActionFormComponent implements OnChanges {
         break;
       case 'open_pr':
         this.integrationId.set(cfg.integration_id);
-        this.prGenerator.set(cfg.generator);
-        this.prGranularity.set(cfg.granularity);
-        this.prVerifyGate.set(cfg.verify_gate);
-        this.prBranchPattern.set(cfg.branch_pattern);
+        this.resetPrFields();
+        this.prGenerator.set(cfg.generator ?? this.prGenerator());
+        this.prGranularity.set(cfg.granularity ?? this.prGranularity());
+        this.prVerifyGate.set(cfg.verify_gate ?? this.prVerifyGate());
+        this.prBranchPattern.set(cfg.branch_pattern ?? this.prBranchPattern());
         this.prTitleTemplate.set(cfg.title_template ?? '');
         this.prBodyTemplate.set(cfg.body_template ?? '');
-        this.prUpdateExisting.set(cfg.update_existing);
+        this.prUpdateExisting.set(cfg.update_existing ?? this.prUpdateExisting());
         break;
       case 'send_matrix_message':
         this.homeserver.set(cfg.homeserver);

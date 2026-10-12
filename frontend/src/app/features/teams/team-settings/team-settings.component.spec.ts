@@ -11,9 +11,9 @@ import { of } from 'rxjs';
 import { TeamSettingsComponent } from './team-settings.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
-import { Team } from '@core/models';
+import { TeamResponse } from '@core/models';
 
-const team: Team = {
+const team: TeamResponse = {
   id: 't1',
   name: 'platform',
   display_name: 'Platform',
@@ -28,7 +28,7 @@ const team: Team = {
 
 function setup(superuser: boolean, managed = false) {
   const update = vi.fn().mockReturnValue(of('Team updated'));
-  const get = vi.fn(() => of({ ...team, managed, oidc_group: managed ? 'ci-admins' : null }));
+  const get = vi.fn(() => of<TeamResponse>({ ...team, managed, oidc_group: managed ? 'ci-admins' : null }));
   TestBed.configureTestingModule({
     imports: [TeamSettingsComponent],
     providers: [

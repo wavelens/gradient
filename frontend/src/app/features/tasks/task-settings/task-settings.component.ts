@@ -29,7 +29,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
-import { ConcurrencyPolicy, Task } from '@core/models';
+import { TaskResponse, ConcurrencyPolicy } from '@core/models';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 
 @Component({
@@ -76,7 +76,7 @@ export class TaskSettingsComponent implements OnInit {
   toggling = signal(false);
   transferring = signal(false);
 
-  task = signal<Task | null>(null);
+  task = signal<TaskResponse | null>(null);
   showDeleteDialog = signal(false);
   showTransferDialog = signal(false);
   errorMessage = signal<string | null>(null);

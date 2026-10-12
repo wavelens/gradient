@@ -8,10 +8,11 @@ import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@ang
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { CardGridComponent, LoadingSpinnerComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
-import { BoardService, BoardHealth } from '@core/services/board.service';
-import { AdminService, AdminTask } from '@core/services/admin.service';
+import { BoardService } from '@core/services/board.service';
+import { AdminService } from '@core/services/admin.service';
 import { ConfigService } from '@core/services/config.service';
 import { formatBytes, formatDuration } from '@shared/text';
+import { BoardHealth, AdminTaskDto } from '@core/models';
 
 @Component({
   selector: 'app-board-health',
@@ -41,7 +42,7 @@ import { formatBytes, formatDuration } from '@shared/text';
 
       <h2>Pipeline</h2>
       <div class="grid">
-        <div class="cell"><span class="label">Rollup lag</span><span [class.bad]="(h.rollup_lag_seconds ?? 0) > 300">{{ h.rollup_lag_seconds !== null ? seconds(h.rollup_lag_seconds) : 'no data' }}</span></div>
+        <div class="cell"><span class="label">Rollup lag</span><span [class.bad]="(h.rollup_lag_seconds ?? 0) > 300">{{ h.rollup_lag_seconds != null ? seconds(h.rollup_lag_seconds) : 'no data' }}</span></div>
         <div class="cell"><span class="label">Latest bucket</span><span>{{ h.latest_rollup_bucket ? (h.latest_rollup_bucket | date: 'short') : '-' }}</span></div>
         <div class="cell"><span class="label">Cache size</span><span>{{ bytes(h.cache_bytes) }}</span></div>
         <div class="cell"><span class="label">Packages</span><span>{{ h.cache_packages }}</span></div>
@@ -59,7 +60,7 @@ import { formatBytes, formatDuration } from '@shared/text';
               <td [class.bad]="l.restarts > 0">{{ l.restarts }}</td>
               <td [class.bad]="l.pass_errors > 0">{{ l.pass_errors }}</td>
               <td [class.bad]="l.pass_timeouts > 0">{{ l.pass_timeouts }}</td>
-              <td>{{ l.last_ok_seconds_ago !== null ? seconds(l.last_ok_seconds_ago) + ' ago' : 'never' }}</td>
+              <td>{{ l.last_ok_seconds_ago != null ? seconds(l.last_ok_seconds_ago) + ' ago' : 'never' }}</td>
               <td [class.bad]="!!l.last_error">{{ l.last_error ?? '' }}</td>
             </tr>
           } @empty {
@@ -111,7 +112,7 @@ export class BoardHealthComponent implements OnInit {
   protected config = inject(ConfigService);
 
   health = signal<BoardHealth | null>(null);
-  tasks = signal<AdminTask[]>([]);
+  tasks = signal<AdminTaskDto[]>([]);
   gcBusy = signal(false);
   gcNotice = signal<string | null>(null);
   drainBusy = signal(false);

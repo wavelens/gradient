@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { InputFetch, InputFetchState } from '@core/models';
+import type { InputFetchState, InputFetch } from '@core/models';
 import { inputFetchLabel, inputFetchRatio, phaseProgress, thunkProgress } from './progress';
 
 const row = (state: InputFetchState, downloaded_bytes: number, expected_bytes: number): InputFetch =>

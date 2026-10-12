@@ -40,8 +40,8 @@ function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponen
           getProject: () => of({ id: 'o', display_name: 'Acme' }),
           getSubscribedCaches: () =>
             of([
-              { id: 'c', name: 'shared', mode: 0, status: 'active' },
-              { id: 'c2', name: 'staging', mode: 0, status: 'pending' },
+              { id: 'c', name: 'shared', mode: 'ReadWrite', status: 'active' },
+              { id: 'c2', name: 'staging', mode: 'ReadWrite', status: 'pending' },
             ]),
         },
       },

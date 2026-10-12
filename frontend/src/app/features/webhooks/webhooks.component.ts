@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { Webhook, WebhookDelivery, WebhookScopeRef } from '@core/models';
+import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId } from '@core/models';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { WebhooksService } from '@core/services/webhooks.service';
 import {
@@ -65,9 +65,9 @@ export class WebhooksComponent implements OnInit {
   loading = signal(true);
   saving = signal(false);
   error = signal<string | null>(null);
-  webhooks = signal<Webhook[]>([]);
+  webhooks = signal<WebhookResponse[]>([]);
 
-  editing = signal<Webhook | null>(null);
+  editing = signal<WebhookResponse | null>(null);
   formOpen = signal(false);
   name = signal('');
   url = signal('');
@@ -77,9 +77,9 @@ export class WebhooksComponent implements OnInit {
 
   revealedSecret = signal<string | null>(null);
   confirmDeleteId = signal<string | null>(null);
-  testResult = signal<{ id: string; delivery: WebhookDelivery | null } | null>(null);
-  deliveriesFor = signal<Webhook | null>(null);
-  deliveries = signal<WebhookDelivery[]>([]);
+  testResult = signal<{ id: string; delivery: DeliveryListItem_WebhookDeliveryId | null } | null>(null);
+  deliveriesFor = signal<WebhookResponse | null>(null);
+  deliveries = signal<DeliveryListItem_WebhookDeliveryId[]>([]);
 
   relativeTime = relativeTime;
 
@@ -131,11 +131,11 @@ export class WebhooksComponent implements OnInit {
     this.fill(null);
   }
 
-  startEdit(hook: Webhook): void {
+  startEdit(hook: WebhookResponse): void {
     this.fill(hook);
   }
 
-  private fill(hook: Webhook | null): void {
+  private fill(hook: WebhookResponse | null): void {
     this.error.set(null);
     this.editing.set(hook);
     this.name.set(hook?.name ?? '');
@@ -182,15 +182,15 @@ export class WebhooksComponent implements OnInit {
     }
   }
 
-  toggleActive(hook: Webhook): void {
+  toggleActive(hook: WebhookResponse): void {
     this.service.update(this.scope, hook.id, { active: !hook.active }).subscribe(() => this.load());
   }
 
-  rotate(hook: Webhook): void {
+  rotate(hook: WebhookResponse): void {
     this.service.rotateSecret(this.scope, hook.id).subscribe((res) => this.revealedSecret.set(res.secret));
   }
 
-  test(hook: Webhook): void {
+  test(hook: WebhookResponse): void {
     this.testResult.set({ id: hook.id, delivery: null });
     this.service.test(this.scope, hook.id).subscribe({
       next: (delivery) => this.testResult.set({ id: hook.id, delivery }),
@@ -201,7 +201,7 @@ export class WebhooksComponent implements OnInit {
     });
   }
 
-  openDeliveries(hook: Webhook): void {
+  openDeliveries(hook: WebhookResponse): void {
     this.deliveriesFor.set(hook);
     this.deliveries.set([]);
     this.service.deliveries(this.scope, hook.id).subscribe((list) => this.deliveries.set(list));

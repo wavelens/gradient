@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { BuildStatus } from '@core/models';
-import type { EvaluationFailureSummary, FailedBuildSummary } from '@core/services/evaluations.service';
+import type { BuildStatus, EvaluationFailureSummary, FailedBuildSummary } from '@core/models';
 import type { BadgeSeverity } from '@gradient/ui/ui';
 
 const BLOCKED_NAMED = 5;

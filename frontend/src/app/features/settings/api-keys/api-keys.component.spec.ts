@@ -12,15 +12,14 @@ import { of } from 'rxjs';
 import { ApiKeysComponent } from './api-keys.component';
 import { UserService } from '@core/services/user.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { ApiKey } from '@core/models/user.model';
+import { ApiKeyInfo } from '@core/models';
 
-const unmanagedKey: ApiKey = {
+const unmanagedKey: ApiKeyInfo = {
   id: 'k1',
   name: 'CI key',
   managed: false,
   permissions: ['viewProject'],
   project: null,
-  cache: null,
   created_at: '2026-01-01T00:00:00',
   last_used_at: null,
   expires_at: null,
@@ -28,13 +27,12 @@ const unmanagedKey: ApiKey = {
   allowed_ips: [],
 };
 
-const managedKey: ApiKey = {
+const managedKey: ApiKeyInfo = {
   id: 'k2',
   name: 'Nix key',
   managed: true,
   permissions: ['viewProject'],
   project: null,
-  cache: null,
   created_at: '2026-01-01T00:00:00',
   last_used_at: null,
   expires_at: null,
@@ -42,7 +40,7 @@ const managedKey: ApiKey = {
   allowed_ips: [],
 };
 
-function setup(keys: ApiKey[]): ComponentFixture<ApiKeysComponent> {
+function setup(keys: ApiKeyInfo[]): ComponentFixture<ApiKeysComponent> {
   TestBed.configureTestingModule({
     imports: [ApiKeysComponent],
     providers: [

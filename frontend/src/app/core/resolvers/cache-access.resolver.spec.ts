@@ -9,7 +9,7 @@ import { ActivatedRouteSnapshot, convertToParamMap } from '@angular/router';
 import { Observable, firstValueFrom, of } from 'rxjs';
 import { CachesService } from '@core/services/caches.service';
 import { cacheAccessResolver, CacheAccessData } from './cache-access.resolver';
-import { Cache } from '@core/models/cache.model';
+import { CacheResponse } from '@core/models';
 
 function snap(params: Record<string, string>): ActivatedRouteSnapshot {
   return { paramMap: convertToParamMap(params) } as ActivatedRouteSnapshot;
@@ -27,7 +27,7 @@ function runResolver(
 describe('cacheAccessResolver', () => {
   let getCache: ReturnType<typeof vi.fn>;
 
-  const baseCache: Cache = {
+  const baseCache: CacheResponse = {
     id: 'c1',
     name: 'demo',
     display_name: 'Demo',
@@ -37,7 +37,10 @@ describe('cacheAccessResolver', () => {
     local_priority: null,
     max_storage_gb: 0,
     pull_through: true,
+    public_key: 'cache:key',
     public: false,
+    created_by: 'u1',
+    created_at: '2026-01-01T00:00:00',
     managed: false,
     can_edit: true,
   };

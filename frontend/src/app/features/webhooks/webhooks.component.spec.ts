@@ -12,9 +12,9 @@ import { WebhooksService } from '@core/services/webhooks.service';
 import { CachesService } from '@core/services/caches.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { EventsService } from '@core/services/events.service';
-import type { Webhook } from '@core/models';
+import type { WebhookResponse } from '@core/models';
 
-const hook: Webhook = {
+const hook: WebhookResponse = {
   id: 'w1',
   scope: 'project',
   name: 'ci',

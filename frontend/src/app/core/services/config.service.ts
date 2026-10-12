@@ -8,26 +8,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '@environments/environment';
-
-export type CreatePermission = 'none' | 'superusers' | 'everyone';
-
-interface ServerConfig {
-  version: string;
-  oidc_enabled: boolean;
-  oidc_required: boolean;
-  registration_enabled: boolean;
-  email_verification_enabled: boolean;
-  smtp_enabled: boolean;
-  create_project: CreatePermission;
-  create_cache: CreatePermission;
-  create_team: CreatePermission;
-  github_app_enabled: boolean;
-  ssh_enabled: boolean;
-  ssh_port: number | null;
-  gradient_ci_enabled: boolean;
-  gradient_ci_url: string;
-  logo_url: string | null;
-}
+import { CreatePermission, ServerConfig } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class ConfigService {

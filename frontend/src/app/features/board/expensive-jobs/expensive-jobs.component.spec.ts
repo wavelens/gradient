@@ -8,13 +8,9 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
 import { vi } from 'vitest';
 import { BoardExpensiveJobsComponent } from './expensive-jobs.component';
-import {
-  BoardService,
-  ExpensiveBuild,
-  ExpensiveResource,
-  TopProjectBuildTime,
-} from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
 import { AuthService } from '@core/services/auth.service';
+import { ExpensiveBuild, ExpensiveResource, TopProjectBuildTime } from '@core/models';
 
 const BUILDS: ExpensiveBuild[] = [
   { build_id: 'b1', project: 'p1', name: 'named', build_time_ms: 5000, worker: 'uuid-1', worker_name: 'builder-1' },

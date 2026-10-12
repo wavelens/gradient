@@ -6,13 +6,14 @@
 
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { BoardService, BoardNetworkStats, HttpRouteStat } from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { workerAxisLabel } from '../worker-label';
 import { clockTime, formatBytes, formatCount, formatDuration, formatQuantity } from '@shared/text';
+import { HttpRouteStat, BoardNetworkStats } from '@core/models';
 
 type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg_ms' | 'errors'>;
 

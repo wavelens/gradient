@@ -10,7 +10,8 @@ import { RouterModule } from '@angular/router';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
 import { formatQuantity } from '@shared/text';
-import { BoardService, ExpensiveEval } from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
+import { ExpensiveEval } from '@core/models';
 
 type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
 

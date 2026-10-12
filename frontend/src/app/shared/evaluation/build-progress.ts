@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { BuildProgress, BuildProgressPhase } from '@core/models';
+import type { BuildProgressPhase, BuildProgress } from '@core/models';
 import { byteAmount } from './progress';
 
 const TITLES: Record<BuildProgressPhase, string> = {
@@ -29,7 +29,7 @@ export function buildProgressBytes(p: BuildProgress): string {
 }
 
 export function buildProgressPaths(p: BuildProgress): string | null {
-  if (p.paths_total === null) return p.paths_done > 1 ? `${p.paths_done} paths` : null;
+  if (p.paths_total == null) return p.paths_done > 1 ? `${p.paths_done} paths` : null;
   return p.paths_total > 1 ? `${p.paths_done} / ${p.paths_total} paths` : null;
 }
 

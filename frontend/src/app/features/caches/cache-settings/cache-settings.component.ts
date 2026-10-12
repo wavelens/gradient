@@ -25,7 +25,7 @@ import {
 } from '@gradient/ui/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
-import { Cache } from '@core/models';
+import { CacheResponse } from '@core/models';
 
 @Component({
   selector: 'app-cache-settings',
@@ -65,7 +65,7 @@ export class CacheSettingsComponent implements OnInit {
   toggling = signal(false);
   deleting = signal(false);
 
-  cache = signal<Cache | null>(null);
+  cache = signal<CacheResponse | null>(null);
   showDeleteDialog = signal(false);
   saveError = signal<string | null>(null);
   saveSuccess = signal(false);
@@ -108,7 +108,7 @@ export class CacheSettingsComponent implements OnInit {
           display_name: cache.display_name,
           description: cache.description,
           priority: cache.priority,
-          local_priority: cache.local_priority,
+          local_priority: cache.local_priority ?? null,
           max_storage_gb: cache.max_storage_gb ?? 0,
           pull_through: cache.pull_through ?? true,
           public: cache.public,

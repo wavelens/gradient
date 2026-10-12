@@ -10,7 +10,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
-import { AccessState, PatchTeam, Team } from '@core/models';
+import { AccessState, TeamResponse, PatchTeamRequest } from '@core/models';
 import { ManagedDisableDirective, WritableDirective } from '@shared/access';
 import {
   ButtonComponent,
@@ -74,7 +74,7 @@ export class TeamSettingsComponent implements OnInit {
 
   teamName = '';
   breadcrumb = computed(() => this.crumbs.team(this.teamName, { label: 'Settings' }));
-  team = signal<Team | null>(null);
+  team = signal<TeamResponse | null>(null);
   loading = signal(true);
   saving = signal(false);
   deleting = signal(false);
@@ -144,7 +144,7 @@ export class TeamSettingsComponent implements OnInit {
     return { managed: this.team()?.managed ?? false, canEdit, canTrigger: canEdit };
   }
 
-  private formOf(team: Team | null): SettingsForm {
+  private formOf(team: TeamResponse | null): SettingsForm {
     return {
       display_name: team?.display_name ?? '',
       new_project_users: team?.new_project_users ?? false,
@@ -155,8 +155,8 @@ export class TeamSettingsComponent implements OnInit {
     };
   }
 
-  private changes(team: Team): PatchTeam {
-    const patch: PatchTeam = {};
+  private changes(team: TeamResponse): PatchTeamRequest {
+    const patch: PatchTeamRequest = {};
     if (this.form.display_name !== team.display_name) patch.display_name = this.form.display_name;
     if (this.isSuperuser()) {
       if (this.form.new_project_users !== team.new_project_users) patch.new_project_users = this.form.new_project_users;

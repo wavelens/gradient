@@ -11,7 +11,8 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { BehaviorSubject, NEVER, Observable, of, throwError } from 'rxjs';
 import { CacheNarsComponent } from './cache-nars.component';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { CachesService, NarListResponse, NarStats } from '@core/services/caches.service';
+import { CachesService } from '@core/services/caches.service';
+import { NarSummary, NarStats, Paginated } from '@core/models';
 
 const NAR = {
   hash: 'abc123',
@@ -22,9 +23,9 @@ const NAR = {
   created_at: '2026-10-05T10:00:00',
   last_fetched_at: null,
 };
-const PAGE: NarListResponse = { items: [NAR], total: 1, page: 1, per_page: 50 };
+const PAGE: Paginated<NarSummary[]> = { items: [NAR], total: 1, page: 1, per_page: 50 };
 
-function render(nars: () => Observable<NarListResponse>, stats: () => Observable<NarStats> = () => NEVER) {
+function render(nars: () => Observable<Paginated<NarSummary[]>>, stats: () => Observable<NarStats> = () => NEVER) {
   const query = new BehaviorSubject(convertToParamMap({}));
   const getCache = vi.fn(() => NEVER);
   TestBed.configureTestingModule({

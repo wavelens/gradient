@@ -4,23 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+export * from './api.generated';
 export * from './api-response.model';
-export * from './user.model';
-export * from './project.model';
-export * from './permission.model';
-export * from './task.model';
-export * from './build.model';
-export * from './cache.model';
 export * from './worker.model';
 export * from './gradient-ci.model';
-export * from './commit.model';
 export * from './integration.model';
-export * from './trigger.model';
-export * from './flake-input-override.model';
 export * from './access.model';
 export * from './action.model';
-export * from './invite.model';
 export * from './dashboard.model';
 export * from './event.model';
 export * from './webhook.model';
-export * from './team.model';

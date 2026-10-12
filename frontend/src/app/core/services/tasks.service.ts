@@ -8,7 +8,18 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { HttpResponse } from '@angular/common/http';
 import { ApiService } from './api.service';
-import { Task, TaskDetail, PaginatedEntryPoints, EvaluationSummary, Paginated, WalkMode } from '@core/models';
+import {
+  Paginated,
+  TaskResponse,
+  TaskDetailsResponse,
+  PaginatedEntryPoints,
+  EvaluationSummary,
+  WalkMode,
+  TaskMetricsResponse,
+  EntryPointMetricsResponse,
+  MakeTaskRequest,
+  PatchTaskRequest,
+} from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class TasksService {
@@ -18,27 +29,21 @@ export class TasksService {
     return this.api.get<boolean>(`tasks/${project}/available?name=${encodeURIComponent(name)}`);
   }
 
-  getTasks(project: string, page = 1, perPage = 50): Observable<Paginated<Task[]>> {
-    return this.api.get<Paginated<Task[]>>(`tasks/${project}?page=${page}&per_page=${perPage}`);
+  getTasks(project: string, page = 1, perPage = 50): Observable<Paginated<TaskResponse[]>> {
+    return this.api.get<Paginated<TaskResponse[]>>(`tasks/${project}?page=${page}&per_page=${perPage}`);
   }
 
-  getTask(project: string, task: string): Observable<TaskDetail> {
-    return this.api.get<TaskDetail>(`tasks/${project}/${task}/details`);
+  getTask(project: string, task: string): Observable<TaskDetailsResponse> {
+    return this.api.get<TaskDetailsResponse>(`tasks/${project}/${task}/details`);
   }
 
-  getTaskInfo(project: string, task: string): Observable<Task> {
-    return this.api.get<Task>(`tasks/${project}/${task}`);
+  getTaskInfo(project: string, task: string): Observable<TaskResponse> {
+    return this.api.get<TaskResponse>(`tasks/${project}/${task}`);
   }
 
   createTask(
     project: string,
-    data: {
-      name: string;
-      display_name: string;
-      description: string;
-      repository: string;
-      wildcard: string;
-    }
+    data: MakeTaskRequest
   ): Observable<string> {
     return this.api.put<string>(`tasks/${project}`, data);
   }
@@ -46,7 +51,7 @@ export class TasksService {
   updateTask(
     project: string,
     task: string,
-    data: Partial<Task>
+    data: PatchTaskRequest
   ): Observable<string> {
     return this.api.patch<string>(`tasks/${project}/${task}`, data);
   }
@@ -129,36 +134,3 @@ export interface ReportOptions {
   include_instance: boolean;
 }
 
-export interface TaskMetricPoint {
-  evaluation_id: string;
-  created_at: string;
-  build_time_total_ms: number;
-  eval_time_ms: number;
-  output_size_bytes: number | null;
-  closure_size_bytes: number | null;
-  runtime_closure_size_bytes: number | null;
-  dependencies_count: number;
-}
-
-export interface TaskMetricsResponse {
-  keep_evaluations: number;
-  points: TaskMetricPoint[];
-}
-
-export interface EntryPointMetricPoint {
-  evaluation_id: string;
-  build_id: string;
-  created_at: string;
-  build_status: string;
-  build_time_ms: number | null;
-  output_size_bytes: number | null;
-  closure_size_bytes: number | null;
-  runtime_closure_size_bytes: number | null;
-  dependencies_count: number;
-}
-
-export interface EntryPointMetricsResponse {
-  eval: string;
-  keep_evaluations: number;
-  points: EntryPointMetricPoint[];
-}

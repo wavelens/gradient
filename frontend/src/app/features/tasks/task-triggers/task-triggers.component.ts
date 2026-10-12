@@ -29,12 +29,12 @@ import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import {
-  TaskTrigger,
   TriggerType,
-  PollingTriggerConfig,
-  CreateTriggerBody,
-  UpdateTriggerBody,
-  IntegrationSummary,
+  TriggerOut,
+  IntegrationSummaryResponse,
+  TriggerConfig,
+  CreateTriggerRequest,
+  UpdateTriggerRequest,
 } from '@core/models';
 import { relativeTime } from '@shared/text';
 
@@ -133,13 +133,13 @@ export class TaskTriggersComponent implements OnInit {
   taskName = '';
   breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName, { label: 'Triggers' }));
 
-  triggers = signal<TaskTrigger[]>([]);
-  editingTrigger = signal<TaskTrigger | null>(null);
+  triggers = signal<TriggerOut[]>([]);
+  editingTrigger = signal<TriggerOut | null>(null);
   showCreateDialog = signal(false);
   showEditDialog = signal(false);
   error = signal<string | null>(null);
 
-  inboundIntegrations = signal<IntegrationSummary[]>([]);
+  inboundIntegrations = signal<IntegrationSummaryResponse[]>([]);
 
   form: TriggerFormState = { ...DEFAULT_FORM };
 
@@ -189,7 +189,7 @@ export class TaskTriggersComponent implements OnInit {
     this.showCreateDialog.set(true);
   }
 
-  startEdit(trigger: TaskTrigger): void {
+  startEdit(trigger: TriggerOut): void {
     const cfg = trigger.config as any;
     this.form = {
       type: trigger.type,
@@ -224,7 +224,7 @@ export class TaskTriggersComponent implements OnInit {
           type: 'polling',
           interval_secs: Math.max(10, this.form.interval_secs),
           branch: trimmed === '' ? null : trimmed,
-        } as PollingTriggerConfig;
+        } as TriggerConfig;
       }
       case 'reporter_push': {
         const cfg: any = { type: 'reporter_push', integration_id: this.form.integration_id };
@@ -252,7 +252,7 @@ export class TaskTriggersComponent implements OnInit {
   saveCreate(): void {
     this.saving.set(true);
     this.error.set(null);
-    const body: CreateTriggerBody = {
+    const body: CreateTriggerRequest = {
       config: this.buildConfig() as any,
       active: this.form.active,
     };
@@ -274,7 +274,7 @@ export class TaskTriggersComponent implements OnInit {
     if (!target) return;
     this.saving.set(true);
     this.error.set(null);
-    const body: UpdateTriggerBody = {
+    const body: UpdateTriggerRequest = {
       config: this.buildConfig() as any,
       active: this.form.active,
     };
@@ -337,7 +337,7 @@ export class TaskTriggersComponent implements OnInit {
     }
   }
 
-  configSummary(trigger: TaskTrigger): string {
+  configSummary(trigger: TriggerOut): string {
     const cfg = trigger.config as any;
     switch (trigger.type) {
       case 'polling': {
@@ -364,7 +364,7 @@ export class TaskTriggersComponent implements OnInit {
     }
   }
 
-  private integrationLabel(trigger: TaskTrigger): string {
+  private integrationLabel(trigger: TriggerOut): string {
     if (trigger.integration) {
       return trigger.integration.display_name || trigger.integration.name;
     }

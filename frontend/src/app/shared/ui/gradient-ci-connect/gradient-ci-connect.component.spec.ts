@@ -9,11 +9,11 @@ import { Observable, of, throwError } from 'rxjs';
 import { GradientCiConnectComponent } from './gradient-ci-connect.component';
 import { ConfigService } from '@core/services/config.service';
 import { WorkersService } from '@core/services/workers.service';
-import { ConnectionStatus, GradientCiScope } from '@core/models';
+import { WorkerConnection, ConnectionScope } from '@core/models';
 
-type StatusOf = (workerId: string) => Observable<ConnectionStatus | undefined>;
+type StatusOf = (workerId: string) => Observable<WorkerConnection | undefined>;
 
-function setup(scope: GradientCiScope, statusOf: StatusOf) {
+function setup(scope: ConnectionScope, statusOf: StatusOf) {
   const connectGradientCi = vi.fn(() => of({ worker_id: 'g1' }));
   TestBed.configureTestingModule({
     imports: [GradientCiConnectComponent],

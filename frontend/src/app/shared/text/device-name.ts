@@ -22,7 +22,7 @@ const SYSTEMS: [RegExp, string][] = [
   [/Linux/, 'Linux'],
 ];
 
-export function deviceName(userAgent: string | null): string {
+export function deviceName(userAgent?: string | null): string {
   if (!userAgent) return 'Unknown device';
   const browser = BROWSERS.find(([pattern]) => pattern.test(userAgent));
   if (!browser) return userAgent.split(' ')[0];

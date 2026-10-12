@@ -7,12 +7,13 @@
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { forkJoin } from 'rxjs';
-import { BoardService, MetricPoint, BoardWorker } from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
 import { LoadingSpinnerComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { workerAxisLabel } from '../worker-label';
 import { clockTime } from '@shared/text';
+import { BoardWorker, MetricPoint } from '@core/models';
 
 @Component({
   selector: 'app-board-throughput',

@@ -8,7 +8,7 @@ import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@ang
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { UserService } from '@core/services/user.service';
-import { Invite } from '@core/models';
+import { InviteItem } from '@core/models';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -44,7 +44,7 @@ export class InvitesComponent implements OnInit {
 
   loading = signal(true);
   pendingToken = signal<string | null>(null);
-  invites = signal<Invite[]>([]);
+  invites = signal<InviteItem[]>([]);
   errorMessage = signal<string | null>(null);
   successMessage = signal<string | null>(null);
 

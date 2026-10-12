@@ -8,9 +8,9 @@ import { TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
 import { ProjectAccessService } from './project-access.service';
 import { ProjectsService } from './projects.service';
-import { Project } from '@core/models/project.model';
+import { ProjectResponse } from '@core/models';
 
-function project(partial: Partial<Project> = {}): Project {
+function project(partial: Partial<ProjectResponse> = {}): ProjectResponse {
   return {
     id: 'o1',
     name: 'acme',
@@ -19,6 +19,9 @@ function project(partial: Partial<Project> = {}): Project {
     public: false,
     hide_build_requests: false,
     managed: false,
+    created_by: 'u1',
+    created_at: '2026-01-01T00:00:00',
+    github_app_available: false,
     ...partial,
   };
 }

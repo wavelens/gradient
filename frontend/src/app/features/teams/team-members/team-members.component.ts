@@ -11,7 +11,13 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { UserService } from '@core/services/user.service';
-import { PendingInvitation, Team, TeamMember, TeamMemberSource, TeamRole } from '@core/models';
+import {
+  TeamRole,
+  TeamResponse,
+  TeamMemberItem,
+  PendingInvitationItem,
+  TeamMemberSource,
+} from '@core/models';
 import {
   AutoCompleteComponent,
   BadgeComponent,
@@ -65,10 +71,10 @@ export class TeamMembersComponent implements OnInit {
 
   teamName = '';
   breadcrumb = computed(() => this.crumbs.team(this.teamName, { label: 'Members' }));
-  team = signal<Team | null>(null);
+  team = signal<TeamResponse | null>(null);
   loading = signal(true);
-  members = signal<TeamMember[]>([]);
-  invitations = signal<PendingInvitation[]>([]);
+  members = signal<TeamMemberItem[]>([]);
+  invitations = signal<PendingInvitationItem[]>([]);
   suggestions = signal<string[]>([]);
   error = signal<string | null>(null);
   addError = signal<string | null>(null);

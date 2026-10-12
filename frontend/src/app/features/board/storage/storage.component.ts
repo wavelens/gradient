@@ -7,10 +7,11 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Observable, Subject, catchError, interval, map, startWith, switchMap } from 'rxjs';
-import { BoardService, BoardStorage } from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/ui';
 import { clockTime, monthDay, formatCount, formatDuration } from '@shared/text';
 import { alignSeries, windowBuckets } from './storage-chart';
+import { BoardStorage } from '@core/models';
 
 const WINDOWS = [1, 6, 24, 168];
 const REFRESH_MS = 60_000;

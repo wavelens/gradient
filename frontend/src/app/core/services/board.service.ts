@@ -7,65 +7,31 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable, shareReplay } from 'rxjs';
 import { ApiService } from './api.service';
-
-export interface AssignedJobSummary {
-  id: string;
-  kind: number;
-  project: string;
-  worker_id: string;
-  worker_name: string | null;
-  score: number;
-  dispatched_at: string;
-  build_id: string | null;
-  evaluation_id: string;
-  /** The derivation's name for a build job, the repository for an eval job. */
-  subject: string | null;
-}
-
-export interface AssignedJobsResponse {
-  jobs: AssignedJobSummary[];
-  other_running: number;
-}
-
-export interface PendingJobSummary {
-  kind: number;
-  project: string;
-  evaluation_id: string;
-  build_id: string | null;
-  queued_at: string;
-  dependency_count: number;
-  subject: string | null;
-}
-
-export interface PendingJobsResponse {
-  jobs: PendingJobSummary[];
-  other_pending: number;
-}
-
-export interface DecisionCandidateView {
-  id: string;
-  job_id: string;
-  kind: number;
-  project: string;
-  build_id: string | null;
-  evaluation_id: string;
-  subject: string | null;
-  score: number;
-  won: boolean;
-}
-
-export interface AssignmentDecisionView {
-  at: string;
-  worker_id: string;
-  worker_name: string | null;
-  kind: number;
-  winner: string | null;
-  candidates: DecisionCandidateView[];
-}
-
-export interface GradientCapabilities {
-  core: boolean; federate: boolean; fetch: boolean; eval: boolean; build: boolean; cache: boolean;
-}
+import {
+  GradientCapabilities,
+  RuleDescription,
+  DispatchedJobsResponse,
+  PendingJobsResponse,
+  AssignDecisionView,
+  BoardWorker,
+  WorkerLoad,
+  ExpensiveBuild,
+  MetricMeta,
+  ScoringSummary,
+  BoardCacheStats,
+  BoardUpstreamCacheStats,
+  BoardNetworkStats,
+  BoardFleetPoint,
+  BoardHealth,
+  BoardStorage,
+  DurationsHeatmap,
+  TopProjectBuildTime,
+  ExpensiveResource,
+  ExpensiveEval,
+  FlakeGraphNode,
+  MetricPoint,
+  DispatchedJobDetail,
+} from '@core/models';
 
 export interface Windowed { w5m: number | null; w1h: number | null; w24h: number | null; }
 
@@ -134,329 +100,12 @@ export interface InstanceContextView {
   cpu_core_score_mean?: number | null;
 }
 
-/// One derivation the job builds, carrying both identities: `build` is what
-/// `GET /builds/{build}` takes, `derivation_build` is the shared build the scheduler assigns.
-export interface JobDerivationView {
-  build: string | null;
-  derivation_build: string;
-  drv_path: string;
-  pname: string | null;
-}
-
-export interface JobPhase {
-  seq: number;
-  parent_seq: number | null;
-  phase: string;
-  start_ms: number;
-  end_ms: number;
-  paths: number;
-  bytes: number;
-}
-
-/// The evaluation an eval job ran.
-export interface JobEvaluationView {
-  repository: string;
-  commit: string;
-  commit_message: string | null;
-  wildcard: string;
-  task: string | null;
-}
-
-export interface AssignedJobDetail extends Omit<AssignedJobSummary, 'subject'> {
-  pname: string | null;
-  evaluation: JobEvaluationView | null;
-  project_name: string;
-  project_display_name: string;
-  queued_at: string;
-  finished_at: string | null;
-  ready_at: string | null;
-  outcome: 'completed' | 'failed' | 'abandoned' | null;
-  phases: JobPhase[];
-  worker_elapsed_ms: number | null;
-  worker_tail_ms: number | null;
-  transit_ms: number | null;
-  derivation_build_id: string | null;
-  derivations: JobDerivationView[];
+export interface AssignedJobDetail
+  extends Omit<DispatchedJobDetail, 'score_breakdown' | 'worker_context' | 'job_context' | 'instance_context'> {
   score_breakdown: { rules: Record<string, number>; total: number };
   worker_context: WorkerContextView;
   job_context: JobContextView;
   instance_context: InstanceContextView | null;
-  candidates: unknown | null;
-  previous_attempts: {
-    dispatched_job_id: string | null;
-    substitute: boolean;
-    outcome: number;
-    reason: number | null;
-    failure_message: string | null;
-    created_at: string;
-  }[];
-  passed_over: boolean;
-}
-
-export interface BoardProject {
-  id: string;
-  name: string;
-  display_name: string;
-}
-
-export interface BoardWorker {
-  id: string | null;
-  name: string | null;
-  projects: BoardProject[];
-  draining: boolean;
-  assigned_jobs: number;
-  max_concurrent_builds: number;
-  eval: boolean;
-  fetch: boolean;
-  build: boolean;
-  architectures: string[];
-  cpu_usage_pct: number | null;
-  ram_free_mb: number | null;
-  ram_total_mb: number | null;
-}
-
-export interface LoadBucket {
-  key: string;
-  in_flight: number;
-  capacity: number;
-  workers: number;
-}
-
-export interface WorkerLoad {
-  by_capability: LoadBucket[];
-  by_architecture: LoadBucket[];
-  by_feature: LoadBucket[];
-}
-
-export interface ExpensiveBuild {
-  build_id: string;
-  project: string;
-  name: string;
-  build_time_ms: number;
-  worker: string | null;
-  worker_name: string | null;
-}
-
-export interface MetricPoint {
-  bucket_start: string;
-  count: number;
-  sum: number;
-  min: number;
-  max: number;
-  avg: number;
-}
-
-export interface MetricMeta {
-  key: string;
-  kind: string;
-  unit: string;
-  dimensions: string[];
-}
-
-export interface ScoreBucket {
-  lo: number;
-  hi: number;
-  count: number;
-}
-
-export interface RuleContribution {
-  rule: string;
-  avg: number;
-  min: number;
-  max: number;
-}
-
-export interface ScoringSummary {
-  sample_size: number;
-  score_min: number;
-  score_max: number;
-  score_avg: number;
-  histogram: ScoreBucket[];
-  rules: RuleContribution[];
-}
-
-export interface RuleDescription {
-  rule: string;
-  description: string;
-}
-
-export interface SeriesPoint {
-  bucket_start: string;
-  count: number;
-  sum: number;
-}
-
-export interface BoardCacheStats {
-  totals: {
-    bytes: number;
-    nar_bytes: number;
-    packages: number;
-    bytes_sent_total: number;
-    requests_total: number;
-  };
-  traffic: SeriesPoint[];
-  storage: SeriesPoint[];
-}
-
-export interface BoardUpstreamCache {
-  upstream_id: string;
-  display_name: string;
-  url: string;
-  avg_latency_ms: number | null;
-  hit_rate: number | null;
-  requests_total: number;
-  latency: SeriesPoint[];
-  hit_rate_series: SeriesPoint[];
-}
-
-export interface BoardUpstreamCacheStats {
-  upstream_caches: BoardUpstreamCache[];
-}
-
-export interface HttpRouteStat {
-  method: string;
-  route: string;
-  count: number;
-  avg_ms: number;
-  errors: number;
-}
-
-export interface WorkerNet {
-  worker_id: string | null;
-  worker_name: string | null;
-  upload_speed_mbps: number | null;
-  download_speed_mbps: number | null;
-  disk_speed_mbps: number | null;
-}
-
-export interface BoardNetworkStats {
-  nar_egress: SeriesPoint[];
-  workers: WorkerNet[];
-  http: HttpRouteStat[];
-}
-
-export interface BoardFleetPoint {
-  bucket_start: string;
-  connected: number;
-  draining: number;
-  eval: number;
-  fetch: number;
-  build: number;
-}
-
-export interface ProcessStat {
-  resident_memory_bytes: number;
-  virtual_memory_bytes: number;
-  open_fds: number;
-  max_fds: number;
-  cpu_seconds_total: number;
-  threads: number;
-}
-
-export interface SupervisedLoop {
-  name: string;
-  restarts: number;
-  pass_errors: number;
-  pass_timeouts: number;
-  last_ok_seconds_ago: number | null;
-  last_error: string | null;
-}
-
-export interface BoardHealth {
-  version: string;
-  uptime_seconds: number;
-  workers_connected: number;
-  jobs_pending: number;
-  jobs_active: number;
-  cache_bytes: number;
-  cache_packages: number;
-  process: ProcessStat;
-  http: HttpRouteStat[];
-  rollup_lag_seconds: number | null;
-  latest_rollup_bucket: string | null;
-  draining: boolean;
-  supervised: SupervisedLoop[];
-  proto_sessions: number;
-  unconfirmed_nars: number;
-  pending_deliveries: number;
-  failed_deliveries: number;
-  hot_nar_cache: HotNarCacheHealth;
-}
-
-export interface HotNarCacheHealth {
-  entries: number;
-  bytes: number;
-  hits: number;
-  misses: number;
-  evictions: number;
-}
-
-export interface LabelledPoint {
-  bucket_start: string;
-  count: number;
-  avg: number;
-  max: number;
-}
-
-export interface LabelledSeries {
-  label: string;
-  points: LabelledPoint[];
-}
-
-export interface BoardStorage {
-  granularity: 'minute' | 'hour' | 'day';
-  op_latency: LabelledSeries[];
-  op_errors: LabelledSeries[];
-  lane_fill: LabelledSeries[];
-  send_stalls: LabelledSeries[];
-  serve_queue: LabelledSeries[];
-  serve_failures: LabelledSeries[];
-}
-
-export interface DurationsHeatmap {
-  times: string[];
-  bands: { band: string; counts: number[] }[];
-}
-
-export interface TopProjectBuildTime {
-  project: string;
-  project_name: string;
-  project_display_name: string;
-  total_build_ms: number;
-  build_count: number;
-}
-
-export interface ExpensiveResource {
-  derivation: string;
-  project: string;
-  name: string;
-  value: number;
-  unit: string;
-  worker: string;
-  worker_name: string | null;
-}
-
-export interface ExpensiveEval {
-  evaluation: string;
-  project: string;
-  project_name: string;
-  project_display_name: string;
-  task_name: string;
-  task_display_name: string;
-  name: string;
-  value: number;
-  unit: string;
-  worker: string;
-  worker_name: string | null;
-}
-
-export interface FlakeGraphNode {
-  path: string;
-  parent: string | null;
-  name: string;
-  kind: string;
-  is_derivation: boolean;
-  drv_path: string | null;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -464,8 +113,8 @@ export class BoardService {
   private api = inject(ApiService);
   private scoringRules$?: Observable<RuleDescription[]>;
 
-  getAssignedJobs(): Observable<AssignedJobsResponse> {
-    return this.api.get<AssignedJobsResponse>('board/jobs/dispatched');
+  getAssignedJobs(): Observable<DispatchedJobsResponse> {
+    return this.api.get<DispatchedJobsResponse>('board/jobs/dispatched');
   }
 
   getPendingJobs(): Observable<PendingJobsResponse> {
@@ -474,8 +123,8 @@ export class BoardService {
 
   /// Recent assignment decisions with every candidate's score, including the
   /// rejected/negative ones the scheduler passed over (superuser-only).
-  getAssignmentDecisions(): Observable<AssignmentDecisionView[]> {
-    return this.api.get<AssignmentDecisionView[]>('board/jobs/decisions');
+  getAssignmentDecisions(): Observable<AssignDecisionView[]> {
+    return this.api.get<AssignDecisionView[]>('board/jobs/decisions');
   }
 
   getJob(id: string): Observable<AssignedJobDetail> {

@@ -8,8 +8,11 @@ import { BadgeComponent, ButtonComponent, DialogComponent, TableComponent } from
 import { Component, inject, input, output, signal, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActionsService } from '../../../core/services/actions.service';
-import { ActionDelivery, ActionDeliveryDetail } from '../../../core/models/action.model';
 import { formatDuration } from '@shared/text';
+import {
+  DeliveryListItem_TaskActionDeliveryId,
+  DeliveryDetail_TaskActionDeliveryId,
+} from '@core/models';
 
 @Component({
   selector: 'app-action-deliveries',
@@ -29,10 +32,10 @@ export class ActionDeliveriesComponent implements OnInit {
 
   readonly duration = formatDuration;
   visible = signal(true);
-  deliveries = signal<ActionDelivery[]>([]);
+  deliveries = signal<DeliveryListItem_TaskActionDeliveryId[]>([]);
   loading = signal(true);
   loadError = signal<string | null>(null);
-  expanded = signal<Map<string, ActionDeliveryDetail | 'loading' | 'error'>>(new Map());
+  expanded = signal<Map<string, DeliveryDetail_TaskActionDeliveryId | 'loading' | 'error'>>(new Map());
   offset = signal(0);
   readonly limit = 50;
   hasMore = signal(false);

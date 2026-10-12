@@ -9,7 +9,7 @@ import { Observable, of, throwError } from 'rxjs';
 import { StarsService, starPath } from './stars.service';
 import { ApiService } from './api.service';
 import { AuthService } from './auth.service';
-import { UserStars } from '@core/models';
+import { StarredNames } from '@core/models';
 
 describe('starPath', () => {
   it('addresses a project', () => {
@@ -36,13 +36,13 @@ describe('starPath', () => {
 });
 
 describe('StarsService', () => {
-  const stars: UserStars = {
+  const stars: StarredNames = {
     projects: ['acme'],
     tasks: [{ project: 'acme', task: 'hosts' }],
     caches: ['main'],
   };
 
-  function setup(authenticated: boolean, response: Observable<UserStars> = of(stars)) {
+  function setup(authenticated: boolean, response: Observable<StarredNames> = of(stars)) {
     const get = vi.fn(() => response);
     TestBed.configureTestingModule({
       providers: [
@@ -61,7 +61,7 @@ describe('StarsService', () => {
 
   it('lists the caller stars', () => {
     const { service, get } = setup(true);
-    let listed: UserStars | undefined;
+    let listed: StarredNames | undefined;
     service.list().subscribe((s) => (listed = s));
     expect(get).toHaveBeenCalledWith('user/stars');
     expect(listed).toEqual(stars);

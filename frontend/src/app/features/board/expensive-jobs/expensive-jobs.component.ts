@@ -6,17 +6,13 @@
 
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import {
-  BoardService,
-  ExpensiveBuild,
-  ExpensiveResource,
-  TopProjectBuildTime,
-} from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { formatDuration, formatQuantity } from '@shared/text';
+import { ExpensiveBuild, ExpensiveResource, TopProjectBuildTime } from '@core/models';
 
 type Tab = 'time' | 'ram' | 'cpu' | 'disk';
 

@@ -8,12 +8,13 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
-  Action,
-  ActionDelivery,
-  ActionDeliveryDetail,
+  ActionResponse,
+  DeletedResponse,
   CreateActionRequest,
   CreateActionResponse,
   UpdateActionRequest,
+  DeliveryListItem_TaskActionDeliveryId,
+  DeliveryDetail_TaskActionDeliveryId,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -24,24 +25,24 @@ export class ActionsService {
     return `tasks/${project}/${proj}/actions`;
   }
 
-  list(project: string, proj: string): Observable<Action[]> {
-    return this.api.get<Action[]>(this.base(project, proj));
+  list(project: string, proj: string): Observable<ActionResponse[]> {
+    return this.api.get<ActionResponse[]>(this.base(project, proj));
   }
 
   create(project: string, proj: string, body: CreateActionRequest): Observable<CreateActionResponse> {
     return this.api.post<CreateActionResponse>(this.base(project, proj), body);
   }
 
-  read(project: string, proj: string, id: string): Observable<Action> {
-    return this.api.get<Action>(`${this.base(project, proj)}/${id}`);
+  read(project: string, proj: string, id: string): Observable<ActionResponse> {
+    return this.api.get<ActionResponse>(`${this.base(project, proj)}/${id}`);
   }
 
-  update(project: string, proj: string, id: string, body: UpdateActionRequest): Observable<Action> {
-    return this.api.patch<Action>(`${this.base(project, proj)}/${id}`, body);
+  update(project: string, proj: string, id: string, body: UpdateActionRequest): Observable<ActionResponse> {
+    return this.api.patch<ActionResponse>(`${this.base(project, proj)}/${id}`, body);
   }
 
-  delete(project: string, proj: string, id: string): Observable<{ deleted: boolean }> {
-    return this.api.delete<{ deleted: boolean }>(`${this.base(project, proj)}/${id}`);
+  delete(project: string, proj: string, id: string): Observable<DeletedResponse> {
+    return this.api.delete<DeletedResponse>(`${this.base(project, proj)}/${id}`);
   }
 
   test(project: string, proj: string, id: string): Observable<void> {
@@ -52,11 +53,11 @@ export class ActionsService {
     return this.api.post<{ token: string }>(`${this.base(project, proj)}/${id}/regenerate-token`);
   }
 
-  listDeliveries(project: string, proj: string, id: string, limit = 50, offset = 0): Observable<ActionDelivery[]> {
-    return this.api.get<ActionDelivery[]>(`${this.base(project, proj)}/${id}/deliveries?limit=${limit}&offset=${offset}`);
+  listDeliveries(project: string, proj: string, id: string, limit = 50, offset = 0): Observable<DeliveryListItem_TaskActionDeliveryId[]> {
+    return this.api.get<DeliveryListItem_TaskActionDeliveryId[]>(`${this.base(project, proj)}/${id}/deliveries?limit=${limit}&offset=${offset}`);
   }
 
-  getDelivery(project: string, proj: string, actionId: string, deliveryId: string): Observable<ActionDeliveryDetail> {
-    return this.api.get<ActionDeliveryDetail>(`${this.base(project, proj)}/${actionId}/deliveries/${deliveryId}`);
+  getDelivery(project: string, proj: string, actionId: string, deliveryId: string): Observable<DeliveryDetail_TaskActionDeliveryId> {
+    return this.api.get<DeliveryDetail_TaskActionDeliveryId>(`${this.base(project, proj)}/${actionId}/deliveries/${deliveryId}`);
   }
 }

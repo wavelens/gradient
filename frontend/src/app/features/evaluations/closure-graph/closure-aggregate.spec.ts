@@ -5,7 +5,7 @@
  */
 
 import { buildClosureSankey, contributesTo, othersIdFor } from './closure-aggregate';
-import type { ClosureGraph } from '@core/services/evaluations.service';
+import { ClosureGraph } from '@core/models';
 
 function graph(
   nodes: [string, number][],

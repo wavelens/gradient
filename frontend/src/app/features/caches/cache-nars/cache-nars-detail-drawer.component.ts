@@ -16,7 +16,7 @@ import {
   ChangeDetectionStrategy
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { CachesService, NarDetail, NarSummary } from '@core/services/caches.service';
+import { CachesService } from '@core/services/caches.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -26,6 +26,7 @@ import {
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
 import { formatBytes } from '@shared/text';
+import { NarSummary, NarDetail } from '@core/models';
 
 @Component({
   selector: 'app-cache-nars-detail-drawer',

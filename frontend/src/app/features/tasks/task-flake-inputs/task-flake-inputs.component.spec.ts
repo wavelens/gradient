@@ -14,7 +14,7 @@ import { FlakeInputOverridesService } from '@core/services/flake-input-overrides
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { AccessState } from '@core/models/access.model';
-import { FlakeInputOverride } from '@core/models';
+import { FlakeInputOverrideOut } from '@core/models';
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
@@ -24,7 +24,7 @@ function activatedRouteStub(access: AccessState): ActivatedRoute {
   } as unknown as ActivatedRoute;
 }
 
-const override: FlakeInputOverride = {
+const override: FlakeInputOverrideOut = {
   id: 'o1',
   task: 'p1',
   input_name: 'utils',
@@ -33,7 +33,7 @@ const override: FlakeInputOverride = {
   updated_at: '2026-01-01T00:00:00Z',
 };
 
-const overrideKeepUrl: FlakeInputOverride = {
+const overrideKeepUrl: FlakeInputOverrideOut = {
   id: 'o2',
   task: 'p1',
   input_name: 'nixpkgs',
@@ -42,7 +42,7 @@ const overrideKeepUrl: FlakeInputOverride = {
   updated_at: '2026-01-01T00:00:00Z',
 };
 
-const overrideGlob: FlakeInputOverride = {
+const overrideGlob: FlakeInputOverrideOut = {
   id: 'o3',
   task: 'p1',
   input_name: 'nixpkgs*',
@@ -53,14 +53,14 @@ const overrideGlob: FlakeInputOverride = {
 
 function setup(
   access: AccessState,
-  overrides: FlakeInputOverride[] = [override],
+  overrides: FlakeInputOverrideOut[] = [override],
   overridesServicePartial: Partial<FlakeInputOverridesService> = {},
 ): ComponentFixture<TaskFlakeInputsComponent> {
   const defaultService: Partial<FlakeInputOverridesService> = {
     list: () => of(overrides),
     create: () => of(override),
     update: () => of(override),
-    delete: () => of(true),
+    delete: () => of({ deleted: true }),
     ...overridesServicePartial,
   };
 
@@ -146,7 +146,7 @@ describe('TaskFlakeInputsComponent', () => {
     let deletedId: string | undefined;
     const svc: Partial<FlakeInputOverridesService> = {
       list: () => of([override]),
-      delete: (project, proj, id) => { deletedId = id; return of(true); },
+      delete: (project, proj, id) => { deletedId = id; return of({ deleted: true }); },
     };
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [override], svc);
     const comp = fixture.componentInstance;

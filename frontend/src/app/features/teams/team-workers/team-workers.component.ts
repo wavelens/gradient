@@ -13,13 +13,13 @@ import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import {
   AllowedCapabilities,
-  ConnectionStatus,
-  RegisterTeamWorker,
-  Team,
-  TeamWorker,
-  WorkerPatch,
   changedCapabilities,
   gradientCiHost,
+  TeamResponse,
+  TeamWorkerEntry,
+  RegisterWorkerRequest,
+  WorkerConnection,
+  PatchWorkerRequest,
 } from '@core/models';
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent } from '@shared/ui';
 import { Observable, map } from 'rxjs';
@@ -71,25 +71,25 @@ export class TeamWorkersComponent implements OnInit {
 
   teamName = '';
   breadcrumb = computed(() => this.crumbs.team(this.teamName, { label: 'Workers' }));
-  team = signal<Team | null>(null);
-  workers = signal<TeamWorker[]>([]);
+  team = signal<TeamResponse | null>(null);
+  workers = signal<TeamWorkerEntry[]>([]);
   loading = signal(true);
   busy = signal<string | null>(null);
   error = signal<string | null>(null);
   showRegister = signal(false);
   showGradientCiConnect = signal(false);
   issuedToken = signal<string | null>(null);
-  editing = signal<TeamWorker | null>(null);
+  editing = signal<TeamWorkerEntry | null>(null);
   editName = '';
   editAllowed: AllowedCapabilities = { enable_fetch: true, enable_eval: true, enable_build: true };
-  form: RegisterTeamWorker = { worker_id: '', display_name: '' };
+  form: RegisterWorkerRequest = { worker_id: '', display_name: '' };
 
   isAdmin = computed(() => this.team()?.role === 'admin' || this.authService.user()?.superuser === true);
   canConnectGradientCi = computed(
     () => this.isAdmin() && this.config.gradientCiEnabled && !this.workers().some((w) => w.gradient_ci),
   );
 
-  statusOf = (workerId: string): Observable<ConnectionStatus | undefined> =>
+  statusOf = (workerId: string): Observable<WorkerConnection | undefined> =>
     this.teams.workers(this.teamName).pipe(map((workers) => workers.find((w) => w.worker_id === workerId)));
 
   get gradientCiHost(): string {
@@ -125,7 +125,7 @@ export class TeamWorkersComponent implements OnInit {
     if (!this.form.worker_id || !this.form.display_name) return;
     this.busy.set('register');
     this.error.set(null);
-    const worker: RegisterTeamWorker = { ...this.form, url: this.form.url?.trim() || undefined };
+    const worker: RegisterWorkerRequest = { ...this.form, url: this.form.url?.trim() || undefined };
     this.teams.registerWorker(this.teamName, worker).subscribe({
       next: (res) => {
         this.busy.set(null);
@@ -138,7 +138,7 @@ export class TeamWorkersComponent implements OnInit {
     });
   }
 
-  setActive(worker: TeamWorker, active: boolean): void {
+  setActive(worker: TeamWorkerEntry, active: boolean): void {
     this.busy.set(worker.worker_id);
     this.teams.updateWorker(this.teamName, worker.worker_id, { active }).subscribe({
       next: () => {
@@ -149,7 +149,7 @@ export class TeamWorkersComponent implements OnInit {
     });
   }
 
-  openEdit(worker: TeamWorker): void {
+  openEdit(worker: TeamWorkerEntry): void {
     this.editName = worker.display_name;
     this.editAllowed = worker;
     this.editing.set(worker);
@@ -158,7 +158,7 @@ export class TeamWorkersComponent implements OnInit {
   saveEdit(): void {
     const worker = this.editing();
     if (!worker || !this.editName.trim()) return;
-    const patch: WorkerPatch = changedCapabilities(worker, this.editAllowed);
+    const patch: PatchWorkerRequest = changedCapabilities(worker, this.editAllowed);
     if (this.editName.trim() !== worker.display_name) patch.display_name = this.editName.trim();
     this.busy.set('edit');
     this.teams.updateWorker(this.teamName, worker.worker_id, patch).subscribe({
@@ -171,7 +171,7 @@ export class TeamWorkersComponent implements OnInit {
     });
   }
 
-  remove(worker: TeamWorker): void {
+  remove(worker: TeamWorkerEntry): void {
     this.busy.set(worker.worker_id);
     this.teams.removeWorker(this.teamName, worker.worker_id).subscribe({
       next: () => {

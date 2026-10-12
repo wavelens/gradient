@@ -5,9 +5,9 @@
  */
 
 import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
-import { EvaluationStatus } from '@core/models/task.model';
 import { evaluationPhase } from '@shared/evaluation';
 import { StatusIconComponent } from '../status-icon/status-icon.component';
+import { EvaluationStatus } from '@core/models';
 
 @Component({
   selector: 'gr-eval-status-badge',

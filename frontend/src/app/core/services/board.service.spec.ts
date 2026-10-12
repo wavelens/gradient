@@ -8,16 +8,16 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { HttpTestingController } from '@angular/common/http/testing';
+import { BoardService } from './board.service';
+import { environment } from '@environments/environment';
 import {
-  BoardService,
-  ExpensiveBuild,
   ExpensiveEval,
+  ExpensiveBuild,
   ExpensiveResource,
+  TopProjectBuildTime,
   FlakeGraphNode,
   RuleDescription,
-  TopProjectBuildTime,
-} from './board.service';
-import { environment } from '@environments/environment';
+} from '@core/models';
 
 const apiUrl = environment.apiUrl;
 

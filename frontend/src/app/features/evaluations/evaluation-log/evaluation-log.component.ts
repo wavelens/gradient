@@ -19,20 +19,32 @@ import {
   ChangeDetectionStrategy
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { LogChunkIndex, LogSearchHit, parseLineFragment, searchLines, windowAround } from './log-window';
+import { parseLineFragment, searchLines, windowAround } from './log-window';
 import { matchesBuildSearch } from './build-search';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { Observable, Subscription, merge } from 'rxjs';
 import { auditTime, filter, map, share, switchMap } from 'rxjs/operators';
-import { EvaluationsService, BuildItem, BuildWithOutputs } from '@core/services/evaluations.service';
+import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService } from '@core/services/tasks.service';
 import { AccessService, WritableDirective } from '@shared/access';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
-import { BuildProgress, Evaluation, EvaluationMessage, EvaluationProgress, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
+import {
+  BuildProgress,
+  EvaluationResponse,
+  EvaluationProgress,
+  BuildItem,
+  EvaluationMessageResponse,
+  LogSearchHit,
+  LogChunkIndex,
+  EvaluationStatus,
+  BuildWithOutputs,
+  WaitingReason,
+  TriggerType,
+} from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import {
   BadgeComponent,
@@ -85,7 +97,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   @ViewChild('logContainer') logContainerRef?: ElementRef<HTMLDivElement>;
 
   loading = signal(true);
-  evaluation = signal<Evaluation | null>(null);
+  evaluation = signal<EvaluationResponse | null>(null);
   private liveProgress = signal<EvaluationProgress | null>(null);
   progress = computed(() => {
     const ev = this.evaluation();
@@ -97,7 +109,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return p?.kind === 'fetching' ? p.inputs : [];
   });
   builds = signal<BuildItem[]>([]);
-  messages = signal<(EvaluationMessage & { renderedHtml: SafeHtml })[]>([]);
+  messages = signal<(EvaluationMessageResponse & { renderedHtml: SafeHtml })[]>([]);
   selectedBuildId = signal<string | null>(null);
   selectedSection = signal<'messages' | null>(null);
   buildsOpen = signal(false);
@@ -313,12 +325,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     });
   }
 
-  private rememberTaskName(evaluation: Evaluation): void {
+  private rememberTaskName(evaluation: EvaluationResponse): void {
     if (!evaluation.task_name || !evaluation.task_display_name) return;
     this.crumbs.rememberTask(this.projectName, evaluation.task_name, evaluation.task_display_name);
   }
 
-  private loadAccess(taskName?: string): void {
+  private loadAccess(taskName?: string | null): void {
     if (!taskName) return;
     this.tasksService
       .getTask(this.projectName, taskName)
@@ -781,7 +793,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private watchProgress(buildId: string): void {
     this.stopProgressWatch();
     const seed = this.evalService.getBuild(buildId).pipe(
-      map(b => b.progress),
+      map(b => b.progress ?? null),
       filter(() => this.buildProgress() === null),
     );
     const updates = this.live.connect<LiveEvent>(`/builds/${buildId}/live`).pipe(
@@ -1429,7 +1441,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   // ── Duration ─────────────────────────────────────────────────────────────────
 
-  private startDurationTimer(evaluation: Evaluation): void {
+  private startDurationTimer(evaluation: EvaluationResponse): void {
     this.stopDurationTimer();
     this.updateDuration(evaluation);
 
@@ -1449,7 +1461,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }
   }
 
-  private updateDuration(evaluation: Evaluation): void {
+  private updateDuration(evaluation: EvaluationResponse): void {
     this.duration.set(formatEvaluationDuration(evaluationDuration(evaluation, Date.now())));
   }
 
@@ -1634,7 +1646,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }
   }
 
-  waitingTitle(reason: WaitingReason | undefined): string {
+  waitingTitle(reason?: WaitingReason | null): string {
     switch (reason?.kind) {
       case 'eval_workers': return reason.capability === 'fetch' ? 'Waiting for a Fetch Worker' : 'Waiting for an Eval Worker';
       case 'approval': return 'Awaiting Approval';

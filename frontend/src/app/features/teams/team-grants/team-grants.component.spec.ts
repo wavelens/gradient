@@ -11,9 +11,9 @@ import { of, throwError } from 'rxjs';
 import { GrantedPart, TeamGrantsComponent } from './team-grants.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
-import { TeamGrant, TeamSummary } from '@core/models';
+import { TeamGrantEntry, TeamSummary } from '@core/models';
 
-const grants: TeamGrant[] = [
+const grants: TeamGrantEntry[] = [
   { team: 'platform', display_name: 'Platform', role: 'Write', users: true, workers: true, pending: false },
   { team: 'docs', display_name: 'Docs', role: 'View', users: true, workers: false, pending: false },
   { team: 'ops', display_name: 'Ops', role: null, users: false, workers: true, pending: false },
@@ -58,7 +58,7 @@ function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false)
   return { fixture, component: fixture.componentInstance, service, text, changed };
 }
 
-function grantOf(team: string): TeamGrant {
+function grantOf(team: string): TeamGrantEntry {
   return grants.find((g) => g.team === team)!;
 }
 

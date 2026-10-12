@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { JobPhase } from '@core/services/board.service';
 import { depths, phaseLabel, phaseRows } from './job-timeline.component';
+import { JobPhaseView } from '@core/models';
 
-function span(seq: number, parent_seq: number | null, phase: string, start_ms: number, end_ms: number): JobPhase {
+function span(seq: number, parent_seq: number | null, phase: string, start_ms: number, end_ms: number): JobPhaseView {
   return { seq, parent_seq, phase, start_ms, end_ms, paths: 0, bytes: 0 };
 }
 
 describe('job timeline', () => {
-  const NESTED: JobPhase[] = [
+  const NESTED: JobPhaseView[] = [
     { seq: 0, parent_seq: null, phase: 'compress', start_ms: 0, end_ms: 1000, paths: 3, bytes: 0 },
     { seq: 1, parent_seq: 0, phase: 'nar_push', start_ms: 100, end_ms: 900, paths: 3, bytes: 4194304 },
   ];

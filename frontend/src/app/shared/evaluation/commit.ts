@@ -15,7 +15,7 @@ export function commitLabel(commit: string | null | undefined): string {
 /** Evaluation title: the commit message when present, else the short hash or
  * the unknown placeholder. */
 export function evaluationTitle(
-  evaluation: { commit: string | null | undefined; commit_message: string | null | undefined },
+  evaluation: { commit: string | null | undefined; commit_message?: string | null },
 ): string {
   return evaluation.commit_message || commitLabel(evaluation.commit);
 }

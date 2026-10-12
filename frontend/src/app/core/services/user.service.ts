@@ -8,46 +8,51 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
-  ApiKey,
+  GetUserSettingsResponse,
+  SshKeyInfo,
+  ApiKeyInfo,
+  SessionInfo,
+  Paginated,
   AuditLogEntry,
-  Invite,
-  PaginatedResponse,
-  Session,
-  SshKey,
-  UserSettings,
+  InviteItem,
+  PatchUserSettingsRequest,
+  DeleteUserRequest,
+  CreateApiKeyRequest,
+  PatchApiKeyRequest,
+  ApiKeyPermissionsResponse,
+  UserSearchResult,
 } from '@core/models';
-import { PermissionDescriptor } from '@core/models/permission.model';
 
 @Injectable({ providedIn: 'root' })
 export class UserService {
   private api = inject(ApiService);
 
-  getUserSettings(): Observable<UserSettings> {
-    return this.api.get<UserSettings>('user/settings');
+  getUserSettings(): Observable<GetUserSettingsResponse> {
+    return this.api.get<GetUserSettingsResponse>('user/settings');
   }
 
-  updateUserSettings(data: { username?: string; name?: string; email?: string }): Observable<string> {
+  updateUserSettings(data: PatchUserSettingsRequest): Observable<string> {
     return this.api.patch<string>('user/settings', data);
   }
 
-  deleteUser(confirmation: { password?: string; confirm_username?: string }): Observable<string> {
+  deleteUser(confirmation: DeleteUserRequest): Observable<string> {
     return this.api.delete<string>('user', confirmation);
   }
 
-  getSshKeys(): Observable<SshKey[]> {
-    return this.api.get<SshKey[]>('user/ssh-keys');
+  getSshKeys(): Observable<SshKeyInfo[]> {
+    return this.api.get<SshKeyInfo[]>('user/ssh-keys');
   }
 
-  addSshKey(name: string, publicKey: string): Observable<SshKey> {
-    return this.api.post<SshKey>('user/ssh-keys', { name, public_key: publicKey });
+  addSshKey(name: string, publicKey: string): Observable<SshKeyInfo> {
+    return this.api.post<SshKeyInfo>('user/ssh-keys', { name, public_key: publicKey });
   }
 
   deleteSshKey(id: string): Observable<string> {
     return this.api.delete<string>(`user/ssh-keys/${id}`);
   }
 
-  getApiKeys(): Observable<ApiKey[]> {
-    return this.api.get<ApiKey[]>('user/keys');
+  getApiKeys(): Observable<ApiKeyInfo[]> {
+    return this.api.get<ApiKeyInfo[]>('user/keys');
   }
 
   createApiKey(
@@ -58,14 +63,7 @@ export class UserService {
     cache: string | null = null,
     allowedIps: string[] = [],
   ): Observable<string> {
-    const body: {
-      name: string;
-      expires_in_days?: number;
-      permissions: string[];
-      project: string | null;
-      cache: string | null;
-      allowed_ips: string[];
-    } = { name, permissions, project, cache, allowed_ips: allowedIps };
+    const body: CreateApiKeyRequest = { name, permissions, project, cache, allowed_ips: allowedIps };
     if (expiresInDays !== null && expiresInDays !== undefined) {
       body.expires_in_days = expiresInDays;
     }
@@ -74,25 +72,13 @@ export class UserService {
 
   updateApiKey(
     apiId: string,
-    body: {
-      name?: string;
-      permissions?: string[];
-      project?: string | null;
-      cache?: string | null;
-      allowed_ips?: string[];
-    },
-  ): Observable<ApiKey> {
-    return this.api.patch<ApiKey>(`user/keys/${apiId}`, body);
+    body: PatchApiKeyRequest,
+  ): Observable<ApiKeyInfo> {
+    return this.api.patch<ApiKeyInfo>(`user/keys/${apiId}`, body);
   }
 
-  getApiKeyPermissions(): Observable<{
-    available_permissions: PermissionDescriptor[];
-    availableCache: PermissionDescriptor[];
-  }> {
-    return this.api.get<{
-      available_permissions: PermissionDescriptor[];
-      availableCache: PermissionDescriptor[];
-    }>('user/keys/permissions');
+  getApiKeyPermissions(): Observable<ApiKeyPermissionsResponse> {
+    return this.api.get<ApiKeyPermissionsResponse>('user/keys/permissions');
   }
 
   deleteApiKey(name: string): Observable<string> {
@@ -103,8 +89,8 @@ export class UserService {
     return this.api.post<string>(`user/keys/${id}/revoke`, {});
   }
 
-  getInvites(): Observable<Invite[]> {
-    return this.api.get<Invite[]>('user/invites');
+  getInvites(): Observable<InviteItem[]> {
+    return this.api.get<InviteItem[]>('user/invites');
   }
 
   acceptInvite(token: string): Observable<string> {
@@ -115,21 +101,21 @@ export class UserService {
     return this.api.post<string>('user/invites/decline', { token });
   }
 
-  getSessions(): Observable<Session[]> {
-    return this.api.get<Session[]>('user/sessions');
+  getSessions(): Observable<SessionInfo[]> {
+    return this.api.get<SessionInfo[]>('user/sessions');
   }
 
   revokeSession(id: string): Observable<string> {
     return this.api.delete<string>(`user/sessions/${id}`);
   }
 
-  getAuditLog(page = 1, perPage = 50): Observable<PaginatedResponse<AuditLogEntry[]>> {
-    return this.api.get<PaginatedResponse<AuditLogEntry[]>>(
+  getAuditLog(page = 1, perPage = 50): Observable<Paginated<AuditLogEntry[]>> {
+    return this.api.get<Paginated<AuditLogEntry[]>>(
       `user/audit-log?page=${page}&per_page=${perPage}`,
     );
   }
 
-  searchUsers(query: string): Observable<{ id: string; username: string; name: string }[]> {
-    return this.api.get<{ id: string; username: string; name: string }[]>(`user/search?q=${encodeURIComponent(query)}`);
+  searchUsers(query: string): Observable<UserSearchResult[]> {
+    return this.api.get<UserSearchResult[]>(`user/search?q=${encodeURIComponent(query)}`);
   }
 }
