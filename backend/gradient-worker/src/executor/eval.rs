@@ -610,10 +610,9 @@ impl<'a> ClosureWalker<'a> {
     }
 
     fn add_root(&mut self, root: Root) {
-        if self.rooted.insert(root.drv_path.clone()) {
-            self.visited.insert(root.drv_path.clone());
-            self.pending.push_front(Queued::Root(root));
-        }
+        self.rooted.insert(root.drv_path.clone());
+        self.visited.insert(root.drv_path.clone());
+        self.pending.push_front(Queued::Root(root));
     }
 
     async fn walk_found(
@@ -1319,6 +1318,61 @@ mod tests {
         }
 
         assert!(!pushed.is_empty(), "expected at least one push");
+    }
+
+    #[tokio::test]
+    async fn attributes_on_a_derivation_yield_entry_points() {
+        let fixture = load_store(&fixture_dir());
+        let repo = "https://example.com/repo";
+        let resolver = FakeDerivationResolver::new()
+            .with_flake_attrs(repo, vec!["pkg".to_owned(), "legacyPkg".to_owned()])
+            .with_drv_path(repo, "pkg", fixture.entry_point.clone())
+            .with_drv_path(repo, "legacyPkg", fixture.entry_point.clone());
+        let drv_reader = FakeDrvReader::from_raw_drvs(fixture.raw_drvs.clone());
+        let job = make_flake_job(repo);
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
+
+        let reported: Vec<(String, String)> = reporter
+            .events()
+            .into_iter()
+            .filter_map(|event| match event {
+                ReportedEvent::EvalResult { derivations, .. } => Some(derivations),
+                _ => None,
+            })
+            .flatten()
+            .map(|d| (d.attr, d.drv_path))
+            .collect();
+
+        let attrs: std::collections::HashSet<&str> = reported
+            .iter()
+            .map(|(attr, _)| attr.as_str())
+            .filter(|attr| !attr.is_empty())
+            .collect();
+        assert_eq!(
+            attrs,
+            std::collections::HashSet::from(["pkg", "legacyPkg"]),
+            "{reported:?}"
+        );
+
+        let mut seen = std::collections::HashSet::new();
+        let repeated: Vec<&str> = reported
+            .iter()
+            .filter(|(attr, _)| !attr.is_empty())
+            .map(|(_, path)| path.as_str())
+            .filter(|path| !seen.insert(*path))
+            .collect();
+        assert_eq!(repeated, vec![fixture.entry_point.as_str()], "{reported:?}");
     }
 
     #[tokio::test]
