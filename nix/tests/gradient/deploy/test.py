@@ -68,9 +68,12 @@ def await_deploy(node):
     return deploy_log(node)
 
 
-def await_deploy_failure(node):
+def await_deploy_failure_from_journal(node, message):
     node.wait_until_succeeds(
-        "systemctl show gradient-deploy.service -p ActiveState --value | grep -qx failed"
+        f"journalctl -u gradient-deploy --no-pager | grep -q 'Error: {message}'"
+    )
+    node.wait_until_succeeds(
+        "journalctl -u gradient-deploy --no-pager | grep -q 'Failed with result'"
     )
     return deploy_log(node)
 
@@ -163,7 +166,9 @@ post(machine, "/control/reset")
 unfetchable = "/nix/store/" + "a" * 32 + DEPLOY_SYSTEM[DEPLOY_SYSTEM.index("-"):]
 set_state(machine, "Building", [entry_point(unfetchable, "Completed")], evaluation_id="e5")
 start_deploy(machine)
-log = await_deploy_failure(machine)
+log = await_deploy_failure_from_journal(
+    machine, f"cannot fetch {unfetchable} from a substituter"
+)
 assert f"Error: cannot fetch {unfetchable} from a substituter" in log, log
 assert "completed successfully" not in log, log
 assert current_system(machine) == DEPLOY_SYSTEM, "a failed fetch must not switch the system"
