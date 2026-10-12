@@ -54,7 +54,7 @@ function evalSummary(
     commit: 'abc1234def5678',
     commit_message: null,
     status,
-    wildcard: 'packages.x86_64-linux.*',
+    wildcard: 'packages.x86_64-linux.**',
     trigger: null,
     triggered_by: null,
     pr_number: null,

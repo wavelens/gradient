@@ -149,7 +149,7 @@ gradient login https://gradient.example.com
 `gradient eval` can start the worker's evaluator locally, like `nix-eval-jobs`. The output is one JSON line per attribute with `attr`, `attrPath` and `drvPath`, or `error` for a failed attribute.
 
 ```sh
-gradient eval 'packages.x86_64-linux.#'             # the flake in the current directory
+gradient eval 'packages.x86_64-linux.*'             # the flake in the current directory
 gradient eval .#hello                              # one attribute, as fast as nix eval
 gradient eval 'github:NixOS/patchelf#hydraJobs.*'  # any flake ref before the #
 ```

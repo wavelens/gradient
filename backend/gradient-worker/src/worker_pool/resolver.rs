@@ -13,6 +13,7 @@ use gradient_sources::{
     AttrError, DerivationResolver, FlakeDiscovery, FoundDerivations, ImportBuilder,
     ResolvedDerivation,
 };
+use gradient_types::wildcard;
 use gradient_util::store_path::nix_store_path;
 use gradient_util::sync::Mutex;
 use std::collections::{HashSet, VecDeque};
@@ -86,7 +87,7 @@ fn entry_point_of(attr: &str, patterns: &[String]) -> String {
             && pat_segs
                 .iter()
                 .zip(&attr_segs)
-                .all(|(p, a)| *p == "*" || p == a)
+                .all(|(p, a)| wildcard::segment_covers(p, a))
     };
 
     patterns
@@ -94,7 +95,7 @@ fn entry_point_of(attr: &str, patterns: &[String]) -> String {
         .filter(|p| matches(p))
         .max_by_key(|p| {
             let segs = p.split('.').count();
-            let literals = p.split('.').filter(|s| *s != "*").count();
+            let literals = p.split('.').filter(|s| !s.contains('*')).count();
             (segs, literals)
         })
         .cloned()
@@ -549,10 +550,10 @@ mod tests {
 
     #[test]
     fn entry_point_longest_prefix_match() {
-        let pats = vec!["packages.*.*".into(), "packages.*.foo".into()];
+        let pats = vec!["packages.**".into(), "packages.*.foo".into()];
         assert_eq!(
-            entry_point_of("packages.x86_64-linux.hello", &["packages.*.*".into()]),
-            "packages.*.*"
+            entry_point_of("packages.x86_64-linux.hello", &["packages.**".into()]),
+            "packages.**"
         );
         assert_eq!(
             entry_point_of("packages.x86_64-linux.foo", &pats),
@@ -562,9 +563,9 @@ mod tests {
         assert_eq!(
             entry_point_of(
                 "devShells.aarch64-linux.default",
-                &["devShells.*.default".into()]
+                &["devShells.*-linux.default".into()]
             ),
-            "devShells.*.default"
+            "devShells.*-linux.default"
         );
     }
 

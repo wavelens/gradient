@@ -428,7 +428,7 @@ pub(crate) fn select_primary_entry_point<'a>(
     tree: &'a ArtefactTree,
     target: Option<&str>,
 ) -> Option<&'a EntryPointArtefacts> {
-    if let Some(t) = target.filter(|t| *t != "*")
+    if let Some(t) = target.filter(|t| !t.contains('*'))
         && let Some(ep) = tree
             .entry_points
             .iter()
@@ -579,15 +579,15 @@ mod tests {
         );
         assert_eq!(
             normalize_installable(".#", "x86_64-linux"),
-            "packages.x86_64-linux.#"
+            "packages.x86_64-linux.*"
         );
     }
 
     #[test]
     fn qualified_and_wildcard_targets_pass_through() {
         assert_eq!(
-            normalize_installable("packages.x86_64-linux.#", "x86_64-linux"),
-            "packages.x86_64-linux.#"
+            normalize_installable("packages.x86_64-linux.*", "x86_64-linux"),
+            "packages.x86_64-linux.*"
         );
         assert_eq!(
             normalize_installable("checks.x86_64-linux.*", "x86_64-linux"),

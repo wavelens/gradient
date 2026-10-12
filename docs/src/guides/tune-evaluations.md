@@ -93,7 +93,7 @@ Exclude an unneeded attribute with an `!` pattern, see [Evaluation Wildcards](..
 === "Declarative"
 
     ```nix
-    services.gradient.state.tasks.web-app.wildcard = "checks.x86_64-linux.*, !checks.x86_64-linux.snapshots";
+    services.gradient.state.tasks.web-app.wildcard = "checks.x86_64-linux.**, !checks.x86_64-linux.snapshots";
     ```
 
 ## Verify Deployment

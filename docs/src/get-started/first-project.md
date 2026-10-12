@@ -32,7 +32,7 @@ A project is the unit of access. Members, workers and caches belong to a project
 | Field | Value |
 |---|---|
 | Repository URL | The flake's Git URL, e.g. `https://github.com/wavelens/gradient` |
-| Evaluation Wildcard | Which flake outputs to build, e.g. `packages.x86_64-linux.#`, see [wildcards](../reference/wildcards.md) |
+| Evaluation Wildcard | Which flake outputs to build, e.g. `packages.x86_64-linux.*`, see [wildcards](../reference/wildcards.md) |
 
 A task is one repository plus the outputs to build from that repository.
 

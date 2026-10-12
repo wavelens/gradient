@@ -90,7 +90,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     display_name: '',
     description: '',
     repository: '',
-    wildcard: 'packages.x86_64-linux.*',
+    wildcard: 'packages.x86_64-linux.**',
   };
 
   protected taskNameEditedByUser = false;
@@ -135,7 +135,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   openCreateDialog(): void {
-    this.newTask = { name: '', display_name: '', description: '', repository: '', wildcard: 'packages.x86_64-linux.*' };
+    this.newTask = { name: '', display_name: '', description: '', repository: '', wildcard: 'packages.x86_64-linux.**' };
     this.taskNameEditedByUser = false;
     this.nameCheckState.set('idle');
     this.createError.set(null);

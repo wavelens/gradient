@@ -32,7 +32,7 @@ const EVALS: ExpensiveEval[] = [
     project_display_name: '',
     task_name: 'ci',
     task_display_name: '',
-    name: 'packages.*.*',
+    name: 'packages.**',
     value: 800,
     unit: 'ms',
     worker: 'w-uuid-2',

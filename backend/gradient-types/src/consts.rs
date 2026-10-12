@@ -36,7 +36,7 @@ pub const FLAKE_START: [&str; 7] = [
     "hydraJobs",
 ];
 
-pub const DEFAULT_TASK_WILDCARD: &str = "packages.x86_64-linux.*";
+pub const DEFAULT_TASK_WILDCARD: &str = "packages.x86_64-linux.**";
 
 pub const NIXOS_CACHE_NAME: &str = "cache.nixos.org";
 pub const NIXOS_CACHE_URL: &str = "https://cache.nixos.org";

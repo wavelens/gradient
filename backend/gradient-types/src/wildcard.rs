@@ -19,31 +19,6 @@ impl Wildcard {
         &self.patterns
     }
 
-    pub fn get_eval_str(&self) -> String {
-        let mut includes: Vec<String> = Vec::new();
-        let mut excludes: Vec<String> = Vec::new();
-
-        for pattern in &self.patterns {
-            let (is_exclude, path) = match pattern.strip_prefix('!') {
-                Some(body) => (true, body),
-                None => (false, pattern.as_str()),
-            };
-
-            let nix_list = path_to_nix_list(path);
-            if is_exclude {
-                excludes.push(nix_list);
-            } else {
-                includes.push(nix_list);
-            }
-        }
-
-        format!(
-            "{{ \"include\" = [ {} ]; \"exclude\" = [ {} ]; }}",
-            includes.join(" "),
-            excludes.join(" "),
-        )
-    }
-
     pub fn matches(&self, attr: &str) -> bool {
         if attr.is_empty() {
             return false;
@@ -68,9 +43,55 @@ impl Wildcard {
 }
 
 enum Seg {
-    Star,
-    Hash,
+    Any,
+    Deep,
+    Glob(String),
     Lit(String),
+}
+
+pub fn segment_covers(pattern_segment: &str, name: &str) -> bool {
+    covers(&segment(pattern_segment), name)
+}
+
+fn segment(pattern_segment: &str) -> Seg {
+    match pattern_segment {
+        "*" => Seg::Any,
+        "**" => Seg::Deep,
+        seg if seg.contains('*') => Seg::Glob(seg.to_string()),
+        seg => Seg::Lit(seg.to_string()),
+    }
+}
+
+fn covers(seg: &Seg, name: &str) -> bool {
+    match seg {
+        Seg::Any | Seg::Deep => true,
+        Seg::Glob(glob) => glob_covers(glob, name),
+        Seg::Lit(lit) => lit == name,
+    }
+}
+
+fn glob_covers(glob: &str, name: &str) -> bool {
+    let (pattern, subject) = (glob.as_bytes(), name.as_bytes());
+    let (mut p, mut s) = (0, 0);
+    let mut backtrack: Option<(usize, usize)> = None;
+
+    while s < subject.len() {
+        if p < pattern.len() && pattern[p] == subject[s] {
+            p += 1;
+            s += 1;
+        } else if p < pattern.len() && pattern[p] == b'*' {
+            backtrack = Some((p, s));
+            p += 1;
+        } else if let Some((star, at)) = backtrack {
+            p = star + 1;
+            s = at + 1;
+            backtrack = Some((star, at + 1));
+        } else {
+            return false;
+        }
+    }
+
+    pattern[p..].iter().all(|b| *b == b'*')
 }
 
 fn unquote_segments(path: &str) -> Vec<String> {
@@ -93,14 +114,10 @@ fn pattern_segments(body: &str) -> Vec<Seg> {
         let next = if is_quoted {
             Seg::Lit(seg.trim_matches('"').to_string())
         } else {
-            match seg.as_str() {
-                "*" => Seg::Star,
-                "#" => Seg::Hash,
-                _ => Seg::Lit(seg),
-            }
+            segment(&seg)
         };
 
-        if matches!(next, Seg::Star) && matches!(out.last(), Some(Seg::Star)) {
+        if matches!(next, Seg::Deep) && matches!(out.last(), Some(Seg::Deep)) {
             continue;
         }
 
@@ -110,26 +127,19 @@ fn pattern_segments(body: &str) -> Vec<Seg> {
     out
 }
 
-/// A trailing `*` is matching one or two path elements. The evaluator is descending one extra
-/// level there. Every other segment is matching exactly one element.
 fn pattern_covers(pattern: &str, path: &[String]) -> bool {
     let segs = pattern_segments(pattern);
     let Some(last) = segs.last() else {
         return false;
     };
 
-    if matches!(last, Seg::Star) {
-        if path.len() != segs.len() && path.len() != segs.len() + 1 {
-            return false;
-        }
-    } else if path.len() != segs.len() {
-        return false;
-    }
+    let depth = if matches!(last, Seg::Deep) {
+        path.len() == segs.len() || path.len() == segs.len() + 1
+    } else {
+        path.len() == segs.len()
+    };
 
-    segs.iter().enumerate().all(|(i, seg)| match seg {
-        Seg::Star | Seg::Hash => true,
-        Seg::Lit(lit) => path[i] == *lit,
-    })
+    depth && segs.iter().zip(path).all(|(seg, name)| covers(seg, name))
 }
 
 fn split_segments(pattern: &str) -> Vec<(String, bool)> {
@@ -158,41 +168,17 @@ fn split_segments(pattern: &str) -> Vec<(String, bool)> {
     segments
 }
 
-fn path_to_nix_list(path: &str) -> String {
-    let raw_elems: Vec<String> = split_segments(path)
-        .into_iter()
-        .map(|(seg, is_quoted)| {
-            let content = if is_quoted {
-                seg.trim_matches('"').to_string()
-            } else {
-                seg
-            };
-            format!("\"{}\"", content)
-        })
-        .collect();
-
-    // `*.*` is identical to `*` because `*` is recursive. `#` is not recursive.
-    // Each `#` is targeting its own depth level and must stay uncollapsed.
-    let mut elems: Vec<String> = Vec::new();
-    for elem in raw_elems {
-        if elem == "\"*\"" && elems.last().is_some_and(|l| l == "\"*\"") {
-            continue;
-        }
-        elems.push(elem);
-    }
-
-    format!("[ {} ]", elems.join(" "))
-}
-
 fn validate_segments(path: &str) -> Result<(), InputError> {
     for (seg, is_quoted) in split_segments(path) {
         if is_quoted {
             let inner = seg.trim_matches('"');
-            if matches!(inner, "*" | "#" | "!") {
+            if matches!(inner, "*" | "**" | "#" | "!") {
                 return Err(InputError::EvaluationWildcardBareSpecialChar);
             }
         } else if seg.starts_with('!') {
             return Err(InputError::EvaluationWildcardBareSpecialChar);
+        } else if seg.contains('#') {
+            return Err(InputError::EvaluationWildcardHashRemoved);
         }
     }
     Ok(())
@@ -219,13 +205,9 @@ fn validate_pattern(part: &str) -> Result<(), InputError> {
         return Err(InputError::EvaluationWildcardStartsWithPeriod);
     }
 
-    if body == "#" {
-        return Err(InputError::EvaluationWildcardBareSpecialChar);
-    }
-
     if is_exclusion {
         for (seg, is_quoted) in split_segments(body) {
-            if !is_quoted && matches!(seg.as_str(), "*" | "#") {
+            if !is_quoted && seg.contains('*') {
                 return Err(InputError::EvaluationWildcardExclusionWildcard);
             }
         }
@@ -268,12 +250,12 @@ mod tests {
     #[test]
     fn patterns_round_trip_through_to_string() {
         let cases = [
-            ("packages.*.*,checks.*.*", "packages.*.*,checks.*.*"),
-            ("packages.*.*, checks.*.*", "packages.*.*,checks.*.*"),
+            ("packages.**,checks.**", "packages.**,checks.**"),
+            ("packages.**, checks.**", "packages.**,checks.**"),
             (r#"my."wild.card".is.*"#, r#"my."wild.card".is.*"#),
             (
-                r#"packages.*.*,!packages.x86_64-linux.broken,my."wild.card".*"#,
-                r#"packages.*.*,!packages.x86_64-linux.broken,my."wild.card".*"#,
+                r#"packages.x86_64-*.*,!packages.x86_64-linux.broken,my."wild.card".**"#,
+                r#"packages.x86_64-*.*,!packages.x86_64-linux.broken,my."wild.card".**"#,
             ),
         ];
         for (input, expected) in cases {
@@ -281,14 +263,14 @@ mod tests {
             assert_eq!(w.to_string(), expected, "{input}");
         }
         assert_eq!(
-            "packages.*.*, checks.*.*"
+            "packages.**, checks.**"
                 .parse::<Wildcard>()
                 .unwrap()
                 .patterns(),
-            &["packages.*.*", "checks.*.*"]
+            &["packages.**", "checks.**"]
         );
         assert_eq!(
-            r#"packages.*.*,!packages.x86_64-linux."broken.pkg""#
+            r#"packages.**,!packages.x86_64-linux."broken.pkg""#
                 .parse::<Wildcard>()
                 .unwrap()
                 .patterns()
@@ -298,40 +280,12 @@ mod tests {
     }
 
     #[test]
-    fn eval_str_renders_include_and_exclude_sets() {
-        let cases = [
-            (
-                "packages.*.*",
-                r#"{ "include" = [ [ "packages" "*" ] ]; "exclude" = [  ]; }"#,
-            ),
-            ("*", r#"{ "include" = [ [ "*" ] ]; "exclude" = [  ]; }"#),
-            (
-                "packages.*.*,!packages.x86_64-linux.broken",
-                r#"{ "include" = [ [ "packages" "*" ] ]; "exclude" = [ [ "packages" "x86_64-linux" "broken" ] ]; }"#,
-            ),
-            (
-                r#"my."wild.card".*"#,
-                r#"{ "include" = [ [ "my" "wild.card" "*" ] ]; "exclude" = [  ]; }"#,
-            ),
-            (
-                "packages.*.*.*,checks.*",
-                r#"{ "include" = [ [ "packages" "*" ] [ "checks" "*" ] ]; "exclude" = [  ]; }"#,
-            ),
-        ];
-        for (input, expected) in cases {
-            assert_eq!(
-                input.parse::<Wildcard>().unwrap().get_eval_str(),
-                expected,
-                "{input}"
-            );
-        }
-    }
-
-    #[test]
     fn parse_rejects_malformed_patterns() {
         let cases = [
             "my.*,!my.ignored.*",
-            "packages.*.*,!packages.x86_64-linux.#",
+            "packages.**,!packages.x86_64-linux.*",
+            "packages.x86_64-linux.#",
+            "packages.x86-*.#",
             "#",
             "!",
             "my.!ignored",
@@ -339,7 +293,7 @@ mod tests {
             r#"my."*".not.allowed.*"#,
             r##"my."#".something"##,
             r#"my."!".something"#,
-            r#"packages.*.*,!my."*".foo"#,
+            r#"packages.**,!my."*".foo"#,
             "",
         ];
         for input in cases {
@@ -351,26 +305,38 @@ mod tests {
     fn parse_reports_the_failing_rule() {
         let cases = [
             (
-                "packages.*.*,,checks.*.*",
+                "packages.**,,checks.**",
                 InputError::EvaluationWildcardConsecutiveCommas,
             ),
-            (" packages.*.*", InputError::EvaluationWildcardWhitespace),
-            ("packages.*.* ", InputError::EvaluationWildcardWhitespace),
+            (" packages.**", InputError::EvaluationWildcardWhitespace),
+            ("packages.** ", InputError::EvaluationWildcardWhitespace),
             (
-                "packages .*.*",
+                "packages .**",
                 InputError::EvaluationWildcardInternalWhitespace,
             ),
             (
-                ".packages.*.*",
+                ".packages.**",
                 InputError::EvaluationWildcardStartsWithPeriod,
             ),
             (
-                "packages.*.*,!",
+                "packages.**,!",
                 InputError::EvaluationWildcardBareSpecialChar,
             ),
             (
-                "packages.*.*,!.packages",
+                "packages.**,!.packages",
                 InputError::EvaluationWildcardStartsWithPeriod,
+            ),
+            (
+                "packages.x86_64-linux.#",
+                InputError::EvaluationWildcardHashRemoved,
+            ),
+            (
+                "packages.x86_64-linux.*#",
+                InputError::EvaluationWildcardHashRemoved,
+            ),
+            (
+                "packages.**,!packages.aarch64-*",
+                InputError::EvaluationWildcardExclusionWildcard,
             ),
         ];
         for (input, expected) in cases {
@@ -409,28 +375,31 @@ mod matches_tests {
             ("my.*.test", "my.test", false),
             ("my.*.test", "my.foo.bar.test", false),
             (
-                "packages.x86_64-linux.#",
+                "packages.x86_64-linux.*",
                 "packages.x86_64-linux.hello",
                 true,
             ),
             (
-                "packages.x86_64-linux.#",
+                "packages.x86_64-linux.*",
                 "packages.x86_64-linux.py.hello",
                 false,
             ),
-            ("packages.x86_64-linux.#", "packages.x86_64-linux", false),
+            ("packages.x86_64-linux.*", "packages.x86_64-linux", false),
             ("packages.*", "packages.x86_64-linux", true),
-            ("packages.*", "packages.x86_64-linux.hello", true),
             ("packages.*", "packages", false),
-            ("packages.*", "packages.x86_64-linux.py.hello", false),
-            ("packages.*.*", "packages.x86_64-linux", true),
             ("packages.*.*", "packages.x86_64-linux.hello", true),
-            ("packages.*.*", "packages.x86_64-linux.py.hello", false),
+            ("packages.*.*", "packages.x86_64-linux", false),
+            ("packages.**", "packages.x86_64-linux", true),
+            ("packages.**", "packages.x86_64-linux.hello", true),
+            ("packages.**", "packages.x86_64-linux.py.hello", false),
+            ("**.**", "packages.x86_64-linux", true),
+            ("**", "hello", true),
+            ("**", "packages.hello", true),
+            ("**", "packages.x86_64-linux.hello", false),
             ("*", "hello", true),
-            ("*", "packages.hello", true),
-            ("*", "packages.x86_64-linux.hello", false),
+            ("*", "packages.hello", false),
             ("*", "", false),
-            ("packages.*.*", "", false),
+            ("packages.*", "", false),
         ];
         for (pattern, attr, expected) in cases {
             assert_eq!(m(pattern, attr), expected, "{pattern} vs {attr}");
@@ -438,15 +407,52 @@ mod matches_tests {
     }
 
     #[test]
+    fn a_glob_segment_matches_within_its_own_level() {
+        let cases = [
+            (
+                "packages.x86_64-*.hello",
+                "packages.x86_64-linux.hello",
+                true,
+            ),
+            (
+                "packages.x86_64-*.hello",
+                "packages.aarch64-linux.hello",
+                false,
+            ),
+            (
+                "packages.*-linux.hello",
+                "packages.aarch64-linux.hello",
+                true,
+            ),
+            ("packages.-*-.hello", "packages.-linux-.hello", true),
+            ("packages.-*-.hello", "packages.-linux.hello", false),
+            ("packages.x86*-*", "packages.x86_64-linux", true),
+            (
+                "packages.*.*-linux.*",
+                "packages.foo.x86_64-linux.hello",
+                true,
+            ),
+            (
+                "packages.*.*-linux.*",
+                "packages.foo.x86_64-linux.py.hello",
+                false,
+            ),
+        ];
+        for (pattern, attr, expected) in cases {
+            assert_eq!(m(pattern, attr), expected, "{pattern} vs {attr}");
+        }
+        assert!(m("packages.**", "packages.x86_64-linux.hello"));
+        assert!(!m("packages.*", "packages.x86_64-linux.hello"));
+    }
+
+    #[test]
     fn include_and_exclude_patterns_combine() {
-        let any: Wildcard = "packages.*.*,checks.*.*".parse().unwrap();
+        let any: Wildcard = "packages.**,checks.**".parse().unwrap();
         assert!(any.matches("packages.x86_64-linux.hello"));
         assert!(any.matches("checks.x86_64-linux.fmt"));
         assert!(!any.matches("devShells.x86_64-linux.default"));
 
-        let excluding: Wildcard = "packages.*.*,!packages.x86_64-linux.broken"
-            .parse()
-            .unwrap();
+        let excluding: Wildcard = "packages.**,!packages.x86_64-linux.broken".parse().unwrap();
         assert!(excluding.matches("packages.x86_64-linux.hello"));
         assert!(!excluding.matches("packages.x86_64-linux.broken"));
         assert!(excluding.matches("packages.aarch64-linux.broken"));
@@ -467,7 +473,7 @@ mod matches_tests {
             ),
             (r#"my."wild.card".test"#, r#"my."wild.card".test"#, true),
             (r#"my."wild.card".test"#, "my.wild.card.test", false),
-            ("packages.*.*", r#"packages."x86_64-linux".hello"#, true),
+            ("packages.**", r#"packages."x86_64-linux".hello"#, true),
         ];
         for (pattern, attr, expected) in cases {
             assert_eq!(m(pattern, attr), expected, "{pattern} vs {attr}");

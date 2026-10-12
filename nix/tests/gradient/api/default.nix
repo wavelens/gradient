@@ -90,7 +90,7 @@ in {
                 project = "stateproject";
                 display_name = "State Task";
                 repository = "git@github.com:Wavelens/Gradient.git";
-                wildcard = "packages.x86_64-linux.*";
+                wildcard = "packages.x86_64-linux.**";
                 concurrency = "hard_abort";
                 sign_cache = false;
                 keep_evaluations = 5;

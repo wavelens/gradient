@@ -26,19 +26,19 @@ pub fn default_nix_system() -> String {
     format!("{}-{}", std::env::consts::ARCH, os)
 }
 
-/// Resolution is mirroring `nix` default installables. A bare package name is prefixed with
-/// `packages.<system>.`. An empty attr is becoming the wildcard `packages.<system>.#`.
+/// Resolution mirrors `nix` default installables. A bare package name gets `packages.<system>.`
+/// in front. An empty attr becomes the wildcard `packages.<system>.*`.
 pub fn qualify_attr(attr: &str, system: &str) -> String {
     let (excl, body) = attr
         .strip_prefix('!')
         .map(|r| ("!", r))
         .unwrap_or(("", attr));
     if body.is_empty() {
-        return format!("{excl}packages.{system}.#");
+        return format!("{excl}packages.{system}.*");
     }
 
     let head = body.split('.').next().unwrap_or("");
-    if head == "*" || head == "#" || OUTPUT_CATEGORIES.contains(&head) {
+    if matches!(head, "*" | "**") || OUTPUT_CATEGORIES.contains(&head) {
         format!("{excl}{body}")
     } else {
         format!("{excl}packages.{system}.{body}")
@@ -118,6 +118,11 @@ mod tests {
             "checks.x86_64-linux.*"
         );
         assert_eq!(qualify_attr("*", "x86_64-linux"), "*");
+        assert_eq!(qualify_attr("**", "x86_64-linux"), "**");
+        assert_eq!(
+            qualify_attr("hello-*", "x86_64-linux"),
+            "packages.x86_64-linux.hello-*"
+        );
         assert_eq!(
             qualify_attr("nixosConfigurations.foo", "x86_64-linux"),
             "nixosConfigurations.foo"
@@ -126,7 +131,7 @@ mod tests {
 
     #[test]
     fn qualify_empty_attr_is_all_packages_and_keeps_exclusion() {
-        assert_eq!(qualify_attr("", "x86_64-linux"), "packages.x86_64-linux.#");
+        assert_eq!(qualify_attr("", "x86_64-linux"), "packages.x86_64-linux.*");
         assert_eq!(
             qualify_attr("!uxc", "x86_64-linux"),
             "!packages.x86_64-linux.uxc"

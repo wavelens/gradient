@@ -68,10 +68,8 @@ pub fn eval_jobs(flake_ref: &str, wildcards: &[String], mut sink: impl FnMut(Job
     Ok(())
 }
 
-/// An exclusion is pruning across the whole include set. Its presence must keep every pattern on
-/// the discovery path.
 fn is_concrete_attr(pattern: &str) -> bool {
-    !pattern.starts_with('!') && pattern.split('.').all(|seg| seg != "*" && seg != "#")
+    !pattern.starts_with('!') && pattern.split('.').all(|seg| !seg.contains('*'))
 }
 
 #[cfg(test)]

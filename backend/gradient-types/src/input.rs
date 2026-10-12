@@ -38,10 +38,14 @@ pub enum InputError {
     EvaluationWildcardEmpty,
     #[error("Evaluation wildcard cannot start with a period")]
     EvaluationWildcardStartsWithPeriod,
-    #[error("Evaluation wildcard pattern cannot be a bare special character (`!`, `*`, or `#`)")]
+    #[error("Evaluation wildcard pattern cannot be a bare special character (`!`, `*`, or `**`)")]
     EvaluationWildcardBareSpecialChar,
-    #[error("Exclusion patterns cannot contain wildcard segments (`*` or `#`)")]
+    #[error("Exclusion patterns cannot contain wildcard segments (`*` or `**`)")]
     EvaluationWildcardExclusionWildcard,
+    #[error(
+        "Evaluation wildcard cannot use `#`; pick `*` for a single level or `**` for nested outputs"
+    )]
+    EvaluationWildcardHashRemoved,
     #[error("Name cannot be empty")]
     NameEmpty,
     #[error("Name must be lowercase")]

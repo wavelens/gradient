@@ -16,13 +16,13 @@ flowchart LR
 - **Frames:** a `u32` little-endian length prefix plus an rkyv payload (`gradient-eval/src/ipc.rs`).
 - **Version byte:** subprocesses write `EVAL_IPC_VERSION` (currently 10) before the first frame. A binary swapped mid-evaluation can no longer pass the handshake and send undecodable frames.
 - **Responses:** request and response pair up. `Stats` ticks and [build requests](#import-from-derivation) can arrive before the response. `List` responses hold the derivation path of each attribute found, resolved in the subprocess that forced the attribute.
-- **Shards:** `Plan` will split each include at its first wildcard.
-    - A wildcard followed by more segments will yield one sub-pattern per child (`packages.*.hello` -> `packages.x86_64-linux.hello`).
-    - A trailing wildcard will yield the unchanged pattern plus its child names (`only`), read without forcing any child.
+- **Shards:** `Plan` can split each include at its first wildcard.
+    - Wildcards followed by more segments give a sub-pattern per child (`packages.**.hello` -> `packages.x86_64-linux.hello`).
+    - Wildcards at the end give the unchanged pattern and its child names (`only`), read without forcing any child.
     - The parent can list those names in batches of `names / (pool * 4)` (at most 64).
-    - `List` will limit the first wildcard to the batch.
-- **Deferred sets:** `List` will never force the children of a nested set under a trailing `*` (all checks of one system).
-    - The set will come back in `deferred` as a `#` shard over its children.
+    - `List` can limit the first wildcard to the batch.
+- **Deferred sets:** `List` can skip the children of a nested set under a trailing `**` (all checks of a system).
+    - Those children appear in `deferred` as a `*` shard.
     - The parent can queue those names in batches.
     - One heavy set will spread across the pool instead of keeping one subprocess busy while the rest sit idle.
 - **Warm walker:** A subprocess can keep one walker (locked flake plus open eval cache) across consecutive requests for the same repository. A Plan / List sequence can pay for the lock and the cache open only once.
