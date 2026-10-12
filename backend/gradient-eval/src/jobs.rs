@@ -100,8 +100,9 @@ mod tests {
         assert!(is_concrete_attr("packages.x86_64-linux.gradient-cli-full"));
         assert!(is_concrete_attr("gradient-cli-full"));
         assert!(!is_concrete_attr("packages.x86_64-linux.*"));
-        assert!(!is_concrete_attr("checks.*.*"));
-        assert!(!is_concrete_attr("packages.x86_64-linux.#"));
+        assert!(!is_concrete_attr("packages.x86_64-linux.**"));
+        assert!(!is_concrete_attr("packages.*.hello"));
+        assert!(!is_concrete_attr("packages.x86_64-*.hello"));
         assert!(!is_concrete_attr("!packages.x86_64-linux.hello"));
     }
 

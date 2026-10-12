@@ -892,7 +892,7 @@ mod tests {
     }
 
     #[test]
-    fn split_discovery_defers_each_nested_set_under_a_trailing_star() {
+    fn split_discovery_defers_each_nested_set_under_a_trailing_deep_star() {
         let root = tree();
         let (attrs, deferred, _) = discover_split(
             &&root,
@@ -914,7 +914,7 @@ mod tests {
 
         let (attrs, deferred, _) = discover_split(
             &&root,
-            &[segs(&["packages", "x86_64-linux", "*"])],
+            &[segs(&["packages", "x86_64-linux", "**"])],
             &[],
             None,
         );
@@ -931,6 +931,24 @@ mod tests {
                 &["packages", "x86_64-linux", "nested", "*"],
                 &["inner"]
             )]
+        );
+
+        let (attrs, deferred, _) = discover_split(
+            &&root,
+            &[segs(&["packages", "x86_64-linux", "*"])],
+            &[],
+            None,
+        );
+        assert_eq!(
+            attrs,
+            vec![
+                "packages.x86_64-linux.cowsay",
+                "packages.x86_64-linux.hello"
+            ]
+        );
+        assert!(
+            deferred.is_empty(),
+            "a `*` stays at its level, so no nested set: {deferred:?}"
         );
     }
 
