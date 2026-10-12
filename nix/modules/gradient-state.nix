@@ -5,19 +5,6 @@
  */
 
 { lib, config, options, ... }: with lib; let
-  renamedStateOptions = [
-    { group = "caches"; from = "upstreams"; to = "upstream_caches"; }
-    { group = "integrations"; from = "forge_type"; to = "git_host_type"; }
-  ];
-
-  stateAlias = from: to: doRename {
-    from = [ from ];
-    to = [ to ];
-    visible = false;
-    warn = false;
-    use = x: x;
-  };
-
   upstreamType = types.submodule {
     options = {
       type = mkOption {
@@ -440,8 +427,6 @@
   });
 
   integrationType = types.submodule ({ config, name, ... }: {
-    imports = [ (stateAlias "forge_type" "git_host_type") ];
-
     options = {
       name = mkOption {
         type = types.str;
@@ -840,8 +825,6 @@
   };
 
   cacheType = types.submodule ({ config, name, ... }: {
-    imports = [ (stateAlias "upstreams" "upstream_caches") ];
-
     options = {
       name = mkOption {
         type = types.str;
@@ -1332,15 +1315,6 @@ in
       description = "Declarative Gradient state: users, projects, tasks, caches and more.";
     };
   };
-
-  config.warnings = concatMap (def:
-    concatMap (r:
-      let entries = def.value.${r.group} or { }; in
-      mapAttrsToList (entry: _:
-        "The option `services.gradient.state.${r.group}.${entry}.${r.from}' defined in ${def.file} has been renamed to `${r.to}'."
-      ) (filterAttrs (_: v: isAttrs v && v ? ${r.from}) (if isAttrs entries then entries else { }))
-    ) renamedStateOptions
-  ) options.services.gradient.state.definitionsWithLocations;
 
   config.assertions = let
     bad = flatten (mapAttrsToList (pName: p:

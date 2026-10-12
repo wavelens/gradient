@@ -126,7 +126,6 @@ in {
   imports = [
     ./gradient-state.nix
     ./gradient-worker.nix
-    ./renamed-options.nix
     { options.services.gradient = serverOptions.options; }
   ];
 
