@@ -559,7 +559,7 @@ assert set(releaser["permissions"]) == {"viewProject", "triggerEvaluation"}, rel
 proj = api("GET", "tasks/stateproject/statetask", token=sa_token)
 assert proj["concurrency"] == "hard_abort", proj
 assert proj["sign_cache"] is False and proj["keep_evaluations"] == 5, proj
-assert proj["wildcard"] == "packages.x86_64-linux.*", proj
+assert proj["wildcard"] == "packages.x86_64-linux.**", proj
 trig_types = {t["type"] for t in api("GET", "tasks/stateproject/statetask/triggers", token=sa_token)}
 assert {"polling", "time"} <= trig_types, trig_types
 
