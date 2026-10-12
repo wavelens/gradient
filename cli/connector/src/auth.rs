@@ -1,3 +1,7 @@
+use crate::api::{
+    CheckUsernameRequest, CliDevicePollRequest, CliDeviceStartResponse, MakeLoginRequest,
+    MakeUserRequest,
+};
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -11,27 +15,8 @@ pub enum CliPollOutcome {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MakeUserRequest {
-    pub username: String,
-    pub name: String,
-    pub email: String,
-    pub password: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MakeLoginRequest {
-    pub loginname: String,
-    pub password: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct VerifyEmailRequest {
     pub token: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ResendRequest {
-    pub username: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -42,21 +27,6 @@ pub struct OidcLoginRequest {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct OidcRedirect {
     pub url: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CliDeviceStartResponse {
-    pub device_code: String,
-    pub user_code: String,
-    pub verification_uri: String,
-    pub verification_uri_complete: String,
-    pub expires_in: i64,
-    pub interval: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CliDevicePollRequest {
-    pub device_code: String,
 }
 
 pub struct AuthApi<'a>(pub(crate) &'a Client);
@@ -113,7 +83,10 @@ impl AuthApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn resend_verification(&self, body: ResendRequest) -> Result<String, ConnectorError> {
+    pub async fn resend_verification(
+        &self,
+        body: CheckUsernameRequest,
+    ) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

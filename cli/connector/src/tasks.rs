@@ -1,148 +1,21 @@
-use crate::{Client, ConnectorError, PaginatedListResponse, http};
+use crate::api::{
+    CreateTriggerRequest, EntryPointMetricsResponse, EvaluationSummary, MakeTaskRequest,
+    PaginatedEntryPoints, PaginatedTaskResponse, PatchTaskRequest, TaskDetailsResponse,
+    TaskMetricsResponse, TaskResponse, TriggerOut, UpdateTriggerRequest,
+};
+use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TaskResponse {
-    pub id: String,
-    pub name: String,
-    pub display_name: String,
-    pub project: String,
-    pub repository: String,
-    pub wildcard: String,
-    pub active: bool,
-    pub created_by: String,
-    pub created_at: String,
-    pub managed: bool,
-    pub can_edit: bool,
-    pub can_trigger: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MakeTaskRequest {
-    pub name: String,
-    pub display_name: String,
-    pub description: String,
-    pub repository: String,
-    pub wildcard: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct PatchTaskRequest {
-    pub name: Option<String>,
-    pub display_name: Option<String>,
-    pub description: Option<String>,
-    pub repository: Option<String>,
-    pub wildcard: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TaskDetails {
-    pub id: String,
-    pub name: String,
-    pub display_name: String,
-    pub description: String,
-    pub repository: String,
-    pub wildcard: String,
-    pub active: bool,
-    pub created_at: String,
-    pub keep_evaluations: i64,
-    pub last_evaluations: Vec<EvaluationSummary>,
-    pub can_edit: bool,
-    pub can_trigger: bool,
-    pub managed: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct BuildStatusCounts {
-    pub completed: i64,
-    pub failed: i64,
-    pub building: i64,
-    pub queued: i64,
-    pub substituted: i64,
-    pub aborted: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct EvaluationSummary {
-    pub id: String,
-    pub commit: String,
-    pub commit_message: Option<String>,
-    pub status: String,
-    pub triggered_by: Option<String>,
-    pub total_builds: i64,
-    pub builds: BuildStatusCounts,
-    pub errors: i64,
-    pub warnings: i64,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-/// `eval` is the Nix attribute path and the server's page ordering field. There is no `name`.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct EntryPoint {
-    pub id: String,
-    pub build_id: String,
-    pub eval: String,
-    pub derivation_path: String,
-    pub build_status: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct EntryPointPage {
-    pub entry_points: Vec<EntryPoint>,
-    pub total: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TaskMetrics {
-    pub keep_evaluations: i64,
-    pub points: Vec<serde_json::Value>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct EntryPointMetrics {
-    pub eval: String,
-    pub keep_evaluations: i64,
-    pub points: Vec<serde_json::Value>,
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TaskIntegration {
     pub integration_id: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Trigger {
-    pub id: String,
-    pub task: String,
-    #[serde(rename = "type")]
-    pub trigger_type: String,
-    pub config: serde_json::Value,
-    pub active: bool,
-    pub last_fired_at: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub integration: Option<serde_json::Value>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MakeTriggerRequest {
-    #[serde(rename = "type")]
-    pub trigger_type: String,
-    pub config: serde_json::Value,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct PatchTriggerRequest {
-    pub config: Option<serde_json::Value>,
-    pub active: Option<bool>,
-}
-
 pub struct TasksApi<'a>(pub(crate) &'a Client);
 
 impl TasksApi<'_> {
-    pub async fn list(&self, project: &str) -> Result<PaginatedListResponse, ConnectorError> {
+    pub async fn list(&self, project: &str) -> Result<PaginatedTaskResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -154,7 +27,7 @@ impl TasksApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn available(&self, project: &str) -> Result<PaginatedListResponse, ConnectorError> {
+    pub async fn available(&self, project: &str, name: &str) -> Result<bool, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -162,7 +35,8 @@ impl TasksApi<'_> {
             Method::GET,
             &format!("tasks/{project}/available"),
             true,
-        )?;
+        )?
+        .query(&[("name", name)]);
         http::decode(req.send().await?).await
     }
 
@@ -225,7 +99,11 @@ impl TasksApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn details(&self, project: &str, proj: &str) -> Result<TaskDetails, ConnectorError> {
+    pub async fn details(
+        &self,
+        project: &str,
+        proj: &str,
+    ) -> Result<TaskDetailsResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -244,7 +122,7 @@ impl TasksApi<'_> {
         evaluation_id: Option<&str>,
         limit: Option<u64>,
         offset: Option<u64>,
-    ) -> Result<EntryPointPage, ConnectorError> {
+    ) -> Result<PaginatedEntryPoints, ConnectorError> {
         let mut query: Vec<String> = Vec::new();
         if let Some(evaluation_id) = evaluation_id {
             query.push(format!("evaluation_id={evaluation_id}"));
@@ -367,7 +245,11 @@ impl TasksApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn metrics(&self, project: &str, proj: &str) -> Result<TaskMetrics, ConnectorError> {
+    pub async fn metrics(
+        &self,
+        project: &str,
+        proj: &str,
+    ) -> Result<TaskMetricsResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -383,7 +265,7 @@ impl TasksApi<'_> {
         &self,
         project: &str,
         proj: &str,
-    ) -> Result<Vec<EntryPointMetrics>, ConnectorError> {
+    ) -> Result<Vec<EntryPointMetricsResponse>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -442,7 +324,7 @@ impl TasksApi<'_> {
         &self,
         project: &str,
         proj: &str,
-    ) -> Result<Vec<Trigger>, ConnectorError> {
+    ) -> Result<Vec<TriggerOut>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -458,7 +340,7 @@ impl TasksApi<'_> {
         &self,
         project: &str,
         proj: &str,
-        body: MakeTriggerRequest,
+        body: CreateTriggerRequest,
     ) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
@@ -477,7 +359,7 @@ impl TasksApi<'_> {
         project: &str,
         proj: &str,
         id: &str,
-    ) -> Result<Trigger, ConnectorError> {
+    ) -> Result<TriggerOut, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -494,7 +376,7 @@ impl TasksApi<'_> {
         project: &str,
         proj: &str,
         id: &str,
-        body: PatchTriggerRequest,
+        body: UpdateTriggerRequest,
     ) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),

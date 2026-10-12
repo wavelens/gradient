@@ -1,50 +1,11 @@
+use crate::api::{CreateWebhookRequest, DeliveryListItem, UpdateWebhookRequest, WebhookResponse};
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Webhook {
-    pub id: String,
-    pub project: String,
-    pub name: String,
-    pub url: String,
-    pub events: Vec<String>,
-    pub active: bool,
-    pub created_by: String,
-    pub created_at: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MakeWebhookRequest {
-    pub name: String,
-    pub url: String,
-    pub secret: String,
-    pub events: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct PatchWebhookRequest {
-    pub name: Option<String>,
-    pub url: Option<String>,
-    pub secret: Option<String>,
-    pub events: Option<Vec<String>>,
-    pub active: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct WebhookDelivery {
-    pub id: String,
-    pub event: String,
-    pub success: bool,
-    pub response_status: Option<i32>,
-    pub error_message: Option<String>,
-    pub duration_ms: i64,
-    pub delivered_at: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaginatedDeliveries {
-    pub items: Vec<WebhookDelivery>,
+    pub items: Vec<DeliveryListItem>,
     pub total: i64,
     pub page: i64,
     pub per_page: i64,
@@ -53,7 +14,7 @@ pub struct PaginatedDeliveries {
 pub struct WebhooksApi<'a>(pub(crate) &'a Client);
 
 impl WebhooksApi<'_> {
-    pub async fn list(&self, project: &str) -> Result<Vec<Webhook>, ConnectorError> {
+    pub async fn list(&self, project: &str) -> Result<Vec<WebhookResponse>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -68,8 +29,8 @@ impl WebhooksApi<'_> {
     pub async fn create(
         &self,
         project: &str,
-        body: MakeWebhookRequest,
-    ) -> Result<Webhook, ConnectorError> {
+        body: CreateWebhookRequest,
+    ) -> Result<WebhookResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -82,7 +43,11 @@ impl WebhooksApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn get(&self, project: &str, webhook: &str) -> Result<Webhook, ConnectorError> {
+    pub async fn get(
+        &self,
+        project: &str,
+        webhook: &str,
+    ) -> Result<WebhookResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -98,8 +63,8 @@ impl WebhooksApi<'_> {
         &self,
         project: &str,
         webhook: &str,
-        body: PatchWebhookRequest,
-    ) -> Result<Webhook, ConnectorError> {
+        body: UpdateWebhookRequest,
+    ) -> Result<WebhookResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

@@ -8,7 +8,7 @@ use crate::config::{ConfigKey, load_config};
 use crate::input::client_from_config;
 use crate::output::Output;
 use crate::tui::watch::eval_is_terminal;
-use connector::evals::EvaluationResponse;
+use connector::api::EvaluationResponse;
 use connector::{Client, ConnectorError};
 use futures::StreamExt;
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -382,9 +382,9 @@ impl GradientMcp {
             .map_err(to_error)?;
 
         Ok(WatchReport {
-            finished: eval_is_terminal(&eval.status),
+            finished: eval_is_terminal(eval.status),
             evaluation,
-            status: eval.status,
+            status: eval.status.to_string(),
             error: eval.error,
             entry_points,
         })
@@ -397,9 +397,13 @@ impl GradientMcp {
             .evaluations(project, task)
             .await
             .map_err(to_error)?;
-        evaluations.into_iter().next().map(|e| e.id).ok_or_else(|| {
-            CallToolResult::error(vec![ContentBlock::text("task has no evaluations")])
-        })
+        evaluations
+            .into_iter()
+            .next()
+            .map(|e| e.id.to_string())
+            .ok_or_else(|| {
+                CallToolResult::error(vec![ContentBlock::text("task has no evaluations")])
+            })
     }
 
     async fn await_terminal(
@@ -411,7 +415,7 @@ impl GradientMcp {
         loop {
             let polled = self.client.evals().get(evaluation).await;
             match &polled {
-                Ok(eval) if eval_is_terminal(&eval.status) => return polled,
+                Ok(eval) if eval_is_terminal(eval.status) => return polled,
                 Err(e) if !is_transient(e) => return polled,
                 _ => {}
             }
@@ -449,10 +453,10 @@ impl GradientMcp {
             let fetched = page.entry_points.len();
             statuses.extend(page.entry_points.into_iter().map(|ep| EntryPointStatus {
                 attr: ep.eval,
-                build_id: ep.build_id,
-                build_status: ep.build_status,
+                build_id: ep.build_id.to_string(),
+                build_status: ep.build_status.to_string(),
             }));
-            if fetched == 0 || statuses.len() as u64 >= page.total {
+            if fetched == 0 || i64::try_from(statuses.len()).is_ok_and(|seen| seen >= page.total) {
                 return Ok(statuses);
             }
         }

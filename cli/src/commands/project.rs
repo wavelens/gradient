@@ -10,8 +10,8 @@ use crate::input::{ask_for_choice, client_from_config, handle_input, is_interact
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
-use connector::projects::{
-    AddUserRequest, MakeProjectRequest, PatchProjectRequest, RemoveUserRequest,
+use connector::api::{
+    AddMemberRequest, MakeProjectRequest, PatchProjectRequest, RemoveMemberRequest,
 };
 use connector::{Client, ConnectorError};
 
@@ -158,9 +158,11 @@ pub async fn handle(cmd: Commands, out: Output) {
             match client
                 .projects()
                 .create(MakeProjectRequest {
-                    name: name.clone(),
-                    display_name: input.get("Display Name"),
+                    name: name.clone().into(),
+                    display_name: input.get("Display Name").into(),
                     description: input.get("Description"),
+                    hide_build_requests: None,
+                    public: None,
                 })
                 .await
             {
@@ -245,9 +247,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .update(
                     &project,
                     PatchProjectRequest {
-                        name: Some(input.get("Name")),
+                        name: Some(input.get("Name").into()),
                         display_name: Some(input.get("Display Name")),
                         description: Some(input.get("Description")),
+                        hide_build_requests: None,
                     },
                 )
                 .await
@@ -315,7 +318,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         .projects()
                         .add_user(
                             &project,
-                            AddUserRequest {
+                            AddMemberRequest {
                                 user,
                                 role: role.unwrap_or_else(|| "Write".to_string()),
                             },
@@ -333,7 +336,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                 UserCommands::Remove { user } => {
                     match client
                         .projects()
-                        .remove_user(&project, RemoveUserRequest { user })
+                        .remove_user(&project, RemoveMemberRequest { user })
                         .await
                     {
                         Ok(_) => {

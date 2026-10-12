@@ -6,7 +6,7 @@
 
 use crate::logfmt;
 use crate::output::Output;
-use connector::evals::EvalMessage;
+use connector::api::EvaluationMessageResponse;
 use futures::StreamExt;
 use futures::pin_mut;
 use std::collections::HashSet;
@@ -64,18 +64,18 @@ async fn flush_messages(
     let Ok(msgs) = client.evals().messages(evaluation).await else {
         return;
     };
-    for m in msgs.iter().filter(|m| seen.insert(m.id.clone())) {
+    for m in msgs.iter().filter(|m| seen.insert(m.id.to_string())) {
         emit_message(m, out);
     }
 }
 
-fn emit_message(m: &EvalMessage, out: Output) {
+fn emit_message(m: &EvaluationMessageResponse, out: Output) {
     if out.is_json() {
         println!(
             "{}",
             serde_json::json!({"error": false, "message": m.message, "level": m.level})
         );
     } else {
-        println!("{}", logfmt::eval_message_line(&m.level, &m.message));
+        println!("{}", logfmt::eval_message_line(m.level, &m.message));
     }
 }

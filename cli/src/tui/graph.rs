@@ -5,7 +5,7 @@
  */
 
 use crate::tui::View;
-use connector::builds::BuildGraph;
+use connector::api::BuildGraph;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use std::collections::HashMap;
 
@@ -39,23 +39,12 @@ impl GraphTree {
     }
 
     pub fn from_build_graph(g: &BuildGraph) -> Self {
-        let nodes = g.nodes.iter().filter_map(|n| {
-            let id = n.get("id")?.as_str()?.to_string();
-            let label = n
-                .get("name")
-                .and_then(|v| v.as_str())
-                .or_else(|| n.get("path").and_then(|v| v.as_str()))
-                .unwrap_or("?")
-                .to_string();
-            Some((id, label))
-        });
-        let dependencies = g.edges.iter().filter_map(|e| {
-            Some((
-                e.get("target")?.as_str()?.to_string(),
-                e.get("source")?.as_str()?.to_string(),
-            ))
-        });
-        Self::new(nodes, dependencies, vec![g.root.clone()])
+        let nodes = g.nodes.iter().map(|n| (n.id.to_string(), n.name.clone()));
+        let dependencies = g
+            .edges
+            .iter()
+            .map(|e| (e.target.to_string(), e.source.to_string()));
+        Self::new(nodes, dependencies, vec![g.root.to_string()])
     }
 
     fn new(
@@ -228,18 +217,32 @@ mod tests {
         assert_eq!(t.flat_len(), 3);
     }
 
+    const ROOT: &str = "00000000-0000-0000-0000-000000000001";
+    const LIB: &str = "00000000-0000-0000-0000-000000000002";
+    const LIBC: &str = "00000000-0000-0000-0000-000000000003";
+
+    fn node(id: &str, name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "name": name,
+            "path": format!("/nix/store/{name}.drv"),
+            "created_at": "2026-05-21T08:53:21.140900",
+            "updated_at": "2026-05-21T08:53:21.140900",
+        })
+    }
+
     #[test]
     fn a_build_graph_lists_the_dependencies_of_the_root_under_it() {
         let graph: BuildGraph = serde_json::from_value(serde_json::json!({
-            "root": "root",
+            "root": ROOT,
             "nodes": [
-                { "id": "root", "name": "root-pkg" },
-                { "id": "lib", "name": "lib-pkg" },
-                { "id": "libc", "name": "libc-pkg" },
+                node(ROOT, "root-pkg"),
+                node(LIB, "lib-pkg"),
+                node(LIBC, "libc-pkg"),
             ],
             "edges": [
-                { "source": "lib", "target": "root" },
-                { "source": "libc", "target": "lib" },
+                { "source": LIB, "target": ROOT },
+                { "source": LIBC, "target": LIB },
             ],
         }))
         .unwrap();
@@ -250,7 +253,7 @@ mod tests {
         t.toggle_expand();
 
         let shown: Vec<(&str, usize)> = t.flat.iter().map(|(id, d)| (id.as_str(), *d)).collect();
-        assert_eq!(shown, [("root", 0), ("lib", 1), ("libc", 2)]);
+        assert_eq!(shown, [(ROOT, 0), (LIB, 1), (LIBC, 2)]);
     }
 
     #[test]

@@ -1,119 +1,11 @@
-use crate::{Client, ConnectorError, PaginatedListResponse, http};
+use crate::api::{
+    AddUpstreamRequest, CacheResponse, CacheStatsResponse, ChunkReceived, MakeCacheRequest,
+    NarDetail, NarStats, NarinfoPart, PaginatedCache, PaginatedNarSummary, PatchCacheRequest,
+    PatchUpstreamRequest, UpstreamCacheItem,
+};
+use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CacheResponse {
-    pub id: String,
-    pub name: String,
-    pub display_name: String,
-    pub description: String,
-    pub priority: i32,
-    pub local_priority: Option<i32>,
-    #[serde(default)]
-    pub max_storage_gb: i32,
-    pub active: bool,
-    pub managed: bool,
-    pub created_by: String,
-    pub created_at: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MakeCacheRequest {
-    pub name: String,
-    pub display_name: String,
-    pub description: String,
-    pub priority: i32,
-    pub max_storage_gb: i32,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct PatchCacheRequest {
-    pub name: Option<String>,
-    pub display_name: Option<String>,
-    pub description: Option<String>,
-    pub priority: Option<i32>,
-    pub max_storage_gb: Option<i32>,
-    pub pull_through: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CacheStats {
-    pub nar_bytes_served: Option<i64>,
-    pub hits: Option<i64>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct UpstreamCache {
-    pub id: String,
-    pub display_name: String,
-    pub mode: String,
-    pub upstream_cache_id: Option<String>,
-    pub url: Option<String>,
-    pub public_key: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct NarSummary {
-    pub hash: String,
-    pub store_path: String,
-    pub package: String,
-    pub nar_size: Option<i64>,
-    pub file_size: Option<i64>,
-    pub created_at: String,
-    pub last_fetched_at: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct NarListResponse {
-    pub items: Vec<NarSummary>,
-    pub total: u64,
-    pub page: u64,
-    pub per_page: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct NarDetail {
-    pub hash: String,
-    pub store_path: String,
-    pub package: String,
-    pub nar_size: Option<i64>,
-    pub file_size: Option<i64>,
-    pub file_hash: Option<String>,
-    pub nar_hash: Option<String>,
-    pub references: Vec<String>,
-    pub deriver: Option<String>,
-    pub ca: Option<String>,
-    pub created_at: String,
-    pub last_fetched_at: Option<String>,
-    pub fetch_count: i64,
-    pub signed: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct NarStats {
-    pub total_nars: i64,
-    pub total_nar_size: i64,
-    pub total_file_size: i64,
-    pub last_uploaded_at: Option<String>,
-    pub oldest_fetched_at: Option<String>,
-}
-
-#[derive(Serialize, Debug, Clone)]
-pub struct NarinfoUpload {
-    pub store_path: String,
-    pub file_hash: String,
-    pub file_size: i64,
-    pub nar_size: i64,
-    pub nar_hash: String,
-    pub references: Vec<String>,
-    pub deriver: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ChunkReceived {
-    received: u64,
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct NarListQuery {
@@ -128,7 +20,7 @@ pub struct NarListQuery {
 pub struct CachesApi<'a>(pub(crate) &'a Client);
 
 impl CachesApi<'_> {
-    pub async fn list(&self) -> Result<PaginatedListResponse, ConnectorError> {
+    pub async fn list(&self) -> Result<PaginatedCache, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -153,7 +45,7 @@ impl CachesApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn available(&self) -> Result<PaginatedListResponse, ConnectorError> {
+    pub async fn available(&self, name: &str) -> Result<bool, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -161,7 +53,8 @@ impl CachesApi<'_> {
             Method::GET,
             "caches/available",
             true,
-        )?;
+        )?
+        .query(&[("name", name)]);
         http::decode(req.send().await?).await
     }
 
@@ -280,7 +173,7 @@ impl CachesApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn stats(&self, cache: &str) -> Result<CacheStats, ConnectorError> {
+    pub async fn stats(&self, cache: &str) -> Result<CacheStatsResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -292,7 +185,10 @@ impl CachesApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn upstream_caches(&self, cache: &str) -> Result<Vec<UpstreamCache>, ConnectorError> {
+    pub async fn upstream_caches(
+        &self,
+        cache: &str,
+    ) -> Result<Vec<UpstreamCacheItem>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -307,7 +203,7 @@ impl CachesApi<'_> {
     pub async fn add_upstream_cache(
         &self,
         cache: &str,
-        body: serde_json::Value,
+        body: AddUpstreamRequest,
     ) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
@@ -325,7 +221,7 @@ impl CachesApi<'_> {
         &self,
         cache: &str,
         id: &str,
-        body: serde_json::Value,
+        body: PatchUpstreamRequest,
     ) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
@@ -359,7 +255,7 @@ impl CachesApi<'_> {
         &self,
         cache: &str,
         q: NarListQuery,
-    ) -> Result<NarListResponse, ConnectorError> {
+    ) -> Result<PaginatedNarSummary, ConnectorError> {
         let mut qs: Vec<(&str, String)> = Vec::new();
         if let Some(v) = q.hash {
             qs.push(("hash", v));
@@ -418,7 +314,7 @@ impl CachesApi<'_> {
     pub async fn nar_upload(
         &self,
         cache: &str,
-        narinfo: NarinfoUpload,
+        narinfo: NarinfoPart,
         nar_bytes: Vec<u8>,
     ) -> Result<(), ConnectorError> {
         let narinfo_json = serde_json::to_string(&narinfo).map_err(ConnectorError::Decode)?;
@@ -488,14 +384,14 @@ impl CachesApi<'_> {
         })
         .await?;
         let received: ChunkReceived = http::decode(resp).await?;
-        Ok(received.received)
+        Ok(received.received.unsigned_abs())
     }
 
     pub async fn nar_upload_finalize(
         &self,
         cache: &str,
         store_hash: &str,
-        narinfo: NarinfoUpload,
+        narinfo: NarinfoPart,
     ) -> Result<(), ConnectorError> {
         let resp = http::send_upload(|| {
             Ok(http::request(

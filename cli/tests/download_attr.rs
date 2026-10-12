@@ -20,17 +20,17 @@ async fn download_by_attr_filters_tree_and_writes_files() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "error": false,
             "message": {
-                "evaluation": "eval-1",
-                "created_at": "2026-01-01T00:00:00Z",
+                "evaluation": "00000000-0000-0000-0000-000000000001",
+                "created_at": "2026-01-01T00:00:00",
                 "entry_points": [{
                     "attr": "packages.x86_64-linux.my-app",
                     "derivation": "/nix/store/a.drv",
-                    "build_id": "b1",
+                    "build_id": "00000000-0000-0000-0000-0000000000b1",
                     "outputs": [{
                         "name": "out",
                         "store_path": "/nix/store/a",
                         "products": [{
-                            "id": "p1",
+                            "id": "00000000-0000-0000-0000-0000000000a1",
                             "type": "file",
                             "subtype": "",
                             "name": "default",
@@ -45,7 +45,9 @@ async fn download_by_attr_filters_tree_and_writes_files() {
         .await;
 
     Mock::given(method("GET"))
-        .and(path("/api/v1/builds/b1/download/my-app.tgz"))
+        .and(path(
+            "/api/v1/builds/00000000-0000-0000-0000-0000000000b1/download/my-app.tgz",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_bytes(b"abcd".to_vec()))
         .mount(&server)
         .await;

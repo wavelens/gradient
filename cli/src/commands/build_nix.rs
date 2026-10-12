@@ -9,8 +9,7 @@ use crate::config::{ConfigKey, load_config};
 use crate::input::server_base;
 use crate::output::{ExitKind, Output, to_exit_kind};
 use connector::ConnectorError;
-use connector::build_requests::BuildStartResponse;
-use connector::evals::ArtefactTree;
+use connector::api::{ArtefactTree, DispatchResponse};
 use futures::StreamExt as _;
 use harmonia_file_nar::NarByteStream;
 
@@ -25,7 +24,7 @@ pub async fn start_via_nar(
     params: &BuildParams,
     quiet: bool,
     out: Output,
-) -> BuildStartResponse {
+) -> DispatchResponse {
     let staging = tempfile::tempdir()
         .unwrap_or_else(|e| out.err(ExitKind::Api, format!("Failed to create temp dir: {}", e)));
 
@@ -155,7 +154,7 @@ fn upload_error_message(
 
 pub async fn link_result(
     client: &connector::Client,
-    started: &BuildStartResponse,
+    started: &DispatchResponse,
     tree: &ArtefactTree,
     target: Option<&str>,
     out: Output,
@@ -214,7 +213,7 @@ struct CacheSource {
 
 async fn cache_source(
     client: &connector::Client,
-    started: &BuildStartResponse,
+    started: &DispatchResponse,
     out: Output,
 ) -> Option<CacheSource> {
     let Some(cache) = started.cache.as_deref() else {

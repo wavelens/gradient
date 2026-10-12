@@ -10,7 +10,7 @@ use crate::input::{client_from_config, handle_input};
 use crate::output::{Color, ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
-use connector::tasks::{MakeTaskRequest, PatchTaskRequest};
+use connector::api::{EvaluationStatus, MakeTaskRequest, PatchTaskRequest};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -114,7 +114,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
 
             let eval_summary = &details.last_evaluations[0];
-            let eval = match client.evals().get(&eval_summary.id).await {
+            let eval = match client.evals().get(&eval_summary.id.to_string()).await {
                 Ok(e) => e,
                 Err(e) => out.err(to_exit_kind(&e), e),
             };
@@ -128,7 +128,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
             out.human("");
 
-            let builds = match client.evals().builds(&eval.id).await {
+            let builds = match client.evals().builds(&eval.id.to_string()).await {
                 Ok(b) => b,
                 Err(e) => out.err(to_exit_kind(&e), e),
             };
@@ -151,9 +151,10 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
             out.human("");
 
-            if eval.status != "Aborted" {
+            if eval.status != EvaluationStatus::Aborted {
                 out.human("===== Log =====");
-                crate::commands::logstream::stream_eval_logs(&client, &eval.id, out).await;
+                crate::commands::logstream::stream_eval_logs(&client, &eval.id.to_string(), out)
+                    .await;
             }
         }
 
@@ -174,7 +175,8 @@ pub async fn handle(cmd: Commands, out: Output) {
             let Some(latest) = details.last_evaluations.first() else {
                 out.err(ExitKind::Api, "Task has no evaluations yet.");
             };
-            crate::commands::logstream::stream_eval_logs(&client, &latest.id, out).await;
+            crate::commands::logstream::stream_eval_logs(&client, &latest.id.to_string(), out)
+                .await;
         }
 
         Commands::Create {
@@ -209,11 +211,15 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .create(
                     &project,
                     MakeTaskRequest {
-                        name: name.clone(),
-                        display_name: input.get("Display Name"),
+                        name: name.clone().into(),
+                        display_name: input.get("Display Name").into(),
                         description: input.get("Description"),
                         repository: input.get("Repository"),
                         wildcard: input.get("Wildcard"),
+                        concurrency: None,
+                        retry_failed_builds: None,
+                        sign_cache: None,
+                        wait_for_workers: None,
                     },
                 )
                 .await
@@ -299,11 +305,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                     &project,
                     &task,
                     PatchTaskRequest {
-                        name: Some(input.get("Name")),
+                        name: Some(input.get("Name").into()),
                         display_name: Some(input.get("Display Name")),
                         description: Some(input.get("Description")),
                         repository: Some(input.get("Repository")),
                         wildcard: Some(input.get("Wildcard")),
+                        ..Default::default()
                     },
                 )
                 .await

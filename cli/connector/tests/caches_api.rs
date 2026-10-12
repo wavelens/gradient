@@ -14,16 +14,18 @@ async fn list_caches_decodes_paginated() {
         .respond_with(
             ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
                 "items": [{
-                    "id": "019e49bd-4474-79d0-8c16-c71631fb6e64",
+                    "id": "00000000-0000-0000-0000-000000000001",
                     "name": "krauterOS",
                     "display_name": "krauterOS",
                     "description": "",
                     "active": true,
                     "priority": 50,
                     "local_priority": 10,
+                    "max_storage_gb": 0,
                     "public_key": "4OAlLNfJx4uizm5zOrRrN4DwT6Af+Om7U0gvzRI8YDU=",
                     "public": false,
-                    "created_by": "019e49bd-43c4-7ee2-afc8-40421c5ce6e9",
+                    "pull_through": false,
+                    "created_by": "00000000-0000-0000-0000-000000000002",
                     "created_at": "2026-05-21T08:53:21.140900",
                     "managed": true
                 }],
@@ -50,7 +52,10 @@ async fn get_cache_stats_returns_stats() {
         .and(path("/api/v1/caches/my-cache/stats"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-                "nar_bytes_served": 12345, "hits": 42
+                "days": [], "hours": [], "minutes": [], "weeks": [],
+                "storage_days": [], "storage_hours": [], "storage_minutes": [],
+                "storage_weeks": [], "total_bytes": 12345, "total_nar_bytes": 12000,
+                "total_packages": 42
             }))),
         )
         .mount(&server)
@@ -62,7 +67,7 @@ async fn get_cache_stats_returns_stats() {
         .build()
         .unwrap();
     let stats = client.caches().stats("my-cache").await.unwrap();
-    assert_eq!(stats.hits, Some(42));
+    assert_eq!(stats.total_packages, 42);
 }
 
 #[tokio::test]
@@ -82,7 +87,7 @@ async fn nar_upload_posts_multipart() {
         .token("t")
         .build()
         .unwrap();
-    let info = connector::caches::NarinfoUpload {
+    let info = connector::api::NarinfoPart {
         store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x".into(),
         file_hash: "sha256:a".into(),
         file_size: 3,
@@ -151,7 +156,7 @@ async fn a_rate_limited_finalize_is_retried_after_the_servers_delay() {
         .token("t")
         .build()
         .unwrap();
-    let info = connector::caches::NarinfoUpload {
+    let info = connector::api::NarinfoPart {
         store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x".into(),
         file_hash: "sha256:a".into(),
         file_size: 3,

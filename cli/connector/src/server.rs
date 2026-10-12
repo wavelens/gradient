@@ -1,13 +1,5 @@
+use crate::api::ServerConfig;
 use crate::{Client, ConnectorError, http};
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ServerConfig {
-    pub oidc_enabled: bool,
-    pub registration_enabled: bool,
-    pub email_verification_enabled: bool,
-    pub quic: bool,
-}
 
 pub struct ServerApi<'a>(pub(crate) &'a Client);
 

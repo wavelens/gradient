@@ -10,7 +10,7 @@ use crate::input::client_from_config;
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
-use connector::workers::MakeWorkerRequest;
+use connector::api::RegisterWorkerRequest;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -62,11 +62,14 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .workers()
                 .create(
                     &project,
-                    MakeWorkerRequest {
+                    RegisterWorkerRequest {
                         worker_id,
                         display_name,
                         url,
                         token,
+                        enable_build: None,
+                        enable_eval: None,
+                        enable_fetch: None,
                     },
                 )
                 .await

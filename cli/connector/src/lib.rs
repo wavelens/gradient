@@ -18,7 +18,10 @@ pub mod workers;
 
 mod http;
 
-use serde::{Deserialize, Serialize};
+pub mod api {
+    include!(concat!(env!("OUT_DIR"), "/api.rs"));
+}
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -193,20 +196,3 @@ mod tests {
         );
     }
 }
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ListItem {
-    pub id: String,
-    pub name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Paginated<T> {
-    pub items: T,
-    pub total: u64,
-    pub page: u64,
-    pub per_page: u64,
-}
-
-pub type ListResponse = Vec<ListItem>;
-pub type PaginatedListResponse = Paginated<Vec<ListItem>>;

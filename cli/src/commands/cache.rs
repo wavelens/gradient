@@ -11,7 +11,7 @@ use crate::input::{client_from_config, handle_input};
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
-use connector::caches::{MakeCacheRequest, PatchCacheRequest};
+use connector::api::{MakeCacheRequest, PatchCacheRequest};
 use std::fs;
 
 #[derive(Subcommand, Debug)]
@@ -129,11 +129,14 @@ pub async fn handle(cmd: Commands, out: Output) {
             match client
                 .caches()
                 .create(MakeCacheRequest {
-                    name,
-                    display_name: input.get("Display Name"),
+                    name: name.into(),
+                    display_name: input.get("Display Name").into(),
                     description: input.get("Description"),
                     priority,
-                    max_storage_gb,
+                    max_storage_gb: Some(max_storage_gb),
+                    local_priority: None,
+                    public: None,
+                    pull_through: None,
                 })
                 .await
             {

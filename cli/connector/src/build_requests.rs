@@ -1,78 +1,17 @@
+use crate::api::{
+    BlobsResponse, ChunkReceived, DispatchRequest, DispatchResponse, InputOverrideBody,
+    ManifestRequest, ManifestResponse, SourceFinalize,
+};
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
-use serde::{Deserialize, Serialize};
-
-#[derive(Deserialize)]
-struct ChunkReceived {
-    received: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct InputOverride {
-    pub input_name: String,
-    pub url: String,
-}
-
-#[derive(Serialize)]
-struct SourceFinalizeBody {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    target: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    input_overrides: Vec<InputOverride>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ManifestFile {
-    pub path: String,
-    pub hash: String,
-    pub size: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BuildManifestRequest {
-    pub project: String,
-    pub files: Vec<ManifestFile>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BuildSession {
-    pub session: String,
-    pub missing: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BlobsResponse {
-    pub uploaded: usize,
-    pub remaining: usize,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct BuildStartRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub system: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub input_overrides: Vec<InputOverride>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BuildStartResponse {
-    pub evaluation: String,
-    pub task: String,
-    pub commit: String,
-    pub cache: Option<String>,
-}
 
 pub struct BuildRequestsApi<'a>(pub(crate) &'a Client);
 
 impl BuildRequestsApi<'_> {
     pub async fn submit_manifest(
         &self,
-        body: BuildManifestRequest,
-    ) -> Result<BuildSession, ConnectorError> {
+        body: ManifestRequest,
+    ) -> Result<ManifestResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -108,7 +47,7 @@ impl BuildRequestsApi<'_> {
         target: Option<&str>,
         system: Option<&str>,
         nar_bytes: Vec<u8>,
-    ) -> Result<BuildStartResponse, ConnectorError> {
+    ) -> Result<DispatchResponse, ConnectorError> {
         let mut form = reqwest::multipart::Form::new().part(
             "nar",
             reqwest::multipart::Part::bytes(nar_bytes).file_name("source.nar"),
@@ -150,7 +89,7 @@ impl BuildRequestsApi<'_> {
         .header("Content-Type", "application/octet-stream")
         .body(chunk);
         let received: ChunkReceived = http::decode(req.send().await?).await?;
-        Ok(received.received)
+        Ok(received.received.unsigned_abs())
     }
 
     pub async fn finalize_source(
@@ -160,13 +99,13 @@ impl BuildRequestsApi<'_> {
         target: Option<&str>,
         system: Option<&str>,
         overrides: &[(String, String)],
-    ) -> Result<BuildStartResponse, ConnectorError> {
-        let body = SourceFinalizeBody {
+    ) -> Result<DispatchResponse, ConnectorError> {
+        let body = SourceFinalize {
             target: target.map(str::to_owned),
             system: system.map(str::to_owned),
             input_overrides: overrides
                 .iter()
-                .map(|(input_name, url)| InputOverride {
+                .map(|(input_name, url)| InputOverrideBody {
                     input_name: input_name.clone(),
                     url: url.clone(),
                 })
@@ -187,8 +126,8 @@ impl BuildRequestsApi<'_> {
     pub async fn start(
         &self,
         session: &str,
-        body: BuildStartRequest,
-    ) -> Result<BuildStartResponse, ConnectorError> {
+        body: DispatchRequest,
+    ) -> Result<DispatchResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -208,7 +147,7 @@ mod tests {
 
     #[test]
     fn input_overrides_skipped_when_empty_and_present_when_set() {
-        let empty = SourceFinalizeBody {
+        let empty = SourceFinalize {
             target: None,
             system: None,
             input_overrides: vec![],
@@ -218,10 +157,10 @@ mod tests {
                 .unwrap()
                 .contains("input_overrides")
         );
-        let set = SourceFinalizeBody {
+        let set = SourceFinalize {
             target: None,
             system: None,
-            input_overrides: vec![InputOverride {
+            input_overrides: vec![InputOverrideBody {
                 input_name: "nixpkgs".into(),
                 url: "github:NixOS/nixpkgs".into(),
             }],

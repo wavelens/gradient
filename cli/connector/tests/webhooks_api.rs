@@ -31,9 +31,10 @@ async fn get_webhook_returns_webhook() {
         .and(path("/api/v1/webhook/my-project/w1"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-                "id": "w1", "project": "project-id", "name": "My Hook",
+                "id": "00000000-0000-0000-0000-000000000001", "scope": "project", "name": "My Hook",
                 "url": "https://example.com/hook", "events": ["build.failed"],
-                "active": true, "created_by": "u1", "created_at": "2024-01-01T00:00:00Z"
+                "active": true, "created_by": "00000000-0000-0000-0000-000000000002", "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00", "last_fired_at": null
             }))),
         )
         .mount(&server)
@@ -45,5 +46,5 @@ async fn get_webhook_returns_webhook() {
         .build()
         .unwrap();
     let wh = client.webhooks().get("my-project", "w1").await.unwrap();
-    assert_eq!(wh.id, "w1");
+    assert_eq!(wh.id.to_string(), "00000000-0000-0000-0000-000000000001");
 }

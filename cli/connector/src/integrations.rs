@@ -1,55 +1,14 @@
+use crate::api::{
+    CreateIntegrationRequest, IntegrationResponse, IntegrationSummaryResponse,
+    PatchIntegrationRequest,
+};
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Integration {
-    pub id: String,
-    pub project: String,
-    pub name: String,
-    pub display_name: String,
-    pub kind: String,
-    pub git_host_type: String,
-    pub endpoint_url: Option<String>,
-    pub has_secret: bool,
-    pub has_access_token: bool,
-    pub created_by: String,
-    pub created_at: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct IntegrationSummary {
-    pub id: String,
-    pub name: String,
-    pub display_name: String,
-    pub kind: String,
-    pub git_host_type: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MakeIntegrationRequest {
-    pub name: String,
-    pub display_name: Option<String>,
-    pub kind: String,
-    pub git_host_type: String,
-    pub secret: Option<String>,
-    pub endpoint_url: Option<String>,
-    pub access_token: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct PatchIntegrationRequest {
-    pub name: Option<String>,
-    pub display_name: Option<String>,
-    pub endpoint_url: Option<String>,
-    pub secret: Option<String>,
-    pub access_token: Option<String>,
-}
 
 pub struct IntegrationsApi<'a>(pub(crate) &'a Client);
 
 impl IntegrationsApi<'_> {
-    pub async fn list(&self, project: &str) -> Result<Vec<Integration>, ConnectorError> {
+    pub async fn list(&self, project: &str) -> Result<Vec<IntegrationResponse>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -64,8 +23,8 @@ impl IntegrationsApi<'_> {
     pub async fn create(
         &self,
         project: &str,
-        body: MakeIntegrationRequest,
-    ) -> Result<Integration, ConnectorError> {
+        body: CreateIntegrationRequest,
+    ) -> Result<IntegrationResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -78,7 +37,10 @@ impl IntegrationsApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn summary(&self, project: &str) -> Result<Vec<IntegrationSummary>, ConnectorError> {
+    pub async fn summary(
+        &self,
+        project: &str,
+    ) -> Result<Vec<IntegrationSummaryResponse>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -90,7 +52,11 @@ impl IntegrationsApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn get(&self, project: &str, id: &str) -> Result<Integration, ConnectorError> {
+    pub async fn get(
+        &self,
+        project: &str,
+        id: &str,
+    ) -> Result<IntegrationResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -107,7 +73,7 @@ impl IntegrationsApi<'_> {
         project: &str,
         id: &str,
         body: PatchIntegrationRequest,
-    ) -> Result<Integration, ConnectorError> {
+    ) -> Result<IntegrationResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

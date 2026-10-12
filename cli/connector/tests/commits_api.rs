@@ -13,7 +13,8 @@ async fn get_commit_returns_response() {
         .and(path("/api/v1/commits/c1"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-                "id": "c1", "message": "feat: add thing", "hash": "abc123", "author_name": "Alice"
+                "id": "00000000-0000-0000-0000-000000000001", "message": "feat: add thing", "hash": [171, 193, 35],
+                "author": null, "author_name": "Alice"
             }))),
         )
         .mount(&server)
@@ -25,6 +26,9 @@ async fn get_commit_returns_response() {
         .build()
         .unwrap();
     let commit = client.commits().get("c1").await.unwrap();
-    assert_eq!(commit.id, "c1");
+    assert_eq!(
+        commit.id.to_string(),
+        "00000000-0000-0000-0000-000000000001"
+    );
     assert_eq!(commit.author_name, "Alice");
 }

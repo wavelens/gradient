@@ -39,7 +39,7 @@ async fn upload_source_nar_returns_started_build() {
         .and(path("/api/v1/build-requests/source"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-                "evaluation": "eval-1", "task": "proj-1", "commit": "commit-1", "cache": "my-cache"
+                "evaluation": "00000000-0000-0000-0000-000000000001", "task": "00000000-0000-0000-0000-000000000002", "commit": "00000000-0000-0000-0000-000000000003", "cache": "my-cache"
             }))),
         )
         .mount(&server)
@@ -60,7 +60,10 @@ async fn upload_source_nar_returns_started_build() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.evaluation, "eval-1");
+    assert_eq!(
+        resp.evaluation.to_string(),
+        "00000000-0000-0000-0000-000000000001"
+    );
     assert_eq!(resp.cache.as_deref(), Some("my-cache"));
 }
 
@@ -71,7 +74,7 @@ async fn submit_manifest_returns_session() {
         .and(path("/api/v1/build-requests/manifest"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-                "session": "sess-1", "missing": []
+                "session": "00000000-0000-0000-0000-000000000001", "missing": []
             }))),
         )
         .mount(&server)
@@ -84,12 +87,15 @@ async fn submit_manifest_returns_session() {
         .unwrap();
     let session = client
         .build_requests()
-        .submit_manifest(connector::build_requests::BuildManifestRequest {
+        .submit_manifest(connector::api::ManifestRequest {
             project: "my-project".into(),
             files: vec![],
         })
         .await
         .unwrap();
-    assert_eq!(session.session, "sess-1");
+    assert_eq!(
+        session.session.to_string(),
+        "00000000-0000-0000-0000-000000000001"
+    );
     assert!(session.missing.is_empty());
 }

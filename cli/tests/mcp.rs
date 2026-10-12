@@ -288,7 +288,18 @@ async fn mcp_list_tasks_defaults_to_the_selected_project() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "error": false,
             "message": {
-                "items": [{"id": "task-1", "name": "nightly"}],
+                "items": [{
+                    "id": "00000000-0000-0000-0000-000000000001", "name": "nightly",
+                    "display_name": "Nightly", "description": "",
+                    "project": "00000000-0000-0000-0000-000000000002", "repository": "r",
+                    "wildcard": "*", "active": true,
+                    "created_by": "00000000-0000-0000-0000-000000000003",
+                    "created_at": "2026-01-01T00:00:00", "managed": false, "can_edit": true,
+                    "can_trigger": true, "concurrency": "skip", "force_evaluation": false,
+                    "keep_evaluations": 30, "last_evaluation": null,
+                    "last_evaluation_status": null, "retry_failed_builds": false,
+                    "sign_cache": true, "wait_for_workers": false
+                }],
                 "total": 1, "page": 1, "per_page": 20
             }
         })))
@@ -445,16 +456,30 @@ async fn mcp_abort_evaluation_sends_the_abort_method() {
 
 fn eval_body(status: &str) -> Value {
     json!({"error": false, "message": {
-        "id": "eval-1", "task": "t", "repository": "r", "commit": "c",
-        "wildcard": "*", "status": status, "created_at": "2026-01-01T00:00:00Z",
-        "error": null
+        "id": "00000000-0000-0000-0000-000000000001",
+        "task": "00000000-0000-0000-0000-000000000002", "repository": "r", "commit": "c",
+        "wildcard": "*", "status": status, "created_at": "2026-01-01T00:00:00",
+        "updated_at": "2026-01-01T00:00:00", "error": null, "entry_points": [],
+        "error_count": 0, "expected_thunks": null, "finished_at": null, "next": null,
+        "previous": null, "prioritized": false, "progress": null, "started_at": null,
+        "task_display_name": null, "task_name": null, "trigger": null,
+        "triggered_by": null, "waiting_reason": null, "warning_count": 0
     }})
 }
 
 fn entry_point(attr: &str, status: &str) -> Value {
     json!({
-        "id": format!("ep-{attr}"), "build_id": format!("b-{attr}"), "eval": attr,
-        "derivation_path": format!("abc-{attr}.drv"), "build_status": status
+        "id": "00000000-0000-0000-0000-000000000003",
+        "build_id": "00000000-0000-0000-0000-000000000004", "eval": attr,
+        "derivation_path": format!("abc-{attr}.drv"), "build_status": status,
+        "architecture": "x86_64-linux", "build_started_at": null, "build_time_ms": null,
+        "created_at": "2026-01-01T00:00:00",
+        "deps": {
+            "aborted": 0, "building": 0, "completed": 0,
+            "failed": 0, "queued": 0, "substituted": 0
+        },
+        "deps_total": 0, "has_artefacts": false, "ifd": false, "outputs": {},
+        "prioritized": false
     })
 }
 
@@ -473,7 +498,7 @@ async fn mount_entry_points(server: &MockServer, offset: &str, items: Vec<Value>
         .and(query_param("offset", offset))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "error": false,
-            "message": {"entry_points": items, "total": total}
+            "message": {"entry_points": items, "failed_attributes": [], "total": total}
         })))
         .mount(server)
         .await;

@@ -9,7 +9,7 @@ use crate::input::client_from_config;
 use crate::narinfo::Narinfo;
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap_complete::engine::ArgValueCompleter;
-use connector::caches::NarinfoUpload;
+use connector::api::NarinfoPart;
 use std::path::PathBuf;
 
 #[derive(clap::Args, Debug)]
@@ -82,7 +82,7 @@ pub(crate) async fn upload_bytes(cache: &str, ni: Narinfo, bytes: Vec<u8>, out: 
     let client = client_from_config(out);
     let store_path = ni.store_path.clone();
     let store_hash = store_hash_of(&store_path).to_string();
-    let payload = NarinfoUpload {
+    let payload = NarinfoPart {
         store_path: ni.store_path,
         file_hash: ni.file_hash,
         file_size: ni.file_size,

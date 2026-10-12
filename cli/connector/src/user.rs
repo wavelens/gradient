@@ -1,52 +1,10 @@
+use crate::api::{
+    ApiKeyInfo, AuditLogEntry, CreateApiKeyRequest, PatchUserSettingsRequest, SessionInfo,
+    UserInfoResponse, UserSearchResult,
+};
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct UserResponse {
-    pub id: String,
-    pub username: String,
-    pub name: String,
-    pub email: String,
-    pub superuser: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct UserSettings {
-    pub username: String,
-    pub name: String,
-    pub email: String,
-    pub is_oidc: bool,
-    pub managed: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct PatchUserSettingsRequest {
-    pub username: Option<String>,
-    pub name: Option<String>,
-    pub email: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ApiKey {
-    pub id: String,
-    pub name: String,
-    pub managed: bool,
-    pub permissions: Vec<String>,
-    pub project: Option<String>,
-    pub created_at: String,
-    pub last_used_at: Option<String>,
-    pub expires_at: Option<String>,
-    pub revoked_at: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MakeApiKeyRequest {
-    pub name: String,
-    pub permissions: Vec<String>,
-    pub expires_in_days: Option<u32>,
-    pub project: Option<String>,
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CreatedApiKey {
@@ -55,39 +13,10 @@ pub struct CreatedApiKey {
     pub token: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Session {
-    pub id: String,
-    pub user_agent: Option<String>,
-    pub ip: Option<String>,
-    pub created_at: String,
-    pub last_used_at: String,
-    pub expires_at: String,
-    pub remember_me: bool,
-    pub current: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct AuditEntry {
-    pub id: String,
-    pub event: String,
-    pub ip: Option<String>,
-    pub user_agent: Option<String>,
-    pub metadata: Option<serde_json::Value>,
-    pub created_at: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct UserSearchResult {
-    pub id: String,
-    pub username: String,
-    pub name: String,
-}
-
 pub struct UserApi<'a>(pub(crate) &'a Client);
 
 impl UserApi<'_> {
-    pub async fn get(&self) -> Result<UserResponse, ConnectorError> {
+    pub async fn get(&self) -> Result<UserInfoResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -115,7 +44,7 @@ impl UserApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn keys(&self) -> Result<Vec<ApiKey>, ConnectorError> {
+    pub async fn keys(&self) -> Result<Vec<ApiKeyInfo>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -129,7 +58,7 @@ impl UserApi<'_> {
 
     pub async fn create_key(
         &self,
-        body: MakeApiKeyRequest,
+        body: CreateApiKeyRequest,
     ) -> Result<CreatedApiKey, ConnectorError> {
         let req = http::request(
             self.0.http(),
@@ -155,7 +84,7 @@ impl UserApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn get_key(&self, api_id: &str) -> Result<ApiKey, ConnectorError> {
+    pub async fn get_key(&self, api_id: &str) -> Result<ApiKeyInfo, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -191,7 +120,7 @@ impl UserApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn sessions(&self) -> Result<Vec<Session>, ConnectorError> {
+    pub async fn sessions(&self) -> Result<Vec<SessionInfo>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -215,7 +144,7 @@ impl UserApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn audit_log(&self) -> Result<Vec<AuditEntry>, ConnectorError> {
+    pub async fn audit_log(&self) -> Result<Vec<AuditLogEntry>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

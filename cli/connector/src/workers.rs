@@ -1,57 +1,13 @@
+use crate::api::{
+    PatchWorkerRequest, ProjectWorkerEntry, RegisterWorkerRequest, RegisterWorkerResponse,
+};
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct WorkerLiveInfo {
-    pub architectures: Vec<String>,
-    pub system_features: Vec<String>,
-    pub max_concurrent_builds: u32,
-    pub assigned_job_count: i32,
-    pub draining: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Worker {
-    pub worker_id: String,
-    pub display_name: String,
-    pub registered_at: String,
-    pub active: bool,
-    pub url: Option<String>,
-    pub created_by: Option<String>,
-    pub enable_fetch: bool,
-    pub enable_eval: bool,
-    pub enable_build: bool,
-    pub live: Option<WorkerLiveInfo>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MakeWorkerRequest {
-    pub worker_id: String,
-    pub display_name: String,
-    pub url: Option<String>,
-    pub token: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct RegisterWorkerResponse {
-    pub peer_id: String,
-    pub token: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct PatchWorkerRequest {
-    pub active: Option<bool>,
-    pub display_name: Option<String>,
-    pub enable_fetch: Option<bool>,
-    pub enable_eval: Option<bool>,
-    pub enable_build: Option<bool>,
-}
 
 pub struct WorkersApi<'a>(pub(crate) &'a Client);
 
 impl WorkersApi<'_> {
-    pub async fn list(&self, project: &str) -> Result<Vec<Worker>, ConnectorError> {
+    pub async fn list(&self, project: &str) -> Result<Vec<ProjectWorkerEntry>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -66,7 +22,7 @@ impl WorkersApi<'_> {
     pub async fn create(
         &self,
         project: &str,
-        body: MakeWorkerRequest,
+        body: RegisterWorkerRequest,
     ) -> Result<RegisterWorkerResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),

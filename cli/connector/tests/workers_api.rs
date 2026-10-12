@@ -31,7 +31,7 @@ async fn create_worker_returns_response() {
         .and(path("/api/v1/projects/my-project/workers"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-                "peer_id": "worker-1", "token": "tok123"
+                "peer_id": "00000000-0000-0000-0000-000000000001", "token": "tok123"
             }))),
         )
         .mount(&server)
@@ -46,14 +46,20 @@ async fn create_worker_returns_response() {
         .workers()
         .create(
             "my-project",
-            connector::workers::MakeWorkerRequest {
+            connector::api::RegisterWorkerRequest {
                 worker_id: "worker-1".into(),
                 display_name: "My Worker".into(),
                 url: None,
                 token: None,
+                enable_build: None,
+                enable_eval: None,
+                enable_fetch: None,
             },
         )
         .await
         .unwrap();
-    assert_eq!(res.peer_id, "worker-1");
+    assert_eq!(
+        res.peer_id.to_string(),
+        "00000000-0000-0000-0000-000000000001"
+    );
 }
