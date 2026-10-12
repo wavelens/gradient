@@ -21,10 +21,10 @@ Tasks hold a comma-separated list of attribute paths and these paths pick the fl
 
 | Element | Meaning |
 |---|---|
-| `a.b.c` | One attribute path, segments separated by `.` |
+| `a.b.c` | A single attribute path, segments separated by `.` |
 | `,` | Pattern separator, with an optional space after the comma |
 | `*` | Any name at this level. At the end of a pattern, only derivations at that level |
-| `**` | Any name at this level and a nested attribute set one level below when the pattern ends there. `a.**.**` is equal to `a.**` |
+| `**` | Any name at this level and a nested attribute set at the next level when the pattern ends there. `a.**.**` is equal to `a.**` |
 | `x86_64-*` | Part of a name at this level |
 | `!path` | Removal of an exact path selected by the earlier patterns |
 | `"a.b"` | A quoted segment, for names with dots or other special characters |
@@ -34,15 +34,15 @@ Tasks hold a comma-separated list of attribute paths and these paths pick the fl
 | Wildcard | Selection |
 |---|---|
 | `packages.x86_64-linux.*` | The derivations directly under `x86_64-linux` |
-| `packages.x86_64-linux.**` | The same, with the derivations inside attribute sets one level down |
+| `packages.x86_64-linux.**` | The same, with the derivations inside attribute sets at the next level |
 
 Flake outputs keep derivations at a fixed depth, so `*` suits an output such as `packages`. A nested package set, such as `python3Packages` inside `legacyPackages`, needs `**`. The default `packages.x86_64-linux.**` suits both.
 
-Option trees stay opaque to a wildcard.
+`**` can stay out of opaque option trees. A single-level `*` can descend into every set. A pattern such as `nixosConfigurations.*.config.system.build.toplevel` can then enter a configuration.
 
 ## Roots
 
-The first segment is one of `checks`, `packages`, `formatter`, `legacyPackages`, `nixosConfigurations`, `devShells`, `hydraJobs`.
+The first segment is a root from `checks`, `packages`, `formatter`, `legacyPackages`, `nixosConfigurations`, `devShells`, `hydraJobs`.
 
 ## Rejected Wildcards
 

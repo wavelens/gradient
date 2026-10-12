@@ -11,7 +11,7 @@ pub trait WalkNode: Sized {
     fn child_names(&self) -> Result<Vec<String>>;
     fn child(&self, name: &str) -> Result<Option<Self>>;
     fn is_derivation(&self) -> Result<bool>;
-    /// Opaque sets like NixOS options stay out of a `*` traversal.
+    /// Opaque sets like NixOS options stay out of a `**` traversal.
     fn is_opaque(&self) -> Result<bool>;
 }
 
@@ -273,8 +273,6 @@ fn level<N: WalkNode>(
             if tolerate(child.is_derivation(), &p, diags) {
                 sink.emit_leaf(p);
             }
-        } else if is_opaque_set(&child, &p, diags) {
-            continue;
         } else {
             descend(&child, p, rest, sink, diags);
         }
@@ -489,6 +487,7 @@ mod tests {
         derivation: bool,
         opaque: bool,
         throws: bool,
+        type_set: bool,
         children: BTreeMap<String, StubNode>,
         forced: std::cell::Cell<usize>,
     }
@@ -513,6 +512,15 @@ mod tests {
 
         fn opaque(children: Vec<(&str, StubNode)>) -> Self {
             StubNode {
+                opaque: true,
+                ..StubNode::set(children)
+            }
+        }
+
+        /// A NixOS-like configuration: `type` is a set, so `is_derivation` cannot read it.
+        fn config(children: Vec<(&str, StubNode)>) -> Self {
+            StubNode {
+                type_set: true,
                 opaque: true,
                 ..StubNode::set(children)
             }
@@ -545,11 +553,17 @@ mod tests {
         }
 
         fn is_derivation(&self) -> Result<bool> {
+            if self.type_set {
+                anyhow::bail!("'x.type' is not a string but a set");
+            }
             self.force()?;
             Ok(self.derivation)
         }
 
         fn is_opaque(&self) -> Result<bool> {
+            if self.is_derivation()? {
+                return Ok(false);
+            }
             self.force()?;
             Ok(self.opaque)
         }
@@ -726,7 +740,7 @@ mod tests {
     }
 
     #[test]
-    fn discover_star_non_last_stops_at_opaque() {
+    fn discover_star_non_last_descends_into_any_set() {
         let root = StubNode::set(vec![(
             "packages",
             StubNode::set(vec![
@@ -735,7 +749,28 @@ mod tests {
             ]),
         )]);
         let got = discover(&&root, &[segs(&["packages", "*", "hello"])], &[]).0;
-        assert_eq!(got, vec!["packages.sysB.hello"]);
+        assert_eq!(got, vec!["packages.sysA.hello", "packages.sysB.hello"]);
+    }
+
+    #[test]
+    fn a_star_matching_a_nixos_configuration_descends_into_it() {
+        let root = StubNode::set(vec![(
+            "nixosConfigurations",
+            StubNode::set(vec![(
+                "airbert",
+                StubNode::config(vec![(
+                    "config",
+                    StubNode::set(vec![("toplevel", StubNode::drv())]),
+                )]),
+            )]),
+        )]);
+        let (got, errors) = discover(
+            &&root,
+            &[segs(&["nixosConfigurations", "*", "config", "toplevel"])],
+            &[],
+        );
+        assert_eq!(got, vec!["nixosConfigurations.airbert.config.toplevel"]);
+        assert!(errors.is_empty(), "{errors:?}");
     }
 
     #[test]
@@ -759,7 +794,7 @@ mod tests {
     }
 
     #[test]
-    fn traverse_records_thrown_attr_and_continues() {
+    fn a_thrown_attr_leaves_a_sibling_with_its_derivation() {
         let root = StubNode::set(vec![("ok", StubNode::drv()), ("bad", StubNode::throwing())]);
         let (got, errors) = discover(&&root, &[segs(&["*"])], &[]);
         assert_eq!(got, vec!["ok"], "sibling still discovered");
@@ -770,7 +805,7 @@ mod tests {
 
     #[test]
     fn a_failing_member_is_forced_once() {
-        for pattern in [vec!["*"], vec!["*", "config"]] {
+        for pattern in [vec!["**"], vec!["**", "config"]] {
             let root = StubNode::set(vec![("ok", StubNode::drv()), ("bad", StubNode::throwing())]);
 
             let (_, errors) = discover(&&root, &[segs(&pattern)], &[]);
@@ -781,7 +816,7 @@ mod tests {
     }
 
     #[test]
-    fn traverse_records_full_dotted_path() {
+    fn a_diagnostic_with_the_full_dotted_path() {
         let root = StubNode::set(vec![(
             "packages",
             StubNode::set(vec![(
@@ -1000,7 +1035,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_skips_opaque_under_wildcard() {
+    fn plan_star_keeps_every_set_under_a_wildcard() {
         let root = StubNode::set(vec![(
             "packages",
             StubNode::set(vec![
@@ -1010,7 +1045,10 @@ mod tests {
         )]);
         assert_eq!(
             shards(&root, &["packages", "*", "hello"]),
-            vec![residual(&["packages", "sysB", "hello"])]
+            vec![
+                residual(&["packages", "sysA", "hello"]),
+                residual(&["packages", "sysB", "hello"])
+            ]
         );
         assert_split_equivalent(&root, &["packages", "*", "hello"]);
         assert_split_equivalent(&root, &["packages", "**"]);
