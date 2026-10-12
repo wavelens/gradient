@@ -152,27 +152,24 @@ mod tests {
     const GIB: u64 = 1024 * MIB;
 
     #[test]
-    fn layout_covers_the_compressed_bound_in_min_sized_parts() {
+    fn layout_covers_the_compressed_bound_within_the_part_cap() {
         let l = layout(GIB);
         assert_eq!(l.part_size, MIN_PART_BYTES);
         assert!(l.part_size * l.part_count >= compressed_bound(GIB));
         assert_eq!(l.part_count, 17);
-    }
 
-    #[test]
-    fn layout_grows_parts_to_stay_under_the_part_cap() {
-        let l = layout(2048 * GIB);
-        assert!(l.part_count <= MAX_PARTS);
-        assert!(l.part_size > MIN_PART_BYTES);
-        assert_eq!(l.part_size % MIB, 0);
-        assert!(l.part_size * l.part_count >= compressed_bound(2048 * GIB));
-    }
+        let big = layout(2048 * GIB);
+        assert!(big.part_count <= MAX_PARTS);
+        assert!(big.part_size > MIN_PART_BYTES);
+        assert_eq!(big.part_size % MIB, 0);
+        assert!(big.part_size * big.part_count >= compressed_bound(2048 * GIB));
 
-    #[test]
-    fn layout_saturates_at_the_part_cap_instead_of_wrapping() {
-        let l = layout(u64::MAX);
-        assert!(l.part_count <= MAX_PARTS);
-        assert!(u128::from(l.part_size) * u128::from(l.part_count) >= u128::from(u64::MAX));
+        let saturated = layout(u64::MAX);
+        assert!(saturated.part_count <= MAX_PARTS);
+        assert!(
+            u128::from(saturated.part_size) * u128::from(saturated.part_count)
+                >= u128::from(u64::MAX)
+        );
     }
 
     #[test]

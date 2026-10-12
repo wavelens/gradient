@@ -92,31 +92,26 @@ mod password_phc_tests {
     use super::parse_password_phc;
 
     #[test]
-    fn accepts_argon2id_phc_hash() {
-        let h = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0$abcdefghijklmnopqrstuvwxyz0123456789ABCD";
-        let parsed = parse_password_phc(h, "/tmp/p").unwrap();
-        assert_eq!(parsed, h);
+    fn accepts_argon2id_phc_hashes() {
+        const PLAIN: &str = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$dGVzdA";
+        for h in [
+            "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0$abcdefghijklmnopqrstuvwxyz0123456789ABCD",
+            PLAIN,
+        ] {
+            assert_eq!(parse_password_phc(h, "/tmp/p").unwrap(), h);
+        }
+        assert_eq!(
+            parse_password_phc(&format!("{PLAIN}\n  \n"), "/tmp/p").unwrap(),
+            PLAIN
+        );
     }
 
     #[test]
-    fn trims_trailing_whitespace_and_newlines() {
-        let h = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$dGVzdA";
-        let with_ws = format!("{h}\n  \n");
-        let parsed = parse_password_phc(&with_ws, "/tmp/p").unwrap();
-        assert_eq!(parsed, h);
-    }
-
-    #[test]
-    fn rejects_plaintext_password() {
-        let err = parse_password_phc("hunter2\n", "/tmp/p").unwrap_err();
-        assert!(err.to_string().contains("argon2 PHC hash"));
-    }
-
-    #[test]
-    fn rejects_other_phc_algorithms() {
-        let h = "$pbkdf2-sha256$i=600000$c2FsdA$aGFzaA";
-        let err = parse_password_phc(h, "/tmp/p").unwrap_err();
-        assert!(err.to_string().contains("argon2"));
+    fn rejects_anything_but_an_argon2_phc_hash() {
+        for input in ["hunter2\n", "$pbkdf2-sha256$i=600000$c2FsdA$aGFzaA"] {
+            let err = parse_password_phc(input, "/tmp/p").unwrap_err();
+            assert!(err.to_string().contains("argon2"), "{input}: {err}");
+        }
     }
 }
 
@@ -127,39 +122,28 @@ mod api_key_hash_tests {
     const VALID: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
     #[test]
-    fn accepts_64_char_hex() {
+    fn accepts_and_normalizes_a_sha256_hex_hash() {
         assert_eq!(parse_api_key_hash(VALID, "/tmp/k").unwrap(), VALID);
+        assert_eq!(
+            parse_api_key_hash(&format!("{VALID}\n"), "/tmp/k").unwrap(),
+            VALID
+        );
+        assert_eq!(
+            parse_api_key_hash(&VALID.to_ascii_uppercase(), "/tmp/k").unwrap(),
+            VALID
+        );
     }
 
     #[test]
-    fn trims_trailing_whitespace() {
-        let with_ws = format!("{VALID}\n");
-        assert_eq!(parse_api_key_hash(&with_ws, "/tmp/k").unwrap(), VALID);
-    }
-
-    #[test]
-    fn lowercases_uppercase_hex() {
-        let upper = VALID.to_ascii_uppercase();
-        assert_eq!(parse_api_key_hash(&upper, "/tmp/k").unwrap(), VALID);
-    }
-
-    #[test]
-    fn rejects_plaintext_token() {
-        let err = parse_api_key_hash("notahashbutaverylongstring", "/tmp/k").unwrap_err();
-        assert!(err.to_string().contains("SHA-256"));
-    }
-
-    #[test]
-    fn rejects_short_hex() {
-        let err = parse_api_key_hash("deadbeef", "/tmp/k").unwrap_err();
-        assert!(err.to_string().contains("SHA-256"));
-    }
-
-    #[test]
-    fn rejects_non_hex_chars() {
-        let bad = "z".repeat(64);
-        let err = parse_api_key_hash(&bad, "/tmp/k").unwrap_err();
-        assert!(err.to_string().contains("SHA-256"));
+    fn rejects_anything_but_64_hex_chars() {
+        for input in [
+            "notahashbutaverylongstring".to_string(),
+            "deadbeef".to_string(),
+            "z".repeat(64),
+        ] {
+            let err = parse_api_key_hash(&input, "/tmp/k").unwrap_err();
+            assert!(err.to_string().contains("SHA-256"), "{input}");
+        }
     }
 }
 
@@ -172,20 +156,19 @@ mod helper_tests {
     use uuid::Uuid;
 
     #[test]
-    fn lookup_id_errors_with_kind_and_name() {
+    fn lookups_and_reads_name_the_missing_thing() {
         let m: HashMap<String, Uuid> = HashMap::new();
-        let err = lookup_id(&m, "ghost", "User").unwrap_err();
-        let s = err.to_string();
-        assert!(s.contains("User"));
-        assert!(s.contains("ghost"));
-    }
+        let err = lookup_id(&m, "ghost", "User").unwrap_err().to_string();
+        assert!(err.contains("User") && err.contains("ghost"), "{err}");
 
-    #[test]
-    fn read_credential_names_the_file_in_the_given_dir() {
         let dir = Path::new("/nonexistent-credentials");
-        let err = read_credential(dir, "user", "alice", "password", "password file").unwrap_err();
-        let s = err.to_string();
-        assert!(s.contains("password file"));
-        assert!(s.contains("/nonexistent-credentials/gradient_user_alice_password"));
+        let err = read_credential(dir, "user", "alice", "password", "password file")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("password file"), "{err}");
+        assert!(
+            err.contains("/nonexistent-credentials/gradient_user_alice_password"),
+            "{err}"
+        );
     }
 }

@@ -250,10 +250,12 @@ mod tests {
     }
 
     #[test]
-    fn a_young_cluster_reserves_nothing() {
-        let s = snapshot(vec![cluster(2, 60, false)], &["w1"], &["w1", "w2"]);
+    fn a_young_or_underserved_cluster_reserves_nothing() {
+        let young = snapshot(vec![cluster(2, 60, false)], &["w1"], &["w1", "w2"]);
+        assert!(matches!(step(&young), AgingStep::Keep));
 
-        assert!(matches!(step(&s), AgingStep::Keep));
+        let short = snapshot(vec![cluster(3, 700, false)], &[], &["w1", "w2"]);
+        assert!(matches!(step(&short), AgingStep::Keep));
     }
 
     #[test]
@@ -267,13 +269,6 @@ mod tests {
     }
 
     #[test]
-    fn an_old_cluster_without_enough_workers_reserves_nothing() {
-        let s = snapshot(vec![cluster(3, 700, false)], &[], &["w1", "w2"]);
-
-        assert!(matches!(step(&s), AgingStep::Keep));
-    }
-
-    #[test]
     fn the_prioritized_cluster_reserves_first() {
         let old = cluster(2, 900, false);
         let urgent = cluster(2, 700, true);
@@ -284,24 +279,16 @@ mod tests {
     }
 
     #[test]
-    fn a_reservation_commits_once_every_seat_is_idle() {
-        let c = cluster(2, 700, false);
-        let mut s = snapshot(vec![c], &[], &["w1", "w2"]);
-        let r = reserved(step(&s));
-        s.reservation = Some(r);
-        s.slots = vec![slot("w1"), slot("w2")];
-
-        assert!(matches!(step(&s), AgingStep::Commit(_)));
-    }
-
-    #[test]
-    fn a_reservation_waits_while_a_seat_is_busy() {
+    fn a_reservation_commits_only_once_every_seat_is_idle() {
         let c = cluster(2, 700, false);
         let mut s = snapshot(vec![c], &[], &["w1", "w2"]);
         s.reservation = Some(reserved(step(&s)));
-        s.slots = vec![slot("w1")];
 
+        s.slots = vec![slot("w1")];
         assert!(matches!(step(&s), AgingStep::Keep));
+
+        s.slots = vec![slot("w1"), slot("w2")];
+        assert!(matches!(step(&s), AgingStep::Commit(_)));
     }
 
     #[test]
@@ -331,36 +318,28 @@ mod tests {
         assert!(Instant::now().duration_since(renewed.since) < Duration::from_secs(1));
     }
 
-    #[test]
-    fn a_seat_that_can_no_longer_run_its_member_expires_the_reservation() {
+    fn aged_reservation() -> ClusterSnapshot {
         let c = cluster(2, 700, false);
         let mut s = snapshot(vec![c], &[], &["w1", "w2"]);
         s.reservation = Some(reserved(step(&s)));
-        let mut unfit = slot("w1");
-        unfit.caps.capabilities.eval = false;
-        s.slots = vec![unfit, slot("w2")];
-
-        assert!(matches!(step(&s), AgingStep::Expire));
+        s
     }
 
     #[test]
-    fn a_reservation_with_a_lost_seat_expires() {
-        let c = cluster(2, 700, false);
-        let mut s = snapshot(vec![c], &[], &["w1", "w2"]);
-        s.reservation = Some(reserved(step(&s)));
-        s.connected = vec![slot("w1")];
+    fn a_reservation_whose_cluster_or_seat_disappears_expires() {
+        let mut unfit = aged_reservation();
+        let mut no_eval = slot("w1");
+        no_eval.caps.capabilities.eval = false;
+        unfit.slots = vec![no_eval, slot("w2")];
+        assert!(matches!(step(&unfit), AgingStep::Expire));
 
-        assert!(matches!(step(&s), AgingStep::Expire));
-    }
+        let mut lost_seat = aged_reservation();
+        lost_seat.connected = vec![slot("w1")];
+        assert!(matches!(step(&lost_seat), AgingStep::Expire));
 
-    #[test]
-    fn a_reservation_for_a_vanished_cluster_expires() {
-        let c = cluster(2, 700, false);
-        let mut s = snapshot(vec![c], &[], &["w1", "w2"]);
-        s.reservation = Some(reserved(step(&s)));
-        s.clusters.clear();
-
-        assert!(matches!(step(&s), AgingStep::Expire));
+        let mut vanished = aged_reservation();
+        vanished.clusters.clear();
+        assert!(matches!(step(&vanished), AgingStep::Expire));
     }
 
     #[test]

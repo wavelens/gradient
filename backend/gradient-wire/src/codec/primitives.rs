@@ -265,42 +265,29 @@ mod tests {
     }
 
     #[test]
-    fn trailing_bytes_are_rejected() {
+    fn decoding_rejects_malformed_frames() {
         assert_eq!(
             from_bytes::<bool>(Bytes::from_static(&[1, 0]), 27),
             Err(DecodeError::TrailingBytes(1))
         );
-    }
-
-    #[test]
-    fn a_bool_other_than_zero_or_one_is_rejected() {
         assert_eq!(
             from_bytes::<bool>(Bytes::from_static(&[2]), 27),
             Err(DecodeError::InvalidBool(2))
         );
-    }
 
-    #[test]
-    fn a_count_beyond_the_frame_is_truncated_not_allocated() {
         let mut frame = bytes::BytesMut::new();
         crate::codec::put_varint(&mut frame, u64::from(u32::MAX));
         assert_eq!(
             from_bytes::<Vec<u64>>(frame.freeze(), 27),
             Err(DecodeError::Truncated)
         );
-    }
 
-    #[test]
-    fn a_value_too_large_for_its_type_is_rejected() {
         let frame = to_bytes(&70_000u32, 27).expect("encodes");
         assert_eq!(
             from_bytes::<u16>(frame, 27),
             Err(DecodeError::OutOfRange("u16"))
         );
-    }
 
-    #[test]
-    fn invalid_utf8_is_rejected() {
         assert_eq!(
             from_bytes::<String>(Bytes::from_static(&[1, 0xff]), 27),
             Err(DecodeError::InvalidUtf8)

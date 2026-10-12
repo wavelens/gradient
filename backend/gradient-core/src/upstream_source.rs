@@ -281,23 +281,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn serves_the_log_from_the_first_upstream_that_has_it() {
+    async fn fetch_upstream_log_reads_the_first_non_empty_body() {
         let without = log_upstream(None).await;
+        let empty = log_upstream(Some("")).await;
         let with = log_upstream(Some("building\n")).await;
 
         let log =
             fetch_upstream_log(&[source(20, without.uri()), source(21, with.uri())], DRV).await;
-
         assert_eq!(log.as_deref(), Some("building\n"));
-    }
-
-    #[tokio::test]
-    async fn an_empty_log_falls_through_to_the_next_upstream() {
-        let empty = log_upstream(Some("")).await;
-        let with = log_upstream(Some("building\n")).await;
 
         let log = fetch_upstream_log(&[source(22, empty.uri()), source(23, with.uri())], DRV).await;
-
         assert_eq!(log.as_deref(), Some("building\n"));
     }
 
@@ -361,31 +354,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_binary_cache_passes_the_http1_probe() {
-        let server = cache_info_upstream("StoreDir: /nix/store\nPriority: 40\n").await;
-
-        let probe = probe_protocol(&server.uri(), HttpVersion::Http1).await;
-
+    async fn probe_accepts_binary_caches_and_reports_what_failed() {
+        let binary = cache_info_upstream("StoreDir: /nix/store\nPriority: 40\n").await;
+        let probe = probe_protocol(&binary.uri(), HttpVersion::Http1).await;
         assert!(probe.ok, "{probe:?}");
         assert_eq!(probe.error, None);
-    }
 
-    #[tokio::test]
-    async fn a_page_that_is_no_binary_cache_fails_the_probe() {
-        let server = cache_info_upstream("<html>login</html>").await;
-
-        let probe = probe_protocol(&server.uri(), HttpVersion::Http1).await;
-
+        let page = cache_info_upstream("<html>login</html>").await;
+        let probe = probe_protocol(&page.uri(), HttpVersion::Http1).await;
         assert!(!probe.ok);
         assert_eq!(probe.status, Some(200));
-    }
 
-    #[tokio::test]
-    async fn a_missing_nix_cache_info_reports_its_status() {
-        let server = MockServer::start().await;
-
-        let probe = probe_protocol(&server.uri(), HttpVersion::Http1).await;
-
+        let missing = MockServer::start().await;
+        let probe = probe_protocol(&missing.uri(), HttpVersion::Http1).await;
         assert!(!probe.ok);
         assert_eq!(probe.status, Some(404));
     }

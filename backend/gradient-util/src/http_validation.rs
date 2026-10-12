@@ -118,113 +118,61 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validate_url_accepts_public_https() {
-        assert!(validate_webhook_url("https://example.com/hook").is_ok());
-        assert!(validate_webhook_url("http://example.com:8080/hook").is_ok());
-        assert!(validate_webhook_url("https://example.com").is_ok());
+    fn validate_webhook_url_accepts_public_targets() {
+        for url in [
+            "https://example.com/hook",
+            "http://example.com:8080/hook",
+            "https://example.com",
+            "http://100.128.0.1/",
+            "http://100.63.255.255/",
+            "http://8.8.8.8/",
+            "http://[2001:4860:4860::8888]/",
+        ] {
+            assert!(validate_webhook_url(url).is_ok(), "{url}");
+        }
     }
 
     #[test]
-    fn validate_url_rejects_invalid_scheme() {
-        assert!(validate_webhook_url("file:///etc/passwd").is_err());
-        assert!(validate_webhook_url("ftp://example.com/").is_err());
-        assert!(validate_webhook_url("gopher://example.com/").is_err());
-        assert!(validate_webhook_url("javascript:alert(1)").is_err());
-    }
-
-    #[test]
-    fn validate_url_rejects_unparseable() {
-        assert!(validate_webhook_url("not a url").is_err());
-        assert!(validate_webhook_url("").is_err());
-    }
-
-    #[test]
-    fn validate_url_rejects_localhost_name() {
-        assert!(validate_webhook_url("http://localhost/").is_err());
-        assert!(validate_webhook_url("http://LOCALHOST/").is_err());
-        assert!(validate_webhook_url("http://Localhost:8080/path").is_err());
-    }
-
-    #[test]
-    fn validate_url_rejects_loopback_ipv4() {
-        assert!(validate_webhook_url("http://127.0.0.1/").is_err());
-        assert!(validate_webhook_url("http://127.255.255.254/").is_err());
-    }
-
-    #[test]
-    fn validate_url_rejects_aws_metadata_ip() {
-        assert!(validate_webhook_url("http://169.254.169.254/latest/meta-data/").is_err());
-        assert!(validate_webhook_url("http://169.254.0.1/").is_err());
-    }
-
-    #[test]
-    fn validate_url_rejects_rfc1918_ranges() {
-        assert!(validate_webhook_url("http://10.0.0.1/").is_err());
-        assert!(validate_webhook_url("http://10.255.255.255/").is_err());
-        assert!(validate_webhook_url("http://172.16.0.1/").is_err());
-        assert!(validate_webhook_url("http://172.31.255.255/").is_err());
-        assert!(validate_webhook_url("http://192.168.0.1/").is_err());
-        assert!(validate_webhook_url("http://192.168.255.255/").is_err());
-    }
-
-    #[test]
-    fn validate_url_rejects_cgnat_shared_space() {
-        assert!(validate_webhook_url("http://100.64.0.1/").is_err());
-        assert!(validate_webhook_url("http://100.127.255.254/").is_err());
-        assert!(validate_webhook_url("http://100.128.0.1/").is_ok());
-        assert!(validate_webhook_url("http://100.63.255.255/").is_ok());
-    }
-
-    #[test]
-    fn validate_url_rejects_unspecified_and_broadcast() {
-        assert!(validate_webhook_url("http://0.0.0.0/").is_err());
-        assert!(validate_webhook_url("http://255.255.255.255/").is_err());
-    }
-
-    #[test]
-    fn validate_url_rejects_multicast_ipv4() {
-        assert!(validate_webhook_url("http://224.0.0.1/").is_err());
-        assert!(validate_webhook_url("http://239.255.255.255/").is_err());
-    }
-
-    #[test]
-    fn validate_url_rejects_reserved_ipv4() {
-        assert!(validate_webhook_url("http://240.0.0.1/").is_err());
-    }
-
-    #[test]
-    fn validate_url_rejects_ipv6_loopback_and_unspecified() {
-        assert!(validate_webhook_url("http://[::1]/").is_err());
-        assert!(validate_webhook_url("http://[::]/").is_err());
-    }
-
-    #[test]
-    fn validate_url_rejects_ipv6_link_and_unique_local() {
-        assert!(validate_webhook_url("http://[fe80::1]/").is_err());
-        assert!(validate_webhook_url("http://[febf::1]/").is_err());
-        assert!(validate_webhook_url("http://[fc00::1]/").is_err());
-        assert!(validate_webhook_url("http://[fdff::1]/").is_err());
-    }
-
-    #[test]
-    fn validate_url_rejects_ipv6_multicast() {
-        assert!(validate_webhook_url("http://[ff00::1]/").is_err());
-        assert!(validate_webhook_url("http://[ff02::1]/").is_err());
-    }
-
-    #[test]
-    fn validate_url_rejects_ipv4_mapped_loopback_in_ipv6() {
-        assert!(validate_webhook_url("http://[::ffff:7f00:1]/").is_err());
-        assert!(validate_webhook_url("http://[::ffff:a9fe:a9fe]/").is_err());
-    }
-
-    #[test]
-    fn validate_url_accepts_public_ipv4_literal() {
-        assert!(validate_webhook_url("http://8.8.8.8/").is_ok());
-    }
-
-    #[test]
-    fn validate_url_accepts_public_ipv6_literal() {
-        assert!(validate_webhook_url("http://[2001:4860:4860::8888]/").is_ok());
+    fn validate_webhook_url_rejects_every_internal_or_bad_target() {
+        for url in [
+            "file:///etc/passwd",
+            "ftp://example.com/",
+            "gopher://example.com/",
+            "javascript:alert(1)",
+            "not a url",
+            "",
+            "http://localhost/",
+            "http://LOCALHOST/",
+            "http://Localhost:8080/path",
+            "http://127.0.0.1/",
+            "http://127.255.255.254/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://169.254.0.1/",
+            "http://10.0.0.1/",
+            "http://10.255.255.255/",
+            "http://172.16.0.1/",
+            "http://172.31.255.255/",
+            "http://192.168.0.1/",
+            "http://192.168.255.255/",
+            "http://100.64.0.1/",
+            "http://100.127.255.254/",
+            "http://0.0.0.0/",
+            "http://255.255.255.255/",
+            "http://224.0.0.1/",
+            "http://239.255.255.255/",
+            "http://240.0.0.1/",
+            "http://[::1]/",
+            "http://[::]/",
+            "http://[fe80::1]/",
+            "http://[febf::1]/",
+            "http://[fc00::1]/",
+            "http://[fdff::1]/",
+            "http://[ff00::1]/",
+            "http://[ff02::1]/",
+            "http://[::ffff:7f00:1]/",
+            "http://[::ffff:a9fe:a9fe]/",
+        ] {
+            assert!(validate_webhook_url(url).is_err(), "{url}");
+        }
     }
 }

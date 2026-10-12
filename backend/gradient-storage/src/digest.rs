@@ -117,47 +117,59 @@ mod tests {
 
     const BYTES: &[u8] = b"gradient nar integrity check";
 
-    #[test]
-    fn valid_bytes_pass() {
+    #[tokio::test]
+    async fn valid_bytes_pass_one_shot_and_streaming() {
         let expected = file_hash_sri(BYTES);
-        assert!(verify_nar_bytes(BYTES, &expected, BYTES.len() as u64).is_ok());
+        let size = BYTES.len() as u64;
+        assert!(verify_nar_bytes(BYTES, &expected, size).is_ok());
+        assert!(verify_nar_reader(BYTES, &expected, size).await.is_ok());
     }
 
-    #[test]
-    fn size_mismatch_is_size_error() {
+    #[tokio::test]
+    async fn a_size_mismatch_is_a_size_error_one_shot_and_streaming() {
         let expected = file_hash_sri(BYTES);
-        let err = verify_nar_bytes(BYTES, &expected, BYTES.len() as u64 + 1).unwrap_err();
-        assert!(matches!(err, VerifyError::Size { .. }));
+        let size = BYTES.len() as u64 + 1;
+        assert!(matches!(
+            verify_nar_bytes(BYTES, &expected, size).unwrap_err(),
+            VerifyError::Size { .. }
+        ));
+        assert!(matches!(
+            verify_nar_reader(BYTES, &expected, size).await.unwrap_err(),
+            VerifyError::Size { .. }
+        ));
     }
 
-    #[test]
-    fn tampered_bytes_are_hash_error() {
+    #[tokio::test]
+    async fn tampered_bytes_are_a_hash_error_one_shot_and_streaming() {
         let mut tampered = BYTES.to_vec();
         let expected = file_hash_sri(&tampered);
         *tampered.last_mut().unwrap() ^= 0xff;
-        let err = verify_nar_bytes(&tampered, &expected, tampered.len() as u64).unwrap_err();
-        assert!(matches!(err, VerifyError::Hash { .. }));
+        let size = tampered.len() as u64;
+        assert!(matches!(
+            verify_nar_bytes(&tampered, &expected, size).unwrap_err(),
+            VerifyError::Hash { .. }
+        ));
+        assert!(matches!(
+            verify_nar_reader(&tampered[..], &expected, size)
+                .await
+                .unwrap_err(),
+            VerifyError::Hash { .. }
+        ));
     }
 
     #[test]
-    fn file_hash_matches_accepts_the_digest_of_the_same_bytes() {
+    fn file_hash_matches_compares_sha256_only() {
         let digest = *Sha256::digest(BYTES).digest_bytes();
         assert!(file_hash_matches(&file_hash_sri(BYTES), &digest));
         assert!(file_hash_matches(
             &normalize_nar_hash(&file_hash_sri(BYTES)),
             &digest
         ));
-    }
 
-    #[test]
-    fn file_hash_matches_rejects_a_different_digest() {
-        let mut digest = *Sha256::digest(BYTES).digest_bytes();
-        digest[0] ^= 0xff;
-        assert!(!file_hash_matches(&file_hash_sri(BYTES), &digest));
-    }
+        let mut other = digest;
+        other[0] ^= 0xff;
+        assert!(!file_hash_matches(&file_hash_sri(BYTES), &other));
 
-    #[test]
-    fn file_hash_matches_passes_a_non_sha256_declaration() {
         let blake3 = "blake3:11cxppanr71mzl1xnyax8rccaj5milx2fx9vnvzk6la672nb6dv4";
         assert!(file_hash_matches(blake3, &[0u8; 32]));
     }
@@ -166,35 +178,5 @@ mod tests {
     fn non_sha256_hash_takes_size_only_path() {
         let blake3 = "blake3:11cxppanr71mzl1xnyax8rccaj5milx2fx9vnvzk6la672nb6dv4";
         assert!(verify_nar_bytes(BYTES, blake3, BYTES.len() as u64).is_ok());
-    }
-
-    #[tokio::test]
-    async fn reader_verify_matches_one_shot_hash() {
-        let expected = file_hash_sri(BYTES);
-        assert!(
-            verify_nar_reader(BYTES, &expected, BYTES.len() as u64)
-                .await
-                .is_ok()
-        );
-    }
-
-    #[tokio::test]
-    async fn reader_verify_rejects_size_mismatch() {
-        let expected = file_hash_sri(BYTES);
-        let err = verify_nar_reader(BYTES, &expected, BYTES.len() as u64 + 1)
-            .await
-            .unwrap_err();
-        assert!(matches!(err, VerifyError::Size { .. }));
-    }
-
-    #[tokio::test]
-    async fn reader_verify_rejects_tampered_content() {
-        let mut tampered = BYTES.to_vec();
-        let expected = file_hash_sri(&tampered);
-        *tampered.last_mut().unwrap() ^= 0xff;
-        let err = verify_nar_reader(&tampered[..], &expected, tampered.len() as u64)
-            .await
-            .unwrap_err();
-        assert!(matches!(err, VerifyError::Hash { .. }));
     }
 }

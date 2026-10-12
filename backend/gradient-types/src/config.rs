@@ -236,6 +236,7 @@ impl RuntimeConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     fn base_cli() -> Cli {
         use crate::cli::*;
@@ -270,173 +271,119 @@ mod tests {
     }
 
     #[test]
-    fn oidc_config_disabled_returns_none() {
-        let cli = base_cli();
-        assert!(cli.oidc_config().is_none());
-    }
+    fn oidc_config_requires_enable_and_all_fields() {
+        assert!(base_cli().oidc_config().is_none());
 
-    #[test]
-    fn oidc_config_enabled_missing_fields_returns_none() {
         let mut cli = base_cli();
         cli.oidc.enable = true;
-        assert!(cli.oidc_config().is_none());
-    }
+        assert!(cli.oidc_config().is_none(), "enabled without fields");
 
-    #[test]
-    fn oidc_config_fully_configured_returns_some() {
-        let mut cli = base_cli();
-        cli.oidc.enable = true;
         cli.oidc.client_id = Some("client-id".into());
         cli.oidc.client_secret_file = Some("/run/secrets/oidc".into());
         cli.oidc.discovery_url = Some("https://idp.example.com".into());
-        let config = cli.oidc_config().expect("should return Some");
-        assert_eq!(config.client_id, "client-id");
+        assert_eq!(
+            cli.oidc_config().expect("configured").client_id,
+            "client-id"
+        );
     }
 
     #[test]
-    fn email_config_disabled_returns_none() {
-        let cli = base_cli();
-        assert!(cli.email_config().is_none());
-    }
+    fn email_config_requires_enable_and_smtp_details() {
+        assert!(base_cli().email_config().is_none());
 
-    #[test]
-    fn email_config_enabled_missing_host_returns_none() {
         let mut cli = base_cli();
         cli.email.enable = true;
-        assert!(cli.email_config().is_none());
-    }
+        assert!(cli.email_config().is_none(), "enabled without an smtp host");
 
-    #[test]
-    fn email_config_fully_configured_returns_some() {
-        let mut cli = base_cli();
-        cli.email.enable = true;
         cli.email.smtp_host = Some("smtp.example.com".into());
         cli.email.smtp_username = Some("user".into());
         cli.email.smtp_password_file = Some("/run/secrets/smtp".into());
         cli.email.from_address = Some("gradient@example.com".into());
-        let config = cli.email_config().expect("should return Some");
+        let config = cli.email_config().expect("configured");
         assert_eq!(config.smtp_host, "smtp.example.com");
         assert_eq!(config.smtp_port, 587);
     }
 
     #[test]
-    fn github_app_config_all_missing_returns_none() {
-        let cli = base_cli();
-        assert!(cli.github_app_config().is_none());
-    }
+    fn github_app_config_requires_all_three_fields() {
+        assert!(base_cli().github_app_config().is_none());
 
-    #[test]
-    fn github_app_config_partial_returns_none() {
         let mut cli = base_cli();
         cli.github_app.id = std::num::NonZeroU64::new(42);
-        assert!(cli.github_app_config().is_none());
-    }
+        assert!(cli.github_app_config().is_none(), "id alone is not enough");
 
-    #[test]
-    fn github_app_config_fully_configured_returns_some() {
-        let mut cli = base_cli();
         cli.github_app.id = std::num::NonZeroU64::new(12345);
         cli.github_app.private_key_file = Some("/run/secrets/github-app.pem".into());
         cli.github_app.webhook_secret_file = Some("/run/secrets/github-webhook".into());
-        let config = cli.github_app_config().expect("should return Some");
+        let config = cli.github_app_config().expect("configured");
         assert_eq!(config.app_id, 12345);
         assert_eq!(config.private_key_file, "/run/secrets/github-app.pem");
         assert_eq!(config.webhook_secret_file, "/run/secrets/github-webhook");
     }
 
     #[test]
-    fn s3_config_no_bucket_returns_none() {
-        let cli = base_cli();
-        assert!(cli.s3_config().is_none());
-    }
+    fn s3_config_needs_a_bucket_and_fills_defaults() {
+        assert!(base_cli().s3_config().is_none());
 
-    #[test]
-    fn s3_config_with_bucket_returns_some() {
         let mut cli = base_cli();
         cli.s3.bucket = Some("my-bucket".into());
-        let config = cli.s3_config().expect("should return Some");
+        let config = cli.s3_config().expect("configured");
         assert_eq!(config.bucket, "my-bucket");
         assert_eq!(config.region, "us-east-1");
         assert!(config.endpoint.is_none());
     }
 
     #[test]
-    fn network_config_defaults_parse() {
-        let cli = base_cli();
-        let cfg = cli.network_config().expect("default CIDR lists parse");
+    fn network_config_parses_cidrs_and_names_the_failing_list() {
+        let cfg = base_cli()
+            .network_config()
+            .expect("default CIDR lists parse");
         assert!(!cfg.trusted_proxies.is_empty());
         assert!(!cfg.local_ips.is_empty());
-    }
 
-    #[test]
-    fn network_config_invalid_trusted_proxies_returns_err() {
         let mut cli = base_cli();
         cli.http.trusted_proxies = vec!["not-a-cidr".into()];
-        let err = cli.network_config().unwrap_err();
-        assert!(err.to_string().contains("GRADIENT_HTTP_TRUSTED_PROXIES"));
-    }
+        assert!(
+            cli.network_config()
+                .unwrap_err()
+                .to_string()
+                .contains("GRADIENT_HTTP_TRUSTED_PROXIES")
+        );
 
-    #[test]
-    fn network_config_invalid_local_ips_returns_err() {
         let mut cli = base_cli();
         cli.http.local_ips = vec!["10.0.0.0/8".into(), "banana".into()];
-        let err = cli.network_config().unwrap_err();
-        assert!(err.to_string().contains("GRADIENT_HTTP_LOCAL_IPS"));
-        assert!(err.to_string().contains("banana"));
+        let err = cli.network_config().unwrap_err().to_string();
+        assert!(err.contains("GRADIENT_HTTP_LOCAL_IPS"), "{err}");
+        assert!(err.contains("banana"), "{err}");
     }
 
     #[test]
-    fn metrics_config_unset_returns_none() {
-        let cli = base_cli();
-        assert!(cli.metrics_config().is_none());
-    }
+    fn metrics_config_reads_only_a_non_blank_token_file() {
+        assert!(base_cli().metrics_config().is_none());
 
-    #[test]
-    fn metrics_config_empty_file_returns_none() {
-        use std::io::Write;
-        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
-        write!(tmp, "   \n  ").expect("write");
-        let path = tmp.path().to_string_lossy().into_owned();
-
+        let mut blank = tempfile::NamedTempFile::new().expect("tempfile");
+        write!(blank, "   \n  ").expect("write");
         let mut cli = base_cli();
-        cli.metrics.token_file = Some(path);
-        assert!(cli.metrics_config().is_none());
+        cli.metrics.token_file = Some(blank.path().to_string_lossy().into_owned());
+        assert!(cli.metrics_config().is_none(), "blank file is no config");
+
+        let mut filled = tempfile::NamedTempFile::new().expect("tempfile");
+        writeln!(filled, "  s3cret-token").expect("write");
+        cli.metrics.token_file = Some(filled.path().to_string_lossy().into_owned());
+        assert_eq!(cli.metrics_config().expect("Some").token, "s3cret-token");
     }
 
     #[test]
-    fn metrics_config_loaded_from_file() {
-        use std::io::Write;
-        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
-        writeln!(tmp, "  s3cret-token").expect("write");
-        let path = tmp.path().to_string_lossy().into_owned();
+    fn scim_config_requires_enable_and_a_token_file() {
+        assert!(base_cli().scim_config().is_none());
 
-        let mut cli = base_cli();
-        cli.metrics.token_file = Some(path);
-
-        let cfg = cli.metrics_config().expect("Some");
-        assert_eq!(cfg.token, "s3cret-token");
-    }
-
-    #[test]
-    fn scim_config_disabled_returns_none() {
-        let cli = base_cli();
-        assert!(cli.scim_config().is_none());
-    }
-
-    #[test]
-    fn scim_config_enabled_missing_token_returns_none() {
         let mut cli = base_cli();
         cli.scim.enable = true;
-        assert!(cli.scim_config().is_none());
-    }
+        assert!(cli.scim_config().is_none(), "enabled without a token file");
 
-    #[test]
-    fn scim_config_fully_configured_returns_some() {
-        let mut cli = base_cli();
-        cli.scim.enable = true;
         cli.scim.token_file = Some("/run/secrets/scim".into());
         cli.scim.hard_delete = true;
-        let cfg = cli.scim_config().expect("should return Some");
+        let cfg = cli.scim_config().expect("configured");
         assert_eq!(cfg.token_file, "/run/secrets/scim");
         assert!(cfg.hard_delete);
     }

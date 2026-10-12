@@ -218,8 +218,8 @@ mod tests {
     }
 
     #[test]
-    fn an_aggregate_collapses_what_it_read() {
-        let body = serde_json::json!([{
+    fn an_aggregate_or_scalar_subplan_collapses_what_it_read() {
+        let aggregate = serde_json::json!([{
             "Plan": {
                 "Node Type": "Aggregate",
                 "Actual Rows": 1.0,
@@ -227,17 +227,12 @@ mod tests {
                 "Plans": [{ "Node Type": "Seq Scan", "Actual Rows": 500.0, "Actual Loops": 1 }],
             }
         }]);
+        assert!(measure(&aggregate).expect("measurable").collapses);
 
-        assert!(measure(&body).expect("measurable").collapses);
-    }
-
-    #[test]
-    fn a_scalar_from_a_subplan_collapses_too() {
-        let body = serde_json::json!([{
+        let scalar = serde_json::json!([{
             "Plan": { "Node Type": "Result", "Actual Rows": 1.0, "Actual Loops": 1 }
         }]);
-
-        assert!(measure(&body).expect("measurable").collapses);
+        assert!(measure(&scalar).expect("measurable").collapses);
     }
 
     #[test]
@@ -258,8 +253,8 @@ mod tests {
     }
 
     #[test]
-    fn a_write_returns_what_it_modified() {
-        let body = serde_json::json!([{
+    fn rows_out_reports_write_modifications_and_read_rows() {
+        let write = serde_json::json!([{
             "Plan": {
                 "Node Type": "ModifyTable",
                 "Operation": "Update",
@@ -269,19 +264,14 @@ mod tests {
                 "Plans": [{ "Node Type": "Index Scan", "Actual Rows": 8.0, "Actual Loops": 1 }],
             }
         }]);
-
-        let m = measure(&body).expect("measurable");
+        let m = measure(&write).expect("measurable");
         assert_eq!(m.rows_out, 8, "an UPDATE without RETURNING reports no rows");
         assert_eq!(m.rows_scanned, 8);
-    }
 
-    #[test]
-    fn a_read_that_returns_nothing_still_returns_nothing() {
-        let body = serde_json::json!([{
+        let read = serde_json::json!([{
             "Plan": { "Node Type": "Seq Scan", "Actual Rows": 0.0, "Actual Loops": 1 }
         }]);
-
-        assert_eq!(measure(&body).expect("measurable").rows_out, 0);
+        assert_eq!(measure(&read).expect("measurable").rows_out, 0);
     }
 
     #[test]

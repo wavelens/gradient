@@ -126,43 +126,29 @@ mod tests {
     }
 
     #[test]
-    fn a_declared_literal_write_passes() {
-        let sql = "UPDATE derivation_build db SET status = 1, updated_at = now() \
-                   WHERE db.status = 0 RETURNING db.derivation";
-        assert_eq!(violation("QUEUE", sql, Some(QUEUE)), None);
-    }
+    fn declared_literal_case_and_other_table_writes_are_allowed() {
+        let queue = "UPDATE derivation_build db SET status = 1, updated_at = now() WHERE db.status = 0 RETURNING db.derivation";
+        assert_eq!(violation("QUEUE", queue, Some(QUEUE)), None);
 
-    #[test]
-    fn a_status_write_without_a_declaration_fails() {
-        let sql = "UPDATE evaluation e SET status = 3 WHERE e.id = $1";
-        assert!(violation("REOPEN", sql, None).is_some());
-    }
+        let case = "UPDATE derivation_build d SET blocking_deps = d.blocking_deps + c.n, status = CASE WHEN d.status = 0 AND coalesce(d.attempt, 0) = 0 THEN 1 ELSE d.status END FROM (SELECT 1) c WHERE d.derivation = c.derivation";
+        assert_eq!(violation("QUEUE", case, Some(QUEUE)), None);
 
-    #[test]
-    fn a_write_of_another_status_than_the_declared_fails() {
-        let sql = "UPDATE derivation_build SET status = 0 WHERE status = 1";
-        assert!(violation("UNQUEUE", sql, Some(QUEUE)).is_some());
-    }
-
-    #[test]
-    fn a_bound_status_fails() {
-        let sql = "UPDATE derivation_build SET cache_available = false, status = $2 WHERE id = $1";
-        assert!(violation("CLEAR", sql, Some(QUEUE)).is_some());
-    }
-
-    #[test]
-    fn a_case_expression_counts_its_literals_only() {
-        let sql = "UPDATE derivation_build d SET blocking_deps = d.blocking_deps + c.n, \
-                   status = CASE WHEN d.status = 0 AND coalesce(d.attempt, 0) = 0 THEN 1 \
-                   ELSE d.status END FROM (SELECT 1) c WHERE d.derivation = c.derivation";
-        assert_eq!(violation("QUEUE", sql, Some(QUEUE)), None);
-    }
-
-    #[test]
-    fn a_statement_without_a_status_write_needs_no_declaration() {
-        let sql = "UPDATE derivation_build SET attempt = attempt + 1 WHERE status = 1";
-        assert_eq!(violation("BUMP", sql, None), None);
+        let bump = "UPDATE derivation_build SET attempt = attempt + 1 WHERE status = 1";
+        assert_eq!(violation("BUMP", bump, None), None);
         let other_table = "UPDATE build_job SET status = 2 WHERE id = $1";
         assert_eq!(violation("JOB", other_table, None), None);
+    }
+
+    #[test]
+    fn undeclared_wrong_or_bound_status_writes_are_flagged() {
+        let undeclared = "UPDATE evaluation e SET status = 3 WHERE e.id = $1";
+        assert!(violation("REOPEN", undeclared, None).is_some());
+
+        let wrong = "UPDATE derivation_build SET status = 0 WHERE status = 1";
+        assert!(violation("UNQUEUE", wrong, Some(QUEUE)).is_some());
+
+        let bound =
+            "UPDATE derivation_build SET cache_available = false, status = $2 WHERE id = $1";
+        assert!(violation("CLEAR", bound, Some(QUEUE)).is_some());
     }
 }

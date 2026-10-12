@@ -559,35 +559,22 @@ mod tests {
     }
 
     #[test]
-    fn glob_empty_list_matches_all() {
+    fn glob_patterns_match_lists_and_wildcards() {
         assert!(glob_matches(&[], "main"));
         assert!(glob_matches(&[], "anything"));
-    }
 
-    #[test]
-    fn glob_exact_match() {
         let globs = vec!["main".to_string()];
         assert!(glob_matches(&globs, "main"));
         assert!(!glob_matches(&globs, "develop"));
-    }
 
-    #[test]
-    fn glob_star_prefix() {
-        assert!(glob_match_pattern("feature/*", "feature/my-branch"));
-        assert!(!glob_match_pattern("feature/*", "bugfix/my-branch"));
-    }
-
-    #[test]
-    fn glob_star_only() {
-        assert!(glob_match_pattern("*", "main"));
-        assert!(glob_match_pattern("*", ""));
-    }
-
-    #[test]
-    fn glob_multiple_patterns() {
         let globs = vec!["main".to_string(), "release/*".to_string()];
         assert!(glob_matches(&globs, "main"));
         assert!(glob_matches(&globs, "release/1.0"));
         assert!(!glob_matches(&globs, "develop"));
+
+        assert!(glob_match_pattern("feature/*", "feature/my-branch"));
+        assert!(!glob_match_pattern("feature/*", "bugfix/my-branch"));
+        assert!(glob_match_pattern("*", "main"));
+        assert!(glob_match_pattern("*", ""));
     }
 }

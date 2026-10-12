@@ -370,65 +370,41 @@ mod auth_decision_tests {
     use super::{AuthDecision, Rejection, decide_auth};
 
     #[test]
-    fn inbound_unknown_worker_rejected() {
-        let d = decide_auth(true, false, true, false, false);
-        assert_eq!(d, AuthDecision::Reject(Rejection::UnknownWorker));
-    }
-
-    #[test]
-    fn deactivated_worker_rejected_inbound() {
-        assert_eq!(
-            decide_auth(true, true, true, false, false),
-            AuthDecision::Reject(Rejection::WorkerDeactivated)
-        );
-    }
-
-    #[test]
-    fn registered_but_no_valid_token() {
-        assert_eq!(
-            decide_auth(false, false, true, false, false),
-            AuthDecision::Reject(Rejection::NoValidPeerTokens)
-        );
-    }
-
-    #[test]
-    fn registered_emptied_by_missing_cache() {
-        assert_eq!(
-            decide_auth(false, false, true, true, false),
-            AuthDecision::Reject(Rejection::NoCacheSubscribed)
-        );
-    }
-
-    #[test]
-    fn team_worker_emptied_by_missing_cache() {
-        assert_eq!(
-            decide_auth(false, false, true, true, true),
-            AuthDecision::Reject(Rejection::NoCacheSubscribed)
-        );
-    }
-
-    #[test]
-    fn registered_with_valid_token_accepted() {
-        assert_eq!(
-            decide_auth(false, false, false, false, false),
-            AuthDecision::Accept
-        );
-    }
-
-    #[test]
-    fn a_team_worker_without_granted_projects_is_refused() {
-        assert_eq!(
-            decide_auth(false, false, true, false, true),
-            AuthDecision::Reject(Rejection::NoProjectGrant)
-        );
-    }
-
-    #[test]
-    fn team_worker_with_authorized_accepted() {
-        assert_eq!(
-            decide_auth(false, false, false, false, true),
-            AuthDecision::Accept
-        );
+    fn decide_auth_maps_every_input_to_the_right_decision() {
+        let cases = [
+            (
+                (true, false, true, false, false),
+                AuthDecision::Reject(Rejection::UnknownWorker),
+            ),
+            (
+                (true, true, true, false, false),
+                AuthDecision::Reject(Rejection::WorkerDeactivated),
+            ),
+            (
+                (false, false, true, false, false),
+                AuthDecision::Reject(Rejection::NoValidPeerTokens),
+            ),
+            (
+                (false, false, true, true, false),
+                AuthDecision::Reject(Rejection::NoCacheSubscribed),
+            ),
+            (
+                (false, false, true, true, true),
+                AuthDecision::Reject(Rejection::NoCacheSubscribed),
+            ),
+            (
+                (false, false, true, false, true),
+                AuthDecision::Reject(Rejection::NoProjectGrant),
+            ),
+            ((false, false, false, false, false), AuthDecision::Accept),
+            ((false, false, false, false, true), AuthDecision::Accept),
+        ];
+        for ((unknown, deactivated, no_tokens, no_cache, team), expected) in cases {
+            assert_eq!(
+                decide_auth(unknown, deactivated, no_tokens, no_cache, team),
+                expected
+            );
+        }
     }
 }
 

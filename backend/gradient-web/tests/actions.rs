@@ -319,30 +319,6 @@ async fn create_matrix_action_never_echoes_the_access_token() {
     );
 }
 
-#[tokio::test]
-async fn read_slack_action_strips_the_webhook_url() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
-
-    let row = task_action::Model {
-        action_type: ActionType::SendSlackMessage,
-        config: json!({ "type": "send_slack_message", "webhook_url": "ENCRYPTED_BLOB" }),
-        ..matrix_action_row()
-    };
-    let db = with_task_member(with_auth(mock_db(), session_id)).append_query_results([vec![row]]);
-
-    let server = make_test_server(db.into_connection());
-    let res = server
-        .get(&format!("{}/{}", BASE_URL, action_id()))
-        .add_header("authorization", format!("Bearer {}", token))
-        .await;
-
-    res.assert_status_ok();
-    let body: Value = res.json();
-    assert_eq!(body["message"]["action_type"], "send_slack_message");
-    assert!(body["message"]["config"].get("webhook_url").is_none());
-}
-
 async fn create_rejected(config: Value) -> Value {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
@@ -364,63 +340,50 @@ async fn create_rejected(config: Value) -> Value {
 }
 
 #[tokio::test]
-async fn create_matrix_action_requires_an_access_token() {
-    let body = create_rejected(json!({
-        "type": "send_matrix_message",
-        "homeserver": "https://matrix.example.org",
-        "room_id": "!ops:example.org",
-    }))
-    .await;
-    assert!(
-        body["message"].as_str().unwrap().contains("access_token"),
-        "{body}"
-    );
-}
+async fn create_chat_action_invalid_config_returns_422() {
+    let cases: &[(Value, &str)] = &[
+        (
+            json!({
+                "type": "send_matrix_message",
+                "homeserver": "https://matrix.example.org",
+                "room_id": "!ops:example.org",
+            }),
+            "access_token",
+        ),
+        (
+            json!({
+                "type": "send_matrix_message",
+                "homeserver": "https://matrix.example.org",
+                "room_id": "!ops:example.org",
+                "access_token": " ",
+            }),
+            "access_token",
+        ),
+        (
+            json!({
+                "type": "send_matrix_message",
+                "homeserver": "https://matrix.example.org",
+                "room_id": "#ops:example.org",
+                "access_token": "t",
+            }),
+            "room_id",
+        ),
+        (
+            json!({
+                "type": "send_slack_message",
+                "webhook_url": "http://127.0.0.1/hook",
+            }),
+            "disallowed address",
+        ),
+    ];
 
-#[tokio::test]
-async fn create_matrix_action_rejects_an_empty_access_token() {
-    let body = create_rejected(json!({
-        "type": "send_matrix_message",
-        "homeserver": "https://matrix.example.org",
-        "room_id": "!ops:example.org",
-        "access_token": " ",
-    }))
-    .await;
-    assert!(
-        body["message"].as_str().unwrap().contains("access_token"),
-        "{body}"
-    );
-}
-
-#[tokio::test]
-async fn create_matrix_action_rejects_a_room_alias() {
-    let body = create_rejected(json!({
-        "type": "send_matrix_message",
-        "homeserver": "https://matrix.example.org",
-        "room_id": "#ops:example.org",
-        "access_token": "t",
-    }))
-    .await;
-    assert!(
-        body["message"].as_str().unwrap().contains("room_id"),
-        "{body}"
-    );
-}
-
-#[tokio::test]
-async fn create_slack_action_rejects_a_loopback_webhook() {
-    let body = create_rejected(json!({
-        "type": "send_slack_message",
-        "webhook_url": "http://127.0.0.1/hook",
-    }))
-    .await;
-    assert!(
-        body["message"]
-            .as_str()
-            .unwrap()
-            .contains("disallowed address"),
-        "{body}"
-    );
+    for (config, expected) in cases {
+        let body = create_rejected(config.clone()).await;
+        assert!(
+            body["message"].as_str().unwrap().contains(expected),
+            "{config}: {body}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -459,29 +422,39 @@ async fn create_git_host_status_report_rejects_nonempty_events() {
 }
 
 #[tokio::test]
-async fn read_action_strips_token_from_config() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+async fn read_action_secret_config_field_is_stripped() {
+    let slack_row = task_action::Model {
+        action_type: ActionType::SendSlackMessage,
+        config: json!({ "type": "send_slack_message", "webhook_url": "ENCRYPTED_BLOB" }),
+        ..matrix_action_row()
+    };
+    let cases = [
+        (web_request_action_row(), "send_web_request", "token"),
+        (slack_row, "send_slack_message", "webhook_url"),
+    ];
 
-    let db = with_task_member(with_auth(mock_db(), session_id))
-        .append_query_results([vec![web_request_action_row()]]);
+    for (row, action_type, secret_field) in cases {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+        let db =
+            with_task_member(with_auth(mock_db(), session_id)).append_query_results([vec![row]]);
 
-    let server = make_test_server(db.into_connection());
-    let url = format!("{}/{}", BASE_URL, action_id());
-    let res = server
-        .get(&url)
-        .add_header("authorization", format!("Bearer {}", token))
-        .await;
+        let server = make_test_server(db.into_connection());
+        let res = server
+            .get(&format!("{}/{}", BASE_URL, action_id()))
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
 
-    res.assert_status_ok();
-    let body: Value = res.json();
-    assert_eq!(body["error"], false);
-    assert!(
-        body["message"]["config"].get("token").is_none(),
-        "token must be stripped from read response: {}",
-        body["message"]["config"]
-    );
-    assert_eq!(body["message"]["action_type"], "send_web_request");
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["error"], false);
+        assert_eq!(body["message"]["action_type"], action_type);
+        assert!(
+            body["message"]["config"].get(secret_field).is_none(),
+            "{action_type}: {}",
+            body["message"]["config"]
+        );
+    }
 }
 
 #[tokio::test]
@@ -514,17 +487,6 @@ async fn update_rejects_action_type_change() {
         body["message"]
     );
 }
-
-#[test]
-#[ignore = "needs end-to-end harness: MockDatabase prescribes query expectations, making it impractical to verify encrypted token preservation via raw row read after update"]
-fn update_send_web_request_without_token_preserves_existing() {}
-
-#[test]
-#[ignore = "test-fire calls execute_action which writes a delivery row via state.worker_db; \
-            the worker_db MockDatabase in make_test_server_with has no prescripted rows for the \
-            worker-side INSERT + UPDATE, causing MockDatabase to return an error. \
-            A real integration test with a live DB is needed to validate end-to-end."]
-fn test_fire_returns_ok_for_send_web_request() {}
 
 #[tokio::test]
 async fn regenerate_token_returns_new_plaintext() {

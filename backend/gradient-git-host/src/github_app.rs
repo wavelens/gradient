@@ -238,15 +238,31 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
 -----END PRIVATE KEY-----\n";
 
     #[test]
-    fn generate_jwt_invalid_pem_err() {
-        let result = generate_jwt(1, "not a pem");
-        assert!(result.is_err(), "expected Err for invalid PEM");
+    fn generate_jwt_rejects_invalid_pem() {
+        assert!(
+            generate_jwt(1, "not a pem").is_err(),
+            "expected Err for invalid PEM"
+        );
     }
 
     #[test]
-    fn generate_jwt_accepts_pkcs1_pem() {
-        let jwt = generate_jwt(7, TEST_RSA_PEM_PKCS1).expect("PKCS#1 must be accepted");
-        assert_eq!(jwt.split('.').count(), 3);
+    fn generate_jwt_signs_pkcs1_and_pkcs8_keys_that_verify() {
+        use ring::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
+
+        let pkcs1 = generate_jwt(7, TEST_RSA_PEM_PKCS1).expect("PKCS#1 must be accepted");
+        assert_eq!(pkcs1.split('.').count(), 3);
+
+        let jwt = generate_jwt(42, TEST_RSA_PEM).expect("generate_jwt failed");
+        let parts: Vec<&str> = jwt.split('.').collect();
+        let signing_input = format!("{}.{}", parts[0], parts[1]);
+        let sig = general_purpose::URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
+
+        let der = pem_to_der(TEST_RSA_PEM).unwrap();
+        let key_pair = RsaKeyPair::from_pkcs8(&der).unwrap();
+        let pub_key = key_pair.public().as_ref();
+        UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, pub_key)
+            .verify(signing_input.as_bytes(), &sig)
+            .expect("signature must verify");
     }
 
     fn compute_github_sig(secret: &str, body: &[u8]) -> String {
@@ -262,126 +278,73 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
     }
 
     #[test]
-    fn verify_github_signature_valid() {
+    fn verify_github_signature_accepts_only_its_own_hmac() {
         let body = b"hello world";
         let sig = compute_github_sig("my-secret", body);
         assert!(verify_github_signature("my-secret", &sig, body));
+        let empty = compute_github_sig("secret", b"");
+        assert!(verify_github_signature("secret", &empty, b""));
     }
 
     #[test]
-    fn verify_github_signature_wrong_body() {
-        let sig = compute_github_sig("my-secret", b"original");
-        assert!(!verify_github_signature("my-secret", &sig, b"tampered"));
+    fn verify_github_signature_rejects_mismatch_or_malformed_header() {
+        let body = b"body";
+        let wrong_body = compute_github_sig("my-secret", b"original");
+        let wrong_secret = compute_github_sig("correct-secret", body);
+        let bare = compute_gitea_sig("secret", body);
+        let wrong_prefix = format!("sha1={bare}");
+        let cases: [(&str, &str, &[u8]); 6] = [
+            ("my-secret", &wrong_body, b"tampered"),
+            ("wrong-secret", &wrong_secret, body),
+            ("secret", &bare, body),
+            ("secret", "sha256=ZZZZ", body),
+            ("secret", "", body),
+            ("secret", &wrong_prefix, body),
+        ];
+        for (secret, sig, payload) in cases {
+            assert!(!verify_github_signature(secret, sig, payload), "{sig}");
+        }
     }
 
     #[test]
-    fn verify_github_signature_wrong_secret() {
-        let sig = compute_github_sig("correct-secret", b"body");
-        assert!(!verify_github_signature("wrong-secret", &sig, b"body"));
-    }
-
-    #[test]
-    fn verify_github_signature_missing_prefix() {
-        let sig = compute_gitea_sig("secret", b"body");
-        assert!(!verify_github_signature("secret", &sig, b"body"));
-    }
-
-    #[test]
-    fn verify_github_signature_invalid_hex() {
-        assert!(!verify_github_signature("secret", "sha256=ZZZZ", b"body"));
-    }
-
-    #[test]
-    fn verify_github_signature_empty_body() {
-        let sig = compute_github_sig("secret", b"");
-        assert!(verify_github_signature("secret", &sig, b""));
-    }
-
-    #[test]
-    fn verify_gitea_signature_valid() {
-        let body = b"gitea payload";
-        let sig = compute_gitea_sig("gitea-secret", body);
-        assert!(verify_gitea_signature("gitea-secret", &sig, body));
-    }
-
-    #[test]
-    fn verify_gitea_signature_whitespace_trimmed() {
+    fn verify_gitea_signature_accepts_its_hmac_and_trims_whitespace() {
         let body = b"payload";
         let sig = compute_gitea_sig("secret", body);
-        let sig_with_space = format!("{sig}  ");
-        assert!(verify_gitea_signature("secret", &sig_with_space, body));
+        assert!(verify_gitea_signature("secret", &sig, body));
+        assert!(verify_gitea_signature("secret", &format!("{sig}  "), body));
     }
 
     #[test]
-    fn verify_gitea_signature_wrong_secret() {
-        let sig = compute_gitea_sig("correct", b"body");
-        assert!(!verify_gitea_signature("wrong", &sig, b"body"));
+    fn verify_gitea_signature_rejects_mismatch_or_malformed_header() {
+        let body = b"body";
+        let wrong_secret = compute_gitea_sig("correct", body);
+        for (secret, sig) in [
+            ("wrong", wrong_secret.as_str()),
+            ("secret", "ZZZZ"),
+            ("secret", ""),
+        ] {
+            assert!(!verify_gitea_signature(secret, sig, body), "{sig}");
+        }
     }
 
     #[test]
-    fn verify_gitea_signature_invalid_hex() {
-        assert!(!verify_gitea_signature("secret", "ZZZZ", b"body"));
-    }
-
-    #[test]
-    fn pem_to_der_valid() {
+    fn pem_to_der_decodes_single_and_multiline_bodies() {
         let original = b"\x30\x82\x01\x22";
         let b64 = general_purpose::STANDARD.encode(original);
         let pem = format!("-----BEGIN TEST KEY-----\n{b64}\n-----END TEST KEY-----\n");
-        let der = pem_to_der(&pem).unwrap();
-        assert_eq!(der, original);
-    }
+        assert_eq!(pem_to_der(&pem).unwrap(), original);
 
-    #[test]
-    fn pem_to_der_invalid_base64() {
-        let pem = "-----BEGIN TEST-----\nnot!valid!base64!!!\n-----END TEST-----\n";
-        assert!(pem_to_der(pem).is_err());
-    }
-
-    #[test]
-    fn pem_to_der_concatenates_multiple_lines() {
-        let original = vec![0xAB; 96];
-        let b64 = general_purpose::STANDARD.encode(&original);
+        let long = vec![0xAB; 96];
+        let b64 = general_purpose::STANDARD.encode(&long);
         let (chunk1, rest) = b64.split_at(16);
         let (chunk2, chunk3) = rest.split_at(16);
         let pem = format!("-----BEGIN K-----\n{chunk1}\n{chunk2}\n{chunk3}\n-----END K-----\n");
-        let der = pem_to_der(&pem).unwrap();
-        assert_eq!(der, original);
+        assert_eq!(pem_to_der(&pem).unwrap(), long);
     }
 
     #[test]
-    fn generate_jwt_signature_verifies_with_public_key() {
-        use ring::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
-
-        let jwt = generate_jwt(42, TEST_RSA_PEM).expect("generate_jwt failed");
-        let parts: Vec<&str> = jwt.split('.').collect();
-        let signing_input = format!("{}.{}", parts[0], parts[1]);
-        let sig = general_purpose::URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
-
-        let der = pem_to_der(TEST_RSA_PEM).unwrap();
-        let key_pair = RsaKeyPair::from_pkcs8(&der).unwrap();
-        let pub_key = key_pair.public().as_ref();
-        let verifier = UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, pub_key);
-        verifier
-            .verify(signing_input.as_bytes(), &sig)
-            .expect("signature must verify");
-    }
-
-    #[test]
-    fn verify_github_signature_empty_header_rejected() {
-        assert!(!verify_github_signature("secret", "", b"body"));
-    }
-
-    #[test]
-    fn verify_gitea_signature_empty_header_rejected() {
-        let body = b"body";
-        assert!(!verify_gitea_signature("secret", "", body));
-    }
-
-    #[test]
-    fn verify_github_signature_wrong_prefix_rejected() {
-        let bare = compute_gitea_sig("secret", b"body");
-        let sig = format!("sha1={bare}");
-        assert!(!verify_github_signature("secret", &sig, b"body"));
+    fn pem_to_der_rejects_invalid_base64() {
+        let pem = "-----BEGIN TEST-----\nnot!valid!base64!!!\n-----END TEST-----\n";
+        assert!(pem_to_der(pem).is_err());
     }
 }

@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `take` is the only way out of this map. The first of a timeout, a reject or a member's end is
-//! owning the attempt's close.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -291,7 +288,6 @@ impl Attempts {
         }
     }
 
-    /// An entry kept past `max_age` would hide its members from every dispatch pass.
     pub fn expire_resolved(&mut self, now: Instant, max_age: Duration) {
         let stale: Vec<ClusterAttemptId> = self
             .attempts

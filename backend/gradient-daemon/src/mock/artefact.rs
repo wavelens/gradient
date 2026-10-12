@@ -46,7 +46,9 @@ pub fn render(node_id: &str, node: &Node, output: &str) -> anyhow::Result<Bytes>
     for reference in &out.references {
         data.extend_from_slice(format!("{reference}\n").as_bytes());
     }
-    let pad = usize::try_from(out.size).unwrap_or(usize::MAX).saturating_sub(data.len());
+    let pad = usize::try_from(out.size)
+        .unwrap_or(usize::MAX)
+        .saturating_sub(data.len());
     data.extend(filler(node.timing.seed, &out.path, pad));
 
     let mut files = BTreeMap::from([("data".to_owned(), plain(data))]);

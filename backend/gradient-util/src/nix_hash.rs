@@ -105,119 +105,57 @@ mod tests {
     const BLAKE3_ABC_HEX: &str = "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85";
 
     #[test]
-    fn nix32_encode_zeros_all_zero_chars() {
-        let result = nix32_encode(&[0u8; 32]);
-        assert_eq!(result.len(), 52);
-        assert!(result.chars().all(|c| c == '0'));
+    fn nix32_encode_known_digest_matches_vector() {
+        let zeros = "0".repeat(52);
+        let cases: &[(&[u8], &str)] = &[
+            (&[0u8; 32], &zeros),
+            (&EMPTY_SHA256, EMPTY_SHA256_NIX32),
+            (&BLAKE3_ABC, BLAKE3_ABC_NIX32),
+        ];
+        for (bytes, expected) in cases {
+            assert_eq!(nix32_encode(bytes), *expected);
+        }
     }
 
     #[test]
-    fn nix32_encode_known_vector() {
-        assert_eq!(nix32_encode(&EMPTY_SHA256), EMPTY_SHA256_NIX32);
+    fn normalize_nar_hash_by_input_format_yields_expected_idempotently() {
+        let b64 = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+        let sha_nix32 = format!("sha256:{EMPTY_SHA256_NIX32}");
+        let blake_nix32 = format!("blake3:{BLAKE3_ABC_NIX32}");
+        let long_hex = format!("{EMPTY_SHA256_HEX}a");
+        let cases: Vec<(String, String)> = vec![
+            (format!("sha256-{}", b64(&EMPTY_SHA256)), sha_nix32.clone()),
+            (format!("blake3-{}", b64(&BLAKE3_ABC)), blake_nix32.clone()),
+            (format!("sha256:{EMPTY_SHA256_HEX}"), sha_nix32.clone()),
+            (format!("blake3:{BLAKE3_ABC_HEX}"), blake_nix32.clone()),
+            (sha_nix32.clone(), sha_nix32.clone()),
+            (blake_nix32.clone(), blake_nix32.clone()),
+            (EMPTY_SHA256_HEX.into(), sha_nix32),
+            (BLAKE3_ABC_HEX.into(), format!("sha256:{BLAKE3_ABC_NIX32}")),
+            (EMPTY_SHA256_HEX[..63].into(), EMPTY_SHA256_HEX[..63].into()),
+            (long_hex.clone(), long_hex),
+            ("sha256:abc".into(), "sha256:abc".into()),
+            ("blake3:abc".into(), "blake3:abc".into()),
+        ];
+        for (input, expected) in &cases {
+            let once = normalize_nar_hash(input);
+            assert_eq!(&once, expected, "input {input}");
+            assert_eq!(normalize_nar_hash(&once), once, "input {input}");
+        }
     }
 
     #[test]
-    fn nix32_encode_blake3_known_vector() {
-        assert_eq!(nix32_encode(&BLAKE3_ABC), BLAKE3_ABC_NIX32);
-    }
-
-    #[test]
-    fn normalize_from_sri() {
-        let b64 = base64::engine::general_purpose::STANDARD.encode(EMPTY_SHA256);
-        let sri = format!("sha256-{b64}");
-        assert_eq!(
-            normalize_nar_hash(&sri),
-            format!("sha256:{EMPTY_SHA256_NIX32}")
-        );
-    }
-
-    #[test]
-    fn normalize_blake3_from_sri() {
-        let b64 = base64::engine::general_purpose::STANDARD.encode(BLAKE3_ABC);
-        let sri = format!("blake3-{b64}");
-        assert_eq!(
-            normalize_nar_hash(&sri),
-            format!("blake3:{BLAKE3_ABC_NIX32}")
-        );
-    }
-
-    #[test]
-    fn normalize_from_prefixed_hex() {
-        let input = format!("sha256:{EMPTY_SHA256_HEX}");
-        assert_eq!(
-            normalize_nar_hash(&input),
-            format!("sha256:{EMPTY_SHA256_NIX32}")
-        );
-    }
-
-    #[test]
-    fn normalize_blake3_from_prefixed_hex() {
-        let input = format!("blake3:{BLAKE3_ABC_HEX}");
-        assert_eq!(
-            normalize_nar_hash(&input),
-            format!("blake3:{BLAKE3_ABC_NIX32}")
-        );
-    }
-
-    #[test]
-    fn normalize_already_nix32_passthrough() {
-        let input = format!("sha256:{EMPTY_SHA256_NIX32}");
-        assert_eq!(normalize_nar_hash(&input), input);
-    }
-
-    #[test]
-    fn normalize_blake3_already_nix32_passthrough() {
-        let input = format!("blake3:{BLAKE3_ABC_NIX32}");
-        assert_eq!(normalize_nar_hash(&input), input);
-    }
-
-    #[test]
-    fn normalize_from_bare_hex() {
-        assert_eq!(
-            normalize_nar_hash(EMPTY_SHA256_HEX),
-            format!("sha256:{EMPTY_SHA256_NIX32}")
-        );
-    }
-
-    #[test]
-    fn normalize_rejects_wrong_length_hex() {
-        let short = &EMPTY_SHA256_HEX[..63];
-        assert_eq!(normalize_nar_hash(short), short);
-        let long = format!("{EMPTY_SHA256_HEX}a");
-        assert_eq!(normalize_nar_hash(&long), long);
-    }
-
-    #[test]
-    fn normalize_rejects_prefixed_non_64_hex() {
-        let input = "sha256:abc";
-        assert_eq!(normalize_nar_hash(input), input);
-        let input = "blake3:abc";
-        assert_eq!(normalize_nar_hash(input), input);
-    }
-
-    #[test]
-    fn normalize_idempotent() {
-        let once = normalize_nar_hash(EMPTY_SHA256_HEX);
-        assert_eq!(normalize_nar_hash(&once), once);
-        let once = normalize_nar_hash(BLAKE3_ABC_HEX);
-        assert_eq!(normalize_nar_hash(&once), once);
-    }
-
-    #[test]
-    fn strip_hash_algo_strips_known_prefixes() {
-        assert_eq!(
-            strip_hash_algo(&format!("sha256:{EMPTY_SHA256_NIX32}")),
-            EMPTY_SHA256_NIX32
-        );
-        assert_eq!(
-            strip_hash_algo(&format!("blake3:{BLAKE3_ABC_NIX32}")),
-            BLAKE3_ABC_NIX32
-        );
-    }
-
-    #[test]
-    fn strip_hash_algo_passthrough_unknown() {
-        assert_eq!(strip_hash_algo("md5:abc"), "md5:abc");
-        assert_eq!(strip_hash_algo("noprefix"), "noprefix");
+    fn strip_hash_algo_by_prefix_strips_only_known() {
+        let sha = format!("sha256:{EMPTY_SHA256_NIX32}");
+        let blake = format!("blake3:{BLAKE3_ABC_NIX32}");
+        let cases: &[(&str, &str)] = &[
+            (&sha, EMPTY_SHA256_NIX32),
+            (&blake, BLAKE3_ABC_NIX32),
+            ("md5:abc", "md5:abc"),
+            ("noprefix", "noprefix"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(strip_hash_algo(input), *expected);
+        }
     }
 }

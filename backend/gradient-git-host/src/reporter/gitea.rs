@@ -251,31 +251,22 @@ mod tests {
     use crate::reporter::test_client;
 
     #[test]
-    fn gitea_reporter_rejects_aws_metadata_ip() {
+    fn gitea_reporter_rejects_internal_or_non_http_targets() {
+        for url in [
+            "http://localhost:3000/",
+            "http://127.0.0.1/",
+            "http://10.0.0.5/",
+            "http://192.168.1.1/",
+            "file:///etc/passwd",
+            "ftp://gitea.example.com/",
+        ] {
+            assert!(
+                GiteaReporter::new(test_client(), url, "tok").is_err(),
+                "{url}"
+            );
+        }
         let err = GiteaReporter::new(test_client(), "http://169.254.169.254/", "tok").unwrap_err();
         assert!(format!("{err}").contains("Rejected Gitea base_url"));
-    }
-
-    #[test]
-    fn gitea_reporter_rejects_localhost_hostname() {
-        assert!(GiteaReporter::new(test_client(), "http://localhost:3000/", "tok").is_err());
-    }
-
-    #[test]
-    fn gitea_reporter_rejects_loopback_ipv4() {
-        assert!(GiteaReporter::new(test_client(), "http://127.0.0.1/", "tok").is_err());
-    }
-
-    #[test]
-    fn gitea_reporter_rejects_rfc1918() {
-        assert!(GiteaReporter::new(test_client(), "http://10.0.0.5/", "tok").is_err());
-        assert!(GiteaReporter::new(test_client(), "http://192.168.1.1/", "tok").is_err());
-    }
-
-    #[test]
-    fn gitea_reporter_rejects_non_http_scheme() {
-        assert!(GiteaReporter::new(test_client(), "file:///etc/passwd", "tok").is_err());
-        assert!(GiteaReporter::new(test_client(), "ftp://gitea.example.com/", "tok").is_err());
     }
 
     #[test]

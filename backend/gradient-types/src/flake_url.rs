@@ -104,48 +104,37 @@ mod tests {
     const REV: &str = "11c2f8505c234697ccabbc96e5b8a76daf0f31d3";
 
     #[test]
-    fn repo_url_https_normalized() {
-        let r: RepositoryUrl = "https://github.com/foo/bar.git".parse().unwrap();
-        assert_eq!(r.to_string(), "git+https://github.com/foo/bar.git");
+    fn repo_url_remote_transport_gets_git_prefix() {
+        let cases = [
+            (
+                "https://github.com/foo/bar.git",
+                "git+https://github.com/foo/bar.git",
+            ),
+            (
+                "http://example.com/repo.git",
+                "git+http://example.com/repo.git",
+            ),
+            (
+                "ssh://git@github.com/foo/bar.git",
+                "git+ssh://git@github.com/foo/bar.git",
+            ),
+            (
+                "git://server.example.com/repo.git",
+                "git+git://server.example.com/repo.git",
+            ),
+            ("git@github.com:foo/bar.git", "git@github.com:foo/bar.git"),
+        ];
+        for (input, expected) in cases {
+            let url: RepositoryUrl = input.parse().unwrap();
+            assert_eq!(url.to_string(), expected, "{input}");
+        }
     }
 
     #[test]
-    fn repo_url_http_normalized() {
-        let r: RepositoryUrl = "http://example.com/repo.git".parse().unwrap();
-        assert_eq!(r.to_string(), "git+http://example.com/repo.git");
-    }
-
-    #[test]
-    fn repo_url_ssh_protocol_normalized() {
-        let r: RepositoryUrl = "ssh://git@github.com/foo/bar.git".parse().unwrap();
-        assert_eq!(r.to_string(), "git+ssh://git@github.com/foo/bar.git");
-    }
-
-    #[test]
-    fn repo_url_scp_passthrough() {
-        let r: RepositoryUrl = "git@github.com:foo/bar.git".parse().unwrap();
-        assert_eq!(r.to_string(), "git@github.com:foo/bar.git");
-    }
-
-    #[test]
-    fn repo_url_git_protocol_normalized() {
-        let r: RepositoryUrl = "git://server.example.com/repo.git".parse().unwrap();
-        assert_eq!(r.to_string(), "git+git://server.example.com/repo.git");
-    }
-
-    #[test]
-    fn repo_url_empty_rejected() {
-        assert!("".parse::<RepositoryUrl>().is_err());
-    }
-
-    #[test]
-    fn repo_url_file_rejected() {
-        assert!("file:///local/repo".parse::<RepositoryUrl>().is_err());
-    }
-
-    #[test]
-    fn repo_url_file_single_slash_rejected() {
-        // `file:/local/repo` is not matching `file://` but is still a local file reference.
+    fn repo_url_local_or_unparsable_is_rejected() {
+        for input in ["", "file:///local/repo", "notaurl"] {
+            assert!(input.parse::<RepositoryUrl>().is_err(), "{input}");
+        }
         assert_eq!(
             "file:/local/repo".parse::<RepositoryUrl>().unwrap_err(),
             InputError::LocalFileUrlNotAllowed,
@@ -153,37 +142,27 @@ mod tests {
     }
 
     #[test]
-    fn repo_url_plain_string_rejected() {
-        assert!("notaurl".parse::<RepositoryUrl>().is_err());
+    fn nix_url_normalizes_repository_and_appends_rev() {
+        let cases = [
+            (
+                "git@github.com:Wavelens/Gradient.git",
+                "git@github.com:Wavelens/Gradient.git",
+            ),
+            (
+                "https://github.com/Wavelens/Gradient.git",
+                "git+https://github.com/Wavelens/Gradient.git",
+            ),
+        ];
+        for (input, expected) in cases {
+            let u = NixFlakeUrl::new(input, REV).unwrap();
+            assert_eq!(u.url(), expected, "{input}");
+            assert_eq!(u.to_string(), format!("{expected}?rev={REV}"), "{input}");
+        }
     }
 
     #[test]
-    fn nix_url_ssh_scp_style() {
-        let u = NixFlakeUrl::new("git@github.com:Wavelens/Gradient.git", REV).unwrap();
-        assert_eq!(u.url(), "git@github.com:Wavelens/Gradient.git");
-        assert_eq!(
-            u.to_string(),
-            format!("git@github.com:Wavelens/Gradient.git?rev={REV}")
-        );
-    }
-
-    #[test]
-    fn nix_url_https_gets_git_plus_prefix() {
-        let u = NixFlakeUrl::new("https://github.com/Wavelens/Gradient.git", REV).unwrap();
-        assert_eq!(u.url(), "git+https://github.com/Wavelens/Gradient.git");
-        assert_eq!(
-            u.to_string(),
-            format!("git+https://github.com/Wavelens/Gradient.git?rev={REV}")
-        );
-    }
-
-    #[test]
-    fn nix_url_short_hash_rejected() {
+    fn nix_url_invalid_input_is_rejected() {
         assert!(NixFlakeUrl::new("https://github.com/foo/bar.git", "abc123").is_err());
-    }
-
-    #[test]
-    fn nix_url_file_rejected() {
         assert!(NixFlakeUrl::new("file:///local/repo", REV).is_err());
     }
 

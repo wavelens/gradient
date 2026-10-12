@@ -309,16 +309,9 @@ mod tests {
     }
 
     #[test]
-    fn normalize_passes_through_canonical_form() {
-        assert_eq!(
-            normalize_repo_url("https://github.com/owner/repo"),
-            "https://github.com/owner/repo"
-        );
-    }
-
-    #[test]
-    fn normalize_collapses_url_variants() {
+    fn normalize_repo_url_collapses_every_variant_to_the_canonical_form() {
         let canonical = normalize_repo_url("https://github.com/owner/repo");
+        assert_eq!(canonical, "https://github.com/owner/repo");
         for url in [
             "https://github.com/owner/repo.git",
             "https://github.com/owner/repo/",

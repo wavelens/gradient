@@ -129,31 +129,20 @@ mod tests {
     }
 
     #[test]
-    fn format_public_key_strips_https() {
-        let project = make_project("myproject", "ssh-ed25519 AAAA");
-        let result = format_public_key(project, "https://example.com");
-        assert_eq!(result, "ssh-ed25519 AAAA example.com-myproject");
-    }
-
-    #[test]
-    fn format_public_key_strips_path() {
-        let project = make_project("myproject", "ssh-ed25519 AAAA");
-        let result = format_public_key(project, "https://example.com/api/v1");
-        assert_eq!(result, "ssh-ed25519 AAAA example.com-myproject");
-    }
-
-    #[test]
-    fn format_public_key_strips_http() {
-        let project = make_project("myproject", "ssh-ed25519 AAAA");
-        let result = format_public_key(project, "http://example.com");
-        assert_eq!(result, "ssh-ed25519 AAAA example.com-myproject");
-    }
-
-    #[test]
-    fn format_public_key_fallback_without_scheme() {
-        let project = make_project("myproject", "ssh-ed25519 AAAA");
-        let result = format_public_key(project, "example.com");
-        assert_eq!(result, "ssh-ed25519 AAAA example.com-myproject");
+    fn format_public_key_strips_scheme_and_path() {
+        for url in [
+            "https://example.com",
+            "https://example.com/api/v1",
+            "http://example.com",
+            "example.com",
+        ] {
+            let project = make_project("myproject", "ssh-ed25519 AAAA");
+            assert_eq!(
+                format_public_key(project, url),
+                "ssh-ed25519 AAAA example.com-myproject",
+                "{url}"
+            );
+        }
     }
 
     #[test]
@@ -171,28 +160,25 @@ mod tests {
     }
 
     #[test]
-    fn decrypt_ssh_key_plaintext_pem_rejected() {
-        // A plaintext PEM in the column must be rejected. Accepting it would let anyone with DB
-        // write access bypass encryption.
+    fn decrypt_ssh_key_rejects_plaintext_payloads() {
         let mut f = tempfile::NamedTempFile::new().unwrap();
         std::io::Write::write_all(&mut f, b"test-secret-key-32-bytes-padding!").unwrap();
         let path = f.path().to_string_lossy().to_string();
-        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----";
-        let mut project = make_project("o", "ssh-ed25519 AAAA");
-        project.private_key = general_purpose::STANDARD.encode(pem);
-        let result = decrypt_ssh_private_key(&path, project, "https://example.com");
-        assert!(matches!(result, Err(SourceError::KeyDecryption { .. })));
-    }
 
-    #[test]
-    fn decrypt_ssh_key_plaintext_non_pem_rejected() {
-        let mut f = tempfile::NamedTempFile::new().unwrap();
-        std::io::Write::write_all(&mut f, b"test-secret-key-32-bytes-padding!").unwrap();
-        let path = f.path().to_string_lossy().to_string();
-        let mut project = make_project("o", "ssh-ed25519 AAAA");
-        project.private_key = general_purpose::STANDARD.encode(b"random garbage not a key");
-        let result = decrypt_ssh_private_key(&path, project, "https://example.com");
-        assert!(matches!(result, Err(SourceError::KeyDecryption { .. })));
+        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----";
+        let mut with_pem = make_project("o", "ssh-ed25519 AAAA");
+        with_pem.private_key = general_purpose::STANDARD.encode(pem);
+        assert!(matches!(
+            decrypt_ssh_private_key(&path, with_pem, "https://example.com"),
+            Err(SourceError::KeyDecryption { .. })
+        ));
+
+        let mut with_garbage = make_project("o", "ssh-ed25519 AAAA");
+        with_garbage.private_key = general_purpose::STANDARD.encode(b"random garbage not a key");
+        assert!(matches!(
+            decrypt_ssh_private_key(&path, with_garbage, "https://example.com"),
+            Err(SourceError::KeyDecryption { .. })
+        ));
     }
 
     #[test]
