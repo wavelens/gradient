@@ -13,7 +13,7 @@
 , stdenv
 }: stdenv.mkDerivation rec {
   pname = "gradient-frontend";
-  version = "2.0.0-rc.1";
+  version = "2.0.0";
   __structuredAttrs = true;
 
   src = lib.cleanSourceWith {
@@ -24,7 +24,7 @@
   pnpmDeps = fetchPnpmDeps {
     inherit pnpm pname version src;
     fetcherVersion = 4;
-    hash = "sha256-ink/Q0fCp9l9UG+7ynH0ko8y3LjTGyUpcMVd2o24d3g=";
+    hash = "sha256-7LhcfB/O0p2KipGNe3ixEBe9bYhKRFVdzP8chKwBd3I=";
   };
 
   nativeBuildInputs = [

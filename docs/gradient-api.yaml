@@ -90,7 +90,7 @@ info:
   license:
     name: AGPL-3.0-only
     identifier: AGPL-3.0-only
-  version: 2.0.0-rc.1
+  version: 2.0.0
 paths:
   /api/v1/admin/draining:
     post:
