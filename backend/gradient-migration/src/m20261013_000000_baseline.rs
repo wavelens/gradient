@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! This baseline is replacing the 151 pre-globalization migrations and is a no-op on an
-//! already-provisioned database. A database stopped mid-chain must first upgrade through a release
-//! still shipping that chain.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::{ConnectionTrait, Statement};
+
+const PROVISIONED_MARKER: &str = "team";
+
+fn provisioned_sql() -> String {
+    format!("SELECT to_regclass('public.{PROVISIONED_MARKER}') IS NOT NULL AS provisioned")
+}
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -21,7 +23,7 @@ impl MigrationTrait for Migration {
         let provisioned = db
             .query_one_raw(Statement::from_string(
                 db.get_database_backend(),
-                "SELECT to_regclass('public.organization') IS NOT NULL AS provisioned",
+                provisioned_sql(),
             ))
             .await?
             .and_then(|r| r.try_get::<bool>("", "provisioned").ok())
@@ -30,14 +32,14 @@ impl MigrationTrait for Migration {
             return Ok(());
         }
 
-        db.execute_unprepared(include_str!("m20241101_000000_baseline.sql"))
+        db.execute_unprepared(include_str!("m20261013_000000_baseline.sql"))
             .await?;
         Ok(())
     }
 
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Migration(
-            "m20241101_000000_baseline is irreversible".into(),
+            "m20261013_000000_baseline is irreversible".into(),
         ))
     }
 }

@@ -62,15 +62,14 @@ pub struct StateTask {
     #[serde(default)]
     pub description: Option<String>,
     pub repository: String,
-    #[serde(default = "default_wildcard", alias = "evaluation_wildcard")]
+    #[serde(default = "default_wildcard")]
     pub wildcard: String,
     #[serde(default = "default_true")]
     pub active: bool,
     pub created_by: String,
     #[serde(default = "default_keep_evaluations")]
     pub keep_evaluations: i32,
-    /// `None` is leaving existing triggers untouched. `Some([])` is an error because a task needs
-    /// at least one trigger.
+    /// `None` for the existing triggers. `Some([])` is an error, with at least a trigger per task.
     #[serde(default)]
     pub triggers: Option<Vec<StateTrigger>>,
     #[serde(default = "default_soft_abort")]

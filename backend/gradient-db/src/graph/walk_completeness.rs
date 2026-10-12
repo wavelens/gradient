@@ -183,7 +183,7 @@ mod tests {
         let statements = crate::sql::registry()
             .filter(|q| q.file.ends_with("walk_completeness.rs"))
             .map(|q| (q.name, q.text()))
-            .chain([("RIPPLE_UNWALKED_INPUTS_FN", RIPPLE_FN.into())]);
+            .chain([("RIPPLE_UNWALKED_INPUTS_FN", ripple_fn().into())]);
         let mut edges = 0;
         for (name, sql) in statements {
             assert_eq!(
@@ -199,28 +199,31 @@ mod tests {
         );
     }
 
-    const RIPPLE_FN: &str =
-        gradient_migration::m20261001_000001_plain_concept_names::RIPPLE_UNWALKED_INPUTS_FN;
+    fn ripple_fn() -> &'static str {
+        gradient_migration::function_sql("ripple_unwalked_inputs")
+    }
 
     #[test]
     fn the_ripple_locks_each_level_in_id_order_before_it_writes() {
-        let lock = RIPPLE_FN
+        let lock = ripple_fn()
             .find("FROM derivation WHERE id = ANY(parents) ORDER BY id FOR NO KEY UPDATE")
             .expect("the ordered lock");
-        let write = RIPPLE_FN
+        let write = ripple_fn()
             .find("SET unwalked_inputs = d.unwalked_inputs")
             .expect("the write");
-        assert!(lock < write, "{RIPPLE_FN}");
+        assert!(lock < write, "{}", ripple_fn());
         assert!(
-            RIPPLE_FN.contains(
+            ripple_fn().contains(
                 "(d.walked AND d.unwalked_inputs = CASE WHEN down THEN 0 ELSE c.n END) AS flipped"
             ),
-            "{RIPPLE_FN}"
+            "{}",
+            ripple_fn()
         );
         assert!(
-            RIPPLE_FN.contains("SELECT unnest(wave)")
-                && RIPPLE_FN.contains("FROM moved WHERE flipped"),
-            "only the rows that flipped form the next level and the result: {RIPPLE_FN}"
+            ripple_fn().contains("SELECT unnest(wave)")
+                && ripple_fn().contains("FROM moved WHERE flipped"),
+            "only the rows that flipped form the next level and the result: {}",
+            ripple_fn()
         );
     }
 

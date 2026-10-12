@@ -1,11 +1,11 @@
 # Database Migrations
 
-Gradient migrations are [SeaORM migrations](https://www.sea-ql.org/SeaORM/docs/migration/setting-up-migration/). Files live in `backend/gradient-migration/src/`, registered in its `lib.rs`. Each server start will apply the ones not yet in `seaql_migrations`.
+Gradient migrations are [SeaORM migrations](https://www.sea-ql.org/SeaORM/docs/migration/setting-up-migration/). Files live in `backend/gradient-migration/src/`, registered in its `lib.rs`. Each server start applies the migrations missing from `seaql_migrations`.
 
 ```mermaid
 flowchart LR
-    start[Server start] --> floor[require_upgrade_floor]
-    floor --> prune[prune_removed_migrations]
+    start[Server start] --> f[require_upgrade_floor]
+    f --> prune[prune_removed_migrations]
     prune --> up["Migrator::up"]
     up --> baseline{Database state}
     baseline -->|fresh| schema[Baseline emitting the schema]
@@ -18,16 +18,16 @@ flowchart LR
 
 1. A new file `mYYYYMMDD_NNNNNN_<name>.rs` in `backend/gradient-migration/src/`, registered in the `lib.rs` file.
 2. The matching entity in the `backend/gradient-entity/src/` directory.
-3. A `down()` that is a real inverse, or an explicit `Err(DbErr::Migration("... is irreversible"))` for a lossy change. A silent no-op `down()` is not allowed. Such a `down()` would be claiming a reversibility missing from the migration.
+3. A `down()` that is a real inverse, or an explicit `Err(DbErr::Migration("... is irreversible"))` for a lossy change. A silent no-op `down()` is not allowed. Such a `down()` would claim a reversibility missing from the migration.
 
 ## Baseline
 
-`m20241101_000000_baseline` replaced the 151 migrations before globalization (`m20241107_135027_create_table_user` to `m20260619_000001_drop_cached_path_store_path`, #478).
+`m20261013_000000_baseline` replaced every migration before the v2.0.0 release.
 
 | Database | Baseline behavior |
 |---|---|
-| Fresh | Emitting the schema left by that chain: a cleaned `pg_dump` of the real chain, verified by dump diff, plus the constant `cache_role` seed rows |
-| Already provisioned | Detecting the schema and doing nothing. `prune_removed_migrations` will drop the deleted files' `seaql_migrations` rows |
+| Fresh | Emitting the schema left by that chain: a cleaned `pg_dump` of the real chain, verified by dump diff and the constant `cache_role` seed rows |
+| Already provisioned | Detecting the schema and doing nothing. `prune_removed_migrations` drops the deleted files' `seaql_migrations` rows |
 
 A database stuck earlier in that chain is behind the [Upgrade Floor](#upgrade-floor).
 
@@ -41,49 +41,49 @@ A database stuck earlier in that chain is behind the [Upgrade Floor](#upgrade-fl
 
 ## Upgrade Floor
 
-A database behind a squash into the baseline has no migration files left to apply. `require_upgrade_floor` (`backend/gradient-db/src/connection/upgrade_floor.rs`) can read `seaql_migrations` on each server start, ahead of `prune_removed_migrations`. Servers refuse to start on a database behind the floor. Errors in the log name the missing migration and the release to start first.
+A database behind a squash into the baseline has no migration files left to apply. `require_upgrade_floor` (`backend/gradient-db/src/connection/upgrade_floor.rs`) reads `seaql_migrations` on each server start, ahead of `prune_removed_migrations`. Servers refuse to start on a database behind the floor. Errors in the log name the missing migration and the release to start first.
 
 | `seaql_migrations` | Server start |
 |---|---|
 | Empty | Fresh install, allowed |
 | Holding the baseline of the running release | Same baseline, allowed |
-| Holding `last_migration`, with all `storage_migrations` applied | Upgrade across the squash, allowed |
+| Holding `last_migration`, with all `storage_migrations` applied | Upgrade over the squash, allowed |
 | Anything else | Refused |
 
 `UPGRADE_FLOOR` in `backend/gradient-migration/src/lib.rs` is the floor.
 
 | Field | Meaning | Value |
 |---|---|---|
-| `release` | Release to start first on a refused database | `commit 0c1e8cc07` |
-| `last_migration` | Last database migration of that release | `m20260619_010000_globalize_derivation` |
-| `storage_migrations` | [Storage migrations](internals/nar-storage.md#storage-migrations) of that release, each with `applied_at` in the `storage_migration` table | Empty |
+| `release` | Release to start first on a refused database | `v2.0.0` |
+| `last_migration` | Last database migration of that release | `m20261012_000001_wildcard_grammar` |
+| `storage_migrations` | [Storage migrations](internals/nar-storage.md#storage-migrations) of that release, each with `applied_at` in the `storage_migration` table | `m20261001_000000_shard_build_logs` |
 
-- **Storage:** The `storage_migration` table is the same for an S3 and a local NAR store, and both are part of the check.
-- **Baseline Name:** A squash must rename the baseline file. Databases of an earlier baseline lack the new name and must reach the floor.
+- **Storage:** The `storage_migration` table is the same for an S3 and a local NAR store and both are part of the check.
+- **Baseline Name:** Rename the baseline file on a squash. Databases of an earlier baseline lack the new name and stop before the floor.
 
 ## Cancelling Pairs
 
-Some columns are added in one release and dropped in a later one. Such a column will leave an `add_X` / `drop_X` pair behind. Every new install would run that pair for nothing. Such pairs are removed under the rules below.
+Some columns are added in a release and dropped in a later release. Such a column: an `add_X` / `drop_X` pair left behind. Every new install would run that pair for nothing. The rules below govern the removal of such pairs.
 
 ### Removal Conditions
 
-Both conditions must hold.
+Two conditions apply.
 
-- The release with `drop_X` is out, plus at least one later minor release on top of that release. Live installs are getting a window to apply the drop.
-- No migration between the two may touch `X` in a way the removal would change. `rg -n "<ColumnName>|<column_name>" backend/gradient-migration/` can check this condition.
+- The release with `drop_X` is out, with a later minor release on top of it. Live installs get a window to apply the drop.
+- No change to `X` by a migration between the two that the removal would alter. The `rg -n "<ColumnName>|<column_name>" backend/gradient-migration/` command for this condition.
 
 ### Removal Limits
 
-- The removal must not edit the original `create_table_*` migration of the table. Such an edit would change the schema of every install path.
-- Intermediate migrations may change only mechanically, e.g. dropping a column declaration the `drop_X` would remove anyway.
+- No edit of the original `create_table_*` migration of the table. Such an edit would change the schema of every install path.
+- Intermediate migrations: mechanical changes only, e.g. dropping a column declaration the `drop_X` would remove anyway.
 
 ### Existing Installs
 
-- Existing installs keep `seaql_migrations` rows for deleted files. SeaORM would reject these rows ("Applied migrations not found in migration list").
-- `prune_removed_migrations` (`backend/gradient-db/src/connection/mod.rs`) can delete every row not in `Migrator::migrations()` before the `Migrator::up` call. The function will log the removed versions at `info` level.
+- `seaql_migrations` rows for deleted files on existing installs. SeaORM would reject these rows ("Applied migrations not found in migration list").
+- `prune_removed_migrations` (`backend/gradient-db/src/connection/mod.rs`) before the `Migrator::up` call: removal of every row not in `Migrator::migrations()`, with the removed versions logged at `info` level.
 - Deleting the file and its `lib.rs` entry is the whole change.
 
-## Retired Pairs
+## Removed Pairs
 
 | Pair | Issue | Notes |
 |---|---|---|

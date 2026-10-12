@@ -62,19 +62,8 @@ impl WaitingReason {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
     }
 
-    /// Legacy rows from before the `kind` discriminator are decoding as `Workers { .. }`.
     pub fn from_json(value: &serde_json::Value) -> Option<Self> {
-        if let Ok(parsed) = serde_json::from_value::<Self>(value.clone()) {
-            return Some(parsed);
-        }
-        if value.is_object() && value.get("kind").is_none() {
-            let mut patched = value.clone();
-            if let serde_json::Value::Object(ref mut m) = patched {
-                m.insert("kind".into(), serde_json::Value::String("workers".into()));
-            }
-            return serde_json::from_value::<Self>(patched).ok();
-        }
-        None
+        serde_json::from_value::<Self>(value.clone()).ok()
     }
 
     pub fn workers(
@@ -115,23 +104,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legacy_untagged_workers_row_decodes() {
-        let legacy = serde_json::json!({
-            "unmet": [],
-            "connected_workers": 3,
-            "available_architectures": ["x86_64-linux"],
-        });
-        let decoded = WaitingReason::from_json(&legacy).expect("legacy row decodes");
-        match decoded {
-            WaitingReason::Workers {
-                connected_workers,
-                available_architectures,
-                ..
-            } => {
-                assert_eq!(connected_workers, 3);
-                assert_eq!(available_architectures, vec!["x86_64-linux"]);
-            }
-            other => panic!("expected Workers, got {other:?}"),
-        }
+    fn a_workers_row_round_trips() {
+        let reason = WaitingReason::Workers {
+            unmet: Vec::new(),
+            connected_workers: 3,
+            available_architectures: vec!["x86_64-linux".to_owned()],
+        };
+        let decoded = WaitingReason::from_json(&reason.to_json()).expect("row decodes");
+        assert_eq!(decoded, reason);
     }
 }

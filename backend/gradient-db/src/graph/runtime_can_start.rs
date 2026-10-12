@@ -390,8 +390,9 @@ mod tests {
         Vec::new()
     }
 
-    const RIPPLE_FN: &str =
-        gradient_migration::m20261001_000001_plain_concept_names::RIPPLE_MISSING_RUNTIME_DEPS_FN;
+    fn ripple_fn() -> &'static str {
+        gradient_migration::function_sql("ripple_missing_runtime_deps")
+    }
 
     #[test]
     fn the_retire_holds_its_producers_keys_before_it_reads_their_completeness() {
@@ -500,38 +501,41 @@ mod tests {
     #[test]
     fn the_ripple_flips_on_the_module_predicates() {
         assert!(
-            RIPPLE_FN.contains(&format!(
+            ripple_fn().contains(&format!(
                 "CASE WHEN down THEN {}",
                 shared_build_complete_predicate("db")
             )),
-            "{RIPPLE_FN}"
+            "{}",
+            ripple_fn()
         );
         assert!(
-            RIPPLE_FN.contains(&format!(
+            ripple_fn().contains(&format!(
                 "ELSE (db.missing_runtime_deps = c.n AND {})",
                 crate::graph::predicates::present_value("db")
             )),
-            "{RIPPLE_FN}"
+            "{}",
+            ripple_fn()
         );
         assert_eq!(
-            RIPPLE_FN.matches("derivation_dependency").count(),
-            RIPPLE_FN.matches("kind IN (1, 2)").count(),
-            "every edge the ripple counts is a runtime dependency: {RIPPLE_FN}"
+            ripple_fn().matches("derivation_dependency").count(),
+            ripple_fn().matches("kind IN (1, 2)").count(),
+            "every edge the ripple counts is a runtime dependency: {}",
+            ripple_fn()
         );
     }
 
     #[test]
     fn every_level_holds_its_keys_and_ordered_rows_before_it_writes() {
-        let keys = RIPPLE_FN
+        let keys = ripple_fn()
             .find("PERFORM pg_advisory_xact_lock(643, k)")
             .expect("the keys");
-        let rows = RIPPLE_FN
+        let rows = ripple_fn()
             .find("WHERE derivation = ANY(parents) ORDER BY derivation FOR NO KEY UPDATE")
             .expect("the ordered row lock");
-        let write = RIPPLE_FN
+        let write = ripple_fn()
             .find("SET missing_runtime_deps = db.missing_runtime_deps")
             .expect("the write");
-        assert!(keys < rows && rows < write, "{RIPPLE_FN}");
+        assert!(keys < rows && rows < write, "{}", ripple_fn());
     }
 
     #[tokio::test]

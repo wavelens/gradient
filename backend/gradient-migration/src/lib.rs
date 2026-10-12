@@ -6,122 +6,12 @@
 
 #![expect(
     clippy::disallowed_methods,
-    reason = "migrations are not gated: they are not independently executable"
+    reason = "migrations are not independently executable"
 )]
 
 pub use sea_orm_migration::prelude::*;
 
-mod m20241101_000000_baseline;
-mod m20260619_010000_globalize_derivation;
-mod m20260619_020000_derivation_build_anchor;
-mod m20260619_030000_build_job_and_attempt;
-mod m20260620_000001_create_github_installation;
-mod m20260620_000002_backfill_drop_org_installation;
-mod m20260620_000003_index_build_job_derivation;
-mod m20260620_000004_fix_github_installation_created_at_tz;
-mod m20260620_000005_derivation_output_upstream;
-mod m20260621_000001_derivation_build_edges_complete;
-mod m20260623_000000_create_derivation_input_source;
-mod m20260624_000001_closure_complete;
-mod m20260624_000002_dispatch_indexes;
-mod m20260624_000003_cached_path_reference;
-mod m20260625_000001_derivation_output_file_hash;
-mod m20260626_000000_create_table_upstream_metric;
-mod m20260626_000001_build_log_chunk_cascade;
-mod m20260626_000002_drop_acknowledged_derivation;
-mod m20260627_000000_derivation_build_edges_unresolved;
-mod m20260629_000000_derivation_build_drv_closure_cached;
-mod m20260703_000000_drop_derivation_build_prefer_local_build;
-mod m20260703_000001_terminal_failed_partial_index;
-mod m20260704_000000_flag_partial_indexes;
-mod m20260705_000000_upstream_metric_by_url;
-mod m20260706_000000_build_attempt_build_job_set_null;
-mod m20260706_000001_disable_jit;
-mod m20260709_000000_input_update_discover_only;
-mod m20260821_000000_debug_info;
-mod m20260822_000000_rename_project_to_task;
-mod m20260822_000001_rename_organization_to_project;
-mod m20260827_000000_metric_rollup_scope_project;
-mod m20260827_000001_commit_hash_index;
-mod m20260904_000000_dispatched_job_phase;
-mod m20260904_000001_graph_edge_indexes;
-mod m20260905_000000_invites;
-mod m20260907_000000_dispatched_job_job_id;
-mod m20260907_000001_base_worker_auto_enable;
-mod m20260908_000000_derivation_walked;
-mod m20260908_000001_cached_path_missing_references;
-mod m20260908_000002_derivation_build_readiness;
-mod m20260909_000000_build_attempt_indexes;
-mod m20260911_000000_edge_bloat_and_dead_indexes;
-mod m20260911_000001_drop_derivation_closure;
-mod m20260915_000000_demand;
-mod m20260915_000001_cached_path_confirmed;
-mod m20260916_000000_path_retention;
-mod m20260917_000001_derivation_build_demanded;
-mod m20260917_000002_outbox;
-mod m20260917_000003_open_work_indexes;
-mod m20260918_000000_gc_freshness_indexes;
-mod m20260918_000001_dispatch_window_columns;
-mod m20260918_000002_derivation_unwalked_inputs;
-mod m20260919_000000_one_graph;
-mod m20260919_000001_drop_cached_path_reference;
-mod m20260919_000002_derivation_build_probed;
-mod m20260922_000000_derivation_build_open;
-mod m20260923_000000_derivation_build_fetchable_unwhole;
-mod m20260923_000001_derivation_build_open_aborted;
-pub mod m20260923_000002_evaluation_anchor_counters;
-mod m20260923_000003_entry_point_unique_eval;
-mod m20260923_000004_dispatched_job_eval_index;
-mod m20260923_000005_dispatched_job_open_unique;
-mod m20260923_000006_user_stars;
-mod m20260923_000007_evaluation_walk_mode;
-mod m20260923_000008_evaluation_task_commit_index;
-mod m20260923_000009_prioritized;
-mod m20260924_000001_worker_telemetry_without_project;
-mod m20260926_000001_events_outbox;
-mod m20260926_000002_cache_usage;
-mod m20260926_000003_webhook;
-mod m20260927_000000_foreign_key_indexes;
-mod m20260927_000001_derivation_metric_architecture;
-mod m20260927_000002_adopt_referenced_outputs;
-mod m20260928_000000_settle_aborting_parks;
-mod m20260928_000001_drop_cache_derivation;
-mod m20260928_000002_task_wait_for_workers;
-mod m20260928_000003_drop_twin_runtime_edges;
-mod m20260929_000000_gin_references_without_pending_list;
-mod m20260929_000001_completed_anchor_window_index;
-mod m20260929_000002_build_job_evaluation_anchor_index;
-mod m20260929_000003_build_job_derivation_covering_index;
-mod m20260930_000000_evaluation_hot_updates;
-mod m20260930_000001_unsettled_anchor_index;
-pub mod m20260930_000002_counter_ripple_functions;
-mod m20260930_000003_cluster_jobs;
-mod m20261001_000000_storage_maintenance;
-pub mod m20261001_000001_plain_concept_names;
-mod m20261001_000002_retention_indexes;
-mod m20261001_000003_cache_upstream_http1_only;
-mod m20261001_000004_cache_upstream_active;
-mod m20261001_000005_dispatched_job_worker_elapsed;
-mod m20261002_000001_user_ssh_key;
-mod m20261002_000002_gradient_ci_connections;
-mod m20261003_000000_adopt_cached_nar_references;
-mod m20261003_000001_unique_task_name;
-mod m20261004_000000_teams;
-mod m20261004_000001_drop_base_workers;
-mod m20261004_000002_transfer_speeds;
-mod m20261004_000003_build_conditions;
-mod m20261004_000004_recount_blocking_deps;
-mod m20261004_000005_team_member_source;
-mod m20261007_000000_integration_managed;
-mod m20261008_000000_derivation_ifd;
-pub mod m20261009_000000_build_job_aborted;
-mod m20261009_000001_task_retry_failed_builds;
-mod m20261009_000002_evaluation_statistics_target;
-mod m20261010_000000_evaluation_next_backfill;
-mod m20261010_000001_cache_pull_through;
-mod m20261011_000000_build_attempt_without_dispatch;
-mod m20261012_000000_unique_keys;
-mod m20261012_000001_wildcard_grammar;
+mod m20261013_000000_baseline;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -130,128 +20,25 @@ pub struct UpgradeFloor {
 }
 
 pub const UPGRADE_FLOOR: UpgradeFloor = UpgradeFloor {
-    release: "commit 0c1e8cc07",
-    last_migration: "m20260619_010000_globalize_derivation",
-    storage_migrations: &[],
+    release: "v2.0.0",
+    last_migration: "m20261012_000001_wildcard_grammar",
+    storage_migrations: &["m20261001_000000_shard_build_logs"],
 };
+
+/// The SQL of a function created by the baseline. Tests compare it with the Rust side.
+pub fn function_sql(name: &str) -> &'static str {
+    let sql = include_str!("m20261013_000000_baseline.sql");
+    let marker = format!("CREATE FUNCTION public.{name}(");
+    let start = sql.find(&marker).expect("the function in the baseline");
+    let end = start + sql[start..].find("$$;").expect("the function end") + 3;
+    &sql[start..end]
+}
 
 pub struct Migrator;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![
-            Box::new(m20241101_000000_baseline::Migration),
-            Box::new(m20260619_010000_globalize_derivation::Migration),
-            Box::new(m20260619_020000_derivation_build_anchor::Migration),
-            Box::new(m20260619_030000_build_job_and_attempt::Migration),
-            Box::new(m20260620_000001_create_github_installation::Migration),
-            Box::new(m20260620_000002_backfill_drop_org_installation::Migration),
-            Box::new(m20260620_000003_index_build_job_derivation::Migration),
-            Box::new(m20260620_000004_fix_github_installation_created_at_tz::Migration),
-            Box::new(m20260620_000005_derivation_output_upstream::Migration),
-            Box::new(m20260621_000001_derivation_build_edges_complete::Migration),
-            Box::new(m20260623_000000_create_derivation_input_source::Migration),
-            Box::new(m20260624_000001_closure_complete::Migration),
-            Box::new(m20260624_000002_dispatch_indexes::Migration),
-            Box::new(m20260624_000003_cached_path_reference::Migration),
-            Box::new(m20260625_000001_derivation_output_file_hash::Migration),
-            Box::new(m20260626_000000_create_table_upstream_metric::Migration),
-            Box::new(m20260626_000001_build_log_chunk_cascade::Migration),
-            Box::new(m20260626_000002_drop_acknowledged_derivation::Migration),
-            Box::new(m20260627_000000_derivation_build_edges_unresolved::Migration),
-            Box::new(m20260629_000000_derivation_build_drv_closure_cached::Migration),
-            Box::new(m20260703_000000_drop_derivation_build_prefer_local_build::Migration),
-            Box::new(m20260703_000001_terminal_failed_partial_index::Migration),
-            Box::new(m20260704_000000_flag_partial_indexes::Migration),
-            Box::new(m20260705_000000_upstream_metric_by_url::Migration),
-            Box::new(m20260706_000000_build_attempt_build_job_set_null::Migration),
-            Box::new(m20260706_000001_disable_jit::Migration),
-            Box::new(m20260709_000000_input_update_discover_only::Migration),
-            Box::new(m20260821_000000_debug_info::Migration),
-            Box::new(m20260822_000000_rename_project_to_task::Migration),
-            Box::new(m20260822_000001_rename_organization_to_project::Migration),
-            Box::new(m20260827_000000_metric_rollup_scope_project::Migration),
-            Box::new(m20260827_000001_commit_hash_index::Migration),
-            Box::new(m20260904_000000_dispatched_job_phase::Migration),
-            Box::new(m20260904_000001_graph_edge_indexes::Migration),
-            Box::new(m20260905_000000_invites::Migration),
-            Box::new(m20260907_000000_dispatched_job_job_id::Migration),
-            Box::new(m20260907_000001_base_worker_auto_enable::Migration),
-            Box::new(m20260908_000000_derivation_walked::Migration),
-            Box::new(m20260908_000001_cached_path_missing_references::Migration),
-            Box::new(m20260908_000002_derivation_build_readiness::Migration),
-            Box::new(m20260909_000000_build_attempt_indexes::Migration),
-            Box::new(m20260911_000000_edge_bloat_and_dead_indexes::Migration),
-            Box::new(m20260911_000001_drop_derivation_closure::Migration),
-            Box::new(m20260915_000000_demand::Migration),
-            Box::new(m20260915_000001_cached_path_confirmed::Migration),
-            Box::new(m20260916_000000_path_retention::Migration),
-            Box::new(m20260917_000001_derivation_build_demanded::Migration),
-            Box::new(m20260917_000002_outbox::Migration),
-            Box::new(m20260917_000003_open_work_indexes::Migration),
-            Box::new(m20260918_000000_gc_freshness_indexes::Migration),
-            Box::new(m20260918_000001_dispatch_window_columns::Migration),
-            Box::new(m20260918_000002_derivation_unwalked_inputs::Migration),
-            Box::new(m20260919_000000_one_graph::Migration),
-            Box::new(m20260919_000001_drop_cached_path_reference::Migration),
-            Box::new(m20260919_000002_derivation_build_probed::Migration),
-            Box::new(m20260922_000000_derivation_build_open::Migration),
-            Box::new(m20260923_000000_derivation_build_fetchable_unwhole::Migration),
-            Box::new(m20260923_000001_derivation_build_open_aborted::Migration),
-            Box::new(m20260923_000002_evaluation_anchor_counters::Migration),
-            Box::new(m20260923_000003_entry_point_unique_eval::Migration),
-            Box::new(m20260923_000004_dispatched_job_eval_index::Migration),
-            Box::new(m20260923_000005_dispatched_job_open_unique::Migration),
-            Box::new(m20260923_000006_user_stars::Migration),
-            Box::new(m20260923_000007_evaluation_walk_mode::Migration),
-            Box::new(m20260923_000008_evaluation_task_commit_index::Migration),
-            Box::new(m20260923_000009_prioritized::Migration),
-            Box::new(m20260924_000001_worker_telemetry_without_project::Migration),
-            Box::new(m20260926_000001_events_outbox::Migration),
-            Box::new(m20260926_000002_cache_usage::Migration),
-            Box::new(m20260926_000003_webhook::Migration),
-            Box::new(m20260927_000000_foreign_key_indexes::Migration),
-            Box::new(m20260927_000001_derivation_metric_architecture::Migration),
-            Box::new(m20260927_000002_adopt_referenced_outputs::Migration),
-            Box::new(m20260928_000000_settle_aborting_parks::Migration),
-            Box::new(m20260928_000001_drop_cache_derivation::Migration),
-            Box::new(m20260928_000002_task_wait_for_workers::Migration),
-            Box::new(m20260928_000003_drop_twin_runtime_edges::Migration),
-            Box::new(m20260929_000000_gin_references_without_pending_list::Migration),
-            Box::new(m20260929_000001_completed_anchor_window_index::Migration),
-            Box::new(m20260929_000002_build_job_evaluation_anchor_index::Migration),
-            Box::new(m20260929_000003_build_job_derivation_covering_index::Migration),
-            Box::new(m20260930_000000_evaluation_hot_updates::Migration),
-            Box::new(m20260930_000001_unsettled_anchor_index::Migration),
-            Box::new(m20260930_000002_counter_ripple_functions::Migration),
-            Box::new(m20260930_000003_cluster_jobs::Migration),
-            Box::new(m20261001_000000_storage_maintenance::Migration),
-            Box::new(m20261001_000001_plain_concept_names::Migration),
-            Box::new(m20261001_000002_retention_indexes::Migration),
-            Box::new(m20261001_000003_cache_upstream_http1_only::Migration),
-            Box::new(m20261001_000004_cache_upstream_active::Migration),
-            Box::new(m20261001_000005_dispatched_job_worker_elapsed::Migration),
-            Box::new(m20261002_000001_user_ssh_key::Migration),
-            Box::new(m20261002_000002_gradient_ci_connections::Migration),
-            Box::new(m20261003_000000_adopt_cached_nar_references::Migration),
-            Box::new(m20261003_000001_unique_task_name::Migration),
-            Box::new(m20261004_000000_teams::Migration),
-            Box::new(m20261004_000001_drop_base_workers::Migration),
-            Box::new(m20261004_000002_transfer_speeds::Migration),
-            Box::new(m20261004_000003_build_conditions::Migration),
-            Box::new(m20261004_000004_recount_blocking_deps::Migration),
-            Box::new(m20261004_000005_team_member_source::Migration),
-            Box::new(m20261007_000000_integration_managed::Migration),
-            Box::new(m20261008_000000_derivation_ifd::Migration),
-            Box::new(m20261009_000000_build_job_aborted::Migration),
-            Box::new(m20261009_000001_task_retry_failed_builds::Migration),
-            Box::new(m20261009_000002_evaluation_statistics_target::Migration),
-            Box::new(m20261010_000000_evaluation_next_backfill::Migration),
-            Box::new(m20261010_000001_cache_pull_through::Migration),
-            Box::new(m20261011_000000_build_attempt_without_dispatch::Migration),
-            Box::new(m20261012_000000_unique_keys::Migration),
-            Box::new(m20261012_000001_wildcard_grammar::Migration),
-        ]
+        vec![Box::new(m20261013_000000_baseline::Migration)]
     }
 }

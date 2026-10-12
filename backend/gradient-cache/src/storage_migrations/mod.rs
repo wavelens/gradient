@@ -5,10 +5,7 @@
  */
 
 //! Storage migrations are to the NAR, log and blob layout what database migrations are to the
-//! schema. They must apply in order and before any deep GC unit. The deep GC is reading only the
-//! layout they leave behind.
-
-mod m20261001_000000_shard_build_logs;
+//! schema. Apply them in order and before any deep GC unit.
 
 use crate::units::{Step, next_unit};
 use anyhow::{Context, Result};
@@ -18,7 +15,7 @@ use gradient_db::maintenance::storage_migrations;
 use std::collections::HashSet;
 use tracing::info;
 
-/// Every unit must be idempotent. A unit cut short by a restart is starting again in full.
+/// Keep every unit idempotent. Apply a cut unit again in full after a restart.
 pub(crate) trait StorageMigration: Send + Sync {
     fn name(&self) -> &'static str;
 
@@ -28,7 +25,7 @@ pub(crate) trait StorageMigration: Send + Sync {
 }
 
 fn migrations() -> Vec<Box<dyn StorageMigration>> {
-    vec![Box::new(m20261001_000000_shard_build_logs::Migration)]
+    Vec::new()
 }
 
 pub(super) async fn step(db: &DbContext) -> Result<Step> {

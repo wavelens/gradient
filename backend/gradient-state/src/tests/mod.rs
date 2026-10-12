@@ -57,26 +57,6 @@ fn project_task_cache_descriptions_optional() {
 }
 
 #[test]
-fn state_task_accepts_legacy_evaluation_wildcard_alias() {
-    // Existing nix configurations using `evaluation_wildcard` must keep
-    // working after the rename to `wildcard`.
-    let json = r#"{
-        "tasks": {
-            "web": {
-                "name": "web",
-                "project": "acme",
-                "display_name": "Web",
-                "repository": "https://example.com/acme/web.git",
-                "evaluation_wildcard": "checks.*",
-                "created_by": "alice"
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.tasks["web"].wildcard, "checks.*");
-}
-
-#[test]
 fn state_task_keep_evaluations_zero_rejected_by_validator() {
     let json = r#"{
         "users": {
