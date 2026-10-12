@@ -215,14 +215,14 @@ pub struct EvalArgs {
     pub fork_workers: Option<NonZeroUsize>,
 
     /// Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit
-    /// restart after their call and free the Nix heap. A call may grow past the limit, with
+    /// restart after the call and free the Nix heap. A call growing past the limit is fine, with
     /// {option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.
     /// Keep it above a typical evaluation's heap.
     #[arg(default_value = "2147483648")]
     pub max_rss: NonZeroU64,
 
     /// Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots,
-    /// flake graph). Disabling it removes their overhead.
+    /// flake graph). Disable it to leave that overhead out.
     #[arg(default_value = "true")]
     pub metrics: bool,
 
@@ -233,6 +233,11 @@ pub struct EvalArgs {
     /// Whether to share eval cache blobs with other workers through the server.
     #[arg(default_value_t = true)]
     pub cache_share: bool,
+
+    /// Ceiling in MiB for the resident memory of all evaluation subprocesses together.
+    /// Subprocesses leave the pool, largest first, while the sum is over the ceiling.
+    /// Conflicts with {option}`services.gradient.worker.system.minFreeRamMb`.
+    pub max_memory: Option<NonZeroU64>,
 }
 
 #[config_group("build", env = "worker_build")]
@@ -242,12 +247,12 @@ pub struct BuildArgs {
     #[arg(id = "build-max-concurrent", default_value = "32")]
     pub max_concurrent: NonZeroU32,
 
-    /// CPU cores a single build can use, passed as `--cores`. `null` uses all cores.
+    /// CPU cores for a build, passed as `--cores`. `null` for every core.
     pub max_cores: Option<NonZeroU32>,
 
-    /// Cgroup directory of {file}`nix-daemon.service`, the parent of the build cgroups. The worker
-    /// is reading the peak memory of each running build from it and sending the values with its
-    /// heartbeat. The scheduler is reserving the larger of the predicted and the reported peak.
+    /// Cgroup directory of {file}`nix-daemon.service`, the parent of the build cgroups, read for
+    /// the peak memory of every running build and sent with the heartbeat. The larger of the
+    /// predicted and the reported peak.
     /// The build cgroups need {option}`services.gradient.worker.build.metrics` and Gradient's
     /// Nix fork on the daemon. `null` reports nothing.
     pub cgroup: Option<PathBuf>,
@@ -256,14 +261,14 @@ pub struct BuildArgs {
 #[config_group("nar", env = "worker_nar")]
 #[derive(Args, Debug, Clone)]
 pub struct NarArgs {
-    /// Upload requests over 1 MiB the worker keeps open at once, waiting for a server grant or
-    /// transferring. One job holds at most half. Smaller uploads have a window of 128 of their
-    /// own. The server's upload budget decides how many run. This limit bounds worker memory.
+    /// Upload requests over 1 MiB open at once, waiting for a server grant or transferring.
+    /// Half of the limit for any job. A window of 128 for smaller uploads.
+    /// How many run: the server's upload budget. A bound on worker memory.
     #[arg(default_value = "16")]
     pub max_concurrent_uploads: NonZeroU32,
 
-    /// Seconds after its last write before the deletion of an unfinished NAR download under
-    /// {file}`<services.gradient.worker.baseDir>/nar-partial`. `0` disables the cleanup.
+    /// Seconds after the last write before the deletion of an unfinished NAR download under
+    /// {file}`<services.gradient.worker.baseDir>/nar-partial`. `0` for no cleanup.
     #[arg(default_value_t = 86400)]
     pub partial_ttl_secs: u64,
 

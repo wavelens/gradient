@@ -8,22 +8,6 @@ use std::collections::HashMap;
 
 pub use gradient_eval::stats::StatsDelta;
 
-/// libnixexpr's `Counter`s are no-ops unless `NIX_SHOW_STATS` is set.
-/// Without it `total_thunks` and `fn_calls` are always reporting 0.
-/// The stats dump is routed to `/dev/null` to keep it out of the worker's stderr.
-pub(crate) fn eval_worker_stats_env(
-    metrics_enabled: bool,
-) -> &'static [(&'static str, &'static str)] {
-    if metrics_enabled {
-        &[
-            ("NIX_SHOW_STATS", "1"),
-            ("NIX_SHOW_STATS_PATH", "/dev/null"),
-        ]
-    } else {
-        &[]
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub(crate) struct EntryPointCost {
     pub attr: String,

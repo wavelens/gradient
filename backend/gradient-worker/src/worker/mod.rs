@@ -177,7 +177,7 @@ impl Worker<Connected> {
         let evaluator = WorkerEvaluator::new(
             config.fork_workers(),
             config.eval.max_rss.get(),
-            config.system.min_free_ram_mb,
+            config.memory_guard()?,
             config.eval_cache_dir(),
             config.eval.cache_share,
             config.eval.metrics,

@@ -306,11 +306,15 @@ in {
     assertions = [
       {
         assertion = cfg.capabilities.federate -> cfg.discoverable;
-        message = "services.gradient.worker: capabilities.federate requires discoverable to be enabled";
+        message = "services.gradient.worker: capabilities.federate and discoverable together, enable both";
       }
       {
         assertion = !(cfg.reverseProxy.nginx.enable && cfg.reverseProxy.caddy.enable);
-        message = "You can only use one reverse proxy at a time";
+        message = "services.gradient.worker: a reverse proxy at a time, nginx or caddy, not both";
+      }
+      {
+        assertion = !(cfg.system.minFreeRamMb != 0 && cfg.eval.maxMemory != null);
+        message = "services.gradient.worker.system.minFreeRamMb and services.gradient.worker.eval.maxMemory are alternatives, unset either";
       }
     ];
 

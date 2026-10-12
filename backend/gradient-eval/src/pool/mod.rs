@@ -21,19 +21,18 @@ use anyhow::Result;
 use crate::ipc::{AttrError, ResolvedItem};
 
 use self::fan_out::{
-    CallStats, Discovery, DiscoveryCall, FoundItems, MAX_CRASH_ATTEMPTS, crashed_listing,
-    discovery_calls, entry_point_of, pooled_fan_out,
+    DiscoveryCall, MAX_CRASH_ATTEMPTS, crashed_listing, discovery_calls, entry_point_of,
+    pooled_fan_out,
 };
 use self::transport::{EvalErrorResponse, Listing};
 use self::workers::EvalWorkerPool;
 
 pub use self::download::{DownloadSink, forward_nix_log};
 pub use self::driver::run_eval_driver;
-pub use self::fan_out::{CallStats as CallCost, Discovery as DiscoveryReport, FoundItems as Found};
+pub use self::fan_out::{CallStats, Discovery, FoundItems};
 pub use self::import::{ImportBuilder, RefuseImports};
 pub use self::live_thunks::LiveThunks;
 pub use self::memory::{MemoryGuard, memory_guard_bytes, min_free_ram_guard, total_memory_bytes};
-pub use self::transport::EvalErrorResponse as EvalCallError;
 pub use self::workers::default_workers;
 
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -49,6 +48,7 @@ pub struct EvalPoolConfig {
     pub metrics: bool,
 }
 
+#[derive(Debug)]
 pub struct EvalPool {
     workers: Arc<EvalWorkerPool>,
     patterns: Mutex<Vec<String>>,
