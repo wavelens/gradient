@@ -9,46 +9,21 @@ import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
   AllowedCapabilities,
-  GradientCiConnectRequest,
-  GradientCiConnectResponse,
-  Worker,
-  WorkerPatch,
-  WorkerRegistration,
+  ProjectWorkerEntry,
+  WorkerMetricsResponse,
+  RegisterWorkerResponse,
+  PatchWorkerRequest,
   WorkerTestResponse,
+  ConnectionRequest,
+  ConnectionResponse,
 } from '@core/models';
-
-export interface WorkerSamplePoint {
-  at: string;
-  cpu_usage_pct: number | null;
-  ram_free_mb: number | null;
-  ram_total_mb: number | null;
-  disk_speed_mbps: number | null;
-  upload_speed_mbps: number | null;
-  download_speed_mbps: number | null;
-  assigned_jobs: number;
-  max_concurrent_builds: number;
-  state: number;
-}
-
-export interface WorkerConnectionEntry {
-  connected_at: string;
-  disconnected_at: string | null;
-}
-
-export interface WorkerMetricsResponse {
-  worker_id: string;
-  display_name: string;
-  samples: WorkerSamplePoint[];
-  connections: WorkerConnectionEntry[];
-  jobs_dispatched: number;
-}
 
 @Injectable({ providedIn: 'root' })
 export class WorkersService {
   private api = inject(ApiService);
 
-  getWorkers(project: string): Observable<Worker[]> {
-    return this.api.get<Worker[]>(`projects/${project}/workers`);
+  getWorkers(project: string): Observable<ProjectWorkerEntry[]> {
+    return this.api.get<ProjectWorkerEntry[]>(`projects/${project}/workers`);
   }
 
   getWorkerMetrics(project: string, workerId: string): Observable<WorkerMetricsResponse> {
@@ -62,8 +37,8 @@ export class WorkersService {
     url?: string,
     token?: string,
     caps?: AllowedCapabilities,
-  ): Observable<WorkerRegistration> {
-    return this.api.post<WorkerRegistration>(`projects/${project}/workers`, {
+  ): Observable<RegisterWorkerResponse> {
+    return this.api.post<RegisterWorkerResponse>(`projects/${project}/workers`, {
       worker_id: workerId,
       display_name: displayName,
       url: url || undefined,
@@ -78,7 +53,7 @@ export class WorkersService {
     return this.api.patch<string>(`projects/${project}/workers/${workerId}`, { active });
   }
 
-  patchWorker(project: string, workerId: string, body: WorkerPatch): Observable<string> {
+  patchWorker(project: string, workerId: string, body: PatchWorkerRequest): Observable<string> {
     return this.api.patch<string>(`projects/${project}/workers/${workerId}`, body);
   }
 
@@ -90,7 +65,7 @@ export class WorkersService {
     return this.api.post<WorkerTestResponse>(`projects/${project}/workers/${workerId}/test`, {});
   }
 
-  connectGradientCi(body: GradientCiConnectRequest): Observable<GradientCiConnectResponse> {
-    return this.api.post<GradientCiConnectResponse>('gradient-ci/connections', body);
+  connectGradientCi(body: ConnectionRequest): Observable<ConnectionResponse> {
+    return this.api.post<ConnectionResponse>('gradient-ci/connections', body);
   }
 }

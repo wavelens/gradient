@@ -9,11 +9,12 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { BoardService, AssignedJobSummary, AssignmentDecisionView, PendingJobSummary } from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
+import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
 
 type KindFilter = 'all' | 'eval' | 'build';
 type StatusFilter = 'all' | 'pending' | 'assigned';
@@ -24,7 +25,7 @@ interface DecisionRow {
   at: string;
   worker: string;
   kind: number;
-  subject: string | null;
+  subject?: string | null;
   score: number;
   won: boolean;
 }
@@ -165,7 +166,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   private refreshTimer?: ReturnType<typeof setTimeout>;
   protected first = firstLoad();
 
-  jobs = signal<AssignedJobSummary[]>([]);
+  jobs = signal<DispatchedJobSummary[]>([]);
   otherRunning = signal(0);
 
   view = signal<'assigned' | 'pending'>('assigned');
@@ -178,7 +179,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   scoreMax = signal<number | null>(null);
 
   scoreScope = signal<ScoreScope>('current');
-  decisions = signal<AssignmentDecisionView[]>([]);
+  decisions = signal<AssignDecisionView[]>([]);
   protected superuser = computed(() => this.auth.user()?.superuser === true);
   showDecisions = computed(() => this.superuser() && this.scoreScope() === 'all');
 
@@ -340,15 +341,15 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     });
   }
 
-  isLive(j: AssignedJobSummary): boolean {
+  isLive(j: DispatchedJobSummary): boolean {
     return j.id.startsWith('live:');
   }
 
-  canInspect(j: AssignedJobSummary): boolean {
+  canInspect(j: DispatchedJobSummary): boolean {
     return !this.isLive(j);
   }
 
-  inspect(j: AssignedJobSummary): void {
+  inspect(j: DispatchedJobSummary): void {
     if (this.isLive(j)) return;
     this.router.navigate(['/board/jobs', j.id]);
   }

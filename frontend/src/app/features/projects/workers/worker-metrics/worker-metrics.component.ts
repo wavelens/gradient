@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
-import { WorkersService, WorkerSamplePoint, WorkerConnectionEntry } from '@core/services/workers.service';
+import { WorkersService } from '@core/services/workers.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import {
   CardGridComponent,
@@ -17,6 +17,7 @@ import {
 } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { clockTime, serverTime, formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
+import { WorkerSamplePoint, WorkerConnectionEntry } from '@core/models';
 
 @Component({
   selector: 'app-worker-metrics',

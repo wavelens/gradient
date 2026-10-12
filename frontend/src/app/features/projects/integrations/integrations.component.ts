@@ -14,12 +14,12 @@ import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import {
   AccessState,
-  CreateIntegrationRequest,
   GitHostType,
   InboundGitHost,
-  Integration,
   IntegrationKind,
-  Project,
+  ProjectResponse,
+  IntegrationResponse,
+  CreateIntegrationRequest,
 } from '@core/models';
 import {
   BadgeComponent,
@@ -91,8 +91,8 @@ export class IntegrationsComponent implements OnInit {
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Integrations' }));
-  project = signal<Project | null>(null);
-  integrations = signal<Integration[]>([]);
+  project = signal<ProjectResponse | null>(null);
+  integrations = signal<IntegrationResponse[]>([]);
   integrationAccess = computed(
     () => new Map(this.integrations().map((i) => [i.id, { ...this.access(), managed: i.managed }])),
   );
@@ -106,7 +106,7 @@ export class IntegrationsComponent implements OnInit {
 
   showCreateDialog = signal(false);
   showEditDialog = signal(false);
-  editingIntegration = signal<Integration | null>(null);
+  editingIntegration = signal<IntegrationResponse | null>(null);
   errorMessage = signal<string | null>(null);
 
   selectedGitHostByIntegration = signal<Record<string, InboundGitHost>>({});
@@ -297,13 +297,13 @@ export class IntegrationsComponent implements OnInit {
     });
   }
 
-  openEditDialog(integration: Integration): void {
+  openEditDialog(integration: IntegrationResponse): void {
     this.editingIntegration.set(integration);
     this.formData = {
       name: integration.name,
       display_name: integration.display_name,
-      kind: integration.kind,
-      git_host_type: integration.git_host_type,
+      kind: integration.kind as IntegrationKind,
+      git_host_type: integration.git_host_type as GitHostType,
       endpoint_url: integration.endpoint_url ?? '',
       secret: '',
       access_token: '',
@@ -402,7 +402,7 @@ export class IntegrationsComponent implements OnInit {
       });
   }
 
-  deleteIntegration(integration: Integration): void {
+  deleteIntegration(integration: IntegrationResponse): void {
     this.deletingId.set(integration.id);
     this.integrationsService.deleteProjectIntegration(this.projectName, integration.id).subscribe({
       next: () => {
@@ -421,7 +421,7 @@ export class IntegrationsComponent implements OnInit {
     this.selectedGitHostByIntegration.update((m) => ({ ...m, [id]: gitHost }));
   }
 
-  inboundUrl(integration: Integration): string {
+  inboundUrl(integration: IntegrationResponse): string {
     const gitHost = this.inboundGitHost(integration.id);
     return `${window.location.origin}/api/v1/hooks/${gitHost}/${this.projectName}/${integration.name}`;
   }
@@ -432,7 +432,7 @@ export class IntegrationsComponent implements OnInit {
       : 'Push, Pull Request, Issue Comment, Pull Request Comment, Pull Request Review, and Release';
   }
 
-  copyInboundUrl(integration: Integration): void {
+  copyInboundUrl(integration: IntegrationResponse): void {
     const url = this.inboundUrl(integration);
     navigator.clipboard.writeText(url).then(() => {
       this.copiedUrlId.set(integration.id);
@@ -442,12 +442,13 @@ export class IntegrationsComponent implements OnInit {
     });
   }
 
-  gitHostLabel(gitHost: GitHostType): string {
+  gitHostLabel(gitHost: string): string {
     switch (gitHost) {
       case 'gitea': return 'Gitea';
       case 'forgejo': return 'Forgejo';
       case 'gitlab': return 'GitLab';
       case 'github': return 'GitHub';
+      default: return gitHost;
     }
   }
 

@@ -7,7 +7,12 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { CreateTriggerBody, TaskTrigger, UpdateTriggerBody } from '@core/models';
+import {
+  DeletedResponse,
+  TriggerOut,
+  CreateTriggerRequest,
+  UpdateTriggerRequest,
+} from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class TriggersService {
@@ -17,24 +22,24 @@ export class TriggersService {
     return `tasks/${project}/${proj}/triggers`;
   }
 
-  list(project: string, proj: string): Observable<TaskTrigger[]> {
-    return this.api.get<TaskTrigger[]>(this.base(project, proj));
+  list(project: string, proj: string): Observable<TriggerOut[]> {
+    return this.api.get<TriggerOut[]>(this.base(project, proj));
   }
 
-  create(project: string, proj: string, body: CreateTriggerBody): Observable<TaskTrigger> {
-    return this.api.post<TaskTrigger>(this.base(project, proj), body);
+  create(project: string, proj: string, body: CreateTriggerRequest): Observable<TriggerOut> {
+    return this.api.post<TriggerOut>(this.base(project, proj), body);
   }
 
-  get(project: string, proj: string, id: string): Observable<TaskTrigger> {
-    return this.api.get<TaskTrigger>(`${this.base(project, proj)}/${id}`);
+  get(project: string, proj: string, id: string): Observable<TriggerOut> {
+    return this.api.get<TriggerOut>(`${this.base(project, proj)}/${id}`);
   }
 
-  update(project: string, proj: string, id: string, body: UpdateTriggerBody): Observable<TaskTrigger> {
-    return this.api.patch<TaskTrigger>(`${this.base(project, proj)}/${id}`, body);
+  update(project: string, proj: string, id: string, body: UpdateTriggerRequest): Observable<TriggerOut> {
+    return this.api.patch<TriggerOut>(`${this.base(project, proj)}/${id}`, body);
   }
 
-  delete(project: string, proj: string, id: string): Observable<boolean> {
-    return this.api.delete<boolean>(`${this.base(project, proj)}/${id}`);
+  delete(project: string, proj: string, id: string): Observable<DeletedResponse> {
+    return this.api.delete<DeletedResponse>(`${this.base(project, proj)}/${id}`);
   }
 
   fireNow(project: string, proj: string, id: string): Observable<boolean> {

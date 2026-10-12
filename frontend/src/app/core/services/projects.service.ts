@@ -7,35 +7,28 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { CacheSubscription, PendingInvitation, Project, Paginated } from '@core/models';
-import { PermissionDescriptor } from '@core/models/permission.model';
-
-export interface ProjectMember {
-  id: string;   // username
-  name: string; // role name (e.g., "Admin")
-}
-
-export interface ProjectRole {
-  id: string;
-  name: string;
-  project: string | null;
-  builtin: boolean;
-  permissions: string[];
-}
-
-export type { PermissionDescriptor };
-
-export interface RoleListResponse {
-  roles: ProjectRole[];
-  available_permissions: PermissionDescriptor[];
-}
+import {
+  Paginated,
+  MemberItem,
+  RoleListResponse_ProjectRoleOwner,
+  RoleResponse_ProjectRoleOwner,
+  ProjectSummary,
+  PendingInvitationItem,
+  CacheSubscriptionItem,
+  ProjectResponse,
+  MakeProjectRequest,
+  PatchProjectRequest,
+  CreateRoleRequest,
+  PatchRoleRequest,
+  Project,
+} from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class ProjectsService {
   private api = inject(ApiService);
 
-  getProjects(page = 1, perPage = 50): Observable<Paginated<Project[]>> {
-    return this.api.get<Paginated<Project[]>>(`projects?page=${page}&per_page=${perPage}`);
+  getProjects(page = 1, perPage = 50): Observable<Paginated<ProjectSummary[]>> {
+    return this.api.get<Paginated<ProjectSummary[]>>(`projects?page=${page}&per_page=${perPage}`);
   }
 
   getPublicProjects(page = 1, perPage = 50): Observable<Paginated<Project[]>> {
@@ -50,22 +43,17 @@ export class ProjectsService {
     return this.api.delete<string>(`projects/${name}/public`);
   }
 
-  getProject(name: string): Observable<Project> {
-    return this.api.get<Project>(`projects/${name}`);
+  getProject(name: string): Observable<ProjectResponse> {
+    return this.api.get<ProjectResponse>(`projects/${name}`);
   }
 
-  createProject(data: {
-    name: string;
-    display_name: string;
-    description: string;
-    public?: boolean;
-  }): Observable<string> {
+  createProject(data: MakeProjectRequest): Observable<string> {
     return this.api.put<string>('projects', data);
   }
 
   updateProject(
     name: string,
-    data: Partial<Project>
+    data: PatchProjectRequest
   ): Observable<string> {
     return this.api.patch<string>(`projects/${name}`, data);
   }
@@ -74,8 +62,8 @@ export class ProjectsService {
     return this.api.delete<string>(`projects/${name}`);
   }
 
-  getMembers(project: string): Observable<ProjectMember[]> {
-    return this.api.get<ProjectMember[]>(`projects/${project}/users`);
+  getMembers(project: string): Observable<MemberItem[]> {
+    return this.api.get<MemberItem[]>(`projects/${project}/users`);
   }
 
   addMember(project: string, user: string, role: string): Observable<string> {
@@ -90,31 +78,31 @@ export class ProjectsService {
     return this.api.delete<string>(`projects/${project}/users`, { user });
   }
 
-  getInvitations(project: string): Observable<PendingInvitation[]> {
-    return this.api.get<PendingInvitation[]>(`projects/${project}/invitations`);
+  getInvitations(project: string): Observable<PendingInvitationItem[]> {
+    return this.api.get<PendingInvitationItem[]>(`projects/${project}/invitations`);
   }
 
   revokeInvitation(project: string, user: string): Observable<string> {
     return this.api.delete<string>(`projects/${project}/invitations`, { user });
   }
 
-  getRoles(project: string): Observable<RoleListResponse> {
-    return this.api.get<RoleListResponse>(`projects/${project}/roles`);
+  getRoles(project: string): Observable<RoleListResponse_ProjectRoleOwner> {
+    return this.api.get<RoleListResponse_ProjectRoleOwner>(`projects/${project}/roles`);
   }
 
   createRole(
     project: string,
-    data: { name: string; permissions: string[] }
-  ): Observable<ProjectRole> {
-    return this.api.post<ProjectRole>(`projects/${project}/roles`, data);
+    data: CreateRoleRequest
+  ): Observable<RoleResponse_ProjectRoleOwner> {
+    return this.api.post<RoleResponse_ProjectRoleOwner>(`projects/${project}/roles`, data);
   }
 
   updateRole(
     project: string,
     roleId: string,
-    data: { name?: string; permissions?: string[] }
-  ): Observable<ProjectRole> {
-    return this.api.patch<ProjectRole>(`projects/${project}/roles/${roleId}`, data);
+    data: PatchRoleRequest
+  ): Observable<RoleResponse_ProjectRoleOwner> {
+    return this.api.patch<RoleResponse_ProjectRoleOwner>(`projects/${project}/roles/${roleId}`, data);
   }
 
   deleteRole(project: string, roleId: string): Observable<boolean> {
@@ -133,8 +121,8 @@ export class ProjectsService {
     return this.api.get<boolean>(`projects/available?name=${encodeURIComponent(name)}`);
   }
 
-  getSubscribedCaches(project: string): Observable<CacheSubscription[]> {
-    return this.api.get<CacheSubscription[]>(`projects/${project}/subscribe`);
+  getSubscribedCaches(project: string): Observable<CacheSubscriptionItem[]> {
+    return this.api.get<CacheSubscriptionItem[]>(`projects/${project}/subscribe`);
   }
 
   subscribeCache(project: string, cache: string): Observable<string> {

@@ -17,11 +17,11 @@ import { visibleProjectGuard } from './visible-project.guard';
 import { ApiError } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { Project } from '@core/models';
+import { ProjectResponse } from '@core/models';
 
 const REQUESTED_URL = '/project/acme/task/demo?eval=e1';
 
-async function run(session: { authenticated: boolean; unreachable?: boolean }, project: Observable<Project>) {
+async function run(session: { authenticated: boolean; unreachable?: boolean }, project: Observable<ProjectResponse>) {
   const getProject = vi.fn(() => project);
   TestBed.configureTestingModule({
     providers: [
@@ -57,7 +57,7 @@ describe('visibleProjectGuard', () => {
   });
 
   it('lets an anonymous visitor into a public project', async () => {
-    const { outcome, getProject } = await run({ authenticated: false }, of({ name: 'acme', public: true } as Project));
+    const { outcome, getProject } = await run({ authenticated: false }, of({ name: 'acme', public: true } as ProjectResponse));
     expect(outcome).toBe(true);
     expect(getProject).toHaveBeenCalledWith('acme');
   });

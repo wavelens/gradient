@@ -19,7 +19,7 @@ import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { AccessState } from '@core/models/access.model';
-import { BuildStatusCounts, EntryPointSummary, EvaluationSummary } from '@core/models/task.model';
+import { BuildStatusCounts, EntryPointSummary, EvaluationSummary } from '@core/models';
 
 function zeroCounts(): BuildStatusCounts {
   return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0 };

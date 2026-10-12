@@ -28,7 +28,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
-import { Project, AccessState } from '@core/models';
+import { AccessState, ProjectResponse } from '@core/models';
 
 @Component({
   selector: 'app-project-settings',
@@ -78,7 +78,7 @@ export class ProjectSettingsComponent implements OnInit {
   sshLoading = signal(true);
   generatingSSH = signal(false);
 
-  project = signal<Project | null>(null);
+  project = signal<ProjectResponse | null>(null);
   sshKey = signal<string>('');
 
   showDeleteDialog = signal(false);

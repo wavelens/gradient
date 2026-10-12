@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { EntryPointSummary, FailedAttributeSummary } from '@core/models/task.model';
 import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
+import { EntryPointSummary, FailedAttributeSummary } from '@core/models';
 
 const ep = (attr: string, architecture = 'x86_64-linux') =>
   ({ id: attr, eval: attr, architecture }) as EntryPointSummary;

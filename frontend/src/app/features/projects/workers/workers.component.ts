@@ -19,17 +19,17 @@ import { AuthService } from '@core/services/auth.service';
 import {
   AccessState,
   AllowedCapabilities,
-  ConnectionStatus,
-  GradientCapabilities,
-  TeamSummary,
-  Worker,
-  WorkerPatch,
-  WorkerRegistration,
   changedCapabilities,
   gradientCiEntry,
   gradientCiHost,
   gradientCiKeysUrl,
   listedWorkers,
+  TeamSummary,
+  ProjectWorkerEntry,
+  GradientCapabilities,
+  RegisterWorkerResponse,
+  WorkerConnection,
+  PatchWorkerRequest,
 } from '@core/models';
 import {
   BadgeComponent,
@@ -107,15 +107,6 @@ export class WorkersComponent implements OnInit {
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
-  rowAccess(worker: Worker): AccessState {
-    const a = this.access();
-    return {
-      managed: worker.managed || a.managed,
-      canEdit: a.canEdit,
-      canTrigger: a.canTrigger,
-    };
-  }
-
   // Activate/Deactivate and Fire Test stay available on state-managed workers:
   // state restores `active` on restart and a test changes nothing.
   actionAccess(): AccessState {
@@ -139,8 +130,8 @@ export class WorkersComponent implements OnInit {
   showTokenDialog = signal(false);
   showToggleWarningDialog = signal(false);
   showRenameDialog = signal(false);
-  pendingToggleWorker = signal<Worker | null>(null);
-  renamingWorker = signal<Worker | null>(null);
+  pendingToggleWorker = signal<ProjectWorkerEntry | null>(null);
+  renamingWorker = signal<ProjectWorkerEntry | null>(null);
   errorMessage = signal<string | null>(null);
   hasNoCacheSubscribed = signal(false);
 
@@ -148,7 +139,7 @@ export class WorkersComponent implements OnInit {
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Workers' }));
   /** The project UUID - shown as peer_id in the register dialog. */
   projectId = signal<string>('');
-  workers = signal<Worker[]>([]);
+  workers = signal<ProjectWorkerEntry[]>([]);
   newWorkerId = '';
   newWorkerName = '';
   newWorkerUrl = '';
@@ -156,7 +147,7 @@ export class WorkersComponent implements OnInit {
   newAllowed: AllowedCapabilities = ALL_ALLOWED;
   newName = '';
   editAllowed: AllowedCapabilities = ALL_ALLOWED;
-  lastRegistration = signal<WorkerRegistration | null>(null);
+  lastRegistration = signal<RegisterWorkerResponse | null>(null);
   tokenCopied = signal(false);
   peerIdCopied = signal(false);
 
@@ -164,10 +155,10 @@ export class WorkersComponent implements OnInit {
   otherWorkers = computed(() => listedWorkers(this.workers(), this.gradientCi()));
   workerMenus = computed(() => new Map(this.otherWorkers().map((w) => [w.worker_id, this.menuFor(w)])));
 
-  private menuFor(worker: Worker): MenuItem[] {
+  private menuFor(worker: ProjectWorkerEntry): MenuItem[] {
     const busy = this.deletingId() !== null || this.togglingId() !== null || this.testingId() !== null;
     const canEdit = this.access().canEdit;
-    const rowLocked = this.rowAccess(worker).managed;
+    const rowLocked = this.access().managed;
     if (worker.team) {
       return [
         ...(this.canOpenTeam(worker.team) ? [{ label: 'Manage on team', icon: 'groups', routerLink: ['/team', worker.team, 'workers'] }] : []),
@@ -191,7 +182,7 @@ export class WorkersComponent implements OnInit {
   showGradientCiConnect = signal(false);
   showGradientCiDisconnect = signal(false);
 
-  statusOf = (workerId: string): Observable<ConnectionStatus | undefined> =>
+  statusOf = (workerId: string): Observable<WorkerConnection | undefined> =>
     this.workersService
       .getWorkers(this.projectName)
       .pipe(map((workers) => workers.find((w) => w.worker_id === workerId)));
@@ -287,7 +278,7 @@ export class WorkersComponent implements OnInit {
     });
   }
 
-  deleteWorker(worker: Worker): void {
+  deleteWorker(worker: ProjectWorkerEntry): void {
     this.deletingId.set(worker.worker_id);
     this.workersService.deleteWorker(this.projectName, worker.worker_id).subscribe({
       next: () => {
@@ -301,7 +292,7 @@ export class WorkersComponent implements OnInit {
     });
   }
 
-  requestToggleWorker(worker: Worker): void {
+  requestToggleWorker(worker: ProjectWorkerEntry): void {
     this.pendingToggleWorker.set(worker);
     if (worker.live && worker.active) {
       // Worker is connected and being deactivated - warn user
@@ -335,7 +326,7 @@ export class WorkersComponent implements OnInit {
     this.pendingToggleWorker.set(null);
   }
 
-  openRenameDialog(worker: Worker): void {
+  openRenameDialog(worker: ProjectWorkerEntry): void {
     this.renamingWorker.set(worker);
     this.newName = worker.display_name;
     this.editAllowed = worker;
@@ -346,7 +337,7 @@ export class WorkersComponent implements OnInit {
     const worker = this.renamingWorker();
     if (!worker || !this.newName.trim()) return;
     this.renaming.set(true);
-    const body: WorkerPatch = changedCapabilities(worker, this.editAllowed);
+    const body: PatchWorkerRequest = changedCapabilities(worker, this.editAllowed);
     if (this.newName.trim() !== worker.display_name) body.display_name = this.newName.trim();
     this.workersService.patchWorker(this.projectName, worker.worker_id, body).subscribe({
       next: () => {
@@ -367,7 +358,7 @@ export class WorkersComponent implements OnInit {
     this.renamingWorker.set(null);
   }
 
-  fireTest(worker: Worker): void {
+  fireTest(worker: ProjectWorkerEntry): void {
     this.testingId.set(worker.worker_id);
     this.workersService.testWorker(this.projectName, worker.worker_id).subscribe({
       next: (r) => {
@@ -409,7 +400,7 @@ export class WorkersComponent implements OnInit {
     }
   }
 
-  disconnectGradientCi(worker: Worker): void {
+  disconnectGradientCi(worker: ProjectWorkerEntry): void {
     this.showGradientCiDisconnect.set(false);
     this.deleteWorker(worker);
   }

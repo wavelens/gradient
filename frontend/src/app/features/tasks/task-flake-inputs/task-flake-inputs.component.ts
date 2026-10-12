@@ -27,7 +27,7 @@ import {
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
-import { FlakeInputOverride, CreateFlakeInputOverrideBody } from '@core/models';
+import { FlakeInputOverrideOut, CreateFlakeInputOverrideRequest } from '@core/models';
 
 interface FlakeInputFormState {
   input_name: string;
@@ -91,7 +91,7 @@ export class TaskFlakeInputsComponent implements OnInit {
   taskName = '';
   breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName, { label: 'Flake Inputs' }));
 
-  overrides = signal<FlakeInputOverride[]>([]);
+  overrides = signal<FlakeInputOverrideOut[]>([]);
   editingId = signal<string | null>(null);
   showCreateDialog = signal(false);
   showEditDialog = signal(false);
@@ -122,7 +122,7 @@ export class TaskFlakeInputsComponent implements OnInit {
     this.showCreateDialog.set(true);
   }
 
-  startEdit(override: FlakeInputOverride): void {
+  startEdit(override: FlakeInputOverrideOut): void {
     this.form = {
       input_name: override.input_name,
       url: override.url ?? '',
@@ -143,7 +143,7 @@ export class TaskFlakeInputsComponent implements OnInit {
   saveCreate(): void {
     this.saving.set(true);
     this.error.set(null);
-    const body: CreateFlakeInputOverrideBody = {
+    const body: CreateFlakeInputOverrideRequest = {
       input_name: this.form.input_name,
       url: this.form.keepUrl ? null : this.form.url,
     };
@@ -170,7 +170,7 @@ export class TaskFlakeInputsComponent implements OnInit {
     if (!id) return;
     this.saving.set(true);
     this.error.set(null);
-    const body: CreateFlakeInputOverrideBody = {
+    const body: CreateFlakeInputOverrideRequest = {
       input_name: this.form.input_name,
       url: this.form.keepUrl ? null : this.form.url,
     };
@@ -205,11 +205,11 @@ export class TaskFlakeInputsComponent implements OnInit {
     });
   }
 
-  modeLabel(override: FlakeInputOverride): string {
+  modeLabel(override: FlakeInputOverrideOut): string {
     return override.url === null ? 'Keep URL' : 'URL override';
   }
 
-  isPattern(override: FlakeInputOverride): boolean {
+  isPattern(override: FlakeInputOverrideOut): boolean {
     return /[*?[]/.test(override.input_name);
   }
 }

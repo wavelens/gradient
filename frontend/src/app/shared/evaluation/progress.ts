@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { EvaluationProgress, EvaluationStatus, InputFetch } from '@core/models';
+import type { EvaluationStatus, EvaluationProgress, InputFetch } from '@core/models';
 import { formatBytes, formatCount } from '@shared/text';
 import type { BarSegment } from '../ui/segmented-bar/segmented-bar.component';
 import { ratioSegments } from '../ui/segmented-bar/ratio-segments';
@@ -57,7 +57,7 @@ export function inputFetchLabel(input: InputFetch): string {
   return byteAmount(input.downloaded_bytes, input.state === 'Fetching' ? input.expected_bytes : null);
 }
 
-export function byteAmount(done: number, total: number | null): string {
+export function byteAmount(done: number, total?: number | null): string {
   const shown = formatBytes(done);
   if (!total) return shown;
   const all = formatBytes(total);

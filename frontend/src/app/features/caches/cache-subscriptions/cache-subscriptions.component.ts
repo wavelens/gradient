@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
-import { SubscriptionRequest } from '@core/models';
+import { SubscriptionRequestItem } from '@core/models';
 import {
   ButtonComponent,
   EmptyStateComponent,
@@ -46,7 +46,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
   breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Subscriptions' }));
   loading = signal(true);
   deciding = signal<string | null>(null);
-  requests = signal<SubscriptionRequest[]>([]);
+  requests = signal<SubscriptionRequestItem[]>([]);
   errorMessage = signal<string | null>(null);
 
   ngOnInit(): void {

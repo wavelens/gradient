@@ -8,9 +8,10 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
-  FlakeInputOverride,
-  CreateFlakeInputOverrideBody,
-  UpdateFlakeInputOverrideBody,
+  DeletedResponse,
+  FlakeInputOverrideOut,
+  CreateFlakeInputOverrideRequest,
+  UpdateFlakeInputOverrideRequest,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -21,23 +22,23 @@ export class FlakeInputOverridesService {
     return `tasks/${project}/${proj}/flake-inputs`;
   }
 
-  list(project: string, proj: string): Observable<FlakeInputOverride[]> {
-    return this.api.get<FlakeInputOverride[]>(this.base(project, proj));
+  list(project: string, proj: string): Observable<FlakeInputOverrideOut[]> {
+    return this.api.get<FlakeInputOverrideOut[]>(this.base(project, proj));
   }
 
-  create(project: string, proj: string, body: CreateFlakeInputOverrideBody): Observable<FlakeInputOverride> {
-    return this.api.post<FlakeInputOverride>(this.base(project, proj), body);
+  create(project: string, proj: string, body: CreateFlakeInputOverrideRequest): Observable<FlakeInputOverrideOut> {
+    return this.api.post<FlakeInputOverrideOut>(this.base(project, proj), body);
   }
 
-  get(project: string, proj: string, id: string): Observable<FlakeInputOverride> {
-    return this.api.get<FlakeInputOverride>(`${this.base(project, proj)}/${id}`);
+  get(project: string, proj: string, id: string): Observable<FlakeInputOverrideOut> {
+    return this.api.get<FlakeInputOverrideOut>(`${this.base(project, proj)}/${id}`);
   }
 
-  update(project: string, proj: string, id: string, body: UpdateFlakeInputOverrideBody): Observable<FlakeInputOverride> {
-    return this.api.patch<FlakeInputOverride>(`${this.base(project, proj)}/${id}`, body);
+  update(project: string, proj: string, id: string, body: UpdateFlakeInputOverrideRequest): Observable<FlakeInputOverrideOut> {
+    return this.api.patch<FlakeInputOverrideOut>(`${this.base(project, proj)}/${id}`, body);
   }
 
-  delete(project: string, proj: string, id: string): Observable<boolean> {
-    return this.api.delete<boolean>(`${this.base(project, proj)}/${id}`);
+  delete(project: string, proj: string, id: string): Observable<DeletedResponse> {
+    return this.api.delete<DeletedResponse>(`${this.base(project, proj)}/${id}`);
   }
 }

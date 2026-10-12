@@ -8,16 +8,8 @@ import { Component, OnInit, DestroyRef, inject, signal, computed, ChangeDetectio
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
-import {
-  BoardService,
-  AssignedJobDetail,
-  GradientCapabilities,
-  InstanceContextView,
-  PendingJobSummary,
-  RuleDescription,
-  Windowed,
-} from '@core/services/board.service';
-import { EvaluationsService, BuildWithOutputs } from '@core/services/evaluations.service';
+import { BoardService, AssignedJobDetail, InstanceContextView, Windowed } from '@core/services/board.service';
+import { EvaluationsService } from '@core/services/evaluations.service';
 import {
   ButtonComponent,
   DialogComponent,
@@ -28,6 +20,12 @@ import {
 import { formatBytes, formatDuration, formatMegabytes } from '@shared/text';
 import { LabelHelpComponent } from '@shared/ui';
 import { JobTimelineComponent } from './job-timeline.component';
+import {
+  PendingJobSummary,
+  RuleDescription,
+  BuildWithOutputs,
+  GradientCapabilities,
+} from '@core/models';
 
 interface RuleRow {
   name: string;

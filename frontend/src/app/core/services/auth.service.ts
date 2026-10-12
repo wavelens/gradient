@@ -9,7 +9,7 @@ import { Router } from '@angular/router';
 import { BehaviorSubject, Observable, filter, of, take } from 'rxjs';
 import { tap, switchMap, finalize, catchError, map } from 'rxjs/operators';
 import { ApiError, ApiService } from './api.service';
-import { User } from '@core/models';
+import { MakeUserRequest, UserInfoResponse } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -17,7 +17,7 @@ export class AuthService {
   private router = inject(Router);
 
   // Signals for reactive state management
-  private userSignal = signal<User | null>(null);
+  private userSignal = signal<UserInfoResponse | null>(null);
   private tokenSignal = signal<string | null>(null);
   private loadingSignal = signal(false);
 
@@ -62,7 +62,7 @@ export class AuthService {
         remember_me: rememberMe,
       })
       .pipe(
-        switchMap(() => this.api.get<User>('user')),
+        switchMap(() => this.api.get<UserInfoResponse>('user')),
         tap((user) => this.userSignal.set(user)),
         finalize(() => this.loadingSignal.set(false))
       );
@@ -71,12 +71,7 @@ export class AuthService {
   /**
    * Register a new user
    */
-  register(data: {
-    username: string;
-    name: string;
-    email: string;
-    password: string;
-  }) {
+  register(data: MakeUserRequest) {
     this.loadingSignal.set(true);
 
     return this.api
@@ -116,7 +111,7 @@ export class AuthService {
   /// outage into a login screen; the state stays unknown until a real answer
   /// comes back.
   private probe(): Observable<boolean> {
-    return this.api.get<User>('user').pipe(
+    return this.api.get<UserInfoResponse>('user').pipe(
       tap((user) => {
         this.userSignal.set(user);
         this.unreachableSignal.set(false);
@@ -147,8 +142,8 @@ export class AuthService {
    * Complete login after an external flow (e.g. OIDC callback).
    * The cookie is already set by the backend redirect; just load the user.
    */
-  loginWithCookie(): Observable<User> {
-    return this.api.get<User>('user').pipe(
+  loginWithCookie(): Observable<UserInfoResponse> {
+    return this.api.get<UserInfoResponse>('user').pipe(
       tap((user) => this.userSignal.set(user))
     );
   }

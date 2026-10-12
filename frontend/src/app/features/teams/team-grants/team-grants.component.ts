@@ -20,7 +20,7 @@ import { RouterModule } from '@angular/router';
 import { Observable } from 'rxjs';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
-import { TeamGrant, TeamSummary } from '@core/models';
+import { TeamGrantEntry, TeamSummary } from '@core/models';
 import { canOpenTeam } from '@shared/access';
 import {
   AutoCompleteComponent,
@@ -77,7 +77,7 @@ export class TeamGrantsComponent implements OnInit {
 
   part = computed<GrantedPart>(() => (this.kind() === 'cache' ? 'users' : this.grants()));
   roleOptions = computed(() => this.roles().map((role) => ({ label: role, value: role })));
-  allGrants = signal<TeamGrant[]>([]);
+  allGrants = signal<TeamGrantEntry[]>([]);
   shownGrants = computed(() => this.allGrants().filter((grant) => grant[this.part()]));
   myTeams = signal<TeamSummary[]>([]);
   suggestions = signal<string[]>([]);
@@ -127,7 +127,7 @@ export class TeamGrantsComponent implements OnInit {
     this.run('grant', request, this.grantError, () => this.showGrant.set(false));
   }
 
-  remove(grant: TeamGrant): void {
+  remove(grant: TeamGrantEntry): void {
     const request = this.kind() === 'project' ? this.removeFromProject(grant) : this.teams.removeCacheGrant(this.name(), grant.team);
     this.run(grant.team, request, this.error);
   }
@@ -153,7 +153,7 @@ export class TeamGrantsComponent implements OnInit {
     );
   }
 
-  private removeFromProject(grant: TeamGrant): Observable<string> {
+  private removeFromProject(grant: TeamGrantEntry): Observable<string> {
     const keepsOtherPart = this.part() === 'users' ? grant.workers : grant.users;
     if (keepsOtherPart && !grant.pending) {
       return this.teams.updateProjectGrant(this.name(), grant.team, { [this.part()]: false });

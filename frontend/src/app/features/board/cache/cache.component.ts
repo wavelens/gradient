@@ -8,17 +8,13 @@ import { Component, OnInit, OnDestroy, inject, signal, computed, ChangeDetection
 import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
-import {
-  BoardService,
-  BoardCacheStats,
-  BoardUpstreamCache,
-  BoardUpstreamCacheStats,
-} from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
 import { LiveService } from '@core/services/live.service';
 import { CardGridComponent, LoadingSpinnerComponent, StatCardComponent } from '@gradient/ui/ui';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { clockTime, formatBytes, formatCount, formatDuration, formatPercent } from '@shared/text';
 import { firstLoad } from '../first-load';
+import { BoardCacheStats, BoardUpstreamCacheStats, BoardUpstreamCache } from '@core/models';
 
 @Component({
   selector: 'app-board-cache',

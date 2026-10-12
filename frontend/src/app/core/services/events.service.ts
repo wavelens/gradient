@@ -7,13 +7,13 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable, shareReplay } from 'rxjs';
 import { ApiService } from './api.service';
-import type { EventCatalogEntry } from '@core/models';
+import type { CatalogEntry } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class EventsService {
   private api = inject(ApiService);
 
-  readonly catalog$: Observable<EventCatalogEntry[]> = this.api
-    .get<EventCatalogEntry[]>('events/catalog')
+  readonly catalog$: Observable<CatalogEntry[]> = this.api
+    .get<CatalogEntry[]>('events/catalog')
     .pipe(shareReplay(1));
 }

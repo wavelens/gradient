@@ -8,12 +8,13 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { HttpTestingController } from '@angular/common/http/testing';
-import { AdminService, AdminTask, StartDeepGcResponse } from './admin.service';
+import { AdminService } from './admin.service';
 import { environment } from '@environments/environment';
+import { AdminTaskDto, StartDeepGcResponse } from '@core/models';
 
 const apiUrl = environment.apiUrl;
 
-const sampleTask: AdminTask = {
+const sampleTask: AdminTaskDto = {
   id: 'task-1',
   kind: 'deep-gc',
   status: 'pending',
@@ -52,7 +53,7 @@ describe('AdminService', () => {
   });
 
   it('listTasks() GETs admin/tasks and returns the task array', () => {
-    let result: AdminTask[] | undefined;
+    let result: AdminTaskDto[] | undefined;
     service.listTasks().subscribe((v) => (result = v));
 
     const req = httpMock.expectOne(`${apiUrl}/admin/tasks`);

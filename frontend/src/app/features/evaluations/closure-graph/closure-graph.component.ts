@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { CommonModule, Location } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
-import { EvaluationsService, ClosureGraph } from '@core/services/evaluations.service';
+import { EvaluationsService } from '@core/services/evaluations.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -20,6 +20,7 @@ import {
 } from '@gradient/ui/ui';
 import { formatBytes } from '@shared/text';
 import { buildClosureSankey, contributesTo, SankeyNode, SankeyLink } from './closure-aggregate';
+import { ClosureGraph } from '@core/models';
 
 const TOP_N = 500;
 const SVG_NS = 'http://www.w3.org/2000/svg';

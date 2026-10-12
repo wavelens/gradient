@@ -6,11 +6,12 @@
 
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { BoardService, MetricPoint, DurationsHeatmap } from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
 import { LoadingSpinnerComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { clockTime, formatDuration } from '@shared/text';
+import { MetricPoint, DurationsHeatmap } from '@core/models';
 
 @Component({
   selector: 'app-board-durations',

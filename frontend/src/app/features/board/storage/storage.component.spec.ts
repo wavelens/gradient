@@ -2,7 +2,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { BoardStorageComponent } from './storage.component';
-import { BoardService, BoardStorage } from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
+import { BoardStorage } from '@core/models';
 
 const EMPTY: BoardStorage = {
   granularity: 'minute',

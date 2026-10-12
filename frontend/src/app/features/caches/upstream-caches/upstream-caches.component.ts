@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { CachesService, UpstreamCache, CacheSubscriptionMode, ProtocolProbe } from '@core/services/caches.service';
+import { CachesService } from '@core/services/caches.service';
 import {
   BadgeComponent,
   BadgeSeverity,
@@ -31,6 +31,7 @@ import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
+import { UpstreamCacheItem, CacheSubscriptionMode, ProtocolProbe } from '@core/models';
 
 @Component({
   selector: 'app-upstream-caches',
@@ -87,10 +88,10 @@ export class UpstreamCachesComponent implements OnInit {
   togglingUpstreamId = signal<string | null>(null);
   probeSuggestsProto = signal(false);
 
-  upstreamCaches = signal<UpstreamCache[]>([]);
+  upstreamCaches = signal<UpstreamCacheItem[]>([]);
   showAddDialog = signal(false);
   showEditDialog = signal(false);
-  editingUpstream = signal<UpstreamCache | null>(null);
+  editingUpstream = signal<UpstreamCacheItem | null>(null);
   addError = signal<string | null>(null);
   editError = signal<string | null>(null);
 
@@ -175,7 +176,7 @@ export class UpstreamCachesComponent implements OnInit {
     this.showAddDialog.set(true);
   }
 
-  openEditDialog(upstream: UpstreamCache): void {
+  openEditDialog(upstream: UpstreamCacheItem): void {
     this.editingUpstream.set(upstream);
     this.editForm = {
       display_name: upstream.display_name,
@@ -298,7 +299,7 @@ export class UpstreamCachesComponent implements OnInit {
     });
   }
 
-  toggleUpstream(upstream: UpstreamCache): void {
+  toggleUpstream(upstream: UpstreamCacheItem): void {
     this.togglingUpstreamId.set(upstream.id);
     this.cachesService.updateUpstream(this.cacheName, upstream.id, { active: !upstream.active }).subscribe({
       next: () => {

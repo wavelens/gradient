@@ -8,7 +8,8 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { BoardExpensiveEvalsComponent } from './expensive-evals.component';
-import { BoardService, ExpensiveEval } from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
+import { ExpensiveEval } from '@core/models';
 
 const EVALS: ExpensiveEval[] = [
   {

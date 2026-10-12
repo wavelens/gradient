@@ -17,7 +17,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { TeamsService } from '@core/services/teams.service';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
-import { Action } from '@core/models';
+import { ActionResponse } from '@core/models';
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
@@ -34,7 +34,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-const action: Action = {
+const action: ActionResponse = {
   id: 'a-1',
   name: 'Notify Ops',
   action_type: 'send_mail',
@@ -49,7 +49,7 @@ const action: Action = {
 
 function setup(
   access: AccessState,
-  actions: Action[] = [action],
+  actions: ActionResponse[] = [action],
 ): ComponentFixture<TaskActionsComponent> {
   TestBed.configureTestingModule({
     imports: [TaskActionsComponent],

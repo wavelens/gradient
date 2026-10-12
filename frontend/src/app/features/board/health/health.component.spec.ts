@@ -8,9 +8,10 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { BoardHealthComponent } from './health.component';
-import { BoardService, BoardHealth } from '@core/services/board.service';
-import { AdminService, AdminTask } from '@core/services/admin.service';
+import { BoardService } from '@core/services/board.service';
+import { AdminService } from '@core/services/admin.service';
 import { ConfigService } from '@core/services/config.service';
+import { BoardHealth, AdminTaskDto } from '@core/models';
 
 const HEALTH: BoardHealth = {
   version: '1.0.0',
@@ -43,7 +44,7 @@ const HEALTH: BoardHealth = {
   hot_nar_cache: { entries: 0, bytes: 0, hits: 0, misses: 0, evictions: 0 },
 };
 
-const TASK: AdminTask = {
+const TASK: AdminTaskDto = {
   id: 't1',
   kind: 'deep_gc',
   status: 'running',

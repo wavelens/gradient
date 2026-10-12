@@ -7,97 +7,28 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Cache, Paginated, PendingInvitation, SubscriptionRequest } from '@core/models';
-import { CacheMemberItem, CacheRole, CacheRoleListResponse } from '@core/models/cache-permission.model';
-
-export type CacheSubscriptionMode = 'ReadWrite' | 'ReadOnly' | 'WriteOnly';
-
-export interface UpstreamCache {
-  id: string;
-  display_name: string;
-  mode: CacheSubscriptionMode;
-  upstream_cache_id: string | null;
-  url: string | null;
-  public_key: string | null;
-  kind: 'internal' | 'gradient_proto' | 'http';
-  http1_only: boolean;
-  active: boolean;
-}
-
-export interface ProtocolProbe {
-  ok: boolean;
-  status: number | null;
-  latency_ms: number;
-  error: string | null;
-}
-
-export interface UpstreamTestResponse {
-  ok: boolean;
-  http1: ProtocolProbe;
-  http2: ProtocolProbe;
-  message: string;
-}
-
-export interface CacheMetricPoint {
-  time: string;
-  bytes: number;
-  requests: number;
-}
-
-export interface StorageMetricPoint {
-  time: string;
-  packages: number;
-  bytes: number;
-}
-
-export interface CacheStats {
-  total_bytes: number;
-  total_nar_bytes: number;
-  total_packages: number;
-  storage_minutes: StorageMetricPoint[];
-  storage_hours: StorageMetricPoint[];
-  storage_days: StorageMetricPoint[];
-  storage_weeks: StorageMetricPoint[];
-  minutes: CacheMetricPoint[];
-  hours: CacheMetricPoint[];
-  days: CacheMetricPoint[];
-  weeks: CacheMetricPoint[];
-}
-
-export interface NarSummary {
-  hash: string;
-  store_path: string;
-  package: string;
-  nar_size: number | null;
-  file_size: number | null;
-  created_at: string;
-  last_fetched_at: string | null;
-}
-
-export interface NarListResponse {
-  items: NarSummary[];
-  total: number;
-  page: number;
-  per_page: number;
-}
-
-export interface NarDetail extends NarSummary {
-  file_hash: string | null;
-  nar_hash: string | null;
-  references: string[];
-  deriver: string | null;
-  ca: string | null;
-  fetch_count: number;
-  signed: boolean;
-}
-
-export interface NarStats {
-  total_nars: number;
-  total_nar_size: number;
-  total_file_size: number;
-  last_uploaded_at: string | null;
-  oldest_fetched_at: string | null;
-}
+import {
+  Paginated,
+  MemberItem,
+  RoleListResponse_CacheRoleOwner,
+  RoleResponse_CacheRoleOwner,
+  Cache,
+  CacheStatsResponse,
+  UpstreamCacheItem,
+  UpstreamTestResponse,
+  NarSummary,
+  NarDetail,
+  NarStats,
+  PendingInvitationItem,
+  SubscriptionRequestItem,
+  MakeCacheRequest,
+  PatchCacheRequest,
+  CacheResponse,
+  AddUpstreamRequest,
+  PatchUpstreamRequest,
+  CreateRoleRequest,
+  PatchRoleRequest,
+} from '@core/models';
 
 export interface NarListQuery {
   hash?: string;
@@ -120,23 +51,16 @@ export class CachesService {
     return this.api.get<Paginated<Cache[]>>(`caches?page=${page}&per_page=${perPage}`);
   }
 
-  getCache(cache: string): Observable<Cache> {
-    return this.api.get<Cache>(`caches/${cache}`);
+  getCache(cache: string): Observable<CacheResponse> {
+    return this.api.get<CacheResponse>(`caches/${cache}`);
   }
 
   getPublicCaches(): Observable<Cache[]> {
     return this.api.get<Cache[]>('caches/public');
   }
 
-  createCache(data: {
-    name: string;
-    display_name: string;
-    description: string;
-    priority: number;
-    public?: boolean;
-    local_priority?: number | null;
-  }): Observable<Cache> {
-    return this.api.put<Cache>('caches', data);
+  createCache(data: MakeCacheRequest): Observable<string> {
+    return this.api.put<string>('caches', data);
   }
 
   setCachePublic(cache: string): Observable<string> {
@@ -147,8 +71,8 @@ export class CachesService {
     return this.api.delete<string>(`caches/${cache}/public`);
   }
 
-  updateCache(cache: string, data: Partial<Cache>): Observable<Cache> {
-    return this.api.patch<Cache>(`caches/${cache}`, data);
+  updateCache(cache: string, data: PatchCacheRequest): Observable<string> {
+    return this.api.patch<string>(`caches/${cache}`, data);
   }
 
   deleteCache(cache: string): Observable<void> {
@@ -163,47 +87,27 @@ export class CachesService {
     return this.api.delete<void>(`caches/${cache}/active`);
   }
 
-  getCacheStats(cache: string): Observable<CacheStats> {
-    return this.api.get<CacheStats>(`caches/${cache}/stats`);
+  getCacheStats(cache: string): Observable<CacheStatsResponse> {
+    return this.api.get<CacheStatsResponse>(`caches/${cache}/stats`);
   }
 
-  getUpstreamCaches(cache: string): Observable<UpstreamCache[]> {
-    return this.api.get<UpstreamCache[]>(`caches/${cache}/upstream-caches`);
+  getUpstreamCaches(cache: string): Observable<UpstreamCacheItem[]> {
+    return this.api.get<UpstreamCacheItem[]>(`caches/${cache}/upstream-caches`);
   }
 
-  addInternalUpstream(cache: string, data: {
-    cache_name: string;
-    display_name?: string;
-    mode?: CacheSubscriptionMode;
-  }): Observable<string> {
+  addInternalUpstream(cache: string, data: Omit<Extract<AddUpstreamRequest, { type: 'internal' }>, 'type'>): Observable<string> {
     return this.api.put<string>(`caches/${cache}/upstream-caches`, { type: 'internal', ...data });
   }
 
-  addGradientProtoUpstream(cache: string, data: {
-    url: string;
-    remote_cache: string;
-    display_name: string;
-    mode?: CacheSubscriptionMode;
-    api_key?: string;
-  }): Observable<string> {
+  addGradientProtoUpstream(cache: string, data: Omit<Extract<AddUpstreamRequest, { type: 'gradient_proto' }>, 'type'>): Observable<string> {
     return this.api.put<string>(`caches/${cache}/upstream-caches`, { type: 'gradient_proto', ...data });
   }
 
-  addHttpUpstream(cache: string, data: {
-    display_name: string;
-    url: string;
-    public_key: string;
-  }): Observable<string> {
+  addHttpUpstream(cache: string, data: Omit<Extract<AddUpstreamRequest, { type: 'http' }>, 'type'>): Observable<string> {
     return this.api.put<string>(`caches/${cache}/upstream-caches`, { type: 'http', ...data });
   }
 
-  updateUpstream(cache: string, upstreamId: string, data: {
-    display_name?: string;
-    mode?: CacheSubscriptionMode;
-    url?: string;
-    public_key?: string;
-    active?: boolean;
-  }): Observable<string> {
+  updateUpstream(cache: string, upstreamId: string, data: PatchUpstreamRequest): Observable<string> {
     return this.api.patch<string>(`caches/${cache}/upstream-caches/${upstreamId}`, data);
   }
 
@@ -215,14 +119,14 @@ export class CachesService {
     return this.api.delete<void>(`caches/${cache}/upstream-caches/${upstreamId}`);
   }
 
-  getCacheNars(cache: string, query: NarListQuery = {}): Observable<NarListResponse> {
+  getCacheNars(cache: string, query: NarListQuery = {}): Observable<Paginated<NarSummary[]>> {
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(query)) {
       if (v !== undefined && v !== null && v !== '') params.set(k, String(v));
     }
     const qs = params.toString();
     const suffix = qs ? `?${qs}` : '';
-    return this.api.get<NarListResponse>(`caches/${cache}/nars${suffix}`);
+    return this.api.get<Paginated<NarSummary[]>>(`caches/${cache}/nars${suffix}`);
   }
 
   getCacheNar(cache: string, hash: string): Observable<NarDetail> {
@@ -237,16 +141,16 @@ export class CachesService {
     return this.api.delete<void>(`caches/${cache}/nars/${hash}`);
   }
 
-  getInvitations(cache: string): Observable<PendingInvitation[]> {
-    return this.api.get<PendingInvitation[]>(`caches/${cache}/invitations`);
+  getInvitations(cache: string): Observable<PendingInvitationItem[]> {
+    return this.api.get<PendingInvitationItem[]>(`caches/${cache}/invitations`);
   }
 
   revokeInvitation(cache: string, user: string): Observable<string> {
     return this.api.delete<string>(`caches/${cache}/invitations`, { user });
   }
 
-  getSubscriptionRequests(cache: string): Observable<SubscriptionRequest[]> {
-    return this.api.get<SubscriptionRequest[]>(`caches/${cache}/subscription-requests`);
+  getSubscriptionRequests(cache: string): Observable<SubscriptionRequestItem[]> {
+    return this.api.get<SubscriptionRequestItem[]>(`caches/${cache}/subscription-requests`);
   }
 
   approveSubscriptionRequest(cache: string, project: string): Observable<string> {
@@ -257,8 +161,8 @@ export class CachesService {
     return this.api.delete<string>(`caches/${cache}/subscription-requests/${project}`);
   }
 
-  getMembers(cache: string): Observable<CacheMemberItem[]> {
-    return this.api.get<CacheMemberItem[]>(`caches/${cache}/members`);
+  getMembers(cache: string): Observable<MemberItem[]> {
+    return this.api.get<MemberItem[]>(`caches/${cache}/members`);
   }
 
   addMember(cache: string, user: string, role: string): Observable<string> {
@@ -273,16 +177,16 @@ export class CachesService {
     return this.api.delete<string>(`caches/${cache}/members`, { user });
   }
 
-  getRoles(cache: string): Observable<CacheRoleListResponse> {
-    return this.api.get<CacheRoleListResponse>(`caches/${cache}/roles`);
+  getRoles(cache: string): Observable<RoleListResponse_CacheRoleOwner> {
+    return this.api.get<RoleListResponse_CacheRoleOwner>(`caches/${cache}/roles`);
   }
 
-  createRole(cache: string, data: { name: string; permissions: string[] }): Observable<CacheRole> {
-    return this.api.post<CacheRole>(`caches/${cache}/roles`, data);
+  createRole(cache: string, data: CreateRoleRequest): Observable<RoleResponse_CacheRoleOwner> {
+    return this.api.post<RoleResponse_CacheRoleOwner>(`caches/${cache}/roles`, data);
   }
 
-  updateRole(cache: string, roleId: string, data: { name?: string; permissions?: string[] }): Observable<CacheRole> {
-    return this.api.patch<CacheRole>(`caches/${cache}/roles/${roleId}`, data);
+  updateRole(cache: string, roleId: string, data: PatchRoleRequest): Observable<RoleResponse_CacheRoleOwner> {
+    return this.api.patch<RoleResponse_CacheRoleOwner>(`caches/${cache}/roles/${roleId}`, data);
   }
 
   deleteRole(cache: string, roleId: string): Observable<boolean> {

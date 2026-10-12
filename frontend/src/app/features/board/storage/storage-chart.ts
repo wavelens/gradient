@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { BoardStorage, LabelledPoint, LabelledSeries } from '@core/services/board.service';
 import type { MetricAxis, MetricSeries, MetricSeriesType } from '@shared/ui';
+import { LabelledSeries, LabelledPoint, BoardStorage } from '@core/models';
 
 export interface SeriesGroup {
   series: LabelledSeries[];

@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { BuildStatus, EntryPointSummary, EvaluationStatus, InputFetchState } from '@core/models';
+import type {
+  BuildStatus,
+  EvaluationStatus,
+  InputFetchState,
+  EntryPointSummary,
+} from '@core/models';
 
 export type StatusPhase = 'queued' | 'waiting' | 'running' | 'success' | 'failure' | 'aborted';
 

@@ -6,11 +6,12 @@
 
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { BoardService, MetricPoint, RuleDescription, ScoringSummary } from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
 import { CardGridComponent, LoadingSpinnerComponent, PopoverComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { clockTime, formatDuration } from '@shared/text';
+import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
 
 @Component({
   selector: 'app-board-scheduler',

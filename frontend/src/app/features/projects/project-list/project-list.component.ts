@@ -29,7 +29,7 @@ import {
   SelectComponent,
 } from '@gradient/ui/ui';
 import { slugify } from '@shared/text';
-import { Project } from '@core/models';
+import { Project, ProjectSummary } from '@core/models';
 
 @Component({
   selector: 'app-project-list',
@@ -74,7 +74,7 @@ export class ProjectListComponent implements OnInit, OnDestroy {
   }
 
   loading = signal(true);
-  projects = signal<Project[]>([]);
+  projects = signal<ProjectSummary[]>([]);
   projectsTotal = signal(0);
   projectsPage = signal(1);
   showCreateDialog = signal(false);

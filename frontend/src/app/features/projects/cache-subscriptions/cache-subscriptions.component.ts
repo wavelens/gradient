@@ -28,7 +28,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
-import { AccessState, CacheSubscription } from '@core/models';
+import { AccessState, CacheSubscriptionItem } from '@core/models';
 
 @Component({
   selector: 'app-cache-subscriptions',
@@ -74,7 +74,7 @@ export class CacheSubscriptionsComponent implements OnInit {
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Cache Subscriptions' }));
-  caches = signal<CacheSubscription[]>([]);
+  caches = signal<CacheSubscriptionItem[]>([]);
   newCacheName = '';
   cacheSuggestions = signal<string[]>([]);
   private availableCacheNames: string[] = [];

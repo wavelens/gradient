@@ -8,7 +8,7 @@ import { Component, OnInit, inject, signal, computed, linkedSignal, ChangeDetect
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint } from '@core/services/caches.service';
+import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
 import { injectCacheAccessData } from '@core/resolvers/inject-access';
@@ -30,7 +30,13 @@ import {
   MetricSeries,
   StarButtonComponent,
 } from '@shared/ui';
-import { Cache, StarTarget } from '@core/models';
+import {
+  StarTarget,
+  CacheStatsResponse,
+  CacheMetricPoint,
+  StorageMetricPoint,
+  CacheResponse,
+} from '@core/models';
 import { docsUrl } from '@core/docs';
 import { formatBytes, formatCount } from '@shared/text';
 import { FormsModule } from '@angular/forms';
@@ -78,9 +84,9 @@ export class CacheDetailComponent implements OnInit {
   protected authService = inject(AuthService);
 
   private access = injectCacheAccessData();
-  cache = linkedSignal<Cache | null>(() => this.access()?.cache ?? null);
+  cache = linkedSignal<CacheResponse | null>(() => this.access()?.cache ?? null);
   statsLoading = signal(true);
-  stats = signal<CacheStats | null>(null);
+  stats = signal<CacheStatsResponse | null>(null);
   activeWindow = signal<Window>('hours');
   starred = signal(false);
 
@@ -127,7 +133,7 @@ export class CacheDetailComponent implements OnInit {
   activeStoragePoints = computed<StorageMetricPoint[]>(() => {
     const s = this.stats();
     if (!s) return [];
-    const key = `storage_${this.activeWindow()}` as keyof CacheStats;
+    const key = `storage_${this.activeWindow()}` as keyof CacheStatsResponse;
     return s[key] as StorageMetricPoint[];
   });
 

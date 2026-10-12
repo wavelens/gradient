@@ -9,12 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import {
-  ProjectsService,
-  ProjectMember,
-  ProjectRole,
-  PermissionDescriptor,
-} from '@core/services/projects.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { UserService } from '@core/services/user.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import {
@@ -36,7 +31,13 @@ import {
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
-import { AccessState, PendingInvitation } from '@core/models';
+import {
+  AccessState,
+  MemberItem,
+  RoleResponse_ProjectRoleOwner,
+  PermissionEntry,
+  PendingInvitationItem,
+} from '@core/models';
 import { permissionLabel } from '@shared/text';
 
 interface RoleFormState {
@@ -95,18 +96,18 @@ export class MembersRolesComponent implements OnInit {
   savingRole = signal(false);
   deletingRole = signal<string | null>(null);
 
-  members = signal<ProjectMember[]>([]);
-  invitations = signal<PendingInvitation[]>([]);
-  roles = signal<ProjectRole[]>([]);
+  members = signal<MemberItem[]>([]);
+  invitations = signal<PendingInvitationItem[]>([]);
+  roles = signal<RoleResponse_ProjectRoleOwner[]>([]);
   roleNames = computed(() => this.roles().map((r) => r.name));
-  availablePermissions = signal<PermissionDescriptor[]>([]);
+  availablePermissions = signal<PermissionEntry[]>([]);
   userSuggestions = signal<string[]>([]);
   memberError = signal<string | null>(null);
   roleError = signal<string | null>(null);
 
   showAddMemberDialog = signal(false);
   showRoleDialog = signal(false);
-  editingRole = signal<ProjectRole | null>(null);
+  editingRole = signal<RoleResponse_ProjectRoleOwner | null>(null);
 
   newMember = { user: '', role: '' };
   roleForm: RoleFormState = { name: '', permissions: {} };
@@ -256,7 +257,7 @@ export class MembersRolesComponent implements OnInit {
     this.showRoleDialog.set(true);
   }
 
-  openEditRoleDialog(role: ProjectRole): void {
+  openEditRoleDialog(role: RoleResponse_ProjectRoleOwner): void {
     if (role.builtin) return;
     this.editingRole.set(role);
     const map = this.permissionTemplate(false);
@@ -308,7 +309,7 @@ export class MembersRolesComponent implements OnInit {
     });
   }
 
-  deleteRole(role: ProjectRole): void {
+  deleteRole(role: RoleResponse_ProjectRoleOwner): void {
     if (role.builtin) return;
     this.deletingRole.set(role.id);
     this.projectsService.deleteRole(this.projectName, role.id).subscribe({
@@ -321,7 +322,7 @@ export class MembersRolesComponent implements OnInit {
   }
 
 
-  rolePermissionLabel(role: ProjectRole): string {
+  rolePermissionLabel(role: RoleResponse_ProjectRoleOwner): string {
     if (role.permissions.length === 0) return 'No permissions';
     return role.permissions.map(permissionLabel).join(', ');
   }

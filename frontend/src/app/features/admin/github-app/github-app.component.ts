@@ -8,7 +8,7 @@ import { Component, HostListener, OnInit, computed, inject, signal, ChangeDetect
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { AdminService, GithubAppCredentials } from '@core/services/admin.service';
+import { AdminService } from '@core/services/admin.service';
 import {
   ButtonComponent,
   CopyFieldComponent,
@@ -17,6 +17,7 @@ import {
   PageLayoutComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
+import { ManifestResult } from '@core/models';
 
 @Component({
   selector: 'app-admin-github-app',
@@ -36,7 +37,7 @@ export class GithubAppComponent implements OnInit {
   errorMessage = signal<string | null>(null);
 
   showResult = signal(false);
-  credentials = signal<GithubAppCredentials | null>(null);
+  credentials = signal<ManifestResult | null>(null);
   credentialsMissing = signal(false);
 
   private keysVisible = computed(() => this.showResult() && this.credentials() !== null);
@@ -68,7 +69,7 @@ export class GithubAppComponent implements OnInit {
     });
   }
 
-  private submitManifestForm(action: string, manifest: Record<string, unknown>): void {
+  private submitManifestForm(action: string, manifest: unknown): void {
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = action;

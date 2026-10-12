@@ -6,7 +6,7 @@
 
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { IconComponent } from '@gradient/ui/ui';
-import type { BuildProgress, BuildProgressPhase } from '@core/models';
+import type { BuildProgressPhase, BuildProgress } from '@core/models';
 import {
   buildProgressBytes, buildProgressPaths, buildProgressRatio, buildProgressTitle,
 } from '@shared/evaluation';

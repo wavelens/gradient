@@ -5,6 +5,6 @@
  */
 
 /// Chart axes have little room: a worker without a display name is cut to the head of its id.
-export function workerAxisLabel(name: string | null, id: string | null): string {
+export function workerAxisLabel(name?: string | null, id?: string | null): string {
   return name || (id ?? '-').slice(0, 12);
 }

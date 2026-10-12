@@ -7,12 +7,13 @@
 import { Component, OnDestroy, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
-import { BoardService, MetricPoint } from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
 import { CardGridComponent, LoadingSpinnerComponent, StatCardComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { clockTime } from '@shared/text';
+import { MetricPoint } from '@core/models';
 
 @Component({
   selector: 'app-board-overview',

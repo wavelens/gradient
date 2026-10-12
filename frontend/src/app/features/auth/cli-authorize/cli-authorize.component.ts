@@ -16,6 +16,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { ApiService } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
+import { CliDeviceInfoResponse } from '@core/models';
 import { take } from 'rxjs';
 import {
   ButtonComponent,
@@ -25,13 +26,6 @@ import {
   LogoComponent,
   MessageBannerComponent,
 } from '@gradient/ui/ui';
-
-interface CliDeviceInfo {
-  user_code: string;
-  expires_at: string;
-  user_agent: string | null;
-  ip: string | null;
-}
 
 @Component({
   selector: 'app-cli-authorize',
@@ -50,7 +44,7 @@ export class CliAuthorizeComponent implements OnInit {
   private config = inject(ConfigService);
 
   form: FormGroup;
-  info = signal<CliDeviceInfo | null>(null);
+  info = signal<CliDeviceInfoResponse | null>(null);
   loading = signal(true);
   submitting = signal(false);
   status = signal<'pending' | 'authorized' | 'denied'>('pending');
@@ -89,7 +83,7 @@ export class CliAuthorizeComponent implements OnInit {
     this.loading.set(true);
     this.errorMessage.set(null);
     this.api
-      .get<CliDeviceInfo>(`auth/cli/info?user_code=${encodeURIComponent(userCode)}`)
+      .get<CliDeviceInfoResponse>(`auth/cli/info?user_code=${encodeURIComponent(userCode)}`)
       .subscribe({
         next: (info) => {
           this.info.set(info);

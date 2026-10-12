@@ -10,7 +10,6 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
-import { CacheMemberItem, CacheRole, CachePermissionDescriptor } from '@core/models/cache-permission.model';
 import { UserService } from '@core/services/user.service';
 import {
   AutoCompleteComponent,
@@ -32,7 +31,12 @@ import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
-import { PendingInvitation } from '@core/models';
+import {
+  MemberItem,
+  RoleResponse_CacheRoleOwner,
+  PermissionEntry,
+  PendingInvitationItem,
+} from '@core/models';
 import { permissionLabel } from '@shared/text';
 
 interface RoleFormState {
@@ -90,18 +94,18 @@ export class CacheMembersRolesComponent implements OnInit {
   savingRole = signal(false);
   deletingRole = signal<string | null>(null);
 
-  members = signal<CacheMemberItem[]>([]);
-  invitations = signal<PendingInvitation[]>([]);
-  roles = signal<CacheRole[]>([]);
+  members = signal<MemberItem[]>([]);
+  invitations = signal<PendingInvitationItem[]>([]);
+  roles = signal<RoleResponse_CacheRoleOwner[]>([]);
   roleNames = computed(() => this.roles().map((r) => r.name));
-  availablePermissions = signal<CachePermissionDescriptor[]>([]);
+  availablePermissions = signal<PermissionEntry[]>([]);
   userSuggestions = signal<string[]>([]);
   memberError = signal<string | null>(null);
   roleError = signal<string | null>(null);
 
   showAddMemberDialog = signal(false);
   showRoleDialog = signal(false);
-  editingRole = signal<CacheRole | null>(null);
+  editingRole = signal<RoleResponse_CacheRoleOwner | null>(null);
 
   newMember = { user: '', role: '' };
   roleForm: RoleFormState = { name: '', permissions: {} };
@@ -244,7 +248,7 @@ export class CacheMembersRolesComponent implements OnInit {
     this.showRoleDialog.set(true);
   }
 
-  openEditRoleDialog(role: CacheRole): void {
+  openEditRoleDialog(role: RoleResponse_CacheRoleOwner): void {
     if (role.builtin) return;
     this.editingRole.set(role);
     const map = this.permissionTemplate(false);
@@ -296,7 +300,7 @@ export class CacheMembersRolesComponent implements OnInit {
     });
   }
 
-  deleteRole(role: CacheRole): void {
+  deleteRole(role: RoleResponse_CacheRoleOwner): void {
     if (role.builtin) return;
     this.deletingRole.set(role.id);
     this.cachesService.deleteRole(this.cacheName, role.id).subscribe({
@@ -309,7 +313,7 @@ export class CacheMembersRolesComponent implements OnInit {
   }
 
 
-  rolePermissionLabel(role: CacheRole): string {
+  rolePermissionLabel(role: RoleResponse_CacheRoleOwner): string {
     if (role.permissions.length === 0) return 'No permissions';
     return role.permissions.map(permissionLabel).join(', ');
   }

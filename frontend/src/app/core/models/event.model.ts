@@ -4,15 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import type { CatalogEntry } from './api.generated';
+
 export interface EventEnvelope<C = Record<string, unknown>> {
   event: string;
   at: string;
   content: C;
-}
-
-export interface EventCatalogEntry {
-  name: string;
-  durable: boolean;
 }
 
 export interface EventGroup {
@@ -21,7 +18,7 @@ export interface EventGroup {
 }
 
 /** Durable events grouped by their first dotted segment, optionally limited to `families`. */
-export function groupCatalog(entries: EventCatalogEntry[], families?: string[]): EventGroup[] {
+export function groupCatalog(entries: CatalogEntry[], families?: string[]): EventGroup[] {
   const groups = new Map<string, EventGroup>();
   for (const { name, durable } of entries) {
     const [family, ...rest] = name.split('.');

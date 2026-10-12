@@ -9,8 +9,9 @@ import { ActivatedRoute, convertToParamMap, provideRouter, RouterLink } from '@a
 import { By } from '@angular/platform-browser';
 import { EMPTY, of, throwError } from 'rxjs';
 import { BoardJobDetailComponent } from './job-detail.component';
-import { BoardService, AssignedJobDetail, PendingJobSummary } from '@core/services/board.service';
+import { BoardService, AssignedJobDetail } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
+import { PendingJobSummary } from '@core/models';
 
 const DETAIL: AssignedJobDetail = {
   id: 'job-1',

@@ -12,7 +12,7 @@ import {
   taskAccessResolver,
   TaskAccessData,
 } from './task-access.resolver';
-import { TaskDetail } from '@core/models/task.model';
+import { TaskDetailsResponse } from '@core/models';
 
 function snap(params: Record<string, string>): ActivatedRouteSnapshot {
   return { paramMap: convertToParamMap(params) } as ActivatedRouteSnapshot;
@@ -30,7 +30,7 @@ function runResolver(
 describe('taskAccessResolver', () => {
   let getTask: ReturnType<typeof vi.fn>;
 
-  const baseTask: TaskDetail = {
+  const baseTask: TaskDetailsResponse = {
     id: 'p1',
     name: 'demo',
     display_name: 'Demo',

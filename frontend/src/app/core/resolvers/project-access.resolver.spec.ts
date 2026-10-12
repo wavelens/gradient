@@ -9,7 +9,7 @@ import { ActivatedRouteSnapshot, convertToParamMap } from '@angular/router';
 import { Observable, firstValueFrom, of, throwError } from 'rxjs';
 import { ProjectsService } from '@core/services/projects.service';
 import { projectAccessResolver, ProjectAccessData } from './project-access.resolver';
-import { Project } from '@core/models';
+import { ProjectResponse } from '@core/models';
 
 function snap(params: Record<string, string>): ActivatedRouteSnapshot {
   return { paramMap: convertToParamMap(params) } as ActivatedRouteSnapshot;
@@ -25,7 +25,7 @@ function runResolver(route: ActivatedRouteSnapshot): Promise<ProjectAccessData> 
 describe('projectAccessResolver', () => {
   let getProject: ReturnType<typeof vi.fn>;
 
-  const baseProject: Project = {
+  const baseProject: ProjectResponse = {
     id: 'o1',
     name: 'wavelens',
     display_name: 'Wavelens',
@@ -33,6 +33,9 @@ describe('projectAccessResolver', () => {
     public: true,
     hide_build_requests: false,
     managed: false,
+    created_by: 'u1',
+    created_at: '2026-01-01T00:00:00',
+    github_app_available: false,
   };
 
   beforeEach(() => {

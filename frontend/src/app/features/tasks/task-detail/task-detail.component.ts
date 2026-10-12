@@ -36,7 +36,17 @@ import { EvalStatusBadgeComponent, inputFetchRows, SegmentedBarComponent, StarBu
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
-import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, FailedAttributeSummary, BuildStatusCounts, WalkMode } from '@core/models';
+import {
+  StarTarget,
+  TaskDetailsResponse,
+  EntryPointSummary,
+  FailedAttributeSummary,
+  BuildStatusCounts,
+  EvaluationSummary,
+  EvaluationProgress,
+  WalkMode,
+  EvaluationStatus,
+} from '@core/models';
 import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, repositoryWebUrl, thunkProgress } from '@shared/evaluation';
 
 @Component({
@@ -76,7 +86,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   triggerAccess = computed(() => this.accessService.triggerAccess(this.access()));
 
   private resolved = injectTaskAccessData();
-  task = signal<TaskDetail | null>(null);
+  task = signal<TaskDetailsResponse | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);
   entryPointsTotal = signal(0);
   failedAttributes = signal<FailedAttributeSummary[]>([]);
@@ -200,7 +210,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     });
   }
 
-  private applyTask(task: TaskDetail, live: boolean): void {
+  private applyTask(task: TaskDetailsResponse, live: boolean): void {
     const sig = this.taskSignature(task);
     if (sig !== this.taskSig) {
       this.taskSig = sig;
@@ -227,7 +237,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   /// Fields whose change should re-render the header / eval strip / panel.
-  private taskSignature(p: TaskDetail): string {
+  private taskSignature(p: TaskDetailsResponse): string {
     const evals = (p.last_evaluations ?? [])
       .map(e => `${e.id}:${e.status}:${e.prioritized}:${e.errors}:${e.warnings}:${e.updated_at}:${JSON.stringify(e.builds)}`)
       .join('|');

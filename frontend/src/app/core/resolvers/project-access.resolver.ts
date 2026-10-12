@@ -9,10 +9,10 @@ import { ResolveFn } from '@angular/router';
 import { catchError, map, of, tap } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { Project } from '@core/models';
+import { ProjectResponse } from '@core/models';
 
 export interface ProjectAccessData {
-  project: Project | null;
+  project: ProjectResponse | null;
 }
 
 export const projectAccessResolver: ResolveFn<ProjectAccessData> = (route) => {

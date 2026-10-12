@@ -4,13 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-export type ActionType =
-  | 'send_mail'
-  | 'send_web_request'
-  | 'git_host_status_report'
-  | 'open_pr'
-  | 'send_matrix_message'
-  | 'send_slack_message';
+import type { ActionConfig } from './api.generated';
+
+export type ActionType = ActionConfig['type'];
 
 export const ACTION_TYPE_LABEL: Record<ActionType, string> = {
   send_mail: 'Mail',
@@ -20,74 +16,5 @@ export const ACTION_TYPE_LABEL: Record<ActionType, string> = {
   git_host_status_report: 'Git Status',
   open_pr: 'PR',
 };
-
-export type PrGenerator = 'flake_lock';
-export type PrGranularity = 'per_run' | 'per_input';
-export type PrVerifyGate = 'none' | 'eval' | 'build';
-
-export type ActionConfig =
-  | { type: 'send_mail'; recipients: string[]; subject_template?: string }
-  | { type: 'send_web_request'; url: string; token?: string }
-  | { type: 'git_host_status_report'; integration_id: string }
-  | {
-      type: 'open_pr';
-      integration_id: string;
-      generator: PrGenerator;
-      granularity: PrGranularity;
-      verify_gate: PrVerifyGate;
-      branch_pattern: string;
-      title_template?: string;
-      body_template?: string;
-      update_existing: boolean;
-    }
-  | { type: 'send_matrix_message'; homeserver: string; room_id: string; access_token?: string }
-  | { type: 'send_slack_message'; webhook_url?: string };
-
-export interface Action {
-  id: string;
-  name: string;
-  action_type: ActionType;
-  config: ActionConfig;
-  events: string[];
-  active: boolean;
-  last_fired_at: string | null;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CreateActionRequest {
-  name: string;
-  config: ActionConfig;
-  events?: string[];
-  active?: boolean;
-}
-
-export interface CreateActionResponse {
-  action: Action;
-  token?: string;
-}
-
-export interface UpdateActionRequest {
-  name?: string;
-  config?: ActionConfig;
-  events?: string[];
-  active?: boolean;
-}
-
-export interface ActionDelivery {
-  id: string;
-  event: string;
-  success: boolean;
-  response_status: number | null;
-  error_message: string | null;
-  duration_ms: number;
-  delivered_at: string;
-}
-
-export interface ActionDeliveryDetail extends ActionDelivery {
-  request_body: string;
-  response_body: string | null;
-}
 
 export const GIT_HOST_STATUS_EVENTS = ['build.started', 'build.completed', 'build.failed'];

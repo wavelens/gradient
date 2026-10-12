@@ -7,7 +7,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActionFormComponent } from './action-form.component';
 import { ConfigService } from '@core/services/config.service';
-import { Action, CreateActionRequest } from '@core/models';
+import { ActionResponse, CreateActionRequest } from '@core/models';
 
 function createFixture(smtpEnabled: boolean): ComponentFixture<ActionFormComponent> {
   TestBed.configureTestingModule({
@@ -20,7 +20,7 @@ function createFixture(smtpEnabled: boolean): ComponentFixture<ActionFormCompone
   return fixture;
 }
 
-const existing: Action = {
+const existing: ActionResponse = {
   id: 'a-1',
   name: 'Notify Ops',
   action_type: 'send_mail',

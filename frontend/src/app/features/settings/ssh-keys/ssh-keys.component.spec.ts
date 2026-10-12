@@ -13,9 +13,9 @@ import { vi } from 'vitest';
 import { SshKeysComponent } from './ssh-keys.component';
 import { UserService } from '@core/services/user.service';
 import { ConfigService } from '@core/services/config.service';
-import { SshKey } from '@core/models/user.model';
+import { SshKeyInfo } from '@core/models';
 
-const key: SshKey = {
+const key: SshKeyInfo = {
   id: 'k1',
   name: 'laptop',
   fingerprint: 'SHA256:abc',
@@ -24,7 +24,7 @@ const key: SshKey = {
 };
 
 function setup(
-  keys: SshKey[],
+  keys: SshKeyInfo[],
   overrides: Partial<Record<keyof UserService, unknown>> = {},
 ): ComponentFixture<SshKeysComponent> {
   TestBed.configureTestingModule({

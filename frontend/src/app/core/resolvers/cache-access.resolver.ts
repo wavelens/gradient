@@ -9,11 +9,11 @@ import { ResolveFn } from '@angular/router';
 import { map, tap } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
-import { Cache } from '@core/models/cache.model';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
+import { CacheResponse } from '@core/models';
 
 export interface CacheAccessData {
-  cache: Cache;
+  cache: CacheResponse;
   access: AccessState;
 }
 

@@ -11,12 +11,12 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
 import { CacheSubscriptionRequestsComponent } from './cache-subscriptions.component';
 import { CachesService } from '@core/services/caches.service';
-import { SubscriptionRequest } from '@core/models';
+import { SubscriptionRequestItem } from '@core/models';
 
-const request: SubscriptionRequest = {
+const request: SubscriptionRequestItem = {
   project: 'wavelens',
   project_display_name: 'Wavelens',
-  mode: 0,
+  mode: 'ReadWrite',
   requested_by: 'alice',
   created_at: '2026-09-05T12:00:00',
 };
@@ -27,7 +27,7 @@ function buttonByText(root: HTMLElement, text: string): HTMLButtonElement | unde
   ) as HTMLButtonElement | undefined;
 }
 
-function setup(requests: SubscriptionRequest[]) {
+function setup(requests: SubscriptionRequestItem[]) {
   const approve = vi.fn().mockReturnValue(of('Subscription approved'));
   const deny = vi.fn().mockReturnValue(of('Subscription request denied'));
 

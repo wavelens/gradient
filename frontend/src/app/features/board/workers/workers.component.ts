@@ -7,18 +7,13 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import {
-  BoardService,
-  BoardWorker,
-  BoardFleetPoint,
-  LoadBucket,
-  WorkerLoad,
-} from '@core/services/board.service';
+import { BoardService } from '@core/services/board.service';
 import { firstLoad } from '../first-load';
 import { clockTime, formatMegabytes, formatPercent } from '@shared/text';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { workerAxisLabel } from '../worker-label';
+import { BoardWorker, BoardFleetPoint, WorkerLoad, LoadBucket } from '@core/models';
 
 @Component({
   selector: 'app-board-workers',
@@ -106,7 +101,7 @@ import { workerAxisLabel } from '../worker-label';
               </td>
               <td>{{ w.draining ? 'draining' : 'active' }}</td>
               <td>{{ w.assigned_jobs }}/{{ w.max_concurrent_builds }}</td>
-              <td>{{ w.cpu_usage_pct !== null ? percent(w.cpu_usage_pct) : '-' }}</td>
+              <td>{{ w.cpu_usage_pct != null ? percent(w.cpu_usage_pct) : '-' }}</td>
               <td>{{ megabytes(w.ram_free_mb) }}</td>
               <td class="mono">{{ w.architectures.join(', ') || '-' }}</td>
             </tr>

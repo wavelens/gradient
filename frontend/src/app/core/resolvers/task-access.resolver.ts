@@ -9,11 +9,11 @@ import { ResolveFn } from '@angular/router';
 import { map, tap } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService } from '@core/services/tasks.service';
-import { TaskDetail } from '@core/models/task.model';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
+import { TaskDetailsResponse } from '@core/models';
 
 export interface TaskAccessData {
-  task: TaskDetail;
+  task: TaskDetailsResponse;
   access: AccessState;
 }
 

@@ -26,11 +26,12 @@ import { WritableDirective, ManagedDisableDirective, AccessService } from '@shar
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import {
   ACTION_TYPE_LABEL,
-  Action,
   ActionType,
+  ActionResponse,
+  IntegrationResponse,
   CreateActionRequest,
-  Integration,
   UpdateActionRequest,
+  ActionConfig,
 } from '@core/models';
 import { ActionFormComponent } from './action-form.component';
 import { ActionDeliveriesComponent } from './action-deliveries.component';
@@ -101,11 +102,11 @@ export class TaskActionsComponent implements OnInit {
   taskName = '';
   breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName, { label: 'Actions' }));
 
-  actions = signal<Action[]>([]);
+  actions = signal<ActionResponse[]>([]);
   outboundIntegrations = signal<IntegrationOption[]>([]);
   mailTeams = signal<string[]>([]);
 
-  editingAction = signal<Action | null>(null);
+  editingAction = signal<ActionResponse | null>(null);
   showCreateDialog = signal(false);
   showEditDialog = signal(false);
 
@@ -140,7 +141,7 @@ export class TaskActionsComponent implements OnInit {
 
   private loadIntegrations(): void {
     this.integrationsService.listProjectIntegrations(this.projectName).subscribe({
-      next: (list: Integration[]) =>
+      next: (list: IntegrationResponse[]) =>
         this.outboundIntegrations.set(
           list
             .filter((i) => i.kind === 'outbound')
@@ -156,7 +157,7 @@ export class TaskActionsComponent implements OnInit {
     this.showCreateDialog.set(true);
   }
 
-  startEdit(action: Action): void {
+  startEdit(action: ActionResponse): void {
     this.error.set(null);
     this.editingAction.set(action);
     this.showEditDialog.set(true);
@@ -255,6 +256,10 @@ export class TaskActionsComponent implements OnInit {
 
   dismissToken(): void {
     this.revealedToken.set(null);
+  }
+
+  typeOf(action: ActionResponse): ActionType {
+    return (action.config as ActionConfig).type;
   }
 
   typeLabel(type: ActionType): string {

@@ -13,9 +13,9 @@ import { ProjectSettingsComponent } from './project-settings.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { AccessState } from '@core/models/access.model';
-import { Project } from '@core/models/project.model';
+import { ProjectResponse } from '@core/models';
 
-function projectFor(access: AccessState): Project {
+function projectFor(access: AccessState): ProjectResponse {
   return {
     id: 'o',
     name: 'acme',
@@ -24,6 +24,9 @@ function projectFor(access: AccessState): Project {
     public: false,
     hide_build_requests: false,
     managed: access.managed,
+    created_by: 'u1',
+    created_at: '2026-01-01T00:00:00',
+    github_app_available: false,
     role: access.canEdit ? 'Admin' : 'View',
   };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { LabelledSeries } from '@core/services/board.service';
 import { alignSeries, windowBuckets } from './storage-chart';
+import { LabelledSeries } from '@core/models';
 
 const T0 = Date.parse('2026-09-29T15:00:00Z');
 const MIN = 60_000;

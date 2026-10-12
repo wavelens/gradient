@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-export interface DependencyEdge {
-  source: string;
-  target: string;
-}
+import type { DependencyEdge } from '@core/models';
 
 /// Longest distance from the root, in topological order: every node and edge is visited once.
 export function longestPathDepths(rootId: string, edges: DependencyEdge[]): Map<string, number> {

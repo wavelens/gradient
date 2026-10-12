@@ -7,7 +7,7 @@
 import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '@environments/environment';
-import type { BuildProgressPhase, EvaluationProgress, EventEnvelope } from '@core/models';
+import type { EventEnvelope, BuildProgressPhase, EvaluationProgress } from '@core/models';
 
 export type LiveEvent = EventEnvelope<{
   task?: string | null;

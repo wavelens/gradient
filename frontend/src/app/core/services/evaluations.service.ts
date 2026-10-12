@@ -7,145 +7,36 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { BuildProgress, BuildStatus, Evaluation, EvaluationMessage } from '@core/models';
-
-export interface DependencyGraphNode {
-  id: string;
-  build: string | null;
-  name: string;
-  path: string;
-  status: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface DependencyEdge {
-  source: string;
-  target: string;
-}
-
-export interface BuildGraph {
-  root: string;
-  nodes: DependencyGraphNode[];
-  edges: DependencyEdge[];
-}
-
-export interface ClosureNode {
-  id: string;
-  name: string;
-  path: string;
-  nar_size: number | null;
-}
-
-export interface ClosureEdge {
-  source: string;
-  target: string;
-}
-
-export interface ClosureGraph {
-  roots: string[];
-  total_size_bytes: number | null;
-  node_count: number;
-  edge_count: number;
-  truncated: boolean;
-  nodes: ClosureNode[];
-  edges: ClosureEdge[];
-}
-
-export interface BuildItem {
-  id: string;
-  name: string;          // derivation path
-  status: string;        // BuildStatus as string
-  has_artefacts: boolean;
-  updated_at: string;
-  build_time_ms: number | null;
-  build_started_at: string | null;
-  dispatched_job: string | null;  // Job Board entry of the latest attempt, null until assigned to a worker
-  depth: number;         // dependency layer, 0 = nothing in the list depends on it
-  prioritized: boolean;
-  ifd: boolean;
-}
-
-export interface BuildWithOutputs {
-  id: string;
-  evaluation: string;
-  status: string;
-  derivation_path: string;
-  architecture: string;
-  worker: string | null;
-  dispatched_job: string | null;
-  output: Record<string, string>;
-  prioritized: boolean;
-  ifd: boolean;
-  created_at: string;
-  updated_at: string;
-  progress: BuildProgress | null;
-}
-
-export interface PaginatedBuilds {
-  builds: BuildItem[];
-  total: number;
-  /** Builds in Building/Queued/Failed/Aborted/DependencyFailed state - all must be in memory for correct log streaming. */
-  active_count: number;
-}
-
-export interface BuildProduct {
-  /** Hydra product type - first token of the `hydra-build-products` line, e.g. `file`, `doc`, `nix-build`, `report`. */
-  file_type: string;
-  /** Hydra product subtype - second token, e.g. `html`, `readme`, `binary-dist`, `out`. Empty when absent. */
-  subtype: string;
-  name: string;
-  path: string;
-  size?: number;
-}
+import {
+  BuildProduct,
+  EvaluationResponse,
+  EvaluationFailureSummary,
+  EvaluationMessageResponse,
+  PaginatedBuilds,
+  BuildWithOutputs,
+  BuildGraph,
+  ClosureGraph,
+} from '@core/models';
 
 /** True for products that should open inline in a browser tab rather than triggering a download. */
 export function isHtmlArtefact(p: BuildProduct): boolean {
   return p.subtype === 'html' || p.file_type === 'html';
 }
 
-export interface FailedBuildSummary {
-  build_id: string;
-  name: string;
-  derivation_path: string;
-  architecture: string;
-  status: BuildStatus;
-  attributes: string[];
-  blocked: string[];
-  blocked_total: number;
-  newly_failing: boolean;
-}
-
-export interface FailedAttributeReport {
-  attr: string;
-  message: string;
-  newly_failing: boolean;
-}
-
-export interface EvaluationFailureSummary {
-  compared_with: { id: string; commit: string } | null;
-  packages: { total: number; built: number; failed: number; blocked: number; unfinished: number };
-  failures: FailedBuildSummary[];
-  failures_total: number;
-  failed_attributes: FailedAttributeReport[];
-  fixed: string[];
-  fixed_total: number;
-}
-
 @Injectable({ providedIn: 'root' })
 export class EvaluationsService {
   private api = inject(ApiService);
 
-  getEvaluation(id: string): Observable<Evaluation> {
-    return this.api.get<Evaluation>(`evals/${id}`);
+  getEvaluation(id: string): Observable<EvaluationResponse> {
+    return this.api.get<EvaluationResponse>(`evals/${id}`);
   }
 
   getEvaluationSummary(id: string): Observable<EvaluationFailureSummary> {
     return this.api.get<EvaluationFailureSummary>(`evals/${id}/summary`);
   }
 
-  getEvaluationMessages(evalId: string): Observable<EvaluationMessage[]> {
-    return this.api.get<EvaluationMessage[]>(`evals/${evalId}/messages`);
+  getEvaluationMessages(evalId: string): Observable<EvaluationMessageResponse[]> {
+    return this.api.get<EvaluationMessageResponse[]>(`evals/${evalId}/messages`);
   }
 
   abortEvaluation(id: string): Observable<string> {

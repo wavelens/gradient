@@ -4,28 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-/** One chunk's metadata from the `/log/chunks` index. */
-export interface LogChunkMeta {
-  index: number;
-  line_start: number;
-  line_count: number;
-  byte_start: number;
-  byte_len: number;
-}
-
-export interface LogChunkIndex {
-  total_chunks: number;
-  total_lines: number;
-  total_bytes: number;
-  chunks: LogChunkMeta[];
-}
-
-export interface LogSearchHit {
-  line_number: number;
-  chunk_index: number;
-  byte_offset: number;
-  preview: string;
-}
+import type { LogChunkMeta, LogSearchHit } from '@core/models';
 
 /** Parse a `#L1234` (or `L1234` / `1234`) router fragment into a 1-based line. */
 export function parseLineFragment(fragment: string | null | undefined): number | null {

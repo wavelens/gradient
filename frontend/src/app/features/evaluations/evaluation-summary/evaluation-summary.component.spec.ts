@@ -7,8 +7,12 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
-import type { Evaluation } from '@core/models';
-import { EvaluationFailureSummary, EvaluationsService, FailedBuildSummary } from '@core/services/evaluations.service';
+import type {
+  EvaluationResponse,
+  FailedBuildSummary,
+  EvaluationFailureSummary,
+} from '@core/models';
+import { EvaluationsService } from '@core/services/evaluations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { EvaluationSummaryComponent } from './evaluation-summary.component';
@@ -24,7 +28,7 @@ const EVALUATION = {
   started_at: '2026-10-10T06:59:01',
   finished_at: '2026-10-10T07:04:00',
   updated_at: '2026-10-10T07:04:00',
-} as Evaluation;
+} as EvaluationResponse;
 
 const failure = (over: Partial<FailedBuildSummary>): FailedBuildSummary => ({
   build_id: 'b1',

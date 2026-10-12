@@ -11,9 +11,9 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
 import { InvitesComponent } from './invites.component';
 import { UserService } from '@core/services/user.service';
-import { Invite } from '@core/models';
+import { InviteItem } from '@core/models';
 
-const projectInvite: Invite = {
+const projectInvite: InviteItem = {
   kind: 'project',
   token: 'tok-project',
   scope: 'wavelens',
@@ -24,7 +24,7 @@ const projectInvite: Invite = {
   expires_at: '2026-09-12T12:00:00',
 };
 
-const teamInvite: Invite = {
+const teamInvite: InviteItem = {
   ...projectInvite,
   kind: 'team',
   token: 'tok-team',
@@ -33,7 +33,7 @@ const teamInvite: Invite = {
   role: 'Member',
 };
 
-function setup(invites: Invite[], queryToken: string | null = null) {
+function setup(invites: InviteItem[], queryToken: string | null = null) {
   const accept = vi.fn().mockReturnValue(of('Invitation accepted'));
   const decline = vi.fn().mockReturnValue(of('Invitation declined'));
 

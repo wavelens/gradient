@@ -16,11 +16,11 @@ import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
-import { Worker } from '@core/models/worker.model';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { signal } from '@angular/core';
 import { MenuItem } from '@gradient/ui/ui';
+import { ProjectWorkerEntry } from '@core/models';
 
 type MockedProjects = {
   getProject: ReturnType<typeof vi.fn>;
@@ -31,10 +31,10 @@ function activatedRouteStub() {
   return { snapshot: { paramMap: convertToParamMap({ project: 'demo' }) } } as Partial<ActivatedRoute>;
 }
 
-const workerUnmanaged: Worker = {
+const workerUnmanaged: ProjectWorkerEntry = {
   worker_id: 'w1',
   display_name: 'Builder',
-  managed: false,
+  registered_at: '2026-01-01T00:00:00',
   active: true,
   gradient_ci: false,
   connected: false,
@@ -43,22 +43,10 @@ const workerUnmanaged: Worker = {
   enable_build: true,
 };
 
-const workerManaged: Worker = {
-  worker_id: 'w2',
-  display_name: 'Nix-managed',
-  managed: true,
-  active: true,
-  gradient_ci: false,
-  connected: false,
-  enable_fetch: true,
-  enable_eval: true,
-  enable_build: true,
-};
-
-const workerOfTeam: Worker = {
+const workerOfTeam: ProjectWorkerEntry = {
   worker_id: 'w3',
   display_name: 'Team worker',
-  managed: true,
+  registered_at: '2026-01-01T00:00:00',
   active: true,
   team: 'platform',
   gradient_ci: false,
@@ -70,7 +58,7 @@ const workerOfTeam: Worker = {
 
 function setup(opts: {
   access: AccessState;
-  workers: Worker[];
+  workers: ProjectWorkerEntry[];
   caches: { id: string; name: string }[];
   testWorker?: ReturnType<typeof vi.fn>;
   gradientCi?: boolean;
@@ -126,7 +114,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-function menuOf(fixture: ComponentFixture<WorkersComponent>, worker: Worker): MenuItem[] {
+function menuOf(fixture: ComponentFixture<WorkersComponent>, worker: ProjectWorkerEntry): MenuItem[] {
   return fixture.componentInstance.workerMenus().get(worker.worker_id) ?? [];
 }
 
@@ -174,17 +162,6 @@ describe('WorkersComponent - access gating', () => {
     const btn = findByText(fixture.nativeElement, 'register worker') as HTMLButtonElement | null;
     expect(btn).not.toBeNull();
     expect(btn!.disabled).toBe(true);
-  });
-
-  it('disables a managed worker row even in an unmanaged, writable project', async () => {
-    const fixture = setup({
-      access: { managed: false, canEdit: true, canTrigger: true },
-      workers: [workerUnmanaged, workerManaged],
-      caches: [{ id: 'c', name: 'c' }],
-    });
-    await settled(fixture);
-    expect(itemOf(menuOf(fixture, workerUnmanaged), 'Edit')?.disabled).toBe(false);
-    expect(itemOf(menuOf(fixture, workerManaged), 'Edit')?.disabled).toBe(true);
   });
 
   it('keeps Edit, Fire Test and Delete in the row menu, each running its action', async () => {
@@ -239,14 +216,14 @@ describe('WorkersComponent - team workers', () => {
     expect(itemOf(menuOf(fixture, workerOfTeam), 'Manage on team')).toBeUndefined();
   });
 
-  it('keeps Deactivate usable on a managed worker in a managed project, since state restores it on restart', async () => {
+  it('keeps Deactivate usable on a worker in a managed project, since state restores it on restart', async () => {
     const fixture = setup({
       access: { managed: true, canEdit: true, canTrigger: true },
-      workers: [workerManaged],
+      workers: [workerUnmanaged],
       caches: [{ id: 'c', name: 'c' }],
     });
     await settled(fixture);
-    const menu = menuOf(fixture, workerManaged);
+    const menu = menuOf(fixture, workerUnmanaged);
     expect(itemOf(menu, 'Deactivate')?.disabled).toBe(false);
     expect(itemOf(menu, 'Edit')?.disabled).toBe(true);
   });
@@ -278,7 +255,7 @@ describe('WorkersComponent - system features', () => {
     const live = {
       capabilities: { fetch: true, eval: true, build: true, federate: false },
       architectures: ['x86_64-linux'], system_features: ['kvm', 'nixos-test'], max_concurrent_builds: 1, assigned_job_count: 0, draining: false,
-    } as unknown as Worker['live'];
+    } as unknown as ProjectWorkerEntry['live'];
     const fixture = setup({
       access: { managed: false, canEdit: true, canTrigger: true },
       workers: [{ ...workerUnmanaged, live }],
@@ -299,7 +276,7 @@ describe('WorkersComponent - connection badge', () => {
   const live = {
     capabilities: { fetch: true, eval: true, build: true, federate: false },
     architectures: [], system_features: [], max_concurrent_builds: 1, assigned_job_count: 0, draining: false,
-  } as unknown as Worker['live'];
+  } as unknown as ProjectWorkerEntry['live'];
   const badges = (fixture: ComponentFixture<WorkersComponent>) =>
     Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-badge')).map((b) => b.textContent?.trim());
 
@@ -335,10 +312,10 @@ function entry(fixture: ComponentFixture<WorkersComponent>): HTMLElement | null 
   return (fixture.nativeElement as HTMLElement).querySelector('[data-testid="gradient-ci-entry"]');
 }
 
-const gciRegistration: Worker = {
+const gciRegistration: ProjectWorkerEntry = {
   worker_id: 'g1',
   display_name: 'Gradient.CI Servers',
-  managed: false,
+  registered_at: '2026-01-01T00:00:00',
   active: true,
   gradient_ci: true,
   connected: false,
@@ -353,7 +330,7 @@ const gciRegistration: Worker = {
   enable_build: true,
 };
 
-const gciTeam: Worker = { ...gciRegistration, worker_id: 'g2', team: 'platform', last_error: undefined };
+const gciTeam: ProjectWorkerEntry = { ...gciRegistration, worker_id: 'g2', team: 'platform', last_error: undefined };
 const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
 const caches = [{ id: 'c', name: 'c' }];
 
@@ -443,7 +420,7 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
   });
 
   it('shows the last failure under an offline registered worker', async () => {
-    const offline: Worker = {
+    const offline: ProjectWorkerEntry = {
       ...workerUnmanaged,
       last_error: {
         reason: 'dial timed out after 10 s',

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { EvaluationFailureSummary, FailedBuildSummary } from '@core/services/evaluations.service';
 import { blockedLine, failureKind, failureTitle, firstLine, headline } from './summary-text';
+import { EvaluationFailureSummary, FailedBuildSummary } from '@core/models';
 
 const summary = (packages: Partial<EvaluationFailureSummary['packages']>, evalErrors = 0): EvaluationFailureSummary => ({
   compared_with: null,

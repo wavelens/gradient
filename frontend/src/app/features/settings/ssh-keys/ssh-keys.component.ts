@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
 import { ConfigService } from '@core/services/config.service';
-import { SshKey } from '@core/models';
+import { SshKeyInfo } from '@core/models';
 import {
   ButtonComponent,
   CopyFieldComponent,
@@ -53,7 +53,7 @@ export class SshKeysComponent implements OnInit {
   saving = signal(false);
   deletingId = signal<string | null>(null);
   errorMessage = signal<string | null>(null);
-  keys = signal<SshKey[]>([]);
+  keys = signal<SshKeyInfo[]>([]);
   showDialog = signal(false);
   formName = '';
   formPublicKey = '';
@@ -100,7 +100,7 @@ export class SshKeysComponent implements OnInit {
     });
   }
 
-  deleteKey(key: SshKey): void {
+  deleteKey(key: SshKeyInfo): void {
     this.deletingId.set(key.id);
     this.userService.deleteSshKey(key.id).subscribe({
       next: () => {

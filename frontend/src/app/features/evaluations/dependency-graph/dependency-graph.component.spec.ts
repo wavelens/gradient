@@ -7,9 +7,10 @@
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { Subject, of } from 'rxjs';
-import { BuildGraph, EvaluationsService } from '@core/services/evaluations.service';
+import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { DependencyGraphComponent } from './dependency-graph.component';
+import { BuildGraph } from '@core/models';
 
 const node = (id: string, status: string | null) => ({
   id, build: id, name: id, path: `/nix/store/hash-${id}.drv`, status,

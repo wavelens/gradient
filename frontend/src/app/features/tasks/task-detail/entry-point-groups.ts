@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { EntryPointSummary, FailedAttributeSummary } from '@core/models/task.model';
+import { EntryPointSummary, FailedAttributeSummary } from '@core/models';
 
 type Row =
   | { kind: 'build'; key: string; entry: EntryPointSummary }

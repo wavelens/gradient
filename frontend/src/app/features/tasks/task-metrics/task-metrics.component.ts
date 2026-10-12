@@ -9,9 +9,10 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { EmptyStateComponent, LoadingSpinnerComponent, PageLayoutComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
-import { TasksService, TaskMetricPoint, TaskMetricsResponse } from '@core/services/tasks.service';
+import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';
+import { TaskMetricPoint, TaskMetricsResponse } from '@core/models';
 
 const CHART_COLORS = {
   buildTime: '#17a2b8',
@@ -64,11 +65,11 @@ export class TaskMetricsComponent implements OnInit {
     { name: 'Eval time', data: this.metrics().map((p) => p.eval_time_ms) },
   ]);
   outputSizeSeries = computed(() => [
-    { name: 'Output size', data: this.metrics().map((p) => p.output_size_bytes) },
+    { name: 'Output size', data: this.metrics().map((p) => p.output_size_bytes ?? null) },
   ]);
   closureSizeSeries = computed(() => [
-    { name: 'Build closure', data: this.metrics().map((p) => p.closure_size_bytes) },
-    { name: 'Runtime closure', data: this.metrics().map((p) => p.runtime_closure_size_bytes) },
+    { name: 'Build closure', data: this.metrics().map((p) => p.closure_size_bytes ?? null) },
+    { name: 'Runtime closure', data: this.metrics().map((p) => p.runtime_closure_size_bytes ?? null) },
   ]);
   depsSeries = computed(() => [
     { name: 'Dependencies', data: this.metrics().map((p) => p.dependencies_count) },

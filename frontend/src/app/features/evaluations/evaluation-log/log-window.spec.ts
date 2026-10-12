@@ -5,13 +5,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
-  parseLineFragment,
-  chunkIndexForLine,
-  windowAround,
-  searchLines,
-  LogChunkMeta,
-} from './log-window';
+import { parseLineFragment, chunkIndexForLine, windowAround, searchLines } from './log-window';
+import { LogChunkMeta } from '@core/models';
 
 const chunks: LogChunkMeta[] = [
   { index: 0, line_start: 0, line_count: 10, byte_start: 0, byte_len: 100 },

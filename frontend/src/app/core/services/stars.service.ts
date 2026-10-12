@@ -9,7 +9,7 @@ import { Observable, of } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
 import { ApiService } from './api.service';
 import { AuthService } from './auth.service';
-import { StarTarget, UserStars } from '@core/models';
+import { StarTarget, StarredNames } from '@core/models';
 
 export function starPath(t: StarTarget): string {
   switch (t.kind) {
@@ -22,7 +22,7 @@ export function starPath(t: StarTarget): string {
   }
 }
 
-export function isStarred(stars: UserStars, t: StarTarget): boolean {
+export function isStarred(stars: StarredNames, t: StarTarget): boolean {
   switch (t.kind) {
     case 'project':
       return stars.projects.includes(t.project);
@@ -38,8 +38,8 @@ export class StarsService {
   private api = inject(ApiService);
   private auth = inject(AuthService);
 
-  list(): Observable<UserStars> {
-    return this.api.get<UserStars>('user/stars');
+  list(): Observable<StarredNames> {
+    return this.api.get<StarredNames>('user/stars');
   }
 
   /// Guests have no stars, and a failed lookup renders as unstarred.
