@@ -9,6 +9,7 @@ pub mod patch;
 
 pub mod access;
 pub mod api_spec;
+pub mod api_typescript;
 pub mod audit;
 pub mod authorization;
 pub(crate) mod client_ip;

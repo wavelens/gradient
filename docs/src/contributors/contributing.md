@@ -73,10 +73,11 @@ CI (`.github/workflows/rust.yml`) will check fmt, the `#[allow]` grep check and 
 | New table | A migration in `backend/gradient-migration/src/`, an entity in `backend/gradient-entity/src/`, see [Migrations](migrations.md) |
 | Configuration option | A field in `backend/gradient-types/src/cli/`, or in `backend/gradient-worker/src/config/options.rs` for the worker, then the generated files below |
 
-The handler annotations generate `docs/gradient-api.yaml`. Regenerate the file with this command.
+The handler annotations generate `docs/gradient-api.yaml` and the frontend types. Regenerate both files with these commands.
 
 ```sh
 cargo run --manifest-path backend/Cargo.toml --features api-spec --bin gradient-api-spec > docs/gradient-api.yaml
+cargo run --manifest-path backend/Cargo.toml --features api-spec --bin gradient-api-spec -- typescript > frontend/src/app/core/models/api.generated.ts
 ```
 
 Flag, environment variable, NixOS option and the row in the [Configuration](../reference/configuration.md) reference derive from the field and its doc comment. Three commands refresh the generated files.

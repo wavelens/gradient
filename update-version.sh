@@ -97,8 +97,10 @@ echo "updated the pnpm dependency hash in nix/packages/gradient-frontend.nix"
 # ── OpenAPI spec ─────────────────────────────────────────────────────────────
 
 OPENAPI_SPEC="$REPO_ROOT/docs/gradient-api.yaml"
+API_TYPES="$REPO_ROOT/frontend/src/app/core/models/api.generated.ts"
 cargo run --manifest-path "$REPO_ROOT/backend/Cargo.toml" --features api-spec --bin gradient-api-spec > "$OPENAPI_SPEC"
-echo "updated docs/gradient-api.yaml"
+cargo run --manifest-path "$REPO_ROOT/backend/Cargo.toml" --features api-spec --bin gradient-api-spec -- typescript > "$API_TYPES"
+echo "updated docs/gradient-api.yaml and the frontend API types"
 
 echo ""
 echo "Version updated to $VERSION"
