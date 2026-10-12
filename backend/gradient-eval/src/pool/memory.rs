@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn max_total_kills_the_largest_while_the_sum_is_over_the_cap() {
-        let guard = MemoryGuard::MaxTotal(1024 * MIB);
+        let guard = MemoryGuard::MaxTotal(768 * MIB);
         assert_eq!(
             victim(
                 &guard,
@@ -212,7 +212,11 @@ mod tests {
             &candidates,
             2 * GIB
         ));
-        assert!(pressured(&MemoryGuard::MaxTotal(GIB), &candidates, 8 * GIB));
+        assert!(pressured(
+            &MemoryGuard::MaxTotal(768 * MIB),
+            &candidates,
+            8 * GIB
+        ));
         assert!(!pressured(
             &MemoryGuard::MaxTotal(2 * GIB),
             &candidates,

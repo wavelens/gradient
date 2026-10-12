@@ -58,8 +58,52 @@ pub(super) fn discovery_calls(
         .collect()
 }
 
+enum Segment<'a> {
+    Any,
+    Deep,
+    Glob(&'a str),
+    Lit(&'a str),
+}
+
+fn classify(pattern: &str) -> Segment<'_> {
+    match pattern {
+        "*" => Segment::Any,
+        "**" => Segment::Deep,
+        glob if glob.contains('*') => Segment::Glob(glob),
+        literal => Segment::Lit(literal),
+    }
+}
+
 fn segment_matches(pattern: &str, attr: &str) -> bool {
-    pattern == "*" || pattern == attr
+    match classify(pattern) {
+        Segment::Any | Segment::Deep => true,
+        Segment::Glob(glob) => glob_matches(glob, attr),
+        Segment::Lit(literal) => literal == attr,
+    }
+}
+
+fn glob_matches(glob: &str, name: &str) -> bool {
+    let (pattern, subject) = (glob.as_bytes(), name.as_bytes());
+    let (mut p, mut s) = (0, 0);
+    let mut backtrack: Option<(usize, usize)> = None;
+
+    while s < subject.len() {
+        if p < pattern.len() && pattern[p] == subject[s] {
+            p += 1;
+            s += 1;
+        } else if p < pattern.len() && pattern[p] == b'*' {
+            backtrack = Some((p, s));
+            p += 1;
+        } else if let Some((star, at)) = backtrack {
+            p = star + 1;
+            s = at + 1;
+            backtrack = Some((star, at + 1));
+        } else {
+            return false;
+        }
+    }
+
+    pattern[p..].iter().all(|b| *b == b'*')
 }
 
 pub(super) fn entry_point_of(attr: &str, patterns: &[String]) -> String {
