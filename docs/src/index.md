@@ -46,20 +46,22 @@
 
 | | [Hydra](https://github.com/NixOS/hydra) | GitHub Actions + [Cachix](https://www.cachix.org) | Gradient |
 |---|---|---|---|
-| Build start | After the end of the whole evaluation | After the job has evaluated the flake | While the evaluation is still running |
-| Evaluation | On the server, limited by one machine | Inside each job, limited by the runner | On workers, scaling with them |
+| Build start | After the whole evaluation | After the whole evaluation | While the evaluation is still running |
+| Evaluation | On the server, limited by one machine | Inside each job, limited by the runner | On workers, scales with them |
 | Evaluation speed | Fast | Slow | Fastest available |
-| Import from derivation (IFD) | Not supported | Built by the runner inside the job | Built on the workers as shared builds, cached and logged like any build |
-| Nix store | Kept on the server and builders | Empty on every job. Every job will download its closure again | Kept on the workers between builds |
-| Shared work | One build per derivation | Parallel jobs can build the same derivation twice | Every derivation built once, shared across projects |
-| Build outputs | Pass through the server | Pushed from the runner to Cachix | Large outputs go from worker straight to S3 |
-| Server host | Writable Nix store required | Hosted by GitHub | No Nix store required, small enough for a micro-VM |
-| Heavy builds | Static machine list with speed factors | Fixed runner sizes | Scoring system placing them by predicted memory, learned from past builds |
-| Remote building over SSH | Only outbound, to its own build machines | Not available | [`ssh-ng://` store](guides/build-over-ssh.md) for `nixos-rebuild --build-host` and `nix copy` straight to the CI workers |
+| Building Order | Round Robin | single Worker | Maximum CPU Load, Minimal Network Traffic, Memory / OOM aware |
+| Import from derivation (IFD) | Not activly supported | Built by the runner inside the job | Built on the workers as shared builds, cached and logged like any build |
+| [Wildcard Support](https://wavelens.github.io/gradient/reference/wildcards/) | No | No | Yes |
+| Nix store | Kept on the server and builders | Empty on every job; each job downloads its closure again | Kept on the workers between builds |
+| Build outputs | Everything through the server | Pushed from the runner to Cachix | Large outputs go from worker straight to S3 |
+| Server host | Needs a writable Nix store | Hosted by GitHub | Needs no Nix store, Micro-VM ready |
+| Heavy builds | Static machine list with speed factors | Fixed runner sizes | Scoring system places them by predicted memory, learned from past builds |
+| Remote building over SSH | Not available | Not available | [`ssh-ng://` store](https://wavelens.github.io/gradient/guides/build-over-ssh/) for `nixos-rebuild --build-host` and `nix copy` straight to the CI workers |
 | Private caches | One store for the whole instance | Free plan: 5 GB, filled quickly by full closures | Per-project caches with access control, on own S3 or disk storage |
-| Sign-in | Local accounts, LDAP, OIDC with roles for the whole instance | GitHub accounts | [OIDC](guides/sso.md) with provider groups mapped to roles per project, SCIM provisioning |
+| Sign-in | Local accounts, LDAP, OIDC with roles for the whole instance | GitHub accounts | [OIDC](https://wavelens.github.io/gradient/guides/sso/) with provider groups mapped to roles per project, SCIM provisioning |
 | Integrations | Minimal JSON API | GitHub only | REST API, webhooks, Git Integrations and MCP server |
 | Web UI | Server-rendered pages | GitHub job logs | Responsive UI with live log streaming |
+| Runners | Not available | builtin | Soon; On Roadmap |
 | Stars | ![](https://img.shields.io/github/stars/NixOS/hydra?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=high) | - | ![](https://img.shields.io/github/stars/wavelens/gradient?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=low) |
 
 ## Public Binary Cache
