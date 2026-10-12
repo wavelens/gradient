@@ -407,7 +407,12 @@ fn parse_warnings(captured: &str) -> Vec<String> {
             .any(|p| t.starts_with(p))
     }
 
-    let lines: Vec<&str> = captured.lines().collect();
+    let lines: Vec<&str> = captured
+        .lines()
+        .filter(|line| !is_ignored_line(line))
+        .map(str::trim_end)
+        .collect();
+
     let mut warnings = Vec::new();
     let mut i = 0;
     while i < lines.len() {
@@ -416,16 +421,23 @@ fn parse_warnings(captured: &str) -> Vec<String> {
             continue;
         }
 
-        let mut block = vec![lines[i].trim_end()];
+        let start = i;
         i += 1;
         while i < lines.len() && !is_boundary(lines[i]) {
-            block.push(lines[i].trim_end());
             i += 1;
         }
 
-        warnings.push(block.join("\n").trim().to_string());
+        let block = lines[start..i].join("\n").trim().to_string();
+        if !warnings.contains(&block) {
+            warnings.push(block);
+        }
     }
     warnings
+}
+
+fn is_ignored_line(line: &str) -> bool {
+    let t = line.to_ascii_lowercase();
+    t.contains("sqlite database") && t.contains("is busy")
 }
 
 #[cfg(test)]
@@ -519,7 +531,7 @@ mod tests {
     fn parse_warnings_keeps_multiline_warning() {
         let captured = "warning: the following insecure packages:\n  - foo-1.2.3\nKnown issues:\n  - CVE-1234\ntrace: unrelated\n";
         let w = parse_warnings(captured);
-        assert_eq!(w.len(), 1, "expected one grouped warning, got {w:?}");
+        assert_eq!(w.len(), 1, "a single grouped warning: {w:?}");
         assert!(w[0].contains("insecure packages"));
         assert!(w[0].contains("foo-1.2.3"));
         assert!(w[0].contains("CVE-1234"));
@@ -528,15 +540,28 @@ mod tests {
 
     #[test]
     fn parse_warnings_splits_distinct_warnings() {
-        let captured =
-            "warning: first\nerror (ignored): SQLite database is busy\nwarning: second\n";
+        let captured = "warning: first\nerror (ignored): ignored mid-block\nwarning: second\n";
         assert_eq!(
             parse_warnings(captured),
             vec![
-                "warning: first\nerror (ignored): SQLite database is busy",
+                "warning: first\nerror (ignored): ignored mid-block",
                 "warning: second"
             ]
         );
+    }
+
+    #[test]
+    fn a_busy_eval_cache_line_is_dropped() {
+        let captured = "warning: first\n\
+             error (ignored): SQLite database \"/root/eval-cache/a.sqlite\" is busy\n\
+             error (ignored): SQLite database \"/root/eval-cache/b.sqlite\" is busy\n";
+        assert_eq!(parse_warnings(captured), vec!["warning: first"]);
+    }
+
+    #[test]
+    fn a_repeated_warning_collapses() {
+        let captured = "warning: same\nwarning: same\nwarning: same\ntrace: nix callsite\n";
+        assert_eq!(parse_warnings(captured), vec!["warning: same"]);
     }
 
     #[cfg(unix)]
@@ -544,10 +569,10 @@ mod tests {
     fn capture_keeps_draining_past_the_pipe_buffer() {
         use std::io::Write;
 
-        let line = format!("warning: {}\n", "x".repeat(1023));
         let (result, warnings) = capture_warnings_during(|| {
             let mut stderr = std::io::stderr().lock();
-            for _ in 0..256 {
+            for i in 0..256 {
+                let line = format!("warning: {i} {}\n", "x".repeat(1015));
                 stderr.write_all(line.as_bytes()).expect("stderr write");
             }
             7
