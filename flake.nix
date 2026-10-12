@@ -44,6 +44,8 @@
       api-spec = pkgs.runCommand "gradient-api-spec-check" { } ''
         ${self.packages.${system}.gradient.gate}/bin/gradient-api-spec > spec.yaml
         diff -u ${./docs/gradient-api.yaml} spec.yaml
+        ${self.packages.${system}.gradient.gate}/bin/gradient-api-spec typescript > api.generated.ts
+        diff -u ${./frontend/src/app/core/models/api.generated.ts} api.generated.ts
         touch $out
       '';
       cli-clippy = self.packages.${system}.gradient-cli-full.clippy;
