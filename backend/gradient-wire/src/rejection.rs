@@ -42,6 +42,14 @@ pub enum Rejection {
     AlreadyConnected,
     #[error("scheduler unavailable")]
     SchedulerUnavailable,
+    #[error("the link is disabled")]
+    LinkDisabled,
+    #[error("the upstream is not allowed to run")]
+    UpstreamNotAllowed,
+    #[error("the upstream is unreadable right now")]
+    UpstreamUnreadable,
+    #[error("the allowance is not checked yet")]
+    AllowanceUnknown,
 }
 
 impl Rejection {
@@ -58,10 +66,12 @@ impl Rejection {
             | Self::NoProjectAuthorization
             | Self::PushOnCacheSession
             | Self::NotAllowedOnCacheSession
-            | Self::NoStoredToken => 403,
+            | Self::NoStoredToken
+            | Self::LinkDisabled
+            | Self::UpstreamNotAllowed => 403,
             Self::NoCacheSubscribed => 495,
             Self::AlreadyConnected => 496,
-            Self::SchedulerUnavailable => 503,
+            Self::SchedulerUnavailable | Self::UpstreamUnreadable | Self::AllowanceUnknown => 503,
         }
     }
 }
