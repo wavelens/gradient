@@ -25,58 +25,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nix_store_path_prepends_prefix_to_bare_hash_name() {
-        assert_eq!(nix_store_path("abc123-foo"), "/nix/store/abc123-foo");
+    fn nix_store_path_and_strip_round_trip() {
+        for (input, expected) in [
+            ("abc123-foo", "/nix/store/abc123-foo"),
+            ("/nix/store/abc123-foo", "/nix/store/abc123-foo"),
+            ("/tmp/foo", "/tmp/foo"),
+            ("", "/nix/store/"),
+        ] {
+            assert_eq!(nix_store_path(input), expected, "{input}");
+        }
+        for (input, expected) in [
+            ("/nix/store/abc123-foo", "abc123-foo"),
+            ("abc123-foo", "abc123-foo"),
+            ("/tmp/foo", "/tmp/foo"),
+            ("", ""),
+        ] {
+            assert_eq!(strip_nix_store_prefix(input), expected, "{input}");
+        }
     }
 
     #[test]
-    fn nix_store_path_passes_through_already_absolute_path() {
-        assert_eq!(
-            nix_store_path("/nix/store/abc123-foo"),
-            "/nix/store/abc123-foo"
-        );
-    }
-
-    #[test]
-    fn nix_store_path_passes_through_other_absolute_paths() {
-        // A path starting with `/` is left alone without checking for `/nix/store/`.
-        assert_eq!(nix_store_path("/tmp/foo"), "/tmp/foo");
-    }
-
-    #[test]
-    fn nix_store_path_empty_input_gets_prefix() {
-        assert_eq!(nix_store_path(""), "/nix/store/");
-    }
-
-    #[test]
-    fn strip_nix_store_prefix_removes_prefix() {
-        assert_eq!(
-            strip_nix_store_prefix("/nix/store/abc123-foo"),
-            "abc123-foo"
-        );
-    }
-
-    #[test]
-    fn strip_nix_store_prefix_passthrough_when_missing() {
-        assert_eq!(strip_nix_store_prefix("abc123-foo"), "abc123-foo");
-        assert_eq!(strip_nix_store_prefix("/tmp/foo"), "/tmp/foo");
-    }
-
-    #[test]
-    fn strip_nix_store_prefix_empty_stays_empty() {
-        assert_eq!(strip_nix_store_prefix(""), "");
-    }
-
-    #[test]
-    fn strip_store_prefix_removes_prefix_without_allocating() {
+    fn strip_store_prefix_borrows_from_the_input() {
         let input = "/nix/store/abc123-foo";
         let out = strip_store_prefix(input);
         assert_eq!(out, "abc123-foo");
         assert!(std::ptr::eq(out.as_ptr(), input[11..].as_ptr()));
-    }
 
-    #[test]
-    fn strip_store_prefix_passthrough_when_missing() {
         let input = "abc123-foo";
         let out = strip_store_prefix(input);
         assert_eq!(out, "abc123-foo");

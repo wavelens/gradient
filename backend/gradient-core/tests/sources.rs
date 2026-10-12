@@ -18,84 +18,45 @@ fn h32() -> String {
 }
 
 #[test]
-fn hash_from_url_narinfo_32_hash_ok() {
-    let url = format!("{}.narinfo", h32());
-    assert_eq!(get_hash_from_url(url).unwrap(), h32());
-}
-
-#[test]
-fn hash_from_url_nar_52_hash_ok() {
-    let url = format!("{}.nar", H52);
-    assert_eq!(get_hash_from_url(url).unwrap(), H52);
-}
-
-#[test]
-fn hash_from_url_nar_with_compression_ok() {
-    let url = format!("{}.nar.zst", H52);
-    assert_eq!(get_hash_from_url(url).unwrap(), H52);
-}
-
-#[test]
-fn hash_from_url_narinfo_cannot_have_compression_suffix() {
-    // A narinfo name must have exactly 2 parts, and `.narinfo.zst` is carrying 3.
-    let url = format!("{}.narinfo.zst", h32());
-    assert!(get_hash_from_url(url).is_err());
-}
-
-#[test]
-fn hash_from_url_single_part_rejected() {
-    assert!(get_hash_from_url(h32()).is_err());
-}
-
-#[test]
-fn hash_from_url_four_parts_rejected() {
-    let url = format!("{}.nar.zst.extra", h32());
-    assert!(get_hash_from_url(url).is_err());
-}
-
-#[test]
-fn hash_from_url_wrong_hash_length_rejected() {
-    let url = format!("{}.narinfo", &H32[..31]);
-    assert!(get_hash_from_url(url).is_err());
-    let url = format!("{}.nar", "a".repeat(40));
-    assert!(get_hash_from_url(url).is_err());
-}
-
-#[test]
-fn hash_from_url_wrong_extension_rejected() {
-    let url = format!("{}.txt", h32());
-    assert!(get_hash_from_url(url).is_err());
-}
-
-#[test]
-fn hash_from_url_disallowed_base32_chars_rejected() {
-    for bad in ['e', 'o', 't', 'u'] {
-        let mut hash: String = "a".repeat(31);
-        hash.push(bad);
-        assert!(
-            get_hash_from_url(format!("{}.narinfo", hash)).is_err(),
-            "char {} should be rejected",
-            bad
-        );
+fn hash_from_url_reads_the_hash_from_narinfo_and_nar_names() {
+    for (url, expected) in [
+        (format!("{}.narinfo", h32()), h32()),
+        (format!("{}.nar", H52), H52.to_string()),
+        (format!("{}.nar.zst", H52), H52.to_string()),
+    ] {
+        assert_eq!(get_hash_from_url(url.clone()).unwrap(), expected, "{url}");
     }
 }
 
 #[test]
-fn hash_from_path_extracts_hash_and_package() {
+fn hash_from_url_rejects_malformed_names() {
+    let mut bad = vec![
+        format!("{}.narinfo.zst", h32()),
+        h32(),
+        format!("{}.nar.zst.extra", h32()),
+        format!("{}.narinfo", &H32[..31]),
+        format!("{}.nar", "a".repeat(40)),
+        format!("{}.txt", h32()),
+    ];
+    for ch in ['e', 'o', 't', 'u'] {
+        let mut hash = "a".repeat(31);
+        hash.push(ch);
+        bad.push(format!("{}.narinfo", hash));
+    }
+    for url in bad {
+        assert!(get_hash_from_url(url.clone()).is_err(), "{url}");
+    }
+}
+
+#[test]
+fn hash_from_path_extracts_hash_and_package_name() {
     let (hash, pkg) = get_hash_from_path("/nix/store/abc123-hello-1.0".to_string()).unwrap();
     assert_eq!(hash, "abc123");
     assert_eq!(pkg, "hello-1.0");
-}
 
-#[test]
-fn hash_from_path_package_with_no_dash_rejected() {
-    assert!(get_hash_from_path("/nix/store/abc123".to_string()).is_err());
-}
-
-#[test]
-fn hash_from_path_too_few_segments_rejected() {
-    assert!(get_hash_from_path("abc".to_string()).is_err());
-    assert!(get_hash_from_path("/nix/store".to_string()).is_err());
+    for bad in ["/nix/store/abc123", "abc", "/nix/store"] {
+        assert!(get_hash_from_path(bad.to_string()).is_err(), "{bad}");
+    }
 }
 
 #[test]

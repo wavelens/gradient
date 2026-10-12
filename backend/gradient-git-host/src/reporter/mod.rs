@@ -275,134 +275,88 @@ mod tests {
         );
     }
 
-    #[test]
-    fn reporter_for_task_unsafe_url_falls_back_to_noop() {
-        let r = reporter_for_task(
-            test_client(),
-            Some("gitea"),
-            Some("http://169.254.169.254/"),
-            Some("tok"),
-        );
-        assert!(is_noop(&r));
-    }
-
     fn is_noop(r: &Arc<dyn CiReporter>) -> bool {
         format!("{:?}", r).contains("NoopCiReporter")
     }
 
     #[test]
-    fn reporter_for_task_no_token_is_noop() {
-        let r = reporter_for_task(test_client(), Some("github"), Some("https://x"), None);
-        assert!(is_noop(&r));
-    }
-
-    #[test]
-    fn reporter_for_task_no_type_is_noop() {
-        let r = reporter_for_task(test_client(), None, None, Some("tok"));
-        assert!(is_noop(&r));
-    }
-
-    #[test]
-    fn reporter_for_task_unknown_type_is_noop() {
-        let r = reporter_for_task(test_client(), Some("bitbucket"), None, Some("tok"));
-        assert!(is_noop(&r));
-    }
-
-    #[test]
-    fn reporter_for_task_gitea_builds_gitea() {
-        let r = reporter_for_task(
+    fn reporter_for_task_picks_by_type_and_falls_back_to_noop() {
+        assert!(is_noop(&reporter_for_task(
             test_client(),
             Some("gitea"),
-            Some("https://gitea.example.com"),
-            Some("tok"),
-        );
-        assert!(format!("{:?}", r).contains("GiteaReporter"));
-    }
-
-    #[test]
-    fn reporter_for_task_gitlab_builds_gitlab() {
-        let r = reporter_for_task(
+            Some("http://169.254.169.254/"),
+            Some("tok")
+        )));
+        assert!(is_noop(&reporter_for_task(
             test_client(),
-            Some("gitlab"),
-            Some("https://gitlab.example.com"),
-            Some("tok"),
+            Some("github"),
+            Some("https://x"),
+            None
+        )));
+        assert!(is_noop(&reporter_for_task(
+            test_client(),
+            None,
+            None,
+            Some("tok")
+        )));
+        assert!(is_noop(&reporter_for_task(
+            test_client(),
+            Some("bitbucket"),
+            None,
+            Some("tok")
+        )));
+
+        let cases = [
+            ("gitea", Some("https://gitea.example.com"), "GiteaReporter"),
+            (
+                "gitlab",
+                Some("https://gitlab.example.com"),
+                "GitlabReporter",
+            ),
+            ("github", None, "GithubReporter"),
+        ];
+        for (kind, url, marker) in cases {
+            let r = reporter_for_task(test_client(), Some(kind), url, Some("tok"));
+            assert!(format!("{:?}", r).contains(marker), "{kind}");
+        }
+    }
+
+    #[test]
+    fn parse_owner_repo_reads_the_owner_and_repo_from_each_transport() {
+        for url in [
+            "https://github.com/acme/widgets.git",
+            "https://github.com/acme/widgets",
+            "http://github.com/acme/widgets.git",
+            "git://github.com/acme/widgets.git",
+            "git@github.com:acme/widgets.git",
+            "git+https://github.com/acme/widgets.git",
+            "git+ssh://git@github.com/acme/widgets.git",
+        ] {
+            assert_eq!(
+                parse_owner_repo(url),
+                Some(("acme".into(), "widgets".into())),
+                "{url}"
+            );
+        }
+        assert_eq!(
+            parse_owner_repo("ssh://forgejo@gitea.home.lan:2222/internal/infra-home"),
+            Some(("internal".into(), "infra-home".into()))
         );
-        assert!(format!("{:?}", r).contains("GitlabReporter"));
+        assert_eq!(
+            parse_owner_repo("git@gitea.example.com:group/sub/repo.git"),
+            Some(("group".into(), "sub/repo".into()))
+        );
     }
 
     #[test]
-    fn reporter_for_task_github_builds_github() {
-        let r = reporter_for_task(test_client(), Some("github"), None, Some("tok"));
-        assert!(format!("{:?}", r).contains("GithubReporter"));
-    }
-
-    #[test]
-    fn parse_owner_repo_https_with_git_suffix() {
-        let got = parse_owner_repo("https://github.com/acme/widgets.git");
-        assert_eq!(got, Some(("acme".into(), "widgets".into())));
-    }
-
-    #[test]
-    fn parse_owner_repo_https_without_git_suffix() {
-        let got = parse_owner_repo("https://github.com/acme/widgets");
-        assert_eq!(got, Some(("acme".into(), "widgets".into())));
-    }
-
-    #[test]
-    fn parse_owner_repo_http() {
-        let got = parse_owner_repo("http://github.com/acme/widgets.git");
-        assert_eq!(got, Some(("acme".into(), "widgets".into())));
-    }
-
-    #[test]
-    fn parse_owner_repo_git_protocol() {
-        let got = parse_owner_repo("git://github.com/acme/widgets.git");
-        assert_eq!(got, Some(("acme".into(), "widgets".into())));
-    }
-
-    #[test]
-    fn parse_owner_repo_ssh_scp_style() {
-        let got = parse_owner_repo("git@github.com:acme/widgets.git");
-        assert_eq!(got, Some(("acme".into(), "widgets".into())));
-    }
-
-    #[test]
-    fn parse_owner_repo_strips_git_plus_prefix() {
-        let got = parse_owner_repo("git+https://github.com/acme/widgets.git");
-        assert_eq!(got, Some(("acme".into(), "widgets".into())));
-    }
-
-    #[test]
-    fn parse_owner_repo_no_path_rejected() {
-        assert_eq!(parse_owner_repo("https://github.com"), None);
-    }
-
-    #[test]
-    fn parse_owner_repo_only_owner_rejected() {
-        assert_eq!(parse_owner_repo("https://github.com/acme"), None);
-    }
-
-    #[test]
-    fn parse_owner_repo_unknown_scheme_rejected() {
-        assert_eq!(parse_owner_repo("ftp-no-colon-owner-repo"), None);
-    }
-
-    #[test]
-    fn parse_owner_repo_ssh_url_with_user_and_port() {
-        let got = parse_owner_repo("ssh://forgejo@gitea.home.lan:2222/internal/infra-home");
-        assert_eq!(got, Some(("internal".into(), "infra-home".into())));
-    }
-
-    #[test]
-    fn parse_owner_repo_git_plus_ssh_url() {
-        let got = parse_owner_repo("git+ssh://git@github.com/acme/widgets.git");
-        assert_eq!(got, Some(("acme".into(), "widgets".into())));
-    }
-
-    #[test]
-    fn parse_owner_repo_ssh_with_subpath() {
-        let got = parse_owner_repo("git@gitea.example.com:group/sub/repo.git");
-        assert_eq!(got, Some(("group".into(), "sub/repo".into())));
+    fn parse_owner_repo_rejects_urls_without_a_repo_path() {
+        for url in [
+            "https://github.com",
+            "https://github.com/acme",
+            "ftp-no-colon-owner-repo",
+        ] {
+            assert_eq!(parse_owner_repo(url), None, "{url}");
+        }
     }
 
     #[derive(Debug, Default)]

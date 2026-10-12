@@ -280,134 +280,102 @@ mod tests {
     use super::*;
 
     #[test]
-    fn each_permission_has_unique_bit() {
+    fn permission_bits_are_unique_and_wire_names_round_trip() {
         let mut seen = 0_i64;
         for p in Permission::ALL.iter().copied() {
-            assert_eq!(p.bit() & seen, 0, "{:?} re-uses an earlier bit", p);
+            assert_eq!(p.bit() & seen, 0, "{p:?} re-uses an earlier bit");
             seen |= p.bit();
-        }
-    }
-
-    #[test]
-    fn wire_names_round_trip() {
-        for p in Permission::ALL.iter().copied() {
             assert_eq!(Permission::from_wire_name(p.as_wire_name()), Some(p));
         }
         assert_eq!(Permission::from_wire_name("nope"), None);
-    }
 
-    #[test]
-    fn admin_mask_grants_everything() {
-        let mask = admin_mask();
-        for p in Permission::ALL.iter().copied() {
-            assert!(mask_grants(mask, p), "admin missing {:?}", p);
-        }
-    }
-
-    #[test]
-    fn write_mask_excludes_admin_only_perms() {
-        let mask = write_mask();
-        assert!(!mask_grants(mask, Permission::ManageMembers));
-        assert!(!mask_grants(mask, Permission::ManageRoles));
-        assert!(!mask_grants(mask, Permission::DeleteProject));
-        assert!(!mask_grants(mask, Permission::ManageProjectSettings));
-        assert!(mask_grants(mask, Permission::EditTask));
-        assert!(mask_grants(mask, Permission::ManageActions));
-    }
-
-    #[test]
-    fn view_mask_cannot_edit_tasks_or_actions() {
-        let mask = view_mask();
-        assert!(!mask_grants(mask, Permission::EditTask));
-        assert!(!mask_grants(mask, Permission::ManageActions));
-        assert!(!mask_grants(mask, Permission::ManageMembers));
-        assert!(!mask_grants(mask, Permission::ManageRoles));
-        assert!(mask_grants(mask, Permission::ViewProject));
-    }
-
-    #[test]
-    fn empty_mask_grants_nothing() {
-        for p in Permission::ALL.iter().copied() {
-            assert!(!mask_grants(0, p));
-        }
-    }
-
-    #[test]
-    fn mask_round_trips_through_vec() {
-        let mask = write_mask();
-        let perms = mask_to_vec(mask);
-        assert_eq!(mask_from(&perms), mask);
-    }
-
-    #[test]
-    fn view_project_is_not_mutating() {
-        assert!(!is_mutating(Permission::ViewProject));
-        assert!(is_mutating(Permission::EditTask));
-        assert!(is_mutating(Permission::ManageMembers));
-        assert!(is_mutating(Permission::ManageRoles));
-    }
-
-    #[test]
-    fn each_cache_permission_has_unique_bit() {
         let mut seen = 0_i64;
         for p in CachePermission::ALL.iter().copied() {
-            assert_eq!(p.bit() & seen, 0, "{:?} re-uses an earlier bit", p);
+            assert_eq!(p.bit() & seen, 0, "{p:?} re-uses an earlier bit");
             seen |= p.bit();
-        }
-    }
-
-    #[test]
-    fn cache_wire_names_round_trip() {
-        for p in CachePermission::ALL.iter().copied() {
             assert_eq!(CachePermission::from_wire_name(p.as_wire_name()), Some(p));
         }
         assert_eq!(CachePermission::from_wire_name("nope"), None);
     }
 
     #[test]
-    fn cache_admin_mask_grants_everything() {
-        let mask = cache_admin_mask();
-        for p in CachePermission::ALL.iter().copied() {
-            assert!(cache_mask_grants(mask, p), "admin missing {:?}", p);
+    fn masks_grant_and_withhold_the_expected_permissions() {
+        for p in Permission::ALL.iter().copied() {
+            assert!(mask_grants(admin_mask(), p), "admin missing {p:?}");
+            assert!(!mask_grants(0, p), "empty mask granted {p:?}");
         }
-    }
 
-    #[test]
-    fn cache_write_mask_excludes_admin_only() {
-        let mask = cache_write_mask();
+        let write = write_mask();
+        assert!(!mask_grants(write, Permission::ManageMembers));
+        assert!(!mask_grants(write, Permission::ManageRoles));
+        assert!(!mask_grants(write, Permission::DeleteProject));
+        assert!(!mask_grants(write, Permission::ManageProjectSettings));
+        assert!(mask_grants(write, Permission::EditTask));
+        assert!(mask_grants(write, Permission::ManageActions));
+
+        let view = view_mask();
+        assert!(!mask_grants(view, Permission::EditTask));
+        assert!(!mask_grants(view, Permission::ManageActions));
+        assert!(!mask_grants(view, Permission::ManageMembers));
+        assert!(!mask_grants(view, Permission::ManageRoles));
+        assert!(mask_grants(view, Permission::ViewProject));
+
+        for p in CachePermission::ALL.iter().copied() {
+            assert!(
+                cache_mask_grants(cache_admin_mask(), p),
+                "admin missing {p:?}"
+            );
+        }
+
+        let cache_write = cache_write_mask();
         assert!(!cache_mask_grants(
-            mask,
+            cache_write,
             CachePermission::ManageCacheSettings
         ));
-        assert!(!cache_mask_grants(mask, CachePermission::ManageCacheRoles));
-        assert!(!cache_mask_grants(mask, CachePermission::DeleteCache));
-        assert!(cache_mask_grants(mask, CachePermission::WriteStore));
-        assert!(cache_mask_grants(mask, CachePermission::ReadStore));
-        assert!(cache_mask_grants(mask, CachePermission::ViewCache));
+        assert!(!cache_mask_grants(
+            cache_write,
+            CachePermission::ManageCacheRoles
+        ));
+        assert!(!cache_mask_grants(
+            cache_write,
+            CachePermission::DeleteCache
+        ));
+        assert!(cache_mask_grants(cache_write, CachePermission::WriteStore));
+        assert!(cache_mask_grants(cache_write, CachePermission::ReadStore));
+        assert!(cache_mask_grants(cache_write, CachePermission::ViewCache));
+
+        let cache_view = cache_view_mask();
+        assert!(cache_mask_grants(cache_view, CachePermission::ViewCache));
+        assert!(cache_mask_grants(cache_view, CachePermission::ReadStore));
+        assert!(!cache_mask_grants(cache_view, CachePermission::WriteStore));
+        assert!(!cache_mask_grants(
+            cache_view,
+            CachePermission::ManageCacheKeys
+        ));
     }
 
     #[test]
-    fn cache_view_mask_is_read_only() {
-        let mask = cache_view_mask();
-        assert!(cache_mask_grants(mask, CachePermission::ViewCache));
-        assert!(cache_mask_grants(mask, CachePermission::ReadStore));
-        assert!(!cache_mask_grants(mask, CachePermission::WriteStore));
-        assert!(!cache_mask_grants(mask, CachePermission::ManageCacheKeys));
+    fn masks_round_trip_through_vectors() {
+        let write = write_mask();
+        assert_eq!(mask_from(&mask_to_vec(write)), write);
+        let cache_write = cache_write_mask();
+        assert_eq!(
+            cache_mask_from(&cache_mask_to_vec(cache_write)),
+            cache_write
+        );
     }
 
     #[test]
-    fn cache_view_is_not_mutating() {
+    fn mutating_permissions_cover_every_write_permission() {
+        assert!(!is_mutating(Permission::ViewProject));
+        assert!(is_mutating(Permission::EditTask));
+        assert!(is_mutating(Permission::ManageMembers));
+        assert!(is_mutating(Permission::ManageRoles));
+
         assert!(!is_cache_mutating(CachePermission::ViewCache));
         assert!(!is_cache_mutating(CachePermission::ReadStore));
         assert!(is_cache_mutating(CachePermission::WriteStore));
         assert!(is_cache_mutating(CachePermission::ManageCacheKeys));
         assert!(is_cache_mutating(CachePermission::DeleteCache));
-    }
-
-    #[test]
-    fn cache_mask_round_trips_through_vec() {
-        let mask = cache_write_mask();
-        let perms = cache_mask_to_vec(mask);
-        assert_eq!(cache_mask_from(&perms), mask);
     }
 }

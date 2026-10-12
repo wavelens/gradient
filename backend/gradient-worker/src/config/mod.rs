@@ -181,67 +181,45 @@ mod tests {
     }
 
     #[test]
-    fn peer_tokens_from_inline_string() {
+    fn peer_tokens_keeps_only_well_formed_lines() {
+        assert!(WorkerConfig::default().peer_tokens().is_empty());
+
         let cfg = config_with_peers(&format!("peer1:{TOK64}\npeer2:{TOK64}"));
-        let tokens = cfg.peer_tokens();
-        assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0], ("peer1".to_owned(), TOK64.to_owned()));
-        assert_eq!(tokens[1], ("peer2".to_owned(), TOK64.to_owned()));
+        assert_eq!(
+            cfg.peer_tokens(),
+            vec![
+                ("peer1".to_owned(), TOK64.to_owned()),
+                ("peer2".to_owned(), TOK64.to_owned())
+            ]
+        );
+
+        let cfg = config_with_peers(&format!("\n# a comment line\npeer:{TOK64}\n\n"));
+        assert_eq!(
+            cfg.peer_tokens(),
+            vec![("peer".to_owned(), TOK64.to_owned())]
+        );
+
+        for bad in [TOK63, TOK65] {
+            let cfg = config_with_peers(&format!("peer-bad:{bad}\npeer-ok:{TOK64}"));
+            assert_eq!(
+                cfg.peer_tokens(),
+                vec![("peer-ok".to_owned(), TOK64.to_owned())],
+                "{bad}"
+            );
+        }
+
+        let cfg = config_with_peers(&format!(":tok64ok\npeer:\nnocolon\npeer-valid:{TOK64}"));
+        assert_eq!(
+            cfg.peer_tokens(),
+            vec![("peer-valid".to_owned(), TOK64.to_owned())]
+        );
+
+        let cfg = config_with_peers(&format!("*:{TOK64}"));
+        assert_eq!(cfg.peer_tokens(), vec![("*".to_owned(), TOK64.to_owned())]);
     }
 
     #[test]
-    fn peer_tokens_skips_blank_lines_and_comments() {
-        let input = format!("\n# this is a comment\npeer:{TOK64}\n\n");
-        let cfg = config_with_peers(&input);
-        let tokens = cfg.peer_tokens();
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].0, "peer");
-    }
-
-    #[test]
-    fn peer_tokens_skips_short_tokens() {
-        let input = format!("peer-short:{TOK63}\npeer-ok:{TOK64}");
-        let cfg = config_with_peers(&input);
-        let tokens = cfg.peer_tokens();
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].0, "peer-ok");
-    }
-
-    #[test]
-    fn peer_tokens_skips_long_tokens() {
-        let input = format!("peer-long:{TOK65}\npeer-ok:{TOK64}");
-        let cfg = config_with_peers(&input);
-        let tokens = cfg.peer_tokens();
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].0, "peer-ok");
-    }
-
-    #[test]
-    fn peer_tokens_empty_when_neither_set() {
-        let cfg = WorkerConfig::default();
-        assert!(cfg.peer_tokens().is_empty());
-    }
-
-    #[test]
-    fn peer_tokens_skips_empty_peer_or_token() {
-        let input = format!(":tok64ok\npeer:\nnocolon\npeer-valid:{TOK64}");
-        let cfg = config_with_peers(&input);
-        let tokens = cfg.peer_tokens();
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].0, "peer-valid");
-    }
-
-    #[test]
-    fn peer_tokens_preserves_wildcard() {
-        let input = format!("*:{TOK64}");
-        let cfg = config_with_peers(&input);
-        let tokens = cfg.peer_tokens();
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0], ("*".to_owned(), TOK64.to_owned()));
-    }
-
-    #[test]
-    fn peer_tokens_from_file() {
+    fn peer_tokens_from_a_file_replace_the_inline_value() {
         let path = std::env::temp_dir().join(format!("gradient-test-peers-{}", std::process::id()));
         std::fs::write(&path, format!("peer-file:{TOK64}")).unwrap();
 
@@ -252,13 +230,7 @@ mod tests {
         };
         let tokens = cfg.peer_tokens();
         let _ = std::fs::remove_file(&path);
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].0, "peer-file");
-    }
-
-    #[test]
-    fn accepted_server_tokens_are_absent_without_a_file() {
-        assert!(WorkerConfig::default().accepted_server_tokens().is_none());
+        assert_eq!(tokens, vec![("peer-file".to_owned(), TOK64.to_owned())]);
     }
 
     #[test]
@@ -290,7 +262,9 @@ mod tests {
     }
 
     #[test]
-    fn an_unreadable_accepted_server_tokens_file_rejects_every_server() {
+    fn accepted_server_tokens_need_a_readable_file() {
+        assert!(WorkerConfig::default().accepted_server_tokens().is_none());
+
         let cfg = WorkerConfig {
             accepted_server_tokens_file: Some(
                 "/nonexistent/gradient-accepted-server-tokens".into(),

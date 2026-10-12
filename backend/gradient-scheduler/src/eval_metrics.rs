@@ -68,13 +68,10 @@ impl Scheduler {
             alloc_bytes: report.alloc_bytes as i64,
             peak_heap_mb: report.peak_heap_mb as i64,
             peak_rss_mb: report.peak_rss_mb as i64,
-            // The job timeline's phase spans are filling this in once the terminal message is in.
-            fetch_ms: 0,
-            eval_flake_ms: 0,
-            eval_drv_ms: 0,
             total_eval_ms: report.total_eval_ms as i64,
             worker_id: report.worker_id,
             created_at: gradient_types::now(),
+            ..Default::default()
         }
         .into_active_model();
 

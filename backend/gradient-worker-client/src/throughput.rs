@@ -80,8 +80,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn empty_is_none() {
-        assert_eq!(ThroughputEwma::new().current(), None);
+    fn an_empty_or_non_positive_sample_stays_none() {
+        let e = ThroughputEwma::new();
+        assert_eq!(e.current(), None);
+        e.observe(0.0);
+        e.observe(-5.0);
+        assert_eq!(e.current(), None);
     }
 
     #[test]
@@ -103,24 +107,13 @@ mod tests {
     }
 
     #[test]
-    fn a_transfer_is_observed_in_megabits_per_second() {
-        let e = ThroughputEwma::new();
-        e.observe_transfer(4_000_000, std::time::Duration::from_secs(2));
-        assert_eq!(e.current(), Some(16.0));
-    }
+    fn transfers_below_a_mebibyte_are_ignored_and_larger_ones_report_megabits() {
+        let small = ThroughputEwma::new();
+        small.observe_transfer(MIN_TRANSFER_BYTES - 1, std::time::Duration::from_millis(1));
+        assert_eq!(small.current(), None);
 
-    #[test]
-    fn a_transfer_under_a_mebibyte_is_ignored() {
-        let e = ThroughputEwma::new();
-        e.observe_transfer(MIN_TRANSFER_BYTES - 1, std::time::Duration::from_millis(1));
-        assert_eq!(e.current(), None);
-    }
-
-    #[test]
-    fn non_positive_ignored() {
-        let e = ThroughputEwma::new();
-        e.observe(0.0);
-        e.observe(-5.0);
-        assert_eq!(e.current(), None);
+        let big = ThroughputEwma::new();
+        big.observe_transfer(4_000_000, std::time::Duration::from_secs(2));
+        assert_eq!(big.current(), Some(16.0));
     }
 }

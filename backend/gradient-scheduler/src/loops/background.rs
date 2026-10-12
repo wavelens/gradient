@@ -565,28 +565,15 @@ mod tests {
     }
 
     #[test]
-    fn a_tracked_job_is_never_reaped() {
-        let tracked = row(Some("build:still-going"));
-        let untracked = HashSet::new();
-
-        assert!(plan_abandoned_reap(&[tracked], &untracked).is_empty());
-    }
-
-    #[test]
-    fn an_untracked_job_is_reaped() {
+    fn abandoned_rows_are_reaped_only_when_untracked() {
         let gone = row(Some("build:worker-vanished"));
         let untracked = HashSet::from(["build:worker-vanished".to_string()]);
-
         assert_eq!(
             plan_abandoned_reap(std::slice::from_ref(&gone), &untracked),
             vec![gone.0]
         );
-    }
 
-    #[test]
-    fn a_row_without_a_job_id_is_reaped_on_age_alone() {
         let legacy = row(None);
-
         assert_eq!(
             plan_abandoned_reap(std::slice::from_ref(&legacy), &HashSet::new()),
             vec![legacy.0]
@@ -594,35 +581,20 @@ mod tests {
     }
 
     #[test]
-    fn a_scheduler_outage_reaps_no_tracked_row() {
-        let rows = vec![row(Some("build:a")), row(Some("eval:b"))];
+    fn tracked_rows_are_kept_through_a_scheduler_outage() {
+        let tracked = row(Some("build:still-going"));
+        assert!(plan_abandoned_reap(&[tracked], &HashSet::new()).is_empty());
 
+        let rows = vec![row(Some("build:a")), row(Some("eval:b"))];
         assert!(plan_abandoned_reap(&rows, &HashSet::new()).is_empty());
     }
 
     #[test]
-    fn an_abandoned_job_is_not_re_driven() {
-        let rows = vec![lost(DispatchedJobOutcome::Abandoned)];
-        let untracked: HashSet<String> = rows
-            .iter()
-            .map(|l| crate::jobs::eval_job_key(l.evaluation))
-            .collect();
-
-        assert!(plan_eval_repairs(&rows, &untracked).is_empty());
-    }
-
-    #[test]
-    fn a_tracked_stranded_shared_build_is_left_alone() {
+    fn stranded_shared_builds_are_requeued_only_when_untracked() {
         let shared_build = DerivationBuildId::now_v7();
-
         assert!(plan_stranded_requeue(&[shared_build], &HashSet::new()).is_empty());
-    }
 
-    #[test]
-    fn an_untracked_stranded_shared_build_is_requeued() {
-        let shared_build = DerivationBuildId::now_v7();
         let untracked = HashSet::from([crate::jobs::build_job_key(shared_build)]);
-
         assert_eq!(
             plan_stranded_requeue(&[shared_build], &untracked),
             vec![shared_build]
@@ -630,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn each_outcome_maps_to_the_transition_that_was_lost() {
+    fn eval_repairs_map_each_outcome_to_the_lost_transition() {
         let rows = vec![
             lost(DispatchedJobOutcome::Completed),
             lost(DispatchedJobOutcome::Failed),
@@ -650,23 +622,26 @@ mod tests {
     }
 
     #[test]
-    fn an_evaluation_the_scheduler_still_tracks_is_left_alone() {
+    fn eval_repairs_skip_tracked_abandoned_and_core_outage_rows() {
         let tracked = lost(DispatchedJobOutcome::Completed);
         let stranded = lost(DispatchedJobOutcome::Completed);
         let untracked = HashSet::from([crate::jobs::eval_job_key(stranded.evaluation)]);
-
         assert_eq!(
             plan_eval_repairs(&[tracked, stranded], &untracked),
             vec![(stranded.evaluation, EvalRepair::Complete)]
         );
-    }
 
-    #[test]
-    fn a_core_outage_repairs_nothing() {
-        let rows = vec![
+        let abandoned = vec![lost(DispatchedJobOutcome::Abandoned)];
+        let untracked: HashSet<String> = abandoned
+            .iter()
+            .map(|l| crate::jobs::eval_job_key(l.evaluation))
+            .collect();
+        assert!(plan_eval_repairs(&abandoned, &untracked).is_empty());
+
+        let outage = vec![
             lost(DispatchedJobOutcome::Completed),
             lost(DispatchedJobOutcome::Failed),
         ];
-        assert!(plan_eval_repairs(&rows, &HashSet::new()).is_empty());
+        assert!(plan_eval_repairs(&outage, &HashSet::new()).is_empty());
     }
 }

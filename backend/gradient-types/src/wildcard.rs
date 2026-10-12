@@ -261,203 +261,121 @@ impl fmt::Display for Wildcard {
         write!(f, "{}", self.patterns.join(","))
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn multiple_patterns() {
-        let w: Wildcard = "packages.*.*,checks.*.*".parse().unwrap();
-        assert_eq!(w.patterns(), &["packages.*.*", "checks.*.*"]);
-        assert_eq!(w.to_string(), "packages.*.*,checks.*.*");
-    }
-
-    #[test]
-    fn trims_spaces_between_patterns() {
-        let w: Wildcard = "packages.*.*, checks.*.*".parse().unwrap();
-        assert_eq!(w.patterns(), &["packages.*.*", "checks.*.*"]);
-        assert_eq!(w.to_string(), "packages.*.*,checks.*.*");
-    }
-
-    #[test]
-    fn quoted_segment_with_dot_valid() {
-        let w: Wildcard = r#"my."wild.card".is.*"#.parse().unwrap();
-        assert_eq!(w.patterns(), &[r#"my."wild.card".is.*"#]);
-        assert_eq!(w.to_string(), r#"my."wild.card".is.*"#);
-    }
-
-    #[test]
-    fn exclusion_with_wildcard_rejected() {
-        assert!("my.*,!my.ignored.*".parse::<Wildcard>().is_err());
-    }
-
-    #[test]
-    fn exclusion_with_hash_rejected() {
-        assert!(
-            "packages.*.*,!packages.x86_64-linux.#"
+    fn patterns_round_trip_through_to_string() {
+        let cases = [
+            ("packages.*.*,checks.*.*", "packages.*.*,checks.*.*"),
+            ("packages.*.*, checks.*.*", "packages.*.*,checks.*.*"),
+            (r#"my."wild.card".is.*"#, r#"my."wild.card".is.*"#),
+            (
+                r#"packages.*.*,!packages.x86_64-linux.broken,my."wild.card".*"#,
+                r#"packages.*.*,!packages.x86_64-linux.broken,my."wild.card".*"#,
+            ),
+        ];
+        for (input, expected) in cases {
+            let w: Wildcard = input.parse().unwrap();
+            assert_eq!(w.to_string(), expected, "{input}");
+        }
+        assert_eq!(
+            "packages.*.*, checks.*.*"
                 .parse::<Wildcard>()
-                .is_err()
+                .unwrap()
+                .patterns(),
+            &["packages.*.*", "checks.*.*"]
         );
-    }
-
-    #[test]
-    fn exclusion_with_quoted_segment_valid() {
-        let w: Wildcard = r#"packages.*.*,!packages.x86_64-linux."broken.pkg""#
-            .parse()
-            .unwrap();
-        assert_eq!(w.patterns().len(), 2);
-    }
-
-    #[test]
-    fn roundtrip() {
-        let original = r#"packages.*.*,!packages.x86_64-linux.broken,my."wild.card".*"#;
-        let w: Wildcard = original.parse().unwrap();
-        assert_eq!(w.to_string(), original);
-    }
-
-    #[test]
-    fn eval_str_include_only() {
-        let w: Wildcard = "packages.*.*".parse().unwrap();
         assert_eq!(
-            w.get_eval_str(),
-            r#"{ "include" = [ [ "packages" "*" ] ]; "exclude" = [  ]; }"#,
+            r#"packages.*.*,!packages.x86_64-linux."broken.pkg""#
+                .parse::<Wildcard>()
+                .unwrap()
+                .patterns()
+                .len(),
+            2
         );
     }
 
     #[test]
-    fn eval_str_bare_star() {
-        let w: Wildcard = "*".parse().unwrap();
-        assert_eq!(
-            w.get_eval_str(),
-            r#"{ "include" = [ [ "*" ] ]; "exclude" = [  ]; }"#,
-        );
+    fn eval_str_renders_include_and_exclude_sets() {
+        let cases = [
+            (
+                "packages.*.*",
+                r#"{ "include" = [ [ "packages" "*" ] ]; "exclude" = [  ]; }"#,
+            ),
+            ("*", r#"{ "include" = [ [ "*" ] ]; "exclude" = [  ]; }"#),
+            (
+                "packages.*.*,!packages.x86_64-linux.broken",
+                r#"{ "include" = [ [ "packages" "*" ] ]; "exclude" = [ [ "packages" "x86_64-linux" "broken" ] ]; }"#,
+            ),
+            (
+                r#"my."wild.card".*"#,
+                r#"{ "include" = [ [ "my" "wild.card" "*" ] ]; "exclude" = [  ]; }"#,
+            ),
+            (
+                "packages.*.*.*,checks.*",
+                r#"{ "include" = [ [ "packages" "*" ] [ "checks" "*" ] ]; "exclude" = [  ]; }"#,
+            ),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(
+                input.parse::<Wildcard>().unwrap().get_eval_str(),
+                expected,
+                "{input}"
+            );
+        }
     }
 
     #[test]
-    fn eval_str_include_and_exclude() {
-        let w: Wildcard = "packages.*.*,!packages.x86_64-linux.broken"
-            .parse()
-            .unwrap();
-        assert_eq!(
-            w.get_eval_str(),
-            r#"{ "include" = [ [ "packages" "*" ] ]; "exclude" = [ [ "packages" "x86_64-linux" "broken" ] ]; }"#,
-        );
+    fn parse_rejects_malformed_patterns() {
+        let cases = [
+            "my.*,!my.ignored.*",
+            "packages.*.*,!packages.x86_64-linux.#",
+            "#",
+            "!",
+            "my.!ignored",
+            "my.!*",
+            r#"my."*".not.allowed.*"#,
+            r##"my."#".something"##,
+            r#"my."!".something"#,
+            r#"packages.*.*,!my."*".foo"#,
+            "",
+        ];
+        for input in cases {
+            assert!(input.parse::<Wildcard>().is_err(), "{input}");
+        }
     }
 
     #[test]
-    fn eval_str_quoted_segment_unwrapped() {
-        let w: Wildcard = r#"my."wild.card".*"#.parse().unwrap();
-        assert_eq!(
-            w.get_eval_str(),
-            r#"{ "include" = [ [ "my" "wild.card" "*" ] ]; "exclude" = [  ]; }"#,
-        );
-    }
-
-    #[test]
-    fn eval_str_multiple_includes() {
-        let w: Wildcard = "packages.*.*.*,checks.*".parse().unwrap();
-        assert_eq!(
-            w.get_eval_str(),
-            r#"{ "include" = [ [ "packages" "*" ] [ "checks" "*" ] ]; "exclude" = [  ]; }"#,
-        );
-    }
-
-    #[test]
-    fn bare_hash_rejected() {
-        assert!("#".parse::<Wildcard>().is_err());
-    }
-
-    #[test]
-    fn bare_exclamation_rejected() {
-        assert!("!".parse::<Wildcard>().is_err());
-    }
-
-    #[test]
-    fn mid_path_exclamation_rejected() {
-        assert!("my.!ignored".parse::<Wildcard>().is_err());
-        assert!("my.!*".parse::<Wildcard>().is_err());
-    }
-
-    #[test]
-    fn quoted_star_segment_rejected() {
-        assert!(r#"my."*".not.allowed.*"#.parse::<Wildcard>().is_err());
-    }
-
-    #[test]
-    fn quoted_hash_segment_rejected() {
-        assert!(r##"my."#".something"##.parse::<Wildcard>().is_err());
-    }
-
-    #[test]
-    fn quoted_exclamation_segment_rejected() {
-        assert!(r#"my."!".something"#.parse::<Wildcard>().is_err());
-    }
-
-    #[test]
-    fn quoted_star_in_exclusion_rejected() {
-        assert!(r#"packages.*.*,!my."*".foo"#.parse::<Wildcard>().is_err());
-    }
-
-    #[test]
-    fn empty_rejected() {
-        assert!("".parse::<Wildcard>().is_err());
-    }
-
-    #[test]
-    fn double_comma_rejected() {
-        assert_eq!(
-            "packages.*.*,,checks.*.*".parse::<Wildcard>().unwrap_err(),
-            InputError::EvaluationWildcardConsecutiveCommas,
-        );
-    }
-
-    #[test]
-    fn leading_space_rejected() {
-        assert_eq!(
-            " packages.*.*".parse::<Wildcard>().unwrap_err(),
-            InputError::EvaluationWildcardWhitespace,
-        );
-    }
-
-    #[test]
-    fn trailing_space_rejected() {
-        assert_eq!(
-            "packages.*.* ".parse::<Wildcard>().unwrap_err(),
-            InputError::EvaluationWildcardWhitespace,
-        );
-    }
-
-    #[test]
-    fn internal_whitespace_rejected() {
-        assert_eq!(
-            "packages .*.*".parse::<Wildcard>().unwrap_err(),
-            InputError::EvaluationWildcardInternalWhitespace,
-        );
-    }
-
-    #[test]
-    fn starts_with_period_rejected() {
-        assert_eq!(
-            ".packages.*.*".parse::<Wildcard>().unwrap_err(),
-            InputError::EvaluationWildcardStartsWithPeriod,
-        );
-    }
-
-    #[test]
-    fn exclusion_bare_body_rejected() {
-        assert_eq!(
-            "packages.*.*,!".parse::<Wildcard>().unwrap_err(),
-            InputError::EvaluationWildcardBareSpecialChar,
-        );
-    }
-
-    #[test]
-    fn exclusion_starts_with_period_rejected() {
-        assert_eq!(
-            "packages.*.*,!.packages".parse::<Wildcard>().unwrap_err(),
-            InputError::EvaluationWildcardStartsWithPeriod,
-        );
+    fn parse_reports_the_failing_rule() {
+        let cases = [
+            (
+                "packages.*.*,,checks.*.*",
+                InputError::EvaluationWildcardConsecutiveCommas,
+            ),
+            (" packages.*.*", InputError::EvaluationWildcardWhitespace),
+            ("packages.*.* ", InputError::EvaluationWildcardWhitespace),
+            (
+                "packages .*.*",
+                InputError::EvaluationWildcardInternalWhitespace,
+            ),
+            (
+                ".packages.*.*",
+                InputError::EvaluationWildcardStartsWithPeriod,
+            ),
+            (
+                "packages.*.*,!",
+                InputError::EvaluationWildcardBareSpecialChar,
+            ),
+            (
+                "packages.*.*,!.packages",
+                InputError::EvaluationWildcardStartsWithPeriod,
+            ),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(input.parse::<Wildcard>().unwrap_err(), expected, "{input}");
+        }
     }
 }
 
@@ -470,99 +388,89 @@ mod matches_tests {
     }
 
     #[test]
-    fn exact_path_matches_itself_only() {
-        assert!(m(
-            "packages.x86_64-linux.hello",
-            "packages.x86_64-linux.hello"
-        ));
-        assert!(!m(
-            "packages.x86_64-linux.hello",
-            "packages.x86_64-linux.world"
-        ));
-        assert!(!m("packages.x86_64-linux.hello", "packages.x86_64-linux"));
-    }
-
-    #[test]
-    fn star_mid_pattern_matches_exactly_one_segment() {
-        assert!(m("my.*.test", "my.foo.test"));
-        assert!(!m("my.*.test", "my.test"));
-        assert!(!m("my.*.test", "my.foo.bar.test"));
-    }
-
-    #[test]
-    fn hash_matches_exactly_one_segment_and_does_not_descend() {
-        assert!(m("packages.x86_64-linux.#", "packages.x86_64-linux.hello"));
-        assert!(!m(
-            "packages.x86_64-linux.#",
-            "packages.x86_64-linux.py.hello"
-        ));
-        assert!(!m("packages.x86_64-linux.#", "packages.x86_64-linux"));
-    }
-
-    #[test]
-    fn trailing_star_matches_one_or_two_segments() {
-        assert!(m("packages.*", "packages.x86_64-linux"));
-        assert!(m("packages.*", "packages.x86_64-linux.hello"));
-        assert!(!m("packages.*", "packages"));
-        assert!(!m("packages.*", "packages.x86_64-linux.py.hello"));
-    }
-
-    #[test]
-    fn consecutive_stars_collapse() {
-        for attr in ["packages.x86_64-linux", "packages.x86_64-linux.hello"] {
-            assert_eq!(m("packages.*.*", attr), m("packages.*", attr), "{attr}");
+    fn single_pattern_matching_follows_the_segment_rules() {
+        let cases = [
+            (
+                "packages.x86_64-linux.hello",
+                "packages.x86_64-linux.hello",
+                true,
+            ),
+            (
+                "packages.x86_64-linux.hello",
+                "packages.x86_64-linux.world",
+                false,
+            ),
+            (
+                "packages.x86_64-linux.hello",
+                "packages.x86_64-linux",
+                false,
+            ),
+            ("my.*.test", "my.foo.test", true),
+            ("my.*.test", "my.test", false),
+            ("my.*.test", "my.foo.bar.test", false),
+            (
+                "packages.x86_64-linux.#",
+                "packages.x86_64-linux.hello",
+                true,
+            ),
+            (
+                "packages.x86_64-linux.#",
+                "packages.x86_64-linux.py.hello",
+                false,
+            ),
+            ("packages.x86_64-linux.#", "packages.x86_64-linux", false),
+            ("packages.*", "packages.x86_64-linux", true),
+            ("packages.*", "packages.x86_64-linux.hello", true),
+            ("packages.*", "packages", false),
+            ("packages.*", "packages.x86_64-linux.py.hello", false),
+            ("packages.*.*", "packages.x86_64-linux", true),
+            ("packages.*.*", "packages.x86_64-linux.hello", true),
+            ("packages.*.*", "packages.x86_64-linux.py.hello", false),
+            ("*", "hello", true),
+            ("*", "packages.hello", true),
+            ("*", "packages.x86_64-linux.hello", false),
+            ("*", "", false),
+            ("packages.*.*", "", false),
+        ];
+        for (pattern, attr, expected) in cases {
+            assert_eq!(m(pattern, attr), expected, "{pattern} vs {attr}");
         }
-        assert!(m("packages.*.*", "packages.x86_64-linux.hello"));
-        assert!(!m("packages.*.*", "packages.x86_64-linux.py.hello"));
     }
 
     #[test]
-    fn bare_star_matches_top_two_levels() {
-        assert!(m("*", "hello"));
-        assert!(m("*", "packages.hello"));
-        assert!(!m("*", "packages.x86_64-linux.hello"));
-    }
+    fn include_and_exclude_patterns_combine() {
+        let any: Wildcard = "packages.*.*,checks.*.*".parse().unwrap();
+        assert!(any.matches("packages.x86_64-linux.hello"));
+        assert!(any.matches("checks.x86_64-linux.fmt"));
+        assert!(!any.matches("devShells.x86_64-linux.default"));
 
-    #[test]
-    fn any_include_pattern_may_match() {
-        let w: Wildcard = "packages.*.*,checks.*.*".parse().unwrap();
-        assert!(w.matches("packages.x86_64-linux.hello"));
-        assert!(w.matches("checks.x86_64-linux.fmt"));
-        assert!(!w.matches("devShells.x86_64-linux.default"));
-    }
-
-    #[test]
-    fn exclusion_removes_an_otherwise_matching_path() {
-        let w: Wildcard = "packages.*.*,!packages.x86_64-linux.broken"
+        let excluding: Wildcard = "packages.*.*,!packages.x86_64-linux.broken"
             .parse()
             .unwrap();
-        assert!(w.matches("packages.x86_64-linux.hello"));
-        assert!(!w.matches("packages.x86_64-linux.broken"));
-        assert!(w.matches("packages.aarch64-linux.broken"));
+        assert!(excluding.matches("packages.x86_64-linux.hello"));
+        assert!(!excluding.matches("packages.x86_64-linux.broken"));
+        assert!(excluding.matches("packages.aarch64-linux.broken"));
     }
 
     #[test]
     fn quoted_segments_compare_by_inner_content() {
-        assert!(m(
-            r#"packages.*."python3.12""#,
-            r#"packages.x86_64-linux."python3.12""#
-        ));
-        assert!(!m(
-            r#"packages.*."python3.12""#,
-            "packages.x86_64-linux.python3.12"
-        ));
-        assert!(m(r#"my."wild.card".test"#, r#"my."wild.card".test"#));
-        assert!(!m(r#"my."wild.card".test"#, "my.wild.card.test"));
-    }
-
-    #[test]
-    fn quoted_attr_segments_are_unwrapped_too() {
-        assert!(m("packages.*.*", r#"packages."x86_64-linux".hello"#));
-    }
-
-    #[test]
-    fn empty_attr_never_matches() {
-        assert!(!m("*", ""));
-        assert!(!m("packages.*.*", ""));
+        let cases = [
+            (
+                r#"packages.*."python3.12""#,
+                r#"packages.x86_64-linux."python3.12""#,
+                true,
+            ),
+            (
+                r#"packages.*."python3.12""#,
+                "packages.x86_64-linux.python3.12",
+                false,
+            ),
+            (r#"my."wild.card".test"#, r#"my."wild.card".test"#, true),
+            (r#"my."wild.card".test"#, "my.wild.card.test", false),
+            ("packages.*.*", r#"packages."x86_64-linux".hello"#, true),
+        ];
+        for (pattern, attr, expected) in cases {
+            assert_eq!(m(pattern, attr), expected, "{pattern} vs {attr}");
+        }
     }
 }

@@ -124,28 +124,20 @@ mod tests {
     use gradient_types::events::build::Reported;
 
     #[test]
-    fn check_scope_with_project() {
+    fn check_scope_uses_the_project_when_present() {
         assert_eq!(
             format_check_scope(Some("wavelens"), "my-task"),
             "wavelens/my-task"
         );
-    }
-
-    #[test]
-    fn check_scope_without_project_falls_back_to_task() {
         assert_eq!(format_check_scope(None, "my-task"), "my-task");
     }
 
     #[test]
-    fn evaluation_context_format() {
+    fn evaluation_context_includes_the_wildcard_when_bounded() {
         assert_eq!(
             evaluation_check_context("my-task", None),
             "gradient/my-task: Evaluation"
         );
-    }
-
-    #[test]
-    fn evaluation_context_format_with_custom_wildcard() {
         assert_eq!(
             evaluation_check_context("my-task", Some("packages.x86_64-linux.foo")),
             "gradient/my-task: Evaluation: packages.x86_64-linux.foo"
@@ -178,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_terminal_states() {
+    fn evaluation_status_maps_terminal_states_and_skips_the_rest() {
         assert_eq!(
             ci_status_for_evaluation(&EvaluationStatus::Completed),
             Some(CiStatus::Success)
@@ -191,49 +183,6 @@ mod tests {
             ci_status_for_evaluation(&EvaluationStatus::Aborted),
             Some(CiStatus::Error)
         );
-    }
-
-    #[test]
-    fn maps_build_terminal_states() {
-        assert_eq!(
-            ci_status_for_build(&BuildStatus::Completed),
-            Some(CiStatus::Success)
-        );
-        assert_eq!(
-            ci_status_for_build(&BuildStatus::Substituted),
-            Some(CiStatus::Success)
-        );
-        assert_eq!(
-            ci_status_for_build(&BuildStatus::FailedPermanent),
-            Some(CiStatus::Failure)
-        );
-        assert_eq!(
-            ci_status_for_build(&BuildStatus::DependencyFailed),
-            Some(CiStatus::Failure)
-        );
-        assert_eq!(
-            ci_status_for_build(&BuildStatus::Aborted),
-            Some(CiStatus::Error)
-        );
-    }
-
-    #[test]
-    fn skips_intermediate_build_states() {
-        for s in [BuildStatus::Created, BuildStatus::Queued] {
-            assert_eq!(ci_status_for_build(&s), None);
-        }
-    }
-
-    #[test]
-    fn maps_building_to_running() {
-        assert_eq!(
-            ci_status_for_build(&BuildStatus::Building),
-            Some(CiStatus::Running)
-        );
-    }
-
-    #[test]
-    fn skips_intermediate_states() {
         for s in [
             EvaluationStatus::Queued,
             EvaluationStatus::Fetching,
@@ -247,7 +196,38 @@ mod tests {
     }
 
     #[test]
-    fn build_event_posts_live_progress() {
+    fn build_status_maps_every_stage_to_a_check_state() {
+        assert_eq!(
+            ci_status_for_build(&BuildStatus::Completed),
+            Some(CiStatus::Success)
+        );
+        assert_eq!(
+            ci_status_for_build(&BuildStatus::Substituted),
+            Some(CiStatus::Success)
+        );
+        assert_eq!(
+            ci_status_for_build(&BuildStatus::Building),
+            Some(CiStatus::Running)
+        );
+        assert_eq!(
+            ci_status_for_build(&BuildStatus::FailedPermanent),
+            Some(CiStatus::Failure)
+        );
+        assert_eq!(
+            ci_status_for_build(&BuildStatus::DependencyFailed),
+            Some(CiStatus::Failure)
+        );
+        assert_eq!(
+            ci_status_for_build(&BuildStatus::Aborted),
+            Some(CiStatus::Error)
+        );
+        for s in [BuildStatus::Created, BuildStatus::Queued] {
+            assert_eq!(ci_status_for_build(&s), None);
+        }
+    }
+
+    #[test]
+    fn build_event_reports_live_progress_and_pending_checks() {
         assert_eq!(Reported::reports(BuildStatus::Queued), Some("build.queued"));
         assert_eq!(
             Reported::reports(BuildStatus::Building),
@@ -260,6 +240,18 @@ mod tests {
         assert_eq!(
             Reported::reports(BuildStatus::Substituted),
             Some("build.substituted")
+        );
+        assert_eq!(
+            Reported::reports(BuildStatus::Created),
+            Some("build.created")
+        );
+        assert_eq!(
+            check_context_kind_for_event("build.created"),
+            Some(CheckContextKind::Build)
+        );
+        assert_eq!(
+            crate::actions::git_host_status_for_event("build.created"),
+            Some(CiStatus::Pending)
         );
     }
 
@@ -277,21 +269,5 @@ mod tests {
                 Some(CiStatus::Failure)
             );
         }
-    }
-
-    #[test]
-    fn build_event_created_posts_pending_check() {
-        assert_eq!(
-            Reported::reports(BuildStatus::Created),
-            Some("build.created")
-        );
-        assert_eq!(
-            check_context_kind_for_event("build.created"),
-            Some(CheckContextKind::Build)
-        );
-        assert_eq!(
-            crate::actions::git_host_status_for_event("build.created"),
-            Some(CiStatus::Pending)
-        );
     }
 }

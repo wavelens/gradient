@@ -139,7 +139,7 @@ mod tests {
     const MIB: u64 = 1024 * 1024;
 
     #[test]
-    fn memory_guard_bytes_configured_and_adaptive() {
+    fn memory_guard_bytes_honours_the_configured_value_and_adapts_otherwise() {
         assert_eq!(memory_guard_bytes(2048, 64 * GIB), 2048 * 1024 * 1024);
         assert_eq!(memory_guard_bytes(0, 4 * GIB), 4 * GIB / 10);
         assert_eq!(memory_guard_bytes(0, 64 * GIB), GIB);
@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn a_victim_too_small_to_clear_the_shortfall_is_left_alone() {
+    fn the_largest_sufficient_victim_is_reaped_and_the_rest_left_alone() {
         let available = 980 * MIB;
         let min_free = 1024 * MIB;
         assert_eq!(reap_victim(&[(1442, 27 * MIB)], available, min_free), None);
@@ -166,25 +166,21 @@ mod tests {
             reap_victim(&[(1442, 44 * MIB)], available, min_free),
             Some((1442, 44 * MIB))
         );
-    }
 
-    #[test]
-    fn a_victim_holding_no_resident_memory_is_never_reaped() {
-        let victims = [(1, 0), (2, 0), (3, 0)];
-        assert_eq!(reap_victim(&victims, 980 * MIB, 1024 * MIB), None);
-    }
-
-    #[test]
-    fn the_largest_sufficient_victim_wins() {
-        let victims = [(1, 100 * MIB), (2, 600 * MIB), (3, 300 * MIB)];
         assert_eq!(
-            reap_victim(&victims, 900 * MIB, 1024 * MIB),
+            reap_victim(&[(1, 0), (2, 0), (3, 0)], available, min_free),
+            None
+        );
+
+        assert_eq!(
+            reap_victim(
+                &[(1, 100 * MIB), (2, 600 * MIB), (3, 300 * MIB)],
+                900 * MIB,
+                min_free
+            ),
             Some((2, 600 * MIB))
         );
-    }
 
-    #[test]
-    fn no_shortfall_means_no_victim() {
         assert_eq!(reap_victim(&[(1, 8 * GIB)], 2 * GIB, GIB), None);
         assert_eq!(reap_victim(&[], 0, GIB), None);
     }

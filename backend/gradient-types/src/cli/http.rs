@@ -73,54 +73,45 @@ mod tests {
     }
 
     #[test]
-    fn empty_string_returns_empty_vec() {
-        assert!(parse_cidr_list(&cidrs("")).unwrap().is_empty());
-        assert!(parse_cidr_list(&cidrs("   ")).unwrap().is_empty());
-        assert!(parse_cidr_list(&cidrs(" , , ")).unwrap().is_empty());
-    }
-
-    #[test]
-    fn single_ipv4_cidr() {
+    fn parse_cidr_list_reads_entries_and_skips_blanks() {
+        for blank in ["", "   ", " , , "] {
+            assert!(
+                parse_cidr_list(&cidrs(blank)).unwrap().is_empty(),
+                "{blank:?}"
+            );
+        }
         let v = parse_cidr_list(&cidrs("10.0.0.0/8")).unwrap();
         assert_eq!(v.len(), 1);
         assert!(v[0].contains(&IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3))));
-    }
-
-    #[test]
-    fn single_ipv6_cidr() {
         let v = parse_cidr_list(&cidrs("fd00::/8")).unwrap();
         assert_eq!(v.len(), 1);
         assert!(v[0].contains(&IpAddr::V6("fd00::1".parse::<Ipv6Addr>().unwrap())));
+        assert_eq!(
+            parse_cidr_list(&cidrs("  10.0.0.0/8 , ::1/128 ,192.168.0.0/16"))
+                .unwrap()
+                .len(),
+            3
+        );
     }
 
     #[test]
-    fn mixed_with_whitespace() {
-        let v = parse_cidr_list(&cidrs("  10.0.0.0/8 , ::1/128 ,192.168.0.0/16")).unwrap();
-        assert_eq!(v.len(), 3);
+    fn parse_cidr_list_names_the_malformed_entry() {
+        for (list, bad) in [
+            ("not-a-cidr", "not-a-cidr"),
+            ("10.0.0.0/8, banana, 192.168.0.0/16", "banana"),
+        ] {
+            let err = parse_cidr_list(&cidrs(list)).unwrap_err().to_string();
+            assert!(err.contains(bad), "{list}: {err}");
+        }
     }
 
     #[test]
-    fn malformed_entry_returns_err() {
-        let err = parse_cidr_list(&cidrs("not-a-cidr")).unwrap_err();
-        assert!(err.to_string().contains("not-a-cidr"));
-    }
-
-    #[test]
-    fn malformed_entry_in_middle_returns_err() {
-        let err = parse_cidr_list(&cidrs("10.0.0.0/8, banana, 192.168.0.0/16")).unwrap_err();
-        assert!(err.to_string().contains("banana"));
-    }
-
-    #[test]
-    fn in_any_hit_and_miss() {
+    fn in_any_matches_members_of_ipv4_and_ipv6_networks() {
         let nets = parse_cidr_list(&cidrs("10.0.0.0/8, 192.168.0.0/16")).unwrap();
         assert!(in_any(IpAddr::V4(Ipv4Addr::new(10, 4, 5, 6)), &nets));
         assert!(in_any(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), &nets));
         assert!(!in_any(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), &nets));
-    }
 
-    #[test]
-    fn in_any_ipv6_hit() {
         let nets = parse_cidr_list(&cidrs("fd00::/8")).unwrap();
         assert!(in_any(IpAddr::V6("fd00::abcd".parse().unwrap()), &nets));
         assert!(!in_any(IpAddr::V6("2001:db8::1".parse().unwrap()), &nets));

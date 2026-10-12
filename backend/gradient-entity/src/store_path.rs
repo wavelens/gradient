@@ -165,15 +165,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_full_path() {
+    fn parse_reads_hash_name_and_derivation_flag() {
         let p = StorePath::parse("/nix/store/abc123-hello-2.12.1").unwrap();
         assert_eq!(p.hash(), "abc123");
         assert_eq!(p.name(), "hello-2.12.1");
         assert!(!p.is_derivation());
-    }
 
-    #[test]
-    fn parses_bare_base() {
         let p = StorePath::parse("abc123-hello-2.12.1.drv").unwrap();
         assert_eq!(p.hash(), "abc123");
         assert_eq!(p.name(), "hello-2.12.1.drv");
@@ -181,18 +178,15 @@ mod tests {
     }
 
     #[test]
-    fn full_and_base_roundtrip() {
+    fn full_and_base_round_trip_and_display_blanks_the_prefix() {
         let p = StorePath::from_parts("abc123", "hello-2.12.1");
         assert_eq!(p.base(), "abc123-hello-2.12.1");
         assert_eq!(p.full(), "/nix/store/abc123-hello-2.12.1");
         assert_eq!(StorePath::parse(&p.full()).unwrap(), p);
         assert_eq!(StorePath::parse(&p.base()).unwrap(), p);
-    }
 
-    #[test]
-    fn display_is_prefix_free() {
-        let p = StorePath::from_parts("abc123", "hello.drv");
-        assert_eq!(p.to_string(), "abc123-hello.drv");
+        let drv = StorePath::from_parts("abc123", "hello.drv");
+        assert_eq!(drv.to_string(), "abc123-hello.drv");
     }
 
     #[test]

@@ -108,10 +108,9 @@ fn summarize(rows: &[MDerivationMetric]) -> gradient_pool::score::HistoryPredict
         uncontended_build_time_ms: mean(&uncontended),
         build_core_score: mean(&built_on).map(|score| u32::try_from(score).unwrap_or(u32::MAX)),
         avg_disk_bytes,
-        output_nar_size: None,
         oom_rate,
         samples,
-        from_fleet_mean: false,
+        ..Default::default()
     }
 }
 

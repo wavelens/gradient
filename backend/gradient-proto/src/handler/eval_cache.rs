@@ -227,46 +227,30 @@ mod tests {
     }
 
     #[test]
-    fn accept_when_no_existing_row() {
+    fn should_accept_push_keeps_the_largest_blob() {
         assert!(should_accept_push(None, 0));
         assert!(should_accept_push(None, 1024));
-    }
-
-    #[test]
-    fn accept_when_incoming_strictly_larger() {
         assert!(should_accept_push(Some(100), 101));
-    }
-
-    #[test]
-    fn skip_when_incoming_equal_or_smaller() {
         assert!(!should_accept_push(Some(100), 100));
         assert!(!should_accept_push(Some(100), 99));
     }
 
     #[test]
-    fn pull_miss_when_no_row() {
-        let outcome = pull_outcome(None, Some("https://s3/x".into()), || "tok".into());
-        assert_eq!(outcome, EvalCachePullOutcome::Miss);
-    }
-
-    #[test]
-    fn pull_presigned_when_url_present() {
-        let r = row(42);
-        let outcome = pull_outcome(Some(&r), Some("https://s3/x".into()), || "tok".into());
+    fn pull_outcome_prefers_a_presigned_url_then_inlines() {
         assert_eq!(
-            outcome,
+            pull_outcome(None, Some("https://s3/x".into()), || "tok".into()),
+            EvalCachePullOutcome::Miss
+        );
+
+        let r = row(42);
+        assert_eq!(
+            pull_outcome(Some(&r), Some("https://s3/x".into()), || "tok".into()),
             EvalCachePullOutcome::Presigned {
                 url: "https://s3/x".into()
             }
         );
-    }
-
-    #[test]
-    fn pull_inline_when_no_url() {
-        let r = row(42);
-        let outcome = pull_outcome(Some(&r), None, || "tok".into());
         assert_eq!(
-            outcome,
+            pull_outcome(Some(&r), None, || "tok".into()),
             EvalCachePullOutcome::Inline {
                 total_bytes: 42,
                 stream_token: "tok".into()

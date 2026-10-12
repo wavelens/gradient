@@ -368,7 +368,7 @@ mod tests {
     const EXAMPLE: &[u8] = br#"Derive([("out","/nix/store/abc-hello","","")],[("/nix/store/xyz.drv",["out"])],["/nix/store/src"],"x86_64-linux","/nix/store/bash",["-e","/nix/store/builder.sh"],[("name","hello"),("requiredSystemFeatures","kvm big-parallel"),("system","x86_64-linux")])"#;
 
     #[test]
-    fn test_parse_full() {
+    fn parse_drv_reads_every_field() {
         let drv = parse_drv(EXAMPLE).unwrap();
         assert_eq!(drv.system, "x86_64-linux");
         assert_eq!(drv.builder, "/nix/store/bash");
@@ -381,36 +381,34 @@ mod tests {
         assert_eq!(drv.input_derivations[0].1, vec!["out"]);
         assert_eq!(drv.input_sources, vec!["/nix/store/src"]);
         assert_eq!(drv.environment["name"], "hello");
-    }
 
-    #[test]
-    fn test_no_features() {
-        let drv = br#"Derive([("out","/nix/store/abc-hello","","")],[],["/nix/store/src"],"aarch64-linux","/nix/store/bash",[],[("name","hello")])"#;
-        let drv = parse_drv(drv).unwrap();
-        assert_eq!(drv.system, "aarch64-linux");
-        assert!(drv.required_system_features().is_empty());
+        let sparse = br#"Derive([("out","/nix/store/abc-hello","","")],[],["/nix/store/src"],"aarch64-linux","/nix/store/bash",[],[("name","hello")])"#;
+        let sparse = parse_drv(sparse).unwrap();
+        assert_eq!(sparse.system, "aarch64-linux");
+        assert!(sparse.required_system_features().is_empty());
     }
 
     const META_DRV: &[u8] = br#"Derive([("out","/nix/store/abc-hello","","")],[],["/nix/store/src"],"x86_64-linux","/nix/store/bash",[],[("name","hello"),("requiredSystemFeatures","kvm"),("timeout","3600"),("maxSilent","1800"),("preferLocalBuild","1")])"#;
 
     #[test]
-    fn build_meta_reads_all_fields() {
-        let drv = parse_drv(META_DRV).unwrap();
-        let meta = drv.build_meta();
+    fn build_meta_reads_flat_env_fields_and_edges() {
+        let meta = parse_drv(META_DRV).unwrap().build_meta();
         assert_eq!(meta.timeout_secs, Some(3600));
         assert_eq!(meta.max_silent_secs, Some(1800));
         assert!(meta.prefer_local_build);
         assert_eq!(meta.required_features, vec!["kvm"]);
-    }
 
-    #[test]
-    fn build_meta_defaults_when_absent() {
-        let drv = parse_drv(EXAMPLE).unwrap();
-        let meta = drv.build_meta();
-        assert_eq!(meta.timeout_secs, None);
-        assert_eq!(meta.max_silent_secs, None);
-        assert!(!meta.prefer_local_build);
-        assert_eq!(meta.required_features, vec!["kvm", "big-parallel"]);
+        let defaults = parse_drv(EXAMPLE).unwrap().build_meta();
+        assert_eq!(defaults.timeout_secs, None);
+        assert_eq!(defaults.max_silent_secs, None);
+        assert!(!defaults.prefer_local_build);
+        assert_eq!(defaults.required_features, vec!["kvm", "big-parallel"]);
+
+        let true_drv = br#"Derive([("out","/nix/store/abc-hello","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("preferLocalBuild","true")])"#;
+        assert!(parse_drv(true_drv).unwrap().build_meta().prefer_local_build);
+
+        let bad = br#"Derive([("out","/nix/store/abc-hello","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("timeout","forever")])"#;
+        assert_eq!(parse_drv(bad).unwrap().build_meta().timeout_secs, None);
     }
 
     #[test]
@@ -420,16 +418,31 @@ mod tests {
         assert!(!parse_drv(EXAMPLE).unwrap().build_meta().is_fixed_output);
     }
 
+    const STRUCTURED_ATTRS_DRV: &[u8] = br#"Derive([("out","/nix/store/cbir-git-minimal-2.54.0","","")],[],["/nix/store/src"],"x86_64-linux","/nix/store/bash",["-e","/nix/store/builder.sh"],[("__json","{\"requiredSystemFeatures\":[\"gccarch-skylake\"],\"preferLocalBuild\":true,\"timeout\":3600,\"allowSubstitutes\":false}"),("__structuredAttrs","1"),("name","git-minimal-2.54.0"),("out","/nix/store/cbir-git-minimal-2.54.0"),("system","x86_64-linux")])"#;
+
     #[test]
-    fn build_meta_prefer_local_build_accepts_true_and_1() {
-        let true_drv = br#"Derive([("out","/nix/store/abc-hello","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("preferLocalBuild","true")])"#;
-        assert!(parse_drv(true_drv).unwrap().build_meta().prefer_local_build);
+    fn structured_attrs_override_the_flat_env() {
+        let drv = parse_drv(STRUCTURED_ATTRS_DRV).unwrap();
+        assert_eq!(drv.required_system_features(), vec!["gccarch-skylake"]);
+
+        let meta = drv.build_meta();
+        assert_eq!(meta.required_features, vec!["gccarch-skylake"]);
+        assert!(meta.prefer_local_build);
+        assert_eq!(meta.timeout_secs, Some(3600));
+
+        assert!(!drv.allow_substitutes());
     }
 
     #[test]
-    fn build_meta_ignores_unparseable_timeout() {
-        let bad = br#"Derive([("out","/nix/store/abc-hello","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("timeout","forever")])"#;
-        assert_eq!(parse_drv(bad).unwrap().build_meta().timeout_secs, None);
+    fn allow_substitutes_defaults_true_and_parses_false() {
+        let absent = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x")])"#;
+        assert!(parse_drv(absent).unwrap().allow_substitutes());
+        let empty = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("allowSubstitutes","")])"#;
+        assert!(!parse_drv(empty).unwrap().allow_substitutes());
+        let zero = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("allowSubstitutes","0")])"#;
+        assert!(!parse_drv(zero).unwrap().allow_substitutes());
+        let on = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("allowSubstitutes","1")])"#;
+        assert!(parse_drv(on).unwrap().allow_substitutes());
     }
 
     #[test]
@@ -445,41 +458,6 @@ mod tests {
             Some("gcc-wrapper".into())
         );
         assert_eq!(derive_pname(Some(""), "hello-1.0"), Some("hello".into()));
-    }
-
-    const STRUCTURED_ATTRS_DRV: &[u8] = br#"Derive([("out","/nix/store/cbir-git-minimal-2.54.0","","")],[],["/nix/store/src"],"x86_64-linux","/nix/store/bash",["-e","/nix/store/builder.sh"],[("__json","{\"requiredSystemFeatures\":[\"gccarch-skylake\"],\"preferLocalBuild\":true,\"timeout\":3600,\"allowSubstitutes\":false}"),("__structuredAttrs","1"),("name","git-minimal-2.54.0"),("out","/nix/store/cbir-git-minimal-2.54.0"),("system","x86_64-linux")])"#;
-
-    #[test]
-    fn required_features_read_from_structured_attrs() {
-        let drv = parse_drv(STRUCTURED_ATTRS_DRV).unwrap();
-        assert_eq!(drv.required_system_features(), vec!["gccarch-skylake"]);
-    }
-
-    #[test]
-    fn build_meta_reads_structured_attrs() {
-        let drv = parse_drv(STRUCTURED_ATTRS_DRV).unwrap();
-        let meta = drv.build_meta();
-        assert_eq!(meta.required_features, vec!["gccarch-skylake"]);
-        assert!(meta.prefer_local_build);
-        assert_eq!(meta.timeout_secs, Some(3600));
-    }
-
-    #[test]
-    fn allow_substitutes_reads_structured_attrs_bool() {
-        let drv = parse_drv(STRUCTURED_ATTRS_DRV).unwrap();
-        assert!(!drv.allow_substitutes());
-    }
-
-    #[test]
-    fn allow_substitutes_defaults_true_and_parses_false() {
-        let absent = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x")])"#;
-        assert!(parse_drv(absent).unwrap().allow_substitutes());
-        let empty = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("allowSubstitutes","")])"#;
-        assert!(!parse_drv(empty).unwrap().allow_substitutes());
-        let zero = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("allowSubstitutes","0")])"#;
-        assert!(!parse_drv(zero).unwrap().allow_substitutes());
-        let on = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("allowSubstitutes","1")])"#;
-        assert!(parse_drv(on).unwrap().allow_substitutes());
     }
 
     #[test]
