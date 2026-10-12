@@ -2003,7 +2003,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3427,7 +3427,7 @@ dependencies = [
 [[package]]
 name = "harmonia-daemon"
 version = "3.3.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -3450,7 +3450,7 @@ dependencies = [
 [[package]]
 name = "harmonia-file-core"
 version = "3.3.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "serde",
  "serde_json",
@@ -3460,7 +3460,7 @@ dependencies = [
 [[package]]
 name = "harmonia-file-nar"
 version = "3.3.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "bstr",
  "bytes",
@@ -3484,7 +3484,7 @@ dependencies = [
 [[package]]
 name = "harmonia-protocol"
 version = "3.3.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "async-stream",
  "bstr",
@@ -3518,7 +3518,7 @@ dependencies = [
 [[package]]
 name = "harmonia-protocol-derive"
 version = "3.3.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3528,7 +3528,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-aterm"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "bytes",
  "harmonia-store-content-address",
@@ -3544,7 +3544,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-build-result"
 version = "3.3.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "harmonia-store-derivation",
  "num_enum",
@@ -3555,7 +3555,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-content-address"
 version = "3.3.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "derive_more",
  "harmonia-store-path",
@@ -3567,7 +3567,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-db"
 version = "3.3.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "foldhash",
  "harmonia-store-content-address",
@@ -3584,7 +3584,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-derivation"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -3603,7 +3603,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-path"
 version = "3.3.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "derive_more",
  "harmonia-utils-base-encoding",
@@ -3616,7 +3616,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-path-info"
 version = "3.3.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "harmonia-store-content-address",
  "harmonia-store-path",
@@ -3628,7 +3628,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-remote"
 version = "3.3.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -3648,7 +3648,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-base-encoding"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "data-encoding",
  "derive_more",
@@ -3658,8 +3658,9 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-hash"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
+ "aws-lc-rs",
  "blake3",
  "data-encoding",
  "derive_more",
@@ -3675,7 +3676,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-io"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "bytes",
  "futures-util",
@@ -3689,7 +3690,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-signature"
 version = "3.3.0"
-source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#ef33c7a4d6416d3d656fb4319f958522b8fc0bbb"
+source = "git+https://github.com/DerDennisOP/harmonia.git?branch=build-resource-usage#0248ba48ed713afba078e5f86645cb2d74a48aa6"
 dependencies = [
  "data-encoding",
  "ed25519-dalek 3.0.0",
@@ -4743,7 +4744,7 @@ dependencies = [
 [[package]]
 name = "nix-bindings"
 version = "0.2352.0"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#fdf824013844f4836b29d796b9d286028a65e703"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#2ab37e6842365a4b4fda4ac3b403ebc2fc781bc3"
 dependencies = [
  "nix-bindings-sys",
 ]
@@ -4751,7 +4752,7 @@ dependencies = [
 [[package]]
 name = "nix-bindings-sys"
 version = "0.2352.0"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#fdf824013844f4836b29d796b9d286028a65e703"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#2ab37e6842365a4b4fda4ac3b403ebc2fc781bc3"
 dependencies = [
  "bindgen",
  "cc",
@@ -6018,7 +6019,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6535,7 +6536,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6548,7 +6549,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6607,7 +6608,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7772,10 +7773,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8699,7 +8700,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8814,15 +8815,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets",
 ]
