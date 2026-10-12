@@ -8,9 +8,11 @@ use crate::commands::attr_spec;
 use crate::config::*;
 use crate::input::client_from_config;
 use crate::output::{ExitKind, Output};
+use crate::tui::watch::eval_is_terminal;
 use connector::ConnectorError;
-use connector::build_requests::BuildStartResponse;
-use connector::evals::{ArtefactTree, EntryPointArtefacts, EvaluationResponse};
+use connector::api::{
+    ArtefactTree, DispatchResponse, EntryPointArtefacts, EvaluationResponse, EvaluationStatus,
+};
 #[cfg(not(feature = "nix"))]
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -114,18 +116,19 @@ pub async fn handle_build(
     }
 
     let started = upload_and_start(&client, &project, &entries, &params, quiet, out).await;
+    let evaluation = started.evaluation.to_string();
 
     if background {
         out.ok(&started);
-        out.human(started.evaluation.clone());
+        out.human(evaluation.clone());
         return;
     }
 
     if quiet {
-        out.human(started.evaluation.clone());
+        out.human(evaluation.clone());
     } else {
         out.ok(&started);
-        out.human(format!("Evaluation: {}", started.evaluation));
+        out.human(format!("Evaluation: {}", evaluation));
         out.human(format!("Task:    {}", started.task));
         out.human(format!("Commit:     {}", started.commit));
     }
@@ -134,15 +137,15 @@ pub async fn handle_build(
         out.human("Streaming evaluation logs...");
     }
 
-    crate::commands::logstream::stream_eval_logs(&client, &started.evaluation, out).await;
+    crate::commands::logstream::stream_eval_logs(&client, &evaluation, out).await;
 
     if no_link {
         return;
     }
 
-    let eval = wait_for_terminal(&client, &started.evaluation, out).await;
-    let status = eval.as_ref().map(|e| e.status.clone()).unwrap_or_default();
-    if status != "Completed" {
+    let eval = wait_for_terminal(&client, &evaluation, out).await;
+    let status = eval.as_ref().map(|e| e.status);
+    if status != Some(EvaluationStatus::Completed) {
         if !quiet {
             if let Some(err) = eval
                 .as_ref()
@@ -153,13 +156,14 @@ pub async fn handle_build(
             }
 
             out.human(format!(
-                "Build did not complete (status: {status}); skipping result."
+                "Build did not complete (status: {}); skipping result.",
+                status.map(|s| s.to_string()).unwrap_or_default()
             ));
         }
         return;
     }
 
-    let tree = match client.evals().artefacts(&started.evaluation).await {
+    let tree = match client.evals().artefacts(&evaluation).await {
         Ok(t) => t,
         Err(e) => {
             if !quiet {
@@ -189,7 +193,7 @@ async fn upload_and_start(
     params: &BuildParams,
     quiet: bool,
     out: Output,
-) -> BuildStartResponse {
+) -> DispatchResponse {
     #[cfg(feature = "nix")]
     {
         crate::commands::build_nix::start_via_nar(client, project, entries, params, quiet, out)
@@ -209,10 +213,8 @@ async fn start_via_manifest(
     params: &BuildParams,
     quiet: bool,
     out: Output,
-) -> BuildStartResponse {
-    use connector::build_requests::{
-        BuildManifestRequest, BuildStartRequest, InputOverride, ManifestFile,
-    };
+) -> DispatchResponse {
+    use connector::api::{DispatchRequest, InputOverrideBody, ManifestEntry, ManifestRequest};
 
     if !quiet {
         out.human(format!(
@@ -234,11 +236,11 @@ async fn start_via_manifest(
         })
         .collect();
 
-    let manifest_req = BuildManifestRequest {
+    let manifest_req = ManifestRequest {
         project: project.to_owned(),
         files: hashed
             .iter()
-            .map(|(path, hash, size)| ManifestFile {
+            .map(|(path, hash, size)| ManifestEntry {
                 path: path.clone(),
                 hash: hash.clone(),
                 size: *size,
@@ -291,7 +293,7 @@ async fn start_via_manifest(
 
         match client
             .build_requests()
-            .upload_blobs(&manifest.session, form)
+            .upload_blobs(&manifest.session.to_string(), form)
             .await
         {
             Ok(resp) => {
@@ -311,7 +313,7 @@ async fn start_via_manifest(
     let input_overrides = params
         .overrides
         .iter()
-        .map(|(input_name, url)| InputOverride {
+        .map(|(input_name, url)| InputOverrideBody {
             input_name: input_name.clone(),
             url: url.clone(),
         })
@@ -320,8 +322,8 @@ async fn start_via_manifest(
     match client
         .build_requests()
         .start(
-            &manifest.session,
-            BuildStartRequest {
+            &manifest.session.to_string(),
+            DispatchRequest {
                 target: params.target.clone(),
                 system: params.system.clone(),
                 input_overrides,
@@ -347,7 +349,7 @@ async fn wait_for_terminal(
     loop {
         match client.evals().get(eval_id).await {
             Ok(e) => {
-                if matches!(e.status.as_str(), "Completed" | "Failed" | "Aborted") {
+                if eval_is_terminal(e.status) {
                     return Some(e);
                 }
             }
@@ -457,7 +459,11 @@ async fn download_result_dir(
     for output in &ep.outputs {
         for product in &output.products {
             let name = product_filename(product);
-            let bytes = match client.builds().download_file(&ep.build_id, &name).await {
+            let bytes = match client
+                .builds()
+                .download_file(&ep.build_id.to_string(), &name)
+                .await
+            {
                 Ok(b) => b,
                 Err(e) => {
                     out.progress(format!("Failed to download {}: {}", name, e));

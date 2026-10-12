@@ -7,6 +7,7 @@
 //! The log transport can carry nix ANSI output double-escaped as a literal `\u001b`. Decoding is
 //! restoring the real control bytes, mirroring the web log viewer.
 
+use connector::api::MessageLevel;
 use std::io::IsTerminal;
 
 pub fn color_enabled() -> bool {
@@ -49,11 +50,11 @@ pub fn render_log(chunk: &str) -> String {
     }
 }
 
-pub fn eval_message_line(level: &str, message: &str) -> String {
-    let (label, colour) = match level.to_ascii_lowercase().as_str() {
-        "error" => ("error", "\u{1b}[1;31m"),
-        "warning" => ("warning", "\u{1b}[1;33m"),
-        _ => ("note", "\u{1b}[1;36m"),
+pub fn eval_message_line(level: MessageLevel, message: &str) -> String {
+    let (label, colour) = match level {
+        MessageLevel::Error => ("error", "\u{1b}[1;31m"),
+        MessageLevel::Warning => ("warning", "\u{1b}[1;33m"),
+        MessageLevel::Notice => ("note", "\u{1b}[1;36m"),
     };
     if color_enabled() {
         format!("{colour}{label}:\u{1b}[0m {message}")
@@ -78,8 +79,8 @@ mod tests {
 
     #[test]
     fn message_line_labels_by_level() {
-        assert!(eval_message_line("error", "boom").contains("error:"));
-        assert!(eval_message_line("warning", "careful").contains("warning:"));
-        assert!(eval_message_line("notice", "fyi").contains("note:"));
+        assert!(eval_message_line(MessageLevel::Error, "boom").contains("error:"));
+        assert!(eval_message_line(MessageLevel::Warning, "careful").contains("warning:"));
+        assert!(eval_message_line(MessageLevel::Notice, "fyi").contains("note:"));
     }
 }

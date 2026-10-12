@@ -18,9 +18,10 @@ async fn basic_login_returns_token() {
     let client = Client::builder().base_url(server.uri()).build().unwrap();
     let token = client
         .auth()
-        .basic_login(connector::auth::MakeLoginRequest {
+        .basic_login(connector::api::MakeLoginRequest {
             loginname: "user".into(),
             password: "pass".into(),
+            remember_me: None,
         })
         .await
         .unwrap();

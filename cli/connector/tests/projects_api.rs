@@ -14,7 +14,12 @@ async fn list_projects_returns_paginated() {
         .and(path("/api/v1/projects"))
         .and(header("authorization", "Bearer t"))
         .respond_with(ResponseTemplate::new(200).set_body_json(ok(json!({
-            "items": [{"id": "1", "name": "foo"}],
+            "items": [{
+                "id": "00000000-0000-0000-0000-000000000001", "name": "foo", "display_name": "Foo", "description": "",
+                "created_by": "00000000-0000-0000-0000-000000000002", "created_at": "2024-01-01T00:00:00",
+                "hide_build_requests": false, "managed": false, "public": false,
+                "public_key": null, "role": null, "running_evaluations": 0
+            }],
             "total": 1, "page": 1, "per_page": 10
         }))))
         .mount(&server)
@@ -48,10 +53,12 @@ async fn create_project_sends_body() {
         .unwrap();
     let id = client
         .projects()
-        .create(connector::projects::MakeProjectRequest {
-            name: "n".into(),
-            display_name: "d".into(),
+        .create(connector::api::MakeProjectRequest {
+            name: "n".to_string().into(),
+            display_name: "d".to_string().into(),
             description: "x".into(),
+            hide_build_requests: None,
+            public: None,
         })
         .await
         .unwrap();

@@ -11,7 +11,8 @@ use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
 use clap_complete::{CompleteEnv, Shell};
-use connector::auth::{CliDevicePollRequest, CliPollOutcome, MakeLoginRequest, MakeUserRequest};
+use connector::api::{CliDevicePollRequest, MakeLoginRequest, MakeUserRequest};
+use connector::auth::CliPollOutcome;
 use std::io::{self, Write};
 use std::process::Command;
 use std::time::Duration;
@@ -262,7 +263,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                 .auth()
                 .register(MakeUserRequest {
                     username: input.get("Username"),
-                    name: input.get("Name"),
+                    name: input.get("Name").into(),
                     email: input.get("Email"),
                     password: pw,
                 })
@@ -303,6 +304,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                     .basic_login(MakeLoginRequest {
                         loginname: username,
                         password: pw,
+                        remember_me: None,
                     })
                     .await
                 {
@@ -408,8 +410,9 @@ async fn run_web_login(out: Output, no_browser: bool) {
         let _ = open_url(&start.verification_uri_complete);
     }
 
-    let interval = Duration::from_secs(start.interval.max(1));
-    let deadline = std::time::Instant::now() + Duration::from_secs(start.expires_in.max(0) as u64);
+    let interval = Duration::from_secs(start.interval.max(1).unsigned_abs());
+    let deadline =
+        std::time::Instant::now() + Duration::from_secs(start.expires_in.max(0).unsigned_abs());
 
     loop {
         if std::time::Instant::now() >= deadline {

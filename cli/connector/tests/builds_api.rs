@@ -10,11 +10,13 @@ fn ok<T: serde::Serialize>(m: T) -> serde_json::Value {
 async fn get_build_returns_response() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/builds/b1"))
+        .and(path("/api/v1/builds/00000000-0000-0000-0000-000000000001"))
         .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-            "id": "b1", "evaluation": "e1", "status": "Succeeded",
+            "id": "00000000-0000-0000-0000-000000000001", "evaluation": "00000000-0000-0000-0000-000000000002", "status": "Completed",
             "derivation_path": "/nix/store/abc.drv", "architecture": "x86_64-linux",
-            "output": {}, "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z"
+            "output": {}, "created_at": "2024-01-01T00:00:00", "updated_at": "2024-01-01T00:00:00",
+            "dispatched_job": null, "ifd": false, "prioritized": false, "progress": null,
+            "worker": null
         }))))
         .mount(&server)
         .await;
@@ -24,9 +26,13 @@ async fn get_build_returns_response() {
         .token("t")
         .build()
         .unwrap();
-    let build = client.builds().get("b1").await.unwrap();
-    assert_eq!(build.id, "b1");
-    assert_eq!(build.status, "Succeeded");
+    let build = client
+        .builds()
+        .get("00000000-0000-0000-0000-000000000001")
+        .await
+        .unwrap();
+    assert_eq!(build.id.to_string(), "00000000-0000-0000-0000-000000000001");
+    assert_eq!(build.status, connector::api::BuildStatus::Completed);
 }
 
 #[tokio::test]

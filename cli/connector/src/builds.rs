@@ -1,42 +1,12 @@
+use crate::api::{BuildGraph, BuildProduct, BuildWithOutputs};
 use crate::{Client, ConnectorError, http};
 use futures::stream::Stream;
 use reqwest::Method;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BuildResponse {
-    pub id: String,
-    pub evaluation: String,
-    pub status: String,
-    pub derivation_path: String,
-    pub architecture: String,
-    pub worker: Option<String>,
-    pub output: HashMap<String, String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BuildGraph {
-    pub root: String,
-    pub nodes: Vec<serde_json::Value>,
-    pub edges: Vec<serde_json::Value>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BuildDownload {
-    pub file_type: String,
-    pub subtype: String,
-    pub name: String,
-    pub path: String,
-    pub size: Option<i64>,
-}
 
 pub struct BuildsApi<'a>(pub(crate) &'a Client);
 
 impl BuildsApi<'_> {
-    pub async fn get(&self, id: &str) -> Result<BuildResponse, ConnectorError> {
+    pub async fn get(&self, id: &str) -> Result<BuildWithOutputs, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -124,7 +94,7 @@ impl BuildsApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn downloads(&self, id: &str) -> Result<Vec<BuildDownload>, ConnectorError> {
+    pub async fn downloads(&self, id: &str) -> Result<Vec<BuildProduct>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

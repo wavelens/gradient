@@ -97,10 +97,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                                 lf,
                             ));
                         }
-                        let pages = if res.per_page == 0 {
+                        let pages = if res.per_page <= 0 {
                             1
                         } else {
-                            res.total.div_ceil(res.per_page)
+                            (res.total + res.per_page - 1) / res.per_page
                         };
                         out.human(format!("page {}/{} (total {})", res.page, pages, res.total));
                     }

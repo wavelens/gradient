@@ -40,8 +40,8 @@ async fn poll_metadata(client: Client, eval_id: String, tx: UnboundedSender<Watc
         let evals = client.evals();
         let terminal = match evals.get(&eval_id).await {
             Ok(eval) => {
-                let terminal = eval_is_terminal(&eval.status);
-                let _ = tx.send(WatchEvent::Eval(eval));
+                let terminal = eval_is_terminal(eval.status);
+                let _ = tx.send(WatchEvent::Eval(Box::new(eval)));
                 terminal
             }
             Err(_) => false,

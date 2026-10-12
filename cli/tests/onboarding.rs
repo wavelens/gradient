@@ -26,7 +26,22 @@ async fn projects_mock(names: &[&str]) -> MockServer {
     let server = MockServer::start().await;
     let items: Vec<_> = names
         .iter()
-        .map(|n| serde_json::json!({"id": format!("id-{n}"), "name": n}))
+        .map(|n| {
+            serde_json::json!({
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": n,
+                "display_name": n,
+                "description": "",
+                "created_by": "00000000-0000-0000-0000-000000000002",
+                "created_at": "2026-01-01T00:00:00",
+                "hide_build_requests": false,
+                "managed": false,
+                "public": false,
+                "public_key": null,
+                "role": null,
+                "running_evaluations": 0
+            })
+        })
         .collect();
     Mock::given(method("GET"))
         .and(path("/api/v1/projects"))

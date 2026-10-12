@@ -5,7 +5,7 @@
  */
 
 use crate::tui::View;
-use connector::evals::{BuildItem, EvalMessage, EvaluationResponse};
+use connector::api::{BuildItem, EvaluationMessageResponse, EvaluationResponse, EvaluationStatus};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::{Color, Modifier, Style};
 use std::collections::HashSet;
@@ -13,9 +13,9 @@ use std::time::Instant;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub enum WatchEvent {
-    Eval(EvaluationResponse),
+    Eval(Box<EvaluationResponse>),
     Builds(Vec<BuildItem>),
-    Message(EvalMessage),
+    Message(EvaluationMessageResponse),
     Log(String),
 }
 
@@ -155,14 +155,17 @@ fn apply_sgr(mut style: Style, code: &str) -> Style {
     style
 }
 
-pub fn eval_is_terminal(status: &str) -> bool {
-    matches!(status, "Completed" | "Failed" | "Aborted")
+pub fn eval_is_terminal(status: EvaluationStatus) -> bool {
+    matches!(
+        status,
+        EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted
+    )
 }
 
-fn eval_style(status: &str) -> Style {
+fn eval_style(status: Option<EvaluationStatus>) -> Style {
     let color = match status {
-        "Completed" => Color::Green,
-        "Failed" | "Aborted" => Color::Red,
+        Some(EvaluationStatus::Completed) => Color::Green,
+        Some(EvaluationStatus::Failed | EvaluationStatus::Aborted) => Color::Red,
         _ => Color::Yellow,
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
@@ -227,10 +230,10 @@ impl Dashboard {
 
     pub fn apply(&mut self, ev: WatchEvent) {
         match ev {
-            WatchEvent::Eval(e) => self.eval = Some(e),
+            WatchEvent::Eval(e) => self.eval = Some(*e),
             WatchEvent::Builds(b) => self.builds = b,
             WatchEvent::Message(m) => {
-                if self.seen_messages.insert(m.id.clone()) {
+                if self.seen_messages.insert(m.id.to_string()) {
                     self.push_line(format!("[eval/{}] {}", m.level, m.message));
                 }
             }
@@ -280,8 +283,8 @@ impl Dashboard {
         self.follow = false;
     }
 
-    fn status(&self) -> &str {
-        self.eval.as_ref().map(|e| e.status.as_str()).unwrap_or("…")
+    fn status(&self) -> Option<EvaluationStatus> {
+        self.eval.as_ref().map(|e| e.status)
     }
 
     #[cfg(test)]
@@ -316,11 +319,12 @@ impl View for Dashboard {
             .split(area);
 
         let summary = BuildSummary::of(&self.builds);
-        let status = self.status().to_string();
+        let status = self.status();
+        let status_text = status.map_or_else(|| "…".to_string(), |s| s.to_string());
         let elapsed = format_duration(self.started.elapsed().as_secs());
         let mut header: Vec<Line> = vec![Line::from(vec![
             Span::raw("Status "),
-            Span::styled(status.clone(), eval_style(&status)),
+            Span::styled(status_text, eval_style(status)),
             Span::raw(format!(
                 "   Elapsed {elapsed}   Builds {}/{} ",
                 summary.done(),
@@ -337,7 +341,9 @@ impl View for Dashboard {
         if let Some(e) = &self.eval {
             header.push(Line::raw(format!(
                 "Task {}   Commit {}   Target {}",
-                e.task.as_deref().unwrap_or("-"),
+                e.task
+                    .as_ref()
+                    .map_or_else(|| "-".to_string(), |t| t.to_string()),
                 short_commit(&e.commit),
                 e.wildcard
             )));
@@ -440,25 +446,36 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use connector::api::MessageLevel;
+
+    const ZERO_ID: &str = "00000000-0000-0000-0000-000000000000";
+    const MESSAGE_1: &str = "00000000-0000-0000-0000-000000000001";
+    const MESSAGE_2: &str = "00000000-0000-0000-0000-000000000002";
 
     fn build(name: &str, status: &str, ms: Option<i64>) -> BuildItem {
         BuildItem {
-            id: name.to_string(),
+            build_started_at: None,
+            build_time_ms: ms,
+            depth: 0,
+            dispatched_job: None,
+            has_artefacts: false,
+            id: ZERO_ID.parse().unwrap(),
+            ifd: false,
             name: name.to_string(),
+            prioritized: false,
             status: status.to_string(),
             updated_at: String::new(),
-            build_time_ms: ms,
         }
     }
 
-    fn msg(id: &str, level: &str, text: &str) -> EvalMessage {
-        EvalMessage {
-            id: id.to_string(),
-            level: level.to_string(),
-            message: text.to_string(),
-            source: None,
+    fn msg(id: &str, level: MessageLevel, text: &str) -> EvaluationMessageResponse {
+        EvaluationMessageResponse {
             created_at: String::new(),
             entry_points: Vec::new(),
+            id: id.parse().unwrap(),
+            level,
+            message: text.to_string(),
+            source: None,
         }
     }
 
@@ -488,11 +505,11 @@ mod tests {
 
     #[test]
     fn eval_terminal_detection() {
-        assert!(eval_is_terminal("Completed"));
-        assert!(eval_is_terminal("Failed"));
-        assert!(eval_is_terminal("Aborted"));
-        assert!(!eval_is_terminal("Building"));
-        assert!(!eval_is_terminal("EvaluatingFlake"));
+        assert!(eval_is_terminal(EvaluationStatus::Completed));
+        assert!(eval_is_terminal(EvaluationStatus::Failed));
+        assert!(eval_is_terminal(EvaluationStatus::Aborted));
+        assert!(!eval_is_terminal(EvaluationStatus::Building));
+        assert!(!eval_is_terminal(EvaluationStatus::EvaluatingFlake));
     }
 
     #[test]
@@ -531,9 +548,21 @@ mod tests {
     fn messages_are_deduplicated() {
         let mut d = Dashboard::bare("e1".into());
         d.set_viewport(5);
-        d.apply(WatchEvent::Message(msg("m1", "error", "boom")));
-        d.apply(WatchEvent::Message(msg("m1", "error", "boom")));
-        d.apply(WatchEvent::Message(msg("m2", "warn", "careful")));
+        d.apply(WatchEvent::Message(msg(
+            MESSAGE_1,
+            MessageLevel::Error,
+            "boom",
+        )));
+        d.apply(WatchEvent::Message(msg(
+            MESSAGE_1,
+            MessageLevel::Error,
+            "boom",
+        )));
+        d.apply(WatchEvent::Message(msg(
+            MESSAGE_2,
+            MessageLevel::Warning,
+            "careful",
+        )));
         assert_eq!(d.log_len(), 2);
     }
 

@@ -1,73 +1,10 @@
+use crate::api::{
+    ArtefactTree, EvaluationMessageResponse, EvaluationResponse, MakeEvaluationRequest,
+    OutputArtefacts, PaginatedBuilds,
+};
 use crate::{Client, ConnectorError, http};
 use futures::stream::Stream;
 use reqwest::Method;
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct EvaluationResponse {
-    pub id: String,
-    pub task: Option<String>,
-    pub repository: String,
-    pub commit: String,
-    pub wildcard: String,
-    pub status: String,
-    #[serde(default)]
-    pub previous: Option<String>,
-    #[serde(default)]
-    pub next: Option<String>,
-    pub created_at: String,
-    #[serde(default)]
-    pub updated_at: String,
-    #[serde(default)]
-    pub error: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BuildItem {
-    pub id: String,
-    pub name: String,
-    pub status: String,
-    pub updated_at: String,
-    pub build_time_ms: Option<i64>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct PaginatedBuilds {
-    pub builds: Vec<BuildItem>,
-    pub total: usize,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct EvalMessage {
-    pub id: String,
-    pub level: String,
-    pub message: String,
-    pub source: Option<String>,
-    pub created_at: String,
-    pub entry_points: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ArtefactTree {
-    pub evaluation: String,
-    pub created_at: String,
-    pub entry_points: Vec<EntryPointArtefacts>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct EntryPointArtefacts {
-    pub attr: String,
-    pub derivation: String,
-    pub build_id: String,
-    pub outputs: Vec<OutputArtefacts>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct OutputArtefacts {
-    pub name: String,
-    pub store_path: String,
-    pub products: Vec<ProductArtefact>,
-}
 
 impl OutputArtefacts {
     /// The API is returning the prefix-free base form. An already-prefixed value is tolerated
@@ -79,17 +16,6 @@ impl OutputArtefacts {
             format!("/nix/store/{}", self.store_path)
         }
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ProductArtefact {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub file_type: String,
-    pub subtype: String,
-    pub name: String,
-    pub path: String,
-    pub size: Option<i64>,
 }
 
 pub struct EvalsApi<'a>(pub(crate) &'a Client);
@@ -116,7 +42,9 @@ impl EvalsApi<'_> {
             &format!("evals/{id}"),
             true,
         )?
-        .json(&serde_json::json!({ "method": "abort" }));
+        .json(&MakeEvaluationRequest {
+            method: "abort".to_owned(),
+        });
         http::decode(req.send().await?).await
     }
 
@@ -147,7 +75,10 @@ impl EvalsApi<'_> {
         http::json_lines(req.send().await?).await
     }
 
-    pub async fn messages(&self, id: &str) -> Result<Vec<EvalMessage>, ConnectorError> {
+    pub async fn messages(
+        &self,
+        id: &str,
+    ) -> Result<Vec<EvaluationMessageResponse>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -169,52 +100,5 @@ impl EvalsApi<'_> {
             true,
         )?;
         http::decode(req.send().await?).await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::EvaluationResponse;
-
-    #[test]
-    fn deserializes_eval_without_updated_at_or_error() {
-        let body = r#"{
-            "id":"019ed787-8325-7441-9343-118e6285488e",
-            "task":"019ed787-8321-7703-ab8d-e79cc2da3d88",
-            "task_name":"build-request",
-            "repository":"/nix/store/abc-source",
-            "commit":"0000000000000000000000000000000000000000",
-            "wildcard":".#dig",
-            "status":"Queued",
-            "previous":null,
-            "next":null,
-            "created_at":"2026-06-17T21:40:42.917745",
-            "error_count":0,
-            "warning_count":0,
-            "entry_points":[]
-        }"#;
-        let eval: EvaluationResponse = serde_json::from_str(body).expect("decode");
-        assert_eq!(eval.status, "Queued");
-        assert!(eval.updated_at.is_empty());
-        assert!(eval.error.is_none());
-    }
-
-    #[test]
-    fn deserializes_eval_with_error_message() {
-        let body = r#"{
-            "id":"019ed787-8325-7441-9343-118e6285488e",
-            "repository":"/nix/store/abc-source",
-            "commit":"0000",
-            "wildcard":".#dig",
-            "status":"Failed",
-            "created_at":"2026-06-17T21:40:42.917745",
-            "updated_at":"2026-06-17T21:42:42.917745",
-            "error_count":1,
-            "warning_count":0,
-            "error":"prefetch import failed",
-            "entry_points":[]
-        }"#;
-        let eval: EvaluationResponse = serde_json::from_str(body).expect("decode");
-        assert_eq!(eval.error.as_deref(), Some("prefetch import failed"));
     }
 }

@@ -5,7 +5,7 @@
  */
 
 use crate::tui::View;
-use connector::caches::NarSummary;
+use connector::api::NarSummary;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 pub struct NarBrowser {

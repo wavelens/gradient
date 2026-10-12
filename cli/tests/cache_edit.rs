@@ -37,7 +37,7 @@ async fn prod_cache(server: &MockServer) {
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "error": false,
             "message": {
-                "id": "cache-1",
+                "id": "00000000-0000-0000-0000-000000000001",
                 "name": "prod",
                 "display_name": "Prod",
                 "description": "the production cache",
@@ -45,8 +45,12 @@ async fn prod_cache(server: &MockServer) {
                 "local_priority": null,
                 "max_storage_gb": 100,
                 "active": true,
+                "can_edit": true,
                 "managed": false,
-                "created_by": "user-1",
+                "public": false,
+                "public_key": "prod:key",
+                "pull_through": false,
+                "created_by": "00000000-0000-0000-0000-000000000002",
                 "created_at": "2026-09-18T00:00:00"
             }
         })))
@@ -74,12 +78,10 @@ async fn an_untouched_edit_patches_the_cache_with_its_own_values() {
     Mock::given(method("PATCH"))
         .and(path("/api/v1/caches/prod"))
         .and(body_json(serde_json::json!({
-            "name": null,
             "display_name": "Prod",
             "description": "the production cache",
             "priority": 40,
-            "max_storage_gb": 100,
-            "pull_through": null
+            "max_storage_gb": 100
         })))
         .respond_with(
             ResponseTemplate::new(200)
@@ -101,12 +103,10 @@ async fn a_flag_overrides_one_field_and_leaves_the_rest() {
     Mock::given(method("PATCH"))
         .and(path("/api/v1/caches/prod"))
         .and(body_json(serde_json::json!({
-            "name": null,
             "display_name": "Production",
             "description": "the production cache",
             "priority": 40,
-            "max_storage_gb": 100,
-            "pull_through": null
+            "max_storage_gb": 100
         })))
         .respond_with(
             ResponseTemplate::new(200)
@@ -132,7 +132,6 @@ async fn the_pull_through_flag_is_patched() {
     Mock::given(method("PATCH"))
         .and(path("/api/v1/caches/prod"))
         .and(body_json(serde_json::json!({
-            "name": null,
             "display_name": "Prod",
             "description": "the production cache",
             "priority": 40,

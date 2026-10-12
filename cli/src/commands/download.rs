@@ -8,7 +8,7 @@ use crate::commands::attr_spec;
 use crate::config::*;
 use crate::input::{client_from_config, flush_stdout};
 use crate::output::{ExitKind, Output, to_exit_kind};
-use connector::evals::{ArtefactTree, ProductArtefact};
+use connector::api::{ArtefactTree, ProductArtefact};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -133,7 +133,7 @@ fn flatten_products(tree: &ArtefactTree) -> Vec<FlatProduct<'_>> {
                 out.push(FlatProduct {
                     attr: &ep.attr,
                     output_name: &o.name,
-                    build_id: ep.build_id.clone(),
+                    build_id: ep.build_id.to_string(),
                     product: p,
                 });
             }
@@ -303,7 +303,7 @@ async fn pick_latest_evaluation(
         "Using latest evaluation {} for task {}/{}.",
         latest.id, project, task
     ));
-    latest.id
+    latest.id.to_string()
 }
 
 fn resolve_task(arg: Option<&str>, out: Output) -> (String, String) {
@@ -338,23 +338,29 @@ fn resolve_task(arg: Option<&str>, out: Output) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use connector::evals::{ArtefactTree, EntryPointArtefacts, OutputArtefacts, ProductArtefact};
+    use connector::api::{ArtefactTree, EntryPointArtefacts, OutputArtefacts, ProductArtefact};
+
+    const EVALUATION: &str = "00000000-0000-0000-0000-0000000000e1";
+    const BUILD_A: &str = "00000000-0000-0000-0000-0000000000b1";
+    const BUILD_B: &str = "00000000-0000-0000-0000-0000000000b2";
+    const PRODUCT_A: &str = "00000000-0000-0000-0000-0000000000a1";
+    const PRODUCT_B: &str = "00000000-0000-0000-0000-0000000000a2";
 
     fn make_tree() -> ArtefactTree {
         ArtefactTree {
-            evaluation: "eval-1".into(),
+            evaluation: EVALUATION.parse().unwrap(),
             created_at: "2026-01-01T00:00:00Z".into(),
             entry_points: vec![
                 EntryPointArtefacts {
                     attr: "packages.x86_64-linux.my-app".into(),
                     derivation: "/nix/store/a.drv".into(),
-                    build_id: "b1".into(),
+                    build_id: BUILD_A.parse().unwrap(),
                     outputs: vec![OutputArtefacts {
                         name: "out".into(),
                         store_path: "/nix/store/a".into(),
                         products: vec![ProductArtefact {
-                            id: "p1".into(),
-                            file_type: "file".into(),
+                            id: PRODUCT_A.parse().unwrap(),
+                            type_: "file".into(),
                             subtype: "".into(),
                             name: "default".into(),
                             path: "/p/my-app-1.0.tar.gz".into(),
@@ -365,13 +371,13 @@ mod tests {
                 EntryPointArtefacts {
                     attr: "packages.x86_64-linux.cli".into(),
                     derivation: "/nix/store/b.drv".into(),
-                    build_id: "b2".into(),
+                    build_id: BUILD_B.parse().unwrap(),
                     outputs: vec![OutputArtefacts {
                         name: "out".into(),
                         store_path: "/nix/store/b".into(),
                         products: vec![ProductArtefact {
-                            id: "p2".into(),
-                            file_type: "file".into(),
+                            id: PRODUCT_B.parse().unwrap(),
+                            type_: "file".into(),
                             subtype: "".into(),
                             name: "default".into(),
                             path: "/p/cli-2.tgz".into(),

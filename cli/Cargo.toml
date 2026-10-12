@@ -43,6 +43,13 @@ schemars   = { version = "1" }
 serde      = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 toml       = { version = "1.0" }
+uuid       = { version = "1", features = ["serde"] }
+
+# Spec-driven type generation, build script of connector
+prettyplease = { version = "0.2" }
+syn          = { version = "2", features = ["full"] }
+typify       = { version = "0.8" }
+yaml_serde   = { version = "0.10" }
 
 # Nix store access, behind the `nix` feature
 harmonia-file-nar    = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
