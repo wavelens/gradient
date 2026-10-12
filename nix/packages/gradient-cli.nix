@@ -31,11 +31,10 @@ let
       (mdFiles cliSrc)
       (craneLib.fileset.commonCargoSources evalSrc)
       (mdFiles evalSrc)
+      (repoRoot + "/docs/gradient-api.yaml")
     ];
   };
 
-  # Crates of the harmonia and nix-bindings git deps are pointing `readme` outside the crate dir.
-  # Vendoring is failing until that key is stripped.
   cargoVendorDir = craneLib.vendorCargoDeps {
     inherit src;
     cargoLock = cliSrc + "/Cargo.lock";
