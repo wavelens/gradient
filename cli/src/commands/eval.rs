@@ -6,41 +6,168 @@
 
 use crate::commands::attr_spec;
 use clap::Args;
+use etcetera::base_strategy::{BaseStrategy, choose_base_strategy};
+use gradient_eval::ipc::ResolvedItem;
+use gradient_eval::pool::{EvalPool, EvalPoolConfig, MemoryGuard, RefuseImports, default_workers};
+use serde::Serialize;
 use std::io::Write;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::Path;
+use std::sync::PoisonError;
 
 #[derive(Args, Debug)]
 pub struct EvalArgs {
     /// Attribute wildcard patterns, e.g. 'checks.*.*' 'packages.x86_64-linux.*'. Patterns also
-    /// accept installable syntax ('.#gradient-cli-full' or 'github:NixOS/patchelf#hydraJobs.*'). A
-    /// bare attr is qualified as 'packages.<system>.<attr>' like 'nix eval'. The flake part is
-    /// selecting the flake to evaluate, with the current directory as default.
+    /// accept installable syntax ('.#gradient-cli-full' or 'github:NixOS/patchelf#hydraJobs.*').
+    /// Attrs without a prefix qualify as 'packages.<system>.<attr>' like 'nix eval'. The parts
+    /// before the '#' name the flake to evaluate, defaulting to the current directory.
     #[arg(required = true, value_name = "PATTERN")]
     patterns: Vec<String>,
+
+    /// Evaluation subprocesses in the pool, defaulting to the host's core count, capped at 16.
+    #[arg(long, value_name = "N")]
+    workers: Option<NonZeroUsize>,
+
+    /// Resident memory in MiB for an idle evaluation subprocess, restarted between calls to free
+    /// the Nix heap.
+    #[arg(long, value_name = "MiB", default_value_t = NonZeroU64::new(2048).expect("nonzero"))]
+    max_rss: NonZeroU64,
+
+    /// Ceiling in MiB for the resident memory of all evaluation subprocesses together.
+    #[arg(long, value_name = "MiB")]
+    max_memory: Option<NonZeroU64>,
 }
 
-/// This is running without a Tokio runtime. The Nix C API is using Boehm GC, which must stay
-/// isolated from Tokio's thread pool.
+#[derive(Debug, Serialize)]
+pub struct Job {
+    pub attr: String,
+    #[serde(rename = "attrPath")]
+    pub attr_path: Vec<String>,
+    #[serde(rename = "drvPath", skip_serializing_if = "Option::is_none")]
+    pub drv_path: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl Job {
+    fn from_item(item: ResolvedItem) -> Self {
+        Job {
+            attr_path: item.attr.split('.').map(str::to_string).collect(),
+            attr: item.attr,
+            drv_path: item.drv_path.map(|drv| gradient_eval::nix_store_path(&drv)),
+            references: item.references,
+            error: item.error,
+        }
+    }
+
+    fn failed(attr: String, error: String) -> Self {
+        Job {
+            attr_path: attr.split('.').map(str::to_string).collect(),
+            attr,
+            drv_path: None,
+            references: vec![],
+            error: Some(error),
+        }
+    }
+}
+
+pub fn subprocess_flags(args: &[String]) -> Option<bool> {
+    let has = |flag: &str| args.iter().any(|arg| arg == flag);
+    has("--eval-subprocess").then(|| has("--eval-metrics"))
+}
+
 pub fn run(args: EvalArgs) -> std::io::Result<()> {
     let system = attr_spec::default_nix_system();
     let (flake_ref, wildcards) = split_installables(&args.patterns, &system);
     let flake_ref = resolve_flake_ref(&flake_ref);
 
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(evaluate(flake_ref, wildcards, args))
+}
 
-    let result = gradient_eval::jobs::eval_jobs(&flake_ref, &wildcards, |job| {
-        if let Ok(line) = serde_json::to_string(&job) {
-            let _ = writeln!(out, "{line}");
-        }
+async fn evaluate(
+    flake_ref: String,
+    wildcards: Vec<String>,
+    args: EvalArgs,
+) -> std::io::Result<()> {
+    let pool = EvalPool::new(EvalPoolConfig {
+        workers: args.workers.unwrap_or_else(default_workers).get(),
+        max_rss: args.max_rss.get() * 1024 * 1024,
+        memory: guard_of(args.max_memory),
+        cache_dir: eval_cache_dir(),
+        trace_dir: None,
+        metrics: false,
     });
 
+    let out = std::sync::Mutex::new(std::io::stdout());
+    let print = |job: Job| {
+        if let Ok(line) = serde_json::to_string(&job) {
+            let mut out = out.lock().unwrap_or_else(PoisonError::into_inner);
+            let _ = writeln!(out, "{line}");
+        }
+    };
+
+    let imports = RefuseImports("the local evaluation");
+    let found = |items: Vec<ResolvedItem>| items.into_iter().map(Job::from_item).for_each(print);
+
+    let evaluated = if all_concrete(&wildcards) {
+        pool.list_attrs(flake_ref, wildcards, &[], &imports, &found)
+            .await
+    } else {
+        pool.list_shards(flake_ref, wildcards, &[], &imports, &found)
+            .await
+    };
+
+    let outcome = match evaluated {
+        Ok(discovery) => {
+            for error in discovery.errors {
+                print(Job::failed(error.attr, error.message));
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    };
+    pool.shutdown().await;
+
+    let mut out = out.into_inner().unwrap_or_else(PoisonError::into_inner);
     out.flush()?;
-    if let Err(e) = result {
-        eprintln!("gradient eval: {e:#}");
-        std::process::exit(1);
+    match outcome {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            eprintln!("gradient eval: {e:#}");
+            std::process::exit(1);
+        }
     }
-    Ok(())
+}
+
+/// Concrete sets skip the discovery walk: siblings cost orders of magnitude more.
+fn all_concrete(wildcards: &[String]) -> bool {
+    !wildcards.is_empty()
+        && wildcards
+            .iter()
+            .all(|w| !w.starts_with('!') && w.split('.').all(|seg| !seg.contains('*')))
+}
+
+/// The CLI has no free-RAM guard, so a memory flag is a ceiling on the whole pool or nothing.
+fn guard_of(max_memory: Option<NonZeroU64>) -> MemoryGuard {
+    max_memory.map_or(MemoryGuard::None, |mib| {
+        MemoryGuard::MaxTotal(mib.get() * 1024 * 1024)
+    })
+}
+
+/// The user's eval cache, apart from `nix eval`'s `~/.cache/nix`.
+fn eval_cache_dir() -> String {
+    let base = choose_base_strategy()
+        .expect("Could not find a cache directory")
+        .cache_dir();
+    base.join("gradient")
+        .join("eval-cache")
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn split_installables(patterns: &[String], system: &str) -> (String, Vec<String>) {
@@ -168,6 +295,107 @@ mod tests {
                 Path::new("/home/u/repo/sub/flake")
             ),
             "git+file:///home/u/repo?dir=sub/flake"
+        );
+    }
+
+    #[test]
+    fn a_resolved_item_becomes_a_job_line() {
+        let line = serde_json::to_string(&Job::from_item(ResolvedItem {
+            attr: "packages.x86_64-linux.hello".into(),
+            drv_path: Some("aaaa-hello.drv".into()),
+            references: vec!["/nix/store/bbbb-glibc".into()],
+            error: None,
+        }))
+        .expect("serialize");
+
+        assert_eq!(
+            line,
+            r#"{"attr":"packages.x86_64-linux.hello","attrPath":["packages","x86_64-linux","hello"],"drvPath":"/nix/store/aaaa-hello.drv","references":["/nix/store/bbbb-glibc"]}"#
+        );
+    }
+
+    #[test]
+    fn a_failed_item_carries_only_its_error() {
+        let line = serde_json::to_string(&Job::from_item(ResolvedItem {
+            attr: "packages.x86_64-linux.broken".into(),
+            drv_path: None,
+            references: vec![],
+            error: Some("boom".into()),
+        }))
+        .expect("serialize");
+
+        assert_eq!(
+            line,
+            r#"{"attr":"packages.x86_64-linux.broken","attrPath":["packages","x86_64-linux","broken"],"error":"boom"}"#
+        );
+    }
+
+    #[test]
+    fn an_all_concrete_set_skips_the_discovery_walk() {
+        assert!(all_concrete(&["packages.x86_64-linux.hello".to_string()]));
+        assert!(!all_concrete(&["packages.x86_64-linux.*".to_string()]));
+        assert!(!all_concrete(&["!packages.x86_64-linux.hello".to_string()]));
+        assert!(!all_concrete(&[]));
+    }
+
+    #[test]
+    fn the_subprocess_flags_are_read_before_clap() {
+        let flag = |args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|a| (*a).to_string()).collect();
+            subprocess_flags(&args)
+        };
+        assert_eq!(flag(&["gradient"]), None);
+        assert_eq!(flag(&["gradient", "--eval-subprocess"]), Some(false));
+        assert_eq!(
+            flag(&["gradient", "--eval-subprocess", "--eval-metrics"]),
+            Some(true)
+        );
+    }
+
+    #[derive(clap::Parser)]
+    struct EvalCli {
+        #[command(flatten)]
+        eval: EvalArgs,
+    }
+
+    fn parse(args: &[&str]) -> EvalArgs {
+        <EvalCli as clap::Parser>::parse_from(args).eval
+    }
+
+    #[test]
+    fn the_flags_default_to_the_pool_sizing() {
+        let args = parse(&["gradient", "packages.x86_64-linux.*"]);
+        assert!(
+            args.workers.is_none(),
+            "an unset worker count is the host's core count, capped at 16"
+        );
+        assert_eq!(args.max_rss.get(), 2048);
+        assert_eq!(args.max_memory, None);
+    }
+
+    #[test]
+    fn the_flags_are_read_as_mib() {
+        let args = parse(&[
+            "gradient",
+            "--workers",
+            "4",
+            "--max-rss",
+            "512",
+            "--max-memory",
+            "1024",
+            "packages.x86_64-linux.*",
+        ]);
+        assert_eq!(args.workers.map(std::num::NonZeroUsize::get), Some(4));
+        assert_eq!(args.max_rss.get(), 512);
+        assert_eq!(args.max_memory.map(std::num::NonZeroU64::get), Some(1024));
+    }
+
+    #[test]
+    fn only_a_memory_flag_arms_a_guard() {
+        assert_eq!(guard_of(None), MemoryGuard::None);
+        assert_eq!(
+            guard_of(std::num::NonZeroU64::new(1024)),
+            MemoryGuard::MaxTotal(1024 * 1024 * 1024)
         );
     }
 }

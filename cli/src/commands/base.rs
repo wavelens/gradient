@@ -167,10 +167,14 @@ pub fn complete_env() {
     CompleteEnv::with_factory(Cli::command).complete();
 }
 
-/// `eval` is running synchronously before any runtime starts. The embedded Nix evaluator is using
-/// Boehm GC, which must stay isolated from Tokio's thread pool.
 pub fn run() -> std::io::Result<()> {
     complete_env();
+
+    #[cfg(feature = "eval")]
+    if let Some(metrics) = eval::subprocess_flags(&std::env::args().collect::<Vec<_>>()) {
+        return gradient_eval::eval_worker::run_eval_worker(metrics);
+    }
+
     let cli = Cli::parse();
 
     #[cfg(feature = "eval")]
