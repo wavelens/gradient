@@ -322,7 +322,7 @@
 |---|---|---|---|---|
 | `worker.build.cgroup` | null or string | `if worker.build.metrics then "/sys/fs/cgroup/system.slice/nix-daemon.service" else null` | `GRADIENT_WORKER_BUILD_CGROUP` | Cgroup directory of `nix-daemon.service`, the parent of the build cgroups. The worker is reading the peak memory of each running build from it and sending the values with its heartbeat. The scheduler is reserving the larger of the predicted and the reported peak. The build cgroups need `worker.build.metrics` and Gradient's Nix fork on the daemon. `null` reports nothing. |
 | `worker.build.maxConcurrent` | positive int | `32` | `GRADIENT_WORKER_BUILD_MAX_CONCURRENT` | Maximum simultaneous builds. |
-| `worker.build.maxCores` | null or (positive int) | `null` | `GRADIENT_WORKER_BUILD_MAX_CORES` | CPU cores a single build can use, passed as `--cores`. `null` uses all cores. |
+| `worker.build.maxCores` | null or (positive int) | `null` | `GRADIENT_WORKER_BUILD_MAX_CORES` | CPU cores for a build, passed as `--cores`. `null` for every core. |
 | `worker.build.metrics` | bool | `false` | - | Whether to record per-build peak memory, CPU time, disk I/O and out-of-memory kills. Enabling it is turning on Nix's experimental `cgroups` feature and `use-cgroups` and delegating cgroup controllers to `nix-daemon.service`. The daemon is reporting the values in each build result. Peak memory, disk I/O and out-of-memory kills need Gradient's Nix fork on the daemon, and `nix.package` is defaulting to its package. Wall-clock time is always recorded. |
 | `worker.build.oomScoreAdjust` | null or integer between -1000 and 1000 (both inclusive) | `500` | - | Out-of-memory score adjustment for `nix-daemon.service`, inherited by every build process. With a positive value the kernel is killing a build process before the worker on a host out of memory, failing that build alone. Evaluation subprocesses use 600 and go first. `null` leaves the daemon unchanged. |
 
@@ -343,8 +343,9 @@
 | `worker.eval.cache.share` | bool | `true` | `GRADIENT_WORKER_EVAL_CACHE_SHARE` | Whether to share eval cache blobs with other workers through the server. |
 | `worker.eval.forkWorkers` | null or (positive int) | `null` | `GRADIENT_WORKER_EVAL_FORK_WORKERS` | Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` sizes the pool to the host's core count, capped at 16. |
 | `worker.eval.maxConcurrent` | positive int | `1` | `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` | Maximum simultaneous evaluations. |
-| `worker.eval.maxRss` | positive int | `2147483648` | `GRADIENT_WORKER_EVAL_MAX_RSS` | Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit restart after their call and free the Nix heap. A call may grow past the limit, with `worker.system.minFreeRamMb` as the host's guard. Keep it above a typical evaluation's heap. |
-| `worker.eval.metrics` | bool | `true` | `GRADIENT_WORKER_EVAL_METRICS` | Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots, flake graph). Disabling it removes their overhead. |
+| `worker.eval.maxMemory` | null or (positive int) | `null` | `GRADIENT_WORKER_EVAL_MAX_MEMORY` | Ceiling in MiB for the resident memory of all evaluation subprocesses together. Subprocesses leave the pool, largest first, while the sum is over the ceiling. Conflicts with `worker.system.minFreeRamMb`. |
+| `worker.eval.maxRss` | positive int | `2147483648` | `GRADIENT_WORKER_EVAL_MAX_RSS` | Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit restart after the call and free the Nix heap. A call growing past the limit is fine, with `worker.system.minFreeRamMb` as the host's guard. Keep it above a typical evaluation's heap. |
+| `worker.eval.metrics` | bool | `true` | `GRADIENT_WORKER_EVAL_METRICS` | Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots, flake graph). Disable it to leave that overhead out. |
 
 ## `worker.log`
 
@@ -364,8 +365,8 @@
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `worker.nar.chunkBytes` | int from 4096 to 4194304 | `524288` | `GRADIENT_WORKER_NAR_CHUNK_BYTES` | Size in bytes of each outbound NAR upload chunk, from 4 KiB to 4 MiB. Smaller chunks can help slow or high-latency links like Tailscale over DERP. |
-| `worker.nar.maxConcurrentUploads` | positive int | `16` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | Upload requests over 1 MiB the worker keeps open at once, waiting for a server grant or transferring. One job holds at most half. Smaller uploads have a window of 128 of their own. The server's upload budget decides how many run. This limit bounds worker memory. |
-| `worker.nar.partialTtlSecs` | unsigned int | `86400` | `GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS` | Seconds after its last write before the deletion of an unfinished NAR download under `<worker.baseDir>/nar-partial`. `0` disables the cleanup. |
+| `worker.nar.maxConcurrentUploads` | positive int | `16` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | Upload requests over 1 MiB open at once, waiting for a server grant or transferring. Half of the limit for any job. A window of 128 for smaller uploads. How many run: the server's upload budget. A bound on worker memory. |
+| `worker.nar.partialTtlSecs` | unsigned int | `86400` | `GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS` | Seconds after the last write before the deletion of an unfinished NAR download under `<worker.baseDir>/nar-partial`. `0` for no cleanup. |
 
 ## `worker.nixDaemon`
 

@@ -63,7 +63,7 @@ fn main() -> Result<()> {
 
     if let Some(requests_path) = config.eval_driver.clone() {
         let rt = tokio::runtime::Runtime::new()?;
-        let code = rt.block_on(worker_pool::driver::run_eval_driver(
+        let code = rt.block_on(gradient_eval::pool::run_eval_driver(
             &requests_path,
             &config.eval_cache_dir(),
             config.eval.metrics,
@@ -71,8 +71,9 @@ fn main() -> Result<()> {
         std::process::exit(code);
     }
 
-    // The crypto provider must be installed before the first TLS handshake. rustls 0.23 is
-    // panicking without one (#232).
+    config.memory_guard()?;
+
+    // The crypto provider, before the first TLS handshake, for rustls 0.23 (#232).
     gradient_util::http::init_crypto_provider();
 
     let rt = tokio::runtime::Runtime::new()?;

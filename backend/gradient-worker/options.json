@@ -293,7 +293,7 @@
     "flag": "eval-max-rss",
     "env": "GRADIENT_WORKER_EVAL_MAX_RSS",
     "type": "NonZeroU64",
-    "description": "Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit\nrestart after their call and free the Nix heap. A call may grow past the limit, with\n{option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.\nKeep it above a typical evaluation's heap.",
+    "description": "Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit\nrestart after the call and free the Nix heap. A call growing past the limit is fine, with\n{option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.\nKeep it above a typical evaluation's heap.",
     "default": "2147483648",
     "values": []
   },
@@ -303,7 +303,7 @@
     "flag": "eval-metrics",
     "env": "GRADIENT_WORKER_EVAL_METRICS",
     "type": "bool",
-    "description": "Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots,\nflake graph). Disabling it removes their overhead.",
+    "description": "Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots,\nflake graph). Disable it to leave that overhead out.",
     "default": "true",
     "values": [
       "true",
@@ -334,6 +334,16 @@
     ]
   },
   {
+    "group": "eval",
+    "field": "max_memory",
+    "flag": "eval-max-memory",
+    "env": "GRADIENT_WORKER_EVAL_MAX_MEMORY",
+    "type": "Option<NonZeroU64>",
+    "description": "Ceiling in MiB for the resident memory of all evaluation subprocesses together.\nSubprocesses leave the pool, largest first, while the sum is over the ceiling.\nConflicts with {option}`services.gradient.worker.system.minFreeRamMb`.",
+    "default": null,
+    "values": []
+  },
+  {
     "group": "build",
     "field": "max_concurrent",
     "flag": "build-max-concurrent",
@@ -349,7 +359,7 @@
     "flag": "build-max-cores",
     "env": "GRADIENT_WORKER_BUILD_MAX_CORES",
     "type": "Option<NonZeroU32>",
-    "description": "CPU cores a single build can use, passed as `--cores`. `null` uses all cores.",
+    "description": "CPU cores for a build, passed as `--cores`. `null` for every core.",
     "default": null,
     "values": []
   },
@@ -359,7 +369,7 @@
     "flag": "build-cgroup",
     "env": "GRADIENT_WORKER_BUILD_CGROUP",
     "type": "Option<PathBuf>",
-    "description": "Cgroup directory of {file}`nix-daemon.service`, the parent of the build cgroups. The worker\nis reading the peak memory of each running build from it and sending the values with its\nheartbeat. The scheduler is reserving the larger of the predicted and the reported peak.\nThe build cgroups need {option}`services.gradient.worker.build.metrics` and Gradient's\nNix fork on the daemon. `null` reports nothing.",
+    "description": "Cgroup directory of {file}`nix-daemon.service`, the parent of the build cgroups, read for\nthe peak memory of every running build and sent with the heartbeat. The larger of the\npredicted and the reported peak.\nThe build cgroups need {option}`services.gradient.worker.build.metrics` and Gradient's\nNix fork on the daemon. `null` reports nothing.",
     "default": null,
     "values": []
   },
@@ -369,7 +379,7 @@
     "flag": "nar-max-concurrent-uploads",
     "env": "GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS",
     "type": "NonZeroU32",
-    "description": "Upload requests over 1 MiB the worker keeps open at once, waiting for a server grant or\ntransferring. One job holds at most half. Smaller uploads have a window of 128 of their\nown. The server's upload budget decides how many run. This limit bounds worker memory.",
+    "description": "Upload requests over 1 MiB open at once, waiting for a server grant or transferring.\nHalf of the limit for any job. A window of 128 for smaller uploads.\nHow many run: the server's upload budget. A bound on worker memory.",
     "default": "16",
     "values": []
   },
@@ -379,7 +389,7 @@
     "flag": "nar-partial-ttl-secs",
     "env": "GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS",
     "type": "u64",
-    "description": "Seconds after its last write before the deletion of an unfinished NAR download under\n{file}`<services.gradient.worker.baseDir>/nar-partial`. `0` disables the cleanup.",
+    "description": "Seconds after the last write before the deletion of an unfinished NAR download under\n{file}`<services.gradient.worker.baseDir>/nar-partial`. `0` for no cleanup.",
     "default": "86400",
     "values": []
   },

@@ -15,6 +15,7 @@ use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
 use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
+use gradient_eval::pool::MemoryGuard;
 use gradient_sources::{AttrError, DerivationResolver, FlakeDiscovery, ResolvedDerivation};
 use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
@@ -127,21 +128,6 @@ fn unmatched_target_errors(wildcards: &[String]) -> Vec<String> {
 
 const DRV_READ_CONCURRENCY: usize = 256;
 
-const TOTAL_RAM_FALLBACK_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-
-fn total_memory_bytes() -> u64 {
-    use sysinfo::{MemoryRefreshKind, RefreshKind, System};
-    let sys = System::new_with_specifics(
-        RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram()),
-    );
-    let total = sys.total_memory();
-    if total == 0 {
-        TOTAL_RAM_FALLBACK_BYTES
-    } else {
-        total
-    }
-}
-
 use crate::proto::job::JobUpdater;
 use crate::traits::{DrvReader, FsDrvReader, JobReporter};
 
@@ -158,20 +144,19 @@ impl WorkerEvaluator {
     pub fn new(
         fork_workers: NonZeroUsize,
         max_eval_rss: u64,
-        min_free_ram_mb: u64,
+        memory: MemoryGuard,
         eval_cache_dir: String,
         eval_cache_share: bool,
         eval_metrics: bool,
     ) -> Self {
-        let min_free_bytes =
-            crate::worker_pool::memory_guard_bytes(min_free_ram_mb, total_memory_bytes());
         let resolver = Arc::new(WorkerPoolResolver::new(
             fork_workers.get(),
             max_eval_rss,
+            memory,
             eval_cache_dir,
+            gradient_util::trace_file::active_dir().map(|dir| dir.to_string_lossy().into_owned()),
             eval_metrics,
         ));
-        resolver.start_memory_reaper(min_free_bytes);
 
         Self {
             resolver,

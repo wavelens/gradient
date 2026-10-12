@@ -10,6 +10,7 @@ pub use options::*;
 
 use std::num::{NonZeroU32, NonZeroUsize};
 
+use gradient_eval::pool::MemoryGuard;
 use gradient_wire::types::GradientCapabilities;
 
 pub fn host_system() -> String {
@@ -19,12 +20,6 @@ pub fn host_system() -> String {
         other => other,
     };
     format!("{arch}-{os}")
-}
-
-/// The pool is capped at 16 workers because each one may hold `eval.max_rss` resident.
-fn default_fork_workers() -> NonZeroUsize {
-    let cores = std::thread::available_parallelism().map_or(4, NonZeroUsize::get);
-    NonZeroUsize::new(cores.min(16)).unwrap_or(NonZeroUsize::MIN)
 }
 
 impl WorkerConfig {
@@ -93,7 +88,24 @@ impl WorkerConfig {
     }
 
     pub fn fork_workers(&self) -> NonZeroUsize {
-        self.eval.fork_workers.unwrap_or_else(default_fork_workers)
+        self.eval
+            .fork_workers
+            .unwrap_or_else(gradient_eval::pool::default_workers)
+    }
+
+    /// The two memory guards are alternatives, not layers: a free-RAM margin or a ceiling on the
+    /// resident memory of the whole pool.
+    pub fn memory_guard(&self) -> anyhow::Result<MemoryGuard> {
+        match (self.system.min_free_ram_mb, self.eval.max_memory) {
+            (_, None) => Ok(gradient_eval::pool::min_free_ram_guard(
+                self.system.min_free_ram_mb,
+            )),
+            (0, Some(mib)) => Ok(MemoryGuard::MaxTotal(mib.get() * 1024 * 1024)),
+            (mb, Some(_)) => anyhow::bail!(
+                "worker.system.minFreeRamMb ({mb}) and worker.eval.maxMemory together; they are \
+                 alternatives, unset either"
+            ),
+        }
     }
 
     pub fn build_cores(&self) -> Option<NonZeroU32> {
@@ -272,5 +284,42 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(cfg.accepted_server_tokens(), Some(vec![]));
+    }
+
+    #[test]
+    fn both_memory_options_together_are_refused() {
+        let mut config = WorkerConfig::default();
+        config.system.min_free_ram_mb = 512;
+        config.eval.max_memory = std::num::NonZeroU64::new(1024);
+
+        let refused = config
+            .memory_guard()
+            .expect_err("both options must be refused");
+
+        let message = refused.to_string();
+        assert!(message.contains("minFreeRamMb"), "{message}");
+        assert!(message.contains("maxMemory"), "{message}");
+    }
+
+    #[test]
+    fn each_memory_option_selects_its_own_guard() {
+        let mut config = WorkerConfig::default();
+        assert!(matches!(
+            config.memory_guard().expect("the default"),
+            MemoryGuard::MinFreeRam(_)
+        ));
+
+        config.eval.max_memory = std::num::NonZeroU64::new(1024);
+        assert_eq!(
+            config.memory_guard().expect("the cap"),
+            MemoryGuard::MaxTotal(1024 * 1024 * 1024)
+        );
+
+        config.eval.max_memory = None;
+        config.system.min_free_ram_mb = 512;
+        assert_eq!(
+            config.memory_guard().expect("the margin"),
+            MemoryGuard::MinFreeRam(512 * 1024 * 1024)
+        );
     }
 }
