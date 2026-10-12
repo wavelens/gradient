@@ -68,6 +68,13 @@ def await_deploy(node):
     return deploy_log(node)
 
 
+def await_deploy_failure(node):
+    node.wait_until_succeeds(
+        "systemctl show gradient-deploy.service -p ActiveState --value | grep -qx failed"
+    )
+    return deploy_log(node)
+
+
 def await_connected(node):
     node.wait_until_succeeds(f"curl -sSf {API}/control/stats | jq -e '.connections == 1'")
 
@@ -149,3 +156,14 @@ assert stats(poller)["entry_points"] >= 2, "must keep re-checking on the timer"
 set_state(poller, "Building", [entry_point(POLLER_SYSTEM, "Queued")], evaluation_id="e4")
 log = await_deploy(poller)
 assert "already up-to-date" in log, log
+
+# ── A system no substituter can supply ────────────────────────────────────────
+banner("A system no substituter can supply")
+post(machine, "/control/reset")
+unfetchable = "/nix/store/" + "a" * 32 + DEPLOY_SYSTEM[DEPLOY_SYSTEM.index("-"):]
+set_state(machine, "Building", [entry_point(unfetchable, "Completed")], evaluation_id="e5")
+start_deploy(machine)
+log = await_deploy_failure(machine)
+assert f"Error: cannot fetch {unfetchable} from a substituter" in log, log
+assert "completed successfully" not in log, log
+assert current_system(machine) == DEPLOY_SYSTEM, "a failed fetch must not switch the system"

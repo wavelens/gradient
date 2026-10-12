@@ -140,6 +140,7 @@ in {
         serviceConfig = {
           Type = "oneshot";
           Restart = "on-failure";
+          RestartSec = 10;
           User = "root";
           Group = "root";
           LoadCredential = [ "gradient_api_key:${cfg.apiKeyFile}" ];
@@ -148,7 +149,7 @@ in {
 
         script = /* bash */ ''
           if ! curl --silent --fail --max-time 5 --output /dev/null "${apiUrl}/health"; then
-            echo "Error: Cannot reach ${apiUrl}/health"
+            echo "Error: cannot connect to ${apiUrl}/health"
             exit 1
           fi
 
@@ -208,12 +209,17 @@ in {
             esac
           }
 
+          die() {
+            echo "Error: $1"
+            exit 1
+          }
+
           deploy() {
             echo "New deployment found: $1"
-            nix-store --realize "$1"
 
-            nix-env -p /nix/var/nix/profiles/system --set "$1"
-            "$1/bin/switch-to-configuration" switch
+            nix-store --realize "$1" || die "cannot fetch $1 from a substituter"
+            nix-env -p /nix/var/nix/profiles/system --set "$1" || die "cannot set the profile to $1"
+            "$1/bin/switch-to-configuration" switch || die "switching to $1 failed"
 
             echo "Deployment to $1 completed successfully"
           }
