@@ -400,11 +400,12 @@ where
 }
 
 fn parse_warnings(captured: &str) -> Vec<String> {
-    fn is_boundary(line: &str) -> bool {
+    fn starts_a_block(line: &str) -> bool {
         let t = line.trim_start().to_ascii_lowercase();
-        ["warning:", "trace:", "error:", "note:"]
-            .iter()
-            .any(|p| t.starts_with(p))
+        t.contains("warning:")
+            || ["trace:", "error:", "note:"]
+                .iter()
+                .any(|p| t.starts_with(p))
     }
 
     let lines: Vec<&str> = captured
@@ -423,7 +424,7 @@ fn parse_warnings(captured: &str) -> Vec<String> {
 
         let start = i;
         i += 1;
-        while i < lines.len() && !is_boundary(lines[i]) {
+        while i < lines.len() && !starts_a_block(lines[i]) {
             i += 1;
         }
 
@@ -562,6 +563,18 @@ mod tests {
     fn a_repeated_warning_collapses() {
         let captured = "warning: same\nwarning: same\nwarning: same\ntrace: nix callsite\n";
         assert_eq!(parse_warnings(captured), vec!["warning: same"]);
+    }
+
+    #[test]
+    fn a_prefixed_warning_repeated_per_shard_collapses() {
+        let head = "evaluation warning: the legacy table is outdated";
+        let captured = format!("{head}\nmore detail\n{head}\nmore detail\n{head}\nmore detail\n");
+
+        assert_eq!(
+            parse_warnings(&captured),
+            vec![format!("{head}\nmore detail")],
+            "a prefixed warning keeps its own block, so the copies collapse"
+        );
     }
 
     #[cfg(unix)]
