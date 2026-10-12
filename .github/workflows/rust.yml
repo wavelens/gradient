@@ -102,6 +102,14 @@ jobs:
             exit 1
           fi
 
+      - name: "Forbid handler routes without a spec entry"
+        run: |
+          if grep -rsnE --include='*.rs' '\.route\(' gradient-web/src \
+               | grep -v -e 'cache_root' -e '/tests/' -e 'tests\.rs' -e '^gradient-web/src/api_spec\.rs'; then
+            echo "::error::annotate the handler with utoipa::path and add it with routes!"
+            exit 1
+          fi
+
       - name: "Forbid database queries in the web crate"
         run: |
           if grep -rsnE --include='*.rs' \
