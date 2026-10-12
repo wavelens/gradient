@@ -1,22 +1,22 @@
 # Connection
 
-Workers talk to the server over one WebSocket at `/proto`, with binary frames from the `Proto` derive. Sessions pass through **version agreement -> handshake -> authorization -> capabilities -> job loop**.
+Workers talk to the server over a single WebSocket at `/proto`, with binary frames from the `Proto` derive. Sessions pass through **version agreement -> handshake -> authorization -> capabilities -> job loop**.
 
 ```mermaid
 sequenceDiagram
-    participant W as Worker
-    participant S as Server
-    W->>S: version range
-    S->>W: version range
-    W->>S: InitConnection { capabilities, id }
-    S->>W: AuthChallenge { peers }
-    W->>S: AuthResponse { tokens }
-    S->>W: InitAck { authorized_peers, failed_peers }
-    W->>S: WorkerCapabilities
-    loop job loop
-        W->>S: RequestJob
-        S->>W: AssignJob
-    end
+      participant W as Worker
+      participant S as Server
+      W->>S: version range
+      S->>W: version range
+      W->>S: InitConnection { capabilities, id }
+      S->>W: AuthChallenge { peers }
+      W->>S: AuthResponse { tokens }
+      S->>W: InitAck { authorized_peers, failed_peers }
+      W->>S: WorkerCapabilities
+      loop job loop
+          W->>S: RequestJob
+          S->>W: AssignJob
+      end
 ```
 
 ## Handshake
@@ -25,14 +25,14 @@ sequenceDiagram
 |---|---|---|
 | 1 | `InitConnection` | `capabilities`, the worker's persistent `id` |
 | 2 | `AuthChallenge` | The peers that registered this worker ID |
-| 3 | `AuthResponse` | One token per challenged peer the worker is holding |
+| 3 | `AuthResponse` | A token for each challenged peer |
 | 4 | `InitAck` or `Reject` | Authorized peers, failed peers with reasons |
 
-The worker ID is stored in `/var/lib/gradient-worker/worker-id` on the worker. The server will use the ID to match reconnects, reject duplicates and label the worker in the UI and logs.
+Worker IDs live in `/var/lib/gradient-worker/worker-id` on the worker. The server can match reconnects by that ID, reject duplicates and label the worker in the UI and logs.
 
-Every handshake message has a cap of `MAX_HANDSHAKE_MESSAGE_SIZE` (64 KiB). A larger message will end the session with close code `1002`, without decoding.
+The cap of a handshake message is `MAX_HANDSHAKE_MESSAGE_SIZE` (64 KiB). A larger message can end the session with close code `1002`, without decoding.
 
-**Rejections:** The server can reject a session with the codes below. A dialed worker can reject the server with `400` or `401`, see [Server-Dialed Handshake](#server-dialed-handshake).
+**Rejections:** The server can reject a session with the codes below. The connected worker can reject the server with `400`, `401`, `403` or `503`, see [Server-Initiated Handshake](#server-initiated-handshake).
 
 | Code | Reason |
 |---|---|
@@ -42,38 +42,47 @@ Every handshake message has a cap of `MAX_HANDSHAKE_MESSAGE_SIZE` (64 KiB). A la
 | `495` | `project has no cache subscribed`: every authorized project is lacking a cache |
 | `496` | `worker already connected` |
 
-## Server-Dialed Handshake
+## Server-Initiated Handshake
 
-The server can dial every registration and team worker with a `url` set. The server will prove itself with its tokens, and the worker's TLS certificate will prove the worker.
+The server can connect to every registration and team worker holding a `url`. The server's tokens and the worker's TLS certificate prove each side.
 
 ```mermaid
 sequenceDiagram
-    participant S as Server
-    participant W as Worker
-    S->>W: Authenticate { worker_id, tokens }
-    W->>S: InitConnection { capabilities, id }
-    S->>W: InitAck { authorized_peers, failed_peers }
+      participant S as Server
+      participant W as Worker
+      S->>W: Authenticate { worker_id, tokens }
+      W->>S: InitConnection { capabilities, id }
+      S->>W: InitAck { authorized_peers, failed_peers }
 ```
 
 | Step | Message | Content |
 |---|---|---|
-| 1 | `Authenticate` | The dialed `worker_id`, one `(peer, token)` per registration with a stored token at the dialed URL |
+| 1 | `Authenticate` | The worker ID, a `(peer, token)` per registration holding a stored token at the URL |
 | 2 | `InitConnection` or `Reject` | `401` for an unknown worker ID or any wrong token, `400` for any other first message |
 | 3 | `InitAck` or `Reject` | The projects whose tokens the worker accepted, without a challenge round |
 
-- The server will send its tokens over `wss://` URLs.
-- A `ws://` URL is for local and operator setups only. The server will still send the tokens and log a warning.
+A refusing side can answer with these codes.
+
+| Code | Reason |
+|---|---|
+| `400` | A first message other than `InitConnection` |
+| `401` | An unknown worker ID or any wrong token |
+| `403` | `the link is disabled`, `the upstream is not allowed to run` |
+| `503` | `the upstream is unreadable right now`, `the allowance is not checked yet` |
+
+- The server can send its tokens over `wss://` URLs.
+- A `ws://` URL is for local and operator setups only. The server can still send the tokens and log a warning.
 - Workers check server tokens against the hashes in `services.gradient.worker.acceptedServerTokensFile` on the worker. Workers without the file accept every server.
-- A reauth of a server-dialed session is answered with `AuthUpdate`, never with `AuthChallenge`.
-- A reauth finding a new registration will close the session. The next dial will carry the new project's token.
-- Projects granting a team's workers join the running session. All of them share the team worker's one token for the team ID.
-- A registration may not reuse the worker ID of a team worker. Gradient.CI worker IDs belong to one registration or team worker only.
-- The server will keep the last failure of every worker ID in memory as the worker's offline reason.
-- The server will keep a failure before the token check only for a registered worker ID.
+- Reauths of a server-connected session get `AuthUpdate`, never `AuthChallenge`.
+- Reauths finding a new registration close the session. The next connection can send the new project's token.
+- Projects granting a team's workers join the running session. All of them share the team worker's single token for the team ID.
+- A registration cannot reuse the worker ID of a team worker. Gradient.CI worker IDs belong to a single registration or team worker only.
+- The server can keep the last failure of every worker ID in memory as the worker's offline reason.
+- The server can keep a failure before the token check only for a registered worker ID.
 
 ## Capabilities
 
-A capability is active only when both sides support the capability. Only the server can set `core` and `cache`.
+A capability is active when both sides support it. Only the server can set `core` and `cache`.
 
 | Capability | Meaning |
 |---|---|
@@ -82,17 +91,17 @@ A capability is active only when both sides support the capability. Only the ser
 | `fetch` | Cloning repositories and prefetching flake inputs |
 | `eval` | Running flake evaluations |
 | `build` | Running Nix builds |
-| `federate` | Reserved: negotiated in the handshake, no behavior yet |
+| `federate` | Reserved. Negotiated in the handshake, no behavior yet |
 
 Capability flags guard new features, not version numbers.
 
 ## Authorization
 
-A **peer** is anything registering a worker, such as a project, a cache or a proxy. Both sides consent. The peer will register the worker ID, and the worker will hold the peer's token.
+A **peer** is anything registering a worker, such as a project, a cache or a proxy. Both sides consent. Peers register the worker ID and workers hold the peer's token.
 
-1. A peer registered the worker ID. The server will generate a token for that pair.
-2. The worker's peers file (`services.gradient.worker.peersFile`) will hold `peer_id:token` lines.
-3. The server will challenge every registering peer on connect. The server will check each token on its own.
+1. A peer registered the worker ID. The server generated a token for that pair.
+2. The peers file (`services.gradient.worker.peersFile`) is a list of `peer_id:token` lines.
+3. The server can challenge every registering peer on connect and check each token on its own.
 
 | Peer | Granted Access |
 |---|---|
@@ -100,43 +109,43 @@ A **peer** is anything registering a worker, such as a project, a cache or a pro
 | Cache | Serving and pulling from the cache |
 | Proxy | Membership in the proxy's worker pool |
 
-- The session can survive some failed tokens with the remaining peers.
-- Only a failure of all tokens will reject the session.
-- A project without a cache subscription will move to `failed_peers` in the reply.
+- The remaining peers keep the session open after some failed tokens.
+- A failure of every token can reject the session.
+- A project without a cache subscription can move to `failed_peers` in the reply.
 - The reply is `495` when no peer remained.
 - **Reauth** can add peers without reconnecting.
-- The server will send `AuthChallenge` to a worker-dialed session when a peer registered the worker.
-- A project subscribing to a cache will reauth the project's workers.
-- The worker will send `ReauthRequest` when its peers file changed.
-- Both will end in `AuthUpdate`, and reauth will never revoke granted peers.
-- One connection per worker ID. The server will reject a second connection with `496`.
-- The server will drop a connection silent for `proto.workerHeartbeatTimeoutSecs` (120 s).
-- The worker will drop a connection with data unacknowledged for 120 s and reconnect.
-- The worker will abandon a connect after 10 s and a handshake after 15 s without an answer.
-- A project's worker list will show a worker as live only when the worker authenticated for that project.
+- The server can send `AuthChallenge` to a connected worker when a peer registered the worker.
+- A cache subscription by a project is a reason for a reauth of the project's workers.
+- The worker can send `ReauthRequest` when its peers file changed.
+- Both end in `AuthUpdate` and reauth can never revoke granted peers.
+- A single connection per worker ID. The server can reject a second connection with `496`.
+- The server can drop a connection silent for `proto.workerHeartbeatTimeoutSecs` (120 s).
+- The worker can drop a connection with data unacknowledged for 120 s and reconnect.
+- The worker can abandon a connect after 10 s and a handshake after 15 s without an answer.
+- A project's worker list can mark a worker as live when that worker authenticated for the project.
 
 ## Build Timeouts
 
-Each `BuildSpec` will carry `timeout_secs` and `max_silent_secs`. The values are the derivation's own `timeout` and `maxSilent`. The fallbacks are `build.defaultTimeoutSecs` (14400) and `build.defaultMaxSilentSecs` (3600). A value of `0` will disable a limit. A build past a limit will end as `FailedTimeout`. Evaluations have no timeout.
+The `timeout_secs` and `max_silent_secs` of a `BuildSpec` follow the derivation's own `timeout` and `maxSilent`. The fallbacks are `build.defaultTimeoutSecs` (14400) and `build.defaultMaxSilentSecs` (3600). A limit is off at a value of `0`. A build past a limit is a `FailedTimeout`. Evaluations have no timeout.
 
 ## Server Restart
 
-A restart can lose work in flight, never a queued job.
+A restart can lose work in flight, but no queued job.
 
 | Side | Behavior |
 |---|---|
 | Worker | Aborting every running job and reconnecting with backoff (1 s, doubling up to 60 s) |
-| Worker | Sending a full handshake, then `RequestJobList` and one `RequestJob` per kind |
-| Server | Dropping every report whose `job_id` and `assignment_id` the current session did not hand out |
-| Server | `recover_interrupted_work` is closing open assignments and aborting running attempts before the first session. The pass will also re-queue every `Building` build and every interrupted evaluation |
+| Worker | Sending a full handshake, then `RequestJobList` and a `RequestJob` per kind |
+| Server | Dropping every report whose `job_id` and `assignment_id` the current session did not assign |
+| Server | `recover_interrupted_work` is closing open assignments and aborting running attempts before the first session. Every `Building` build and every interrupted evaluation is queued again |
 
 ## Server Stop
 
-- The server will close every session at once on `SIGTERM`.
+- Server sessions all close at once on `SIGTERM`.
 - Workers abort every running job of the closed session.
-- [Startup recovery](../scheduler/waiting-and-recovery.md#startup-recovery) will re-queue the interrupted work on the next start.
+- The next start can re-queue the interrupted work through [Startup recovery](../scheduler/waiting-and-recovery.md#startup-recovery).
 - Workers reconnect once the server is back.
-- A `Draining` message from the server will end the session, never the worker process.
+- A `Draining` message from the server can end the session, never the worker process.
 
 ## Version Agreement
 
@@ -144,16 +153,16 @@ A restart can lose work in flight, never a queued job.
 "GRAD" | oldest: u16 LE | newest: u16 LE
 ```
 
-- Both sides send this 8-byte frame before their first message. The frame format will never change.
-- The `ProtoSocket` type will agree on the first send or receive. Both sides are sending first and reading second.
-- The agreed version is the lower of both newest versions. Every later frame is encoded for that version.
-- Two ranges without overlap will end the session with close code `1002` and `no shared protocol version: ours 30..=30, peer 31..=32`.
-- A first frame without `GRAD` came from protocol 26 or older. The session will end with `peer protocol is older than 30`.
-- The oldest supported version is 30. Older workers must upgrade.
+- Both sides send this 8-byte frame before the first message. Future versions leave it alone.
+- The `ProtoSocket` type can agree on the first send or receive. Both sides are sending first and reading second.
+- The agreed version is the lower of both newest versions. Every later frame is for that version.
+- Two ranges without overlap can end the session with close code `1002` and `no shared protocol version: ours 30..=30, peer 31..=32`.
+- A first frame without `GRAD` came from protocol 26 or older. The session can end with `peer protocol is older than 30`.
+- The oldest supported version is 30. Older workers need an upgrade.
 - Both sides are logging the reason at the `warn` level.
-- A server dialing a worker will keep the reason as the worker's offline reason.
+- A server connecting to a worker can keep the reason as the worker's offline reason.
 - `gradient_wire::PROTO_VERSIONS` is the supported range, computed from the `#[proto]` annotations.
-- The `writer.version()` call will expose the agreed version for feature checks.
+- The agreed version for feature checks is available through the `writer.version()` call.
 
 ## Changing a Message
 
@@ -164,14 +173,14 @@ A restart can lose work in flight, never a queued job.
 | New variant | `#[proto(N)]` on the variant | Appended at the end. Sending the variant to a peer below N is an `EncodeError` |
 | Removed or reordered field or variant, changed meaning | `#[proto(oldest = N)]` on `ClientMessage` and `ServerMessage` | The oldest supported version is rising to N |
 
-- A field without `default` is required. A forgotten `default` can cost compatibility, never correctness.
-- Variants are append-only. A variant older than the one before is a compile error.
-- The files `gradient-wire/schema/v{N}.txt` hold the wire shape of each supported version. The `schema` test will compare the files to the code.
-- Running `cargo run --example wire_schema` will write the file of a new version and delete files below the oldest. Existing files are never rewritten.
+- A field without `default` is mandatory. A forgotten `default` can cost compatibility, never correctness.
+- Variants are append-only. A variant older than its predecessor is a compile error.
+- The files `gradient-wire/schema/v{N}.txt` hold the wire shape of each supported version. The `schema` test can compare the files to the code.
+- `cargo run --example wire_schema` can write the file of a new version and delete files below the oldest. Existing files stay untouched.
 
 ## Cache Sessions
 
-The `/cache/{cache}/proto` endpoint will offer the same frames as a read-only session for one cache.
+The `/cache/{cache}/proto` endpoint can offer the same frames as a read-only session for a single cache.
 
 | Aspect | Rule |
 |---|---|
@@ -184,11 +193,11 @@ The `/cache/{cache}/proto` endpoint will offer the same frames as a read-only se
 
 ## Implementation
 
-- One pure handshake state machine in `gradient-wire/src/session/handshake.rs` will drive every session.
-- The server will run `as_authority` for a worker dialing in and `as_dialer` for a worker the server dialed. The worker will run `as_peer` and `as_dialed`.
-- The cache session will agree on a version like every other session.
-- The code in `session/frame.rs` will split each socket into a typed reader and a writer. The writer will hold a control lane and a bulk lane.
-- Control frames go first. A bulk batch will hold at most 256 KiB.
-- A full bulk queue will never block control replies.
-- Chunk payloads (`NarPush`, `UploadChunk`, `EvalCacheChunk`, `LogChunk`) reach the handler as slices of the frame, without a copy.
-- The `client::dial` function will disable Nagle's algorithm on every socket. Small control frames go out without waiting for a delayed ACK.
+- A single handshake state machine in `gradient-wire/src/session/handshake.rs` is the driver of every session.
+- The server can run `as_authority` for an incoming worker and `as_dialer` for a worker the server connected to. The worker can run `as_peer` and `as_dialed`.
+- The cache session can agree on a version like every other session.
+- The code in `session/frame.rs` can split each socket into a typed reader and a writer. The writer can hold a control lane and a bulk lane.
+- Control frames go first. A bulk batch can hold no more than 256 KiB.
+- A full bulk queue can never block control replies.
+- Chunk payloads (`NarPush`, `UploadChunk`, `EvalCacheChunk`, `LogChunk`) arrive at the handler as slices of the frame, without a copy.
+- The `client::dial` function can disable Nagle's algorithm on every socket. Small control frames go out without waiting for a delayed ACK.
