@@ -1140,8 +1140,9 @@ mod tests {
                     .to_string()
             ]
         );
-        assert!(unmatched_target_errors(&["packages.x86_64-linux.#".to_string()]).is_empty());
         assert!(unmatched_target_errors(&["packages.x86_64-linux.*".to_string()]).is_empty());
+        assert!(unmatched_target_errors(&["packages.x86_64-linux.**".to_string()]).is_empty());
+        assert!(unmatched_target_errors(&["packages.x86_64-*.hello".to_string()]).is_empty());
         assert!(unmatched_target_errors(&["!nixosConfigurations.foo".to_string()]).is_empty());
     }
 
@@ -1167,8 +1168,9 @@ mod tests {
     fn explicit_attr_set_keeps_only_wildcard_free_includes() {
         let set = explicit_attr_set(&[
             "packages.x86_64-linux.hello".into(),
-            "packages.x86_64-linux.#".into(),
             "packages.x86_64-linux.*".into(),
+            "packages.x86_64-linux.**".into(),
+            "packages.x86_64-*.hello".into(),
             "!packages.x86_64-linux.broken".into(),
             "checks.\"py.3\".unit".into(),
         ]);
