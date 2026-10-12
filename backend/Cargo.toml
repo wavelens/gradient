@@ -176,12 +176,9 @@ harmonia-utils-hash            = { git = "https://github.com/DerDennisOP/harmoni
 harmonia-utils-io              = { git = "https://github.com/DerDennisOP/harmonia.git", branch = "build-resource-usage", default-features = false }
 harmonia-utils-signature       = { git = "https://github.com/DerDennisOP/harmonia.git", branch = "build-resource-usage", default-features = false }
 
-# Nix bindings. The version tracks the FORK below, not upstream: the patch
-# replaces the source, so only the requirement is resolved against the index.
 nix-bindings = { version = "0.2352", default-features = false }
 
-# Shared utilities promoted from member crates
-git-url-parse = { version = "0.6" } # defaults: re-exports the `url` crate
+git-url-parse = { version = "0.6" }
 ipnet         = { version = "2.10", default-features = false, features = ["std"] }
 password-auth = { version = "1.0", default-features = false, features = ["argon2"] }
 prometheus    = { version = "0.14", default-features = false, features = ["process"] }
@@ -222,11 +219,7 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-# Only crates published on crates.io can be patched: the requirement resolves
-# against the index, then the source is replaced by the one named here. Every
-# harmonia-* crate is unpublished, so those stay plain git deps above.
 nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/eval-metrics-stats" }
-# sqlx 0.9.0 caps libsqlite3-sys below 0.38, harmonia-store-db needs rusqlite 0.40 (0.38); main lifts the cap. Drop on the next sqlx release.
 sqlx             = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
 sqlx-core        = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
 sqlx-macros      = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
@@ -253,8 +246,6 @@ workspace = true
 name = "gradient-server"
 path = "src/main.rs"
 
-# The SQL plan gate. `required-features` keeps it out of a default build, so it
-# is compiled only by the nix passthru the e2e VM test runs and never ships.
 [[bin]]
 name = "gradient-sql-gate"
 path = "src/sql_gate/main.rs"
