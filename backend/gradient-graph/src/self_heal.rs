@@ -29,9 +29,9 @@ async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[Deriv
     false
 }
 
-/// Transient retries requeue the failed build and keep it out of the queue until the input is
-/// back. Present inputs stay, whoever reported them missing. Worker views of the cache can lag
-/// behind storage, and deleting a present object dead-ends the parents.
+/// Present inputs stay, whoever reported them missing: a worker view of the cache can lag behind
+/// storage. Retire the `cached_path` row of a gone object. An immediate retry for its
+/// terminal-failed producer.
 pub(crate) async fn repair_missing_inputs(
     ctx: &DbContext,
     failed_derivation: DerivationId,
@@ -87,19 +87,12 @@ pub(crate) async fn repair_missing_inputs(
         }
     }
 
-    // The derivation naming a source, a .drv or a present object walks again, and that walk
-    // pushes them.
-    if !kept.is_empty() {
-        match gradient_db::graph::can_start::unwalk_derivations(ctx, &[failed_derivation]).await {
-            Ok(changes) => gradient_db::status::emit_transition_effects(ctx, &changes).await?,
-            Err(e) => {
-                warn!(%failed_derivation, error = %e, "repair: re-walk of the failed derivation failed")
-            }
-        }
-    }
+    // Leave the derivation walked. Once the evaluation has left its walk phase nothing can walk
+    // it again and every consumer of an unwalked row cannot start. The retry loop cannot
+    // outgrow `max_attempts`.
 
-    // A wanted output with a terminal-failed producer retries right away. Waiting for an eval to
-    // requeue it can dead-end whenever evals are aborted.
+    // An immediate retry for a wanted output with a terminal-failed producer: an aborted eval
+    // can skip the requeue.
     let requeued = if demoted_producers.is_empty() {
         0
     } else {
@@ -126,7 +119,7 @@ pub(crate) async fn repair_missing_inputs(
         parents_unwalked,
         requeued,
         paths = missing_paths.len(),
-        "repaired missing inputs: gone objects purged, present and producerless paths kept, the failed derivation walks again"
+        "repaired missing inputs: gone objects purged, present and producerless paths kept"
     );
     Ok(())
 }
