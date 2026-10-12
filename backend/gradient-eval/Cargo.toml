@@ -21,9 +21,14 @@ doctest = false
 
 [dependencies]
 anyhow       = { version = "1.0", default-features = false, features = ["std"] }
+async-trait  = { version = "0.1", default-features = false }
+futures      = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 libc         = { version = "0.2", default-features = false }
+nix          = { version = "0.31", default-features = false, features = ["signal", "process"] }
 nix-bindings = { version = "0.2352", default-features = false, features = ["flake", "main"] }
 rkyv         = { version = "0.8", default-features = false, features = ["alloc", "bytecheck"] }
 serde        = { version = "1", default-features = false, features = ["std", "derive"] }
 serde_json   = { version = "1.0", default-features = false, features = ["std"] }
+sysinfo      = { version = "0.39", default-features = false, features = ["system"] }
+tokio        = { version = "1.50", default-features = false, features = ["rt", "rt-multi-thread", "process", "io-util", "sync", "time", "macros"] }
 tracing      = { version = "0.1", default-features = false, features = ["std", "attributes"] }
