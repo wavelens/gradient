@@ -54,13 +54,15 @@ sudo gradient-update
 journalctl -u gradient-deploy
 ```
 
-`gradient-update` will start the deployment at once, without waiting for the timer. The journal will end with `Deployment to /nix/store/...-nixos-system-office-pc-... completed successfully`, or with the reason no deployment ran.
+Start a deployment at once with `gradient-update`, without waiting for the timer. The last journal lines read `Deployment to /nix/store/...-nixos-system-office-pc-... completed successfully`, or the reason no deployment ran.
 
 `... without a deployment for <name>` is a sign that no system matched. The `networking.hostName` of the built configuration does not match `deployFor`.
 
+An `Error:` line in the journal is the sign of a failed fetch or switch. No switch took place.
+
 ## Run Behavior
 
-Each round will read the task's newest evaluation and pick one of these outcomes.
+Read the task's newest evaluation every round, then act on the outcome below.
 
 | Newest system for the machine | Result |
 |---|---|
@@ -68,8 +70,9 @@ Each round will read the task's newest evaluation and pick one of these outcomes
 | Built | Fetched from the cache and switched to |
 | Still building | Waiting for the build, then switching |
 | Failed, or the evaluation failed | Stopping, reported in the journal |
+| Not fetchable, or the switch failed | `Error:` in the journal, a retry after 10 seconds, no switch |
 
-None of these fail the unit. The waiting service will follow the task's live WebSocket. The service can react the moment the build is finished.
+The waiting outcomes leave the unit successful. The waiting service can follow the task's live WebSocket. A finished build can turn into a switch at once.
 
 | Option | Default | Effect |
 |---|---|---|
