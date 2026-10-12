@@ -113,7 +113,6 @@
         openssl
         sqlite
         postgresql_18
-        pgadmin4-desktopmode
         zstd
       ];
 
