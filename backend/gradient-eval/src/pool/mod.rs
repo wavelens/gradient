@@ -5,6 +5,7 @@
  */
 
 pub mod download;
+mod driver;
 pub mod fan_out;
 pub mod import;
 mod live_thunks;
@@ -27,6 +28,7 @@ use self::transport::{EvalErrorResponse, Listing};
 use self::workers::EvalWorkerPool;
 
 pub use self::download::{DownloadSink, forward_nix_log};
+pub use self::driver::run_eval_driver;
 pub use self::fan_out::{CallStats as CallCost, Discovery as DiscoveryReport, FoundItems as Found};
 pub use self::import::{ImportBuilder, RefuseImports};
 pub use self::live_thunks::LiveThunks;
