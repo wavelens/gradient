@@ -59,10 +59,10 @@
       # Shutdown is producing no response line.
       banner("Run eval-worker via --eval-driver")
       requests = [
+          {"op": "list", "repository": REPO, "wildcards": ["packages.x86_64-linux.**"]},
           {"op": "list", "repository": REPO, "wildcards": ["packages.x86_64-linux.*"]},
-          {"op": "list", "repository": REPO, "wildcards": ["packages.x86_64-linux.#"]},
           {"op": "list", "repository": REPO,
-           "wildcards": ["packages.x86_64-linux.*", "!packages.x86_64-linux.cowsay"]},
+           "wildcards": ["packages.x86_64-linux.**", "!packages.x86_64-linux.cowsay"]},
           {"op": "fingerprint", "repository": REPO},
           {"op": "shutdown"},
       ]
@@ -97,15 +97,15 @@
       hello = "packages.x86_64-linux.hello"
       cowsay = "packages.x86_64-linux.cowsay"
 
-      nested = [{"pattern": "packages.x86_64-linux.nested.#", "only": ["inner"]}]
+      nested = [{"pattern": "packages.x86_64-linux.nested.*", "only": ["inner"]}]
 
       assert responses[0]["kind"] == "list_ok", responses[0]
-      star = {it["attr"] for it in responses[0]["items"]}
-      assert star == {hello, cowsay}, f"trailing-* mismatch: {star}"
+      deep = {it["attr"] for it in responses[0]["items"]}
+      assert deep == {hello, cowsay}, f"trailing-** mismatch: {deep}"
       assert responses[0]["deferred"] == nested, f"nested set not deferred: {responses[0]}"
 
-      hash_ = {it["attr"] for it in responses[1]["items"]}
-      assert hash_ == {hello, cowsay}, f"# should be non-recursive: {hash_}"
+      star = {it["attr"] for it in responses[1]["items"]}
+      assert star == {hello, cowsay}, f"trailing-* mismatch: {star}"
 
       excluded = {it["attr"] for it in responses[2]["items"]}
       assert excluded == {hello}, f"exclusion mismatch: {excluded}"

@@ -111,7 +111,7 @@ fn explicit_attr_set(wildcards: &[String]) -> HashSet<String> {
         .iter()
         .filter_map(|w| {
             let (exclude, segs) = crate::nix::wildcard_walk::parse_pattern(w);
-            (!exclude && !segs.iter().any(|s| s == "*" || s == "#")).then(|| segs.join("."))
+            (!exclude && !segs.iter().any(|s| s.contains('*'))).then(|| segs.join("."))
         })
         .collect()
 }

@@ -89,7 +89,7 @@ services.gradient.state = {
 | `triggers.*.config` | attribute set | `{ }` | Type-specific configuration. |
 | `triggers.*.integration` | null or string | `null` | Name of an inbound integration in the same project backing this trigger. |
 | `triggers.*.type` | one of `polling` `reporter_push` `reporter_pull_request` `time` | - | Trigger kind, determining the expected `config` and the firing behavior of the trigger. |
-| `wildcard` | string | `"packages.x86_64-linux.*"` | Comma-separated Nix attribute paths to evaluate from the flake. A `*` or `#` segment is matching any attribute name. A pattern prefixed with `!` is excluding matching paths. See [Evaluation Wildcards](wildcards.md). |
+| `wildcard` | string | `"packages.x86_64-linux.**"` | Comma-separated Nix attribute paths to evaluate from the flake. A `*` segment takes any attribute name, `**` also takes a nested set below it, and `x86_64-*` matches part of a name. A pattern prefixed with `!` excludes matching paths. See [Evaluation Wildcards](wildcards.md). |
 
 ## `integrations.<name>`
 

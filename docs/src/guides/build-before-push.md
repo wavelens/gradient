@@ -25,7 +25,7 @@ gradient build .#hello
 |---|---|
 | none | The wildcard of the `build-request` task |
 | `.#hello` | `packages.<system>.hello`, with `--system` picking another system |
-| `checks.x86_64-linux.#` | Any [wildcard](../reference/wildcards.md) |
+| `checks.x86_64-linux.*` | Any [wildcard](../reference/wildcards.md) |
 
 ## 2. Use the Result
 

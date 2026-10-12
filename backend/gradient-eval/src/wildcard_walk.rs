@@ -11,21 +11,45 @@ pub trait WalkNode: Sized {
     fn child_names(&self) -> Result<Vec<String>>;
     fn child(&self, name: &str) -> Result<Option<Self>>;
     fn is_derivation(&self) -> Result<bool>;
-    /// `*` traversal must not descend into an opaque typed attrset like a NixOS option.
+    /// Opaque sets like NixOS options stay out of a `*` traversal.
     fn is_opaque(&self) -> Result<bool>;
 }
 
-pub fn collapse_stars(segs: &[String]) -> Vec<String> {
+pub fn collapse_deep(segs: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for s in segs {
-        if s == "*" && out.last().map(|p| p == "*").unwrap_or(false) {
+    for seg in segs {
+        if seg == "**" && out.last().is_some_and(|prev| prev == "**") {
             continue;
         }
 
-        out.push(s.clone());
+        out.push(seg.clone());
     }
 
     out
+}
+
+fn glob_covers(glob: &str, name: &str) -> bool {
+    let (pattern, subject) = (glob.as_bytes(), name.as_bytes());
+    let (mut p, mut s) = (0, 0);
+    let mut backtrack: Option<(usize, usize)> = None;
+
+    while s < subject.len() {
+        if p < pattern.len() && pattern[p] == subject[s] {
+            p += 1;
+            s += 1;
+        } else if p < pattern.len() && pattern[p] == b'*' {
+            backtrack = Some((p, s));
+            p += 1;
+        } else if let Some((star, at)) = backtrack {
+            p = star + 1;
+            s = at + 1;
+            backtrack = Some((star, at + 1));
+        } else {
+            return false;
+        }
+    }
+
+    pattern[p..].iter().all(|b| *b == b'*')
 }
 
 pub fn parse_pattern(pat: &str) -> (bool, Vec<String>) {
@@ -107,7 +131,7 @@ impl Sink<'_> {
 
         if !names.is_empty() {
             let mut segments = path.to_vec();
-            segments.push("#".to_owned());
+            segments.push("*".to_owned());
             deferred.push(Shard {
                 segments,
                 only: Some(names.to_vec()),
@@ -122,20 +146,23 @@ fn wildcard_children<N: WalkNode>(
     node: &N,
     path: &[String],
     only: Option<&[String]>,
+    glob: Option<&str>,
     diags: &mut Vec<AttrError>,
 ) -> Vec<String> {
     let names = tolerate(node.child_names(), path, diags);
-    match only {
-        Some(only) => names.into_iter().filter(|n| only.contains(n)).collect(),
-        None => names,
-    }
+    names
+        .into_iter()
+        .filter(|n| {
+            glob.is_none_or(|glob| glob_covers(glob, n)) && only.is_none_or(|only| only.contains(n))
+        })
+        .collect()
 }
 
 fn tolerate<T: Default>(res: Result<T>, path: &[String], diags: &mut Vec<AttrError>) -> T {
     attempt(res, path, diags).unwrap_or_default()
 }
 
-/// Nix re-runs a thunk that threw, so a member whose evaluation failed is not asked again.
+/// Failed members stay failed; reuse the cached error.
 fn attempt<T>(res: Result<T>, path: &[String], diags: &mut Vec<AttrError>) -> Option<T> {
     res.map_err(|e| {
         diags.push(AttrError {
@@ -146,6 +173,22 @@ fn attempt<T>(res: Result<T>, path: &[String], diags: &mut Vec<AttrError>) -> Op
     .ok()
 }
 
+enum Seg<'a> {
+    Any,
+    Deep,
+    Glob(&'a str),
+    Literal,
+}
+
+fn segment(seg: &str) -> Seg<'_> {
+    match seg {
+        "*" => Seg::Any,
+        "**" => Seg::Deep,
+        s if s.contains('*') => Seg::Glob(s),
+        _ => Seg::Literal,
+    }
+}
+
 fn traverse<N: WalkNode>(
     node: &N,
     path: &[String],
@@ -154,92 +197,149 @@ fn traverse<N: WalkNode>(
     sink: &mut Sink<'_>,
     diags: &mut Vec<AttrError>,
 ) {
-    match segs.split_first() {
-        None => match sink {
+    let Some((seg, rest)) = segs.split_first() else {
+        match sink {
             Sink::Derivations { out, .. } => {
                 if tolerate(node.is_derivation(), path, diags) {
                     out.push(path.join("."));
                 }
             }
             Sink::Shards(_) => sink.emit_leaf(path.to_vec()),
-        },
-        Some((seg, rest)) if seg == "*" => {
-            let names = wildcard_children(node, path, only, diags);
-            if rest.is_empty() && sink.restrict_trailing(path, seg, names.clone()) {
-                return;
-            }
-
-            for name in names {
-                let mut p = path.to_vec();
-                p.push(name.clone());
-                let Some(child) = tolerate(node.child(&name), &p, diags) else {
-                    continue;
-                };
-
-                if rest.is_empty() {
-                    let Some(is_derivation) = attempt(child.is_derivation(), &p, diags) else {
-                        continue;
-                    };
-                    if is_derivation {
-                        sink.emit_leaf(p);
-                    } else if tolerate(child.is_opaque(), &p, diags) {
-                        continue;
-                    } else {
-                        let Some(subs) = attempt(child.child_names(), &p, diags) else {
-                            continue;
-                        };
-                        if sink.defer_children(&p, &subs) {
-                            continue;
-                        }
-
-                        for sub in subs {
-                            let mut q = p.clone();
-                            q.push(sub.clone());
-                            let Some(gc) = tolerate(child.child(&sub), &q, diags) else {
-                                continue;
-                            };
-                            if tolerate(gc.is_derivation(), &q, diags) {
-                                sink.emit_leaf(q);
-                            }
-                        }
-                    }
-                } else if attempt(child.is_opaque(), &p, diags).is_none_or(|opaque| opaque) {
-                    continue;
-                } else {
-                    descend(&child, p, rest, sink, diags);
-                }
-            }
         }
-        Some((seg, rest)) if seg == "#" => {
-            let names = wildcard_children(node, path, only, diags);
-            if rest.is_empty() && sink.restrict_trailing(path, seg, names.clone()) {
-                return;
-            }
+        return;
+    };
 
-            for name in names {
-                let mut p = path.to_vec();
-                p.push(name.clone());
-                let Some(child) = tolerate(node.child(&name), &p, diags) else {
-                    continue;
-                };
-
-                if rest.is_empty() {
-                    if tolerate(child.is_derivation(), &p, diags) {
-                        sink.emit_leaf(p);
-                    }
-                } else {
-                    descend(&child, p, rest, sink, diags);
-                }
-            }
-        }
-        Some((seg, rest)) => {
+    match segment(seg) {
+        Seg::Literal => {
             let mut p = path.to_vec();
             p.push(seg.clone());
             if let Some(child) = tolerate(node.child(seg), &p, diags) {
                 traverse(&child, &p, rest, only, sink, diags);
             }
         }
+        Seg::Any => level(
+            node,
+            path,
+            rest,
+            only,
+            Pattern { seg, glob: None },
+            sink,
+            diags,
+        ),
+        Seg::Glob(glob) => level(
+            node,
+            path,
+            rest,
+            only,
+            Pattern {
+                seg,
+                glob: Some(glob),
+            },
+            sink,
+            diags,
+        ),
+        Seg::Deep => nested(node, path, seg, rest, only, sink, diags),
     }
+}
+
+struct Pattern<'a> {
+    seg: &'a str,
+    glob: Option<&'a str>,
+}
+
+fn level<N: WalkNode>(
+    node: &N,
+    path: &[String],
+    rest: &[String],
+    only: Option<&[String]>,
+    pattern: Pattern<'_>,
+    sink: &mut Sink<'_>,
+    diags: &mut Vec<AttrError>,
+) {
+    let Pattern { seg, glob } = pattern;
+    let names = wildcard_children(node, path, only, glob, diags);
+    if rest.is_empty() && sink.restrict_trailing(path, seg, names.clone()) {
+        return;
+    }
+
+    for name in names {
+        let mut p = path.to_vec();
+        p.push(name.clone());
+        let Some(child) = tolerate(node.child(&name), &p, diags) else {
+            continue;
+        };
+
+        if rest.is_empty() {
+            if tolerate(child.is_derivation(), &p, diags) {
+                sink.emit_leaf(p);
+            }
+        } else if is_opaque_set(&child, &p, diags) {
+            continue;
+        } else {
+            descend(&child, p, rest, sink, diags);
+        }
+    }
+}
+
+/// `**`: a name at this level and a nested set below it at the end of a pattern.
+fn nested<N: WalkNode>(
+    node: &N,
+    path: &[String],
+    seg: &str,
+    rest: &[String],
+    only: Option<&[String]>,
+    sink: &mut Sink<'_>,
+    diags: &mut Vec<AttrError>,
+) {
+    let names = wildcard_children(node, path, only, None, diags);
+    if rest.is_empty() && sink.restrict_trailing(path, seg, names.clone()) {
+        return;
+    }
+
+    for name in names {
+        let mut p = path.to_vec();
+        p.push(name.clone());
+        let Some(child) = tolerate(node.child(&name), &p, diags) else {
+            continue;
+        };
+
+        if rest.is_empty() {
+            let Some(is_derivation) = attempt(child.is_derivation(), &p, diags) else {
+                continue;
+            };
+            if is_derivation {
+                sink.emit_leaf(p);
+            } else if tolerate(child.is_opaque(), &p, diags) {
+                continue;
+            } else {
+                let Some(subs) = attempt(child.child_names(), &p, diags) else {
+                    continue;
+                };
+                if sink.defer_children(&p, &subs) {
+                    continue;
+                }
+
+                for sub in subs {
+                    let mut q = p.clone();
+                    q.push(sub.clone());
+                    let Some(gc) = tolerate(child.child(&sub), &q, diags) else {
+                        continue;
+                    };
+                    if tolerate(gc.is_derivation(), &q, diags) {
+                        sink.emit_leaf(q);
+                    }
+                }
+            }
+        } else if is_opaque_set(&child, &p, diags) {
+            continue;
+        } else {
+            descend(&child, p, rest, sink, diags);
+        }
+    }
+}
+
+fn is_opaque_set<N: WalkNode>(child: &N, path: &[String], diags: &mut Vec<AttrError>) -> bool {
+    attempt(child.is_opaque(), path, diags).is_none_or(|opaque| opaque)
 }
 
 fn descend<N: WalkNode>(
@@ -300,7 +400,7 @@ fn collect_derivations<N: WalkNode>(
     let mut out = Vec::new();
     let mut diags = Vec::new();
     for inc in includes {
-        let segs = collapse_stars(inc);
+        let segs = collapse_deep(inc);
         traverse(
             root,
             &[],
@@ -350,7 +450,7 @@ pub fn plan_shards<N: WalkNode>(
     let mut shards = Vec::new();
     let mut diags = Vec::new();
     for inc in includes {
-        let segs = collapse_stars(inc);
+        let segs = collapse_deep(inc);
         traverse(
             root,
             &[],
@@ -369,10 +469,10 @@ pub fn plan_shards<N: WalkNode>(
 pub fn segments_to_pattern(segs: &[String]) -> String {
     segs.iter()
         .map(|s| {
-            if s == "*" || s == "#" || !(s.contains('.') || s.contains('"')) {
-                s.clone()
-            } else {
+            if s.contains('.') || s.contains('"') {
                 format!("\"{s}\"")
+            } else {
+                s.clone()
             }
         })
         .collect::<Vec<_>>()
@@ -517,17 +617,17 @@ mod tests {
     }
 
     #[test]
-    fn collapse_consecutive_stars() {
+    fn collapse_consecutive_deep_segments() {
         assert_eq!(
-            collapse_stars(&segs(&["packages", "*", "*"])),
-            segs(&["packages", "*"])
+            collapse_deep(&segs(&["packages", "**", "**"])),
+            segs(&["packages", "**"])
         );
     }
 
     #[test]
-    fn discover_double_star_recovers_one_level() {
+    fn discover_deep_star_terminal_adds_a_nested_set() {
         let root = tree();
-        let got = discover(&&root, &[segs(&["packages", "*", "*"])], &[]).0;
+        let got = discover(&&root, &[segs(&["packages", "**"])], &[]).0;
         assert_eq!(
             got,
             vec![
@@ -539,9 +639,9 @@ mod tests {
     }
 
     #[test]
-    fn discover_hash_non_recursive() {
+    fn discover_star_terminal_keeps_the_level() {
         let root = tree();
-        let got = discover(&&root, &[segs(&["packages", "x86_64-linux", "#"])], &[]).0;
+        let got = discover(&&root, &[segs(&["packages", "x86_64-linux", "*"])], &[]).0;
         assert_eq!(
             got,
             vec![
@@ -563,7 +663,7 @@ mod tests {
         let root = tree();
         let got = discover(
             &&root,
-            &[segs(&["packages", "*"])],
+            &[segs(&["packages", "**"])],
             &[segs(&["packages", "aarch64-linux", "hello"])],
         )
         .0;
@@ -579,12 +679,28 @@ mod tests {
     #[test]
     fn discover_checks_star() {
         let root = tree();
-        let got = discover(&&root, &[segs(&["checks", "*"])], &[]).0;
+        let got = discover(&&root, &[segs(&["checks", "**"])], &[]).0;
         assert_eq!(got, vec!["checks.x86_64-linux.test"]);
     }
 
     #[test]
-    fn discover_hash_non_last_recurses() {
+    fn discover_partial_glob_selects_names() {
+        let root = tree();
+        let got = discover(&&root, &[segs(&["packages", "x86_64-*", "*"])], &[]).0;
+        assert_eq!(
+            got,
+            vec![
+                "packages.x86_64-linux.cowsay",
+                "packages.x86_64-linux.hello"
+            ]
+        );
+
+        let got = discover(&&root, &[segs(&["packages", "aarch64-*", "*"])], &[]).0;
+        assert_eq!(got, vec!["packages.aarch64-linux.hello"]);
+    }
+
+    #[test]
+    fn discover_star_non_last_recurses() {
         let root = StubNode::set(vec![(
             "top",
             StubNode::set(vec![
@@ -592,12 +708,12 @@ mod tests {
                 ("y", StubNode::set(vec![("leaf", StubNode::drv())])),
             ]),
         )]);
-        let got = discover(&&root, &[segs(&["top", "#", "leaf"])], &[]).0;
+        let got = discover(&&root, &[segs(&["top", "*", "leaf"])], &[]).0;
         assert_eq!(got, vec!["top.x.leaf", "top.y.leaf"]);
     }
 
     #[test]
-    fn discover_hash_terminal_non_recursive() {
+    fn discover_star_terminal_stays_at_the_level() {
         let root = StubNode::set(vec![(
             "top",
             StubNode::set(vec![
@@ -605,7 +721,7 @@ mod tests {
                 ("nested", StubNode::set(vec![("inner", StubNode::drv())])),
             ]),
         )]);
-        let got = discover(&&root, &[segs(&["top", "#"])], &[]).0;
+        let got = discover(&&root, &[segs(&["top", "*"])], &[]).0;
         assert_eq!(got, vec!["top.a"]);
     }
 
@@ -631,14 +747,14 @@ mod tests {
                 ("optset", StubNode::opaque(vec![("b", StubNode::drv())])),
             ]),
         )]);
-        let got = discover(&&root, &[segs(&["top", "*", "*"])], &[]).0;
+        let got = discover(&&root, &[segs(&["top", "**"])], &[]).0;
         assert_eq!(got, vec!["top.realset.a"]);
     }
 
     #[test]
     fn discover_trailing_star_emits_derivation_child() {
         let root = StubNode::set(vec![("top", StubNode::set(vec![("d", StubNode::drv())]))]);
-        let got = discover(&&root, &[segs(&["top", "*"])], &[]).0;
+        let got = discover(&&root, &[segs(&["top", "**"])], &[]).0;
         assert_eq!(got, vec!["top.d"]);
     }
 
@@ -735,9 +851,9 @@ mod tests {
     fn plan_trailing_star_restricts_the_pattern_to_each_child_name() {
         let root = tree();
         assert_eq!(
-            shards(&root, &["packages", "*", "*"]),
+            shards(&root, &["packages", "**"]),
             vec![restricted(
-                &["packages", "*"],
+                &["packages", "**"],
                 &["aarch64-linux", "x86_64-linux"]
             )]
         );
@@ -752,7 +868,7 @@ mod tests {
                 ("b", StubNode::throwing()),
             ]),
         )]);
-        for wildcard in ["*", "#"] {
+        for wildcard in ["*", "**"] {
             let (got, errors) = plan_shards(&&root, &[segs(&["hydraJobs", wildcard])]);
             assert_eq!(got, vec![restricted(&["hydraJobs", wildcard], &["a", "b"])]);
             assert!(errors.is_empty(), "no child was forced: {errors:?}");
@@ -771,8 +887,8 @@ mod tests {
             ]),
         )]);
         assert_split_equivalent(&root, &["jobs", "*"]);
-        assert_split_equivalent(&root, &["jobs", "#"]);
-        assert_split_equivalent(&root, &["*", "*"]);
+        assert_split_equivalent(&root, &["jobs", "**"]);
+        assert_split_equivalent(&root, &["**"]);
     }
 
     #[test]
@@ -780,7 +896,7 @@ mod tests {
         let root = tree();
         let (attrs, deferred, _) = discover_split(
             &&root,
-            &[segs(&["packages", "*"])],
+            &[segs(&["packages", "**"])],
             &[],
             Some(&segs(&["x86_64-linux"])),
         );
@@ -791,7 +907,7 @@ mod tests {
         assert_eq!(
             deferred,
             vec![restricted(
-                &["packages", "x86_64-linux", "#"],
+                &["packages", "x86_64-linux", "*"],
                 &["cowsay", "hello", "nested"]
             )]
         );
@@ -812,7 +928,7 @@ mod tests {
         assert_eq!(
             deferred,
             vec![restricted(
-                &["packages", "x86_64-linux", "nested", "#"],
+                &["packages", "x86_64-linux", "nested", "*"],
                 &["inner"]
             )]
         );
@@ -828,19 +944,26 @@ mod tests {
                 residual(&["packages", "x86_64-linux", "hello"]),
             ]
         );
+        assert_eq!(
+            shards(&root, &["packages", "*-linux", "hello"]),
+            vec![
+                residual(&["packages", "aarch64-linux", "hello"]),
+                residual(&["packages", "x86_64-linux", "hello"]),
+            ]
+        );
     }
 
     #[test]
-    fn plan_hash_terminal_restricts_the_pattern_to_each_child_name() {
+    fn plan_star_terminal_restricts_the_pattern_to_each_child_name() {
         let root = tree();
         assert_eq!(
-            shards(&root, &["packages", "x86_64-linux", "#"]),
+            shards(&root, &["packages", "x86_64-linux", "*"]),
             vec![restricted(
-                &["packages", "x86_64-linux", "#"],
+                &["packages", "x86_64-linux", "*"],
                 &["cowsay", "hello", "nested"]
             )]
         );
-        assert_split_equivalent(&root, &["packages", "x86_64-linux", "#"]);
+        assert_split_equivalent(&root, &["packages", "x86_64-linux", "*"]);
     }
 
     #[test]
@@ -872,13 +995,13 @@ mod tests {
             vec![residual(&["packages", "sysB", "hello"])]
         );
         assert_split_equivalent(&root, &["packages", "*", "hello"]);
-        assert_split_equivalent(&root, &["packages", "*", "*"]);
+        assert_split_equivalent(&root, &["packages", "**"]);
     }
 
     #[test]
     fn plan_top_level_wildcard_shards_by_category() {
         let root = tree();
-        assert_split_equivalent(&root, &["*", "*", "*"]);
+        assert_split_equivalent(&root, &["**"]);
     }
 
     #[test]
@@ -886,14 +1009,14 @@ mod tests {
         let root = tree();
         let got = plan_shards(
             &&root,
-            &[segs(&["packages", "*", "*"]), segs(&["checks", "*", "*"])],
+            &[segs(&["packages", "**"]), segs(&["checks", "**"])],
         )
         .0;
         assert_eq!(
             got,
             vec![
-                restricted(&["packages", "*"], &["aarch64-linux", "x86_64-linux"]),
-                restricted(&["checks", "*"], &["x86_64-linux"]),
+                restricted(&["packages", "**"], &["aarch64-linux", "x86_64-linux"]),
+                restricted(&["checks", "**"], &["x86_64-linux"]),
             ]
         );
     }
@@ -901,10 +1024,18 @@ mod tests {
     #[test]
     fn segments_to_pattern_quotes_dotted_segments_only() {
         assert_eq!(
-            segments_to_pattern(&segs(&["packages", "x86_64-linux", "#"])),
-            "packages.x86_64-linux.#"
+            segments_to_pattern(&segs(&["packages", "x86_64-linux", "*"])),
+            "packages.x86_64-linux.*"
         );
         assert_eq!(segments_to_pattern(&segs(&["packages", "*"])), "packages.*");
+        assert_eq!(
+            segments_to_pattern(&segs(&["packages", "**"])),
+            "packages.**"
+        );
+        assert_eq!(
+            segments_to_pattern(&segs(&["packages", "x86_64-*"])),
+            "packages.x86_64-*"
+        );
         let dotted = segs(&["packages", "x86_64-linux", "python3.12"]);
         let rendered = segments_to_pattern(&dotted);
         assert_eq!(rendered, r#"packages.x86_64-linux."python3.12""#);

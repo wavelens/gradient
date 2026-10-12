@@ -267,10 +267,11 @@
 
       wildcard = mkOption {
         type = types.str;
-        default = "packages.x86_64-linux.*";
+        default = "packages.x86_64-linux.**";
         description = ''
-          Comma-separated Nix attribute paths to evaluate from the flake. A `*` or `#` segment
-          matches any attribute name. A pattern prefixed with `!` excludes matching paths.
+          Comma-separated Nix attribute paths to evaluate from the flake. A `*` segment takes any
+          attribute name, `**` also takes a nested set below it, and `x86_64-*` matches part of a
+          name. A pattern prefixed with `!` excludes matching paths.
         '';
       };
 
@@ -1291,7 +1292,7 @@ in
               display_name = "Web Application";
               description = "Main web application";
               repository = "https://github.com/acme-corp/web-app.git";
-              wildcard = "nixosConfigurations.*.config.system.build.toplevel";
+              wildcard = "nixosConfigurations.**.config.system.build.toplevel";
               active = true;
               concurrency = "hard_abort";
               created_by = "alice";

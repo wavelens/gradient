@@ -148,7 +148,7 @@ in {
             display_name = "MyTask";
             description = "My Test Task";
             repository = "git://server/test";
-            wildcard = "packages.*.buildWait5Sec,packages.*.deployment";
+            wildcard = "packages.**.buildWait5Sec,packages.**.deployment";
             keep_evaluations = 10;
             created_by = "admin";
             triggers = [

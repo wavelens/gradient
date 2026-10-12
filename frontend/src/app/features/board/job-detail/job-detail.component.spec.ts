@@ -112,7 +112,7 @@ const EVAL_DETAIL: AssignedJobDetail = {
     repository: 'https://git.example/acme.git',
     commit: 'abc1234def5678abc1234def5678abc1234def56',
     commit_message: 'Bump inputs',
-    wildcard: 'packages.*.*',
+    wildcard: 'packages.**',
     task: 'ci',
   },
   job_context: {
@@ -409,7 +409,7 @@ describe('BoardJobDetailComponent - #636', () => {
     expect(section.textContent).toContain('https://git.example/acme.git');
     expect(section.textContent).toContain('abc1234');
     expect(section.textContent).toContain('Bump inputs');
-    expect(section.textContent).toContain('packages.*.*');
+    expect(section.textContent).toContain('packages.**');
     expect(el.textContent).not.toContain('Derivations');
   });
 
