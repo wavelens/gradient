@@ -5,6 +5,7 @@
 BASE = "http://localhost:8080"
 RUN = ("docker run -dt --name gradient --privileged --cgroupns=host "
        "-p 127.0.0.1:8080:80 -v gradient:/var/lib gradient-standalone:latest")
+LOGIN_JOURNAL = "docker exec gradient journalctl -u gradient-standalone-login.service --no-pager"
 
 
 def dump_container():
@@ -21,7 +22,7 @@ def dump_container():
 def start_container():
     machine.succeed(RUN)
     try:
-        machine.wait_until_succeeds("docker logs gradient 2>&1 | grep -q 'log in with admin / '", timeout=600)
+        machine.wait_until_succeeds(f"{LOGIN_JOURNAL} | grep -q 'log in with admin / '", timeout=600)
         assert_serving(machine, BASE)
     except Exception:
         dump_container()
@@ -41,7 +42,7 @@ machine.succeed("docker load < /etc/gradient-standalone.tar.gz")
 
 start_container()
 password = machine.succeed("docker exec gradient cat /var/lib/gradient-standalone/admin-password").strip()
-machine.succeed(f"docker logs gradient 2>&1 | grep -F 'admin / {password}'")
+machine.succeed(f"{LOGIN_JOURNAL} | grep -F 'admin / {password}'")
 token = login(machine, BASE, password)
 
 gateway = machine.succeed(
