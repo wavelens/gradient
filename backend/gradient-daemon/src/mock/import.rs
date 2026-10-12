@@ -14,7 +14,7 @@ pub async fn read_with_delays<R: AsyncBufRead + Unpin>(
     key: &str,
 ) -> std::io::Result<Vec<u8>> {
     let mut out = Vec::new();
-    let mut chunk = vec![0u8; timing.chunk_bytes.max(1) as usize];
+    let mut chunk = vec![0u8; usize::try_from(timing.chunk_bytes.max(1)).unwrap_or(usize::MAX)];
     let mut index = 0u64;
     loop {
         let n = reader.read(&mut chunk).await?;
