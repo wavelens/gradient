@@ -15,11 +15,15 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
-gradient-entity = { workspace = true }
-gradient-types  = { workspace = true }
+gradient-entity    = { workspace = true }
+gradient-migration = { workspace = true }
+gradient-types     = { workspace = true }
 
 chrono        = { workspace = true }
 password-auth = { workspace = true }
 sea-orm       = { workspace = true }
 serde_json    = { workspace = true }
 uuid          = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

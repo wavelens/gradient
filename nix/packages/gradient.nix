@@ -14,6 +14,8 @@
 , openssl
 , pkg-config
 , pkgs
+, postgresql_18
+, postgresqlTestHook
 , zstd
 }:
 let
@@ -136,7 +138,12 @@ craneLib.buildPackage (commonArgs // rec {
     CARGO_PROFILE = "test";
     doInstallCargoArtifacts = false;
 
-    nativeCheckInputs = [ git ];
+    nativeCheckInputs = [ git postgresql_18 postgresqlTestHook ];
+    postgresqlTestUserOptions = "LOGIN CREATEDB";
+    postgresqlExtraSettings = ''
+      fsync = off
+      max_connections = 500
+    '';
     preCheck = ''
       ln -s ${testStore} ./test-store
     '';

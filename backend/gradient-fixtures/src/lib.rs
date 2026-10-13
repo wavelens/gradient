@@ -9,6 +9,7 @@
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
 )]
 
+pub mod database;
 pub mod ids;
 pub mod mock;
 pub mod rows;
