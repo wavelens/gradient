@@ -6,11 +6,16 @@
 
 use std::time::Duration;
 
+use gradient_entity::ids::{DerivationId, EvaluationId, ProjectId, TaskId};
+use gradient_entity::{
+    cached_path, cached_path_signature, derivation, derivation_build, derivation_dependency,
+    derivation_output, evaluation, task,
+};
 use gradient_migration::{Migrator, MigratorTrait};
 use sea_orm::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sea_orm::{
-    ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, SqlxPostgresConnector,
-    Statement,
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, QueryFilter,
+    SqlxPostgresConnector, Statement,
 };
 use uuid::Uuid;
 
@@ -63,6 +68,80 @@ impl TestDatabase {
             .all(&self.connection)
             .await
             .expect("the table reads")
+    }
+
+    pub async fn derivation(&self, path: &str) -> derivation::Model {
+        let (hash, name) = crate::shape::drv_hash_name(path);
+        derivation::Entity::find()
+            .filter(derivation::Column::Hash.eq(hash))
+            .filter(derivation::Column::Name.eq(name))
+            .one(&self.connection)
+            .await
+            .expect("the derivation reads")
+            .unwrap_or_else(|| panic!("no derivation {path}"))
+    }
+
+    pub async fn id_of(&self, path: &str) -> DerivationId {
+        self.derivation(path).await.id
+    }
+
+    pub async fn shared_build(&self, path: &str) -> derivation_build::Model {
+        derivation_build::Entity::find()
+            .filter(derivation_build::Column::Derivation.eq(self.id_of(path).await))
+            .one(&self.connection)
+            .await
+            .expect("the shared build reads")
+            .unwrap_or_else(|| panic!("no shared build of {path}"))
+    }
+
+    pub async fn edge(&self, from: &str, to: &str) -> Option<derivation_dependency::Model> {
+        derivation_dependency::Entity::find_by_id((self.id_of(from).await, self.id_of(to).await))
+            .one(&self.connection)
+            .await
+            .expect("the edge reads")
+    }
+
+    pub async fn output(&self, hash: &str) -> derivation_output::Model {
+        derivation_output::Entity::find()
+            .filter(derivation_output::Column::Hash.eq(hash))
+            .one(&self.connection)
+            .await
+            .expect("the output reads")
+            .unwrap_or_else(|| panic!("no output {hash}"))
+    }
+
+    pub async fn signatures(&self, hash: &str) -> Vec<cached_path_signature::Model> {
+        let Some(path) = cached_path::Entity::find()
+            .filter(cached_path::Column::Hash.eq(hash))
+            .one(&self.connection)
+            .await
+            .expect("the cached path reads")
+        else {
+            return Vec::new();
+        };
+        cached_path_signature::Entity::find()
+            .filter(cached_path_signature::Column::CachedPath.eq(path.id))
+            .all(&self.connection)
+            .await
+            .expect("the signatures read")
+    }
+
+    pub async fn task_of(&self, evaluation: EvaluationId) -> TaskId {
+        evaluation::Entity::find_by_id(evaluation)
+            .one(&self.connection)
+            .await
+            .expect("the evaluation reads")
+            .and_then(|e| e.task)
+            .unwrap_or_else(|| panic!("no task of {evaluation}"))
+    }
+
+    pub async fn project_of(&self, evaluation: EvaluationId) -> ProjectId {
+        task::Entity::find_by_id(self.task_of(evaluation).await)
+            .one(&self.connection)
+            .await
+            .expect("the task reads")
+            .expect("the task of the evaluation")
+            .project
     }
 
     pub async fn finish(mut self) {
