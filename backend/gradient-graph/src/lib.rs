@@ -9,6 +9,8 @@
 pub mod messages;
 pub mod writer;
 
+#[cfg(test)]
+mod cases;
 mod claims;
 mod demote;
 mod gc;
@@ -341,6 +343,12 @@ pub(crate) mod test_ctx {
     use gradient_util::shutdown::Shutdown;
     use sea_orm::DatabaseConnection;
 
+    pub(crate) use crate::messages::{RecordBatch as Batch, RecordReport as BatchReport};
+
+    pub(crate) async fn send(graph: &crate::Graph, batch: Batch) -> anyhow::Result<BatchReport> {
+        graph.record(batch).await
+    }
+
     pub(crate) async fn ctx_with_probes(
         db: DatabaseConnection,
     ) -> (
@@ -403,5 +411,21 @@ pub(crate) mod test_ctx {
             memory: Default::default(),
         };
         (ctx, worker_db)
+    }
+
+    pub(crate) fn secret_file() -> (tempfile::NamedTempFile, String) {
+        use std::io::Write as _;
+
+        let mut file = tempfile::NamedTempFile::new().expect("temp secret");
+        file.write_all(b"test-secret-key-32-bytes-padding!")
+            .expect("write secret");
+        let path = file.path().to_string_lossy().to_string();
+        (file, path)
+    }
+
+    pub(crate) fn signing_key(secret: &str) -> String {
+        gradient_sources::generate_signing_key(secret)
+            .expect("signing key")
+            .0
     }
 }
