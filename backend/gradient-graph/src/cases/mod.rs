@@ -26,9 +26,16 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use gradient_db::evaluations::counters::{eval_counters, recount_evaluations};
+use gradient_db::evaluations::counters::{
+    eval_counters, fold_shared_build_deltas, recount_evaluations,
+};
+use gradient_db::graph::can_start::{lock_seed_shared_builds, seed_blocking_deps};
 use gradient_db::graph::consistency::{ConsistencyReport, graph_consistency_report};
-use gradient_db::{DbContext, DbMemory, ProbeRequests, WebDb};
+use gradient_db::{DbContext, DbMemory, IN_CHUNK_SIZE, ProbeRequests};
+use gradient_entity::build::BuildStatus;
+use gradient_entity::derivation_dependency::EdgeKind;
+use gradient_entity::dispatched_job::DispatchedJobOutcome;
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{
     CacheId, CachedPathSignatureId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId,
 };
@@ -38,12 +45,14 @@ use gradient_entity::{
     evaluation,
 };
 use gradient_fixtures::database::TestDatabase;
-use gradient_fixtures::shape::{Shape, build_assignment};
+use gradient_fixtures::shape::{Shape, build_assignment, build_job_key};
 use gradient_fixtures::test_date;
 use gradient_wire::types::{BuildFailureKind, DiscoveredDerivation};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait,
+};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::Graph;
@@ -79,6 +88,18 @@ impl Case {
     }
 
     pub async fn start(shape: Shape) -> Self {
+        let (case, report) = Self::start_with_drift(shape).await;
+        assert_eq!(report.total(), 0, "drift after the seed: {report:?}");
+        case
+    }
+
+    pub async fn start_with_unstored_outputs(shape: Shape, unstored: i64) -> Self {
+        let (case, report) = Self::start_with_drift(shape).await;
+        assert_only_unstored_outputs(report, unstored, "the seed");
+        case
+    }
+
+    pub async fn start_with_drift(shape: Shape) -> (Self, ConsistencyReport) {
         let declared = shape.declared_statuses();
         let secret = SECRET.with(|(_, path)| path.clone());
         let db = shape.into_database().await;
@@ -86,9 +107,8 @@ impl Case {
         let probe_inbox = probe_requests
             .take_inbox()
             .expect("a fresh channel has an inbox");
-        let (ctx, _) = ctx_with_crypt_file(db.connection(), &secret).await;
+        let ctx = ctx_with_crypt_file(db.connection(), &secret).await;
         let ctx = DbContext {
-            web_db: WebDb::new(db.connection()),
             memory: DbMemory {
                 probe_requests,
                 ..ctx.memory.clone()
@@ -100,6 +120,7 @@ impl Case {
             .await
             .expect("the seed settles");
 
+        write_blocking_deps_of_every_build(&ctx, &db).await;
         for (derivation, status) in declared {
             let settled = db.shared_build(&derivation).await.status;
             assert_eq!(
@@ -124,9 +145,9 @@ impl Case {
             probe_inbox: Mutex::new(probe_inbox),
         };
 
-        case.zero_drift("the seed").await;
+        let report = case.drift().await;
         case.probe_requests();
-        case
+        (case, report)
     }
 
     pub fn probe_requests(&self) -> BTreeSet<DerivationId> {
@@ -178,6 +199,28 @@ impl Case {
 
     pub async fn sb(&self, path: &str) -> derivation_build::Model {
         self.db.shared_build(path).await
+    }
+
+    pub async fn status(&self, path: &str) -> BuildStatus {
+        self.sb(path).await.status
+    }
+
+    pub async fn queue_state(&self, path: &str) -> (BuildStatus, i32) {
+        let build = self.sb(path).await;
+        (build.status, build.blocking_deps)
+    }
+
+    pub async fn closure_state(&self, path: &str) -> (bool, i32) {
+        let build = self.sb(path).await;
+        (build.fetchable, build.missing_runtime_deps)
+    }
+
+    pub async fn edge_kind(&self, from: &str, to: &str) -> Option<EdgeKind> {
+        self.db.edge(from, to).await.map(|edge| edge.kind)
+    }
+
+    pub async fn evaluation_status(&self, id: EvaluationId) -> EvaluationStatus {
+        self.evaluation(id).await.status
     }
 
     pub async fn cached_path(&self, hash: &str) -> cached_path::Model {
@@ -248,6 +291,11 @@ impl Case {
     }
 
     pub async fn drift(&self) -> ConsistencyReport {
+        let folded = fold_shared_build_deltas(&self.ctx.worker_db)
+            .await
+            .expect("the counter deltas fold");
+
+        assert!(folded, "the fold lock of the counter deltas is free");
         graph_consistency_report(&self.ctx)
             .await
             .expect("the consistency check runs")
@@ -275,10 +323,7 @@ impl Case {
         drop((self.ctx, self.graph));
         self.db.finish().await;
     }
-}
 
-#[expect(dead_code, reason = "the themes after signing call these")]
-impl Case {
     pub async fn finish_with_drift(self) -> ConsistencyReport {
         self.stop_writer().await;
         let report = self.drift().await;
@@ -388,20 +433,35 @@ impl Case {
     }
 
     pub async fn close_assignment(&self, path: &str) {
-        let open = self
-            .open_assignment(path)
-            .await
-            .unwrap_or_else(|| panic!("no open assignment of {path}"));
+        let shared_build = self.sb(path).await.id;
+        let closed = self
+            .finish_assignments(&[shared_build], DispatchedJobOutcome::Completed)
+            .await;
 
+        assert_eq!(closed, 1, "no open assignment of {path}");
+    }
+
+    async fn finish_assignments(
+        &self,
+        shared_builds: &[DerivationBuildId],
+        outcome: DispatchedJobOutcome,
+    ) -> u64 {
+        let jobs: Vec<String> = shared_builds.iter().copied().map(build_job_key).collect();
         dispatched_job::Entity::update_many()
             .col_expr(
                 dispatched_job::Column::FinishedAt,
                 Expr::value(gradient_types::now()),
             )
-            .filter(dispatched_job::Column::Id.eq(open.id))
+            .col_expr(
+                dispatched_job::Column::Outcome,
+                Expr::value(i16::from(outcome)),
+            )
+            .filter(dispatched_job::Column::JobId.is_in(jobs))
+            .filter(dispatched_job::Column::FinishedAt.is_null())
             .exec(&self.db.connection())
             .await
-            .expect("the assignment is closed");
+            .expect("the assignments are closed")
+            .rows_affected
     }
 
     pub async fn build_started(&self, path: &str) -> TransitionReport {
@@ -444,8 +504,13 @@ impl Case {
     }
 
     pub async fn builds_lost(&self, paths: &[&str], cause: OrphanCause) -> TransitionReport {
-        self.transition(worker_loss(self.sb_ids(paths).await, cause))
-            .await
+        let shared_builds = self.sb_ids(paths).await;
+        if cause == OrphanCause::WorkerLost {
+            self.finish_assignments(&shared_builds, DispatchedJobOutcome::Abandoned)
+                .await;
+        }
+
+        self.transition(worker_loss(shared_builds, cause)).await
     }
 
     pub async fn ready(&self, paths: &[&str]) -> TransitionReport {
@@ -547,11 +612,7 @@ impl Case {
         known
     }
 
-    pub async fn set_evaluation_status(
-        &self,
-        id: EvaluationId,
-        status: evaluation::EvaluationStatus,
-    ) {
+    pub async fn set_evaluation_status(&self, id: EvaluationId, status: EvaluationStatus) {
         evaluation::ActiveModel {
             id: Set(id),
             status: Set(status),
@@ -623,10 +684,6 @@ impl Case {
 
     pub async fn edge(&self, from: &str, to: &str) -> Option<derivation_dependency::Model> {
         self.db.edge(from, to).await
-    }
-
-    pub async fn output(&self, hash: &str) -> derivation_output::Model {
-        self.db.output(hash).await
     }
 
     pub async fn output_of(&self, path: &str, name: &str) -> derivation_output::Model {
@@ -744,6 +801,28 @@ impl Case {
     }
 }
 
+async fn write_blocking_deps_of_every_build(ctx: &DbContext, db: &TestDatabase) {
+    let derivations: Vec<DerivationId> = db
+        .rows::<derivation_build::Entity>()
+        .await
+        .iter()
+        .map(|build| build.derivation)
+        .collect();
+
+    for chunk in derivations.chunks(IN_CHUNK_SIZE) {
+        let txn = ctx.worker_db.begin().await.expect("a transaction opens");
+        let lock = lock_seed_shared_builds(&txn, chunk)
+            .await
+            .expect("the seeded builds lock");
+
+        seed_blocking_deps(&lock)
+            .await
+            .expect("the blocking dependencies are written");
+
+        txn.commit().await.expect("the transaction commits");
+    }
+}
+
 async fn write_counters_of_finished_evaluations(ctx: &DbContext, db: &TestDatabase) {
     let finished: Vec<EvaluationId> = db
         .rows::<evaluation::Entity>()
@@ -764,12 +843,13 @@ fn printed<M: std::fmt::Debug>(rows: Vec<M>) -> Vec<String> {
     printed
 }
 
-#[expect(dead_code, reason = "the themes after signing use these")]
 mod shared {
     use std::collections::BTreeSet;
 
     use chrono::NaiveDateTime;
+    use gradient_db::graph::consistency::ConsistencyReport;
     use gradient_entity::build::BuildStatus;
+    use gradient_entity::build_attempt::AttemptFailureReason;
     use gradient_entity::ids::{DerivationId, EvaluationId};
     use gradient_fixtures::shape::{Shape, shape};
     use gradient_fixtures::test_date;
@@ -838,6 +918,19 @@ mod shared {
     pub(crate) const B_OUT2: &str = "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1";
     pub(crate) const SOURCE: &str = "k0k0k0k0k0k0k0k0k0k0k0k0k0k0k0k0";
     pub(crate) const UNKNOWN_OUT: &str = "l0l0l0l0l0l0l0l0l0l0l0l0l0l0l0l0";
+
+    pub(crate) const BUILDER_EXIT: Option<AttemptFailureReason> =
+        Some(AttemptFailureReason::BuilderNonzero);
+
+    pub(crate) fn assert_only_unstored_outputs(
+        report: ConsistencyReport,
+        unstored: i64,
+        after: &str,
+    ) {
+        let unbacked = report.unbacked_trusted_outputs;
+        assert_eq!(unbacked, unstored, "{after}: {report:?}");
+        assert_eq!(report.total(), unstored, "{after}: {report:?}");
+    }
 
     pub(crate) fn t0() -> NaiveDateTime {
         test_date() + chrono::Duration::days(30)
@@ -1026,6 +1119,10 @@ mod shared {
     pub(crate) fn with_references(mut commit: NarCommit, paths: &[(&str, &str)]) -> NarCommit {
         commit.references = stored_names(paths);
         commit
+    }
+
+    pub(crate) fn commit_of(hash: &str, package: &str, references: &[(&str, &str)]) -> NarCommit {
+        with_references(nar(hash, package), references)
     }
 
     pub(crate) fn narinfo(references: &[(&str, &str)]) -> UpstreamHit {

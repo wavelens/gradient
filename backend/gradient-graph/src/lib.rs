@@ -333,7 +333,6 @@ mod tests {
 
 #[cfg(test)]
 pub(crate) mod test_ctx {
-    use gradient_fixtures::mock::empty_db;
     use std::sync::Arc;
 
     use clap::Parser as _;
@@ -381,39 +380,7 @@ pub(crate) mod test_ctx {
         }
     }
 
-    pub(crate) async fn ctx_with_probes(
-        db: DatabaseConnection,
-    ) -> (
-        DbContext,
-        WorkerDb,
-        tokio::sync::mpsc::UnboundedReceiver<Vec<gradient_types::DerivationId>>,
-    ) {
-        let probe_requests = gradient_db::ProbeRequests::channel();
-        let probes = probe_requests
-            .take_inbox()
-            .expect("a fresh channel has one");
-        let (ctx, pool) = ctx(db).await;
-        (
-            DbContext {
-                memory: gradient_db::DbMemory {
-                    probe_requests,
-                    ..ctx.memory.clone()
-                },
-                ..ctx
-            },
-            pool,
-            probes,
-        )
-    }
-
-    pub(crate) async fn ctx(db: DatabaseConnection) -> (DbContext, WorkerDb) {
-        ctx_with_crypt_file(db, "test-secret").await
-    }
-
-    pub(crate) async fn ctx_with_crypt_file(
-        db: DatabaseConnection,
-        crypt_file: &str,
-    ) -> (DbContext, WorkerDb) {
+    pub(crate) async fn ctx_with_crypt_file(db: DatabaseConnection, crypt_file: &str) -> DbContext {
         let dir = std::env::temp_dir().join(format!("gradient-graph-{}", uuid::Uuid::now_v7()));
         let cli = Cli::try_parse_from([
             "gradient-server",
@@ -428,10 +395,9 @@ pub(crate) mod test_ctx {
         ])
         .expect("test cli");
         let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("test config"));
-        let worker_db = WorkerDb::new(db);
-        let ctx = DbContext {
-            worker_db: worker_db.clone(),
-            web_db: WebDb::new(empty_db()),
+        DbContext {
+            worker_db: WorkerDb::new(db.clone()),
+            web_db: WebDb::new(db),
             config,
             storage: StorageCtx {
                 nar_storage: NarStore::local(&dir).unwrap(),
@@ -441,8 +407,7 @@ pub(crate) mod test_ctx {
             events: gradient_types::EventBus::new(16),
             wake: Default::default(),
             memory: Default::default(),
-        };
-        (ctx, worker_db)
+        }
     }
 
     pub(crate) fn secret_file() -> (tempfile::NamedTempFile, String) {

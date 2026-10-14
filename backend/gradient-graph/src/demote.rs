@@ -77,31 +77,3 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
         ..Default::default()
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_ctx::ctx;
-    use gradient_fixtures::mock::mock_db;
-
-    #[tokio::test]
-    async fn an_unknown_path_reports_no_cached_path() {
-        let (ctx, _) = ctx(mock_db()
-            .append_query_results([Vec::<MCachedPath>::new()])
-            .into_connection())
-        .await;
-
-        let report = apply(
-            &ctx,
-            Demotion::CacheClaim {
-                cache: CacheId::now_v7(),
-                hash: "a".into(),
-            },
-        )
-        .await
-        .expect("an unknown path is not an error");
-
-        assert!(report.cached_path.is_none());
-        assert!(!report.others_remain);
-    }
-}

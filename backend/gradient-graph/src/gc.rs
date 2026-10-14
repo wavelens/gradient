@@ -373,117 +373,8 @@ fn orphaned_survivors(
 }
 
 #[cfg(test)]
-fn attempt_logs_to_reclaim(
-    snapshot: &[(DerivationId, Uuid)],
-    deleted: &HashSet<DerivationId>,
-) -> Vec<Uuid> {
-    snapshot
-        .iter()
-        .filter(|(derivation, _)| deleted.contains(derivation))
-        .map(|(_, attempt)| *attempt)
-        .collect()
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_ctx::ctx;
-    use gradient_fixtures::mock::{empty_db, mock_db, statements};
-    use std::collections::BTreeMap;
-
-    fn norm(s: &str) -> String {
-        s.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
-
-    fn empty() -> Vec<BTreeMap<String, Value>> {
-        Vec::new()
-    }
-
-    #[tokio::test]
-    async fn the_delete_excludes_what_a_root_created_since_the_scan_reaches() {
-        let d = DerivationId::now_v7();
-        let db = mock_db()
-            .append_query_results([empty(), empty(), empty()])
-            .into_connection();
-        let (ctx, pool) = ctx(db).await;
-
-        let report = delete_derivations(&ctx, &[d], gradient_types::now())
-            .await
-            .expect("the delete runs");
-        drop(ctx);
-
-        assert!(report.deleted_derivations.is_empty());
-        let log = statements(pool.into_transaction_log());
-        let delete = norm(
-            log.iter()
-                .find(|s| s.contains("DELETE FROM derivation d"))
-                .expect("the delete runs"),
-        );
-        assert!(
-            delete.contains(
-                "fresh(derivation) AS (SELECT derivation FROM build_job WHERE created_at >= $2"
-            ),
-            "{delete}"
-        );
-        assert!(
-            delete.contains("UNION SELECT derivation FROM entry_point WHERE created_at >= $2"),
-            "{delete}"
-        );
-        assert!(
-            delete.contains(
-                "AND NOT EXISTS (SELECT 1 FROM fresh f WHERE f.derivation = d.id) RETURNING d.id"
-            ),
-            "{delete}"
-        );
-    }
-
-    #[tokio::test]
-    async fn the_retire_excludes_fresh_parents_and_the_fresh_closure() {
-        let db = mock_db().append_query_results([empty()]).into_connection();
-        let (ctx, pool) = ctx(db).await;
-
-        let report = retire_stale_paths(&ctx, &["abc".to_owned()], gradient_types::now())
-            .await
-            .expect("the re-check runs");
-        drop(ctx);
-
-        assert!(report.retired.is_empty());
-        let log = statements(pool.into_transaction_log());
-        let sql = norm(&log[0]);
-        assert!(sql.contains("e.kind IN (1, 2)"), "{sql}");
-        assert!(
-            sql.contains("UNION SELECT id FROM derivation WHERE created_at >= $2")
-                && sql.contains(
-                    "UNION SELECT derivation FROM derivation_output WHERE created_at >= $2"
-                ),
-            "{sql}"
-        );
-        assert!(sql.contains("live(hash) AS ("), "{sql}");
-        assert!(!sql.contains("cached_path_reference"), "{sql}");
-    }
-
-    #[tokio::test]
-    async fn an_empty_request_costs_no_statement() {
-        let db = empty_db();
-        let (ctx, pool) = ctx(db).await;
-
-        assert!(
-            apply(
-                &ctx,
-                GcRequest::Derivations {
-                    candidates: Vec::new(),
-                    scanned_at: gradient_types::now()
-                }
-            )
-            .await
-            .unwrap()
-            .deleted_derivations
-            .is_empty()
-        );
-        drop(ctx);
-
-        assert!(statements(pool.into_transaction_log()).is_empty());
-    }
 
     #[test]
     fn only_a_survivor_of_a_reclaimed_dependency_is_re_walked() {
@@ -501,19 +392,6 @@ mod tests {
                 &deleted,
             ),
             vec![survivor],
-        );
-    }
-
-    #[test]
-    fn only_a_reclaimed_derivations_logs_are_reported() {
-        let gone = DerivationId::now_v7();
-        let kept = DerivationId::now_v7();
-        let gone_attempt = Uuid::now_v7();
-        let deleted: HashSet<DerivationId> = [gone].into_iter().collect();
-
-        assert_eq!(
-            attempt_logs_to_reclaim(&[(gone, gone_attempt), (kept, Uuid::now_v7())], &deleted),
-            vec![gone_attempt],
         );
     }
 }

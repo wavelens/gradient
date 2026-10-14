@@ -26,27 +26,3 @@ pub(crate) async fn prunable(
         .map(|d| d.store_path())
         .collect())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::prunable;
-    use gradient_db::WorkerDb;
-    use gradient_fixtures::mock::{all_statements, mock_db};
-
-    #[tokio::test]
-    async fn only_a_recorded_subtree_is_prunable() {
-        let db = mock_db()
-            .append_query_results([Vec::<gradient_types::MDerivation>::new()])
-            .into_connection();
-        let pool = WorkerDb::new(db);
-
-        prunable(&pool, vec!["a".repeat(32)]).await.unwrap();
-
-        let log: Vec<sea_orm::Statement> = all_statements(pool.into_transaction_log());
-        let sql = &log[0].sql;
-        assert!(
-            sql.contains("\"walked\" = ") && sql.contains("\"unwalked_inputs\" = "),
-            "the prune must read both bits: {sql}"
-        );
-    }
-}
