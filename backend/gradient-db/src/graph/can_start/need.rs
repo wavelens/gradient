@@ -103,7 +103,7 @@ pub(crate) static RECOUNT_WANTED_SQL: LazyLock<String> = LazyLock::new(|| {
          UPDATE derivation_build db \
          SET wanted = (db.derivation IN (SELECT derivation FROM wanted)), \
              updated_at = (now() AT TIME ZONE 'UTC') \
-         WHERE {open} \
+         WHERE ({open} OR db.fetchable) \
            AND db.wanted <> (db.derivation IN (SELECT derivation FROM wanted)) \
          RETURNING db.derivation, db.wanted",
         cte = crate::graph::walks::open_closure_cte_body("wanted", &open_entry_points(), None),

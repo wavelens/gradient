@@ -147,7 +147,7 @@ async fn mark(lock: &SharedBuildLock<'_>, to: bool) -> Result<Vec<DerivationId>,
 
 #[derive(Debug, Default)]
 pub(super) struct MarkedFetchable {
-    pub(super) marked: usize,
+    pub(super) marked: Vec<DerivationId>,
     pub(super) startable: Vec<DerivationId>,
 }
 
@@ -171,10 +171,7 @@ pub(super) async fn mark_fetchable(lock: &SharedBuildLock<'_>) -> Result<MarkedF
         }
     }
 
-    Ok(MarkedFetchable {
-        marked: marked.len(),
-        startable,
-    })
+    Ok(MarkedFetchable { marked, startable })
 }
 
 #[derive(Debug, Default)]
@@ -206,7 +203,13 @@ pub(super) async fn mark_unfetchable(
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn became_fetchable(lock: &SharedBuildLock<'_>) -> Result<Vec<TransitionChange>, DbErr> {
     let marked = mark_fetchable(lock).await?;
-    promote(lock.txn, &marked.startable).await
+    let mut changes = promote(lock.txn, &marked.startable).await?;
+    if !marked.marked.is_empty() {
+        let moved = update_need(lock.txn, &marked.marked).await?;
+        changes.extend(settle_need(lock.txn, &moved).await?);
+    }
+
+    Ok(changes)
 }
 
 pub async fn advance_fetchable<C>(

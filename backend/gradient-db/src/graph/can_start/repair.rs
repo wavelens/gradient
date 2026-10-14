@@ -105,7 +105,7 @@ where
         let unfetchable = mark_unfetchable(&lock).await?;
         txn.commit().await?;
 
-        repaired.marked += (fetchable.marked + unfetchable.marked.len()) as u64;
+        repaired.marked += (fetchable.marked.len() + unfetchable.marked.len()) as u64;
         repaired.unqueued.extend(unfetchable.unqueued);
     }
 
