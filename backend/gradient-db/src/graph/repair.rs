@@ -58,6 +58,9 @@ pub async fn repair_build_graph(
     let thawed = crate::graph::promotion::requeue_failed_closure(db, scope).await?;
     report.thawed = thawed.len() as u64;
     emit_transition_effects(ctx, &thawed).await?;
+    let thawed: Vec<_> = thawed.iter().map(|c| c.derivation).collect();
+    let settled = crate::graph::can_start::settle_created(db, &thawed).await?;
+    emit_transition_effects(ctx, &settled).await?;
 
     let cached =
         crate::graph::promotion::repair_cached_shared_builds_for_eval(db, evaluation).await?;

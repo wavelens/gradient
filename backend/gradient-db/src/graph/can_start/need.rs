@@ -298,6 +298,19 @@ pub(crate) async fn settle_need<C: ConnectionTrait>(
     Ok(changes)
 }
 
+pub async fn settle_created<C: ConnectionTrait>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr> {
+    let mut changes = Vec::new();
+    for chunk in derivations.chunks(crate::IN_CHUNK_SIZE) {
+        changes.extend(skip_unwanted(db, chunk).await?);
+        changes.extend(promote(db, chunk).await?);
+    }
+
+    Ok(changes)
+}
+
 #[derive(Debug, Default)]
 pub struct SettledNeed {
     pub moved: NeedMoved,

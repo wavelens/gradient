@@ -6,7 +6,7 @@
 
 use gradient_db::{
     DbContext,
-    graph::can_start::promote,
+    graph::can_start::settle_created,
     status::{emit_transition_effects, update_derivation_build_status},
 };
 use gradient_entity::build::BuildStatus;
@@ -44,16 +44,16 @@ async fn transient_retries(ctx: &DbContext) -> anyhow::Result<u64> {
         }
     }
 
-    let queued = promote(&ctx.worker_db, &requeued).await?;
-    if queued.len() < requeued.len() {
+    let settled = settle_created(&ctx.worker_db, &requeued).await?;
+    if settled.len() < requeued.len() {
         debug!(
-            queued = queued.len(),
+            settled = settled.len(),
             requeued = requeued.len(),
             "retried shared builds wait in Created until their inputs can be fetched"
         );
     }
 
-    emit_transition_effects(ctx, &queued).await?;
+    emit_transition_effects(ctx, &settled).await?;
 
     Ok(requeued.len() as u64)
 }

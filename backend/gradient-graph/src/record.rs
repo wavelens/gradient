@@ -708,6 +708,18 @@ impl BatchWriter<'_> {
         Ok(gained_need)
     }
 
+    async fn settle_created(&self, ids: &HashMap<String, DerivationId>) -> Result<()> {
+        let mut derivations: Vec<DerivationId> = ids.values().copied().collect();
+        derivations.sort_unstable();
+        derivations.dedup();
+        let changes = gradient_db::graph::can_start::settle_created(self.db(), &derivations)
+            .await
+            .context("settle the shared builds this batch left created")?;
+        gradient_db::status::emit_transition_effects(self.ctx, &changes).await?;
+
+        Ok(())
+    }
+
     #[tracing::instrument(level = "debug", skip_all)]
     async fn persist_input_sources(
         &self,
@@ -956,6 +968,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
                 &report.entry_points,
             )
             .await?;
+        writer.settle_created(ids).await?;
         report.to_probe.extend(
             newly_walked
                 .iter()

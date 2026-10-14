@@ -102,6 +102,7 @@ A `settle_need` call must follow each call.
 - Entry points of a `Completed` or `Failed` evaluation still want the closure below them. A retired output of such an entry point will be built again.
 - `status::release_evaluation_need` updates the need below the entry points of an aborted evaluation, inside the abort transition. Every abort sends it: hard aborts after aborting the unshared builds, soft aborts and the stuck-evaluation recovery without touching builds.
 - `update_need` and `settle_need` are crate-private. Other crates call `update_and_settle_need`, and every needs-build move can skip and thaw inline. The consistency check's `settle_skipped` is the table-wide backstop, reporting `skipped_moves`.
+- Writers of `Created` call `can_start::settle_created` on the rows they wrote. Unwanted rows go to `Skipped`, startable rows to `Queued`. The retire, the batch writer, the thaws and the retries are such writers.
 
 ## Evaluation Verdict
 

@@ -336,14 +336,14 @@ async fn retire_shared_builds(
             txn.query_all_raw(RESET_UNCACHED_PRODUCERS.bind([ids(gone)]))
                 .await?,
         );
-        if !reset.is_empty() {
-            let thawed: Vec<DerivationId> = reset.iter().map(|c| c.derivation).collect();
+        let thawed: Vec<DerivationId> = reset.iter().map(|c| c.derivation).collect();
+        transitions.extend(reset);
+        if !thawed.is_empty() {
             let thawed_lock =
                 crate::graph::can_start::lock_seed_shared_builds(txn, &thawed).await?;
             crate::graph::can_start::seed_blocking_deps(&thawed_lock).await?;
+            transitions.extend(crate::graph::can_start::settle_created(txn, &thawed).await?);
         }
-
-        transitions.extend(reset);
     }
 
     transitions.extend(crate::graph::can_start::unpromote_drv_owners(txn, hashes).await?);

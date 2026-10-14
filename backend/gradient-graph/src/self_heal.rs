@@ -100,9 +100,11 @@ pub(crate) async fn repair_missing_inputs(
             .await
         {
             Ok(changes) => {
-                let thawed = changes.len();
+                let thawed: Vec<_> = changes.iter().map(|c| c.derivation).collect();
                 gradient_db::status::emit_transition_effects(ctx, &changes).await?;
-                thawed
+                let settled = gradient_db::graph::can_start::settle_created(db, &thawed).await?;
+                gradient_db::status::emit_transition_effects(ctx, &settled).await?;
+                thawed.len()
             }
             Err(e) => {
                 warn!(error = %e, "repair: requeue failed producers failed");

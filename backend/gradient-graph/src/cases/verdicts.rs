@@ -704,7 +704,7 @@ async fn v11_unstick_leaves_a_deterministic_builder_failure_alone_and_retry_thaw
     let timed_out = case.sb(T).await;
     assert_eq!(
         timed_out.status,
-        BuildStatus::Created,
+        BuildStatus::Skipped,
         "after 1: sb(T).status, nothing wants T below the failed A (Q17)"
     );
     assert_eq!(timed_out.attempt, 0, "after 1: sb(T).attempt");
@@ -738,7 +738,7 @@ async fn v11_unstick_leaves_a_deterministic_builder_failure_alone_and_retry_thaw
     .await;
 
     let (failed, top, timed_out) = (case.sb(B).await, case.sb(A).await, case.sb(T).await);
-    assert_eq!(failed.status, BuildStatus::Created, "after 2: sb(B).status");
+    assert_eq!(failed.status, BuildStatus::Skipped, "after 2: sb(B).status");
     assert_eq!(failed.attempt, 0, "after 2: sb(B).attempt");
     assert!(!failed.probed, "after 2: sb(B).probed");
     assert!(!failed.wanted, "after 2: sb(B).wanted");
@@ -748,7 +748,7 @@ async fn v11_unstick_leaves_a_deterministic_builder_failure_alone_and_retry_thaw
     assert!(top.wanted, "after 2: sb(A).wanted");
     assert_eq!(
         timed_out.status,
-        BuildStatus::Created,
+        BuildStatus::Skipped,
         "after 2: sb(T).status"
     );
     assert!(timed_out.probed, "after 2: sb(T).probed");

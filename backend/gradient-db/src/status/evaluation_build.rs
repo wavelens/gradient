@@ -87,8 +87,9 @@ pub async fn retry_evaluation_build(
     let failed = crate::graph::promotion::repair_dependency_failed(db, evaluation.id).await?;
     emit_transition_effects(ctx, &failed).await?;
 
-    let queued = crate::graph::can_start::promote_closure(db, evaluation.id).await?;
-    emit_transition_effects(ctx, &queued).await?;
+    let thawed: Vec<DerivationId> = thawed.iter().map(|change| change.derivation).collect();
+    let settled = crate::graph::can_start::settle_created(db, &thawed).await?;
+    emit_transition_effects(ctx, &settled).await?;
 
     if retried.is_empty() {
         if reopens {

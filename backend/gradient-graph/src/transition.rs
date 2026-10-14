@@ -537,8 +537,8 @@ async fn requeue_imports(ctx: &DbContext, derivations: &[DerivationId]) -> Resul
         .filter(|change| change.to == BuildStatus::Created)
         .map(|change| change.derivation)
         .collect();
-    let queued = gradient_db::graph::can_start::promote(&ctx.worker_db, &thawed).await?;
-    emit_transition_effects(ctx, &queued).await?;
+    let settled = gradient_db::graph::can_start::settle_created(&ctx.worker_db, &thawed).await?;
+    emit_transition_effects(ctx, &settled).await?;
 
     Ok(())
 }
@@ -976,7 +976,9 @@ async fn exhaust_substitution(
             .await?
             .changes,
     );
-    changes.extend(gradient_db::graph::can_start::promote(db, &[shared_build.derivation]).await?);
+    changes.extend(
+        gradient_db::graph::can_start::settle_created(db, &[shared_build.derivation]).await?,
+    );
     emit_transition_effects(ctx, &changes).await?;
 
     if let Ok(Some(drv)) = EDerivation::find_by_id(shared_build.derivation)
