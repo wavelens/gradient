@@ -36,8 +36,6 @@ fn claims_of_paths_sql() -> String {
     claims_sql("dout.hash = ANY($1::text[])")
 }
 
-/// A path is claimed by every project whose signing task holds a job on its producer, the rule
-/// the sign sweep repairs orphans by. Claims already signed are left out.
 fn claims_sql(jobs: &str) -> String {
     format!(
         r#"
@@ -128,6 +126,7 @@ async fn sign_claims(ctx: &DbContext, claims: Statement) -> anyhow::Result<()> {
         .all(db)
         .await
         .context("read the cached outputs left to claim")?;
+
     if claims.is_empty() {
         return Ok(());
     }

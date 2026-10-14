@@ -15,8 +15,6 @@ path = "src/lib.rs"
 doctest = false
 
 [features]
-# A handle that answers calls itself, for harnesses that drive a caller
-# of the graph without a database behind it.
 stub = []
 
 [lints]

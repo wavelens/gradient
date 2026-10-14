@@ -156,9 +156,11 @@ pub fn derive_pname(env_pname: Option<&str>, name: &str) -> Option<String> {
     {
         return Some(p.to_owned());
     }
+
     if name.is_empty() {
         return None;
     }
+
     match name.rsplit_once('-') {
         Some((prefix, version)) if version.chars().next().is_some_and(|c| c.is_ascii_digit()) => {
             Some(prefix.to_owned())

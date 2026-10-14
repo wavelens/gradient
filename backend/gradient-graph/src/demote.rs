@@ -63,8 +63,6 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
         .await?;
     let others_remain = remaining > 0;
 
-    // The shared helper is resetting the producer, gate flags and parent counters together.
-    // A bare `is_cached` clear would leave a `Completed` producer with no NAR behind it.
     if !others_remain {
         demote_cached_output(ctx, hash, DemoteWhen::Always).await?;
     }
