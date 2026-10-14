@@ -1010,7 +1010,7 @@ async fn refusal_for_settled_code(db: &WebDb, user_code: &str) -> WebError {
     operation_id = "cliDeviceInfo",
     tag = "auth",
     summary = "Look up a pending CLI device authorization",
-    description = "Returns metadata about a pending `user_code` so the browser-side UI can confirm what is being authorized.",
+    description = "Returns metadata about a pending `user_code` so the browser-side UI can confirm what it authorizes.",
     params(CliDeviceUserCodeQuery),
     responses((status = OK, description = "Device info", body = CliDeviceInfoResponse), WebError)
 )]

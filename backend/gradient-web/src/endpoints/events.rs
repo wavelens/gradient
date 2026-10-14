@@ -23,7 +23,7 @@ pub struct FirehoseQuery {
     pub events: Option<String>,
 }
 
-/// The upgrade is checked after the caller. A non-superuser is getting 403 rather than 426.
+/// The upgrade is checked after the caller. A non-superuser gets 403 rather than 426.
 #[utoipa::path(
     get,
     path = "/metrics/events",

@@ -518,8 +518,8 @@ pub struct BoardHealth {
     pub supervised: Vec<SupervisedLoop>,
     pub proto_sessions: usize,
     pub unconfirmed_nars: u64,
-    /// A rising `failed_deliveries` is pointing at a Git host or mail host that is down, not a
-    /// backlog. Those rows are dead letters until an operator acts.
+    /// A rising `failed_deliveries` points at a Git host or mail host that is down, not at a
+    /// backlog. Those rows stay dead letters until an operator acts.
     pub pending_deliveries: i64,
     pub failed_deliveries: i64,
     pub hot_nar_cache: HotNarCacheHealth,

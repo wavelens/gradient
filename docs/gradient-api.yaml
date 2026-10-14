@@ -900,7 +900,7 @@ paths:
       tags:
       - auth
       summary: Look up a pending CLI device authorization
-      description: Returns metadata about a pending `user_code` so the browser-side UI can confirm what is being authorized.
+      description: Returns metadata about a pending `user_code` so the browser-side UI can confirm what it authorizes.
       operationId: cliDeviceInfo
       parameters:
       - name: user_code
@@ -4088,9 +4088,7 @@ paths:
       tags:
       - caches
       summary: List subscription requests
-      description: |-
-        Projects that have asked to subscribe to this cache and are waiting for
-        a decision. Requires `manageCacheSubscriptions`.
+      description: Projects that asked to subscribe to this cache and await a decision. Requires `manageCacheSubscriptions`.
       operationId: listCacheSubscriptionRequests
       parameters:
       - name: cache
@@ -12873,8 +12871,8 @@ components:
           type: integer
           format: int64
           description: |-
-            A rising `failed_deliveries` is pointing at a Git host or mail host that is down, not a
-            backlog. Those rows are dead letters until an operator acts.
+            A rising `failed_deliveries` points at a Git host or mail host that is down, not at a
+            backlog. Those rows stay dead letters until an operator acts.
         failed_deliveries:
           type: integer
           format: int64
@@ -16692,9 +16690,7 @@ components:
           type:
           - string
           - 'null'
-          description: |-
-            An omitted field is leaving the pin alone. A name is pinning the key, and JSON null is
-            unpinning it.
+          description: An omitted field leaves the pin unchanged. A name pins the key, and JSON null unpins it.
         allowed_ips:
           type:
           - array

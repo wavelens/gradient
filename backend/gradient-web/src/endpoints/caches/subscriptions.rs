@@ -58,7 +58,7 @@ impl SubscriptionRequestItem {
     operation_id = "listCacheSubscriptionRequests",
     tag = "caches",
     summary = "List subscription requests",
-    description = "Projects that have asked to subscribe to this cache and are waiting for\na decision. Requires `manageCacheSubscriptions`.",
+    description = "Projects that asked to subscribe to this cache and await a decision. Requires `manageCacheSubscriptions`.",
     params(CachePath),
     responses((status = OK, description = "Pending requests, newest first", body = Vec<SubscriptionRequestItem>), WebError)
 )]

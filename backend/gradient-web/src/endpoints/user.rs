@@ -125,8 +125,7 @@ pub struct CreateApiKeyRequest {
 pub struct PatchApiKeyRequest {
     pub name: Option<String>,
     pub permissions: Option<Vec<String>>,
-    /// An omitted field is leaving the pin alone. A name is pinning the key, and JSON null is
-    /// unpinning it.
+    /// An omitted field leaves the pin unchanged. A name pins the key, and JSON null unpins it.
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub project: Option<Option<String>>,
     #[serde(default)]
