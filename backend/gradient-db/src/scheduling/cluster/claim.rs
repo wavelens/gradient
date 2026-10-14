@@ -114,6 +114,28 @@ where
 {
     let now = gradient_types::now();
     let txn = db.begin().await?;
+    let running = EClusterJob::update_many()
+        .col_expr(
+            CClusterJob::Status,
+            Expr::value(i16::from(ClusterJobStatus::Running)),
+        )
+        .col_expr(
+            CClusterJob::Attempts,
+            Expr::col(CClusterJob::Attempts).add(1),
+        )
+        .col_expr(CClusterJob::UpdatedAt, Expr::value(now))
+        .filter(CClusterJob::Id.eq(cluster))
+        .filter(CClusterJob::Status.eq(ClusterJobStatus::Queued))
+        .exec(&txn)
+        .await?
+        .rows_affected
+        == 1;
+    if !running {
+        close_attempt(&txn, attempt, ClusterAttemptOutcome::Aborted).await?;
+        txn.commit().await?;
+        return Ok(false);
+    }
+
     let started = EClusterAttempt::update_many()
         .col_expr(CClusterAttempt::StartedAt, Expr::value(now))
         .filter(CClusterAttempt::Id.eq(attempt))
@@ -123,24 +145,13 @@ where
         .await?
         .rows_affected
         == 1;
-    if started {
-        EClusterJob::update_many()
-            .col_expr(
-                CClusterJob::Status,
-                Expr::value(i16::from(ClusterJobStatus::Running)),
-            )
-            .col_expr(
-                CClusterJob::Attempts,
-                Expr::col(CClusterJob::Attempts).add(1),
-            )
-            .col_expr(CClusterJob::UpdatedAt, Expr::value(now))
-            .filter(CClusterJob::Id.eq(cluster))
-            .exec(&txn)
-            .await?;
+    if !started {
+        txn.rollback().await?;
+        return Ok(false);
     }
     txn.commit().await?;
 
-    Ok(started)
+    Ok(true)
 }
 
 pub async fn close_cluster_attempt<C>(
@@ -317,9 +328,9 @@ mod tests {
             .collect()
     }
 
-    async fn started(first: u64) -> (bool, Vec<Statement>) {
+    async fn started(rows: &[u64]) -> (bool, Vec<Statement>) {
         let db = mock_db()
-            .append_exec_results([exec(first), exec(1)])
+            .append_exec_results(rows.iter().map(|n| exec(*n)))
             .into_connection();
         let started =
             start_cluster_attempt(&db, ClusterJobId::now_v7(), ClusterAttemptId::now_v7())
@@ -422,7 +433,7 @@ mod tests {
 
     #[tokio::test]
     async fn starting_an_open_attempt_runs_its_cluster() {
-        let (started, statements) = started(1).await;
+        let (started, statements) = started(&[1, 1]).await;
 
         assert!(started);
         let attempt = &statements
@@ -443,17 +454,34 @@ mod tests {
         );
         let running = format!("SmallInt(Some({}))", i16::from(ClusterJobStatus::Running));
         assert!(format!("{:?}", job.values).contains(&running));
+        let queued = format!("SmallInt(Some({}))", i16::from(ClusterJobStatus::Queued));
+        assert!(format!("{:?}", job.values).contains(&queued), "{job:?}");
+    }
+
+    #[tokio::test]
+    async fn a_cluster_no_longer_queued_closes_the_attempt_and_starts_nothing() {
+        let (started, statements) = started(&[0, 1, 0]).await;
+
+        assert!(!started);
+        let closed = &updates(&statements, "cluster_attempt")
+            .first()
+            .expect("attempt close")
+            .sql;
+        assert!(closed.contains("\"finished_at\" = $"), "{closed}");
+        assert!(
+            statements.iter().any(|s| s.sql == "COMMIT"),
+            "{statements:?}"
+        );
     }
 
     #[tokio::test]
     async fn a_started_or_closed_attempt_starts_nothing() {
-        let (started, statements) = started(0).await;
+        let (started, statements) = started(&[1, 0]).await;
 
         assert!(!started);
         assert!(
-            !statements
-                .iter()
-                .any(|s| s.sql.starts_with("UPDATE \"cluster_job\""))
+            statements.iter().any(|s| s.sql == "ROLLBACK"),
+            "{statements:?}"
         );
     }
 
