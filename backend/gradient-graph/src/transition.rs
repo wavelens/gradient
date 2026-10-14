@@ -532,6 +532,14 @@ async fn requeue_imports(ctx: &DbContext, derivations: &[DerivationId]) -> Resul
             .context("requeue the failed closure of an import")?;
     emit_transition_effects(ctx, &changes).await?;
 
+    let thawed: Vec<DerivationId> = changes
+        .iter()
+        .filter(|change| change.to == BuildStatus::Created)
+        .map(|change| change.derivation)
+        .collect();
+    let queued = gradient_db::graph::can_start::promote(&ctx.worker_db, &thawed).await?;
+    emit_transition_effects(ctx, &queued).await?;
+
     Ok(())
 }
 
