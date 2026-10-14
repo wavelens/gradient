@@ -5,8 +5,9 @@
  */
 
 use gradient_entity::{
-    build_job, cache, cached_path, commit, derivation, derivation_build, derivation_dependency,
-    derivation_output, entry_point, evaluation, project, project_cache, task, user,
+    build_attempt, build_job, cache, cached_path, commit, derivation, derivation_build,
+    derivation_dependency, derivation_output, dispatched_job, entry_point, evaluation, project,
+    project_cache, task, user,
 };
 use sea_orm::{DatabaseConnection, EntityTrait, IntoActiveModel};
 
@@ -43,4 +44,6 @@ pub(super) async fn all(shape: Shape, db: &DatabaseConnection) {
     insert!(db, entry_point::Entity, shape.entry_points);
     insert!(db, cache::Entity, shape.caches);
     insert!(db, project_cache::Entity, shape.project_caches);
+    insert!(db, dispatched_job::Entity, shape.assignments);
+    insert!(db, build_attempt::Entity, shape.attempts);
 }

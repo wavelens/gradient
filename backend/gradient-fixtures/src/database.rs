@@ -6,18 +6,21 @@
 
 use std::time::Duration;
 
+use gradient_entity::evaluation_message::{self, MessageLevel};
 use gradient_entity::ids::{DerivationId, EvaluationId, ProjectId, TaskId};
 use gradient_entity::{
-    cached_path, cached_path_signature, derivation, derivation_build, derivation_dependency,
-    derivation_output, evaluation, task,
+    build_attempt, build_job, cached_path, cached_path_signature, derivation, derivation_build,
+    derivation_dependency, derivation_output, dispatched_job, entry_point, evaluation, task,
 };
 use gradient_migration::{Migrator, MigratorTrait};
 use sea_orm::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, QueryFilter,
-    SqlxPostgresConnector, Statement,
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait,
+    PrimaryKeyTrait, QueryFilter, QueryOrder, SqlxPostgresConnector, Statement,
 };
 use uuid::Uuid;
+
+use crate::shape::build_job_key;
 
 const TEMPLATE: &str = "gradient_template";
 const TEMPLATE_DRAFT: &str = "gradient_template_draft";
@@ -70,7 +73,35 @@ impl TestDatabase {
             .expect("the table reads")
     }
 
-    pub async fn derivation(&self, path: &str) -> derivation::Model {
+    pub async fn find<E: EntityTrait>(
+        &self,
+        id: impl Into<<E::PrimaryKey as PrimaryKeyTrait>::ValueType>,
+    ) -> Option<E::Model> {
+        E::find_by_id(id)
+            .one(&self.connection)
+            .await
+            .expect("the row reads")
+    }
+
+    pub async fn execute(&self, sql: &str) {
+        run(&self.connection, sql).await;
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a test reads columns no entity has"
+    )]
+    pub async fn texts(&self, sql: &str) -> Vec<String> {
+        self.connection
+            .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+            .await
+            .unwrap_or_else(|error| panic!("{sql}: {error}"))
+            .iter()
+            .map(|row| row.try_get_by_index(0).expect("a text column"))
+            .collect()
+    }
+
+    pub async fn find_derivation(&self, path: &str) -> Option<derivation::Model> {
         let (hash, name) = crate::shape::drv_hash_name(path);
         derivation::Entity::find()
             .filter(derivation::Column::Hash.eq(hash))
@@ -78,6 +109,11 @@ impl TestDatabase {
             .one(&self.connection)
             .await
             .expect("the derivation reads")
+    }
+
+    pub async fn derivation(&self, path: &str) -> derivation::Model {
+        self.find_derivation(path)
+            .await
             .unwrap_or_else(|| panic!("no derivation {path}"))
     }
 
@@ -110,13 +146,26 @@ impl TestDatabase {
             .unwrap_or_else(|| panic!("no output {hash}"))
     }
 
-    pub async fn signatures(&self, hash: &str) -> Vec<cached_path_signature::Model> {
-        let Some(path) = cached_path::Entity::find()
+    pub async fn output_of(&self, path: &str, name: &str) -> derivation_output::Model {
+        derivation_output::Entity::find()
+            .filter(derivation_output::Column::Derivation.eq(self.id_of(path).await))
+            .filter(derivation_output::Column::Name.eq(name))
+            .one(&self.connection)
+            .await
+            .expect("the output reads")
+            .unwrap_or_else(|| panic!("no output {name} of {path}"))
+    }
+
+    pub async fn cached_path(&self, hash: &str) -> Option<cached_path::Model> {
+        cached_path::Entity::find()
             .filter(cached_path::Column::Hash.eq(hash))
             .one(&self.connection)
             .await
             .expect("the cached path reads")
-        else {
+    }
+
+    pub async fn signatures(&self, hash: &str) -> Vec<cached_path_signature::Model> {
+        let Some(path) = self.cached_path(hash).await else {
             return Vec::new();
         };
         cached_path_signature::Entity::find()
@@ -124,6 +173,75 @@ impl TestDatabase {
             .all(&self.connection)
             .await
             .expect("the signatures read")
+    }
+
+    pub async fn jobs(&self, evaluation: EvaluationId) -> Vec<build_job::Model> {
+        build_job::Entity::find()
+            .filter(build_job::Column::Evaluation.eq(evaluation))
+            .all(&self.connection)
+            .await
+            .expect("the jobs read")
+    }
+
+    pub async fn job(&self, evaluation: EvaluationId, path: &str) -> Option<build_job::Model> {
+        let derivation = self.find_derivation(path).await?.id;
+        self.jobs(evaluation)
+            .await
+            .into_iter()
+            .find(|job| job.derivation == derivation)
+    }
+
+    pub async fn entry_points(&self, evaluation: EvaluationId) -> Vec<entry_point::Model> {
+        entry_point::Entity::find()
+            .filter(entry_point::Column::Evaluation.eq(evaluation))
+            .all(&self.connection)
+            .await
+            .expect("the entry points read")
+    }
+
+    pub async fn entry_point(
+        &self,
+        evaluation: EvaluationId,
+        attr: &str,
+    ) -> Option<entry_point::Model> {
+        self.entry_points(evaluation)
+            .await
+            .into_iter()
+            .find(|point| point.eval == attr)
+    }
+
+    pub async fn attempts(&self, path: &str) -> Vec<build_attempt::Model> {
+        build_attempt::Entity::find()
+            .filter(build_attempt::Column::DerivationBuild.eq(self.shared_build(path).await.id))
+            .order_by_asc(build_attempt::Column::CreatedAt)
+            .order_by_asc(build_attempt::Column::Id)
+            .all(&self.connection)
+            .await
+            .expect("the attempts read")
+    }
+
+    pub async fn open_assignment(&self, path: &str) -> Option<dispatched_job::Model> {
+        dispatched_job::Entity::find()
+            .filter(
+                dispatched_job::Column::JobId.eq(build_job_key(self.shared_build(path).await.id)),
+            )
+            .filter(dispatched_job::Column::FinishedAt.is_null())
+            .one(&self.connection)
+            .await
+            .expect("the assignment reads")
+    }
+
+    pub async fn error_messages(&self, evaluation: EvaluationId) -> Vec<String> {
+        evaluation_message::Entity::find()
+            .filter(evaluation_message::Column::Evaluation.eq(evaluation))
+            .filter(evaluation_message::Column::Level.eq(MessageLevel::Error))
+            .order_by_asc(evaluation_message::Column::CreatedAt)
+            .all(&self.connection)
+            .await
+            .expect("the messages read")
+            .into_iter()
+            .map(|row| row.message)
+            .collect()
     }
 
     pub async fn task_of(&self, evaluation: EvaluationId) -> TaskId {

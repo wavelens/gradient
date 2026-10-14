@@ -6,17 +6,21 @@
 
 mod insert;
 
+use chrono::{Duration, NaiveDateTime};
 use gradient_entity::build::BuildStatus;
+use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::derivation_dependency::EdgeKind;
+use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{
-    BuildJobId, CacheId, CachedPathId, DerivationBuildId, DerivationId, DerivationOutputId,
-    EntryPointId, EvaluationId, ProjectCacheId, ProjectId, TaskId, UserId,
+    BuildAttemptId, BuildJobId, CacheId, CachedPathId, DerivationBuildId, DerivationId,
+    DerivationOutputId, DispatchedJobId, EntryPointId, EvaluationId, ProjectCacheId, ProjectId,
+    TaskId, UserId,
 };
 use gradient_entity::{
-    StorePath, build_job, cache, cached_path, commit, derivation, derivation_build,
-    derivation_dependency, derivation_output, entry_point, evaluation, project, project_cache,
-    task, user,
+    StorePath, build_attempt, build_job, cache, cached_path, commit, derivation, derivation_build,
+    derivation_dependency, derivation_output, dispatched_job, entry_point, evaluation, project,
+    project_cache, task, user,
 };
 use uuid::Uuid;
 
@@ -43,13 +47,21 @@ pub struct Shape {
     pub(super) cached_paths: Vec<cached_path::Model>,
     pub(super) caches: Vec<cache::Model>,
     pub(super) project_caches: Vec<project_cache::Model>,
+    pub(super) assignments: Vec<dispatched_job::Model>,
+    pub(super) attempts: Vec<build_attempt::Model>,
+    task_of: Vec<usize>,
     evaluation: Option<usize>,
     derivation: Option<usize>,
     cache: Option<usize>,
+    cached_path: Option<usize>,
 }
 
 impl Shape {
     pub fn evaluation(mut self, id: EvaluationId) -> Self {
+        if let Some(declared) = self.evaluations.iter().position(|e| e.id == id) {
+            self.evaluation = Some(declared);
+            return self;
+        }
         self.owner();
         let slug = Uuid::now_v7().simple().to_string();
         let project = rows::project_with_id(ProjectId::now_v7(), &format!("project-{slug}"));
@@ -69,6 +81,7 @@ impl Shape {
         self.projects.push(project);
         self.tasks.push(task);
         self.commits.push(commit);
+        self.task_of.push(self.tasks.len() - 1);
         self.evaluation = Some(self.evaluations.len() - 1);
         self
     }
@@ -76,13 +89,29 @@ impl Shape {
     pub fn evaluation_status(mut self, status: EvaluationStatus) -> Self {
         let at = self.current_evaluation();
         self.evaluations[at].status = status;
+        if status == EvaluationStatus::Building || status.is_terminal() {
+            self.evaluations[at].building_started_at = Some(test_date());
+        }
         self
     }
 
-    pub fn without_cache_signing(mut self) -> Self {
+    pub fn same_task_as(mut self, evaluation: EvaluationId) -> Self {
         let at = self.current_evaluation();
-        self.tasks[at].sign_cache = false;
+        let shared = self.task_of[self.evaluation_at(evaluation)];
+        let own = std::mem::replace(&mut self.task_of[at], shared);
+        self.evaluations[at].task = Some(self.tasks[shared].id);
+        self.drop_unused_task(own);
         self
+    }
+
+    pub fn task_option(mut self, change: impl FnOnce(&mut task::Model)) -> Self {
+        let at = self.current_task();
+        change(&mut self.tasks[at]);
+        self
+    }
+
+    pub fn without_cache_signing(self) -> Self {
+        self.task_option(|task| task.sign_cache = false)
     }
 
     pub fn derivation(mut self, path: &str) -> Self {
@@ -108,7 +137,35 @@ impl Shape {
         self.edge(path, EdgeKind::Both)
     }
 
-    pub fn output(mut self, hash: &str) -> Self {
+    pub fn ifd(mut self) -> Self {
+        let at = self.current_derivation();
+        self.derivations[at].ifd = true;
+        self
+    }
+
+    pub fn created_at(mut self, at: NaiveDateTime) -> Self {
+        let current = self.current_derivation();
+        let derivation = &mut self.derivations[current];
+        derivation.created_at = at;
+        let id = derivation.id;
+        let mut hashes = vec![derivation.hash.clone()];
+        for output in self.outputs.iter_mut().filter(|o| o.derivation == id) {
+            output.created_at = at;
+            hashes.push(output.hash.clone());
+        }
+        for path in &mut self.cached_paths {
+            if hashes.contains(&path.hash) {
+                path.created_at = at;
+            }
+        }
+        self
+    }
+
+    pub fn output(self, hash: &str) -> Self {
+        self.named_output(hash, "out")
+    }
+
+    pub fn named_output(mut self, hash: &str, name: &str) -> Self {
         let at = self.current_derivation();
         let derivation = self.derivations[at].id;
         let declared = self
@@ -116,12 +173,32 @@ impl Shape {
             .iter()
             .any(|o| o.derivation == derivation && o.hash == hash);
         if !declared {
-            self.outputs.push(derivation_output::Model {
+            let mut output = derivation_output::Model {
                 id: DerivationOutputId::now_v7(),
                 derivation,
-                name: "out".into(),
+                name: name.into(),
                 hash: hash.into(),
-                package: self.derivations[at].name.clone(),
+                package: output_package(&self.derivations[at].name, name),
+                created_at: test_date(),
+                ..Default::default()
+            };
+            if self.shared_builds[at].cache_available {
+                known_upstream(&mut output);
+            }
+            self.outputs.push(output);
+        }
+        self
+    }
+
+    pub fn job(mut self) -> Self {
+        let (evaluation, at) = (self.current_evaluation(), self.current_derivation());
+        if self.job_of(evaluation, at).is_none() {
+            self.jobs.push(build_job::Model {
+                id: BuildJobId::now_v7(),
+                evaluation: self.evaluations[evaluation].id,
+                derivation: self.derivations[at].id,
+                derivation_build: self.shared_builds[at].id,
+                score_breakdown: serde_json::json!({}),
                 created_at: test_date(),
                 ..Default::default()
             });
@@ -129,30 +206,28 @@ impl Shape {
         self
     }
 
-    pub fn job(mut self) -> Self {
-        let (evaluation, at) = (self.current_evaluation(), self.current_derivation());
-        self.jobs.push(build_job::Model {
-            id: BuildJobId::now_v7(),
-            evaluation: self.evaluations[evaluation].id,
-            derivation: self.derivations[at].id,
-            derivation_build: self.shared_builds[at].id,
-            created_at: test_date(),
-            ..Default::default()
-        });
-        self
-    }
-
     pub fn entry_point(mut self, attr: &str) -> Self {
-        let (evaluation, at) = (self.current_evaluation(), self.current_derivation());
-        self.entry_points.push(entry_point::Model {
-            id: EntryPointId::now_v7(),
-            task: self.tasks[evaluation].id,
-            evaluation: self.evaluations[evaluation].id,
-            derivation: self.derivations[at].id,
-            eval: attr.into(),
-            created_at: test_date(),
-            ..Default::default()
-        });
+        let (evaluation, derivation, task) = (
+            self.evaluations[self.current_evaluation()].id,
+            self.derivations[self.current_derivation()].id,
+            self.tasks[self.current_task()].id,
+        );
+        match self
+            .entry_points
+            .iter_mut()
+            .find(|p| p.evaluation == evaluation && p.eval == attr)
+        {
+            Some(declared) => declared.derivation = derivation,
+            None => self.entry_points.push(entry_point::Model {
+                id: EntryPointId::now_v7(),
+                task,
+                evaluation,
+                derivation,
+                eval: attr.into(),
+                created_at: test_date(),
+                ..Default::default()
+            }),
+        }
         self
     }
 
@@ -172,14 +247,64 @@ impl Shape {
         let at = self.current_derivation();
         self.shared_builds[at].cache_available = true;
         let derivation = self.derivations[at].id;
-        for output in self
-            .outputs
+        self.outputs
             .iter_mut()
             .filter(|o| o.derivation == derivation)
-        {
-            output.external_url = Some(format!("https://upstream.invalid/nar/{}.nar", output.hash));
-            output.nar_hash = Some("sha256:def".into());
-            output.nar_size = Some(5);
+            .for_each(known_upstream);
+        self
+    }
+
+    pub fn attempt(
+        mut self,
+        outcome: AttemptOutcome,
+        reason: Option<AttemptFailureReason>,
+    ) -> Self {
+        let at = self.current_derivation();
+        let shared_build = self.shared_builds[at].id;
+        let build_job = self
+            .evaluation
+            .and_then(|evaluation| self.job_of(evaluation, at))
+            .map(|job| job.id);
+        let running = outcome == AttemptOutcome::Running;
+        let dispatched_job = self.assignment_of(shared_build).filter(|_| running);
+        let created_at = test_date() + Duration::seconds(self.attempts.len() as i64);
+        self.attempts.push(build_attempt::Model {
+            id: BuildAttemptId::now_v7(),
+            build_job,
+            derivation_build: shared_build,
+            dispatched_job,
+            outcome,
+            reason,
+            build_context: serde_json::json!({}),
+            build_finished_at: (!running).then_some(created_at),
+            created_at,
+            ..Default::default()
+        });
+        self
+    }
+
+    pub fn open_assignment(mut self) -> Self {
+        let (evaluation, at) = (self.current_evaluation(), self.current_derivation());
+        let shared_build = self.shared_builds[at].id;
+        if self.assignment_of(shared_build).is_none() {
+            let task = self.current_task();
+            let assignment = build_assignment(
+                self.evaluations[evaluation].id,
+                self.projects[task].id,
+                self.tasks[task].id,
+                shared_build,
+                test_date(),
+            );
+            if let Some(latest) = self
+                .attempts
+                .iter_mut()
+                .rev()
+                .find(|a| a.derivation_build == shared_build)
+                .filter(|a| a.outcome == AttemptOutcome::Running)
+            {
+                latest.dispatched_job = Some(assignment.id);
+            }
+            self.assignments.push(assignment);
         }
         self
     }
@@ -202,15 +327,37 @@ impl Shape {
             .unwrap_or_else(|| panic!("cached output of {path}: declare its output first"));
         let hash = self.outputs[output].hash.clone();
         let package = self.outputs[output].package.clone();
-        let id = self.stored_path(&hash, &package);
+        let stored = self.stored_path(&hash, &package);
         self.outputs[output].is_cached = true;
-        self.outputs[output].cached_path = Some(id);
+        self.outputs[output].cached_path = Some(self.cached_paths[stored].id);
+        self.cached_path = Some(stored);
+        self
+    }
+
+    pub fn cached_path(mut self, hash: &str, package: &str) -> Self {
+        self.cached_path = Some(self.stored_path(hash, package));
+        self
+    }
+
+    pub fn references(mut self, paths: &[(&str, &str)]) -> Self {
+        let at = self.current_cached_path();
+        let stored: Vec<String> = paths
+            .iter()
+            .map(|(hash, package)| format!("{hash}-{package}"))
+            .collect();
+        self.cached_paths[at].references = Some(stored.join(" "));
+        self
+    }
+
+    pub fn unconfirmed(mut self) -> Self {
+        let at = self.current_cached_path();
+        self.cached_paths[at].confirmed = false;
         self
     }
 
     pub fn into_cache(mut self, id: CacheId) -> Self {
         let owner = self.owner();
-        let project = self.projects[self.current_evaluation()].id;
+        let project = self.projects[self.current_task()].id;
         self.cache = Some(self.cache_at(id, owner));
         let linked = self
             .project_caches
@@ -257,6 +404,50 @@ impl Shape {
 
     fn current_derivation(&self) -> usize {
         self.derivation.expect("name a derivation first")
+    }
+
+    fn current_task(&self) -> usize {
+        self.task_of[self.current_evaluation()]
+    }
+
+    fn current_cached_path(&self) -> usize {
+        self.cached_path.expect("name a cached path first")
+    }
+
+    fn evaluation_at(&self, id: EvaluationId) -> usize {
+        self.evaluations
+            .iter()
+            .position(|e| e.id == id)
+            .unwrap_or_else(|| panic!("declare evaluation {id} first"))
+    }
+
+    fn drop_unused_task(&mut self, at: usize) {
+        if self.task_of.contains(&at) {
+            return;
+        }
+        self.tasks.remove(at);
+        self.projects.remove(at);
+        for index in self.task_of.iter_mut().filter(|index| **index > at) {
+            *index -= 1;
+        }
+    }
+
+    fn job_of(&self, evaluation: usize, derivation: usize) -> Option<&build_job::Model> {
+        let (evaluation, derivation) = (
+            self.evaluations[evaluation].id,
+            self.derivations[derivation].id,
+        );
+        self.jobs
+            .iter()
+            .find(|j| j.evaluation == evaluation && j.derivation == derivation)
+    }
+
+    fn assignment_of(&self, shared_build: DerivationBuildId) -> Option<DispatchedJobId> {
+        let key = build_job_key(shared_build);
+        self.assignments
+            .iter()
+            .find(|a| a.job_id.as_deref() == Some(key.as_str()))
+            .map(|a| a.id)
     }
 
     fn derivation_at(&mut self, path: &str) -> usize {
@@ -317,13 +508,12 @@ impl Shape {
         self
     }
 
-    fn stored_path(&mut self, hash: &str, package: &str) -> CachedPathId {
-        if let Some(existing) = self.cached_paths.iter().find(|p| p.hash == hash) {
-            return existing.id;
+    fn stored_path(&mut self, hash: &str, package: &str) -> usize {
+        if let Some(declared) = self.cached_paths.iter().position(|p| p.hash == hash) {
+            return declared;
         }
-        let id = CachedPathId::now_v7();
         self.cached_paths.push(cached_path::Model {
-            id,
+            id: CachedPathId::now_v7(),
             hash: hash.into(),
             package: package.into(),
             file_hash: Some("sha256:abc".into()),
@@ -334,8 +524,50 @@ impl Shape {
             created_at: test_date(),
             ..Default::default()
         });
-        id
+        self.cached_paths.len() - 1
     }
+}
+
+pub fn build_job_key(shared_build: DerivationBuildId) -> String {
+    format!("build:{shared_build}")
+}
+
+pub fn build_assignment(
+    evaluation: EvaluationId,
+    project: ProjectId,
+    task: TaskId,
+    shared_build: DerivationBuildId,
+    at: NaiveDateTime,
+) -> dispatched_job::Model {
+    dispatched_job::Model {
+        id: DispatchedJobId::now_v7(),
+        kind: DispatchedJobKind::Build,
+        evaluation_id: evaluation,
+        project,
+        task: Some(task),
+        worker_id: "worker".into(),
+        job_id: Some(build_job_key(shared_build)),
+        queued_at: at,
+        dispatched_at: at,
+        score_breakdown: serde_json::json!({}),
+        worker_context: serde_json::json!({}),
+        job_context: serde_json::json!({}),
+        created_at: at,
+        ..Default::default()
+    }
+}
+
+fn output_package(derivation: &str, output: &str) -> String {
+    match output {
+        "out" => derivation.to_owned(),
+        named => format!("{derivation}-{named}"),
+    }
+}
+
+fn known_upstream(output: &mut derivation_output::Model) {
+    output.external_url = Some(format!("https://upstream.invalid/nar/{}.nar", output.hash));
+    output.nar_hash = Some("sha256:def".into());
+    output.nar_size = Some(5);
 }
 
 pub(crate) fn drv_hash_name(path: &str) -> (String, String) {
@@ -357,6 +589,7 @@ mod tests {
     const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv";
     const A_OUT: &str = "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0";
     const B_OUT: &str = "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0";
+    const A_DEV: &str = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
 
     #[tokio::test]
     async fn a_shape_writes_every_table_the_claim_statement_joins() {
@@ -450,6 +683,144 @@ mod tests {
 
         assert_eq!(db.rows::<project::Entity>().await.len(), 2);
         assert_ne!(db.project_of(first).await, db.project_of(second).await);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn an_evaluation_of_the_same_task_shares_its_project() {
+        let (first, second) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let db = shape()
+            .evaluation(first)
+            .evaluation_status(EvaluationStatus::Failed)
+            .evaluation(second)
+            .same_task_as(first)
+            .derivation(A)
+            .entry_point("pkg.a")
+            .into_database()
+            .await;
+
+        let shared = db.task_of(first).await;
+        assert_eq!(db.task_of(second).await, shared);
+        assert_eq!(db.rows::<task::Entity>().await.len(), 1);
+        assert_eq!(db.rows::<project::Entity>().await.len(), 1);
+        let point = db
+            .entry_point(second, "pkg.a")
+            .await
+            .expect("the entry point");
+        assert_eq!(point.task, shared);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_named_output_is_a_second_row_of_its_derivation() {
+        let db = shape()
+            .derivation(A)
+            .cache_available()
+            .output(A_OUT)
+            .named_output(A_DEV, "dev")
+            .into_database()
+            .await;
+
+        let (out, dev) = (db.output_of(A, "out").await, db.output_of(A, "dev").await);
+        assert_eq!((out.hash.as_str(), out.package.as_str()), (A_OUT, "a"));
+        assert_eq!((dev.hash.as_str(), dev.package.as_str()), (A_DEV, "a-dev"));
+        assert!(out.external_url.is_some() && dev.external_url.is_some());
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn an_open_assignment_belongs_to_the_running_attempt_of_its_build() {
+        let evaluation = EvaluationId::now_v7();
+        let db = shape()
+            .evaluation(evaluation)
+            .derivation(A)
+            .job()
+            .attempt(
+                AttemptOutcome::Failed,
+                Some(AttemptFailureReason::BuilderNonzero),
+            )
+            .attempt(AttemptOutcome::Running, None)
+            .open_assignment()
+            .derivation(B)
+            .attempt(AttemptOutcome::Running, None)
+            .into_database()
+            .await;
+
+        let job = db.job(evaluation, A).await.expect("the job of A").id;
+        let assignment = db.open_assignment(A).await.expect("the assignment of A");
+        let attempts = db.attempts(A).await;
+        let [failed, running] = attempts.as_slice() else {
+            panic!("two attempts of A, oldest first: {attempts:?}");
+        };
+        assert_eq!(failed.outcome, AttemptOutcome::Failed);
+        assert_eq!(failed.reason, Some(AttemptFailureReason::BuilderNonzero));
+        assert_eq!((failed.build_job, failed.dispatched_job), (Some(job), None));
+        assert_eq!(running.outcome, AttemptOutcome::Running);
+        assert_eq!(
+            (running.build_job, running.dispatched_job),
+            (Some(job), Some(assignment.id))
+        );
+        assert_eq!(assignment.evaluation_id, evaluation);
+        assert!(db.open_assignment(B).await.is_none());
+        assert_eq!(db.attempts(B).await[0].dispatched_job, None);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn references_and_unconfirmed_change_the_cached_output_only() {
+        let db = shape()
+            .derivation(A)
+            .drv_cached()
+            .output(A_OUT)
+            .cached_output(A)
+            .unconfirmed()
+            .references(&[(A_OUT, "a"), (B_OUT, "b")])
+            .into_database()
+            .await;
+
+        let output = db.cached_path(A_OUT).await.expect("the output path");
+        assert!(
+            !output.confirmed && output.file_hash.is_some(),
+            "{output:?}"
+        );
+        assert_eq!(
+            output.references,
+            Some(format!("{A_OUT}-a {B_OUT}-b")),
+            "{output:?}"
+        );
+        let (drv_hash, _) = drv_hash_name(A);
+        let drv = db.cached_path(&drv_hash).await.expect("the drv path");
+        assert!(drv.confirmed && drv.references.is_none(), "{drv:?}");
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn created_at_moves_a_derivation_with_its_outputs_and_cached_paths() {
+        let earlier = test_date() - Duration::days(2);
+        let db = shape()
+            .derivation(A)
+            .drv_cached()
+            .output(A_OUT)
+            .cached_output(A)
+            .created_at(earlier)
+            .derivation(B)
+            .drv_cached()
+            .output(B_OUT)
+            .cached_output(B)
+            .into_database()
+            .await;
+
+        assert_eq!(db.derivation(A).await.created_at, earlier);
+        assert_eq!(db.output(A_OUT).await.created_at, earlier);
+        let moved = db.cached_path(A_OUT).await.expect("the output path of A");
+        assert_eq!(moved.created_at, earlier);
+        let (drv_hash, _) = drv_hash_name(A);
+        let drv = db.cached_path(&drv_hash).await.expect("the drv path of A");
+        assert_eq!(drv.created_at, earlier);
+        assert_eq!(db.derivation(B).await.created_at, test_date());
+        assert_eq!(db.output(B_OUT).await.created_at, test_date());
+        let other = db.cached_path(B_OUT).await.expect("the output path of B");
+        assert_eq!(other.created_at, test_date());
         db.finish().await;
     }
 
