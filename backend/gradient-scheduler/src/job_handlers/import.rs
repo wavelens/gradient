@@ -22,7 +22,7 @@ use crate::actor::SchedulerMsg;
 use crate::buildability::BuildabilityChecker;
 use crate::import_waits::{ImportAnswer, ImportWait, ImportedBuild};
 
-const NO_ENTRY_POINT: &str = "no entry point recorded for the import";
+pub(crate) const NO_ENTRY_POINT: &str = "no entry point recorded for the import";
 
 impl Scheduler {
     pub async fn handle_import_request(

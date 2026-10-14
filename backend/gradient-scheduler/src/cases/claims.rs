@@ -19,8 +19,8 @@ use gradient_wire::types::{
 
 use super::{
     A, A_OUT, ARM, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, REPOSITORY, SchedulerCase, SlotKind,
-    X86, ago, build_output, drv_nar, drv_path, eval_key, failure, from_now, is_recent, narinfo,
-    output_nar, span, store_path, w_all,
+    X86, ago, build_output, drv_nar, drv_path, eval_key, failure, from_now, is_recent, job_ids,
+    narinfo, output_nar, span, store_path, w_all,
 };
 use crate::actor::Offer;
 use crate::jobs::Assignment;
@@ -1973,10 +1973,6 @@ async fn c28_a_registration_on_a_second_instance_leaves_rows_of_the_first_claim_
 
     second.finish().await;
     case.finish().await;
-}
-
-fn job_ids(offer: &Offer) -> Vec<String> {
-    offer.candidates.iter().map(|c| c.job_id.clone()).collect()
 }
 
 fn offered(offer: &Offer) -> Vec<(String, Option<BuildRequirement>)> {

@@ -103,6 +103,7 @@ impl SchedulerCase {
             session.last_seen = registered.last_seen;
         }
         lock(&self.connected_workers).insert(worker.to_owned());
+        lock(&self.connected_on_any_instance).insert(worker.to_owned());
     }
 
     fn port_of(

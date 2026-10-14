@@ -221,9 +221,7 @@ impl SchedulerCase {
         let rows = self.claim_due_trigger_fires().await;
         let mut fired = 0;
         for row in &rows {
-            let fire: TriggerFire =
-                serde_json::from_value(row.payload.clone()).expect("a trigger fire payload");
-            let outcome = match crate::trigger_firing::fire(&self.scheduler, &fire).await {
+            let outcome = match self.fire_payload(&row.payload).await {
                 Ok(()) => Outcome::Delivered,
                 Err(e) => Outcome::Retry(format!("{e:#}")),
             };
@@ -234,6 +232,19 @@ impl SchedulerCase {
         }
         self.settled().await;
         fired
+    }
+
+    pub async fn deliver_trigger_fire_again(&self, row: &pending_delivery::Model) {
+        self.fire_payload(&row.payload)
+            .await
+            .expect("the firing applies");
+        self.settled().await;
+    }
+
+    async fn fire_payload(&self, payload: &serde_json::Value) -> anyhow::Result<()> {
+        let fire: TriggerFire =
+            serde_json::from_value(payload.clone()).expect("a trigger fire payload");
+        crate::trigger_firing::fire(&self.scheduler, &fire).await
     }
 
     async fn claim_due_trigger_fires(&self) -> Vec<pending::PendingDelivery> {

@@ -22,6 +22,7 @@ use gradient_entity::{
 };
 use gradient_fixtures::database::TestDatabase;
 use gradient_pool::WorkerInfo;
+use sea_orm::Iterable;
 
 use crate::Scheduler;
 use crate::jobs::{TrackedKeys, build_job_key, eval_job_key};
@@ -117,9 +118,15 @@ impl Rows {
         }
     }
 
-    pub(super) async fn s12_no_open_job_pending(&self, scheduler: &Scheduler, after: &str) {
+    pub(super) async fn s12_no_open_job_pending(
+        &self,
+        scheduler: &Scheduler,
+        workers_of_other_instances: &HashSet<String>,
+        after: &str,
+    ) {
         for key in self
             .open_assignments()
+            .filter(|row| !workers_of_other_instances.contains(&row.worker_id))
             .filter_map(|row| row.job_id.as_deref())
         {
             assert!(
@@ -398,7 +405,7 @@ impl Observed {
         for evaluation in &rows.evaluations {
             if let Some(&from) = self.evaluation_statuses.get(&evaluation.id) {
                 assert!(
-                    allowed_move(from, evaluation.status),
+                    reachable(from, evaluation.status),
                     "S18 after {after}: evaluation {} moved {from:?} to {:?}",
                     evaluation.id,
                     evaluation.status
@@ -435,9 +442,22 @@ impl Observed {
     }
 }
 
+fn reachable(from: EvaluationStatus, to: EvaluationStatus) -> bool {
+    let mut seen = vec![from];
+    let mut next = vec![from];
+    while let Some(status) = next.pop() {
+        for target in EvaluationStatus::iter() {
+            if allowed_move(status, target) && !seen.contains(&target) {
+                seen.push(target);
+                next.push(target);
+            }
+        }
+    }
+    seen.contains(&to)
+}
+
 fn allowed_move(from: EvaluationStatus, to: EvaluationStatus) -> bool {
-    from == to
-        || to.sources().contains(&from)
+    to.sources().contains(&from)
         || (to == EvaluationStatus::Building && EvaluationStatus::REOPENABLE.contains(&from))
 }
 

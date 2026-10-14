@@ -7,6 +7,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use gradient_db::evaluations::counters::eval_counters;
+use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
+use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_entity::ids::{ClusterJobId, DispatchedJobId, EvaluationId, TaskTriggerId};
 use gradient_entity::{
     build_attempt, build_job, cached_path, cluster_attempt, cluster_job, cluster_member,
@@ -17,7 +19,7 @@ use gradient_entity::{
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use super::SchedulerCase;
-use crate::actor::SchedulerMsg;
+use crate::actor::{Offer, SchedulerMsg};
 use crate::cluster::{PendingCluster, Reservation, SlotKind};
 use crate::jobs::{AssignDecision, PendingBuildJob, PendingJob, build_job_key};
 use crate::probe::ProbePlan;
@@ -50,6 +52,10 @@ pub(crate) fn planned_targets(plan: &ProbePlan) -> BTreeMap<EvaluationId, BTreeS
         .collect()
 }
 
+pub(crate) fn job_ids(offer: &Offer) -> Vec<String> {
+    offer.candidates.iter().map(|c| c.job_id.clone()).collect()
+}
+
 impl SchedulerCase {
     pub async fn key(&self, path: &str) -> String {
         build_job_key(self.sb(path).await.id)
@@ -61,6 +67,25 @@ impl SchedulerCase {
 
     pub async fn attempts(&self, path: &str) -> Vec<build_attempt::Model> {
         self.db.attempts(path).await
+    }
+
+    pub async fn attempt_outcomes(&self, path: &str) -> Vec<AttemptOutcome> {
+        self.attempts(path)
+            .await
+            .into_iter()
+            .map(|t| t.outcome)
+            .collect()
+    }
+
+    pub async fn attempt_outcomes_with_reasons(
+        &self,
+        path: &str,
+    ) -> Vec<(AttemptOutcome, Option<AttemptFailureReason>)> {
+        self.attempts(path)
+            .await
+            .into_iter()
+            .map(|t| (t.outcome, t.reason))
+            .collect()
     }
 
     pub async fn counters(&self, evaluation: EvaluationId) -> [i64; 5] {
@@ -107,6 +132,17 @@ impl SchedulerCase {
             .all(&self.db.connection())
             .await
             .expect("the assignments read")
+    }
+
+    pub async fn assignment_outcomes(
+        &self,
+        key: &str,
+    ) -> Vec<(DispatchedJobId, Option<DispatchedJobOutcome>)> {
+        self.assignments(key)
+            .await
+            .into_iter()
+            .map(|row| (row.id, row.outcome))
+            .collect()
     }
 
     pub async fn open_assignment(&self, key: &str) -> Option<dispatched_job::Model> {

@@ -23,7 +23,7 @@ use gradient_wire::types::{
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, SchedulerCase, ago, attr_of, build_output, drv,
-    drv_nar, eval_key, failure, is_recent, output_nar, span, w_all, w_eval, w_fetch_eval,
+    drv_nar, eval_key, failure, is_recent, job_ids, output_nar, span, w_all, w_eval, w_fetch_eval,
     with_attr, with_output,
 };
 use crate::jobs::PendingJob;
@@ -99,7 +99,7 @@ async fn r02_a_completion_without_a_building_report_leaves_no_second_running_att
     case.commit_nar(output_nar(A, A_OUT)).await;
     case.complete(W1, &a, a1, Vec::new(), 5).await;
     assert_eq!(
-        outcomes(&case, &a).await,
+        case.assignment_outcomes(&a).await,
         vec![(a1, Some(DispatchedJobOutcome::Completed))],
         "after 2: dj(build:A)"
     );
@@ -170,7 +170,7 @@ async fn r03_a_failure_after_a_completion_and_a_second_completion_change_nothing
         "after 3: sb(A).status"
     );
     assert_eq!(
-        attempt_outcomes(&case, A).await,
+        case.attempt_outcomes_with_reasons(A).await,
         vec![(AttemptOutcome::Built, None)],
         "after 3: att(A)"
     );
@@ -180,7 +180,7 @@ async fn r03_a_failure_after_a_completion_and_a_second_completion_change_nothing
         .await;
     assert_eq!(elapsed(&case, &a).await, closed, "after 4: dj(build:A)");
     assert_eq!(
-        attempt_outcomes(&case, A).await,
+        case.attempt_outcomes_with_reasons(A).await,
         vec![(AttemptOutcome::Built, None)],
         "after 4: att(A)"
     );
@@ -270,7 +270,11 @@ async fn r05_a_report_for_a_reaped_job_leaves_the_closed_row_and_the_graph_alone
     case.abort_evaluation(e1).await;
     case.reap_overdue_aborts(Duration::ZERO).await;
     let reaped = vec![(a1, Some(DispatchedJobOutcome::Abandoned))];
-    assert_eq!(outcomes(&case, &a).await, reaped, "after 2: dj(build:A)");
+    assert_eq!(
+        case.assignment_outcomes(&a).await,
+        reaped,
+        "after 2: dj(build:A)"
+    );
     assert_eq!(
         case.sb(A).await.status,
         BuildStatus::Aborted,
@@ -332,7 +336,7 @@ async fn r06_a_report_with_the_id_of_a_rejected_claim_is_dropped_once_another_wo
 
     case.complete(W1, &a, a1, Vec::new(), 5).await;
     assert_eq!(
-        outcomes(&case, &a).await,
+        case.assignment_outcomes(&a).await,
         vec![(a1, Some(DispatchedJobOutcome::Abandoned)), (a2, None)],
         "after 3: dj(build:A)"
     );
@@ -418,7 +422,7 @@ async fn r07_a_failure_with_an_old_id_of_a_lost_worker_does_not_fail_the_build_o
         .elapsed_ms(1);
     case.fail(W1, &a, a1, old).await;
     assert_eq!(
-        outcomes(&case, &a).await,
+        case.assignment_outcomes(&a).await,
         vec![(a1, Some(DispatchedJobOutcome::Abandoned)), (a2, None)],
         "after 4: dj(build:A)"
     );
@@ -454,12 +458,12 @@ async fn r08_a_transient_failure_retries_with_backoff_then_fails_permanently() {
 
     case.fail(W1, &a, a1, transient("flaky")).await;
     assert_eq!(
-        outcomes(&case, &a).await,
+        case.assignment_outcomes(&a).await,
         vec![(a1, Some(DispatchedJobOutcome::Failed))],
         "after 2: dj(build:A)"
     );
     assert_eq!(
-        outcome_list(&case, A).await,
+        case.attempt_outcomes(A).await,
         vec![AttemptOutcome::Failed],
         "after 2: att(A)"
     );
@@ -508,7 +512,8 @@ async fn r08_a_transient_failure_retries_with_backoff_then_fails_permanently() {
         BuildStatus::FailedPermanent,
         "after 6: sb(A).status"
     );
-    let failed: Vec<_> = attempt_outcomes(&case, A)
+    let failed: Vec<_> = case
+        .attempt_outcomes_with_reasons(A)
         .await
         .into_iter()
         .map(|(outcome, _)| outcome)
@@ -645,7 +650,7 @@ async fn r10_a_timeout_failure_is_failed_timeout_and_fails_the_dependent() {
         "after 2: sb(B).status"
     );
     assert_eq!(
-        attempt_outcomes(&case, B).await,
+        case.attempt_outcomes_with_reasons(B).await,
         vec![(
             AttemptOutcome::Failed,
             Some(AttemptFailureReason::WallClockTimeout)
@@ -699,7 +704,7 @@ async fn r11_a_second_substitute_miss_turns_the_passthrough_into_a_real_build() 
         "after 2: sb(A)"
     );
     assert_eq!(
-        attempt_outcomes(&case, A).await,
+        case.attempt_outcomes_with_reasons(A).await,
         vec![(
             AttemptOutcome::Failed,
             Some(AttemptFailureReason::SubstituteUnavailable)
@@ -800,12 +805,12 @@ async fn r12_inputs_unavailable_removes_the_missing_input_and_retries_after_it_i
         .elapsed_ms(2);
     case.fail(W1, &a, a1, missing).await;
     assert_eq!(
-        outcomes(&case, &a).await,
+        case.assignment_outcomes(&a).await,
         vec![(a1, Some(DispatchedJobOutcome::Failed))],
         "after 2: dj(build:A)"
     );
     assert_eq!(
-        attempt_outcomes(&case, A).await,
+        case.attempt_outcomes_with_reasons(A).await,
         vec![(
             AttemptOutcome::Failed,
             Some(AttemptFailureReason::InputsUnavailable)
@@ -875,7 +880,7 @@ async fn r13_a_canceled_build_closes_the_row_abandoned_and_requeues_without_an_a
         "after 2: dj(build:A)"
     );
     assert_eq!(
-        outcome_list(&case, A).await,
+        case.attempt_outcomes(A).await,
         vec![AttemptOutcome::Aborted],
         "after 2: att(A)"
     );
@@ -899,7 +904,7 @@ async fn r13_a_canceled_build_closes_the_row_abandoned_and_requeues_without_an_a
         "after 3: result.job_id"
     );
     assert_eq!(
-        outcome_list(&case, A).await,
+        case.attempt_outcomes(A).await,
         vec![AttemptOutcome::Aborted, AttemptOutcome::Running],
         "after 3: att(A)"
     );
@@ -926,7 +931,7 @@ async fn r14_a_canceled_eval_job_puts_the_evaluation_back_to_queued() {
     )
     .await;
     assert_eq!(
-        outcomes(&case, &k).await,
+        case.assignment_outcomes(&k).await,
         vec![(a1, Some(DispatchedJobOutcome::Abandoned))],
         "after 1: dj(eval:E1)"
     );
@@ -974,7 +979,7 @@ async fn r15_a_corrupt_eval_cache_purges_the_blob_and_requeues_then_fails() {
         "after 1: evaluation(E1).status"
     );
     assert_eq!(
-        outcomes(&case, &k).await,
+        case.assignment_outcomes(&k).await,
         vec![(a1, Some(DispatchedJobOutcome::Failed))],
         "after 1: dj(eval:E1)"
     );
@@ -1003,7 +1008,7 @@ async fn r15_a_corrupt_eval_cache_purges_the_blob_and_requeues_then_fails() {
         "after 3: evaluation_message(E1) has an Error"
     );
     assert_eq!(
-        outcomes(&case, &k).await.get(1).cloned(),
+        case.assignment_outcomes(&k).await.get(1).cloned(),
         Some((a2, Some(DispatchedJobOutcome::Failed))),
         "after 3: dj(eval:E1)[1]"
     );
@@ -1097,12 +1102,12 @@ async fn r17_a_completed_fetch_job_enqueues_the_cached_follow_up_for_an_eval_wor
         "after 1: steps of the pending job"
     );
     assert_eq!(
-        candidates(&fetch_offer),
+        job_ids(&fetch_offer),
         vec![k.clone()],
         "after 1: offers(W1)"
     );
     assert_eq!(
-        candidates(&eval_offer),
+        job_ids(&eval_offer),
         Vec::<String>::new(),
         "after 1: offers(W2)"
     );
@@ -1194,7 +1199,7 @@ async fn r17_a_completed_fetch_job_enqueues_the_cached_follow_up_for_an_eval_wor
 
     let offer = case.offers_delta(W2).await;
     assert_eq!(
-        candidates(&offer),
+        job_ids(&offer),
         vec![k.clone()],
         "after 5: offers result.candidates"
     );
@@ -1245,7 +1250,7 @@ async fn r18_a_completed_fetch_job_without_a_flake_source_fails_the_evaluation()
     case.complete(W1, &k, a1, vec![span(JobPhase::Fetch, 0, 100)], 100)
         .await;
     assert_eq!(
-        outcomes(&case, &k).await,
+        case.assignment_outcomes(&k).await,
         vec![(a1, Some(DispatchedJobOutcome::Completed))],
         "after 2: dj(eval:E1)"
     );
@@ -1332,7 +1337,7 @@ async fn r19_an_eval_completion_moves_to_building_or_straight_to_the_verdict() {
         "after 2: evaluation_metric(E1) phase totals"
     );
     assert_eq!(
-        outcomes(&case, &k1).await,
+        case.assignment_outcomes(&k1).await,
         vec![(a1, Some(DispatchedJobOutcome::Completed))],
         "after 2: dj(eval:E1)"
     );
@@ -1671,7 +1676,7 @@ async fn r24_the_stranded_build_sweep_requeues_an_abandoned_building_build_and_s
         "after 1: sb(A).status"
     );
     assert_eq!(
-        attempt_outcomes(&case, A).await,
+        case.attempt_outcomes_with_reasons(A).await,
         vec![(
             AttemptOutcome::Aborted,
             Some(AttemptFailureReason::WorkerLost)
@@ -1684,7 +1689,7 @@ async fn r24_the_stranded_build_sweep_requeues_an_abandoned_building_build_and_s
         "after 1: sb(B).status"
     );
     assert_eq!(
-        outcome_list(&case, B).await,
+        case.attempt_outcomes(B).await,
         vec![AttemptOutcome::Running],
         "after 1: att(B)"
     );
@@ -1745,7 +1750,7 @@ async fn r25_the_abandoned_dispatch_sweep_closes_only_old_untracked_rows() {
         .collect();
     assert_eq!(open, vec![None], "after 2: dj(build:B) == [{{open}}]");
     assert_eq!(
-        outcomes(&case, &c).await,
+        case.assignment_outcomes(&c).await,
         vec![(a3, None)],
         "after 2: dj(build:C)"
     );
@@ -1755,7 +1760,7 @@ async fn r25_the_abandoned_dispatch_sweep_closes_only_old_untracked_rows() {
         "after 2: sb(A).status, sb(B).status"
     );
     assert_eq!(
-        outcome_list(&case, A).await,
+        case.attempt_outcomes(A).await,
         vec![AttemptOutcome::Running],
         "after 2: att(A)"
     );
@@ -1908,26 +1913,11 @@ fn corrupt() -> super::Failure {
         .elapsed_ms(3)
 }
 
-fn candidates(offer: &crate::actor::Offer) -> Vec<String> {
-    offer.candidates.iter().map(|c| c.job_id.clone()).collect()
-}
-
 async fn has_error(case: &SchedulerCase, evaluation: EvaluationId) -> bool {
     case.messages(evaluation)
         .await
         .iter()
         .any(|m| m.level == MessageLevel::Error)
-}
-
-async fn outcomes(
-    case: &SchedulerCase,
-    key: &str,
-) -> Vec<(DispatchedJobId, Option<DispatchedJobOutcome>)> {
-    case.assignments(key)
-        .await
-        .into_iter()
-        .map(|row| (row.id, row.outcome))
-        .collect()
 }
 
 async fn elapsed(
@@ -1938,25 +1928,6 @@ async fn elapsed(
         .await
         .into_iter()
         .map(|row| (row.id, row.outcome, row.worker_elapsed_ms))
-        .collect()
-}
-
-async fn attempt_outcomes(
-    case: &SchedulerCase,
-    path: &str,
-) -> Vec<(AttemptOutcome, Option<AttemptFailureReason>)> {
-    case.attempts(path)
-        .await
-        .into_iter()
-        .map(|t| (t.outcome, t.reason))
-        .collect()
-}
-
-async fn outcome_list(case: &SchedulerCase, path: &str) -> Vec<AttemptOutcome> {
-    case.attempts(path)
-        .await
-        .into_iter()
-        .map(|t| t.outcome)
         .collect()
 }
 

@@ -13,14 +13,14 @@ use gradient_entity::cluster_attempt::ClusterAttemptOutcome;
 use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::dispatched_job::{DispatchedJobKind, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::ids::{ClusterAttemptId, ClusterJobId, DispatchedJobId, EvaluationId};
+use gradient_entity::ids::{ClusterAttemptId, ClusterJobId, EvaluationId};
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_pool::session_port::SessionSignal;
 use gradient_wire::types::{BuildFailureKind, ClusterPeer, JobKind};
 
 use super::{
     A, A_OUT, B, B_OUT, CaseShapes, ClusterAssignment, D, D_OUT, SchedulerCase, SlotKind, ago,
-    eval_key, failure, output_nar, w_all,
+    eval_key, failure, output_nar, w_all, without_offers,
 };
 
 const W1: &str = "w1";
@@ -165,7 +165,7 @@ async fn k02_a_planning_pass_claims_the_attempt_and_both_member_rows() {
         "after 3: dj(build:A)"
     );
     assert_eq!(
-        attempt_outcomes(&case, A).await,
+        case.attempt_outcomes(A).await,
         vec![AttemptOutcome::Running],
         "after 3: att(A)"
     );
@@ -330,7 +330,7 @@ async fn k04_a_member_reject_fails_the_prepare_and_leaves_the_budget() {
         vec![Some(DispatchedJobOutcome::Abandoned)],
         "after 2: dj(build:A)"
     );
-    let attempts = attempt_outcomes(&case, A).await;
+    let attempts = case.attempt_outcomes(A).await;
     assert!(
         matches!(attempts.as_slice(), [outcome] if *outcome != AttemptOutcome::Running),
         "after 2: att(A) has a single closed row, got {attempts:?}"
@@ -589,7 +589,7 @@ async fn k12_member_transitions_wait_for_the_complete_verdict_then_apply() {
     case.complete(W1, &eval, started.eval.assignment_id, Vec::new(), 10)
         .await;
     assert_eq!(
-        row_results(&case, &eval).await,
+        case.assignment_outcomes(&eval).await,
         vec![(
             started.eval.assignment_id,
             Some(DispatchedJobOutcome::Completed)
@@ -613,7 +613,7 @@ async fn k12_member_transitions_wait_for_the_complete_verdict_then_apply() {
     case.complete(W2, &build, started.build.assignment_id, Vec::new(), 20)
         .await;
     assert_eq!(
-        row_results(&case, &build).await,
+        case.assignment_outcomes(&build).await,
         vec![(
             started.build.assignment_id,
             Some(DispatchedJobOutcome::Completed)
@@ -680,7 +680,7 @@ async fn k14_a_transient_member_failure_with_budget_left_requeues_the_cluster() 
         "after 1: cluster_job(C)"
     );
     assert_eq!(
-        row_results(&case, &build).await,
+        case.assignment_outcomes(&build).await,
         vec![(
             started.build.assignment_id,
             Some(DispatchedJobOutcome::Failed)
@@ -803,7 +803,7 @@ async fn k16_a_retry_budget_of_0_fails_the_cluster_on_the_first_member_failure()
         "after 1: sb(A).status"
     );
     assert_eq!(
-        attempt_outcomes(&case, A).await.first(),
+        case.attempt_outcomes(A).await.first(),
         Some(&AttemptOutcome::Failed),
         "after 1: att(A)[0]"
     );
@@ -1228,25 +1228,6 @@ async fn row_outcomes(case: &SchedulerCase, key: &str) -> Vec<Option<DispatchedJ
         .collect()
 }
 
-async fn row_results(
-    case: &SchedulerCase,
-    key: &str,
-) -> Vec<(DispatchedJobId, Option<DispatchedJobOutcome>)> {
-    case.assignments(key)
-        .await
-        .into_iter()
-        .map(|r| (r.id, r.outcome))
-        .collect()
-}
-
-async fn attempt_outcomes(case: &SchedulerCase, path: &str) -> Vec<AttemptOutcome> {
-    case.attempts(path)
-        .await
-        .into_iter()
-        .map(|a| a.outcome)
-        .collect()
-}
-
 async fn seeded_member_outcomes(case: &SchedulerCase) -> Vec<Option<DispatchedJobOutcome>> {
     let mut outcomes = Vec::new();
     for worker in SEEDED_MEMBERS {
@@ -1310,13 +1291,6 @@ fn peer(role: &str, worker: &str) -> ClusterPeer {
         zone: None,
         endpoint: None,
     }
-}
-
-fn without_offers(signals: Vec<SessionSignal>) -> Vec<SessionSignal> {
-    signals
-        .into_iter()
-        .filter(|s| !matches!(s, SessionSignal::Offers(_)))
-        .collect()
 }
 
 fn aborts_cluster(signals: &[SessionSignal], attempt: ClusterAttemptId) -> bool {

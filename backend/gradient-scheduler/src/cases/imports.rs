@@ -15,8 +15,9 @@ use gradient_wire::types::{BuildFailureKind, DiscoveredDerivation, ImportOutcome
 
 use super::{
     CaseShapes, P, P_OUT, SchedulerCase, X, X_OUT, Y, Y_OUT, attr_of, drv, drv_path, eval_key,
-    failure, output_nar, w_all, with_attr, with_ifd, with_output,
+    failure, output_nar, w_all, with_attr, with_ifd, with_output, without_offers,
 };
+use crate::job_handlers::import::NO_ENTRY_POINT;
 
 const W1: &str = "w1";
 const W2: &str = "w2";
@@ -96,22 +97,15 @@ async fn f02_an_import_without_an_entry_point_in_the_evaluation_answers_failed()
 
     case.import_request(W1, &eval_key(e1), "r1", &[drv_path(X)])
         .await;
-    let build_id = build_job_of(&case, e1, X).await;
-    let signals = case.signals(W1);
-    assert!(
-        matches!(
-            signals.as_slice(),
-            [SessionSignal::ImportResult {
-                job_id,
-                request_id,
-                outcome: ImportOutcome::Failed { drv_path: path, build_id: id, status },
-            }] if *job_id == eval_key(e1)
-                && request_id == "r1"
-                && *path == drv_path(X)
-                && *id == build_id
-                && status.starts_with("no entry point")
-        ),
-        "after 1: signals(W1) == [ImportResult{{eval:E1, r1, Failed{{X.drv, build_id, no entry point}}}}], got {signals:?}"
+    let failed = ImportOutcome::Failed {
+        drv_path: drv_path(X),
+        build_id: build_job_of(&case, e1, X).await,
+        status: NO_ENTRY_POINT.into(),
+    };
+    assert_eq!(
+        case.signals(W1),
+        vec![answer(e1, "r1", failed)],
+        "after 1: signals(W1)"
     );
     case.check("step 1").await;
 
@@ -728,11 +722,4 @@ fn assignment_of(claimed: &[(String, DispatchedJobId)], key: &str) -> Dispatched
         .find(|(job, _)| job == key)
         .map(|(_, assignment)| *assignment)
         .unwrap_or_else(|| panic!("{key} among the claimed jobs {claimed:?}"))
-}
-
-fn without_offers(signals: Vec<SessionSignal>) -> Vec<SessionSignal> {
-    signals
-        .into_iter()
-        .filter(|signal| !matches!(signal, SessionSignal::Offers(_)))
-        .collect()
 }

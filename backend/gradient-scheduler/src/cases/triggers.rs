@@ -485,7 +485,7 @@ async fn t09_the_second_consumer_of_a_firing_finds_the_stamp_moved() {
     let [row] = deliveries.as_slice() else {
         panic!("after 2: a single pending_delivery row, got {deliveries:?}");
     };
-    fire_again(&case, row).await;
+    case.deliver_trigger_fire_again(row).await;
     assert_eq!(
         evaluations_besides(&case, &[e0]).await.len(),
         1,
@@ -918,13 +918,4 @@ async fn undelivered(case: &SchedulerCase) -> Vec<pending_delivery::Model> {
         .into_iter()
         .filter(|d| d.delivered_at.is_none())
         .collect()
-}
-
-async fn fire_again(case: &SchedulerCase, row: &pending_delivery::Model) {
-    let firing: TriggerFire =
-        serde_json::from_value(row.payload.clone()).expect("a trigger fire payload");
-    crate::trigger_firing::fire(&case.scheduler, &firing)
-        .await
-        .expect("the firing applies");
-    case.settled().await;
 }

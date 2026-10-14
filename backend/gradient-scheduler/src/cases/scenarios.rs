@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::cache_upstream::CacheUpstreamKind;
-use gradient_entity::dispatched_job::{self, DispatchedJobOutcome};
+use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{CacheId, CacheUpstreamId, DispatchedJobId, EvaluationId};
 use gradient_entity::project_cache::CacheSubscriptionMode;
@@ -21,17 +21,13 @@ use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildSpecKind, Job, J
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, SchedulerCase, UpstreamServer, attr_of, build_output,
-    drv, drv_nar, eval_key, failure, invariants, lock, output_nar, w_all, with_attr, with_output,
-    with_references,
+    drv, drv_nar, eval_key, failure, output_nar, w_all, with_attr, with_output, with_references,
 };
-use crate::actor::SchedulerMsg;
 use crate::jobs::Assignment;
 
 const W1: &str = "w1";
 const W2: &str = "w2";
 const W3: &str = "w3";
-
-type AttemptSummary = (AttemptOutcome, Option<AttemptFailureReason>);
 
 #[tokio::test]
 async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mid_walk() {
@@ -43,7 +39,7 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
         shape()
             .evalq(e1)
             .into_cache(c1)
-            .keyed(signing_key())
+            .keyed(SchedulerCase::signing_key())
             .upstream(
                 CacheUpstreamId::now_v7(),
                 &u1.url(),
@@ -229,14 +225,14 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
     );
     for (key, id) in [(&eval, a1), (&b, a2), (&a, a3)] {
         assert_eq!(
-            row_outcomes(&case, key).await,
+            case.assignment_outcomes(key).await,
             vec![(id, Some(DispatchedJobOutcome::Completed))],
             "after 8: dj({key})"
         );
     }
     for path in [B, A] {
         assert_eq!(
-            attempt_summaries(&case, path).await,
+            case.attempt_outcomes_with_reasons(path).await,
             vec![(AttemptOutcome::Built, None)],
             "after 8: att({path})"
         );
@@ -427,7 +423,7 @@ async fn z03_a_lost_worker_and_a_transient_failure_both_end_in_completed_builds(
         "after 2: sb(A).status"
     );
     assert_eq!(
-        attempt_summaries(&case, A).await,
+        case.attempt_outcomes_with_reasons(A).await,
         vec![(
             AttemptOutcome::Aborted,
             Some(AttemptFailureReason::WorkerLost)
@@ -435,7 +431,7 @@ async fn z03_a_lost_worker_and_a_transient_failure_both_end_in_completed_builds(
         "after 2: att(A)"
     );
     assert_eq!(
-        row_outcomes(&case, &a).await,
+        case.assignment_outcomes(&a).await,
         vec![(a1, Some(DispatchedJobOutcome::Abandoned))],
         "after 2: dj(build:A)"
     );
@@ -455,7 +451,7 @@ async fn z03_a_lost_worker_and_a_transient_failure_both_end_in_completed_builds(
         "after 3: sb(B).status"
     );
     assert_eq!(
-        attempt_outcomes(&case, B).await,
+        case.attempt_outcomes(B).await,
         vec![AttemptOutcome::Failed],
         "after 3: att(B)"
     );
@@ -506,7 +502,7 @@ async fn z03_a_lost_worker_and_a_transient_failure_both_end_in_completed_builds(
         "after 5: evaluation(E1).status"
     );
     assert_eq!(
-        attempt_summaries(&case, A).await,
+        case.attempt_outcomes_with_reasons(A).await,
         vec![
             (
                 AttemptOutcome::Aborted,
@@ -517,7 +513,7 @@ async fn z03_a_lost_worker_and_a_transient_failure_both_end_in_completed_builds(
         "after 5: att(A)"
     );
     assert_eq!(
-        attempt_outcomes(&case, B).await,
+        case.attempt_outcomes(B).await,
         vec![AttemptOutcome::Failed, AttemptOutcome::Built],
         "after 5: att(B)"
     );
@@ -636,7 +632,7 @@ async fn z04_a_passthrough_missing_twice_becomes_a_real_build_after_its_input() 
         Some(AttemptFailureReason::SubstituteUnavailable),
     );
     assert_eq!(
-        attempt_summaries(&case, A).await,
+        case.attempt_outcomes_with_reasons(A).await,
         vec![unavailable, unavailable, (AttemptOutcome::Built, None)],
         "after 4: att(A)"
     );
@@ -770,7 +766,7 @@ async fn z06_two_instances_on_a_database_share_the_jobs_without_a_double_claim()
     second.offers_full(W2).await;
     case.score_all(W1).await;
     second.score_all(W2).await;
-    check_own_workers(&case, "step 1").await;
+    case.check("step 1").await;
     second.check("step 1").await;
 
     let mut first_builds = Vec::new();
@@ -819,7 +815,7 @@ async fn z06_two_instances_on_a_database_share_the_jobs_without_a_double_claim()
         open, expected,
         "after 2: 3 open rows, build:A, build:B, eval:E2"
     );
-    check_own_workers(&case, "step 2").await;
+    case.check("step 2").await;
     second.check("step 2").await;
 
     case.report_building(W1, &a).await;
@@ -833,7 +829,7 @@ async fn z06_two_instances_on_a_database_share_the_jobs_without_a_double_claim()
     case.disconnect(W1).await;
     for (key, id) in &first_rows {
         assert_eq!(
-            row_outcomes(&case, key).await,
+            case.assignment_outcomes(key).await,
             vec![(*id, Some(DispatchedJobOutcome::Abandoned))],
             "after 3: dj({key})"
         );
@@ -845,7 +841,7 @@ async fn z06_two_instances_on_a_database_share_the_jobs_without_a_double_claim()
             "after 3: sb({path}).status"
         );
         assert_eq!(
-            attempt_summaries(&case, path).await,
+            case.attempt_outcomes_with_reasons(path).await,
             vec![(
                 AttemptOutcome::Aborted,
                 Some(AttemptFailureReason::WorkerLost)
@@ -858,7 +854,7 @@ async fn z06_two_instances_on_a_database_share_the_jobs_without_a_double_claim()
         matches!(status, EvaluationStatus::Waiting | EvaluationStatus::Queued),
         "after 3: evaluation(E2).status in {{Waiting, Queued}}, got {status:?}"
     );
-    check_own_workers(&case, "step 3").await;
+    case.check("step 3").await;
     second.check("step 3").await;
 
     second.resync_startable_set().await;
@@ -884,7 +880,7 @@ async fn z06_two_instances_on_a_database_share_the_jobs_without_a_double_claim()
     for key in [&a, &b, &eval] {
         assert!(case.pending(key).await, "after 4: I1.pending({key})");
     }
-    check_own_workers(&case, "step 4").await;
+    case.check("step 4").await;
     second.check("step 4").await;
 
     for job in &taken_again {
@@ -916,7 +912,7 @@ async fn z06_two_instances_on_a_database_share_the_jobs_without_a_double_claim()
         EvaluationStatus::Completed,
         "after 5: evaluation(E2).status"
     );
-    check_own_workers(&case, "step 5").await;
+    case.check("step 5").await;
     second.check("step 5").await;
 
     second.finish().await;
@@ -1047,62 +1043,4 @@ fn spec_kind(assignment: &Assignment) -> BuildSpecKind {
         panic!("a build job, got {:?}", assignment.job);
     };
     build.builds[0].kind
-}
-
-async fn row_outcomes(
-    case: &SchedulerCase,
-    key: &str,
-) -> Vec<(DispatchedJobId, Option<DispatchedJobOutcome>)> {
-    case.assignments(key)
-        .await
-        .into_iter()
-        .map(|row| (row.id, row.outcome))
-        .collect()
-}
-
-async fn attempt_summaries(case: &SchedulerCase, path: &str) -> Vec<AttemptSummary> {
-    case.attempts(path)
-        .await
-        .into_iter()
-        .map(|t| (t.outcome, t.reason))
-        .collect()
-}
-
-async fn attempt_outcomes(case: &SchedulerCase, path: &str) -> Vec<AttemptOutcome> {
-    case.attempts(path)
-        .await
-        .into_iter()
-        .map(|t| t.outcome)
-        .collect()
-}
-
-fn signing_key() -> String {
-    let (_secret, path) = gradient_graph::testing::secret_file();
-    gradient_graph::testing::signing_key(&path)
-}
-
-async fn check_own_workers(case: &SchedulerCase, after: &str) {
-    case.check_rows(after).await;
-    let tracked = case
-        .scheduler
-        .call(|reply| SchedulerMsg::TrackedKeys { reply })
-        .await
-        .expect("the scheduler core lists its job keys");
-    invariants::s11_a_single_job_list_per_key(&tracked, after);
-    invariants::Rows::read(&case.db)
-        .await
-        .s8_open_builds_within_slots(&case.board_workers().await, after);
-    let own = lock(&case.connected_workers).clone();
-    let open = case
-        .db
-        .rows::<dispatched_job::Entity>()
-        .await
-        .into_iter()
-        .filter(|row| row.finished_at.is_none() && own.contains(&row.worker_id));
-    for key in open.filter_map(|row| row.job_id) {
-        assert!(
-            !case.pending(&key).await,
-            "S12 after {after}: job {key} pending while its row on this instance is open"
-        );
-    }
 }

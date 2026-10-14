@@ -61,7 +61,7 @@ use invariants::{Observed, Rows};
 
 pub(crate) use crate::cluster::SlotKind;
 pub(crate) use outside::{GitRepo, UpstreamServer};
-pub(crate) use readers::{Totals, UpstreamTally, planned_targets};
+pub(crate) use readers::{Totals, UpstreamTally, job_ids, planned_targets};
 pub(crate) use session::{ClusterAssignment, Failure, failure};
 pub(crate) use shapes::*;
 
@@ -77,6 +77,7 @@ pub(crate) struct SchedulerCase {
     core: Mutex<ActorRef<SchedulerMsg>>,
     sessions: Mutex<HashMap<String, Session>>,
     connected_workers: Mutex<HashSet<String>>,
+    connected_on_any_instance: Arc<Mutex<HashSet<String>>>,
     observed: Mutex<Observed>,
     secret: Arc<NamedTempFile>,
     probe: crate::probe::UpstreamProbe,
@@ -117,7 +118,7 @@ impl SchedulerCase {
         testing::settle_seed(&state.db(), &db, declared).await;
         enter_queued_builds(&state, &db, None).await;
 
-        let case = Self::spawn(Arc::new(db), state, graph, secret).await;
+        let case = Self::spawn(Arc::new(db), state, graph, secret, Arc::default()).await;
         testing::zero_drift(&case.state.db(), "the seed").await;
         case
     }
@@ -128,7 +129,19 @@ impl SchedulerCase {
         let state = server_state(&self.db, &graph, Utc::now(), &self.secret, move |c| {
             *c = config;
         });
-        Self::spawn(Arc::clone(&self.db), state, graph, Arc::clone(&self.secret)).await
+        Self::spawn(
+            Arc::clone(&self.db),
+            state,
+            graph,
+            Arc::clone(&self.secret),
+            Arc::clone(&self.connected_on_any_instance),
+        )
+        .await
+    }
+
+    pub fn signing_key() -> String {
+        let (secret, _) = testing::secret_file();
+        testing::signing_key(&secret.path().to_string_lossy())
     }
 
     async fn spawn(
@@ -136,6 +149,7 @@ impl SchedulerCase {
         state: Arc<ServerState>,
         graph: Arc<Graph>,
         secret: Arc<NamedTempFile>,
+        connected_on_any_instance: Arc<Mutex<HashSet<String>>>,
     ) -> Self {
         let writer = graph
             .spawn(state.db(), None, None)
@@ -159,6 +173,7 @@ impl SchedulerCase {
             core: Mutex::new(core),
             sessions: Mutex::default(),
             connected_workers: Mutex::default(),
+            connected_on_any_instance,
             observed,
             secret,
             probe,
@@ -177,6 +192,15 @@ impl SchedulerCase {
             return Vec::new();
         };
         std::iter::from_fn(|| session.inbox.try_recv().ok()).collect()
+    }
+
+    fn workers_of_other_instances(&self) -> HashSet<String> {
+        let own = lock(&self.connected_workers).clone();
+        lock(&self.connected_on_any_instance)
+            .iter()
+            .filter(|worker| !own.contains(*worker))
+            .cloned()
+            .collect()
     }
 
     pub async fn settled(&self) {
@@ -221,7 +245,8 @@ impl SchedulerCase {
 
         let rows = Rows::read(&self.db).await;
         rows.s8_open_builds_within_slots(&self.scheduler.board_workers().await, after);
-        rows.s12_no_open_job_pending(&self.scheduler, after).await;
+        rows.s12_no_open_job_pending(&self.scheduler, &self.workers_of_other_instances(), after)
+            .await;
     }
 
     pub async fn finish(self) {
@@ -302,6 +327,13 @@ async fn drop_database_if_last(db: Arc<TestDatabase>) {
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+pub(crate) fn without_offers(signals: Vec<SessionSignal>) -> Vec<SessionSignal> {
+    signals
+        .into_iter()
+        .filter(|signal| !matches!(signal, SessionSignal::Offers(_)))
+        .collect()
 }
 
 fn new_port() -> (Arc<dyn SessionPort>, UnboundedReceiver<SessionSignal>) {
