@@ -202,7 +202,7 @@ fn terminal(failure: Failure) -> Failure {
 mod tests {
     use super::*;
     use crate::cluster::{AttemptBook, AttemptState};
-    use crate::scheduler_tests::eval_job;
+    use crate::test_jobs::eval_job;
     use gradient_types::ids::{ClusterJobId, ProjectId};
     use std::time::Instant;
 

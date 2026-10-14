@@ -1072,7 +1072,7 @@ impl Actor for CoreActor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scheduler_tests::{build_job, eval_job, eval_worker_caps, port};
+    use crate::test_jobs::{build_job, eval_job, eval_worker_caps, port};
 
     fn pending_heavy_build(core: &mut SchedulerCore, predicted_peak_ram_mb: u64) -> String {
         pending_build(core, predicted_peak_ram_mb, |_| {})

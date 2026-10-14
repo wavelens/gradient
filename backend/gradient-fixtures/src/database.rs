@@ -51,7 +51,7 @@ impl TestDatabase {
         close(admin).await;
 
         Self {
-            connection: connect(server.clone().database(&name), 4).await,
+            connection: connect(server.clone().database(&name), 16).await,
             name,
             server,
             finished: false,

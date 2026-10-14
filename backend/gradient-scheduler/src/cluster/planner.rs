@@ -132,11 +132,8 @@ mod tests {
 
     fn build_member(role: &str, pin: Option<&str>) -> ClusterMember {
         let shared_build = DerivationBuildId::now_v7();
-        let job = crate::scheduler_tests::build_job(
-            EvaluationId::now_v7(),
-            ProjectId::now_v7(),
-            shared_build,
-        );
+        let job =
+            crate::test_jobs::build_job(EvaluationId::now_v7(), ProjectId::now_v7(), shared_build);
         ClusterMember {
             id: ClusterMemberId::now_v7(),
             role: role.into(),

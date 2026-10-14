@@ -306,9 +306,9 @@ async fn assign_one_member(
         scheduler
             .register_worker(
                 "w1",
-                crate::scheduler_tests::eval_worker_caps(),
+                crate::test_jobs::eval_worker_caps(),
                 std::collections::HashSet::new(),
-                crate::scheduler_tests::port().0,
+                crate::test_jobs::port().0,
             )
             .await
             .expect("register");

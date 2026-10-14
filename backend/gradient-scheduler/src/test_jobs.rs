@@ -1,0 +1,106 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use std::sync::Arc;
+
+use gradient_pool::session_port::{SessionPort, SessionSignal};
+use gradient_types::ids::*;
+use gradient_wire::types::{
+    BuildJob, BuildSpec, BuildSpecKind, FlakeJob, FlakeStep, GradientCapabilities,
+};
+use tokio::sync::mpsc;
+
+use crate::jobs::{PendingBuildJob, PendingEvalJob};
+
+pub(crate) fn port() -> (Arc<dyn SessionPort>, mpsc::UnboundedReceiver<SessionSignal>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    (Arc::new(tx), rx)
+}
+
+pub(crate) fn eval_job(peer: ProjectId) -> PendingEvalJob {
+    PendingEvalJob {
+        evaluation_id: EvaluationId::now_v7(),
+        task_id: None,
+        project_id: peer,
+        commit_id: CommitId::now_v7(),
+        repository: "https://example.com/repo".into(),
+        job: FlakeJob {
+            steps: vec![FlakeStep::EvaluateDerivations],
+            source: gradient_wire::types::FlakeSource::Repository {
+                url: "https://example.com/repo".into(),
+                commit: "abc123".into(),
+            },
+            wildcards: vec!["*".into()],
+            timeout_secs: None,
+            input_overrides: vec![],
+            input_update: None,
+        },
+        required_paths: vec![],
+        queued_at: gradient_types::now(),
+        ready_at: gradient_types::now(),
+        rescore_count: 0,
+        prioritized: false,
+        build_request: false,
+        history: Default::default(),
+        walk_mode: Default::default(),
+    }
+}
+
+pub(crate) fn build_job(
+    evaluation_id: EvaluationId,
+    peer: ProjectId,
+    derivation_build: DerivationBuildId,
+) -> PendingBuildJob {
+    PendingBuildJob {
+        derivation_build,
+        derivation: DerivationId::now_v7(),
+        evaluation_id,
+        project_id: peer,
+        job: BuildJob {
+            builds: vec![BuildSpec {
+                build_id: derivation_build.to_string(),
+                drv_path: "aaaa-hello.drv".into(),
+                kind: BuildSpecKind::Build,
+                is_fixed_output: false,
+                outputs: vec![],
+                timeout_secs: None,
+                max_silent_secs: None,
+            }],
+            requirement: gradient_wire::types::BuildRequirement {
+                architecture: "x86_64-linux".into(),
+                required_features: vec![],
+            },
+        },
+        required_paths: vec![],
+        dependency_count: 0,
+        closure_size: None,
+        prefer_local_build: false,
+        is_fixed_output: false,
+        history: gradient_pool::score::HistoryPrediction::default(),
+        queued_at: gradient_types::now(),
+        ready_at: gradient_types::now(),
+        rescore_count: 0,
+        prioritized: false,
+        build_request: false,
+        ifd: false,
+        pname: None,
+        substitute: false,
+    }
+}
+
+pub(crate) fn eval_worker_caps() -> GradientCapabilities {
+    GradientCapabilities {
+        eval: true,
+        ..GradientCapabilities::default()
+    }
+}
+
+pub(crate) fn build_worker_caps() -> GradientCapabilities {
+    GradientCapabilities {
+        build: true,
+        ..GradientCapabilities::default()
+    }
+}

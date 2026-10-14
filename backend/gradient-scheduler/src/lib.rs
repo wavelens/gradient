@@ -58,7 +58,11 @@ pub const fn link() {}
 #[cfg(test)]
 mod assign_tests;
 #[cfg(test)]
+mod cases;
+#[cfg(test)]
 mod scheduler_tests;
+#[cfg(test)]
+mod test_jobs;
 
 #[derive(Clone)]
 pub struct Scheduler {

@@ -171,7 +171,7 @@ mod tests {
     use super::*;
     use crate::cluster::ClusterMember;
     use crate::jobs::PendingJob;
-    use crate::scheduler_tests::eval_job;
+    use crate::test_jobs::eval_job;
     use gradient_entity::ids::{ClusterJobId, ClusterMemberId};
     use gradient_pool::WorkerCaps;
     use gradient_types::ids::ProjectId;

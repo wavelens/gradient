@@ -8,7 +8,8 @@ use crate::cli::test_cli;
 use crate::fakes::email::InMemoryEmailSender;
 use crate::log_storage::NoopLogStorage;
 use axum_test::TestServer;
-use gradient_core::{InstanceMemory, ServerState};
+use chrono::{DateTime, Utc};
+use gradient_core::{Graph, InstanceMemory, ServerState};
 use gradient_db::{CacheDb, WebDb, WorkerDb};
 use gradient_fixtures::mock::empty_db;
 use gradient_notify::EmailSender;
@@ -30,6 +31,8 @@ pub struct TestState {
     nar_storage: Option<NarStore>,
     log_storage: Arc<dyn LogStorage>,
     email: Arc<dyn EmailSender>,
+    graph: Option<Arc<Graph>>,
+    started_at: Option<DateTime<Utc>>,
 }
 
 impl Default for TestState {
@@ -43,6 +46,8 @@ impl Default for TestState {
             nar_storage: None,
             log_storage: Arc::new(NoopLogStorage),
             email: Arc::new(InMemoryEmailSender::new()),
+            graph: None,
+            started_at: None,
         }
     }
 }
@@ -92,6 +97,16 @@ impl TestState {
         self
     }
 
+    pub fn graph(mut self, graph: Arc<Graph>) -> Self {
+        self.graph = Some(graph);
+        self
+    }
+
+    pub fn started_at(mut self, at: DateTime<Utc>) -> Self {
+        self.started_at = Some(at);
+        self
+    }
+
     pub fn build(self) -> Arc<ServerState> {
         let mut config = RuntimeConfig::from_cli(&self.cli).expect("valid test config");
         for change in self.config_changes {
@@ -113,10 +128,10 @@ impl TestState {
             git_host: gradient_git_host::GitHostRegistry::with_builtin(),
             shutdown: gradient_util::shutdown::Shutdown::new(),
             jwt_secret: SecretString::new(TEST_JWT_SECRET.to_string()),
-            started_at: chrono::Utc::now(),
+            started_at: self.started_at.unwrap_or_else(Utc::now),
             events: gradient_types::EventBus::default(),
             wake: Default::default(),
-            graph: gradient_core::Graph::stub(),
+            graph: self.graph.unwrap_or_else(Graph::stub),
             memory: InstanceMemory {
                 db: Default::default(),
                 last_used_stamps: gradient_core::last_used_stamps(),

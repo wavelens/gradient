@@ -2935,11 +2935,7 @@ mod tests {
         let shared_build = DerivationBuildId::now_v7();
         let job = PendingJob::Build(PendingBuildJob {
             substitute: true,
-            ..crate::scheduler_tests::build_job(
-                EvaluationId::now_v7(),
-                ProjectId::now_v7(),
-                shared_build,
-            )
+            ..crate::test_jobs::build_job(EvaluationId::now_v7(), ProjectId::now_v7(), shared_build)
         });
         let key = build_job_key(shared_build);
 
