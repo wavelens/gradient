@@ -20,7 +20,8 @@ use gradient_scheduler::jobs::{Assignment, PendingJob};
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_wire::Rejection;
 use gradient_wire::messages::{
-    CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership, JobKind, ServerMessage,
+    CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership, JobKind, JobUpdateKind,
+    ServerMessage,
 };
 use gradient_wire::types::{
     BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
@@ -218,9 +219,7 @@ impl<'a> InboundContext<'a> {
             } => {
                 if self.owns(&job_id, &assignment_id).await {
                     debug!(peer_id = %self.peer_id, %job_id, ?update, "JobUpdate");
-                    self.job_events
-                        .push(JobEvent::Update { job_id, update })
-                        .await;
+                    self.on_job_update(job_id, update).await;
                 }
                 true
             }
@@ -264,7 +263,7 @@ impl<'a> InboundContext<'a> {
             } => {
                 let report = ReportedTimeline::received(spans, elapsed_ms);
                 self.forget_uploads(&job_id, uploads).await;
-                self.logs.flush().await;
+                let logs_flushed = self.logs.flushed().await;
                 if let Some(assignment_id) = self.owned(&job_id, &assignment_id).await {
                     self.active.remove(&job_id);
                     self.job_events
@@ -272,6 +271,7 @@ impl<'a> InboundContext<'a> {
                             job_id,
                             assignment_id,
                             report,
+                            logs_flushed,
                         })
                         .await;
                 }
@@ -289,7 +289,7 @@ impl<'a> InboundContext<'a> {
             } => {
                 let report = ReportedTimeline::received(spans, elapsed_ms);
                 self.forget_uploads(&job_id, uploads).await;
-                self.logs.flush().await;
+                let logs_flushed = self.logs.flushed().await;
                 let Some(assignment_id) = self.owned(&job_id, &assignment_id).await else {
                     return true;
                 };
@@ -307,6 +307,7 @@ impl<'a> InboundContext<'a> {
                             kind,
                             missing_paths,
                             metrics,
+                            logs_flushed,
                         })
                         .await;
                 }
@@ -413,6 +414,17 @@ impl<'a> InboundContext<'a> {
                 self.on_log_chunk(&job_id, task_index, &data).await;
                 true
             }
+        }
+    }
+
+    async fn on_job_update(&self, job_id: String, update: JobUpdateKind) {
+        let starts_build = matches!(update, JobUpdateKind::Building { .. });
+        let event = JobEvent::Update { job_id, update };
+        if starts_build {
+            let applied = self.job_events.push_awaited(event).await;
+            self.logs.after(applied).await;
+        } else {
+            self.job_events.push(event).await;
         }
     }
 

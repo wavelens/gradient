@@ -22,6 +22,7 @@ enum Entry {
         data: Vec<u8>,
     },
     Flush(oneshot::Sender<()>),
+    After(oneshot::Receiver<()>),
 }
 
 pub(super) struct LogLane {
@@ -41,6 +42,9 @@ impl LogLane {
                     Entry::Chunk { build, data } => append(build, data).await,
                     Entry::Flush(done) => {
                         let _ = done.send(());
+                    }
+                    Entry::After(applied) => {
+                        let _ = applied.await;
                     }
                 }
             }
@@ -64,12 +68,15 @@ impl LogLane {
         let _ = self.tx.send(Entry::Chunk { build, data }).await;
     }
 
+    pub(super) async fn after(&self, applied: oneshot::Receiver<()>) {
+        let _ = self.tx.send(Entry::After(applied)).await;
+    }
+
     /// A job's last lines must land before its completion is closing the log.
-    pub(super) async fn flush(&self) {
+    pub(super) async fn flushed(&self) -> oneshot::Receiver<()> {
         let (done, flushed) = oneshot::channel();
-        if self.tx.send(Entry::Flush(done)).await.is_ok() {
-            let _ = flushed.await;
-        }
+        let _ = self.tx.send(Entry::Flush(done)).await;
+        flushed
     }
 }
 
@@ -79,11 +86,11 @@ async fn append_to_storage(
     build: DerivationBuildId,
     data: &[u8],
 ) {
-    let Some(attempt) = gradient_db::scheduling::build_attempt::latest_attempt_id(db, build)
+    let Some(attempt) = gradient_db::scheduling::build_attempt::running_attempt_id(db, build)
         .await
         .unwrap_or(None)
     else {
-        debug!(%build, bytes = data.len(), "log chunk dropped: no open attempt for the shared build");
+        debug!(%build, bytes = data.len(), "log chunk dropped: no running attempt for the shared build");
         return;
     };
 
@@ -118,8 +125,34 @@ mod tests {
 
         lane.append(build, b"one".to_vec()).await;
         lane.append(build, b"two".to_vec()).await;
-        lane.flush().await;
+        let _ = lane.flushed().await.await;
 
         assert_eq!(*written.lock(), vec![b"one".to_vec(), b"two".to_vec()]);
+    }
+
+    #[tokio::test]
+    async fn chunks_after_a_build_start_wait_until_the_start_is_applied() {
+        let shutdown = Shutdown::new();
+        let written = Arc::new(gradient_util::sync::Mutex::new(Vec::new()));
+        let lane = LogLane::spawn(&shutdown, {
+            let written = Arc::clone(&written);
+            move |_, data| {
+                let written = Arc::clone(&written);
+                async move { written.lock().push(data) }
+            }
+        });
+        let build = DerivationBuildId::now_v7();
+        let (start_applied, applied) = oneshot::channel();
+
+        lane.append(build, b"before".to_vec()).await;
+        lane.after(applied).await;
+        lane.append(build, b"after".to_vec()).await;
+        let flushed = lane.flushed().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(*written.lock(), vec![b"before".to_vec()]);
+
+        start_applied.send(()).unwrap();
+        let _ = flushed.await;
+        assert_eq!(*written.lock(), vec![b"before".to_vec(), b"after".to_vec()]);
     }
 }

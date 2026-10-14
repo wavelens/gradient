@@ -1136,12 +1136,10 @@ async fn running_attempt_id(
     ctx: &DbContext,
     derivation_build: DerivationBuildId,
 ) -> Option<BuildAttemptId> {
-    gradient_db::scheduling::build_attempt::latest_attempt(&ctx.worker_db, derivation_build)
+    gradient_db::scheduling::build_attempt::running_attempt_id(&ctx.worker_db, derivation_build)
         .await
         .ok()
         .flatten()
-        .filter(|attempt| attempt.outcome == AttemptOutcome::Running)
-        .map(|attempt| attempt.id)
 }
 
 async fn stamp_dispatched_at(ctx: &DbContext, derivation_build: DerivationBuildId) {

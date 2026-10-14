@@ -16,7 +16,7 @@ use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_types::ids::{DispatchedJobId, EvaluationId};
 use gradient_util::shutdown::Shutdown;
 use gradient_wire::types::{BuildFailureKind, BuildMetrics};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{Instrument as _, debug, debug_span, error, info, warn};
 
@@ -36,6 +36,7 @@ pub(super) enum JobEvent {
         job_id: String,
         assignment_id: DispatchedJobId,
         report: ReportedTimeline,
+        logs_flushed: oneshot::Receiver<()>,
     },
     Failed {
         job_id: String,
@@ -43,6 +44,7 @@ pub(super) enum JobEvent {
         kind: BuildFailureKind,
         missing_paths: Vec<String>,
         metrics: Option<BuildMetrics>,
+        logs_flushed: oneshot::Receiver<()>,
     },
     ImportRequest {
         job_id: String,
@@ -114,8 +116,10 @@ pub(super) trait ApplyJobEvent: Send + Sync + 'static {
     fn apply(&self, event: JobEvent) -> impl Future<Output = ()> + Send;
 }
 
+type QueuedEvent = (Instant, JobEvent, Option<oneshot::Sender<()>>);
+
 pub(super) struct JobEvents {
-    tx: Option<mpsc::Sender<(Instant, JobEvent)>>,
+    tx: Option<mpsc::Sender<QueuedEvent>>,
     drained: Option<JoinHandle<()>>,
 }
 
@@ -130,6 +134,16 @@ impl JobEvents {
     }
 
     pub(super) async fn push(&self, event: JobEvent) {
+        self.send(event, None).await;
+    }
+
+    pub(super) async fn push_awaited(&self, event: JobEvent) -> oneshot::Receiver<()> {
+        let (applied, done) = oneshot::channel();
+        self.send(event, Some(applied)).await;
+        done
+    }
+
+    async fn send(&self, event: JobEvent, applied: Option<oneshot::Sender<()>>) {
         let Some(tx) = &self.tx else {
             error!(
                 job_id = event.job_id(),
@@ -137,7 +151,7 @@ impl JobEvents {
             );
             return;
         };
-        if let Err(lost) = tx.send((Instant::now(), event)).await {
+        if let Err(lost) = tx.send((Instant::now(), event, applied)).await {
             error!(
                 job_id = (lost.0).1.job_id(),
                 "job event lane closed; report dropped"
@@ -153,23 +167,19 @@ impl JobEvents {
     }
 }
 
-async fn drain(
-    mut rx: mpsc::Receiver<(Instant, JobEvent)>,
-    peer_id: String,
-    handler: impl ApplyJobEvent,
-) {
+async fn drain(mut rx: mpsc::Receiver<QueuedEvent>, peer_id: String, handler: impl ApplyJobEvent) {
     let mut held = None;
     loop {
         let next = match held.take() {
             Some(next) => Some(next),
             None => rx.recv().await,
         };
-        let Some((received, mut event)) = next else {
+        let Some((received, mut event, applied)) = next else {
             break;
         };
-        while let Ok((arrived, following)) = rx.try_recv() {
+        while let Ok((arrived, following, following_applied)) = rx.try_recv() {
             if let Some(following) = event.absorb(following) {
-                held = Some((arrived, following));
+                held = Some((arrived, following, following_applied));
                 break;
             }
         }
@@ -183,6 +193,9 @@ async fn drain(
         );
         let started = Instant::now();
         handler.apply(event).instrument(span).await;
+        if let Some(applied) = applied {
+            let _ = applied.send(());
+        }
         let took = started.elapsed();
         if took > SLOW_JOB_EVENT {
             warn!(%peer_id, %job_id, took_ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX), queued = rx.len(), "job event applied slowly; the graph is behind");
@@ -204,14 +217,20 @@ impl ApplyJobEvent for SchedulerJobEvents {
                 job_id,
                 assignment_id,
                 report,
-            } => self.completed(job_id, assignment_id, report).await,
+                logs_flushed,
+            } => {
+                let _ = logs_flushed.await;
+                self.completed(job_id, assignment_id, report).await
+            }
             JobEvent::Failed {
                 job_id,
                 error,
                 kind,
                 missing_paths,
                 metrics,
+                logs_flushed,
             } => {
+                let _ = logs_flushed.await;
                 self.failed(job_id, error, kind, missing_paths, metrics)
                     .await
             }
@@ -447,7 +466,7 @@ mod tests {
     async fn drained(events: Vec<JobEvent>) -> Vec<String> {
         let (tx, rx) = mpsc::channel(JOB_EVENT_QUEUE);
         for event in events {
-            tx.send((Instant::now(), event)).await.unwrap();
+            tx.send((Instant::now(), event, None)).await.unwrap();
         }
         drop(tx);
         let (labels, mut applied) = mpsc::unbounded_channel();
@@ -516,6 +535,20 @@ mod tests {
             order.push(applied.recv().await.unwrap());
         }
         assert_eq!(order, ["blocked", "a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn an_awaited_report_signals_once_applied() {
+        let (events, _applied, gate) = lane();
+        let mut done = events.push_awaited(update("blocked")).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(done.try_recv().is_err(), "signalled before the apply");
+
+        gate.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), done)
+            .await
+            .expect("signalled after the apply")
+            .expect("the apply sends the signal");
     }
 
     #[tokio::test]

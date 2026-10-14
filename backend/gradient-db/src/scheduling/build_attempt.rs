@@ -215,6 +215,16 @@ pub async fn latest_attempts_by_derivation<C: ConnectionTrait>(
         .collect())
 }
 
+pub async fn running_attempt_id<C: ConnectionTrait>(
+    db: &C,
+    derivation_build: DerivationBuildId,
+) -> Result<Option<BuildAttemptId>, DbErr> {
+    Ok(latest_attempt(db, derivation_build)
+        .await?
+        .filter(|attempt| attempt.outcome == AttemptOutcome::Running)
+        .map(|attempt| attempt.id))
+}
+
 pub async fn latest_attempt_id<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
