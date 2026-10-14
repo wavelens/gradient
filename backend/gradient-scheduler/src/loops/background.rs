@@ -34,7 +34,7 @@ const ABANDONED_ASSIGNMENT_SWEEP_LIMIT: u64 = 10_000;
 
 const ABORT_CONFIRM_GRACE: Duration = Duration::from_secs(300);
 
-pub(super) fn liveness_period(config: &RuntimeConfig) -> Option<Duration> {
+pub(crate) fn liveness_period(config: &RuntimeConfig) -> Option<Duration> {
     let timeout_secs = config.proto.worker_heartbeat_timeout_secs;
     (timeout_secs != 0)
         .then(|| Duration::from_secs((timeout_secs / LIVENESS_POLLS_PER_DEADLINE).max(5)))
@@ -149,7 +149,7 @@ impl Pass for WorkerLiveness {
     }
 }
 
-async fn worker_liveness_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
+pub(crate) async fn worker_liveness_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let timeout_secs = scheduler.db.config.proto.worker_heartbeat_timeout_secs;
     let timeout_ms = (timeout_secs as i64) * 1000;
     let now_ms = gradient_types::now().and_utc().timestamp_millis();
@@ -236,7 +236,7 @@ impl Pass for WorkerSample {
     }
 }
 
-async fn worker_sample_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
+pub(crate) async fn worker_sample_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let workers = scheduler.board_workers().await;
     for info in &workers {
         crate::worker_lifecycle::record_worker_sample(&scheduler.db.worker_db, info).await;
@@ -284,7 +284,7 @@ impl Pass for AbandonedDispatchSweep {
     }
 }
 
-async fn abandoned_assignment_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
+pub(crate) async fn abandoned_assignment_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     use gradient_entity::dispatched_job::{Column as CDispatchedJob, Entity as EDispatchedJob};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 
@@ -378,7 +378,7 @@ impl Pass for EvalCompletionWatchdog {
     }
 }
 
-async fn eval_completion_watchdog_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
+pub(crate) async fn eval_completion_watchdog_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let lost = gradient_db::evaluations::watchdog::lost_eval_completions(
         &scheduler.db.worker_db,
         LOST_COMPLETION_GRACE_SECS,
@@ -506,7 +506,7 @@ impl Pass for StrandedBuildSweep {
     }
 }
 
-async fn stranded_build_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
+pub(crate) async fn stranded_build_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let stranded = gradient_db::scheduling::build_watchdog::stranded_building_shared_builds(
         &scheduler.db.worker_db,
         LOST_COMPLETION_GRACE_SECS,

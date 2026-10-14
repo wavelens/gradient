@@ -151,6 +151,11 @@ impl ImportWaits {
         self.0.lock().is_empty()
     }
 
+    #[cfg(test)]
+    pub fn waiting_requests(&self) -> usize {
+        self.0.lock().waits.len()
+    }
+
     pub async fn register_and_settle(
         &self,
         wait: ImportWait,

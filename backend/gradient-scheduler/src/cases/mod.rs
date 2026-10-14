@@ -4,10 +4,34 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![allow(
+    dead_code,
+    unused_imports,
+    reason = "the theme files of the scheduler cases call the shared layer"
+)]
+
+mod abort;
+mod aliases;
 mod case_layer;
+mod claims;
+mod clusters;
+mod control;
+mod eval_queue;
+mod imports;
 mod invariants;
+mod outside;
+mod probe;
+mod readers;
+mod reports;
+mod scenarios;
+mod scoring;
+mod session;
+mod shapes;
+mod triggers;
+mod workers;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicI64;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -15,11 +39,12 @@ use chrono::{DateTime, Utc};
 use gradient_core::ServerState;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation_build;
+use gradient_entity::ids::DispatchedJobId;
 use gradient_fixtures::database::TestDatabase;
 use gradient_fixtures::shape::Shape;
 use gradient_graph::writer::GraphMsg;
 use gradient_graph::{Graph, testing};
-use gradient_pool::session_port::SessionSignal;
+use gradient_pool::session_port::{SessionPort, SessionSignal};
 use gradient_test_support::state::TestState;
 use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
@@ -30,8 +55,15 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
+use crate::jobs::PendingJob;
 use crate::test_jobs;
 use invariants::{Observed, Rows};
+
+pub(crate) use crate::cluster::SlotKind;
+pub(crate) use outside::{GitRepo, UpstreamServer};
+pub(crate) use readers::{Totals, UpstreamTally, planned_targets};
+pub(crate) use session::{ClusterAssignment, Failure, failure};
+pub(crate) use shapes::*;
 
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 const SETTLE_POLL: Duration = Duration::from_millis(10);
@@ -41,12 +73,28 @@ pub(crate) struct SchedulerCase {
     pub state: Arc<ServerState>,
     pub scheduler: Arc<Scheduler>,
     pub graph: Arc<Graph>,
-    writer: ActorRef<GraphMsg>,
-    core: ActorRef<SchedulerMsg>,
-    inboxes: Mutex<HashMap<String, UnboundedReceiver<SessionSignal>>>,
+    writer: Mutex<ActorRef<GraphMsg>>,
+    core: Mutex<ActorRef<SchedulerMsg>>,
+    sessions: Mutex<HashMap<String, Session>>,
     connected_workers: Mutex<HashSet<String>>,
     observed: Mutex<Observed>,
     secret: Arc<NamedTempFile>,
+    probe: crate::probe::UpstreamProbe,
+}
+
+struct Session {
+    port: Arc<dyn SessionPort>,
+    inbox: UnboundedReceiver<SessionSignal>,
+    caps: GradientCapabilities,
+    projects: HashSet<ProjectId>,
+    last_seen: Arc<AtomicI64>,
+    jobs: HashMap<String, SessionJob>,
+}
+
+#[derive(Clone)]
+struct SessionJob {
+    assignment_id: DispatchedJobId,
+    job: PendingJob,
 }
 
 impl SchedulerCase {
@@ -67,7 +115,7 @@ impl SchedulerCase {
         let state = server_state(&db, &graph, started_at, &secret, config);
 
         testing::settle_seed(&state.db(), &db, declared).await;
-        enter_seeded_queued_builds(&state, &db).await;
+        enter_queued_builds(&state, &db, None).await;
 
         let case = Self::spawn(Arc::new(db), state, graph, secret).await;
         testing::zero_drift(&case.state.db(), "the seed").await;
@@ -99,37 +147,36 @@ impl SchedulerCase {
             .await
             .expect("the scheduler core starts");
         let observed = Mutex::new(Observed::of(&Rows::read(&db).await));
+        let probe =
+            crate::probe::UpstreamProbe::new(&state.db(), &graph, &scheduler.upstream_query);
 
         Self {
             db,
             state,
             scheduler,
             graph,
-            writer,
-            core,
-            inboxes: Mutex::default(),
+            writer: Mutex::new(writer),
+            core: Mutex::new(core),
+            sessions: Mutex::default(),
             connected_workers: Mutex::default(),
             observed,
             secret,
+            probe,
         }
     }
 
-    pub async fn connect(&self, worker: &str, caps: GradientCapabilities, projects: &[ProjectId]) {
-        let (session, inbox) = test_jobs::port();
-        self.scheduler
-            .register_worker(worker, caps, projects.iter().copied().collect(), session)
-            .await
-            .expect("the worker registers");
-        lock(&self.inboxes).insert(worker.to_owned(), inbox);
-        lock(&self.connected_workers).insert(worker.to_owned());
+    pub async fn seed(&self, shape: Shape) {
+        let declared = shape.declared_statuses();
+        shape.insert_into(&self.db.connection()).await;
+        enter_queued_builds(&self.state, &self.db, Some(declared)).await;
     }
 
     pub fn signals(&self, worker: &str) -> Vec<SessionSignal> {
-        let mut inboxes = lock(&self.inboxes);
-        let inbox = inboxes
-            .get_mut(worker)
-            .unwrap_or_else(|| panic!("connect {worker} first"));
-        std::iter::from_fn(|| inbox.try_recv().ok()).collect()
+        let mut sessions = lock(&self.sessions);
+        let Some(session) = sessions.get_mut(worker) else {
+            return Vec::new();
+        };
+        std::iter::from_fn(|| session.inbox.try_recv().ok()).collect()
     }
 
     pub async fn settled(&self) {
@@ -179,11 +226,12 @@ impl SchedulerCase {
 
     pub async fn finish(self) {
         self.check_core("the last step").await;
-        self.core
-            .stop_and_wait(None, None)
+        let core = lock(&self.core).clone();
+        core.stop_and_wait(None, None)
             .await
             .expect("the scheduler core stops");
-        self.writer
+        let writer = lock(&self.writer).clone();
+        writer
             .stop_and_wait(None, None)
             .await
             .expect("the graph writer stops");
@@ -194,9 +242,10 @@ impl SchedulerCase {
             state,
             scheduler,
             graph,
+            probe,
             ..
         } = self;
-        drop((state, scheduler, graph));
+        drop((state, scheduler, graph, probe));
         drop_database_if_last(db).await;
     }
 }
@@ -220,13 +269,28 @@ fn server_state(
         .build()
 }
 
-async fn enter_seeded_queued_builds(state: &ServerState, db: &TestDatabase) {
+async fn enter_queued_builds(
+    state: &ServerState,
+    db: &TestDatabase,
+    declared: Option<Vec<(String, BuildStatus)>>,
+) {
+    let only = match declared {
+        Some(declared) => {
+            let mut ids = HashSet::new();
+            for (path, _) in declared {
+                ids.insert(db.id_of(&path).await);
+            }
+            Some(ids)
+        }
+        None => None,
+    };
     let queued = db
         .rows::<derivation_build::Entity>()
         .await
         .into_iter()
         .filter(|build| build.status == BuildStatus::Queued)
-        .map(|build| build.derivation);
+        .map(|build| build.derivation)
+        .filter(|derivation| only.as_ref().is_none_or(|ids| ids.contains(derivation)));
     state.memory.db.startable_set.enter(queued);
 }
 
@@ -238,4 +302,8 @@ async fn drop_database_if_last(db: Arc<TestDatabase>) {
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn new_port() -> (Arc<dyn SessionPort>, UnboundedReceiver<SessionSignal>) {
+    test_jobs::port()
 }

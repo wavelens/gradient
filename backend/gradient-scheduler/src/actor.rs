@@ -302,6 +302,21 @@ pub enum SchedulerMsg {
     TrackedKeys {
         reply: RpcReplyPort<crate::jobs::TrackedKeys>,
     },
+    #[cfg(test)]
+    ActiveWorker {
+        job_id: String,
+        reply: RpcReplyPort<Option<String>>,
+    },
+    #[cfg(test)]
+    SentCandidates {
+        worker: String,
+        reply: RpcReplyPort<Option<HashSet<String>>>,
+    },
+    #[cfg(test)]
+    WaitingCluster {
+        cluster: gradient_types::ids::ClusterJobId,
+        reply: RpcReplyPort<Option<crate::cluster::PendingCluster>>,
+    },
     RecentDecisions {
         reply: RpcReplyPort<Vec<AssignDecision>>,
     },
@@ -1056,6 +1071,18 @@ impl Actor for CoreActor {
             #[cfg(test)]
             SchedulerMsg::TrackedKeys { reply } => {
                 let _ = reply.send(core.tracker.tracked_keys());
+            }
+            #[cfg(test)]
+            SchedulerMsg::ActiveWorker { job_id, reply } => {
+                let _ = reply.send(core.tracker.active_worker(&job_id));
+            }
+            #[cfg(test)]
+            SchedulerMsg::SentCandidates { worker, reply } => {
+                let _ = reply.send(core.pool.sent_candidates_for(&worker).cloned());
+            }
+            #[cfg(test)]
+            SchedulerMsg::WaitingCluster { cluster, reply } => {
+                let _ = reply.send(core.tracker.waiting_cluster(cluster).cloned());
             }
             SchedulerMsg::RecentDecisions { reply } => {
                 let _ = reply.send(core.tracker.recent_decisions());

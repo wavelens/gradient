@@ -638,6 +638,11 @@ impl JobTracker {
     }
 
     #[cfg(test)]
+    pub fn active_worker(&self, job_id: &str) -> Option<String> {
+        self.active.get(job_id).map(|a| a.worker.clone())
+    }
+
+    #[cfg(test)]
     pub fn tracked_keys(&self) -> TrackedKeys {
         TrackedKeys {
             pending: self.pending.keys().cloned().collect(),

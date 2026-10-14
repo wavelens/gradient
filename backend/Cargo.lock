@@ -2905,6 +2905,7 @@ dependencies = [
  "chrono",
  "cron",
  "futures",
+ "git2",
  "gradient-ci",
  "gradient-core",
  "gradient-db",

@@ -15,11 +15,9 @@ use gradient_pool::session_port::SessionSignal;
 use gradient_wire::types::JobKind;
 use sea_orm::{EntityTrait, QuerySelect, TransactionTrait};
 
-use super::SchedulerCase;
-use crate::actor::WorkerCapabilities;
+use super::{SchedulerCase, w_build, w_eval};
 use crate::jobs::build_job_key;
-use crate::loops::admit_startable_moves;
-use crate::test_jobs::{build_worker_caps, eval_job, eval_worker_caps};
+use crate::test_jobs::eval_job;
 
 const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv";
 const A_OUT: &str = "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0";
@@ -39,25 +37,12 @@ fn queued_build(evaluation: EvaluationId) -> Shape {
         .build_status(BuildStatus::Queued)
 }
 
-fn x86_builder() -> WorkerCapabilities {
-    WorkerCapabilities {
-        architectures: vec!["x86_64-linux".into()],
-        max_concurrent_builds: 1,
-        ..WorkerCapabilities::default()
-    }
-}
-
 async fn connect_builder(case: &SchedulerCase) {
-    case.connect(W, build_worker_caps(), &[]).await;
-    case.scheduler
-        .update_worker_capabilities(W, x86_builder())
-        .await;
+    case.connect(W, w_build(), &[]).await;
 }
 
 async fn admit(case: &SchedulerCase) {
-    admit_startable_moves(&case.scheduler)
-        .await
-        .expect("the admission runs");
+    case.admit_startable_moves().await;
 }
 
 async fn key_of_a(case: &SchedulerCase) -> String {
@@ -141,7 +126,7 @@ async fn a_seeded_queued_build_is_pending_after_admission() {
 #[tokio::test]
 async fn signals_are_taken_once() {
     let case = SchedulerCase::start(shape()).await;
-    case.connect(W, eval_worker_caps(), &[]).await;
+    case.connect(W, w_eval(), &[]).await;
     let project = ProjectId::now_v7();
 
     for key in ["eval-1", "eval-2"] {

@@ -43,6 +43,7 @@ uuid       = { workspace = true }
 
 [dev-dependencies]
 gradient-entity = { workspace = true }
+git2 = { workspace = true }
 gradient-storage = { workspace = true }
 tempfile    = { workspace = true }
 gradient-fixtures = { workspace = true }

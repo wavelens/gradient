@@ -348,6 +348,32 @@ pub(crate) async fn plan_probes(
 }
 
 #[cfg(test)]
+impl UpstreamProbe {
+    pub(crate) async fn round(&self, shared_builds: Vec<DerivationId>) -> Result<()> {
+        self.probe_round(shared_builds).await
+    }
+
+    pub(crate) async fn sweep(&self) -> Result<()> {
+        let need = unanswered_need(&self.db).await?;
+        self.probe_round(need).await
+    }
+
+    pub(crate) async fn requested(&self) -> HashSet<DerivationId> {
+        drain_requests(&self.inbox).await
+    }
+}
+
+#[cfg(test)]
+pub(crate) async fn planned_round(
+    db: &WorkerDb,
+    shared_builds: &[DerivationId],
+) -> Result<ProbePlan> {
+    let mut targets = unprobed_wanted(db, shared_builds).await?;
+    targets.extend(unprobed_dependencies(db, &targets).await?);
+    plan_probes(db, &targets).await
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use gradient_entity::build_job::Model as MBuildJob;

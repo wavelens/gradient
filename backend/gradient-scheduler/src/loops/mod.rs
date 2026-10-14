@@ -30,6 +30,11 @@ use background::{
 };
 use eval::EvalDispatch;
 
+#[cfg(test)]
+pub(crate) use background::{
+    abandoned_assignment_pass, eval_completion_watchdog_pass, liveness_period, stranded_build_pass,
+    worker_liveness_pass, worker_sample_pass,
+};
 pub(crate) use build::BuildKick;
 #[cfg(test)]
 pub(crate) use build::{admit_startable_moves, build_assign_pass, resync_startable_set};
