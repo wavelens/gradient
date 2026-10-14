@@ -623,6 +623,7 @@ pub struct LostMember {
 #[derive(Debug, Default)]
 pub struct Disconnected {
     pub requeued: Vec<PendingJob>,
+    pub requeued_keys: Vec<String>,
     pub cluster_members: Vec<LostMember>,
     pub observed_peak_ram_mb: HashMap<String, u64>,
 }
@@ -1321,25 +1322,16 @@ impl JobTracker {
         self.pending.get(job_id)
     }
 
-    pub fn drain_peer_jobs_on_worker(
-        &mut self,
+    pub fn peer_jobs_on_worker(
+        &self,
         worker_id: &str,
         revoked_peers: &HashSet<ProjectId>,
     ) -> Vec<String> {
-        let to_requeue: Vec<String> = self
-            .active
+        self.active
             .iter()
             .filter(|(_, a)| a.worker == worker_id && revoked_peers.contains(&a.job.project_id()))
             .map(|(id, _)| id.clone())
-            .collect();
-        for job_id in &to_requeue {
-            if let Some(active) = self.active.remove(job_id)
-                && active.cluster.is_none()
-            {
-                self.pending.insert(job_id.clone(), active.job);
-            }
-        }
-        to_requeue
+            .collect()
     }
 
     pub fn raise_predicted_ram(&mut self, observed_peak_ram_mb: &HashMap<String, u64>) {
@@ -1366,18 +1358,21 @@ impl JobTracker {
             .collect();
         let mut gone = Disconnected::default();
         for job_id in orphaned {
-            let Some(active) = self.active.remove(&job_id) else {
+            let Some(active) = self.active.get(&job_id) else {
                 continue;
             };
             match active.cluster {
-                Some(attempt) => gone.cluster_members.push(LostMember {
-                    attempt,
-                    key: job_id,
-                    job: active.job,
-                }),
+                Some(attempt) => {
+                    let job = self.active.remove(&job_id).map(|a| a.job);
+                    gone.cluster_members.extend(job.map(|job| LostMember {
+                        attempt,
+                        key: job_id,
+                        job,
+                    }));
+                }
                 None => {
                     gone.requeued.push(active.job.clone());
-                    self.pending.insert(job_id, active.job);
+                    gone.requeued_keys.push(job_id);
                 }
             }
         }
@@ -2662,8 +2657,11 @@ mod tests {
         assert_eq!(tracker.active_count(), 2);
         assert_eq!(tracker.pending_count(), 0);
 
-        let orphaned = tracker.worker_disconnected("w1").requeued;
-        assert_eq!(orphaned.len(), 2);
+        let gone = tracker.worker_disconnected("w1");
+        assert_eq!(gone.requeued.len(), 2);
+        gone.requeued_keys
+            .iter()
+            .for_each(|key| tracker.release_to_pending(key));
         assert_eq!(tracker.pending_count(), 2);
         assert_eq!(tracker.active_count(), 0);
     }
@@ -2727,8 +2725,9 @@ mod tests {
         assert_eq!(tracker.active_jobs().count(), 3);
 
         let revoked = HashSet::from([project_a]);
-        let aborted = tracker.drain_peer_jobs_on_worker("w1", &revoked);
+        let aborted = tracker.peer_jobs_on_worker("w1", &revoked);
         aborted.iter().for_each(|id| assert!(id.starts_with("ja")));
+        aborted.iter().for_each(|id| tracker.release_to_pending(id));
         assert_eq!(aborted.len(), 2);
 
         assert_eq!(tracker.active_jobs().count(), 1);
@@ -2749,7 +2748,7 @@ mod tests {
             &gradient_pool::score::InstanceContext::default(),
         );
 
-        let aborted = tracker.drain_peer_jobs_on_worker("w1", &HashSet::new());
+        let aborted = tracker.peer_jobs_on_worker("w1", &HashSet::new());
         assert!(aborted.is_empty());
         assert_eq!(tracker.active_jobs().count(), 1);
     }
@@ -2999,6 +2998,9 @@ mod tests {
         assert_eq!(tracker.active_cluster("m1"), Some(attempt));
 
         let gone = tracker.worker_disconnected("w1");
+        gone.requeued_keys
+            .iter()
+            .for_each(|key| tracker.release_to_pending(key));
 
         assert_eq!(gone.requeued.len(), 1);
         assert_eq!(gone.cluster_members.len(), 1);

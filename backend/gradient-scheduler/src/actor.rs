@@ -390,6 +390,13 @@ impl SchedulerCore {
         self.pool.assign_job(worker, job_id, kind, reserved_ram_mb);
     }
 
+    fn return_to_pending(&mut self, job_ids: &[String]) {
+        for job_id in job_ids {
+            self.tracker.release_to_pending(job_id);
+            self.pool.remove_sent_candidate(job_id);
+        }
+    }
+
     /// A build lost with its worker keeps the peak RAM the worker last reported for it. The
     /// next attempt reserves at least that much.
     fn unregister(&mut self, worker: &str) -> crate::jobs::Disconnected {
@@ -405,6 +412,7 @@ impl SchedulerCore {
         }
         self.tracker.raise_predicted_ram(&observed_peak_ram_mb);
         let gone = self.tracker.worker_disconnected(worker);
+        self.return_to_pending(&gone.requeued_keys);
         let total = orphaned.len() + gone.requeued.len() + gone.cluster_members.len();
         if total > 0 {
             info!(%worker, orphaned_jobs = total, "worker disconnected; jobs re-queued");
@@ -766,7 +774,8 @@ impl Actor for CoreActor {
                 revoked,
                 reply,
             } => {
-                let job_ids = core.tracker.drain_peer_jobs_on_worker(&worker, &revoked);
+                let job_ids = core.tracker.peer_jobs_on_worker(&worker, &revoked);
+                core.return_to_pending(&job_ids);
                 for job_id in &job_ids {
                     core.pool.send_abort(
                         &worker,
@@ -946,8 +955,7 @@ impl Actor for CoreActor {
                 reply,
             } => {
                 core.pool.release_job(&worker, &job_id);
-                core.tracker.release_to_pending(&job_id);
-                core.pool.remove_sent_candidate(&job_id);
+                core.return_to_pending(std::slice::from_ref(&job_id));
                 info!(%worker, %job_id, "job rejected; re-queued");
                 let _ = reply.send(());
             }
