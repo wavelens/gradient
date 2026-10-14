@@ -75,6 +75,7 @@ pub async fn requeue_orphaned_jobs(
     graph: &Graph,
     orphaned: &[PendingJob],
     observed_peak_ram_mb: &std::collections::HashMap<String, u64>,
+    cause: gradient_graph::OrphanCause,
 ) {
     abandon_dispatched_jobs(&db.worker_db, orphaned).await;
 
@@ -93,7 +94,7 @@ pub async fn requeue_orphaned_jobs(
         && let Err(e) = graph
             .transition(Transition::OrphanedBuilds {
                 shared_builds,
-                cause: gradient_graph::OrphanCause::WorkerLost,
+                cause,
                 observed_peak_ram_mb,
             })
             .await

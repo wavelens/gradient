@@ -127,6 +127,7 @@ A `dispatched_job` row is the proof of a job being out. Claims insert the row th
 | Claim with an `Assigned` transition failing or exceeding its budget (`assignment.rs`) | `Abandoned` |
 | Worker rejecting the assignment (`withdraw_assignment`) | `Abandoned` |
 | Worker disconnect (requeue of its jobs) | `Abandoned` |
+| Project access revoked for a worker (`abort_project_jobs_on_worker`), its jobs of that project only | `Abandoned` |
 | Worker registration: rows assigned before this process started | `Abandoned` |
 | Startup recovery (`abandon_all_open_assignments`) | `Abandoned` |
 | Overdue abort reap, `abandoned-dispatch-sweep` | `Abandoned` |

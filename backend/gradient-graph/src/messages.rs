@@ -261,4 +261,5 @@ pub struct GcReport {
 pub enum OrphanCause {
     WorkerLost,
     ClusterAttemptEnded,
+    AccessRevoked,
 }

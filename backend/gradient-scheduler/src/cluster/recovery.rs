@@ -165,6 +165,7 @@ impl Scheduler {
                     &self.graph,
                     &[job],
                     &Default::default(),
+                    gradient_graph::OrphanCause::WorkerLost,
                 )
                 .await;
                 Ok(())

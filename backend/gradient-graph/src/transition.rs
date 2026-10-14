@@ -714,14 +714,12 @@ async fn orphaned_builds(
             }
             worker_loss_streaks(&ctx.worker_db, &ids).await?
         }
-        OrphanCause::ClusterAttemptEnded => {
-            abort_running_attempts(
-                &ctx.worker_db,
-                &ids,
-                None,
-                "the cluster attempt ended before the build finished",
-            )
-            .await?;
+        OrphanCause::ClusterAttemptEnded | OrphanCause::AccessRevoked => {
+            let message = match cause {
+                OrphanCause::AccessRevoked => "the project revoked the worker's access",
+                _ => "the cluster attempt ended before the build finished",
+            };
+            abort_running_attempts(&ctx.worker_db, &ids, None, message).await?;
             Default::default()
         }
     };

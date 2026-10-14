@@ -113,7 +113,7 @@ pub enum SchedulerMsg {
     RevokePeers {
         worker: String,
         revoked: HashSet<ProjectId>,
-        reply: RpcReplyPort<usize>,
+        reply: RpcReplyPort<Vec<PendingJob>>,
     },
     Reauth {
         worker: String,
@@ -775,18 +775,23 @@ impl Actor for CoreActor {
                 reply,
             } => {
                 let job_ids = core.tracker.peer_jobs_on_worker(&worker, &revoked);
-                core.return_to_pending(&job_ids);
+                let jobs: Vec<PendingJob> = job_ids
+                    .iter()
+                    .filter_map(|id| core.tracker.active_job(id).cloned())
+                    .collect();
                 for job_id in &job_ids {
                     core.pool.send_abort(
                         &worker,
                         job_id.clone(),
                         "project deactivated worker".to_owned(),
                     );
+                    core.pool.release_job(&worker, job_id);
                 }
+                core.return_to_pending(&job_ids);
                 if !job_ids.is_empty() {
                     core.bump_offers();
                 }
-                let _ = reply.send(job_ids.len());
+                let _ = reply.send(jobs);
             }
             SchedulerMsg::Reauth { worker } => core.pool.request_reauth(&worker),
             SchedulerMsg::UpdateCapabilities {

@@ -209,17 +209,27 @@ impl Scheduler {
         }
         let worker = worker_id.to_owned();
         let revoked = revoked_peers.clone();
-        let aborted = self
+        let revoked_jobs = self
             .call(|reply| SchedulerMsg::RevokePeers {
                 worker,
                 revoked,
                 reply,
             })
             .await
-            .unwrap_or(0);
-        if aborted > 0 {
-            info!(%worker_id, aborted, "aborted jobs for revoked project(s) on worker");
+            .unwrap_or_default();
+        if revoked_jobs.is_empty() {
+            return;
         }
+        info!(%worker_id, aborted = revoked_jobs.len(), "aborted jobs for revoked project(s) on worker");
+        build::requeue_orphaned_jobs(
+            &self.db,
+            &self.graph,
+            &revoked_jobs,
+            &Default::default(),
+            gradient_graph::OrphanCause::AccessRevoked,
+        )
+        .await;
+        self.build_kick.kick();
     }
 
     pub async fn request_reauth(&self, worker_id: &str) {
@@ -276,6 +286,7 @@ impl Scheduler {
             &self.graph,
             &gone.requeued,
             &gone.observed_peak_ram_mb,
+            gradient_graph::OrphanCause::WorkerLost,
         )
         .await;
         for lost in gone.cluster_members {
