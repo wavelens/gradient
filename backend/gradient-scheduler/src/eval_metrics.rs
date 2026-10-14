@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use sea_orm::{ActiveModelTrait, IntoActiveModel};
+use gradient_entity::evaluation_metric::{
+    Column as CEvaluationMetric, Entity as EEvaluationMetric,
+};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel};
 use tracing::{debug, warn};
 
 use gradient_types::*;
@@ -75,7 +79,26 @@ impl Scheduler {
         }
         .into_active_model();
 
-        if let Err(e) = metric.insert(&self.db.worker_db).await {
+        let stats = [
+            CEvaluationMetric::TotalThunks,
+            CEvaluationMetric::FnCalls,
+            CEvaluationMetric::PrimopCalls,
+            CEvaluationMetric::Lookups,
+            CEvaluationMetric::AllocBytes,
+            CEvaluationMetric::PeakHeapMb,
+            CEvaluationMetric::PeakRssMb,
+            CEvaluationMetric::TotalEvalMs,
+            CEvaluationMetric::WorkerId,
+        ];
+        if let Err(e) = EEvaluationMetric::insert(metric)
+            .on_conflict(
+                OnConflict::column(CEvaluationMetric::Evaluation)
+                    .update_columns(stats)
+                    .to_owned(),
+            )
+            .exec(&self.db.worker_db)
+            .await
+        {
             warn!(%evaluation_id, error = %e, "failed to record evaluation_metric");
         }
 

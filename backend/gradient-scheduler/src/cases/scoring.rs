@@ -287,15 +287,6 @@ async fn m07_eval_history_takes_the_p95_rss_per_task_and_the_fleet_fetch_mean() 
     let mut seed = shape()
         .evaluation(e1)
         .evaluation_status(EvaluationStatus::Completed);
-    for (age, rss) in (0..=20)
-        .map(|i| (60 * (i + 1), 100 + i))
-        .chain([(25 * 3600, 9000)])
-    {
-        seed = seed.evaluation_metric(move |m| {
-            m.peak_rss_mb = rss;
-            m.created_at = before(age);
-        });
-    }
     for (age, fetch_ms) in [(3600, 900), (1800, 1100)] {
         seed = seed
             .eval_assignment()
@@ -303,6 +294,19 @@ async fn m07_eval_history_takes_the_p95_rss_per_task_and_the_fleet_fetch_mean() 
             .closed(DispatchedJobOutcome::Completed, before(age - 600))
             .worker_elapsed_ms(1500)
             .phase(JobPhase::Fetch.as_i16(), 0, fetch_ms);
+    }
+    for (age, rss) in (0..=20)
+        .map(|i| (60 * (i + 1), 100 + i))
+        .chain([(25 * 3600, 9000)])
+    {
+        seed = seed
+            .evaluation(EvaluationId::now_v7())
+            .same_task_as(e1)
+            .evaluation_status(EvaluationStatus::Completed)
+            .evaluation_metric(move |m| {
+                m.peak_rss_mb = rss;
+                m.created_at = before(age);
+            });
     }
     let seed = seed
         .evaluation(e2)

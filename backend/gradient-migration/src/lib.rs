@@ -14,6 +14,7 @@ pub use sea_orm_migration::prelude::*;
 mod m20261013_000000_baseline;
 mod m20261014_000000_evaluation_branch;
 mod m20261014_000001_auto_concurrency;
+mod m20261015_000000_evaluation_metric_per_evaluation;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -45,6 +46,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261013_000000_baseline::Migration),
             Box::new(m20261014_000000_evaluation_branch::Migration),
             Box::new(m20261014_000001_auto_concurrency::Migration),
+            Box::new(m20261015_000000_evaluation_metric_per_evaluation::Migration),
         ]
     }
 }

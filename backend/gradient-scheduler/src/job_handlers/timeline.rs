@@ -8,7 +8,8 @@ use gradient_db::lookup::by_id;
 use std::sync::Arc;
 
 use chrono::NaiveDateTime;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
 use tracing::{debug, warn};
 
 use gradient_entity::dispatched_job::{DispatchedJobOutcome, Entity as EDispatchedJob};
@@ -193,14 +194,33 @@ impl Scheduler {
 
     async fn apply_eval_phase_totals(&self, evaluation: EvaluationId, totals: EvalPhaseTotals) {
         use gradient_entity::evaluation_metric::{
-            Column as CEvaluationMetric, Entity as EEvaluationMetric,
+            Column as CEvaluationMetric, Entity as EEvaluationMetric, Model as MEvaluationMetric,
         };
 
-        if let Err(e) = EEvaluationMetric::update_many()
-            .col_expr(CEvaluationMetric::FetchMs, totals.fetch_ms.into())
-            .col_expr(CEvaluationMetric::EvalFlakeMs, totals.eval_flake_ms.into())
-            .col_expr(CEvaluationMetric::EvalDrvMs, totals.eval_drv_ms.into())
-            .filter(CEvaluationMetric::Evaluation.eq(evaluation))
+        let measured: Vec<CEvaluationMetric> = [
+            (CEvaluationMetric::FetchMs, totals.fetch_ms),
+            (CEvaluationMetric::EvalFlakeMs, totals.eval_flake_ms),
+            (CEvaluationMetric::EvalDrvMs, totals.eval_drv_ms),
+        ]
+        .into_iter()
+        .filter(|(_, ms)| *ms > 0)
+        .map(|(column, _)| column)
+        .collect();
+        let row = MEvaluationMetric {
+            id: gradient_types::ids::EvaluationMetricId::now_v7(),
+            evaluation,
+            fetch_ms: totals.fetch_ms,
+            eval_flake_ms: totals.eval_flake_ms,
+            eval_drv_ms: totals.eval_drv_ms,
+            created_at: now(),
+            ..Default::default()
+        };
+        if let Err(e) = EEvaluationMetric::insert(row.into_active_model())
+            .on_conflict(
+                OnConflict::column(CEvaluationMetric::Evaluation)
+                    .update_columns(measured)
+                    .to_owned(),
+            )
             .exec(&self.db.worker_db)
             .await
         {
