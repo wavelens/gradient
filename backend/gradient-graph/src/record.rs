@@ -1101,6 +1101,8 @@ pub(crate) async fn apply_upstream_hits(
         changes.extend(settled.changes);
         gained_need.extend_from_slice(&settled.moved.gained);
     }
+    changes
+        .extend(gradient_db::graph::can_start::settle_created(db, &newly_cache_available).await?);
     gradient_db::status::emit_transition_effects(ctx, &changes).await?;
 
     Ok(gained_need)
