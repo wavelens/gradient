@@ -47,9 +47,11 @@ impl Scheduler {
                 .abort_evaluation_shared_builds(evaluation_id, true)
                 .await;
             if !shared_builds.is_empty() {
-                scheduler
-                    .log_aborted_jobs(evaluation_id, shared_builds)
-                    .await;
+                let job_ids = shared_builds
+                    .into_iter()
+                    .map(crate::jobs::build_job_key)
+                    .collect();
+                scheduler.cancel_jobs(evaluation_id, job_ids).await;
             }
         });
     }
