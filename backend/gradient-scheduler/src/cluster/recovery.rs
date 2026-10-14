@@ -5,8 +5,11 @@
  */
 
 use anyhow::Result;
+use gradient_db::status::BuildRefusal;
+use gradient_graph::Transition;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::ids::{ClusterAttemptId, DispatchedJobId};
+use gradient_wire::types::BuildFailureKind;
 use tracing::warn;
 
 use super::settlement::*;
@@ -141,6 +144,9 @@ impl Scheduler {
         for disposition in dispositions {
             let settled = match disposition {
                 Disposition::Complete(job) => self.settle_completed(job, false).await,
+                Disposition::Fail(job, failure) if failure.kind == BuildFailureKind::Aborted => {
+                    self.abort_survivor(job, &failure, &mut requeue).await
+                }
                 Disposition::Fail(job, failure) => self.settle_failed(job, &failure, None).await,
                 Disposition::Requeue(job) => {
                     requeue.push(job);
@@ -153,6 +159,34 @@ impl Scheduler {
             }
         }
         crate::build::requeue_cluster_members(&self.db, &self.graph, &requeue).await;
+    }
+
+    /// A survivor's build is aborted for its own evaluation, as the build abort of the API does,
+    /// and goes back to the queue while another live evaluation still wants it.
+    async fn abort_survivor(
+        &self,
+        job: PendingJob,
+        failure: &Failure,
+        requeue: &mut Vec<PendingJob>,
+    ) -> Result<()> {
+        let Some(shared_build) = job.derivation_build() else {
+            return self.settle_failed(job, failure, None).await;
+        };
+        let report = self
+            .graph
+            .transition(Transition::AbortBuild {
+                evaluation: job.evaluation_id(),
+                shared_build,
+            })
+            .await?;
+        match report.refusal {
+            None => Ok(()),
+            Some(BuildRefusal::NeededByOtherEvaluation) => {
+                requeue.push(job);
+                Ok(())
+            }
+            Some(_) => self.settle_failed(job, failure, None).await,
+        }
     }
 
     async fn settle_single(&self, report: MemberReport) -> Result<()> {
