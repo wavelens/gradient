@@ -20,6 +20,8 @@ pub mod policy;
 mod record;
 mod requeue;
 mod self_heal;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 mod transition;
 
 use std::sync::{Arc, OnceLock};
@@ -333,16 +335,10 @@ mod tests {
 
 #[cfg(test)]
 pub(crate) mod test_ctx {
-    use std::sync::Arc;
-
-    use clap::Parser as _;
-    use gradient_db::{DbContext, WebDb, WorkerDb};
-    use gradient_storage::{FileLogStorage, NarStore, StorageCtx};
-    use gradient_types::{Cli, RuntimeConfig};
-    use gradient_util::shutdown::Shutdown;
-    use sea_orm::DatabaseConnection;
+    use gradient_db::{DbContext, WorkerDb};
 
     pub(crate) use crate::messages::{RecordBatch as Batch, RecordReport as BatchReport};
+    pub(crate) use crate::testing::{ctx_with_crypt_file, secret_file, signing_key};
 
     pub(crate) async fn send(graph: &crate::Graph, batch: Batch) -> anyhow::Result<BatchReport> {
         graph.record(batch).await
@@ -378,51 +374,5 @@ pub(crate) mod test_ctx {
             cause,
             observed_peak_ram_mb: Default::default(),
         }
-    }
-
-    pub(crate) async fn ctx_with_crypt_file(db: DatabaseConnection, crypt_file: &str) -> DbContext {
-        let dir = std::env::temp_dir().join(format!("gradient-graph-{}", uuid::Uuid::now_v7()));
-        let cli = Cli::try_parse_from([
-            "gradient-server",
-            "--secrets-crypt-file",
-            crypt_file,
-            "--secrets-jwt-file",
-            "test-jwt",
-            "--serve-url",
-            "http://127.0.0.1:3000",
-            "--base-dir",
-            dir.to_str().unwrap(),
-        ])
-        .expect("test cli");
-        let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("test config"));
-        DbContext {
-            worker_db: WorkerDb::new(db.clone()),
-            web_db: WebDb::new(db),
-            config,
-            storage: StorageCtx {
-                nar_storage: NarStore::local(&dir).unwrap(),
-                log_storage: Arc::new(FileLogStorage::new(&dir).await.unwrap()),
-            },
-            shutdown: Shutdown::new(),
-            events: gradient_types::EventBus::new(16),
-            wake: Default::default(),
-            memory: Default::default(),
-        }
-    }
-
-    pub(crate) fn secret_file() -> (tempfile::NamedTempFile, String) {
-        use std::io::Write as _;
-
-        let mut file = tempfile::NamedTempFile::new().expect("temp secret");
-        file.write_all(b"test-secret-key-32-bytes-padding!")
-            .expect("write secret");
-        let path = file.path().to_string_lossy().to_string();
-        (file, path)
-    }
-
-    pub(crate) fn signing_key(secret: &str) -> String {
-        gradient_sources::generate_signing_key(secret)
-            .expect("signing key")
-            .0
     }
 }

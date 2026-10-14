@@ -26,12 +26,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use gradient_db::evaluations::counters::{
-    eval_counters, fold_shared_build_deltas, recount_evaluations,
-};
-use gradient_db::graph::can_start::{lock_seed_shared_builds, seed_blocking_deps};
-use gradient_db::graph::consistency::{ConsistencyReport, graph_consistency_report};
-use gradient_db::{DbContext, DbMemory, IN_CHUNK_SIZE, ProbeRequests};
+use gradient_db::evaluations::counters::eval_counters;
+use gradient_db::graph::consistency::ConsistencyReport;
+use gradient_db::{DbContext, DbMemory, ProbeRequests};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation_dependency::EdgeKind;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
@@ -50,12 +47,9 @@ use gradient_fixtures::test_date;
 use gradient_wire::types::{BuildFailureKind, DiscoveredDerivation};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::Graph;
 use crate::messages::{
     DemoteReport, Demotion, GcReport, GcRequest, NarCommit, NarCommitted, OrphanCause, RamShortage,
     RequeueScope, SignTargets, Transition, TransitionReport, UpstreamHit,
@@ -65,6 +59,7 @@ use crate::test_ctx::{
     worker_loss,
 };
 use crate::writer::{GraphMsg, transact};
+use crate::{Graph, testing};
 
 pub(crate) use shared::*;
 
@@ -116,20 +111,7 @@ impl Case {
             ..ctx
         };
 
-        graph_consistency_report(&ctx)
-            .await
-            .expect("the seed settles");
-
-        write_blocking_deps_of_every_build(&ctx, &db).await;
-        for (derivation, status) in declared {
-            let settled = db.shared_build(&derivation).await.status;
-            assert_eq!(
-                settled, status,
-                "seed of {derivation}: declared {status:?}, production settles it to {settled:?}"
-            );
-        }
-
-        write_counters_of_finished_evaluations(&ctx, &db).await;
+        testing::settle_seed(&ctx, &db, declared).await;
 
         let graph = Graph::new();
         let writer = graph
@@ -291,19 +273,11 @@ impl Case {
     }
 
     pub async fn drift(&self) -> ConsistencyReport {
-        let folded = fold_shared_build_deltas(&self.ctx.worker_db)
-            .await
-            .expect("the counter deltas fold");
-
-        assert!(folded, "the fold lock of the counter deltas is free");
-        graph_consistency_report(&self.ctx)
-            .await
-            .expect("the consistency check runs")
+        testing::drift(&self.ctx).await
     }
 
     pub async fn zero_drift(&self, after: &str) {
-        let report = self.drift().await;
-        assert_eq!(report.total(), 0, "drift after {after}: {report:?}");
+        testing::zero_drift(&self.ctx, after).await;
     }
 
     pub async fn finish(self) {
@@ -799,42 +773,6 @@ impl Case {
             ),
         ])
     }
-}
-
-async fn write_blocking_deps_of_every_build(ctx: &DbContext, db: &TestDatabase) {
-    let derivations: Vec<DerivationId> = db
-        .rows::<derivation_build::Entity>()
-        .await
-        .iter()
-        .map(|build| build.derivation)
-        .collect();
-
-    for chunk in derivations.chunks(IN_CHUNK_SIZE) {
-        let txn = ctx.worker_db.begin().await.expect("a transaction opens");
-        let lock = lock_seed_shared_builds(&txn, chunk)
-            .await
-            .expect("the seeded builds lock");
-
-        seed_blocking_deps(&lock)
-            .await
-            .expect("the blocking dependencies are written");
-
-        txn.commit().await.expect("the transaction commits");
-    }
-}
-
-async fn write_counters_of_finished_evaluations(ctx: &DbContext, db: &TestDatabase) {
-    let finished: Vec<EvaluationId> = db
-        .rows::<evaluation::Entity>()
-        .await
-        .iter()
-        .filter(|evaluation| evaluation.status.is_terminal())
-        .map(|evaluation| evaluation.id)
-        .collect();
-
-    recount_evaluations(&ctx.worker_db, &finished)
-        .await
-        .expect("the counters of the finished evaluations are written");
 }
 
 fn printed<M: std::fmt::Debug>(rows: Vec<M>) -> Vec<String> {
