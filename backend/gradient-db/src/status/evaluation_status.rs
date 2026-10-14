@@ -147,6 +147,7 @@ pub async fn reopen_evaluation(ctx: &DbContext, evaluation: &MEvaluation) -> Res
         return Ok(false);
     }
 
+    crate::evaluations::counters::recount_evaluations(&ctx.worker_db, &[evaluation.id]).await?;
     report_evaluation_status(
         ctx,
         evaluation,
