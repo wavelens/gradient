@@ -171,8 +171,13 @@ impl Shape {
         let declared = self
             .outputs
             .iter()
-            .any(|o| o.derivation == derivation && o.hash == hash);
-        if !declared {
+            .find(|o| o.derivation == derivation && o.hash == hash);
+        if let Some(declared) = declared {
+            assert_eq!(
+                declared.name, name,
+                "output {hash}: a derivation names a hash in a single output"
+            );
+        } else {
             let mut output = derivation_output::Model {
                 id: DerivationOutputId::now_v7(),
                 derivation,
@@ -388,10 +393,25 @@ impl Shape {
             .collect()
     }
 
-    pub async fn into_database(self) -> TestDatabase {
+    pub async fn into_database(mut self) -> TestDatabase {
+        self.attempts_follow_the_builds();
         let db = TestDatabase::create().await;
         insert::all(self, &db.connection()).await;
         db
+    }
+
+    fn attempts_follow_the_builds(&mut self) {
+        for attempt in &mut self.attempts {
+            let build = self
+                .shared_builds
+                .iter()
+                .find(|b| b.id == attempt.derivation_build)
+                .expect("an attempt is declared on a build");
+            attempt.substitute = build.cache_available;
+            if attempt.outcome == AttemptOutcome::Running && build.status == BuildStatus::Building {
+                attempt.build_started_at = Some(attempt.created_at);
+            }
+        }
     }
 
     fn owner(&mut self) -> UserId {
@@ -764,6 +784,38 @@ mod tests {
         assert!(db.open_assignment(B).await.is_none());
         assert_eq!(db.attempts(B).await[0].dispatched_job, None);
         db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_running_attempt_declared_after_the_assignment_points_at_it() {
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(A)
+            .open_assignment()
+            .attempt(AttemptOutcome::Running, None)
+            .cache_available()
+            .build_status(BuildStatus::Building)
+            .into_database()
+            .await;
+
+        let assignment = db.open_assignment(A).await.expect("the assignment of A");
+        let attempts = db.attempts(A).await;
+        let [running] = attempts.as_slice() else {
+            panic!("a single attempt of A: {attempts:?}");
+        };
+        assert_eq!(running.dispatched_job, Some(assignment.id));
+        assert!(running.substitute, "{running:?}");
+        assert_eq!(running.build_started_at, Some(running.created_at));
+        db.finish().await;
+    }
+
+    #[test]
+    #[should_panic(expected = "names a hash in a single output")]
+    fn a_hash_declared_under_a_second_output_name_panics() {
+        let _ = shape()
+            .derivation(A)
+            .output(A_OUT)
+            .named_output(A_OUT, "dev");
     }
 
     #[tokio::test]
