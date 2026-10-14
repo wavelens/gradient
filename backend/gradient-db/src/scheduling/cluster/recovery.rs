@@ -15,6 +15,10 @@ use gradient_entity::ids::ClusterJobId;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, QueryFilter};
 
+fn retries_left() -> Expr {
+    Expr::col(CClusterJob::Attempts).lte(Expr::col(CClusterJob::RetryBudget))
+}
+
 pub async fn requeue_cluster_job<C: ConnectionTrait>(
     db: &C,
     cluster: ClusterJobId,
@@ -27,7 +31,7 @@ pub async fn requeue_cluster_job<C: ConnectionTrait>(
         .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
         .filter(CClusterJob::Id.eq(cluster))
         .filter(CClusterJob::Status.eq(ClusterJobStatus::Running))
-        .filter(Expr::col(CClusterJob::Attempts).lt(Expr::col(CClusterJob::RetryBudget)))
+        .filter(retries_left())
         .filter(Expr::exists(dead_member_of_cluster()).not())
         .exec(db)
         .await?;
@@ -82,7 +86,7 @@ pub async fn recover_cluster_attempts<C: ConnectionTrait>(
         )
         .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
         .filter(CClusterJob::Status.eq(ClusterJobStatus::Running))
-        .filter(Expr::col(CClusterJob::Attempts).gte(Expr::col(CClusterJob::RetryBudget)))
+        .filter(retries_left().not())
         .exec(conn)
         .await?
         .rows_affected;
@@ -151,7 +155,7 @@ mod tests {
             sql.starts_with("UPDATE \"cluster_job\" SET \"status\" = $1"),
             "{sql}"
         );
-        assert!(sql.contains("\"attempts\" < \"retry_budget\""), "{sql}");
+        assert!(sql.contains("\"attempts\" <= \"retry_budget\""), "{sql}");
         assert!(sql.contains("NOT EXISTS(SELECT"), "{sql}");
         assert!(sql.contains("FROM \"cluster_member\""), "{sql}");
         assert!(

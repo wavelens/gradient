@@ -104,7 +104,7 @@ A `JobCompleted` or `JobFailed` from a member will release its job. The report m
 
 - Reports arriving during the resolution of the attempt settle by the decided verdict.
 - Members count as tracked while their attempt is open. `abandoned-dispatch-sweep` and the evaluation watchdog skip them.
-- `cluster_job.retry_budget` can bound retries, not the per-evaluation assignment budget.
+- `cluster_job.retry_budget` is the number of automatic retries after the first start (`attempts <= retry_budget` allows a requeue), separate from the per-evaluation assignment budget. A user retry of a build ignores it.
 - Members lost with their worker, or reaped after an unconfirmed abort, report into the same verdict.
 
 ## Aging Reservations
