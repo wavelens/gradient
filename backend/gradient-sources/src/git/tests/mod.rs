@@ -8,10 +8,91 @@ mod fixtures;
 
 use super::checkout::checkout_commit;
 use super::commit_info::{fetch_commit, head_refspec};
-use super::pktline::read_ref_from_pktlines;
+use super::pktline::read_advertised_refs;
+use super::remote::{AdvertisedRef, BranchHead, branch_head, ls_remote_head};
 use super::url::{git_transport_url, parse_git_protocol_url};
 use crate::SourceError;
 use fixtures::{FAKE_SHA, FLUSH, ref_line, ref_line_with_caps};
+use gradient_types::branch_key::NO_BRANCH;
+
+fn default_head(reader: &mut dyn std::io::Read) -> Result<BranchHead, SourceError> {
+    branch_head(&read_advertised_refs(reader)?, None)
+}
+
+fn advertised(name: &str, oid: u8, symref_target: Option<&str>) -> AdvertisedRef {
+    AdvertisedRef {
+        name: name.to_owned(),
+        oid: vec![oid; 20],
+        symref_target: symref_target.map(str::to_owned),
+    }
+}
+
+fn head_of(refs: &[AdvertisedRef], branch: Option<&str>) -> (String, Vec<u8>) {
+    let head = branch_head(refs, branch).unwrap();
+    (head.branch, head.commit)
+}
+
+#[test]
+fn the_default_branch_key_is_the_branch_named_by_head() {
+    let refs = [
+        advertised("HEAD", 2, Some("refs/heads/develop")),
+        advertised("refs/heads/develop", 2, None),
+        advertised("refs/heads/main", 1, None),
+    ];
+    assert_eq!(
+        head_of(&refs, None),
+        ("refs/heads/develop".to_owned(), vec![2; 20])
+    );
+    assert_eq!(
+        head_of(&refs, Some("main")),
+        ("refs/heads/main".to_owned(), vec![1; 20])
+    );
+}
+
+#[test]
+fn without_a_symref_the_default_branch_is_the_branch_at_the_head_commit() {
+    let refs = [
+        advertised("HEAD", 2, None),
+        advertised("refs/heads/feature", 1, None),
+        advertised("refs/heads/main", 2, None),
+    ];
+    assert_eq!(head_of(&refs, None).0, "refs/heads/main");
+}
+
+#[test]
+fn a_detached_head_belongs_to_no_branch() {
+    let refs = [
+        advertised("HEAD", 2, None),
+        advertised("refs/heads/main", 1, None),
+    ];
+    assert_eq!(head_of(&refs, None), (NO_BRANCH.to_owned(), vec![2; 20]));
+}
+
+#[test]
+fn a_missing_branch_is_an_error() {
+    let refs = [advertised("HEAD", 2, Some("refs/heads/main"))];
+    assert!(matches!(
+        branch_head(&refs, Some("feature")),
+        Err(SourceError::GitHashExtraction)
+    ));
+}
+
+#[test]
+fn the_symref_capability_names_the_default_branch_of_a_git_daemon() {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&ref_line_with_caps(
+        FAKE_SHA,
+        "HEAD",
+        "multi_ack symref=HEAD:refs/heads/develop agent=git/2",
+    ));
+    buf.extend_from_slice(&ref_line(FAKE_SHA, "refs/heads/develop"));
+    buf.extend_from_slice(&ref_line(FAKE_SHA, "refs/heads/main"));
+    buf.extend_from_slice(FLUSH);
+
+    let head = default_head(&mut buf.as_slice()).unwrap();
+    assert_eq!(head.branch, "refs/heads/develop");
+    assert_eq!(hex::encode(&head.commit), FAKE_SHA);
+}
 
 #[test]
 fn git_transport_url_strips_git_plus_https() {
@@ -86,8 +167,8 @@ fn read_head_from_pktlines_basic() {
     buf.extend_from_slice(&ref_line(FAKE_SHA, "refs/heads/main"));
     buf.extend_from_slice(FLUSH);
 
-    let result = read_ref_from_pktlines(&mut buf.as_slice(), None).unwrap();
-    assert_eq!(hex::encode(&result), FAKE_SHA);
+    let result = default_head(&mut buf.as_slice()).unwrap();
+    assert_eq!(hex::encode(&result.commit), FAKE_SHA);
 }
 
 #[test]
@@ -98,8 +179,8 @@ fn read_head_from_pktlines_head_not_first() {
     buf.extend_from_slice(&ref_line(FAKE_SHA, "HEAD"));
     buf.extend_from_slice(FLUSH);
 
-    let result = read_ref_from_pktlines(&mut buf.as_slice(), None).unwrap();
-    assert_eq!(hex::encode(&result), FAKE_SHA);
+    let result = default_head(&mut buf.as_slice()).unwrap();
+    assert_eq!(hex::encode(&result.commit), FAKE_SHA);
 }
 
 #[test]
@@ -108,8 +189,8 @@ fn read_head_from_pktlines_no_head_falls_back_to_first_ref() {
     buf.extend_from_slice(&ref_line_with_caps(FAKE_SHA, "refs/heads/main", "caps"));
     buf.extend_from_slice(FLUSH);
 
-    let result = read_ref_from_pktlines(&mut buf.as_slice(), None).unwrap();
-    assert_eq!(hex::encode(&result), FAKE_SHA);
+    let result = default_head(&mut buf.as_slice()).unwrap();
+    assert_eq!(hex::encode(&result.commit), FAKE_SHA);
 }
 
 #[test]
@@ -119,7 +200,7 @@ fn read_head_from_pktlines_empty_repo_returns_error() {
     buf.extend_from_slice(&ref_line_with_caps(zero_id, "capabilities^{}", "multi_ack"));
     buf.extend_from_slice(FLUSH);
 
-    let err = read_ref_from_pktlines(&mut buf.as_slice(), None).unwrap_err();
+    let err = default_head(&mut buf.as_slice()).unwrap_err();
     assert!(matches!(err, SourceError::GitHashExtraction));
 }
 
@@ -150,13 +231,13 @@ fn read_head_from_pktlines_server_keeps_connection_open() {
         .unwrap();
 
     let start = std::time::Instant::now();
-    let result = read_ref_from_pktlines(&mut stream, None).unwrap();
+    let result = default_head(&mut stream).unwrap();
     let elapsed = start.elapsed();
 
-    assert_eq!(hex::encode(&result), FAKE_SHA);
+    assert_eq!(hex::encode(&result.commit), FAKE_SHA);
     assert!(
         elapsed.as_millis() < 1000,
-        "read_ref_from_pktlines blocked for {}ms - likely still using read_to_end",
+        "read_advertised_refs blocked for {}ms - likely still using read_to_end",
         elapsed.as_millis()
     );
 
@@ -203,6 +284,21 @@ fn the_head_commit_is_the_tip_of_the_ref_asked_for() {
 
     let branch = fetch_commit(&url, None, &head_refspec(Some("feature"))).unwrap();
     assert_eq!(branch.hash, feature.as_bytes());
+}
+
+#[test]
+fn the_default_branch_of_a_local_remote_follows_head() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    let main = commit_on(&repo, "main", "first");
+    repo.reference("refs/heads/develop", main, true, "same commit")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    let url = format!("file://{}", dir.path().display());
+
+    let head = ls_remote_head(&url, None, None, None).unwrap();
+    assert_eq!(head.branch, "refs/heads/main");
+    assert_eq!(head.commit, main.as_bytes());
 }
 
 #[test]

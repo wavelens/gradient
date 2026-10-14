@@ -1104,6 +1104,85 @@ async fn t19_skip_on_a_branch_lets_another_branch_start() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn t20_a_poll_of_the_default_branch_and_a_push_to_it_abort_each_other() {
+    let (e0, t1, t2) = (
+        EvaluationId::now_v7(),
+        TaskTriggerId::now_v7(),
+        TaskTriggerId::now_v7(),
+    );
+    let repo = GitRepo::new();
+    let c0 = repo.commit("c0");
+    let c1 = repo.commit("c1");
+    repo.push("main", &c1);
+    let main = branch_key::branch("main");
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e0)
+            .evaluation_status(EvaluationStatus::Building)
+            .repository(&repo.url())
+            .commit_hash(&c0)
+            .branch(&main)
+            .last_evaluation(e0)
+            .task_option(|t| t.concurrency = ConcurrencyPolicy::HardAbort)
+            .trigger(t1, TriggerType::Polling, polling(60, None), true, None)
+            .trigger(
+                t2,
+                TriggerType::ReporterPush,
+                serde_json::json!({}),
+                true,
+                None,
+            )
+            .into_cache(CacheId::now_v7())
+            .worker_registration("w-reg")
+            .startable(A, A_OUT),
+    )
+    .await;
+
+    case.fire_once().await;
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    let [e1] = fresh.as_slice() else {
+        panic!("after 1: a single new evaluation, got {fresh:?}");
+    };
+    assert_eq!(
+        (
+            commit_of(&case, e1).await,
+            e1.branch.clone(),
+            e1.status,
+            e1.concurrent
+        ),
+        (c1, main.clone(), EvaluationStatus::Queued, false),
+        "after 1: E1"
+    );
+    assert_eq!(
+        case.evaluation(e0).await.status,
+        EvaluationStatus::Aborted,
+        "after 1: evaluation(E0).status"
+    );
+    case.check("step 1").await;
+
+    let outcome = case.apply_trigger(t2, &main, &[2u8; 20]).await;
+    assert!(
+        matches!(
+            outcome,
+            ApplyOutcome::Created {
+                aborted_evaluation: Some(aborted),
+                ..
+            } if aborted == e1.id
+        ),
+        "after 2: the push aborts E1, got {outcome:?}"
+    );
+    assert_eq!(
+        case.evaluation(e1.id).await.status,
+        EvaluationStatus::Aborted,
+        "after 2: evaluation(E1).status"
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
 fn due_polling(e0: EvaluationId, t1: TaskTriggerId, repo: &GitRepo) -> Shape {
     shape()
         .evaluation(e0)

@@ -41,7 +41,9 @@ Tasks allow a single active evaluation per branch. Triggers firing during a runn
 | Push | Pushed branch or tag |
 | Pull request | Pull request number, shared by every push to the pull request |
 | Polling | Polled branch, or the default branch of the remote without a configured branch |
-| Cron schedule, manual start, API | Default branch of the task |
+| Cron schedule, manual start, API | Default branch of the remote |
+
+Polls, cron schedules, manual starts and API starts look up the name of the default branch on the remote. A push to `main` and a poll of the default branch `main` share the branch.
 
 Evaluations of a pinned commit and `gradient build` requests belong to no branch. Concurrency policies skip them.
 

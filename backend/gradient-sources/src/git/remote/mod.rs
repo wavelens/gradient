@@ -12,6 +12,7 @@ use super::url::git_transport_url;
 use crate::SourceError;
 use git_protocol::ls_remote_head_git_protocol;
 use git2::RemoteCallbacks;
+use gradient_types::branch_key;
 use https::ls_remote_head_no_creds;
 use ssh::ls_remote_head_ssh;
 
@@ -45,12 +46,24 @@ pub(in crate::git) fn callbacks_with_ssh(ssh_key: Option<&str>) -> RemoteCallbac
     callbacks
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchHead {
+    pub branch: String,
+    pub commit: Vec<u8>,
+}
+
+pub(in crate::git) struct AdvertisedRef {
+    pub name: String,
+    pub oid: Vec<u8>,
+    pub symref_target: Option<String>,
+}
+
 pub(in crate::git) fn ls_remote_head(
     url: &str,
     private_key: Option<&str>,
     public_key: Option<&str>,
     branch: Option<&str>,
-) -> Result<Vec<u8>, SourceError> {
+) -> Result<BranchHead, SourceError> {
     let url = git_transport_url(url);
     match (private_key, public_key) {
         (Some(priv_key), Some(pub_key)) => ls_remote_head_ssh(url, priv_key, pub_key, branch),
@@ -59,23 +72,57 @@ pub(in crate::git) fn ls_remote_head(
     }
 }
 
-fn find_ref_in_list(
-    list: &[git2::RemoteHead<'_>],
+fn advertised(list: &[git2::RemoteHead<'_>]) -> Vec<AdvertisedRef> {
+    list.iter()
+        .map(|head| AdvertisedRef {
+            name: head.name().to_owned(),
+            oid: head.oid().as_bytes().to_vec(),
+            symref_target: head.symref_target().map(str::to_owned),
+        })
+        .collect()
+}
+
+pub(in crate::git) fn branch_head(
+    refs: &[AdvertisedRef],
     branch: Option<&str>,
-) -> Result<Vec<u8>, SourceError> {
+) -> Result<BranchHead, SourceError> {
     match branch {
-        None => list
-            .iter()
-            .find(|h| h.name() == "HEAD")
-            .or_else(|| list.first())
-            .map(|h| h.oid().as_bytes().to_vec())
-            .ok_or(SourceError::GitHashExtraction),
-        Some(b) => {
-            let ref_name = format!("refs/heads/{}", b);
-            list.iter()
-                .find(|h| h.name() == ref_name)
-                .map(|h| h.oid().as_bytes().to_vec())
-                .ok_or(SourceError::GitHashExtraction)
-        }
+        Some(name) => tip_of(refs, branch_key::branch(name)),
+        None => default_branch_head(refs),
     }
+    .ok_or(SourceError::GitHashExtraction)
+}
+
+fn tip_of(refs: &[AdvertisedRef], name: String) -> Option<BranchHead> {
+    let tip = refs.iter().find(|r| r.name == name)?;
+    Some(BranchHead {
+        commit: tip.oid.clone(),
+        branch: name,
+    })
+}
+
+fn default_branch_head(refs: &[AdvertisedRef]) -> Option<BranchHead> {
+    let Some(head) = refs.iter().find(|r| r.name == "HEAD") else {
+        let first = branches(refs).next()?;
+        return tip_of(refs, first.name.clone());
+    };
+    let branch = head
+        .symref_target
+        .clone()
+        .or_else(|| branch_at_commit(refs, &head.oid))
+        .unwrap_or_else(|| branch_key::NO_BRANCH.to_owned());
+    Some(BranchHead {
+        branch,
+        commit: head.oid.clone(),
+    })
+}
+
+fn branches(refs: &[AdvertisedRef]) -> impl Iterator<Item = &AdvertisedRef> {
+    refs.iter().filter(|r| branch_key::is_branch(&r.name))
+}
+
+fn branch_at_commit(refs: &[AdvertisedRef], commit: &[u8]) -> Option<String> {
+    branches(refs)
+        .find(|r| r.oid == commit)
+        .map(|r| r.name.clone())
 }

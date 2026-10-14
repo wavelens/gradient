@@ -592,7 +592,7 @@ pub async fn delete_task_active(
 pub async fn post_task_check_repository(
     TaskScope { task, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_has_updates, remote_hash) = check_task_updates(&db, &task, None).await.map_err(|e| {
+    let (_has_updates, head) = check_task_updates(&db, &task, None).await.map_err(|e| {
         TaskRefusal::RepositoryCheckFailed {
             reason: e.to_string(),
         }
@@ -600,7 +600,7 @@ pub async fn post_task_check_repository(
 
     let res = BaseResponse {
         error: false,
-        message: vec_to_hex(&remote_hash),
+        message: vec_to_hex(&head.commit),
     };
 
     Ok(Json(res))

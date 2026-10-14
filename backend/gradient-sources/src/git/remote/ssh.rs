@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{accept_cert, find_ref_in_list};
+use super::{BranchHead, accept_cert, advertised, branch_head};
 use crate::SourceError;
 use git2::{Direction, RemoteCallbacks};
 
@@ -13,7 +13,7 @@ pub(super) fn ls_remote_head_ssh(
     private_key: &str,
     public_key: &str,
     branch: Option<&str>,
-) -> Result<Vec<u8>, SourceError> {
+) -> Result<BranchHead, SourceError> {
     let mut remote =
         git2::Remote::create_detached(url).map_err(|e| SourceError::GitCommand(e.to_string()))?;
 
@@ -40,5 +40,5 @@ pub(super) fn ls_remote_head_ssh(
         stderr: e.message().to_string(),
     })?;
 
-    find_ref_in_list(list, branch)
+    branch_head(&advertised(list), branch)
 }

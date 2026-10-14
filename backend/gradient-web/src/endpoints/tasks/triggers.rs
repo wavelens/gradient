@@ -20,7 +20,6 @@ use gradient_core::ServerState;
 use gradient_db::lookup::by_ids;
 use gradient_scheduler::Scheduler;
 use gradient_sources::resolve_head;
-use gradient_types::branch_key;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -337,15 +336,14 @@ pub async fn fire_now(
             _ => None,
         });
 
-    let (commit_hash, commit_message, author_name) =
-        resolve_head(&db, &proj, branch_for_fire.as_deref())
-            .await
-            .context("resolve the branch head")?;
+    let (head, commit_message, author_name) = resolve_head(&db, &proj, branch_for_fire.as_deref())
+        .await
+        .context("resolve the branch head")?;
 
     if let Err(e) = gradient_ci::trigger::maybe_trigger_input_update(
         &state.web_db,
         &proj,
-        commit_hash.clone(),
+        head.commit.clone(),
         Some(row.id),
     )
     .await
@@ -356,8 +354,8 @@ pub async fn fire_now(
     let input = ApplyInput {
         trigger_id: row.id,
         trigger_type,
-        branch: branch_key::polled(branch_for_fire.as_deref()),
-        commit_hash,
+        branch: head.branch,
+        commit_hash: head.commit,
         commit_message: Some(commit_message),
         author_name: Some(author_name),
         manual: true,

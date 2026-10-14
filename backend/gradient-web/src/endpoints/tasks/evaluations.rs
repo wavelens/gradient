@@ -222,17 +222,22 @@ pub async fn post_task_evaluate(
 
     let pinned_run = pinned.is_some();
 
-    let (commit_hash, commit_message, author_name) = match pinned {
+    let (branch, commit_hash, commit_message, author_name) = match pinned {
         Some(commit_hash) => {
             let commit = get_commit_info(&db, &task, &commit_hash)
                 .await
                 .map_err(|e| TaskRefusal::CommitLookupFailed {
                     reason: e.to_string(),
                 })?;
-            (commit_hash, commit.message, commit.author_name)
+            (
+                branch_key::NO_BRANCH.to_owned(),
+                commit_hash,
+                commit.message,
+                commit.author_name,
+            )
         }
         None => {
-            let head = head_commit(&db, &task, None).await.map_err(|e| {
+            let (branch, head) = head_commit(&db, &task, None).await.map_err(|e| {
                 SharedRefusal::RepositoryStateFetchFailed {
                     reason: e.to_string(),
                 }
@@ -250,18 +255,13 @@ pub async fn post_task_evaluate(
                 tracing::warn!(error = %e, task = %task.name, "manual input_update trigger failed");
             }
 
-            (commit_hash, head.message, head.author_name)
+            (branch, commit_hash, head.message, head.author_name)
         }
     };
 
     // A pinned run is an out-of-band request, typically from a deployment tool. Marking it
     // concurrent is keeping it from queueing behind or aborting the task's own CI run.
     let concurrent = pinned_run;
-    let branch = if pinned_run {
-        branch_key::NO_BRANCH
-    } else {
-        branch_key::DEFAULT_BRANCH
-    };
 
     let eval = gradient_ci::trigger_evaluation(
         &state.web_db,
@@ -271,7 +271,7 @@ pub async fn post_task_evaluate(
         Some(author_name),
         None,
         concurrent,
-        branch.to_owned(),
+        branch,
         None,
         attr,
         None,

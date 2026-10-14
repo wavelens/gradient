@@ -5,10 +5,9 @@
  */
 
 use super::context::TaskGitContext;
-use super::remote::ls_remote_head;
+use super::remote::{BranchHead, ls_remote_head};
 use crate::SourceError;
 use gradient_db::evaluations::branch::newest_on_branch;
-use gradient_types::branch_key;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
@@ -25,44 +24,43 @@ impl TaskGitContext<'_> {
     pub(super) async fn check_for_updates(
         &self,
         branch: Option<&str>,
-    ) -> Result<(bool, Vec<u8>), SourceError> {
+    ) -> Result<(bool, BranchHead), SourceError> {
         debug!("Checking for updates on task");
 
-        let remote_hash = self.remote_head(branch).await?;
-        debug!(remote_hash = %vec_to_hex(&remote_hash), "Retrieved remote hash");
+        let head = self.remote_head(branch).await?;
+        debug!(remote_hash = %vec_to_hex(&head.commit), branch = %head.branch, "Retrieved remote hash");
 
-        let newest = newest_on_branch(
-            &self.ctx.worker_db,
-            self.task.id,
-            &branch_key::polled(branch),
-        )
-        .await
-        .map_err(database_error)?;
+        let newest = newest_on_branch(&self.ctx.worker_db, self.task.id, &head.branch)
+            .await
+            .map_err(database_error)?;
         let head_evaluated = match &newest {
-            Some(evaluation) => self.commit_hash(evaluation).await? == Some(remote_hash.clone()),
+            Some(evaluation) => self.commit_hash(evaluation).await? == Some(head.commit.clone()),
             None => false,
         };
 
         if self.task.force_evaluation {
             if head_evaluated && newest.is_some_and(|e| e.status.is_active()) {
                 debug!("Evaluation of the remote head in progress, skipping forced re-eval");
-                return Ok((false, remote_hash));
+                return Ok((false, head));
             }
             info!("Force evaluation enabled, updating task");
             self.clear_force_evaluation().await;
-            return Ok((true, remote_hash));
+            return Ok((true, head));
         }
 
         if head_evaluated {
             debug!("Remote hash matches the newest evaluation of the branch, no update needed");
-            return Ok((false, remote_hash));
+            return Ok((false, head));
         }
 
         info!("Remote hash differs from the newest evaluation of the branch, update needed");
-        Ok((true, remote_hash))
+        Ok((true, head))
     }
 
-    async fn remote_head(&self, branch: Option<&str>) -> Result<Vec<u8>, SourceError> {
+    pub(super) async fn remote_head(
+        &self,
+        branch: Option<&str>,
+    ) -> Result<BranchHead, SourceError> {
         let url = self.task.repository.clone();
         let ssh_creds = self.ssh_creds.clone();
         let branch_owned = branch.map(|b| b.to_owned());

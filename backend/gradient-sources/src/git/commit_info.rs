@@ -80,8 +80,10 @@ impl TaskGitContext<'_> {
     pub(super) async fn head_commit(
         &self,
         branch: Option<&str>,
-    ) -> Result<HeadCommit, SourceError> {
-        self.fetch_commit(head_refspec(branch)).await
+    ) -> Result<(String, HeadCommit), SourceError> {
+        let head = self.remote_head(branch).await?;
+        let commit = self.fetch_commit(head_refspec(branch)).await?;
+        Ok((head.branch, commit))
     }
 
     #[instrument(skip(self), fields(task_id = %self.task.id, task_name = %self.task.name, commit_hash = %vec_to_hex(commit_hash)))]

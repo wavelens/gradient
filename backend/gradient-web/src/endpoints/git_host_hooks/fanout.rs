@@ -112,7 +112,7 @@ pub(super) async fn trigger_pr_for_integration(
     let action_owned = action.to_string();
     let branch_owned = branch.map(str::to_string);
     let pull_request_key = approval_ctx.pr_number.map_or_else(
-        || branch_key::DEFAULT_BRANCH.to_owned(),
+        || branch_key::NO_BRANCH.to_owned(),
         branch_key::pull_request,
     );
     fan_out_triggers(
@@ -177,7 +177,7 @@ pub(super) async fn trigger_release_for_integration(
         integration_id,
         event_repo_urls,
         TriggerType::ReporterPush,
-        tag.map_or_else(|| branch_key::DEFAULT_BRANCH.to_owned(), branch_key::tag),
+        tag.map_or_else(|| branch_key::NO_BRANCH.to_owned(), branch_key::tag),
         commit_hash,
         commit_message,
         author_name,

@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::{BranchHead, branch_head};
 use crate::SourceError;
-use crate::git::pktline::read_ref_from_pktlines;
+use crate::git::pktline::read_advertised_refs;
 use crate::git::url::parse_git_protocol_url;
 
 /// libgit2 is negotiating protocol v2 with git-daemon, and its `ls-refs` exchange can fail
@@ -14,7 +15,7 @@ use crate::git::url::parse_git_protocol_url;
 pub(super) fn ls_remote_head_git_protocol(
     url: &str,
     branch: Option<&str>,
-) -> Result<Vec<u8>, SourceError> {
+) -> Result<BranchHead, SourceError> {
     use std::io::Write;
     use std::net::TcpStream;
     use std::time::Duration;
@@ -40,6 +41,5 @@ pub(super) fn ls_remote_head_git_protocol(
             stderr: e.to_string(),
         })?;
 
-    let target = branch.map(|b| format!("refs/heads/{}", b));
-    read_ref_from_pktlines(&mut stream, target.as_deref())
+    branch_head(&read_advertised_refs(&mut stream)?, branch)
 }

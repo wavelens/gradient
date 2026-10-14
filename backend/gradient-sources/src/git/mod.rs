@@ -21,14 +21,14 @@ use tracing::instrument;
 
 pub use checkout::checkout_commit;
 pub use commit_info::HeadCommit;
-pub use remote::{accept_cert, fetch_options_with_ssh};
+pub use remote::{BranchHead, accept_cert, fetch_options_with_ssh};
 
 #[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
 pub async fn check_task_updates(
     ctx: &DbContext,
     task: &MTask,
     branch: Option<&str>,
-) -> Result<(bool, Vec<u8>), SourceError> {
+) -> Result<(bool, BranchHead), SourceError> {
     TaskGitContext::new(ctx, task)
         .await?
         .check_for_updates(branch)
@@ -52,7 +52,7 @@ pub async fn head_commit(
     ctx: &DbContext,
     task: &MTask,
     branch: Option<&str>,
-) -> Result<HeadCommit, SourceError> {
+) -> Result<(String, HeadCommit), SourceError> {
     TaskGitContext::new(ctx, task)
         .await?
         .head_commit(branch)
@@ -64,10 +64,10 @@ pub async fn resolve_head(
     ctx: &DbContext,
     task: &MTask,
     branch: Option<&str>,
-) -> Result<(Vec<u8>, String, String), SourceError> {
-    let (_has_update, commit_hash) = check_task_updates(ctx, task, branch).await?;
-    let commit = get_commit_info(ctx, task, &commit_hash).await?;
-    Ok((commit_hash, commit.message, commit.author_name))
+) -> Result<(BranchHead, String, String), SourceError> {
+    let (_has_update, head) = check_task_updates(ctx, task, branch).await?;
+    let commit = get_commit_info(ctx, task, &head.commit).await?;
+    Ok((head, commit.message, commit.author_name))
 }
 
 #[instrument(skip(ctx, project), fields(project_id = %project.id, repository = %url))]
@@ -90,7 +90,7 @@ pub async fn resolve_remote_ref(
     let url = url.to_owned();
     let branch = branch.map(|b| b.to_owned());
 
-    tokio::task::spawn_blocking(move || match ssh_creds {
+    let head = tokio::task::spawn_blocking(move || match ssh_creds {
         Some((private_key, public_key)) => remote::ls_remote_head(
             &url,
             Some(&private_key),
@@ -102,7 +102,8 @@ pub async fn resolve_remote_ref(
     .await
     .map_err(|e| SourceError::GitExecution {
         error: e.to_string(),
-    })?
+    })??;
+    Ok(head.commit)
 }
 
 #[cfg(test)]

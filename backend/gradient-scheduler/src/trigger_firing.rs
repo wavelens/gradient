@@ -72,8 +72,7 @@ use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger, trigger::maybe_trigge
 use gradient_db::deliveries::trigger_fire::{TriggerFire, enqueue_trigger_fires};
 use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::task_trigger as ept;
-use gradient_sources::{check_task_updates, get_commit_info};
-use gradient_types::branch_key;
+use gradient_sources::{BranchHead, check_task_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use gradient_util::supervision::{Pass, PassError, RunsOn};
@@ -133,8 +132,8 @@ pub async fn fire(scheduler: &Scheduler, fire: &TriggerFire) -> anyhow::Result<(
     let sources = &scheduler.db;
     let branch = polling_branch(&cfg);
     let resolve = check_task_updates(sources, &task, branch.as_deref());
-    if let Some((has_update, commit_hash)) = resolve_head(resolve, &task.name).await {
-        apply_resolved_head(scheduler, &trig, &task, &cfg, has_update, commit_hash).await;
+    if let Some((has_update, head)) = resolve_head(resolve, &task.name).await {
+        apply_resolved_head(scheduler, &trig, &task, &cfg, has_update, head).await;
     }
 
     stamp_last_fired(&scheduler.db.worker_db, &trig, now).await
@@ -219,22 +218,18 @@ fn polling_branch(cfg: &TriggerConfig) -> Option<String> {
     }
 }
 
-fn branch_key_of(cfg: &TriggerConfig) -> String {
-    branch_key::polled(polling_branch(cfg).as_deref())
-}
-
 async fn apply_resolved_head(
     scheduler: &Scheduler,
     trig: &ept::Model,
     task: &MTask,
     cfg: &TriggerConfig,
     has_update: bool,
-    commit_hash: Vec<u8>,
+    head: BranchHead,
 ) {
     if let Err(e) = maybe_trigger_input_update(
         &scheduler.db.worker_db,
         task,
-        commit_hash.clone(),
+        head.commit.clone(),
         Some(trig.id),
     )
     .await
@@ -243,7 +238,7 @@ async fn apply_resolved_head(
     }
 
     if has_update || matches!(cfg, TriggerConfig::Time { .. }) {
-        apply_to_task(scheduler, trig, task, cfg, commit_hash).await;
+        apply_to_task(scheduler, trig, task, cfg, head).await;
     }
 }
 
@@ -252,17 +247,17 @@ async fn apply_to_task(
     trig: &ept::Model,
     task: &MTask,
     cfg: &TriggerConfig,
-    commit_hash: Vec<u8>,
+    head: BranchHead,
 ) {
-    let (msg, author) = commit_metadata(&scheduler.db, task, &commit_hash).await;
+    let (msg, author) = commit_metadata(&scheduler.db, task, &head.commit).await;
     let outcome = apply_trigger(
         &scheduler.db.worker_db,
         task,
         ApplyInput {
             trigger_id: trig.id,
             trigger_type: cfg.trigger_type(),
-            branch: branch_key_of(cfg),
-            commit_hash,
+            branch: head.branch,
+            commit_hash: head.commit,
             commit_message: Some(msg),
             author_name: Some(author),
             manual: false,
