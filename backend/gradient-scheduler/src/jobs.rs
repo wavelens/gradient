@@ -614,6 +614,14 @@ pub struct BuildWorker {
     pub caps: WorkerCaps,
 }
 
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub struct TrackedKeys {
+    pub pending: Vec<String>,
+    pub active: Vec<String>,
+    pub cluster_book: Vec<String>,
+}
+
 #[derive(Debug, Default)]
 pub struct JobTracker {
     pending: HashMap<String, PendingJob>,
@@ -627,6 +635,15 @@ pub struct JobTracker {
 impl JobTracker {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    #[cfg(test)]
+    pub fn tracked_keys(&self) -> TrackedKeys {
+        TrackedKeys {
+            pending: self.pending.keys().cloned().collect(),
+            active: self.active.keys().cloned().collect(),
+            cluster_book: self.clusters.jobs().map(|(key, _)| key.clone()).collect(),
+        }
     }
 
     pub fn add_pending(&mut self, job_id: String, job: PendingJob) -> JobCandidate {

@@ -298,6 +298,10 @@ pub enum SchedulerMsg {
     BoardActiveJobs {
         reply: RpcReplyPort<Vec<BoardActiveJob>>,
     },
+    #[cfg(test)]
+    TrackedKeys {
+        reply: RpcReplyPort<crate::jobs::TrackedKeys>,
+    },
     RecentDecisions {
         reply: RpcReplyPort<Vec<AssignDecision>>,
     },
@@ -1048,6 +1052,10 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::BoardActiveJobs { reply } => {
                 let _ = reply.send(core.tracker.board_active_jobs());
+            }
+            #[cfg(test)]
+            SchedulerMsg::TrackedKeys { reply } => {
+                let _ = reply.send(core.tracker.tracked_keys());
             }
             SchedulerMsg::RecentDecisions { reply } => {
                 let _ = reply.send(core.tracker.recent_decisions());

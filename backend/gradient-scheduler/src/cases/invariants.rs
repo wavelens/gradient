@@ -24,7 +24,23 @@ use gradient_fixtures::database::TestDatabase;
 use gradient_pool::WorkerInfo;
 
 use crate::Scheduler;
-use crate::jobs::{build_job_key, eval_job_key};
+use crate::jobs::{TrackedKeys, build_job_key, eval_job_key};
+
+pub(super) fn s11_a_single_job_list_per_key(tracked: &TrackedKeys, after: &str) {
+    let lists = [
+        ("pending", &tracked.pending),
+        ("active", &tracked.active),
+        ("cluster book", &tracked.cluster_book),
+    ];
+    assert_unique(
+        "S11",
+        after,
+        "job lists of key",
+        lists
+            .into_iter()
+            .flat_map(|(list, keys)| keys.iter().map(move |key| (key.as_str(), list))),
+    );
+}
 
 pub(super) struct Rows {
     assignments: Vec<dispatched_job::Model>,

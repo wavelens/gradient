@@ -148,6 +148,11 @@ impl SchedulerCase {
     }
 
     pub async fn check(&self, after: &str) {
+        self.check_rows(after).await;
+        self.check_core(after).await;
+    }
+
+    async fn check_rows(&self, after: &str) {
         self.settled().await;
         testing::zero_drift(&self.state.db(), after).await;
 
@@ -156,12 +161,24 @@ impl SchedulerCase {
         lock(&self.observed).advance(&rows, after);
         let connected = lock(&self.connected_workers).clone();
         rows.s7_no_open_row_before_start(&connected, self.state.started_at.naive_utc(), after);
+    }
+
+    async fn check_core(&self, after: &str) {
+        self.settled().await;
+        let tracked = self
+            .scheduler
+            .call(|reply| SchedulerMsg::TrackedKeys { reply })
+            .await
+            .expect("the scheduler core lists its job keys");
+        invariants::s11_a_single_job_list_per_key(&tracked, after);
+
+        let rows = Rows::read(&self.db).await;
         rows.s8_open_builds_within_slots(&self.scheduler.board_workers().await, after);
         rows.s12_no_open_job_pending(&self.scheduler, after).await;
     }
 
     pub async fn finish(self) {
-        self.settled().await;
+        self.check_core("the last step").await;
         self.core
             .stop_and_wait(None, None)
             .await
@@ -170,7 +187,7 @@ impl SchedulerCase {
             .stop_and_wait(None, None)
             .await
             .expect("the graph writer stops");
-        self.check("the last step").await;
+        self.check_rows("the last step").await;
 
         let Self {
             db,

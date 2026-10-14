@@ -85,7 +85,13 @@ async fn a_case_finishes_while_an_abort_still_runs() {
         .await
         .expect("the evaluation row");
     case.scheduler.abort_evaluation(evaluation).await;
+    case.settled().await;
 
+    assert_eq!(
+        case.db.shared_build(A).await.status,
+        BuildStatus::Aborted,
+        "sb(A) after the graph half of the abort"
+    );
     case.finish().await;
 }
 
@@ -128,6 +134,7 @@ async fn a_seeded_queued_build_is_pending_after_admission() {
         case.scheduler.pending_job(&key).await.is_some(),
         "{key} pending after the first admission"
     );
+    case.check("the admission").await;
     case.finish().await;
 }
 
