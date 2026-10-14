@@ -316,9 +316,9 @@ async fn t06_a_delivery_on_a_new_commit_creates_a_queued_evaluation() {
         case.trigger(t1).await.last_fired_at.is_some_and(is_recent),
         "after 2: task_trigger(T1).last_fired_at ~now"
     );
-    let deliveries = case.deliveries().await;
+    let deliveries = firings(&case).await;
     let [row] = deliveries.as_slice() else {
-        panic!("after 2: a single pending_delivery row, got {deliveries:?}");
+        panic!("after 2: a single TriggerFire row, got {deliveries:?}");
     };
     assert!(row.delivered_at.is_some(), "after 2: delivered_at set");
     assert_eq!(row.attempts, 0, "after 2: attempts");
@@ -481,9 +481,9 @@ async fn t09_the_second_consumer_of_a_firing_finds_the_stamp_moved() {
     case.check("step 2").await;
     second.check("step 2").await;
 
-    let deliveries = case.deliveries().await;
+    let deliveries = firings(&case).await;
     let [row] = deliveries.as_slice() else {
-        panic!("after 2: a single pending_delivery row, got {deliveries:?}");
+        panic!("after 2: a single TriggerFire row, got {deliveries:?}");
     };
     case.deliver_trigger_fire_again(row).await;
     assert_eq!(
@@ -910,6 +910,14 @@ async fn commit_of(case: &SchedulerCase, evaluation: &evaluation::Model) -> Vec<
         .await
         .expect("the commit of the evaluation")
         .hash
+}
+
+async fn firings(case: &SchedulerCase) -> Vec<pending_delivery::Model> {
+    case.deliveries()
+        .await
+        .into_iter()
+        .filter(|d| d.kind == PendingDeliveryKind::TriggerFire)
+        .collect()
 }
 
 async fn undelivered(case: &SchedulerCase) -> Vec<pending_delivery::Model> {

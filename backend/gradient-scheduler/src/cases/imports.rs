@@ -90,7 +90,8 @@ async fn f02_an_import_without_an_entry_point_in_the_evaluation_answers_failed()
             .drv_cached()
             .ifd()
             .job()
-            .output(X_OUT),
+            .output(X_OUT)
+            .build_status(BuildStatus::Skipped),
     )
     .await;
     evaluating(&case, e1, vec![with_ifd(with_output(drv(X, &[]), X_OUT))]).await;
@@ -178,9 +179,10 @@ async fn f04_an_import_of_a_running_build_waits_and_answers_completed_exactly_on
 async fn f05_an_import_of_an_aborted_build_requeues_it_and_answers_after_the_rebuild() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(
-        importing(e1, &[X], BuildStatus::Created)
+        importing(e1, &[X], BuildStatus::DependencyFailed)
             .derivation(X)
             .build_status(BuildStatus::Aborted)
+            .job_option(|job| job.aborted = true)
             .attempt(AttemptOutcome::Aborted, None),
     )
     .await;
@@ -340,6 +342,7 @@ async fn f08_a_transient_failure_waits_through_the_retry_and_ends_on_the_permane
     let case = SchedulerCase::start(
         startable_import(e1)
             .derivation(X)
+            .shared_build_option(|build| build.attempt = 2)
             .attempt(
                 AttemptOutcome::Failed,
                 Some(AttemptFailureReason::BuilderNonzero),

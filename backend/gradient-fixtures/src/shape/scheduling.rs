@@ -20,10 +20,10 @@ use gradient_entity::ids::{
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_entity::task_trigger::TriggerType;
 use gradient_entity::{
-    build_attempt, cache_upstream, cluster_attempt, cluster_job, cluster_member, derivation,
-    derivation_feature, derivation_metric, dispatched_job, dispatched_job_phase, eval_cache_store,
-    evaluation, evaluation_flake_input_override, evaluation_input_update, evaluation_metric,
-    feature, task_trigger,
+    build_attempt, build_job, cache_upstream, cluster_attempt, cluster_job, cluster_member,
+    derivation, derivation_build, derivation_feature, derivation_metric, dispatched_job,
+    dispatched_job_phase, eval_cache_store, evaluation, evaluation_flake_input_override,
+    evaluation_input_update, evaluation_metric, feature, task_trigger,
 };
 
 use super::Shape;
@@ -171,6 +171,29 @@ impl Shape {
     pub fn derivation_option(mut self, change: impl FnOnce(&mut derivation::Model)) -> Self {
         let at = self.current_derivation();
         change(&mut self.derivations[at]);
+        self
+    }
+
+    pub fn shared_build_option(
+        mut self,
+        change: impl FnOnce(&mut derivation_build::Model),
+    ) -> Self {
+        let at = self.current_derivation();
+        change(&mut self.shared_builds[at]);
+        self
+    }
+
+    pub fn job_option(mut self, change: impl FnOnce(&mut build_job::Model)) -> Self {
+        let (evaluation, derivation) = (
+            self.evaluations[self.current_evaluation()].id,
+            self.derivations[self.current_derivation()].id,
+        );
+        let job = self
+            .jobs
+            .iter_mut()
+            .find(|j| j.evaluation == evaluation && j.derivation == derivation)
+            .unwrap_or_else(|| panic!("declare the build job of {derivation} first"));
+        change(job);
         self
     }
 

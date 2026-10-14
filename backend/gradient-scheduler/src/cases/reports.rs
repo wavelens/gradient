@@ -690,7 +690,7 @@ async fn r11_a_second_substitute_miss_turns_the_passthrough_into_a_real_build() 
     let (a, b) = (case.key(A).await, case.key(B).await);
     let attempt = case.sb(A).await.attempt;
 
-    claim(&case, &[W1], W1).await;
+    offered(&case, &[W1]).await;
     let a1 = substitute(&case, W1, &a).await;
     case.report_building(W1, &a).await;
     case.check("step 1").await;
@@ -1853,7 +1853,7 @@ async fn r26_phase_spans_are_stored_with_the_parent_on_completion_and_failure() 
     case.finish().await;
 }
 
-async fn claim(case: &SchedulerCase, workers: &[&str], winner: &str) -> DispatchedJobId {
+async fn offered(case: &SchedulerCase, workers: &[&str]) {
     case.admit_startable_moves().await;
     for worker in workers {
         case.offers_full(worker).await;
@@ -1861,6 +1861,10 @@ async fn claim(case: &SchedulerCase, workers: &[&str], winner: &str) -> Dispatch
     for worker in workers {
         case.score_all(worker).await;
     }
+}
+
+async fn claim(case: &SchedulerCase, workers: &[&str], winner: &str) -> DispatchedJobId {
+    offered(case, workers).await;
     case.request_job(winner, JobKind::Build)
         .await
         .unwrap_or_else(|| panic!("after 1: {winner} gets a build"))

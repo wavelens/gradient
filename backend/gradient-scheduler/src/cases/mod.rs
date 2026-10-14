@@ -40,8 +40,8 @@ use gradient_graph::writer::GraphMsg;
 use gradient_graph::{Graph, testing};
 use gradient_pool::session_port::{SessionPort, SessionSignal};
 use gradient_test_support::state::TestState;
-use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
+use gradient_types::{BuildArgs, RuntimeConfig};
 use gradient_wire::types::GradientCapabilities;
 use ractor::ActorRef;
 use tempfile::NamedTempFile;
@@ -281,7 +281,10 @@ fn server_state(
         .worker_db(db.connection())
         .web_db(db.connection())
         .cache_db(db.connection())
-        .cli(|cli| cli.secrets.crypt_file = crypt_file)
+        .cli(|cli| {
+            cli.secrets.crypt_file = crypt_file;
+            cli.build = BuildArgs::default();
+        })
         .graph(Arc::clone(graph))
         .started_at(started_at)
         .config(config)
