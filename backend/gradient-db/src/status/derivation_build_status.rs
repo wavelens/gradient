@@ -50,15 +50,6 @@ pub async fn update_derivation_build_status(
         change = change.col_expr(CDerivationBuild::QueuedAt, Expr::value(Some(now)));
     }
 
-    if status == BuildStatus::Building {
-        crate::scheduling::build_attempt::stamp_attempt_started(
-            &ctx.worker_db,
-            shared_build.id,
-            now,
-        )
-        .await?;
-    }
-
     if status.is_terminal() {
         crate::scheduling::build_attempt::stamp_attempt_finished(
             &ctx.worker_db,

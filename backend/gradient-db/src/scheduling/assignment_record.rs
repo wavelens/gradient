@@ -231,6 +231,19 @@ pub async fn abandon_open_assignments<C: ConnectionTrait>(
     .await
 }
 
+pub async fn build_has_open_assignment<C: ConnectionTrait>(
+    db: &C,
+    shared_build: DerivationBuildId,
+) -> Result<bool, DbErr> {
+    let open = EDispatchedJob::find()
+        .filter(CDispatchedJob::JobId.eq(format!("{BUILD_KEY_PREFIX}{shared_build}")))
+        .filter(CDispatchedJob::FinishedAt.is_null())
+        .one(db)
+        .await?;
+
+    Ok(open.is_some())
+}
+
 pub(crate) async fn abandon_open<C: ConnectionTrait>(
     db: &C,
     scope: Option<Expr>,

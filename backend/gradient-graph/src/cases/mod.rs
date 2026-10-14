@@ -71,6 +71,7 @@ pub(crate) struct Case {
     pub graph: Arc<Graph>,
     writer: ractor::ActorRef<GraphMsg>,
     probe_inbox: Mutex<UnboundedReceiver<Vec<DerivationId>>>,
+    claims: Mutex<HashMap<DerivationBuildId, (DispatchedJobId, bool)>>,
 }
 
 thread_local! {
@@ -125,6 +126,7 @@ impl Case {
             graph,
             writer,
             probe_inbox: Mutex::new(probe_inbox),
+            claims: Mutex::new(HashMap::new()),
         };
 
         let report = case.drift().await;
@@ -394,14 +396,11 @@ impl Case {
             return None;
         }
 
-        self.transition(Transition::Assigned {
-            evaluation,
-            shared_build,
-            dispatched_job,
-            substitute,
-            build_context: serde_json::json!({}),
-        })
-        .await;
+        self.transition(Transition::Assigned { shared_build }).await;
+        self.claims
+            .lock()
+            .expect("the claims")
+            .insert(shared_build, (dispatched_job, substitute));
 
         Some(dispatched_job)
     }
@@ -440,8 +439,20 @@ impl Case {
 
     pub async fn build_started(&self, path: &str) -> TransitionReport {
         let shared_build = self.sb(path).await.id;
-        self.transition(Transition::BuildStarted { shared_build })
-            .await
+        let claim = self
+            .claims
+            .lock()
+            .expect("the claims")
+            .remove(&shared_build);
+        let unclaimed = (DispatchedJobId::now_v7(), false);
+        let (dispatched_job, substitute) = claim.unwrap_or(unclaimed);
+        self.transition(Transition::BuildStarted {
+            shared_build,
+            dispatched_job,
+            substitute,
+            build_context: serde_json::json!({}),
+        })
+        .await
     }
 
     pub async fn build_output(&self, path: &str, substituted: bool) -> TransitionReport {

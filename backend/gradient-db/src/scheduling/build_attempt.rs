@@ -52,6 +52,7 @@ pub async fn open_attempt<C: ConnectionTrait>(
     substitute: bool,
     build_context: serde_json::Value,
 ) -> Result<Model, DbErr> {
+    let now = gradient_types::now();
     Model {
         id: BuildAttemptId::now_v7(),
         build_job: Some(build_job),
@@ -60,7 +61,8 @@ pub async fn open_attempt<C: ConnectionTrait>(
         substitute,
         outcome: AttemptOutcome::Running,
         build_context,
-        created_at: gradient_types::now(),
+        build_started_at: Some(now),
+        created_at: now,
         ..Default::default()
     }
     .into_active_model()
@@ -236,22 +238,6 @@ pub async fn latest_attempt_worker<C: ConnectionTrait>(
         .await?;
 
     Ok(job.map(|j| j.worker_id))
-}
-
-pub async fn stamp_attempt_started<C: ConnectionTrait>(
-    db: &C,
-    derivation_build: DerivationBuildId,
-    now: NaiveDateTime,
-) -> Result<(), DbErr> {
-    if let Some(att) = latest_attempt(db, derivation_build).await?
-        && att.build_started_at.is_none()
-    {
-        let mut a = att.into_active_model();
-        a.build_started_at = Set(Some(now));
-        a.update(db).await?;
-    }
-
-    Ok(())
 }
 
 pub async fn finish_latest_attempt<C: ConnectionTrait>(

@@ -8,7 +8,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::AttemptOutcome;
 use gradient_entity::dispatched_job::{DispatchedJobKind, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::ids::EvaluationId;
+use gradient_entity::ids::{DispatchedJobId, EvaluationId};
 use gradient_fixtures::shape::shape;
 use gradient_graph::{NarCommit, Transition};
 use gradient_pool::session_port::SessionSignal;
@@ -29,7 +29,7 @@ const W1: &str = "w1";
 const W2: &str = "w2";
 
 #[tokio::test]
-async fn c01_a_won_claim_opens_the_row_and_attempt_and_leaves_the_build_queued() {
+async fn c01_a_won_claim_opens_the_row_and_leaves_the_build_queued_until_the_start() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
     case.connect(W1, w_all(), &[]).await;
@@ -136,20 +136,7 @@ async fn c01_a_won_claim_opens_the_row_and_attempt_and_leaves_the_build_queued()
         (None, None),
         "after 4: open row"
     );
-    let attempts = case.attempts(A).await;
-    let [attempt] = attempts.as_slice() else {
-        panic!("after 4: att(A) has a single row, got {attempts:?}");
-    };
-    assert_eq!(
-        (
-            attempt.outcome,
-            attempt.dispatched_job,
-            attempt.substitute,
-            attempt.build_started_at,
-        ),
-        (AttemptOutcome::Running, Some(a1), false, None),
-        "after 4: att(A)"
-    );
+    assert_eq!(case.attempts(A).await, vec![], "after 4: att(A) == []");
     assert_eq!(
         case.sb(A).await.status,
         BuildStatus::Queued,
@@ -185,6 +172,29 @@ async fn c01_a_won_claim_opens_the_row_and_attempt_and_leaves_the_build_queued()
     );
     assert_eq!(case.signals(W1), vec![], "after 5: signals(W1)");
     case.check("step 5").await;
+
+    case.report_building(W1, &a).await;
+
+    let attempts = case.attempts(A).await;
+    let [attempt] = attempts.as_slice() else {
+        panic!("after 6: att(A) has a single row, got {attempts:?}");
+    };
+    assert_eq!(
+        (
+            attempt.outcome,
+            attempt.dispatched_job,
+            attempt.substitute,
+            attempt.build_started_at.is_some(),
+        ),
+        (AttemptOutcome::Running, Some(a1), false, true),
+        "after 6: att(A)"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Building,
+        "after 6: sb(A).status"
+    );
+    case.check("step 6").await;
 
     case.finish().await;
 }
@@ -301,27 +311,16 @@ async fn c04_a_row_of_a_second_instance_makes_the_local_claim_lose() {
     case.check("step 1").await;
     second.check("step 1").await;
 
-    let a1 = second
+    second
         .request_job(W2, JobKind::Build)
         .await
-        .expect("after 2: W2 gets build:A")
-        .assignment_id();
+        .expect("after 2: W2 gets build:A");
     let open = case
         .open_assignment(&a)
         .await
         .expect("after 2: open(build:A)");
     assert_eq!(open.worker_id, W2, "after 2: open(build:A).worker_id");
-    let attempts: Vec<_> = case
-        .attempts(A)
-        .await
-        .into_iter()
-        .map(|t| (t.outcome, t.dispatched_job))
-        .collect();
-    assert_eq!(
-        attempts,
-        vec![(AttemptOutcome::Running, Some(a1))],
-        "after 2: att(A)"
-    );
+    assert_eq!(case.attempts(A).await, vec![], "after 2: att(A) == []");
     case.check("step 2").await;
     second.check("step 2").await;
 
@@ -398,17 +397,8 @@ async fn c05_a_lost_claim_moves_on_to_the_next_candidate() {
     assert!(!case.pending(&x).await, "after 3: I1.pending(X)");
     assert!(!case.pending(&y).await, "after 3: I1.pending(Y)");
     for path in [A, B] {
-        let outcomes: Vec<_> = case
-            .attempts(path)
-            .await
-            .into_iter()
-            .map(|t| t.outcome)
-            .collect();
-        assert_eq!(
-            outcomes,
-            vec![AttemptOutcome::Running],
-            "after 3: att({path})"
-        );
+        let attempts = case.attempts(path).await;
+        assert_eq!(attempts, vec![], "after 3: att({path}) == []");
     }
     case.check("step 3").await;
     second.check("step 3").await;
@@ -626,17 +616,7 @@ async fn c08_an_upstream_hit_before_the_claim_fails_the_build_claim_and_offers_a
         substitute.pending.required_paths().is_empty(),
         "after 5: result.job.required_paths"
     );
-    let attempts: Vec<_> = case
-        .attempts(A)
-        .await
-        .into_iter()
-        .map(|t| (t.outcome, t.substitute))
-        .collect();
-    assert_eq!(
-        attempts,
-        vec![(AttemptOutcome::Running, true)],
-        "after 5: att(A)"
-    );
+    assert_eq!(case.attempts(A).await, vec![], "after 5: att(A) == []");
     assert!(
         case.open_assignment(&a).await.is_some(),
         "after 5: open(build:A)"
@@ -647,6 +627,21 @@ async fn c08_an_upstream_hit_before_the_claim_fails_the_build_claim_and_offers_a
         "after 5: sb(A).status"
     );
     case.check("step 5").await;
+
+    case.report_building(W1, &a).await;
+
+    let attempts: Vec<_> = case
+        .attempts(A)
+        .await
+        .into_iter()
+        .map(|t| (t.outcome, t.substitute))
+        .collect();
+    assert_eq!(
+        attempts,
+        vec![(AttemptOutcome::Running, true)],
+        "after 6: att(A)"
+    );
+    case.check("step 6").await;
 
     case.finish().await;
 }
@@ -868,7 +863,7 @@ async fn c11_a_won_eval_claim_writes_the_row_and_leaves_the_evaluation_queued() 
 }
 
 #[tokio::test]
-async fn c12_a_reject_closes_the_row_and_attempt_and_returns_the_job_to_every_worker() {
+async fn c12_a_reject_closes_the_row_and_returns_the_job_to_every_worker() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
     case.connect(W1, w_all(), &[]).await;
@@ -906,21 +901,7 @@ async fn c12_a_reject_closes_the_row_and_attempt_and_returns_the_job_to_every_wo
         "after 4: dj(build:A)"
     );
     assert!(row.finished_at.is_some(), "after 4: finished_at set");
-    let attempts: Vec<_> = case
-        .attempts(A)
-        .await
-        .into_iter()
-        .map(|t| (t.outcome, t.reason, t.failure_message))
-        .collect();
-    assert_eq!(
-        attempts,
-        vec![(
-            AttemptOutcome::Aborted,
-            None,
-            Some("the worker rejected the job".to_owned())
-        )],
-        "after 4: att(A)"
-    );
+    assert_eq!(case.attempts(A).await, vec![], "after 4: att(A) == []");
     assert!(case.pending(&a).await, "after 4: pending(build:A)");
     assert_eq!(case.active(&a).await, None, "after 4: active(build:A)");
     assert_eq!(
@@ -961,6 +942,11 @@ async fn c12_a_reject_closes_the_row_and_attempt_and_returns_the_job_to_every_wo
         ],
         "after 6: dj(build:A)"
     );
+    assert_eq!(case.attempts(A).await, vec![], "after 6: att(A) == []");
+    case.check("step 6").await;
+
+    case.report_building(W2, &a).await;
+
     let running: Vec<_> = case
         .attempts(A)
         .await
@@ -968,8 +954,8 @@ async fn c12_a_reject_closes_the_row_and_attempt_and_returns_the_job_to_every_wo
         .filter(|t| t.outcome == AttemptOutcome::Running)
         .map(|t| t.dispatched_job)
         .collect();
-    assert_eq!(running, vec![Some(a2)], "after 6: Running rows of att(A)");
-    case.check("step 6").await;
+    assert_eq!(running, vec![Some(a2)], "after 7: Running rows of att(A)");
+    case.check("step 7").await;
 
     case.finish().await;
 }
@@ -1029,6 +1015,11 @@ async fn c13_a_claim_whose_assigned_transition_fails_closes_its_row_and_keeps_th
         vec![(a1, Some(DispatchedJobOutcome::Abandoned)), (a2, None)],
         "after 3: dj(build:A)"
     );
+    assert_eq!(case.attempts(A).await, vec![], "after 3: att(A) == []");
+    case.check("step 3").await;
+
+    case.report_building(W1, &a).await;
+
     let attempts: Vec<_> = case
         .attempts(A)
         .await
@@ -1038,9 +1029,9 @@ async fn c13_a_claim_whose_assigned_transition_fails_closes_its_row_and_keeps_th
     assert_eq!(
         attempts,
         vec![(AttemptOutcome::Running, Some(a2))],
-        "after 3: att(A)"
+        "after 4: att(A)"
     );
-    case.check("step 3").await;
+    case.check("step 4").await;
 
     case.finish().await;
 }
@@ -1564,8 +1555,13 @@ async fn c23_offer_generations_rise_per_enqueue_and_deltas_do_not_repeat_a_candi
 
     case.commit_nar(output_nar(B, B_OUT)).await;
     let shared_build = case.sb(B).await.id;
-    case.transition(Transition::BuildStarted { shared_build })
-        .await;
+    case.transition(Transition::BuildStarted {
+        shared_build,
+        dispatched_job: DispatchedJobId::now_v7(),
+        substitute: false,
+        build_context: serde_json::json!({}),
+    })
+    .await;
     case.transition(Transition::BuildCompleted { shared_build })
         .await;
     let build_b = case.sb(B).await;
@@ -1708,6 +1704,15 @@ async fn c25_a_passthrough_is_a_substitute_job_and_finishes_substituted_without_
         substitute.pending.required_paths().is_empty(),
         "after 1: result.job.required_paths"
     );
+    assert_eq!(case.attempts(A).await, vec![], "after 1: att(A) == []");
+    case.check("step 1").await;
+
+    case.report_building(W1, &a).await;
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Building,
+        "after 2: sb(A).status"
+    );
     let attempts: Vec<_> = case
         .attempts(A)
         .await
@@ -1717,15 +1722,7 @@ async fn c25_a_passthrough_is_a_substitute_job_and_finishes_substituted_without_
     assert_eq!(
         attempts,
         vec![(AttemptOutcome::Running, true)],
-        "after 1: att(A)"
-    );
-    case.check("step 1").await;
-
-    case.report_building(W1, &a).await;
-    assert_eq!(
-        case.sb(A).await.status,
-        BuildStatus::Building,
-        "after 2: sb(A).status"
+        "after 2: att(A)"
     );
     assert_eq!(
         case.counters(e1).await,

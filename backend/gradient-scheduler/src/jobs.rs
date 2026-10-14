@@ -101,6 +101,20 @@ pub fn build_job_key(shared_build: DerivationBuildId) -> String {
     )
 }
 
+impl PendingBuildJob {
+    pub fn build_context(&self) -> serde_json::Value {
+        serde_json::json!({
+            "architecture": self.job.requirement.architecture,
+            "required_features": self.job.requirement.required_features,
+            "dependency_count": self.dependency_count,
+            "closure_size": self.closure_size,
+            "prefer_local_build": self.prefer_local_build,
+            "is_fixed_output": self.is_fixed_output,
+            "substitute": self.substitute,
+        })
+    }
+}
+
 impl PendingJob {
     pub fn job_key(&self) -> String {
         match self {
@@ -304,7 +318,6 @@ pub struct AssignmentRecord {
     pub job_context: serde_json::Value,
     pub instance_context: serde_json::Value,
     pub substitute: bool,
-    pub build_context: serde_json::Value,
 }
 
 /// An upstream probe landing in between can turn a build into a passthrough. A stale build would
@@ -441,18 +454,6 @@ fn assignment_record_for(
         job_context: sc.job_context.clone(),
         instance_context,
         substitute: matches!(job, PendingJob::Build(b) if b.substitute),
-        build_context: match job {
-            PendingJob::Build(b) => serde_json::json!({
-                "architecture": b.job.requirement.architecture,
-                "required_features": b.job.requirement.required_features,
-                "dependency_count": b.dependency_count,
-                "closure_size": b.closure_size,
-                "prefer_local_build": b.prefer_local_build,
-                "is_fixed_output": b.is_fixed_output,
-                "substitute": b.substitute,
-            }),
-            PendingJob::Eval(_) => serde_json::json!({}),
-        },
     }
 }
 
@@ -1175,6 +1176,18 @@ impl JobTracker {
         self.active
             .get(job_id)
             .is_some_and(|a| a.worker == worker_id && a.assignment_id == assignment_id)
+    }
+
+    pub fn active_build_dispatch(
+        &self,
+        worker_id: &str,
+        job_id: &str,
+    ) -> Option<(DispatchedJobId, &PendingBuildJob)> {
+        let active = self.active.get(job_id).filter(|a| a.worker == worker_id)?;
+        match &active.job {
+            PendingJob::Build(build) => Some((active.assignment_id, build)),
+            PendingJob::Eval(_) => None,
+        }
     }
 
     pub fn release_to_pending(&mut self, job_id: &str) {

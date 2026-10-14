@@ -15,7 +15,7 @@ use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput};
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::cluster::{Failure, MemberReport};
-use crate::jobs::PendingJob;
+use crate::jobs::{PendingBuildJob, PendingJob};
 
 impl Scheduler {
     pub async fn handle_build_status_update(&self, build_id_str: &str, worker_id: &str) {
@@ -27,10 +27,20 @@ impl Scheduler {
             }
         };
 
+        let job_id = crate::jobs::build_job_key(derivation_build);
+        let Some((dispatched_job, build)) = self.active_build_dispatch(worker_id, &job_id).await
+        else {
+            warn!(%derivation_build, %worker_id, "Building update without an active dispatch of this worker");
+            return;
+        };
+
         match self
             .graph
             .transition(Transition::BuildStarted {
                 shared_build: derivation_build,
+                dispatched_job,
+                substitute: build.substitute,
+                build_context: build.build_context(),
             })
             .await
         {
@@ -38,7 +48,6 @@ impl Scheduler {
             // before its evaluation was aborted can still report started here. The worker is told
             // to stop instead of building on.
             Ok(report) if report.already_aborted => {
-                let job_id = crate::jobs::build_job_key(derivation_build);
                 self.abort_job(worker_id, job_id, "evaluation aborted".to_owned())
                     .await;
                 info!(%derivation_build, %worker_id, "aborting build that started after its evaluation was aborted");
@@ -48,6 +57,22 @@ impl Scheduler {
                 warn!(error = %e, %derivation_build, "Building update did not reach the graph writer")
             }
         }
+    }
+
+    async fn active_build_dispatch(
+        &self,
+        worker_id: &str,
+        job_id: &str,
+    ) -> Option<(DispatchedJobId, PendingBuildJob)> {
+        let (worker, job_id) = (worker_id.to_owned(), job_id.to_owned());
+        self.call(|reply| SchedulerMsg::ActiveBuildDispatch {
+            worker,
+            job_id,
+            reply,
+        })
+        .await
+        .ok()
+        .flatten()
     }
 
     pub async fn handle_build_output(

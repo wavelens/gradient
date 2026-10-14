@@ -776,13 +776,7 @@ async fn a09_a_building_report_for_an_aborted_build_is_answered_with_abort() {
         BuildStatus::Aborted,
         "after 3: sb(A).status"
     );
-    let attempts = case.attempts(A).await;
-    assert!(
-        attempts
-            .iter()
-            .all(|t| t.outcome != AttemptOutcome::Running),
-        "after 3: att(A) has no Running row, got {attempts:?}"
-    );
+    assert_eq!(case.attempts(A).await, vec![], "after 3: att(A) == []");
     let signals = case.signals(W1);
     assert!(
         matches!(signals.as_slice(), [SessionSignal::Abort { job_id, .. }] if *job_id == a),
@@ -1014,6 +1008,21 @@ async fn a12_a_retry_is_refused_while_the_aborted_job_is_active_and_reopens_afte
         vec![(a1, Some(DispatchedJobOutcome::Abandoned)), (a2, None)],
         "after 6: dj(build:A)"
     );
+    let outcomes: Vec<_> = case
+        .attempts(A)
+        .await
+        .into_iter()
+        .map(|t| t.outcome)
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec![AttemptOutcome::Aborted],
+        "after 6: att(A) == [{{Aborted}}]"
+    );
+    case.check("step 6").await;
+
+    case.report_building(W1, &a).await;
+
     let attempts: Vec<_> = case
         .attempts(A)
         .await
@@ -1025,9 +1034,9 @@ async fn a12_a_retry_is_refused_while_the_aborted_job_is_active_and_reopens_afte
             attempts.as_slice(),
             [(AttemptOutcome::Aborted, _), (AttemptOutcome::Running, Some(open))] if *open == a2
         ),
-        "after 6: att(A) == [{{Aborted}}, {{Running, a2}}], got {attempts:?}"
+        "after 7: att(A) == [{{Aborted}}, {{Running, a2}}], got {attempts:?}"
     );
-    case.check("step 6").await;
+    case.check("step 7").await;
 
     case.finish().await;
 }

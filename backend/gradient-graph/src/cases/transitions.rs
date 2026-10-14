@@ -543,13 +543,7 @@ async fn t11_not_enough_resources_fails_a_queued_build_its_dependents_and_the_ev
 #[tokio::test]
 async fn t12_not_enough_resources_leaves_a_build_alone_that_a_worker_took() {
     let e1 = EvaluationId::now_v7();
-    let case = Case::start(
-        chain(e1)
-            .derivation(B)
-            .attempt(AttemptOutcome::Running, None)
-            .open_assignment(),
-    )
-    .await;
+    let case = Case::start(chain(e1).derivation(B).open_assignment()).await;
     let version = case.gv(e1).await;
 
     case.not_enough_resources(e1, B, 4096).await;
@@ -560,7 +554,7 @@ async fn t12_not_enough_resources_leaves_a_build_alone_that_a_worker_took() {
         "after 1: sb(B)"
     );
     let attempts = case.attempts(B).await;
-    assert_eq!(attempts.len(), 1, "after 1: no new attempt: {attempts:?}");
+    assert!(attempts.is_empty(), "after 1: no attempt: {attempts:?}");
     assert_eq!(
         case.sb(A).await.status,
         BuildStatus::Created,

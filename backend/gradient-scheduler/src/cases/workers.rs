@@ -258,22 +258,13 @@ async fn w04_a_disconnect_while_building_requeues_the_build_for_another_worker()
         .expect("after 4: W2 gets build:A")
         .assignment_id();
     assert_ne!(a2, a1, "after 4: result.assignment_id == a2");
-    let attempts = case.attempts(A).await;
     assert_eq!(
-        verdicts(&attempts),
-        vec![
-            (
-                AttemptOutcome::Aborted,
-                Some(AttemptFailureReason::WorkerLost)
-            ),
-            (AttemptOutcome::Running, None),
-        ],
+        verdicts(&case.attempts(A).await),
+        vec![(
+            AttemptOutcome::Aborted,
+            Some(AttemptFailureReason::WorkerLost)
+        )],
         "after 4: att(A)"
-    );
-    assert_eq!(
-        attempts[1].dispatched_job,
-        Some(a2),
-        "after 4: att(A)[1].dispatched_job"
     );
     case.check("step 4").await;
 
@@ -287,7 +278,7 @@ async fn w04_a_disconnect_while_building_requeues_the_build_for_another_worker()
 }
 
 #[tokio::test]
-async fn w05_a_disconnect_before_the_building_report_leaves_a_single_running_attempt() {
+async fn w05_a_disconnect_before_the_building_report_leaves_no_attempt() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
     case.connect(W1, w_all(), &[]).await;
     case.connect(W2, w_all(), &[]).await;
@@ -317,13 +308,7 @@ async fn w05_a_disconnect_before_the_building_report_leaves_a_single_running_att
         "after 2: sb(A).status"
     );
     assert!(case.pending(&a).await, "after 2: pending(build:A)");
-    let attempts = case.attempts(A).await;
-    assert!(
-        attempts
-            .iter()
-            .all(|t| t.outcome != AttemptOutcome::Running),
-        "after 2: att(A) has no Running row, got {attempts:?}"
-    );
+    assert_eq!(case.attempts(A).await, vec![], "after 2: att(A) == []");
     case.check("step 2").await;
 
     case.offers_delta(W2).await;
@@ -333,28 +318,31 @@ async fn w05_a_disconnect_before_the_building_report_leaves_a_single_running_att
         .await
         .expect("after 3: W2 gets build:A")
         .assignment_id();
-    assert_eq!(
-        running(&case.attempts(A).await),
-        vec![Some(a2)],
-        "after 3: att(A) has a single Running row (dispatched_job a2)"
-    );
+    assert_eq!(case.attempts(A).await, vec![], "after 3: att(A) == []");
     case.check("step 3").await;
 
     case.report_building(W2, &a).await;
+    assert_eq!(
+        running(&case.attempts(A).await),
+        vec![Some(a2)],
+        "after 4: att(A) has a single Running row (dispatched_job a2)"
+    );
+    case.check("step 4").await;
+
     case.commit_nar(output_nar(A, A_OUT)).await;
     case.complete(W2, &a, a2, Vec::new(), 5).await;
     assert_eq!(
         case.sb(A).await.status,
         BuildStatus::Completed,
-        "after 4: sb(A).status"
+        "after 5: sb(A).status"
     );
-    let last = case.attempts(A).await.pop().expect("after 4: att(A)");
+    let last = case.attempts(A).await.pop().expect("after 5: att(A)");
     assert_eq!(
         (last.outcome, last.dispatched_job),
         (AttemptOutcome::Built, Some(a2)),
-        "after 4: att(A)[-1]"
+        "after 5: att(A)[-1]"
     );
-    case.check("step 4").await;
+    case.check("step 5").await;
 
     case.finish().await;
 }
@@ -723,13 +711,7 @@ async fn w12_a_draining_worker_keeps_its_job_and_gets_no_offers_and_no_new_job()
         vec![(a2, Some(DispatchedJobOutcome::Abandoned))],
         "after 2: dj(build:B)"
     );
-    let outcomes: Vec<_> = case
-        .attempts(B)
-        .await
-        .into_iter()
-        .map(|t| t.outcome)
-        .collect();
-    assert_eq!(outcomes, vec![AttemptOutcome::Aborted], "after 2: att(B)");
+    assert_eq!(case.attempts(B).await, vec![], "after 2: att(B) == []");
     assert_eq!(
         case.sb(B).await.status,
         BuildStatus::Queued,

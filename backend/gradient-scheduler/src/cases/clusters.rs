@@ -166,8 +166,8 @@ async fn k02_a_planning_pass_claims_the_attempt_and_both_member_rows() {
     );
     assert_eq!(
         case.attempt_outcomes(A).await,
-        vec![AttemptOutcome::Running],
-        "after 3: att(A)"
+        vec![],
+        "after 3: att(A) == []"
     );
     assert_eq!(
         case.sb(A).await.status,
@@ -330,10 +330,10 @@ async fn k04_a_member_reject_fails_the_prepare_and_leaves_the_budget() {
         vec![Some(DispatchedJobOutcome::Abandoned)],
         "after 2: dj(build:A)"
     );
-    let attempts = case.attempt_outcomes(A).await;
-    assert!(
-        matches!(attempts.as_slice(), [outcome] if *outcome != AttemptOutcome::Running),
-        "after 2: att(A) has a single closed row, got {attempts:?}"
+    assert_eq!(
+        case.attempt_outcomes(A).await,
+        vec![],
+        "after 2: att(A) == []"
     );
     assert!(
         aborts_cluster(&case.signals(W1), t1),

@@ -252,6 +252,11 @@ pub enum SchedulerMsg {
         job_id: String,
         reply: RpcReplyPort<Option<PendingJob>>,
     },
+    ActiveBuildDispatch {
+        worker: String,
+        job_id: String,
+        reply: RpcReplyPort<Option<(DispatchedJobId, PendingBuildJob)>>,
+    },
     OwnsDispatch {
         worker: String,
         job_id: String,
@@ -1018,6 +1023,17 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::ActiveJob { job_id, reply } => {
                 let _ = reply.send(core.tracker.active_job(&job_id).cloned());
+            }
+            SchedulerMsg::ActiveBuildDispatch {
+                worker,
+                job_id,
+                reply,
+            } => {
+                let dispatch = core
+                    .tracker
+                    .active_build_dispatch(&worker, &job_id)
+                    .map(|(assignment_id, build)| (assignment_id, build.clone()));
+                let _ = reply.send(dispatch);
             }
             SchedulerMsg::OwnsDispatch {
                 worker,

@@ -129,7 +129,7 @@ Case layers start the real component on a shape. Tests read like the case steps,
 
 **Conventions**
 
-- Test names start with the case id: `c01_a_won_claim_opens_the_row_and_attempt_and_leaves_the_build_queued`.
+- Test names start with the case id: `c01_a_won_claim_opens_the_row_and_leaves_the_build_queued_until_the_start`.
 - Assertion messages name the step: `"after 2: sb(A).status"`.
 - Row assertions go first, then signals, then `case.check("step 2")`.
 - Second instances finish first: `second.finish()`, then `case.finish()`.

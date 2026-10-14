@@ -12,7 +12,7 @@ use gradient_db::{DbContext, MissingRow};
 use gradient_entity::StorePathError;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation;
-use gradient_entity::ids::EvaluationId;
+use gradient_entity::ids::{DispatchedJobId, EvaluationId};
 use gradient_fixtures::shape::shape;
 use gradient_wire::types::DiscoveredDerivation;
 use sea_orm::ConnectionTrait;
@@ -330,7 +330,13 @@ async fn m07_a_transaction_aborted_by_a_swallowed_error_is_rolled_back_not_commi
         Injection::Swallowed,
         1..=3,
         |scoped| async move {
-            crate::transition::apply(&scoped, Transition::BuildStarted { shared_build }).await
+            let started = Transition::BuildStarted {
+                shared_build,
+                dispatched_job: DispatchedJobId::now_v7(),
+                substitute: false,
+                build_context: serde_json::json!({}),
+            };
+            crate::transition::apply(&scoped, started).await
         },
     )
     .await;

@@ -118,6 +118,9 @@ pub enum Transition {
     },
     BuildStarted {
         shared_build: DerivationBuildId,
+        dispatched_job: DispatchedJobId,
+        substitute: bool,
+        build_context: serde_json::Value,
     },
     BuildOutput {
         shared_build: DerivationBuildId,
@@ -137,11 +140,7 @@ pub enum Transition {
         metrics: Option<BuildMetrics>,
     },
     Assigned {
-        evaluation: EvaluationId,
         shared_build: DerivationBuildId,
-        dispatched_job: DispatchedJobId,
-        substitute: bool,
-        build_context: serde_json::Value,
     },
     OrphanedBuilds {
         shared_builds: Vec<DerivationBuildId>,

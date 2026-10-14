@@ -33,7 +33,7 @@ const W2: &str = "w2";
 const SOURCE: &str = "/nix/store/src1-source";
 
 #[tokio::test]
-async fn r01_the_building_report_moves_queued_to_building_and_stamps_the_attempt() {
+async fn r01_the_building_report_moves_queued_to_building_and_opens_the_attempt() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
     case.connect(W1, w_all(), &[]).await;
@@ -45,11 +45,7 @@ async fn r01_the_building_report_moves_queued_to_building_and_stamps_the_attempt
         BuildStatus::Queued,
         "after 1: sb(A).status"
     );
-    assert_eq!(
-        started(&case, A).await,
-        vec![(AttemptOutcome::Running, false)],
-        "after 1: att(A)"
-    );
+    assert_eq!(started(&case, A).await, vec![], "after 1: att(A) == []");
     case.signals(W1);
     case.check("step 1").await;
 
@@ -905,7 +901,7 @@ async fn r13_a_canceled_build_closes_the_row_abandoned_and_requeues_without_an_a
     );
     assert_eq!(
         case.attempt_outcomes(A).await,
-        vec![AttemptOutcome::Aborted, AttemptOutcome::Running],
+        vec![AttemptOutcome::Aborted],
         "after 3: att(A)"
     );
     case.check("step 3").await;

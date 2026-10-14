@@ -9,8 +9,8 @@ use gradient_db::{
     DbContext,
     graph::{can_start::unpromote_ungated, promotion::cascade_dependency_failed},
     scheduling::build_attempt::{
-        abort_running_attempts, fail_latest_attempt, latest_attempt, open_failed_attempt,
-        succeed_latest_attempt, worker_loss_streaks,
+        abort_running_attempts, fail_latest_attempt, open_failed_attempt, succeed_latest_attempt,
+        worker_loss_streaks,
     },
     status::{
         EvaluationFailure, EvaluationWarning, emit_transition_effects,
@@ -49,24 +49,18 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             eval_failed(ctx, evaluation, &error, kind, &missing_paths).await?;
             Ok(TransitionReport::default())
         }
-        Transition::BuildStarted { shared_build } => {
-            let Some(row) = EDerivationBuild::find_by_id(shared_build)
-                .one(&ctx.worker_db)
-                .await?
-            else {
-                warn!(derivation_build = %shared_build, "shared build not found for Building status update");
-                return Ok(TransitionReport::default());
+        Transition::BuildStarted {
+            shared_build,
+            dispatched_job,
+            substitute,
+            build_context,
+        } => {
+            let start = BuildStart {
+                dispatched_job,
+                substitute,
+                build_context,
             };
-
-            if row.status == BuildStatus::Aborted {
-                return Ok(TransitionReport {
-                    already_aborted: true,
-                    ..Default::default()
-                });
-            }
-
-            update_derivation_build_status(ctx, row, BuildStatus::Building).await?;
-            Ok(TransitionReport::default())
+            build_started(ctx, shared_build, start).await
         }
         Transition::BuildOutput {
             shared_build,
@@ -101,22 +95,8 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             .await?;
             Ok(TransitionReport::default())
         }
-        Transition::Assigned {
-            evaluation,
-            shared_build,
-            dispatched_job,
-            substitute,
-            build_context,
-        } => {
-            assigned(
-                ctx,
-                evaluation,
-                shared_build,
-                dispatched_job,
-                substitute,
-                build_context,
-            )
-            .await;
+        Transition::Assigned { shared_build } => {
+            stamp_dispatched_at(ctx, shared_build).await;
             Ok(TransitionReport::default())
         }
         Transition::OrphanedBuilds {
@@ -575,11 +555,8 @@ async fn build_failed(
         record_metrics(ctx, &shared_build, shared_build.derivation, &metrics).await;
     }
 
-    if let Some(attempt_id) =
-        gradient_db::scheduling::build_attempt::latest_attempt_id(&ctx.worker_db, shared_build.id)
-            .await
-            .ok()
-            .flatten()
+    let running_attempt = running_attempt_id(ctx, derivation_build).await;
+    if let Some(attempt_id) = running_attempt
         && let Err(e) = ctx
             .storage
             .log_storage
@@ -632,14 +609,15 @@ async fn build_failed(
         other => other,
     };
 
-    if let Err(e) = fail_latest_attempt(
-        &ctx.worker_db,
-        derivation_build,
-        policy::attempt_outcome(kind),
-        policy::attempt_reason_for(kind, outcome, out_of_memory),
-        Some(policy::truncate_failure_message(error)),
-    )
-    .await
+    if running_attempt.is_some()
+        && let Err(e) = fail_latest_attempt(
+            &ctx.worker_db,
+            derivation_build,
+            policy::attempt_outcome(kind),
+            policy::attempt_reason_for(kind, outcome, out_of_memory),
+            Some(policy::truncate_failure_message(error)),
+        )
+        .await
     {
         warn!(%derivation_build, error = %e, "failed to store the attempt failure reason");
     }
@@ -834,9 +812,11 @@ async fn queued_without_worker(
         return Ok(None);
     }
 
-    let dispatched = latest_attempt(&ctx.worker_db, derivation_build)
-        .await?
-        .is_some_and(|attempt| attempt.outcome == AttemptOutcome::Running);
+    let dispatched = gradient_db::scheduling::assignment_record::build_has_open_assignment(
+        &ctx.worker_db,
+        derivation_build,
+    )
+    .await?;
 
     Ok((!dispatched).then_some(shared_build))
 }
@@ -857,16 +837,20 @@ async fn fail_build_no_worker_fits(
         "build fits on no connected worker; failing instead of leaving it queued"
     );
 
-    open_shortage_attempt(ctx, shortage, &error).await;
+    open_shortage_attempt(ctx, &shared_build, shortage, &error).await;
     update_derivation_build_status(ctx, shared_build, BuildStatus::FailedPermanent).await?;
     cascade_dependency_failed(&ctx.worker_db, derivation).await?;
     check_referencing_evals_done(ctx, derivation).await
 }
 
-async fn open_shortage_attempt(ctx: &DbContext, shortage: &RamShortage, error: &str) {
-    let derivation_build = shortage.shared_build;
-    let Some(build_job) =
-        find_or_create_build_job(ctx, shortage.evaluation, derivation_build).await
+async fn open_shortage_attempt(
+    ctx: &DbContext,
+    shared_build: &MDerivationBuild,
+    shortage: &RamShortage,
+    error: &str,
+) {
+    let derivation_build = shared_build.id;
+    let Some(build_job) = find_or_create_build_job(ctx, shortage.evaluation, shared_build).await
     else {
         return;
     };
@@ -1068,35 +1052,99 @@ async fn record_metrics(
     }
 }
 
-async fn assigned(
-    ctx: &DbContext,
-    evaluation: EvaluationId,
-    derivation_build: DerivationBuildId,
+struct BuildStart {
     dispatched_job: DispatchedJobId,
     substitute: bool,
     build_context: serde_json::Value,
-) {
-    if let Some(build_job) = find_or_create_build_job(ctx, evaluation, derivation_build).await {
-        let superseded = gradient_db::scheduling::build_attempt::latest_attempt_id(
-            &ctx.worker_db,
-            derivation_build,
-        )
-        .await;
-        match gradient_db::scheduling::build_attempt::open_attempt(
-            &ctx.worker_db,
-            build_job,
-            derivation_build,
-            dispatched_job,
-            substitute,
-            build_context,
-        )
-        .await
-        {
-            Ok(_) => finalize_superseded_log(ctx, superseded).await,
-            Err(e) => warn!(error = %e, "failed to open build_attempt"),
+}
+
+async fn build_started(
+    ctx: &DbContext,
+    derivation_build: DerivationBuildId,
+    start: BuildStart,
+) -> Result<TransitionReport> {
+    let Some(row) = EDerivationBuild::find_by_id(derivation_build)
+        .one(&ctx.worker_db)
+        .await?
+    else {
+        warn!(%derivation_build, "shared build not found for Building status update");
+        return Ok(TransitionReport::default());
+    };
+
+    match row.status {
+        BuildStatus::Aborted => {
+            return Ok(TransitionReport {
+                already_aborted: true,
+                ..Default::default()
+            });
         }
+        BuildStatus::Queued => open_started_attempt(ctx, &row, start).await,
+        _ => {}
     }
 
+    update_derivation_build_status(ctx, row, BuildStatus::Building).await?;
+    Ok(TransitionReport::default())
+}
+
+async fn open_started_attempt(ctx: &DbContext, shared_build: &MDerivationBuild, start: BuildStart) {
+    let Some(evaluation) = dispatch_evaluation(ctx, start.dispatched_job).await else {
+        return;
+    };
+    let Some(build_job) = find_or_create_build_job(ctx, evaluation, shared_build).await else {
+        return;
+    };
+
+    let superseded =
+        gradient_db::scheduling::build_attempt::latest_attempt_id(&ctx.worker_db, shared_build.id)
+            .await;
+    match gradient_db::scheduling::build_attempt::open_attempt(
+        &ctx.worker_db,
+        build_job,
+        shared_build.id,
+        start.dispatched_job,
+        start.substitute,
+        start.build_context,
+    )
+    .await
+    {
+        Ok(_) => finalize_superseded_log(ctx, superseded).await,
+        Err(e) => warn!(error = %e, "failed to open build_attempt"),
+    }
+}
+
+async fn dispatch_evaluation(
+    ctx: &DbContext,
+    dispatched_job: DispatchedJobId,
+) -> Option<EvaluationId> {
+    match gradient_entity::dispatched_job::Entity::find_by_id(dispatched_job)
+        .one(&ctx.worker_db)
+        .await
+    {
+        Ok(Some(dispatch)) => Some(dispatch.evaluation_id),
+        Ok(None) => {
+            warn!(%dispatched_job, "dispatch row missing while opening build_attempt");
+            None
+        }
+        Err(e) => {
+            warn!(error = %e, %dispatched_job, "dispatch row lookup failed while opening build_attempt");
+            None
+        }
+    }
+}
+
+async fn running_attempt_id(
+    ctx: &DbContext,
+    derivation_build: DerivationBuildId,
+) -> Option<BuildAttemptId> {
+    gradient_db::scheduling::build_attempt::latest_attempt(&ctx.worker_db, derivation_build)
+        .await
+        .ok()
+        .flatten()
+        .filter(|attempt| attempt.outcome == AttemptOutcome::Running)
+        .map(|attempt| attempt.id)
+}
+
+async fn stamp_dispatched_at(ctx: &DbContext, derivation_build: DerivationBuildId) {
     if let Err(e) = EDerivationBuild::update_many()
         .col_expr(CDerivationBuild::DispatchedAt, Expr::value(now()))
         .filter(CDerivationBuild::Id.eq(derivation_build))
@@ -1124,23 +1172,8 @@ async fn finalize_superseded_log(
 async fn find_or_create_build_job(
     ctx: &DbContext,
     evaluation: EvaluationId,
-    derivation_build: DerivationBuildId,
+    shared_build: &MDerivationBuild,
 ) -> Option<BuildJobId> {
-    let shared_build = match EDerivationBuild::find_by_id(derivation_build)
-        .one(&ctx.worker_db)
-        .await
-    {
-        Ok(Some(a)) => a,
-        Ok(None) => {
-            warn!(%derivation_build, "shared build missing while opening build_attempt");
-            return None;
-        }
-        Err(e) => {
-            warn!(error = %e, %derivation_build, "shared build lookup failed while opening build_attempt");
-            return None;
-        }
-    };
-
     let existing = EBuildJob::find()
         .filter(CBuildJob::Evaluation.eq(evaluation))
         .filter(CBuildJob::Derivation.eq(shared_build.derivation))
@@ -1156,7 +1189,7 @@ async fn find_or_create_build_job(
         id: BuildJobId::now_v7(),
         evaluation,
         derivation: shared_build.derivation,
-        derivation_build,
+        derivation_build: shared_build.id,
         created_at: now(),
         ..Default::default()
     }

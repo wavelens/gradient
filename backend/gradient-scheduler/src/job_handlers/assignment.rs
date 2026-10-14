@@ -90,21 +90,6 @@ impl Scheduler {
     }
 
     pub async fn job_rejected(&self, worker_id: &str, job_id: &str) {
-        if let Some(shared_build) = self
-            .active_job(job_id)
-            .await
-            .and_then(|job| job.derivation_build())
-            && let Err(e) = gradient_db::scheduling::build_attempt::abort_running_attempts(
-                &self.db.worker_db,
-                &[shared_build],
-                None,
-                "the worker rejected the job",
-            )
-            .await
-        {
-            warn!(error = %e, %worker_id, %job_id, "failed to close the attempt of a rejected job");
-        }
-
         let worker = worker_id.to_owned();
         let job_id = job_id.to_owned();
         let _ = self
@@ -219,13 +204,7 @@ pub(crate) async fn assigned_transition(
     let budget = transition_budget(config.proto.worker_heartbeat_timeout_secs);
     match tokio::time::timeout(
         budget,
-        graph.transition(Transition::Assigned {
-            evaluation: rec.evaluation_id,
-            shared_build,
-            dispatched_job: rec.assignment_id,
-            substitute: rec.substitute,
-            build_context: rec.build_context.clone(),
-        }),
+        graph.transition(Transition::Assigned { shared_build }),
     )
     .await
     {
