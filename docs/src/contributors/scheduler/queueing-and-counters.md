@@ -100,7 +100,7 @@ A `settle_need` call must follow each call.
 - An entry point with `build_job.aborted` set wants nothing until a retry clears the mark.
 - Entry points of an `Aborted` evaluation want nothing. An aborted evaluation would otherwise keep its own builds wanted, and the next check would thaw them.
 - Entry points of a `Completed` or `Failed` evaluation still want the closure below them. A retired output of such an entry point will be built again.
-- `status::release_evaluation_need` will update the need below the entry points of an aborted evaluation, inside the abort transition.
+- `status::release_evaluation_need` updates the need below the entry points of an aborted evaluation, inside the abort transition. Every abort sends it: hard aborts after aborting the unshared builds, soft aborts and the stuck-evaluation recovery without touching builds.
 - `update_need` and `settle_need` are crate-private. Other crates call `update_and_settle_need`, and every needs-build move can skip and thaw inline. The consistency check's `settle_skipped` is the table-wide backstop, reporting `skipped_moves`.
 
 ## Evaluation Verdict

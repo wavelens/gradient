@@ -382,8 +382,11 @@ async fn d05_aborting_an_evaluation_aborts_only_builds_nobody_else_names_and_rel
     case.set_evaluation_status(e1, EvaluationStatus::Aborted)
         .await;
 
-    case.transition(Transition::AbortEvaluationSharedBuilds { evaluation: e1 })
-        .await;
+    case.transition(Transition::AbortEvaluationSharedBuilds {
+        evaluation: e1,
+        hard: true,
+    })
+    .await;
 
     for path in [A1, O] {
         let build = case.sb(path).await;

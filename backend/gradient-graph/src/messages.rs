@@ -156,6 +156,7 @@ pub enum Transition {
     },
     AbortEvaluationSharedBuilds {
         evaluation: EvaluationId,
+        hard: bool,
     },
     PrioritizeEvaluation {
         evaluation: EvaluationId,

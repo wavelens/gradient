@@ -13,6 +13,7 @@ use gradient_db::status::change_evaluation_status;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::ConnectionTrait;
+use sea_orm::sea_query::Expr;
 use tracing::debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,7 +34,15 @@ pub async fn abort_evaluation<C: ConnectionTrait>(
         return Ok(false);
     }
 
-    if change_evaluation_status(db, eval_id, EvaluationStatus::ABORT, |update| update)
+    let finished = |update: sea_orm::UpdateMany<EEvaluation>| {
+        update
+            .col_expr(CEvaluation::FinishedAt, Expr::value(now()))
+            .col_expr(
+                CEvaluation::WaitingReason,
+                Expr::value(None::<serde_json::Value>),
+            )
+    };
+    if change_evaluation_status(db, eval_id, EvaluationStatus::ABORT, finished)
         .await?
         .is_none()
     {

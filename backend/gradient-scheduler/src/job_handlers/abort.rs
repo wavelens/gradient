@@ -44,7 +44,7 @@ impl Scheduler {
         let scheduler = Arc::clone(self);
         self.db.shutdown.spawn(async move {
             let shared_builds = scheduler
-                .abort_evaluation_shared_builds(evaluation_id)
+                .abort_evaluation_shared_builds(evaluation_id, true)
                 .await;
             if !shared_builds.is_empty() {
                 scheduler
@@ -55,11 +55,9 @@ impl Scheduler {
     }
 
     pub async fn stop_aborted_evaluation(&self, evaluation: EvaluationId, hard_abort: bool) {
-        let shared_builds = if hard_abort {
-            self.abort_evaluation_shared_builds(evaluation).await
-        } else {
-            Vec::new()
-        };
+        let shared_builds = self
+            .abort_evaluation_shared_builds(evaluation, hard_abort)
+            .await;
 
         self.cancel_evaluation_jobs(evaluation, &shared_builds)
             .await;
@@ -130,17 +128,20 @@ impl Scheduler {
         .report(&self.db.worker_db, evaluation_id)
         .await;
 
-        let shared_builds = self.abort_evaluation_shared_builds(evaluation_id).await;
+        let shared_builds = self
+            .abort_evaluation_shared_builds(evaluation_id, true)
+            .await;
         self.log_aborted_jobs(evaluation_id, shared_builds).await;
     }
 
     pub(crate) async fn abort_evaluation_shared_builds(
         &self,
         evaluation: EvaluationId,
+        hard: bool,
     ) -> Vec<DerivationBuildId> {
         match self
             .graph
-            .transition(Transition::AbortEvaluationSharedBuilds { evaluation })
+            .transition(Transition::AbortEvaluationSharedBuilds { evaluation, hard })
             .await
         {
             Ok(report) => report.aborted_shared_builds,

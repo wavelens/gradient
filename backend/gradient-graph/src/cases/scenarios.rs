@@ -459,8 +459,11 @@ async fn l03_skip_and_thaw_over_three_evaluations_and_a_gc() {
 
     case.set_evaluation_status(e1, EvaluationStatus::Aborted)
         .await;
-    case.transition(Transition::AbortEvaluationSharedBuilds { evaluation: e1 })
-        .await;
+    case.transition(Transition::AbortEvaluationSharedBuilds {
+        evaluation: e1,
+        hard: true,
+    })
+    .await;
 
     let status = case.sb(A1).await.status;
     assert_eq!(status, BuildStatus::Aborted, "after 1: sb(A1)");

@@ -118,7 +118,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             gradient_db::graph::repair::repair_build_graph(ctx, scope).await?;
             Ok(TransitionReport::default())
         }
-        Transition::AbortEvaluationSharedBuilds { evaluation } => {
+        Transition::AbortEvaluationSharedBuilds { evaluation, hard } => {
             let Some(eval) = EEvaluation::find_by_id(evaluation)
                 .one(&ctx.worker_db)
                 .await?
@@ -126,8 +126,11 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 return Ok(TransitionReport::default());
             };
 
-            let aborted_shared_builds =
-                gradient_db::status::abort_eval_shared_builds(ctx, &eval).await?;
+            let aborted_shared_builds = if hard {
+                gradient_db::status::abort_eval_shared_builds(ctx, &eval).await?
+            } else {
+                Vec::new()
+            };
             gradient_db::status::release_evaluation_need(ctx, eval.id).await?;
             Ok(TransitionReport {
                 aborted_shared_builds,

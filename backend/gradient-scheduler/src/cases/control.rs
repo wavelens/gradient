@@ -63,7 +63,7 @@ impl SchedulerCase {
     }
 
     pub async fn recover_drv_stuck_evals(&self) {
-        crate::waiting_state::recover_drv_stuck_evals(&self.scheduler.db)
+        crate::waiting_state::recover_drv_stuck_evals(&self.scheduler)
             .await
             .expect("the drv recovery runs");
     }

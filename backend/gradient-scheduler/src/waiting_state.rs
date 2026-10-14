@@ -494,7 +494,8 @@ pub async fn reheal_graph_stuck_evals(db: &WorkerDb, graph: &Graph) -> Result<()
 /// A build target's own `.drv` is producerless, and the daemon-free server cannot reproduce one. A
 /// fresh evaluation of the same commit is the sole recovery. A `DrvRecovery` run stalling the same
 /// way is failed, not retried, to avoid a loop.
-pub async fn recover_drv_stuck_evals(db: &DbContext) -> Result<()> {
+pub async fn recover_drv_stuck_evals(scheduler: &crate::Scheduler) -> Result<()> {
+    let db = &scheduler.db;
     let waiting = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
         .all(&db.worker_db)
@@ -535,6 +536,7 @@ pub async fn recover_drv_stuck_evals(db: &DbContext) -> Result<()> {
 
         match gradient_ci::trigger_drv_recovery(&db.worker_db, &task, &eval).await {
             Ok(new_eval) => {
+                scheduler.stop_aborted_evaluation(eval.id, false).await;
                 info!(stuck = %eval.id, recovery = %new_eval.id, "auto-triggered .drv-recovery re-evaluation");
                 db.record_evaluation_created(&new_eval).await;
             }
