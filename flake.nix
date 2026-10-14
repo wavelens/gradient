@@ -168,10 +168,18 @@
           gradient-nix;
       };
 
-      nix = final: prev: {
-        gradient-nix = ((prev.nixVersions.nixComponents_2_35.appendPatches (
+      nix = final: prev: let
+        version = "2.35.3";
+        src = prev.fetchFromGitHub {
+          owner = "NixOS";
+          repo = "nix";
+          tag = version;
+          hash = "sha256-qtlx8ywd1qj2ToZTNBunXE7JUajLtw44ja3r7+d47D4=";
+        };
+      in {
+        gradient-nix = (((prev.nixVersions.nixComponents_2_35.overrideSource src).appendPatches (
           map (patch: ./nix/patches/nix + "/${patch}") (builtins.attrNames (builtins.readDir ./nix/patches/nix))
-        )).overrideScope (finalScope: prevScope: { withAWS = false; })).nix-everything;
+        )).overrideScope (finalScope: prevScope: { inherit version; withAWS = false; })).nix-everything;
       };
     };
 
