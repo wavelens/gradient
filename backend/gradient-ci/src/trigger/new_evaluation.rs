@@ -13,29 +13,19 @@ use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter, RuntimeErr, sqlx,
 };
 
 pub(super) async fn ensure_no_active_evaluation<C: ConnectionTrait>(
     db: &C,
     task_id: TaskId,
+    branch: &str,
 ) -> Result<(), TriggerError> {
-    let in_progress = EEvaluation::find()
-        .filter(CEvaluation::Task.eq(task_id))
-        .filter(
-            Condition::any()
-                .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
-                .add(CEvaluation::Status.eq(EvaluationStatus::Fetching))
-                .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
-                .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
-                .add(CEvaluation::Status.eq(EvaluationStatus::Building))
-                .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
-        )
-        .one(db)
-        .await?;
-
-    if in_progress.is_some() {
+    if gradient_db::evaluations::branch::in_flight_on_branch(db, task_id, branch)
+        .await?
+        .is_some()
+    {
         return Err(TriggerError::AlreadyInProgress);
     }
 
@@ -72,6 +62,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     author_name: Option<String>,
     trigger: Option<gradient_types::ids::TaskTriggerId>,
     concurrent: bool,
+    branch: String,
     repository_override: Option<String>,
     wildcard_override: Option<String>,
     source_comment: Option<serde_json::Value>,
@@ -79,7 +70,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     walk_mode: WalkMode,
 ) -> Result<MEvaluation, TriggerError> {
     if !concurrent {
-        ensure_no_active_evaluation(db, task.id).await?;
+        ensure_no_active_evaluation(db, task.id, &branch).await?;
     }
 
     // A dangling `task.last_evaluation` must resolve to `None` before the insert. The
@@ -114,6 +105,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         updated_at: now,
         trigger,
         concurrent,
+        branch,
         source_comment,
         started_by,
         walk_mode,
@@ -138,17 +130,17 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     Ok(evaluation)
 }
 
-const ONE_ACTIVE_PER_TASK: &str = "uq_evaluation_one_active_per_task";
+const ONE_ACTIVE_PER_BRANCH: &str = "uq_evaluation_one_active_per_branch";
 
 fn active_evaluation_conflict(err: DbErr) -> TriggerError {
-    if violates_one_active_per_task(&err) {
+    if violates_one_active_per_branch(&err) {
         TriggerError::AlreadyInProgress
     } else {
         TriggerError::Db(err)
     }
 }
 
-fn violates_one_active_per_task(err: &DbErr) -> bool {
+fn violates_one_active_per_branch(err: &DbErr) -> bool {
     let (DbErr::Query(RuntimeErr::SqlxError(sqlx_err))
     | DbErr::Exec(RuntimeErr::SqlxError(sqlx_err))) = err
     else {
@@ -157,6 +149,6 @@ fn violates_one_active_per_task(err: &DbErr) -> bool {
     matches!(
         sqlx_err.as_ref(),
         sqlx::Error::Database(db_err)
-            if db_err.is_unique_violation() && db_err.constraint() == Some(ONE_ACTIVE_PER_TASK)
+            if db_err.is_unique_violation() && db_err.constraint() == Some(ONE_ACTIVE_PER_BRANCH)
     )
 }

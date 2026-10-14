@@ -12,6 +12,7 @@
 pub use sea_orm_migration::prelude::*;
 
 mod m20261013_000000_baseline;
+mod m20261014_000000_evaluation_branch;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -39,6 +40,9 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20261013_000000_baseline::Migration)]
+        vec![
+            Box::new(m20261013_000000_baseline::Migration),
+            Box::new(m20261014_000000_evaluation_branch::Migration),
+        ]
     }
 }

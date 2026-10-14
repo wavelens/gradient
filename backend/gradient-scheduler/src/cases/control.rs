@@ -7,11 +7,12 @@
 use std::time::Duration;
 
 use chrono::NaiveDateTime;
+use gradient_ci::ApplyOutcome;
 use gradient_db::deliveries::pending::{self, Outcome, PendingDeliveryKind};
 use gradient_db::deliveries::trigger_fire::{TriggerFire, enqueue_trigger_fires};
 use gradient_db::status::BuildRefusal;
 use gradient_entity::ids::{DerivationId, DispatchedJobId, EvaluationId, TaskTriggerId};
-use gradient_entity::{dispatched_job, evaluation, pending_delivery};
+use gradient_entity::{dispatched_job, evaluation, pending_delivery, task};
 use gradient_fixtures::shape::build_assignment;
 use gradient_graph::{
     Demotion, NarCommit, NarCommitted, RequeueScope, SignTargets, Transition, TransitionReport,
@@ -269,6 +270,42 @@ impl SchedulerCase {
             claimed.push(delivery);
         }
         claimed
+    }
+
+    pub async fn apply_trigger(
+        &self,
+        trigger: TaskTriggerId,
+        branch: &str,
+        commit: &[u8],
+    ) -> ApplyOutcome {
+        let row = self.trigger(trigger).await;
+        let task = self
+            .db
+            .find::<task::Entity>(row.task)
+            .await
+            .expect("the task of the trigger");
+        let input = aliases::trigger_input(
+            trigger,
+            row.trigger_type,
+            branch,
+            commit,
+            self.scheduler.db.config.cache.max_storage_gb,
+        );
+        let outcome = gradient_ci::apply_trigger(&self.scheduler.db.worker_db, &task, input)
+            .await
+            .expect("the trigger applies");
+        if let ApplyOutcome::Created {
+            aborted_evaluation: Some(aborted),
+            hard_abort,
+            ..
+        } = &outcome
+        {
+            self.scheduler
+                .stop_aborted_evaluation(*aborted, *hard_abort)
+                .await;
+        }
+        self.settled().await;
+        outcome
     }
 
     pub async fn enqueue_trigger_fire(

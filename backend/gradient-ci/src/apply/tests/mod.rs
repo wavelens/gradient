@@ -9,7 +9,7 @@ mod fixtures;
 use super::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, park_if_storage_full};
 use fixtures::{
     input, make_commit, make_eval, make_task_with_concurrency, make_task_with_last_eval,
-    one_active_per_task_violation, with_eval_worker, with_storage_not_full, with_writable_cache,
+    one_active_per_branch_violation, with_eval_worker, with_storage_not_full, with_writable_cache,
 };
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_fixtures::mock::{empty_db, mock_db};
@@ -118,6 +118,7 @@ async fn skip_concurrency_with_running_eval() {
     let db = mock_db()
         .append_query_results([vec![running_eval.clone()]])
         .append_query_results([Vec::<gradient_entity::commit::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .into_connection();
 
     let trig = TaskTriggerId::now_v7();
@@ -176,6 +177,7 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
 
     let db = mock_db()
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
         .append_query_results([vec![{
             let mut m = make_eval(
@@ -227,8 +229,9 @@ async fn unique_constraint_violation_returns_skipped_concurrency() {
     let db = mock_db()
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, vec![1u8; 20])]])
-        .append_query_errors([one_active_per_task_violation()])
+        .append_query_errors([one_active_per_branch_violation()])
         .into_connection();
 
     let res = apply_trigger(
@@ -305,6 +308,7 @@ async fn hard_abort_populates_aborted_fields() {
     let db = mock_db()
         .append_query_results([vec![running_eval.clone()]])
         .append_query_results([Vec::<gradient_entity::commit::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![running_eval.clone()]])
         .append_query_results([vec![running_eval.clone()]])
         .append_exec_results([MockExecResult {
@@ -376,6 +380,7 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
     let db = mock_db()
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
         .append_query_results([vec![{
             let mut m = make_eval(
@@ -403,6 +408,7 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
     let applied = ApplyInput {
         trigger_id: trig,
         trigger_type: TriggerType::ReporterPullRequest,
+        branch: gradient_types::branch_key::pull_request(42),
         commit_hash: new_hash,
         commit_message: None,
         author_name: None,
@@ -461,6 +467,7 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
     };
 
     let db = mock_db()
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
@@ -533,6 +540,7 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
     };
 
     let db = mock_db()
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_ci::ApplyOutcome;
 use gradient_db::deliveries::trigger_fire::TriggerFire;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{self, EvaluationKind, EvaluationStatus};
@@ -14,6 +15,7 @@ use gradient_entity::task_trigger::TriggerType;
 use gradient_entity::{commit, task};
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_pool::session_port::SessionSignal;
+use gradient_types::branch_key;
 use gradient_wire::types::JobKind;
 
 use super::{
@@ -783,6 +785,116 @@ async fn t15_a_hard_abort_spares_a_build_a_live_third_evaluation_wants() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn t18_hard_abort_leaves_the_evaluation_of_another_pull_request_running() {
+    let (e1, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .branch(&branch_key::pull_request(1))
+            .task_option(|t| t.concurrency = ConcurrencyPolicy::HardAbort)
+            .trigger(
+                t1,
+                TriggerType::ReporterPullRequest,
+                serde_json::json!({}),
+                true,
+                None,
+            )
+            .into_cache(CacheId::now_v7())
+            .worker_registration("w-reg")
+            .startable(A, A_OUT),
+    )
+    .await;
+
+    let outcome = case
+        .apply_trigger(t1, &branch_key::pull_request(2), &[2u8; 20])
+        .await;
+    assert!(
+        matches!(
+            outcome,
+            ApplyOutcome::Created {
+                aborted_evaluation: None,
+                ..
+            }
+        ),
+        "after 1: the trigger creates an evaluation and aborts none, got {outcome:?}"
+    );
+    let fresh = evaluations_besides(&case, &[e1]).await;
+    let [e2] = fresh.as_slice() else {
+        panic!("after 1: a single new evaluation, got {fresh:?}");
+    };
+    assert_eq!(
+        (e2.branch.as_str(), e2.status, e2.concurrent),
+        (
+            branch_key::pull_request(2).as_str(),
+            EvaluationStatus::Queued,
+            false
+        ),
+        "after 1: E2"
+    );
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::Building,
+        "after 1: evaluation(E1).status"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn t19_skip_on_a_branch_lets_another_branch_start() {
+    let (e1, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let repo = GitRepo::new();
+    let c0 = repo.commit("c0");
+    let c1 = repo.commit("c1");
+    repo.push("main", &c1);
+    let case = SchedulerCase::start(
+        polled(
+            e1,
+            t1,
+            &repo,
+            &c0,
+            EvaluationStatus::Building,
+            ConcurrencyPolicy::Skip,
+        )
+        .branch(&branch_key::branch("feature"))
+        .startable(A, A_OUT),
+    )
+    .await;
+
+    case.fire_once().await;
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e1]).await;
+    let [e2] = fresh.as_slice() else {
+        panic!("after 1: a single new evaluation, got {fresh:?}");
+    };
+    assert_eq!(
+        (
+            commit_of(&case, e2).await,
+            e2.branch.clone(),
+            e2.status,
+            e2.concurrent
+        ),
+        (
+            c1,
+            branch_key::branch("main"),
+            EvaluationStatus::Queued,
+            false
+        ),
+        "after 1: E2"
+    );
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::Building,
+        "after 1: evaluation(E1).status"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
 fn due_polling(e0: EvaluationId, t1: TaskTriggerId, repo: &GitRepo) -> Shape {
     shape()
         .evaluation(e0)
@@ -810,6 +922,7 @@ fn polled(
         .evaluation_status(status)
         .repository(&repo.url())
         .commit_hash(commit)
+        .branch(&branch_key::branch("main"))
         .last_evaluation(e0)
         .task_option(|t| t.concurrency = policy)
         .trigger(

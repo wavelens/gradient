@@ -7,10 +7,18 @@
 use super::context::TaskGitContext;
 use super::remote::ls_remote_head;
 use crate::SourceError;
+use gradient_db::evaluations::branch::newest_on_branch;
+use gradient_types::branch_key;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 use tracing::{debug, info, instrument, warn};
+
+fn database_error(e: sea_orm::DbErr) -> SourceError {
+    SourceError::Database {
+        reason: e.to_string(),
+    }
+}
 
 impl TaskGitContext<'_> {
     #[instrument(skip(self), fields(task_id = %self.task.id, task_name = %self.task.name))]
@@ -20,11 +28,46 @@ impl TaskGitContext<'_> {
     ) -> Result<(bool, Vec<u8>), SourceError> {
         debug!("Checking for updates on task");
 
+        let remote_hash = self.remote_head(branch).await?;
+        debug!(remote_hash = %vec_to_hex(&remote_hash), "Retrieved remote hash");
+
+        let newest = newest_on_branch(
+            &self.ctx.worker_db,
+            self.task.id,
+            &branch_key::polled(branch),
+        )
+        .await
+        .map_err(database_error)?;
+        let head_evaluated = match &newest {
+            Some(evaluation) => self.commit_hash(evaluation).await? == Some(remote_hash.clone()),
+            None => false,
+        };
+
+        if self.task.force_evaluation {
+            if head_evaluated && newest.is_some_and(|e| e.status.is_active()) {
+                debug!("Evaluation of the remote head in progress, skipping forced re-eval");
+                return Ok((false, remote_hash));
+            }
+            info!("Force evaluation enabled, updating task");
+            self.clear_force_evaluation().await;
+            return Ok((true, remote_hash));
+        }
+
+        if head_evaluated {
+            debug!("Remote hash matches the newest evaluation of the branch, no update needed");
+            return Ok((false, remote_hash));
+        }
+
+        info!("Remote hash differs from the newest evaluation of the branch, update needed");
+        Ok((true, remote_hash))
+    }
+
+    async fn remote_head(&self, branch: Option<&str>) -> Result<Vec<u8>, SourceError> {
         let url = self.task.repository.clone();
         let ssh_creds = self.ssh_creds.clone();
         let branch_owned = branch.map(|b| b.to_owned());
 
-        let remote_hash = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let branch_ref = branch_owned.as_deref();
             if let Some((private_key, public_key)) = ssh_creds {
                 ls_remote_head(&url, Some(&private_key), Some(&public_key), branch_ref)
@@ -35,77 +78,25 @@ impl TaskGitContext<'_> {
         .await
         .map_err(|e| SourceError::GitExecution {
             error: e.to_string(),
-        })??;
+        })?
+    }
 
-        let remote_hash_str = vec_to_hex(&remote_hash);
-        debug!(remote_hash = %remote_hash_str, "Retrieved remote hash");
+    async fn commit_hash(&self, evaluation: &MEvaluation) -> Result<Option<Vec<u8>>, SourceError> {
+        Ok(ECommit::find_by_id(evaluation.commit)
+            .one(&self.ctx.worker_db)
+            .await
+            .map_err(database_error)?
+            .map(|commit| commit.hash))
+    }
 
-        if self.task.force_evaluation {
-            // An in-flight evaluation must never be superseded. Re-triggering would let the
-            // concurrency policy abort a progressing build on every fast poll.
-            if let Some(last_evaluation) = self.task.last_evaluation
-                && let Some(evaluation) = EEvaluation::find_by_id(last_evaluation)
-                    .one(&self.ctx.worker_db)
-                    .await
-                    .map_err(|e| SourceError::Database {
-                        reason: e.to_string(),
-                    })?
-                && evaluation.status.is_active()
-            {
-                debug!(status = ?evaluation.status, "Evaluation already in progress, skipping forced re-eval");
-                return Ok((false, remote_hash));
-            }
-            info!("Force evaluation enabled, updating task");
-            if let Err(e) = ETask::update_many()
-                .col_expr(CTask::ForceEvaluation, Expr::value(false))
-                .filter(CTask::Id.eq(self.task.id))
-                .exec(&self.ctx.worker_db)
-                .await
-            {
-                warn!(error = %e, "failed to clear force_evaluation flag");
-            }
-            return Ok((true, remote_hash));
+    async fn clear_force_evaluation(&self) {
+        if let Err(e) = ETask::update_many()
+            .col_expr(CTask::ForceEvaluation, Expr::value(false))
+            .filter(CTask::Id.eq(self.task.id))
+            .exec(&self.ctx.worker_db)
+            .await
+        {
+            warn!(error = %e, "failed to clear force_evaluation flag");
         }
-
-        // A dangling `last_evaluation` is treated like a fresh task with no previous evaluation.
-        // The pointer is healed on the next successful trigger.
-        if let Some(last_evaluation) = self.task.last_evaluation {
-            let evaluation = EEvaluation::find_by_id(last_evaluation)
-                .one(&self.ctx.worker_db)
-                .await
-                .map_err(|e| SourceError::Database {
-                    reason: e.to_string(),
-                })?;
-
-            if let Some(evaluation) = evaluation {
-                if evaluation.status.is_active() {
-                    debug!(status = ?evaluation.status, "Evaluation already in progress, skipping");
-                    return Ok((false, remote_hash));
-                }
-
-                let commit = ECommit::find_by_id(evaluation.commit)
-                    .one(&self.ctx.worker_db)
-                    .await
-                    .map_err(|e| SourceError::Database {
-                        reason: e.to_string(),
-                    })?;
-
-                if let Some(commit) = commit {
-                    if commit.hash == remote_hash {
-                        debug!("Remote hash matches current evaluation commit, no update needed");
-                        return Ok((false, remote_hash));
-                    }
-                    info!("Remote hash differs from current evaluation commit, update needed");
-                } else {
-                    info!(eval_id = %last_evaluation, "Last evaluation's commit row missing; treating as update needed");
-                }
-            } else {
-                info!(eval_id = %last_evaluation, "Last evaluation row missing; treating as no previous evaluation");
-            }
-        } else {
-            info!("No previous evaluation found, update needed");
-        }
-
-        Ok((true, remote_hash))
     }
 }

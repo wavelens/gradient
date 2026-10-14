@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `abort_evaluation` is only marking the evaluation `Aborted`. The caller must abort unneeded
-//! shared builds through the graph writer and call `Scheduler::cancel_evaluation_jobs` after
+//! `abort_evaluation` is only marking the evaluation `Aborted`. The caller must call
+//! `Scheduler::stop_aborted_evaluation`, which also aborts unneeded shared builds after
 //! `AbortKind::Hard`. The in-flight builds keep running and fill the cache after `AbortKind::Soft`.
 
 use gradient_db::lookup::by_id;

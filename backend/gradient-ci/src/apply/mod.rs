@@ -9,9 +9,9 @@ mod dedup;
 mod gates;
 
 use super::trigger::{TriggerError, trigger_evaluation};
-use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
+use gradient_entity::evaluation::WalkMode;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::ConnectionTrait;
 
 pub use gates::{
     park_if_no_cache, park_if_no_workers, park_if_pending_approval, park_if_storage_full,
@@ -25,7 +25,7 @@ pub use gates::{
 pub enum ApplyOutcome {
     Created {
         evaluation: MEvaluation,
-        /// The caller must call `Scheduler::cancel_evaluation_jobs` for this evaluation to purge
+        /// The caller must call `Scheduler::stop_aborted_evaluation` for this evaluation to purge
         /// its `JobTracker` entries.
         aborted_evaluation: Option<EvaluationId>,
         hard_abort: bool,
@@ -45,6 +45,7 @@ pub enum ApplyError {
 pub struct ApplyInput {
     pub trigger_id: TaskTriggerId,
     pub trigger_type: TriggerType,
+    pub branch: String,
     pub commit_hash: Vec<u8>,
     pub commit_message: Option<String>,
     pub author_name: Option<String>,
@@ -67,21 +68,8 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     task: &MTask,
     input: ApplyInput,
 ) -> Result<ApplyOutcome, ApplyError> {
-    // The in-flight lookup is serving both the commit dedup and the concurrency policy. Concurrent
-    // runs such as `input_update` flake bumps are excluded, mirroring the
-    // `uq_evaluation_one_active_per_task` partial index. A normal trigger must neither abort nor
-    // dedup-block them.
-    let active_codes: Vec<i32> = EvaluationStatus::ACTIVE
-        .iter()
-        .copied()
-        .map(i32::from)
-        .collect();
-    let in_flight = EEvaluation::find()
-        .filter(CEvaluation::Task.eq(task.id))
-        .filter(CEvaluation::Status.is_in(active_codes))
-        .filter(CEvaluation::Concurrent.eq(false))
-        .one(db)
-        .await?;
+    let in_flight =
+        gradient_db::evaluations::branch::in_flight_on_branch(db, task.id, &input.branch).await?;
 
     if dedup::skip_for_same_commit(db, task, &input, in_flight.as_ref()).await? {
         return Ok(ApplyOutcome::SkippedSameCommit);
@@ -99,6 +87,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         input.author_name,
         Some(input.trigger_id),
         decision.concurrent_flag,
+        input.branch,
         input.repository_override,
         input.wildcard_override,
         input.source_comment,

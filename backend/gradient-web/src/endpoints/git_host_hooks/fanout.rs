@@ -12,9 +12,8 @@ use gradient_ci::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, parse_o
 use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
 use gradient_entity::task_trigger as ept;
-use gradient_graph::Graph;
-use gradient_graph::Transition;
 use gradient_scheduler::Scheduler;
+use gradient_types::branch_key;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use std::sync::Arc;
@@ -24,6 +23,15 @@ use tracing::{info, warn};
 pub(super) enum PushRefKind<'a> {
     Branch(&'a str),
     Tag(&'a str),
+}
+
+impl PushRefKind<'_> {
+    fn branch_key(self) -> String {
+        match self {
+            Self::Branch(name) => branch_key::branch(name),
+            Self::Tag(name) => branch_key::tag(name),
+        }
+    }
 }
 
 #[allow(
@@ -46,6 +54,7 @@ pub(super) async fn trigger_push_for_integration(
         integration_id,
         event_repo_urls,
         TriggerType::ReporterPush,
+        ref_kind.branch_key(),
         commit_hash,
         commit_message,
         author_name,
@@ -102,12 +111,17 @@ pub(super) async fn trigger_pr_for_integration(
 ) -> WebhookTriggerOutcome {
     let action_owned = action.to_string();
     let branch_owned = branch.map(str::to_string);
+    let pull_request_key = approval_ctx.pr_number.map_or_else(
+        || branch_key::DEFAULT_BRANCH.to_owned(),
+        branch_key::pull_request,
+    );
     fan_out_triggers(
         ci,
         scheduler,
         integration_id,
         event_repo_urls,
         TriggerType::ReporterPullRequest,
+        pull_request_key,
         commit_hash,
         commit_message,
         author_name,
@@ -163,6 +177,7 @@ pub(super) async fn trigger_release_for_integration(
         integration_id,
         event_repo_urls,
         TriggerType::ReporterPush,
+        tag.map_or_else(|| branch_key::DEFAULT_BRANCH.to_owned(), branch_key::tag),
         commit_hash,
         commit_message,
         author_name,
@@ -213,6 +228,7 @@ async fn fan_out_triggers<F>(
     integration_id: IntegrationId,
     event_repo_urls: &[String],
     trigger_type: TriggerType,
+    branch: String,
     commit_hash: Vec<u8>,
     commit_message: Option<String>,
     author_name: Option<String>,
@@ -289,6 +305,7 @@ where
         let input = ApplyInput {
             trigger_id: trig.id,
             trigger_type,
+            branch: branch.clone(),
             commit_hash: commit_hash.clone(),
             commit_message: commit_message.clone(),
             author_name: author_name.clone(),
@@ -356,14 +373,8 @@ async fn apply_and_record(
             hard_abort,
         }) => {
             if let Some(aborted_id) = aborted_evaluation {
-                let shared_builds = if hard_abort {
-                    abort_eval_shared_builds(&scheduler.graph, aborted_id).await
-                } else {
-                    Vec::new()
-                };
-
                 scheduler
-                    .cancel_evaluation_jobs(aborted_id, &shared_builds)
+                    .stop_aborted_evaluation(aborted_id, hard_abort)
                     .await;
             }
             info!(
@@ -385,22 +396,6 @@ async fn apply_and_record(
         Err(e) => {
             warn!(error = %e, task_id = %task.id, "apply_trigger failed in webhook fan-out");
             push_skipped(outcome, task, project_name, "error");
-        }
-    }
-}
-
-async fn abort_eval_shared_builds(
-    graph: &Arc<Graph>,
-    evaluation: EvaluationId,
-) -> Vec<DerivationBuildId> {
-    match graph
-        .transition(Transition::AbortEvaluationSharedBuilds { evaluation })
-        .await
-    {
-        Ok(report) => report.aborted_shared_builds,
-        Err(e) => {
-            warn!(error = %e, evaluation_id = %evaluation, "aborting the evaluation's shared builds did not reach the graph writer");
-            Vec::new()
         }
     }
 }

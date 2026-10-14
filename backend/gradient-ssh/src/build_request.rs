@@ -248,6 +248,7 @@ async fn create_evaluation(
         kind: EvaluationKind::Ssh,
         started_by: Some(session.user.id),
         concurrent: true,
+        branch: gradient_types::branch_key::NO_BRANCH.to_owned(),
         created_at: created,
         updated_at: created,
         eval_drv_started_at: Some(created),

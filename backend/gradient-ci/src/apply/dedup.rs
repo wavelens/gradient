@@ -10,8 +10,6 @@ use gradient_types::triggers::TriggerType;
 use gradient_types::*;
 use sea_orm::ConnectionTrait;
 
-/// The in-flight check is catching a poll during a running build, even with a dangling
-/// `last_evaluation`. Time triggers and manual fires are bypassing the check.
 pub(super) async fn skip_for_same_commit<C: ConnectionTrait>(
     db: &C,
     task: &MTask,
@@ -30,10 +28,10 @@ pub(super) async fn skip_for_same_commit<C: ConnectionTrait>(
         return Ok(true);
     }
 
-    if let Some(prev) = task.last_evaluation
-        && let Some(prev_eval) = by_id::<EEvaluation, _>(db, prev).await?
-        && let Some(prev_commit) = by_id::<ECommit, _>(db, prev_eval.commit).await?
-        && prev_commit.hash == input.commit_hash
+    if let Some(newest) =
+        gradient_db::evaluations::branch::newest_on_branch(db, task.id, &input.branch).await?
+        && let Some(newest_commit) = by_id::<ECommit, _>(db, newest.commit).await?
+        && newest_commit.hash == input.commit_hash
     {
         return Ok(true);
     }

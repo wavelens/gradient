@@ -135,6 +135,7 @@ pub async fn create_input_update_eval<C: ConnectionTrait>(
         status: EvaluationStatus::Queued,
         kind: EvaluationKind::InputUpdate,
         concurrent: true,
+        branch: gradient_types::branch_key::NO_BRANCH.to_owned(),
         trigger,
         created_at: now,
         updated_at: now,

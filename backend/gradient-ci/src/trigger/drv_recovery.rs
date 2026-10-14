@@ -23,7 +23,7 @@ pub async fn trigger_drv_recovery<C: ConnectionTrait>(
     task: &MTask,
     stuck: &MEvaluation,
 ) -> Result<MEvaluation, TriggerError> {
-    // The single-active-per-task unique index is rejecting a second active row. The stuck
+    // The single-active-per-branch unique index is rejecting a second active row. The stuck
     // evaluation must leave the active set before the insert.
     abort_evaluation(db, stuck.id, AbortKind::Soft).await?;
 
@@ -35,6 +35,8 @@ pub async fn trigger_drv_recovery<C: ConnectionTrait>(
         repository: stuck.repository.clone(),
         commit: stuck.commit,
         wildcard: stuck.wildcard.clone(),
+        branch: stuck.branch.clone(),
+        concurrent: stuck.concurrent,
         status: EvaluationStatus::Queued,
         previous: Some(stuck.id),
         kind: EvaluationKind::DrvRecovery,

@@ -344,6 +344,8 @@ pub struct Model {
     pub trigger: Option<TaskTriggerId>,
     pub started_by: Option<UserId>,
     pub concurrent: bool,
+    #[sea_orm(column_type = "Text")]
+    pub branch: String,
     pub source_comment: Option<Json>,
     pub fetch_started_at: Option<NaiveDateTime>,
     pub eval_flake_started_at: Option<NaiveDateTime>,

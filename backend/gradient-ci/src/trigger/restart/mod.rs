@@ -24,7 +24,7 @@ pub async fn trigger_evaluation_retry<C: ConnectionTrait>(
     task: &MTask,
     prev_eval: &MEvaluation,
 ) -> Result<MEvaluation, TriggerError> {
-    ensure_no_active_evaluation(db, task.id).await?;
+    ensure_no_active_evaluation(db, task.id, &prev_eval.branch).await?;
 
     let prev_entry_points = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(prev_eval.id))
@@ -41,6 +41,7 @@ pub async fn trigger_evaluation_retry<C: ConnectionTrait>(
         repository: prev_eval.repository.clone(),
         commit: prev_eval.commit,
         wildcard: prev_eval.wildcard.clone(),
+        branch: prev_eval.branch.clone(),
         status: initial_status,
         previous: Some(prev_eval.id),
         created_at: now,

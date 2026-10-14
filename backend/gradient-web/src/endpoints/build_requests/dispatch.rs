@@ -272,6 +272,7 @@ pub(super) async fn queue_build_request<C: ConnectionTrait>(
             wildcard: target,
             status: gradient_entity::evaluation::EvaluationStatus::Queued,
             concurrent: true,
+            branch: gradient_types::branch_key::NO_BRANCH.to_owned(),
             created_at: now_ts,
             updated_at: now_ts,
             ..Default::default()

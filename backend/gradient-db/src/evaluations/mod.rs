@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod branch;
 pub mod counters;
 pub mod draining;
 pub mod expected_thunks;

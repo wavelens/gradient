@@ -38,6 +38,7 @@ use gradient_storage::NarStore;
 use gradient_storage::nar_extract::{
     ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
 };
+use gradient_types::branch_key;
 use gradient_types::input::{hex_to_vec, vec_to_hex};
 use gradient_types::*;
 use gradient_util::latest::Latest;
@@ -256,6 +257,11 @@ pub async fn post_task_evaluate(
     // A pinned run is an out-of-band request, typically from a deployment tool. Marking it
     // concurrent is keeping it from queueing behind or aborting the task's own CI run.
     let concurrent = pinned_run;
+    let branch = if pinned_run {
+        branch_key::NO_BRANCH
+    } else {
+        branch_key::DEFAULT_BRANCH
+    };
 
     let eval = gradient_ci::trigger_evaluation(
         &state.web_db,
@@ -265,6 +271,7 @@ pub async fn post_task_evaluate(
         Some(author_name),
         None,
         concurrent,
+        branch.to_owned(),
         None,
         attr,
         None,

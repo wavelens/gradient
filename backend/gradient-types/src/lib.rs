@@ -8,6 +8,7 @@ pub mod actions;
 
 extern crate self as gradient_types;
 
+pub mod branch_key;
 pub mod cli;
 pub mod config;
 pub mod constants;

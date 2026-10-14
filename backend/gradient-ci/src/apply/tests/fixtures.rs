@@ -67,6 +67,7 @@ pub fn input(trig: TaskTriggerId, ttype: TriggerType, hash: Vec<u8>, manual: boo
     ApplyInput {
         trigger_id: trig,
         trigger_type: ttype,
+        branch: String::new(),
         commit_hash: hash,
         commit_message: None,
         author_name: None,
@@ -147,11 +148,11 @@ impl sqlx::error::DatabaseError for ActiveEvaluationExists {
     }
 
     fn constraint(&self) -> Option<&str> {
-        Some("uq_evaluation_one_active_per_task")
+        Some("uq_evaluation_one_active_per_branch")
     }
 }
 
-pub fn one_active_per_task_violation() -> DbErr {
+pub fn one_active_per_branch_violation() -> DbErr {
     DbErr::Query(RuntimeErr::SqlxError(Arc::new(sqlx::Error::Database(
         Box::new(ActiveEvaluationExists),
     ))))

@@ -18,10 +18,9 @@ use chrono::Utc;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::ServerState;
 use gradient_db::lookup::by_ids;
-use gradient_graph::Graph;
-use gradient_graph::Transition;
 use gradient_scheduler::Scheduler;
 use gradient_sources::resolve_head;
+use gradient_types::branch_key;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -357,6 +356,7 @@ pub async fn fire_now(
     let input = ApplyInput {
         trigger_id: row.id,
         trigger_type,
+        branch: branch_key::polled(branch_for_fire.as_deref()),
         commit_hash,
         commit_message: Some(commit_message),
         author_name: Some(author_name),
@@ -389,14 +389,8 @@ pub async fn fire_now(
             hard_abort,
         } => {
             if let Some(aborted_id) = aborted_evaluation {
-                let shared_builds = if hard_abort {
-                    abort_eval_shared_builds(&state.graph, aborted_id).await
-                } else {
-                    Vec::new()
-                };
-
                 scheduler
-                    .cancel_evaluation_jobs(aborted_id, &shared_builds)
+                    .stop_aborted_evaluation(aborted_id, hard_abort)
                     .await;
             }
 
@@ -413,20 +407,4 @@ pub async fn fire_now(
     };
 
     Ok(ok_json(body))
-}
-
-async fn abort_eval_shared_builds(
-    graph: &Arc<Graph>,
-    evaluation: EvaluationId,
-) -> Vec<DerivationBuildId> {
-    match graph
-        .transition(Transition::AbortEvaluationSharedBuilds { evaluation })
-        .await
-    {
-        Ok(report) => report.aborted_shared_builds,
-        Err(e) => {
-            tracing::warn!(error = %e, evaluation_id = %evaluation, "aborting the evaluation's shared builds did not reach the graph writer");
-            Vec::new()
-        }
-    }
 }

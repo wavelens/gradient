@@ -73,6 +73,7 @@ use gradient_db::deliveries::trigger_fire::{TriggerFire, enqueue_trigger_fires};
 use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::task_trigger as ept;
 use gradient_sources::{check_task_updates, get_commit_info};
+use gradient_types::branch_key;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use gradient_util::supervision::{Pass, PassError, RunsOn};
@@ -218,6 +219,10 @@ fn polling_branch(cfg: &TriggerConfig) -> Option<String> {
     }
 }
 
+fn branch_key_of(cfg: &TriggerConfig) -> String {
+    branch_key::polled(polling_branch(cfg).as_deref())
+}
+
 async fn apply_resolved_head(
     scheduler: &Scheduler,
     trig: &ept::Model,
@@ -256,6 +261,7 @@ async fn apply_to_task(
         ApplyInput {
             trigger_id: trig.id,
             trigger_type: cfg.trigger_type(),
+            branch: branch_key_of(cfg),
             commit_hash,
             commit_message: Some(msg),
             author_name: Some(author),
@@ -276,7 +282,9 @@ async fn apply_to_task(
             hard_abort,
         }) => {
             if let Some(aborted_id) = aborted_evaluation {
-                cancel_aborted(scheduler, aborted_id, hard_abort).await;
+                scheduler
+                    .stop_aborted_evaluation(aborted_id, hard_abort)
+                    .await;
             }
             info!(task = %task.name, trigger_id = %trig.id, evaluation_id = %evaluation.id, "trigger created evaluation");
             scheduler.db.record_evaluation_created(&evaluation).await;
@@ -288,18 +296,6 @@ async fn apply_to_task(
             error!(error = %e, trigger_id = %trig.id, "trigger application failed");
         }
     }
-}
-
-async fn cancel_aborted(scheduler: &Scheduler, aborted_id: EvaluationId, hard_abort: bool) {
-    let shared_builds = if hard_abort {
-        scheduler.abort_evaluation_shared_builds(aborted_id).await
-    } else {
-        Vec::new()
-    };
-
-    scheduler
-        .cancel_evaluation_jobs(aborted_id, &shared_builds)
-        .await;
 }
 
 async fn commit_metadata(

@@ -76,7 +76,7 @@ impl Rows {
         self.s6_disconnected_workers_have_no_open_row(after);
         self.s14_a_single_running_attempt_per_shared_build(after);
         self.s19_waiting_reason_only_while_waiting(after);
-        self.s20_a_single_active_evaluation_per_task(after);
+        self.s20_a_single_active_evaluation_per_branch(after);
         self.s21_a_single_open_attempt_per_cluster(after);
         self.s22_closed_attempts_have_no_open_row(after);
         self.s23_running_clusters_have_a_started_attempt(after);
@@ -214,15 +214,15 @@ impl Rows {
         );
     }
 
-    fn s20_a_single_active_evaluation_per_task(&self, after: &str) {
+    fn s20_a_single_active_evaluation_per_branch(&self, after: &str) {
         assert_unique(
             "S20",
             after,
-            "active evaluations of task",
+            "active evaluations of task and branch",
             self.evaluations
                 .iter()
                 .filter(|e| e.status.is_active() && !e.concurrent)
-                .filter_map(|e| Some((e.task?, e.id))),
+                .filter_map(|e| Some(((e.task?, e.branch.clone()), e.id))),
         );
     }
 

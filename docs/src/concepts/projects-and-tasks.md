@@ -34,7 +34,16 @@ flowchart LR
 
 ## Concurrency
 
-A task is limited to one active evaluation at a time. Triggers firing during a running evaluation follow the task's concurrency policy.
+Tasks allow a single active evaluation per branch. Triggers firing during a running evaluation of the same branch follow the task's concurrency policy. Evaluations of other branches keep running.
+
+| Trigger | Branch of the evaluation |
+|---|---|
+| Push | Pushed branch or tag |
+| Pull request | Pull request number, shared by every push to the pull request |
+| Polling | Polled branch, or the default branch of the remote without a configured branch |
+| Cron schedule, manual start, API | Default branch of the task |
+
+Evaluations of a pinned commit and `gradient build` requests belong to no branch. Concurrency policies skip them.
 
 | Policy | Running evaluation | Running builds |
 |---|---|---|

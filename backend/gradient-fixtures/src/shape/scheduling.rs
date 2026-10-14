@@ -59,6 +59,10 @@ impl Shape {
         self.evaluation_option(|e| e.wildcard = wildcard.into())
     }
 
+    pub fn branch(self, branch: &str) -> Self {
+        self.evaluation_option(|e| e.branch = branch.into())
+    }
+
     pub fn without_commit(self) -> Self {
         self.evaluation_option(|e| e.commit = CommitId::now_v7())
     }

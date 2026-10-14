@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_ci::ApplyInput;
 use gradient_db::WorkerDb;
 use gradient_entity::ids::DispatchedJobId;
+use gradient_entity::ids::TaskTriggerId;
+use gradient_entity::task_trigger::TriggerType;
 use gradient_wire::types::{CandidateScore, ClusterMembership, EvalMessageLevel, EvalStatsReport};
 
 use crate::Scheduler;
@@ -62,4 +65,27 @@ pub(super) async fn abandon_row(db: &WorkerDb, assignment: DispatchedJobId) {
     gradient_db::scheduling::assignment_record::abandon_open_assignment(db, assignment)
         .await
         .expect("the dispatched_job row closes");
+}
+
+pub(super) fn trigger_input(
+    trigger: TaskTriggerId,
+    trigger_type: TriggerType,
+    branch: &str,
+    commit: &[u8],
+    instance_max_storage_gb: u32,
+) -> ApplyInput {
+    ApplyInput {
+        trigger_id: trigger,
+        trigger_type,
+        branch: branch.to_owned(),
+        commit_hash: commit.to_vec(),
+        commit_message: None,
+        author_name: None,
+        manual: false,
+        gate_approval: None,
+        repository_override: None,
+        wildcard_override: None,
+        source_comment: None,
+        instance_max_storage_gb,
+    }
 }
