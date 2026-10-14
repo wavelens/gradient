@@ -257,6 +257,17 @@ impl SchedulerCase {
             .and_then(|s| s.jobs.remove(key))
     }
 
+    async fn owns_remembered(&self, worker: &str, key: &str) -> bool {
+        let remembered = lock(&self.sessions)
+            .get(worker)
+            .and_then(|s| s.jobs.get(key))
+            .map(|j| j.assignment_id);
+        match remembered {
+            Some(assignment) => self.scheduler.owns_dispatch(worker, key, assignment).await,
+            None => false,
+        }
+    }
+
     pub async fn accept(&self, _worker: &str, key: &str) {
         self.scheduler.cluster_member_accepted(key).await;
     }
@@ -297,6 +308,9 @@ impl SchedulerCase {
     }
 
     pub async fn report_building(&self, worker: &str, key: &str) {
+        if !self.owns_remembered(worker, key).await {
+            return;
+        }
         self.scheduler
             .handle_build_status_update(build_id(key), worker)
             .await;
@@ -304,12 +318,15 @@ impl SchedulerCase {
 
     pub async fn report_build_output(
         &self,
-        _worker: &str,
+        worker: &str,
         key: &str,
         outputs: Vec<BuildOutput>,
         substituted: bool,
         metrics: Option<BuildMetrics>,
     ) {
+        if !self.owns_remembered(worker, key).await {
+            return;
+        }
         let _ = self
             .scheduler
             .handle_build_output(key, build_id(key), outputs, metrics, substituted)
@@ -325,6 +342,9 @@ impl SchedulerCase {
         elapsed_ms: u64,
     ) {
         self.forget(worker, key);
+        if !self.scheduler.owns_dispatch(worker, key, assignment).await {
+            return;
+        }
         self.scheduler
             .close_job_timeline(
                 assignment,
@@ -342,11 +362,12 @@ impl SchedulerCase {
         assignment: DispatchedJobId,
         failure: Failure,
     ) {
-        if self.scheduler.cluster_member_released(key).await {
-            self.forget(worker, key);
+        self.forget(worker, key);
+        if !self.scheduler.owns_dispatch(worker, key, assignment).await
+            || self.scheduler.cluster_member_released(key).await
+        {
             return;
         }
-        self.forget(worker, key);
         let _ = self
             .scheduler
             .persist_job_timeline(
@@ -387,7 +408,10 @@ impl SchedulerCase {
         assignment.assignment_id()
     }
 
-    pub async fn report_status(&self, _worker: &str, key: &str, status: EvaluationStatus) {
+    pub async fn report_status(&self, worker: &str, key: &str, status: EvaluationStatus) {
+        if !self.owns_remembered(worker, key).await {
+            return;
+        }
         self.scheduler.handle_eval_status_update(key, status).await;
     }
 
@@ -404,7 +428,10 @@ impl SchedulerCase {
         }
     }
 
-    pub async fn report_flake_source(&self, _worker: &str, key: &str, path: &str) {
+    pub async fn report_flake_source(&self, worker: &str, key: &str, path: &str) {
+        if !self.owns_remembered(worker, key).await {
+            return;
+        }
         self.scheduler
             .persist_flake_source(key, Some(path.to_owned()))
             .await;
@@ -412,10 +439,13 @@ impl SchedulerCase {
 
     pub async fn report_eval_result(
         &self,
-        _worker: &str,
+        worker: &str,
         key: &str,
         derivations: Vec<DiscoveredDerivation>,
     ) {
+        if !self.owns_remembered(worker, key).await {
+            return;
+        }
         let _ = self
             .scheduler
             .handle_eval_result(key, derivations, Vec::new(), Vec::new())
@@ -440,23 +470,32 @@ impl SchedulerCase {
         .await;
     }
 
-    pub async fn report_eval_stats(&self, _worker: &str, key: &str, stats: EvalStatsReport) {
+    pub async fn report_eval_stats(&self, worker: &str, key: &str, stats: EvalStatsReport) {
+        if !self.owns_remembered(worker, key).await {
+            return;
+        }
         let _ = aliases::store_eval_stats(&self.scheduler, key, stats).await;
     }
 
     pub async fn report_input_update_result(
         &self,
-        _worker: &str,
+        worker: &str,
         key: &str,
         candidate_lock: &str,
         bumped: Vec<BumpedInputWire>,
     ) {
+        if !self.owns_remembered(worker, key).await {
+            return;
+        }
         self.scheduler
             .persist_input_update_result(key, candidate_lock.to_owned(), bumped)
             .await;
     }
 
-    pub async fn report_input_update_expansion(&self, _worker: &str, key: &str, matched: &[&str]) {
+    pub async fn report_input_update_expansion(&self, worker: &str, key: &str, matched: &[&str]) {
+        if !self.owns_remembered(worker, key).await {
+            return;
+        }
         self.scheduler
             .persist_input_update_expansion(key, matched.iter().map(|m| (*m).to_owned()).collect())
             .await;
@@ -473,6 +512,9 @@ impl SchedulerCase {
             .strip_prefix(EVAL_PREFIX)
             .and_then(|id| id.parse().ok())
             .unwrap_or_else(|| panic!("{key} is no eval job key"));
+        if !self.owns_remembered(worker, key).await {
+            return;
+        }
         let _ = self
             .scheduler
             .handle_import_request(
@@ -506,7 +548,7 @@ impl SchedulerCase {
                 None => self.job_of_row(key, *assignment_id).await,
             };
             self.remember(worker, key, *assignment_id, job.clone());
-            active.push(Reattached::single((*key).to_owned(), job));
+            active.push(Reattached::single((*key).to_owned(), *assignment_id, job));
         }
         let (caps, projects, port) = {
             let sessions = lock(&self.sessions);

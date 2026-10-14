@@ -136,7 +136,7 @@ A restart can lose work in flight, but no queued job.
 |---|---|
 | Worker | Aborting every running job and reconnecting with backoff (1 s, doubling up to 60 s) |
 | Worker | Sending a full handshake, then `RequestJobList` and a `RequestJob` per kind |
-| Server | Dropping every report whose `job_id` and `assignment_id` the current session did not assign |
+| Server | Dropping every report whose `assignment_id` is not the live dispatch of the job in the scheduler core |
 | Server | `recover_interrupted_work` is closing open assignments and aborting running attempts before the first session. Every `Building` build and every interrupted evaluation is queued again |
 
 ## Server Stop

@@ -217,6 +217,7 @@ impl Scheduler {
             .iter()
             .map(|s| AttemptMember {
                 job_id: s.key.clone(),
+                assignment_id: s.record.assignment_id,
                 worker: s.worker.clone(),
                 role: s.role.clone(),
                 index: s.index,

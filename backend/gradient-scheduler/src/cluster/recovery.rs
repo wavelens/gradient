@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use gradient_pool::session_port::SessionSignal;
-use gradient_types::ids::ClusterAttemptId;
+use gradient_types::ids::{ClusterAttemptId, DispatchedJobId};
 use tracing::warn;
 
 use super::settlement::*;
@@ -27,13 +27,15 @@ impl Scheduler {
             Recorded::Preparing {
                 attempt,
                 worker,
+                assignment_id,
                 report,
             } => {
                 if let MemberReport::Completed { job }
                 | MemberReport::Failed { job, .. }
                 | MemberReport::Lost { job } = report
                 {
-                    self.return_member(&worker, job_id, job, attempt).await;
+                    self.return_member(&worker, job_id, assignment_id, job, attempt)
+                        .await;
                 }
                 self.fail_prepare(attempt).await;
                 Ok(())
@@ -175,6 +177,7 @@ impl Scheduler {
         &self,
         worker: &str,
         key: &str,
+        assignment_id: DispatchedJobId,
         job: PendingJob,
         attempt: ClusterAttemptId,
     ) {
@@ -183,6 +186,7 @@ impl Scheduler {
             .call(|reply| SchedulerMsg::ReturnMember {
                 worker,
                 key,
+                assignment_id,
                 job,
                 attempt,
                 reply,

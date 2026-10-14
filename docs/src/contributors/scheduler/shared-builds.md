@@ -86,7 +86,7 @@ All other messages flush the queue first. A write after a batch or a commit will
 - Two walks of overlapping graphs converge on one `derivation` row per `(hash, name)` pair. `WALKED_UPSERT` and `STUB_INSERT` use `ON CONFLICT (hash, name)`.
 - Edge inserts (`derivation_dependency`) use `ON CONFLICT DO NOTHING`. Two walks of one node record the same set.
 - `accepts_batches` can take batches only while the evaluation is `Fetching`, `EvaluatingFlake` or `EvaluatingDerivation`. Other batches get dropped as stale (`RecordReport.skipped`).
-- Two walks of one evaluation differ in the assignment id minted at hand-out. The worker must echo the id on every report. The session will drop a report for an assignment that another session handed out (`gradient-proto/src/handler/inbound.rs`, `owned`).
+- Two walks of an evaluation differ in the assignment id minted at dispatch. Workers echo the id on every report. Sessions forward a report once the scheduler core confirmed the id as the live dispatch of the job on that worker (`Scheduler::owns_dispatch`). Sessions drop reports of any other dispatch.
 
 ## Cache Availability Flag
 

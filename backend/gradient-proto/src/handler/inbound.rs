@@ -106,6 +106,7 @@ impl ActiveJobs {
             .iter()
             .map(|(id, job)| gradient_scheduler::jobs::Reattached {
                 job_id: id.clone(),
+                assignment_id: job.assignment_id,
                 job: job.pending.clone(),
                 cluster: job.cluster,
             })
@@ -116,16 +117,6 @@ impl ActiveJobs {
 impl From<HashMap<String, ActiveJob>> for ActiveJobs {
     fn from(jobs: HashMap<String, ActiveJob>) -> Self {
         Self(Arc::new(gradient_util::sync::Mutex::new(jobs)))
-    }
-}
-
-/// Only the dispatch this session handed out is matching, which is covering a reconnecting worker
-/// declared dead. One hole is still open. An evicted worker with a live socket can report after a
-/// re-dispatch. Closing it is requiring the `DispatchedJobId` check inside the core actor.
-pub(super) fn assignment_matches(current: Option<DispatchedJobId>, reported: &str) -> bool {
-    match (current, reported.parse::<DispatchedJobId>()) {
-        (Some(current), Ok(reported)) => current == reported,
-        _ => false,
     }
 }
 
@@ -225,7 +216,7 @@ impl<'a> InboundContext<'a> {
                 assignment_id,
                 update,
             } => {
-                if self.owns(&job_id, &assignment_id) {
+                if self.owns(&job_id, &assignment_id).await {
                     debug!(peer_id = %self.peer_id, %job_id, ?update, "JobUpdate");
                     self.job_events
                         .push(JobEvent::Update { job_id, update })
@@ -243,7 +234,7 @@ impl<'a> InboundContext<'a> {
                 paths_done,
                 paths_total,
             } => {
-                if self.owns(&job_id, &assignment_id) {
+                if self.owns(&job_id, &assignment_id).await {
                     let progress = BuildProgress {
                         phase: build_progress_phase(phase),
                         bytes_done,
@@ -260,7 +251,7 @@ impl<'a> InboundContext<'a> {
                 assignment_id,
                 progress,
             } => {
-                if self.owns(&job_id, &assignment_id) {
+                if self.owns(&job_id, &assignment_id).await {
                     self.on_eval_progress(&job_id, progress);
                 }
                 true
@@ -274,7 +265,7 @@ impl<'a> InboundContext<'a> {
                 let report = ReportedTimeline::received(spans, elapsed_ms);
                 self.forget_uploads(&job_id, uploads).await;
                 self.logs.flush().await;
-                if let Some(assignment_id) = self.owned(&job_id, &assignment_id) {
+                if let Some(assignment_id) = self.owned(&job_id, &assignment_id).await {
                     self.active.remove(&job_id);
                     self.job_events
                         .push(JobEvent::Completed {
@@ -299,14 +290,14 @@ impl<'a> InboundContext<'a> {
                 let report = ReportedTimeline::received(spans, elapsed_ms);
                 self.forget_uploads(&job_id, uploads).await;
                 self.logs.flush().await;
-                if self.owned(&job_id, &assignment_id).is_some()
-                    && self.scheduler.cluster_member_released(&job_id).await
-                {
+                let Some(assignment_id) = self.owned(&job_id, &assignment_id).await else {
+                    return true;
+                };
+                self.active.remove(&job_id);
+                if self.scheduler.cluster_member_released(&job_id).await {
                     info!(peer_id = %self.peer_id, %job_id, %error, "waiting cluster member released before its start");
-                    self.active.remove(&job_id);
-                } else if let Some(assignment_id) = self.owned(&job_id, &assignment_id) {
+                } else {
                     warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = report.spans.len(), "job failed");
-                    self.active.remove(&job_id);
                     self.scheduler
                         .close_failed_job_timeline(assignment_id, kind, report);
                     self.job_events
@@ -356,8 +347,9 @@ impl<'a> InboundContext<'a> {
                 request_id,
                 drv_paths,
             } => {
+                let owned = self.owns_handed_dispatch(&job_id).await;
                 match self.active.eval(&job_id) {
-                    Some((evaluation, _)) => {
+                    Some((evaluation, _)) if owned => {
                         self.job_events
                             .push(JobEvent::ImportRequest {
                                 job_id,
@@ -367,7 +359,7 @@ impl<'a> InboundContext<'a> {
                             })
                             .await;
                     }
-                    None => {
+                    _ => {
                         warn!(peer_id = %self.peer_id, %job_id, "import request for an evaluation this session does not run");
                     }
                 }
@@ -424,18 +416,33 @@ impl<'a> InboundContext<'a> {
         }
     }
 
-    fn owned(&self, job_id: &str, reported: &str) -> Option<DispatchedJobId> {
-        let current = self.active.assignment_id(job_id);
-        if assignment_matches(current, reported) {
-            return current;
+    async fn owned(&self, job_id: &str, reported: &str) -> Option<DispatchedJobId> {
+        if let Ok(assignment_id) = reported.parse::<DispatchedJobId>()
+            && self
+                .scheduler
+                .owns_dispatch(self.peer_id, job_id, assignment_id)
+                .await
+        {
+            return Some(assignment_id);
         }
 
-        warn!(peer_id = %self.peer_id, %job_id, reported, ?current, "report from another dispatch; dropped");
+        warn!(peer_id = %self.peer_id, %job_id, reported, "report from another dispatch; dropped");
         None
     }
 
-    fn owns(&self, job_id: &str, reported: &str) -> bool {
-        self.owned(job_id, reported).is_some()
+    async fn owns(&self, job_id: &str, reported: &str) -> bool {
+        self.owned(job_id, reported).await.is_some()
+    }
+
+    async fn owns_handed_dispatch(&self, job_id: &str) -> bool {
+        match self.active.assignment_id(job_id) {
+            Some(assignment_id) => {
+                self.scheduler
+                    .owns_dispatch(self.peer_id, job_id, assignment_id)
+                    .await
+            }
+            None => false,
+        }
     }
 
     fn rpc(&self) -> RpcContext {
@@ -1133,22 +1140,6 @@ pub(in crate::handler) mod fixture {
             *gradient_wire::PROTO_VERSIONS.end(),
         )
         .expect("deserialise ServerMessage")
-    }
-}
-
-#[cfg(test)]
-mod assignment_id_tests {
-    use super::assignment_matches;
-    use gradient_types::ids::DispatchedJobId;
-
-    #[test]
-    fn only_the_current_assignment_is_accepted() {
-        let current = DispatchedJobId::now_v7();
-        let other = DispatchedJobId::now_v7();
-        assert!(assignment_matches(Some(current), &current.to_string()));
-        assert!(!assignment_matches(Some(current), &other.to_string()));
-        assert!(!assignment_matches(None, &current.to_string()));
-        assert!(!assignment_matches(Some(current), "not-a-uuid"));
     }
 }
 

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gradient_types::ids::{ClusterAttemptId, ClusterJobId};
+use gradient_types::ids::{ClusterAttemptId, ClusterJobId, DispatchedJobId};
 use gradient_util::sync::Mutex;
 use gradient_wire::types::{ClusterAddress, ClusterPeer};
 
@@ -23,6 +23,7 @@ pub const CLUSTER_RETRY_BACKOFF: Duration = Duration::from_secs(30);
 #[derive(Debug, Clone)]
 pub struct AttemptMember {
     pub job_id: String,
+    pub assignment_id: DispatchedJobId,
     pub worker: String,
     pub role: String,
     pub index: u32,
@@ -192,6 +193,7 @@ impl Attempts {
             return Recorded::Preparing {
                 attempt,
                 worker: member.worker.clone(),
+                assignment_id: member.assignment_id,
                 report,
             };
         }
@@ -390,6 +392,7 @@ mod tests {
     fn member(job: &str, worker: &str, role: &str, index: u32) -> AttemptMember {
         AttemptMember {
             job_id: job.into(),
+            assignment_id: DispatchedJobId::now_v7(),
             worker: worker.into(),
             role: role.into(),
             index,

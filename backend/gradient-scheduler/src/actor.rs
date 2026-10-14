@@ -191,6 +191,7 @@ pub enum SchedulerMsg {
     ReturnMember {
         worker: String,
         key: String,
+        assignment_id: DispatchedJobId,
         job: PendingJob,
         attempt: ClusterAttemptId,
         reply: RpcReplyPort<()>,
@@ -250,6 +251,12 @@ pub enum SchedulerMsg {
     ActiveJob {
         job_id: String,
         reply: RpcReplyPort<Option<PendingJob>>,
+    },
+    OwnsDispatch {
+        worker: String,
+        job_id: String,
+        assignment_id: DispatchedJobId,
+        reply: RpcReplyPort<bool>,
     },
     PendingJob {
         job_id: String,
@@ -587,7 +594,14 @@ impl SchedulerCore {
 
         let active = seats
             .iter()
-            .map(|s| (s.worker.clone(), s.key.clone(), s.job.clone()))
+            .map(|s| {
+                (
+                    s.worker.clone(),
+                    s.key.clone(),
+                    s.record.assignment_id,
+                    s.job.clone(),
+                )
+            })
             .collect();
         self.tracker.activate_members(attempt, active);
         for s in &seats {
@@ -859,12 +873,13 @@ impl Actor for CoreActor {
             SchedulerMsg::ReturnMember {
                 worker,
                 key,
+                assignment_id,
                 job,
                 attempt,
                 reply,
             } => {
                 core.tracker
-                    .activate_members(attempt, vec![(worker, key, job)]);
+                    .activate_members(attempt, vec![(worker, key, assignment_id, job)]);
                 let _ = reply.send(());
             }
             SchedulerMsg::Reserve { reservation, reply } => {
@@ -1003,6 +1018,14 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::ActiveJob { job_id, reply } => {
                 let _ = reply.send(core.tracker.active_job(&job_id).cloned());
+            }
+            SchedulerMsg::OwnsDispatch {
+                worker,
+                job_id,
+                assignment_id,
+                reply,
+            } => {
+                let _ = reply.send(core.tracker.owns_dispatch(&worker, &job_id, assignment_id));
             }
             SchedulerMsg::PendingJob { job_id, reply } => {
                 let _ = reply.send(core.tracker.pending_job(&job_id).cloned());

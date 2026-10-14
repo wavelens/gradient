@@ -561,15 +561,17 @@ const CANDIDATES_PER_DECISION: usize = 64;
 #[derive(Debug)]
 struct ActiveJob {
     worker: String,
+    assignment_id: DispatchedJobId,
     job: PendingJob,
     aborted_at: Option<Instant>,
     cluster: Option<ClusterAttemptId>,
 }
 
 impl ActiveJob {
-    fn new(worker: &str, job: PendingJob) -> Self {
+    fn new(worker: &str, assignment_id: DispatchedJobId, job: PendingJob) -> Self {
         Self {
             worker: worker.to_owned(),
+            assignment_id,
             job,
             aborted_at: None,
             cluster: None,
@@ -580,14 +582,16 @@ impl ActiveJob {
 #[derive(Debug, Clone)]
 pub struct Reattached {
     pub job_id: String,
+    pub assignment_id: DispatchedJobId,
     pub job: PendingJob,
     pub cluster: Option<ClusterAttemptId>,
 }
 
 impl Reattached {
-    pub fn single(job_id: String, job: PendingJob) -> Self {
+    pub fn single(job_id: String, assignment_id: DispatchedJobId, job: PendingJob) -> Self {
         Self {
             job_id,
+            assignment_id,
             job,
             cluster: None,
         }
@@ -1126,6 +1130,7 @@ impl JobTracker {
             .and_then(|ws| ws.remove(job_id))
             .is_some_and(|score| score.outputs_present);
 
+        let assignment_id = record.assignment_id;
         let assignment = Assignment {
             job: job.clone().into_job(),
             ram_need: job.ram_need(outputs_present),
@@ -1133,14 +1138,17 @@ impl JobTracker {
             assignment_record: record,
             pending: job.clone(),
         };
-        self.active
-            .insert(job_id.to_owned(), ActiveJob::new(worker_id, job));
+        self.active.insert(
+            job_id.to_owned(),
+            ActiveJob::new(worker_id, assignment_id, job),
+        );
         Some(assignment)
     }
 
     pub fn restore_active(&mut self, worker_id: &str, reattached: Reattached) {
         let Reattached {
             job_id,
+            assignment_id,
             job,
             cluster,
         } = reattached;
@@ -1153,9 +1161,20 @@ impl JobTracker {
             job_id,
             ActiveJob {
                 cluster,
-                ..ActiveJob::new(worker_id, job)
+                ..ActiveJob::new(worker_id, assignment_id, job)
             },
         );
+    }
+
+    pub fn owns_dispatch(
+        &self,
+        worker_id: &str,
+        job_id: &str,
+        assignment_id: DispatchedJobId,
+    ) -> bool {
+        self.active
+            .get(job_id)
+            .is_some_and(|a| a.worker == worker_id && a.assignment_id == assignment_id)
     }
 
     pub fn release_to_pending(&mut self, job_id: &str) {
@@ -1211,16 +1230,16 @@ impl JobTracker {
     pub fn activate_members(
         &mut self,
         attempt: ClusterAttemptId,
-        members: Vec<(String, String, PendingJob)>,
+        members: Vec<(String, String, DispatchedJobId, PendingJob)>,
     ) {
-        for (worker, key, job) in members {
+        for (worker, key, assignment_id, job) in members {
             self.forget_job_scores(&key);
             self.clusters.release(&key);
             self.active.insert(
                 key,
                 ActiveJob {
                     cluster: Some(attempt),
-                    ..ActiveJob::new(&worker, job)
+                    ..ActiveJob::new(&worker, assignment_id, job)
                 },
             );
         }
@@ -2915,7 +2934,12 @@ mod tests {
         let mut tracker = JobTracker::new();
         tracker.activate_members(
             ClusterAttemptId::now_v7(),
-            vec![("w1".into(), "m1".into(), eval_job(ProjectId::now_v7()))],
+            vec![(
+                "w1".into(),
+                "m1".into(),
+                DispatchedJobId::now_v7(),
+                eval_job(ProjectId::now_v7()),
+            )],
         );
 
         tracker.release_to_pending("m1");
@@ -2933,7 +2957,15 @@ mod tests {
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
-        tracker.activate_members(attempt, vec![("w1".into(), "m1".into(), eval_job(peer))]);
+        tracker.activate_members(
+            attempt,
+            vec![(
+                "w1".into(),
+                "m1".into(),
+                DispatchedJobId::now_v7(),
+                eval_job(peer),
+            )],
+        );
         assert_eq!(tracker.active_cluster("m1"), Some(attempt));
 
         let gone = tracker.worker_disconnected("w1");
@@ -3005,7 +3037,7 @@ mod tests {
 
         tracker.activate_members(
             ClusterAttemptId::now_v7(),
-            vec![("w1".into(), "eval:x".into(), job)],
+            vec![("w1".into(), "eval:x".into(), DispatchedJobId::now_v7(), job)],
         );
         tracker.remove_active("eval:x");
 
@@ -3021,6 +3053,7 @@ mod tests {
             "w1",
             Reattached {
                 job_id: "m1".into(),
+                assignment_id: DispatchedJobId::now_v7(),
                 job: eval_job(ProjectId::now_v7()),
                 cluster: Some(attempt),
             },
@@ -3028,5 +3061,28 @@ mod tests {
         tracker.release_to_pending("m1");
 
         assert_eq!(tracker.pending_count(), 0);
+    }
+
+    #[test]
+    fn only_the_live_dispatch_on_its_worker_owns_a_job() {
+        let mut tracker = JobTracker::new();
+        tracker.add_pending("eval:x".into(), eval_job(ProjectId::now_v7()));
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
+        let inst = gradient_pool::score::InstanceContext::default();
+        let claimed = tracker
+            .take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst)
+            .expect("w1 claims eval:x")
+            .assignment_id();
+        let reattached = DispatchedJobId::now_v7();
+        tracker.restore_active(
+            "w2",
+            Reattached::single("eval:y".into(), reattached, eval_job(ProjectId::now_v7())),
+        );
+
+        assert!(tracker.owns_dispatch("w1", "eval:x", claimed));
+        assert!(tracker.owns_dispatch("w2", "eval:y", reattached));
+        assert!(!tracker.owns_dispatch("w1", "eval:x", DispatchedJobId::now_v7()));
+        assert!(!tracker.owns_dispatch("w2", "eval:x", claimed));
+        assert!(!tracker.owns_dispatch("w1", "eval:z", claimed));
     }
 }

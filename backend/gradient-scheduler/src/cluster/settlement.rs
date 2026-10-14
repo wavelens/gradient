@@ -6,7 +6,7 @@
 
 use gradient_entity::cluster_attempt::ClusterAttemptOutcome;
 use gradient_entity::cluster_job::ClusterJobStatus;
-use gradient_types::ids::ClusterAttemptId;
+use gradient_types::ids::{ClusterAttemptId, DispatchedJobId};
 use gradient_wire::types::BuildFailureKind;
 
 use super::coordinator::AttemptMember;
@@ -110,6 +110,7 @@ pub enum Recorded {
     Preparing {
         attempt: ClusterAttemptId,
         worker: String,
+        assignment_id: DispatchedJobId,
         report: MemberReport,
     },
     Decided(ClusterAttemptId, Fate),
@@ -247,6 +248,7 @@ mod tests {
     fn member(job_id: &str, primary: bool, report: Option<MemberReport>) -> AttemptMember {
         AttemptMember {
             job_id: job_id.into(),
+            assignment_id: DispatchedJobId::now_v7(),
             worker: format!("w-{job_id}"),
             role: "r".into(),
             index: 0,

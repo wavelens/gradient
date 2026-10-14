@@ -240,6 +240,23 @@ impl Scheduler {
             .flatten()
     }
 
+    pub async fn owns_dispatch(
+        &self,
+        worker: &str,
+        job_id: &str,
+        assignment_id: gradient_types::ids::DispatchedJobId,
+    ) -> bool {
+        let (worker, job_id) = (worker.to_owned(), job_id.to_owned());
+        self.call(|reply| SchedulerMsg::OwnsDispatch {
+            worker,
+            job_id,
+            assignment_id,
+            reply,
+        })
+        .await
+        .unwrap_or(false)
+    }
+
     pub async fn pending_job(&self, job_id: &str) -> Option<jobs::PendingJob> {
         let job_id = job_id.to_owned();
         self.call(|reply| SchedulerMsg::PendingJob { job_id, reply })
