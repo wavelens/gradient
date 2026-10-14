@@ -5,6 +5,9 @@
  */
 
 mod insert;
+mod scheduling;
+
+pub use scheduling::{eval_assignment, eval_job_key};
 
 use chrono::{Duration, NaiveDateTime};
 use gradient_entity::build::BuildStatus;
@@ -18,10 +21,14 @@ use gradient_entity::ids::{
     TaskId, UserId,
 };
 use gradient_entity::{
-    StorePath, build_attempt, build_job, cache, cached_path, commit, derivation, derivation_build,
-    derivation_dependency, derivation_output, dispatched_job, entry_point, evaluation, project,
-    project_cache, task, user,
+    StorePath, build_attempt, build_job, cache, cache_upstream, cached_path, cluster_attempt,
+    cluster_job, cluster_member, commit, derivation, derivation_build, derivation_dependency,
+    derivation_feature, derivation_metric, derivation_output, dispatched_job, dispatched_job_phase,
+    entry_point, eval_cache_store, evaluation, evaluation_flake_input_override,
+    evaluation_input_update, evaluation_metric, feature, project, project_cache, task,
+    task_trigger, user, worker_registration,
 };
+use sea_orm::DatabaseConnection;
 use uuid::Uuid;
 
 use crate::database::TestDatabase;
@@ -49,11 +56,26 @@ pub struct Shape {
     pub(super) project_caches: Vec<project_cache::Model>,
     pub(super) assignments: Vec<dispatched_job::Model>,
     pub(super) attempts: Vec<build_attempt::Model>,
+    pub(super) triggers: Vec<task_trigger::Model>,
+    pub(super) clusters: Vec<cluster_job::Model>,
+    pub(super) members: Vec<cluster_member::Model>,
+    pub(super) cluster_attempts: Vec<cluster_attempt::Model>,
+    pub(super) phases: Vec<dispatched_job_phase::Model>,
+    pub(super) features: Vec<feature::Model>,
+    pub(super) derivation_features: Vec<derivation_feature::Model>,
+    pub(super) upstreams: Vec<cache_upstream::Model>,
+    pub(super) input_overrides: Vec<evaluation_flake_input_override::Model>,
+    pub(super) input_updates: Vec<evaluation_input_update::Model>,
+    pub(super) derivation_metrics: Vec<derivation_metric::Model>,
+    pub(super) evaluation_metrics: Vec<evaluation_metric::Model>,
+    pub(super) eval_caches: Vec<eval_cache_store::Model>,
+    pub(super) registrations: Vec<worker_registration::Model>,
     task_of: Vec<usize>,
     evaluation: Option<usize>,
     derivation: Option<usize>,
     cache: Option<usize>,
     cached_path: Option<usize>,
+    assignment: Option<usize>,
 }
 
 impl Shape {
@@ -291,7 +313,14 @@ impl Shape {
     pub fn open_assignment(mut self) -> Self {
         let (evaluation, at) = (self.current_evaluation(), self.current_derivation());
         let shared_build = self.shared_builds[at].id;
-        if self.assignment_of(shared_build).is_none() {
+        let key = build_job_key(shared_build);
+        if let Some(declared) = self
+            .assignments
+            .iter()
+            .position(|a| a.job_id.as_deref() == Some(key.as_str()))
+        {
+            self.assignment = Some(declared);
+        } else {
             let task = self.current_task();
             let assignment = build_assignment(
                 self.evaluations[evaluation].id,
@@ -310,6 +339,7 @@ impl Shape {
                 latest.dispatched_job = Some(assignment.id);
             }
             self.assignments.push(assignment);
+            self.assignment = Some(self.assignments.len() - 1);
         }
         self
     }
@@ -393,11 +423,16 @@ impl Shape {
             .collect()
     }
 
-    pub async fn into_database(mut self) -> TestDatabase {
-        self.attempts_follow_the_builds();
+    pub async fn into_database(self) -> TestDatabase {
         let db = TestDatabase::create().await;
-        insert::all(self, &db.connection()).await;
+        self.insert_into(&db.connection()).await;
         db
+    }
+
+    pub async fn insert_into(mut self, db: &DatabaseConnection) {
+        self.attempts_follow_the_builds();
+        self.open_member_rows();
+        insert::all(self, db).await;
     }
 
     fn attempts_follow_the_builds(&mut self) {
@@ -892,5 +927,279 @@ mod tests {
     #[should_panic(expected = "declare its output first")]
     fn a_cached_output_needs_a_declared_output() {
         let _ = shape().derivation(A).cached_output(A);
+    }
+
+    mod scheduling {
+        use gradient_entity::cache_upstream::CacheUpstreamKind;
+        use gradient_entity::cluster_job::ClusterJobStatus;
+        use gradient_entity::dispatched_job::DispatchedJobOutcome;
+        use gradient_entity::evaluation::EvaluationKind;
+        use gradient_entity::ids::{
+            CacheId, CacheUpstreamId, ClusterAttemptId, ClusterJobId, EvaluationId, TaskTriggerId,
+        };
+        use gradient_entity::project_cache::CacheSubscriptionMode;
+        use gradient_entity::task_trigger::TriggerType;
+        use gradient_entity::{
+            cache_upstream, cluster_attempt, cluster_job, cluster_member, derivation_feature,
+            derivation_metric, dispatched_job, dispatched_job_phase, eval_cache_store, evaluation,
+            evaluation_flake_input_override, evaluation_input_update, evaluation_metric, feature,
+            task, task_trigger, worker_registration,
+        };
+
+        use super::{A, A_OUT, B};
+        use crate::shape::{build_job_key, eval_job_key, shape};
+        use crate::test_date;
+
+        #[tokio::test]
+        async fn evaluation_fields_and_a_trigger_go_to_the_evaluation_and_task_rows() {
+            let (e, trigger) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+            let earlier = test_date() - chrono::Duration::hours(1);
+            let db = shape()
+                .evaluation(e)
+                .repository("file:///repo")
+                .commit_hash(&[7; 20])
+                .wildcard("pkg.*")
+                .evaluation_kind(EvaluationKind::InputUpdate)
+                .waiting_reason(serde_json::json!({"kind": "approval"}))
+                .updated_at(earlier)
+                .last_evaluation(e)
+                .trigger(
+                    trigger,
+                    TriggerType::Polling,
+                    serde_json::json!({"interval_secs": 60}),
+                    true,
+                    Some(earlier),
+                )
+                .input_override("nixpkgs", "github:a/b")
+                .input_update("c0", "g", &["nixpkgs"], true)
+                .worker_registration("w1")
+                .evaluation_metric(|m| m.peak_rss_mb = 512)
+                .into_database()
+                .await;
+
+            let row = db
+                .find::<evaluation::Entity>(e)
+                .await
+                .expect("the evaluation");
+            assert_eq!(
+                (row.repository.as_str(), row.wildcard.as_str(), row.kind),
+                ("file:///repo", "pkg.*", EvaluationKind::InputUpdate)
+            );
+            assert_eq!(row.updated_at, earlier);
+            assert!(row.waiting_reason.is_some());
+            let commit = db
+                .find::<gradient_entity::commit::Entity>(row.commit)
+                .await
+                .expect("the commit");
+            assert_eq!(commit.hash, vec![7; 20]);
+            let task = db
+                .find::<task::Entity>(db.task_of(e).await)
+                .await
+                .expect("the task");
+            assert_eq!(
+                (task.repository.as_str(), task.last_evaluation),
+                ("file:///repo", Some(e))
+            );
+            let triggers = db.rows::<task_trigger::Entity>().await;
+            assert!(
+                matches!(triggers.as_slice(), [t] if t.id == trigger && t.task == task.id && t.last_fired_at == Some(earlier)),
+                "{triggers:?}"
+            );
+            let overrides = db.rows::<evaluation_flake_input_override::Entity>().await;
+            assert!(
+                matches!(overrides.as_slice(), [o] if o.evaluation == e && o.input_name == "nixpkgs")
+            );
+            let updates = db.rows::<evaluation_input_update::Entity>().await;
+            assert!(
+                matches!(updates.as_slice(), [u] if u.evaluation == e && u.discover_only && u.base_commit == "c0")
+            );
+            let registrations = db.rows::<worker_registration::Entity>().await;
+            assert!(
+                matches!(registrations.as_slice(), [r] if r.peer_id == task.project && r.enable_eval)
+            );
+            let metrics = db.rows::<evaluation_metric::Entity>().await;
+            assert!(matches!(metrics.as_slice(), [m] if m.evaluation == e && m.peak_rss_mb == 512));
+            db.finish().await;
+        }
+
+        #[tokio::test]
+        async fn derivation_columns_features_and_metrics_are_written() {
+            let db = shape()
+                .evaluation(EvaluationId::now_v7())
+                .derivation(A)
+                .system("builtin")
+                .fixed_output()
+                .pname("hello")
+                .feature("kvm")
+                .derivation(B)
+                .feature("kvm")
+                .derivation(A)
+                .derivation_metric(|m| m.peak_ram_mb = Some(100))
+                .into_database()
+                .await;
+
+            let a = db.derivation(A).await;
+            assert_eq!(
+                (
+                    a.architecture.as_str(),
+                    a.is_fixed_output,
+                    a.pname.as_deref()
+                ),
+                ("builtin", true, Some("hello"))
+            );
+            let features = db.rows::<feature::Entity>().await;
+            assert!(
+                matches!(features.as_slice(), [f] if f.name == "kvm"),
+                "{features:?}"
+            );
+            assert_eq!(db.rows::<derivation_feature::Entity>().await.len(), 2);
+            let metrics = db.rows::<derivation_metric::Entity>().await;
+            assert!(
+                matches!(metrics.as_slice(), [m] if m.derivation == a.id && m.pname.as_deref() == Some("hello") && m.architecture == "builtin" && m.peak_ram_mb == Some(100)),
+                "{metrics:?}"
+            );
+            db.finish().await;
+        }
+
+        #[tokio::test]
+        async fn assignment_rows_take_the_worker_times_outcome_and_phases() {
+            let e = EvaluationId::now_v7();
+            let at = test_date() - chrono::Duration::hours(1);
+            let db = shape()
+                .evaluation(e)
+                .eval_assignment()
+                .by_worker("w1")
+                .dispatched_at(at)
+                .closed(DispatchedJobOutcome::Completed, at)
+                .worker_elapsed_ms(900)
+                .phase(0, 0, 100)
+                .phase(2, 100, 200)
+                .eval_assignment()
+                .derivation(A)
+                .job()
+                .open_assignment()
+                .ready_at(at)
+                .into_database()
+                .await;
+
+            let rows = db.rows::<dispatched_job::Entity>().await;
+            let key = eval_job_key(e);
+            let evals: Vec<_> = rows
+                .iter()
+                .filter(|r| r.job_id.as_deref() == Some(key.as_str()))
+                .collect();
+            let [closed, open] = evals.as_slice() else {
+                panic!("two eval rows: {rows:?}");
+            };
+            assert_eq!(
+                (
+                    closed.worker_id.as_str(),
+                    closed.dispatched_at,
+                    closed.worker_elapsed_ms
+                ),
+                ("w1", at, Some(900))
+            );
+            assert_eq!(closed.outcome, Some(DispatchedJobOutcome::Completed));
+            assert!(open.finished_at.is_none());
+            let phases = db.rows::<dispatched_job_phase::Entity>().await;
+            assert!(
+                matches!(phases.as_slice(), [p0, p1] if p0.dispatched_job == closed.id && p1.seq == 1 && p1.phase == 2),
+                "{phases:?}"
+            );
+            let build = db.open_assignment(A).await.expect("the build row");
+            assert_eq!(build.ready_at, Some(at));
+            db.finish().await;
+        }
+
+        #[tokio::test]
+        async fn a_cluster_with_an_open_attempt_opens_a_row_per_member() {
+            let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+            let (cluster, attempt) = (ClusterJobId::now_v7(), ClusterAttemptId::now_v7());
+            let db = shape()
+                .evaluation(e1)
+                .evaluation_member_of(cluster, "head", true, None)
+                .evaluation(e2)
+                .derivation(A)
+                .job()
+                .output(A_OUT)
+                .build_member_of(cluster, "node", false, Some("w5"))
+                .cluster(cluster, false, 2, ClusterJobStatus::Running, 1, test_date())
+                .cluster_attempt(cluster, attempt, Some(test_date()), None, None)
+                .into_database()
+                .await;
+
+            let clusters = db.rows::<cluster_job::Entity>().await;
+            assert!(matches!(clusters.as_slice(), [c] if c.retry_budget == 2 && c.attempts == 1));
+            let members = db.rows::<cluster_member::Entity>().await;
+            assert_eq!(members.len(), 2);
+            assert!(
+                members
+                    .iter()
+                    .any(|m| m.evaluation == Some(e1) && m.primary)
+            );
+            assert!(members.iter().any(|m| m.pin.as_deref() == Some("w5")));
+            let attempts = db.rows::<cluster_attempt::Entity>().await;
+            assert!(
+                matches!(attempts.as_slice(), [a] if a.id == attempt && a.finished_at.is_none())
+            );
+            let rows = db.rows::<dispatched_job::Entity>().await;
+            let build_key = build_job_key(db.shared_build(A).await.id);
+            assert!(rows.iter().all(|r| r.cluster_attempt == Some(attempt)));
+            assert!(rows.iter().any(|r| r.job_id == Some(eval_job_key(e1))));
+            assert!(
+                rows.iter()
+                    .any(|r| r.job_id == Some(build_key.clone()) && r.evaluation_id == e2)
+            );
+            assert_ne!(rows[0].worker_id, rows[1].worker_id);
+            db.finish().await;
+        }
+
+        #[tokio::test]
+        async fn an_upstream_and_an_eval_cache_are_written() {
+            let (cache, upstream) = (CacheId::now_v7(), CacheUpstreamId::now_v7());
+            let db = shape()
+                .evaluation(EvaluationId::now_v7())
+                .into_cache(cache)
+                .upstream(
+                    upstream,
+                    "http://127.0.0.1:1",
+                    "up-1:key",
+                    CacheUpstreamKind::Http,
+                    CacheSubscriptionMode::ReadOnly,
+                    false,
+                )
+                .eval_cache("fingerprint")
+                .into_database()
+                .await;
+
+            let upstreams = db.rows::<cache_upstream::Entity>().await;
+            assert!(
+                matches!(upstreams.as_slice(), [u] if u.id == upstream && u.cache == cache && !u.active && u.mode == CacheSubscriptionMode::ReadOnly),
+                "{upstreams:?}"
+            );
+            let caches = db.rows::<eval_cache_store::Entity>().await;
+            assert!(matches!(caches.as_slice(), [c] if c.fingerprint == "fingerprint"));
+            db.finish().await;
+        }
+
+        #[tokio::test]
+        async fn a_second_shape_joins_a_live_database() {
+            let (first, second) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+            let db = shape().evaluation(first).into_database().await;
+
+            shape()
+                .evaluation(second)
+                .without_task()
+                .insert_into(&db.connection())
+                .await;
+
+            let row = db
+                .find::<evaluation::Entity>(second)
+                .await
+                .expect("the evaluation");
+            assert_eq!(row.task, None);
+            assert_eq!(db.rows::<evaluation::Entity>().await.len(), 2);
+            db.finish().await;
+        }
     }
 }
