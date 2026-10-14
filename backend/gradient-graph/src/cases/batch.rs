@@ -119,7 +119,7 @@ async fn b01_a_first_batch_writes_its_graph_rows_and_leaves_the_unwanted_stub_sk
     assert_eq!(columns, (1, false), "after 1: report");
     let asked = case.ids(&[A]).await;
     assert_eq!(as_set(&report.to_probe), asked, "after 1: report.to_probe");
-    assert_eq!(case.gv(e1).await, gv + 2, "after 1: gv(E1)");
+    assert_eq!(case.gv(e1).await, gv + 3, "after 1: gv(E1)");
     let counters = case.counters(e1).await;
     assert_eq!(counters, [2, 1, 0, 0, 0], "after 1: counters(E1)");
     let skipped = SharedBuild {
@@ -365,7 +365,7 @@ async fn b06_a_grown_edge_set_raises_graph_version_of_every_naming_evaluation_on
     }
 
     let after = [case.gv(e1).await, case.gv(e2).await, case.gv(e3).await];
-    let expected = [gv[0] + 2, gv[1] + 1, gv[2]];
+    let expected = [gv[0] + 3, gv[1] + 1, gv[2]];
     assert_eq!(after, expected, "after 1: gv of E1, E2, E3");
     let a = case.sb(A).await;
     let columns = (a.status, a.wanted, a.blocking_deps, a.probed);

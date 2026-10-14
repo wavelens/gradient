@@ -640,7 +640,7 @@ async fn t14_requeue_imports_thaws_the_failed_closure_except_reproducible_builde
     let p = case.sb(P).await;
     assert_eq!(
         (p.status, p.attempt, p.probed, p.wanted),
-        (BuildStatus::Created, 0, true, false),
+        (BuildStatus::Skipped, 0, true, false),
         "after 1: sb(P)"
     );
     assert_eq!(

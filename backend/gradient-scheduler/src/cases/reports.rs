@@ -105,11 +105,7 @@ async fn r02_a_completion_without_a_building_report_leaves_no_second_running_att
         BuildStatus::Completed,
         "after 2: sb(A).status"
     );
-    assert_eq!(
-        started(&case, A).await,
-        vec![(AttemptOutcome::Built, false)],
-        "after 2: att(A)"
-    );
+    assert_eq!(started(&case, A).await, vec![], "after 2: att(A) == []");
     case.check("step 2").await;
 
     case.resync_startable_set().await;

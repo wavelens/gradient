@@ -334,6 +334,7 @@ fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
 fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![commit_row()]])
         .append_query_results([vec![eval_row(EvaluationStatus::Queued)]])
         .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])

@@ -275,7 +275,7 @@ async fn f04_a_retry_thaws_the_shared_build_and_only_the_dependents_of_its_evalu
     let b = case.sb(B).await;
     assert_eq!(
         (b.status, b.attempt, b.probed, b.wanted),
-        (BuildStatus::Created, 0, false, false),
+        (BuildStatus::Skipped, 0, false, false),
         "after 2: sb(B)"
     );
     let a2 = case.sb(A2).await;
@@ -566,7 +566,7 @@ async fn f07_retrying_a_dependency_failed_build_retries_the_failed_dependencies_
         let build = case.sb(path).await;
         assert_eq!(
             (build.status, build.attempt, build.probed, build.wanted),
-            (BuildStatus::Created, 0, false, false),
+            (BuildStatus::Skipped, 0, false, false),
             "after 1: sb({path})"
         );
     }

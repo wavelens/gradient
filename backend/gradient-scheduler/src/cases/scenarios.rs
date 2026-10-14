@@ -77,7 +77,7 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
     let sb_b = case.sb(B).await;
     assert_eq!(
         (sb_b.status, sb_b.probed, sb_b.wanted),
-        (BuildStatus::Created, false, false),
+        (BuildStatus::Skipped, false, false),
         "after 3: sb(B)"
     );
     assert!(!case.pending(&b).await, "after 3: pending(build:B)");

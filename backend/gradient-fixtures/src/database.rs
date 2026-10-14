@@ -264,8 +264,22 @@ impl TestDatabase {
 
     pub async fn finish(mut self) {
         self.finished = true;
-        let admin = connect(self.server.clone(), 1).await;
-        run(&admin, &format!("DROP DATABASE {} WITH (FORCE)", self.name)).await;
+        let (admin, name) = (connect(self.server.clone(), 1).await, &self.name);
+        run(
+            &admin,
+            &format!("ALTER DATABASE {name} ALLOW_CONNECTIONS false"),
+        )
+        .await;
+        // `WITH (FORCE)` refuses to end an autovacuum worker without `pg_signal_backend`; a plain drop ends it.
+        run(
+            &admin,
+            &format!(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+                 WHERE datname = '{name}' AND usename = current_user"
+            ),
+        )
+        .await;
+        run(&admin, &format!("DROP DATABASE {name}")).await;
         close(admin).await;
     }
 }
