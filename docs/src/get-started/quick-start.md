@@ -61,7 +61,7 @@ openssl rand -base64 48 > /var/lib/gradient-secrets/crypt
 }
 ```
 
-1.  An nginx virtual host from the module, answering on this domain.
+1.  An nginx virtual host from the module, answering on this domain. Only set it to false if you know what you are doing.
 2.  A local PostgreSQL database for Gradient.
 3.  A worker on the same host, self-registering and joining every project.
 4.  Gradient needs PostgreSQL 18 or newer. The NixOS default may be older.

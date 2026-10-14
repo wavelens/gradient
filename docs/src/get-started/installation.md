@@ -92,7 +92,7 @@ Root can keep ownership of the files. The server will read them as systemd crede
 
 ## 4. Reverse Proxy and TLS
 
-The server will handle the API, the worker protocol and the cache. A reverse proxy in front will deliver the web frontend and TLS.
+The server will handle the API, the worker protocol and the cache. A reverse proxy in front will deliver the web frontend and TLS. The server listens on `127.0.0.1:3000`, and `services.gradient.port` can change the port.
 
 === "nginx (default)"
 
