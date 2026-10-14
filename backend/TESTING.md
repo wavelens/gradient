@@ -1,259 +1,35 @@
 # Testing
 
-## Quick Start
+Details in `docs/src/contributors/tests.md`.
 
-```bash
-cargo test -p core       # pure-function tests, no DB needed
-cargo test -p web        # HTTP handler tests (mocked DB)
-cargo test -p builder    # scheduler logic (mocked DB)
-cargo test --workspace   # everything
-```
+## Running
 
----
+- Backend tests: `nix build .#checks.x86_64-linux.unittest`, nextest on a throwaway Postgres 18.
+- Local `cargo test` and `cargo nextest` over the whole workspace exceed the memory of a typical workstation.
+- Local checks before a commit: `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all -- --check`.
 
-## Philosophy
+## Scope
 
-The deleted tests shared three anti-patterns that made them worthless:
+- Tests check logic we wrote, not serde or SeaORM.
+- Calls into nix, git, the filesystem or the network go through a trait with an in-memory fake.
+- Tests without effect on our confidence stay out.
 
-| Anti-pattern | Why it's useless |
-|---|---|
-| `serde_json::to_string(x).contains("field")` | Tests serde's derive macro, not our code |
-| SeaORM MockDB returning what you inserted | Tests SeaORM, not our code |
-| Constructing a `Cli` and asserting `port == 3000` | That's a compile error, not a test |
+## Shape Tests
 
-**Tests should cover logic we wrote.** If deleting the test would not change the confidence we have in the code, the test should not exist.
+The graph writer and the scheduler have tests on a real Postgres 18 database.
 
----
+| Part | Location | Purpose |
+|---|---|---|
+| Test database | `gradient-fixtures/src/database.rs` | A fresh `test_<uuid>` database per test, cloned from the migrated `gradient_template` |
+| Shape builder | `gradient-fixtures/src/shape/` | The rows of a test as a chain of setters |
+| Graph case layer | `gradient-graph/src/cases/` | Graph writer on a shape, zero drift after the seed and at the end |
+| Scheduler case layer | `gradient-scheduler/src/cases/` | Scheduler core, graph writer and worker sessions on a shape, with invariant checks after each step |
 
-## What Needs a Mock
+- Server settings: `PGHOST`, `PGUSER` and `PGDATABASE`, with a role allowed to create databases (`CREATEDB`).
+- Tests end with `finish()`. Tests without `finish()` panic on drop and failing tests leave the database behind.
+- `SchedulerCase::check(after)` can wait for detached tasks, expect zero drift and assert the invariants listed in the tests page.
 
-### Database - `sea_orm::MockDatabase`
+## Other Suites
 
-Any function that calls into `state.db`. SeaORM's `MockDatabase` replays pre-loaded query results in order; each `.append_query_results([...])` call feeds the next `SELECT`, each `.append_exec_results([...])` feeds the next `INSERT`/`UPDATE`/`DELETE`.
-
-Use the `db_with` helper in `tests/common` (one per crate) instead of repeating the 4-line setup:
-
-```rust
-pub fn db_with<T: sea_orm::IntoMockRow>(rows: Vec<T>) -> DatabaseConnection {
-    MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([rows])
-        .into_connection()
-}
-```
-
-Chain multiple `.append_query_results` for handlers that run several queries.
-
-### External Processes - trait injection
-
-`execute_build` (builder) and `check_task_updates` (core) shell out to `nix` and `git`
-via `tokio::process::Command`. These cannot be tested without real binaries **unless** the
-call site is abstracted behind a trait.
-
-Planned refactor - extract a `ProcessRunner` trait and inject it via `ServerState`:
-
-```rust
-// core/src/runner.rs
-#[cfg_attr(test, mockall::automock)]
-pub trait ProcessRunner: Send + Sync {
-    async fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output>;
-}
-```
-
-Until this refactor is done, do not write tests for code that shells out. Add the trait first,
-then the tests.
-
-### JWT / Secrets - temp files
-
-Handlers that mint or verify JWTs read a secret from a file path in `Cli`. In tests, write a
-known secret to a `tempfile::NamedTempFile` and pass its path. The `test_cli()` helper in
-`tests/common` already does this.
-
----
-
-## What to Test
-
-### Priority 1 - Pure functions (no mocks, fast)
-
-Live in `#[cfg(test)]` blocks inside the source file or in `tests/` integration files.
-
-| Module | What to cover |
-|---|---|
-| `core::input` | Every validator/parser: valid input, each error variant, boundary values |
-| `core::sources` | Path/hash utilities, `get_cache_nar_location`, SSH key format |
-| `core::types` | `NixCacheInfo::to_nix_string()`, `NixPathInfo::to_nix_string()` |
-| `entity::*` | Enum `FromStr`/Display roundtrips (`Architecture`, `BuildStatus`, `EvaluationStatus`) |
-| `nix-daemon::nix::wire` | Wire protocol encode/decode (already covered inline) |
-
-These run offline with no setup. They should be the majority of tests.
-
-### Priority 2 - HTTP handlers (mock DB + axum-test)
-
-Requires extracting `create_router(state: Arc<ServerState>) -> Router` from `serve_web` (one-line refactor).
-
-For each endpoint, write tests for:
-1. **Auth enforcement** - 401 without JWT, 403 when caller lacks permission
-2. **Not-found** - 404 when the DB returns no rows
-3. **Validation** - 400 for invalid body fields
-4. **Happy path** - correct status code and key response values
-
-Do NOT assert every JSON field - that re-tests serde. Only assert on values the handler itself
-computes (aggregations, transformations, IDs it creates).
-
-```rust
-// web/tests/tasks.rs
-#[tokio::test]
-async fn get_task_metrics_empty_returns_empty_points() {
-    // DB: task found, then no completed evaluations
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![common::task(common::project().id)]])
-        .append_query_results([Vec::<evaluation::Model>::new()])
-        .into_connection();
-
-    let resp = common::server(db).await
-        .get("/api/v1/tasks/test-project/test-task/metrics")
-        .add_header("Authorization", common::bearer_token())
-        .await;
-
-    resp.assert_status_ok();
-    let body: serde_json::Value = resp.json();
-    assert_eq!(body["message"]["points"].as_array().unwrap().len(), 0);
-}
-```
-
-### Priority 3 - Business logic (mock DB, async)
-
-| Function | What to cover |
-|---|---|
-| `builder::scheduler::evaluation::gc_old_evaluations` | Keeps exactly `keep` evals; deletes oldest; nulls cross-references before deleting to avoid cascade issues |
-| `web::endpoints::tasks` - metrics aggregation | `build_time_total_ms` sums only Completed builds; falls back to timestamp diff when `build_time_ms` is NULL |
-| `web::endpoints::auth` - login | Wrong password → 401; correct → response contains token |
-
----
-
-## Avoiding Boilerplate
-
-### The `Cli` problem
-
-`Cli` has 30+ fields. Writing it inline in every test is the main source of boilerplate and
-the main reason tests go stale (they stop compiling when a field is added).
-
-**Rule: never spell out `Cli` fields outside of `tests/common`.** All test files use
-`common::test_cli()`. When a field is added to `Cli`, update exactly one place.
-
-### Pattern: `tests/common.rs` (one per crate)
-
-```rust
-// core/tests/common.rs
-
-pub fn test_cli() -> Cli {
-    Cli {
-        log: LogArgs {
-            level_default: "error".into(), // suppress noise in test output
-            ..Default::default()
-        },
-        server: ServerArgs {
-            serve_url: "http://127.0.0.1:3000".into(),
-            base_dir: "/tmp/gradient-test".into(),
-            ..Default::default()
-        },
-        secrets: SecretsArgs {
-            crypt_file: "test-secret".into(), // tests/fixtures/test-secret
-            jwt_file: "test-jwt".into(),      // tests/fixtures/test-jwt
-        },
-        registration: RegistrationArgs { enable: false },
-        ..Default::default()
-    }
-}
-
-pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
-    Arc::new(ServerState { db, cli: test_cli() })
-}
-
-pub fn db_empty<T: sea_orm::IntoMockRow>() -> DatabaseConnection {
-    db_with(Vec::<T>::new())
-}
-
-pub fn db_with<T: sea_orm::IntoMockRow>(rows: Vec<T>) -> DatabaseConnection {
-    MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([rows])
-        .into_connection()
-}
-
-// Fixture builders - deterministic values, easy to read in assertions
-pub fn project() -> project::Model { ... }
-pub fn task(project_id: Uuid) -> task::Model { ... }
-pub fn user() -> user::Model { ... }
-pub fn evaluation(task_id: Uuid) -> evaluation::Model { ... }
-pub fn build(eval_id: Uuid) -> build::Model { ... }
-```
-
-### Pattern: web handler test
-
-```rust
-// web/tests/common/mod.rs
-pub async fn server(db: DatabaseConnection) -> TestServer {
-    // Requires: pub fn create_router(state: Arc<ServerState>) -> Router in web/src/lib.rs
-    let app = web::create_router(test_state(db));
-    TestServer::new(app).unwrap()
-}
-
-// web/tests/projects.rs
-#[tokio::test]
-async fn get_project_unauthenticated_returns_401() {
-    let s = common::server(common::db_with(vec![common::project()])).await;
-    s.get("/api/v1/projects/test-project").await.assert_status_unauthorized();
-}
-
-#[tokio::test]
-async fn get_project_unknown_returns_404() {
-    let s = common::server(common::db_empty::<project::Model>()).await;
-    s.get("/api/v1/projects/nonexistent")
-        .add_header("Authorization", common::bearer_token())
-        .await
-        .assert_status_not_found();
-}
-```
-
----
-
-## File Layout
-
-```
-core/
-  tests/
-    mod.rs          ← pub mod common; pub mod input; pub mod sources;
-    common.rs       ← test_cli(), test_state(), db_with(), fixture builders
-    input.rs        ← pure function tests for core::input (validators, parsers)
-    sources.rs      ← SSH key generation, path/hash utilities
-
-web/
-  tests/
-    common/
-      mod.rs        ← test_cli(), test_state(), server(), bearer_token(), fixtures
-    auth.rs         ← register / login / logout flows
-    projects.rs         ← CRUD, member management, auth enforcement
-    tasks.rs     ← CRUD, metrics, keep_evaluations GC
-    builds.rs       ← status queries, log endpoints
-    evals.rs        ← evaluation actions, build listing
-
-builder/
-  tests/
-    common/
-      mod.rs        ← test_state(), db_with()
-    gc.rs           ← gc_old_evaluations: keeps N, deletes oldest, safe cascade
-
-entity/
-  (no integration tests - entity crate only defines models and enums)
-  (enum FromStr/Display roundtrips live in #[cfg(test)] blocks in each entity file)
-```
-
----
-
-## Adding a New Test
-
-1. Add the test function to the appropriate file in `tests/`.
-2. Use `common::test_state(db)` - never build `Cli` inline.
-3. For a handler test: pre-load **only** the DB rows that handler will query, in order.
-4. Assert on **computed values** only - not on IDs or timestamps you inserted.
-5. Name the test `<subject>_<condition>_<expected_outcome>`, e.g.
-   `get_task_metrics_no_evals_returns_empty_points`.
+- HTTP handler suites in `gradient-*/tests/` use a mocked database through `gradient_fixtures::mock`.
+- `gradient-test-support`: fakes, `TestState`, the test server and `StoreFixture`.

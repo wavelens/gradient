@@ -24,7 +24,7 @@ flowchart LR
 
 -   :material-test-tube: **[Tests](tests.md)**
 
-    Where tests live, how to run them and the shared harness.
+    Test locations, the Nix checks and the test database on a real Postgres.
 
 </div>
 

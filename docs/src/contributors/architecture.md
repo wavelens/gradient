@@ -119,7 +119,7 @@ Every backend crate is `backend/gradient-<name>`. The workspace root is `gradien
 | | `daemon` | Mock Nix daemon for VM tests |
 | Shared | `types` | IDs, runtime config, events, entity aliases |
 | | `util` | Shutdown, supervision, HTTP clients, logging, metrics setup |
-| | `test-support` | Shared test fixtures, see [Tests](tests.md#shared-harness) |
+| | `test-support` | Shared test fixtures, see [Tests](tests.md#test-support) |
 
 **Entity aliases** (`gradient-types/src/entity_aliases.rs`): `MFoo` model, `AFoo` active model, `EFoo` entity, `CFoo` column.
 

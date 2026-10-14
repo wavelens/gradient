@@ -1,6 +1,6 @@
 # Tests
 
-Test structure and the patterns new tests follow. Individual tests are not catalogued here. The source tree is the catalogue, and a per-test list would go stale.
+Test structure and the patterns new tests follow. The source tree is the catalogue of individual tests, and per-test lists fall behind the code.
 
 ## Layers
 
@@ -8,7 +8,8 @@ Test structure and the patterns new tests follow. Individual tests are not catal
 |---|---|---|
 | Backend unit | `#[cfg(test)] mod tests` beside the code | Pure logic, no I/O |
 | Backend integration | `backend/gradient-*/tests/*.rs` | The real router and handlers over a mocked database |
-| Shared harness | `backend/gradient-test-support/` | Fakes, fixtures and the test server reused by every suite |
+| Shape tests | `backend/gradient-graph/src/cases/`, `backend/gradient-scheduler/src/cases/` | The graph writer and the scheduler on a real Postgres 18 database ([Shape Tests](#shape-tests)) |
+| Test support | `backend/gradient-fixtures/`, `backend/gradient-test-support/` | Test database, shape builder, fakes and fixtures for every suite ([Test Support](#test-support)) |
 | CLI | `cli/tests/*.rs` | The `gradient` binary against a stub HTTP server |
 | Frontend | `frontend/src/**/*.spec.ts` | Components and services under vitest |
 | Report inspector | `nix/tools/report-inspector/tests/` | Inspector commands over a report fixture built in the test |
@@ -18,80 +19,162 @@ Test structure and the patterns new tests follow. Individual tests are not catal
 | Eval benchmark | `nix/tests/bench/evalbench/`, on request | Evaluation speed per stage, with a capture bundle per round ([Eval Benchmark](eval-benchmark.md)) |
 
 - A crate's `tests/` directory is for public entry points (an HTTP route, a CLI call). All other tests go into a `#[cfg(test)]` module next to the code.
-- The inspector fixture is built in the test, never committed as a `.db`. A checked-in binary would drift from its schema.
+- Tests build the inspector fixture at test time. Committed `.db` binaries drift from the schema.
 
 ## Running
 
 | Command | Checks |
 |---|---|
 | `nix flake check` | Every check below |
-| `nix build .#checks.x86_64-linux.unittest` | Backend tests (nextest, then doc tests) |
+| `nix build .#checks.x86_64-linux.unittest` | Backend tests (nextest, then doc tests) on a throwaway Postgres 18 |
 | `nix build .#checks.x86_64-linux.cli-unittest` | CLI tests |
 | `nix build .#checks.x86_64-linux.gradient-<name>` | One VM test |
 | `nix build .#gradient-evalbench` | The eval benchmark, outside `nix flake check` |
 | `pnpm -C frontend exec ng test --watch=false` | Frontend tests |
 
 !!! warning
-    A local `cargo test` or `cargo nextest` over the whole backend workspace would need more memory than a typical workstation has. The Nix checks are the supported way.
+    Local `cargo test` and `cargo nextest` over the whole backend workspace exceed the memory of a typical workstation. The Nix checks are the supported way.
 
-- The cargo suites are checks, not the packages' check phase. `nix build .#gradient` will build the binary only.
-- Tests build under `[profile.test]`, unoptimised and without the full DWARF of the released binary. `[profile.dev.package."*"]` will keep dependencies optimised.
-- Any folder under `nix/tests/gradient/` will become the check `gradient-<folder>` without wiring.
-- Every VM test will store NARs on local disk. S3 storage has no VM test.
+- The cargo suites are checks, not the packages' check phase. `nix build .#gradient` can only build the binary.
+- Tests build under `[profile.test]`, unoptimised and without the full DWARF of the released binary. Dependencies stay optimised through `[profile.dev.package."*"]`.
+- Folders under `nix/tests/gradient/` become the check `gradient-<folder>` without wiring.
+- VM tests store NARs on local disk. S3 storage has no VM test.
 
-## Shared Harness
+## Shape Tests
 
-`gradient-test-support` can spare every suite its own scaffolding. A missing helper is added to the crate rather than re-derived locally. `use gradient_test_support::prelude::*` will bring in the common items.
+The graph writer and the scheduler have tests on a real Postgres 18 database. Tests declare the rows as a shape. The real graph writer and scheduler then work on those rows. Assertions on every table follow each step.
 
-| Module | Contents |
+```mermaid
+flowchart LR
+    shape["Shape builder"] --> db["Test database"]
+    db --> graphcase["Graph Case"]
+    db --> schedcase["SchedulerCase"]
+```
+
+### Test Database
+
+`TestDatabase` (`backend/gradient-fixtures/src/database.rs`) can create a fresh database per test.
+
+| Aspect | Behavior |
 |---|---|
-| `fakes/` | In-memory doubles: `FakeNixStoreProvider`, `FakeDerivationResolver`, `FakeWorkerStore`, `FakeDrvReader`, `RecordingJobReporter`, `RecordingCiReporter`, `InMemoryEmailSender` |
-| `fakes/store_fixture.rs` | `StoreFixture`: a real 951-derivation `hello` closure from `backend/test-store/`, with helpers to mark subtrees built or unbuild a fraction |
-| `fixtures.rs` | Canonical entity models and stable IDs (`project()`, `user()`, `eval_at()`, ...) |
-| `db.rs` | `db_with(rows)`, the `MockDatabase` setup |
-| `state.rs` | `test_state()` and variants: a wired `ServerState` |
-| `web.rs` | `make_test_server()`, `make_token()`, `live_session()` for authenticated requests |
-| `cli.rs` | `test_cli()` |
-| `log_storage.rs` | `NoopLogStorage`, `RecordingLogStorage` |
-| `cache_fixture.rs` | Populated cache and NAR state |
+| Server | `PGHOST`, `PGUSER` and `PGDATABASE`. The role must have the `CREATEDB` attribute |
+| Template | Every migration applied to `gradient_template` by the first test on a server, under an advisory lock |
+| Clone | A `test_<uuid>` database per test, created with `CREATE DATABASE ... TEMPLATE gradient_template` |
+| Cleanup | `finish()` with `DROP DATABASE ... WITH (FORCE)`. Tests without `finish()` panic on drop |
+| Failure | Failing tests leave the database behind for inspection and print the name |
+| Readers | `rows::<E>()`, `find::<E>(id)`, `shared_build(path)`, `attempts(path)`, `output_of(path, name)` and more |
 
-The prelude will also re-export the protocol doubles.
+The `unittest` check can start Postgres 18 through `postgresqlTestHook`, with `fsync = off` and 500 connections.
 
-- `MockProtoServer` (`gradient-wire`) can script an authority with handshake, offers, scores, claims and NAR passthrough.
-- `ProtoPeer` (`gradient-worker-client`) can script a worker on the real client connection.
+### Shape Builder
+
+Shapes (`backend/gradient-fixtures/src/shape/`) declare the rows of a test as a chain of setters.
+
+```rust
+let seed = shape()
+    .evaluation(e1)
+    .evaluation_status(EvaluationStatus::Building)
+    .derivation(A)
+    .walked()
+    .entry_point("pkg.a")
+    .job()
+    .output(A_OUT)
+    .build_status(BuildStatus::Queued);
+```
+
+- Setters act on the evaluation, derivation, cache or assignment named last.
+- New evaluations get a fresh project, task and commit each. All projects share a single owner.
+- `into_database()` can create the test database and insert the rows. `insert_into(connection)` can add a second shape to a running test.
+- `declared_statuses()` can list the declared build statuses. The case layers assert those statuses after the seed settled.
+- Scheduler setters (`shape/scheduling.rs`) add triggers, clusters, eval assignments, metrics, upstream caches and worker registrations.
+
+### Case Layers
+
+Case layers start the real component on a shape. Tests read like the case steps, with assertions after each step.
+
+| Layer | Location | Start | Per step | End |
+|---|---|---|---|---|
+| Graph `Case` | `gradient-graph/src/cases/mod.rs` | Seed settled, graph writer spawned, zero drift | Graph operations, `zero_drift(after)` | `finish()`: writer stopped, zero drift, database dropped |
+| `SchedulerCase` | `gradient-scheduler/src/cases/mod.rs` | Seed settled, graph writer and scheduler core spawned, zero drift | Worker sessions, passes, admin calls, `check(after)` | `finish()`: core and writer stopped, invariants checked, database dropped |
+
+- Zero drift means an empty report from the [consistency check](scheduler/repair-pass.md#consistency-check).
+- Files of `SchedulerCase`: `session.rs` for worker sessions, `control.rs` for passes and admin calls, `readers.rs` for rows and core state.
+- `second_instance()` can start a second scheduler with its own memory, core and graph writer on the same database.
+- `start_with(shape, config)` can change the runtime config before the start.
+- `signals(worker)` can drain the signals of a worker since the last call.
+- `aliases.rs` can wrap production names with banned words.
+- External services are local doubles in `outside.rs`: a temporary Git repository and an upstream cache over HTTP.
+
+`check(after)` can wait for detached tasks, expect zero drift and assert the invariants below. Failure messages name the invariant and the step.
+
+| Id | Invariant |
+|---|---|
+| S1 | A single open row per job |
+| S2 | Open rows without an outcome. Closed rows stay closed |
+| S6 | No open row of a disconnected worker |
+| S7 | No open row of a connected worker dispatched before the start |
+| S8 | Open build rows within the build slots of a worker |
+| S11 | A single core list per job key (pending, active, cluster book) |
+| S12 | No pending job with an open row. Rows of workers on another instance stay out |
+| S14 | A single running attempt per shared build |
+| S18 | Evaluation statuses along allowed transitions, also with more than a single move per step |
+| S19 | A waiting reason only on `Waiting` evaluations |
+| S20 | A single active evaluation per task, concurrent evaluations aside |
+| S21 | A single open attempt per cluster |
+| S22 | No open row of a closed cluster attempt |
+| S23 | A started attempt per running cluster, with a row per member |
+| S24 | A single open row per attempt and worker. Pinned members stay on the pinned worker |
+| S27 | A single undelivered firing per trigger key |
+| S28 | `last_fired_at` moving forward only, after a delivered firing |
+
+**Conventions**
+
+- Test names start with the case id: `c01_a_won_claim_opens_the_row_and_attempt_and_leaves_the_build_queued`.
+- Assertion messages name the step: `"after 2: sb(A).status"`.
+- Row assertions go first, then signals, then `case.check("step 2")`.
+- Second instances finish first: `second.finish()`, then `case.finish()`.
+
+## Test Support
+
+Two crates contain the shared test code. Missing helpers belong in those crates rather than in a single test file.
+
+| Crate | Module | Contents |
+|---|---|---|
+| `gradient-fixtures` | `database.rs`, `shape/` | Test database and shape builder |
+| | `rows/`, `ids.rs` | Entity models with stable IDs (`project()`, `user()`, `task()`, ...) |
+| | `mock.rs` | `MockDatabase` helpers for suites still on a mocked database |
+| `gradient-test-support` | `fakes/` | In-memory doubles such as `FakeDrvReader`, `FakeWorkerStore`, `RecordingJobReporter` |
+| | `fakes/store_fixture.rs` | `StoreFixture`: a real 951-derivation `hello` closure from `backend/test-store/` |
+| | `state.rs` | `TestState` and `test_state()`: a wired `ServerState` |
+| | `web.rs` | `make_test_server()`, `make_token()`, `signed_in()` for authenticated requests |
+| | `cli.rs`, `log_storage.rs`, `cache_fixture.rs` | `test_cli()`, log storage doubles, populated cache states |
+
+`use gradient_test_support::prelude::*` can bring in the common items and the scripted protocol peers (`MockProtoServer`, `ProtoPeer`).
 
 ## Patterns
 
 ### Scope
 
-- **Test what we wrote.** A test asserting that serde serialised a field, or that SeaORM returned the handed row, would only cover a dependency. A test whose deletion would change nobody's confidence is not added.
-- **Fakes, not a mock framework.** Code touching nix, git, the filesystem or the network must sit behind a trait. Fakes implement the trait and record calls. Recording fakes let a test assert the sequence of effects.
-- **Fakes for one algorithm stay local.** Some traits only lift one algorithm out of its I/O (`UpstreamIo` in the worker's substitute executor). Such a trait will keep its fake in that module's tests.
+- **Test what we wrote.** Tests asserting that serde serialised a field, or that SeaORM returned the handed row, only check a dependency. Tests without effect on our confidence stay out.
+- **Fakes, not a mock framework.** Calls into nix, git, the filesystem or the network go through a trait. Fakes implement the trait and log each call. Tests can then assert the sequence of effects.
+- **Fakes for a single algorithm stay local.** Some traits only lift a single algorithm out of its I/O (`UpstreamIo` in the substitute executor of the worker). The fakes of such traits stay in the tests of that module.
 - **Actors with side effects sit behind small traits.** The `gradient-effects` actor can take `PendingDeliveryStore` and `Handoff` as inputs. The actor's one promise is at most the worker count in flight, with one pass per burst of wakes. In-memory fakes are asserting this promise with no database and no clock.
-- **Closure and scheduling logic must use `StoreFixture`**, a genuine derivation graph instead of a hand-built three-node tree.
-
-### MockDatabase
-
-- **Results replay in FIFO order.** Each `append_query_results` call will feed the next `SELECT` statement. The script is the handler's query sequence (auth, loads, the endpoint's work). The module doc comment must state that sequence.
-- **`INSERT ... RETURNING`:** Such a statement must have both an `append_query_results` for the row and an `append_exec_results` with `rows_affected: 1`. SeaORM would otherwise treat the insert as a no-op.
-- **Assert on one statement, never on a formatted transaction.** A transaction is one log entry bracketed by a synthetic `BEGIN`/`COMMIT` pair. `gradient_db::pool::statements(log)` will flatten the log to one string per statement without transaction control.
-- **Quoted identifiers or bound values:** These need `raw_statements(log)` and a match on `s.sql` / `s.values`. The `statements` helper will return `Debug` strings with escaped quotes.
-- **Spawned work races the result buffer.** Assertions target the response, not the count of executed queries.
+- **Closure logic outside the shape tests must use `StoreFixture`**, a genuine derivation graph instead of a hand-built three-node tree.
 
 ### VM Tests
 
-- **Modules under test get a scripted API.** Some modules only consume the HTTP API (`gradient-client/deploy.nix`). Such a module is tested against a stdlib-only stub driven through the `/control` endpoint.
+- **Modules under test get a scripted API.** Some modules only consume the HTTP API (`gradient-client/deploy.nix`). Tests of such modules talk to a stdlib-only stub, steered through the `/control` endpoint.
 - The stub's `/control` endpoint can swap the scripted state and push the matching WebSocket event. The VM needs no Postgres and no builder.
-- **Assert on the database's own accounting.** The e2e test will check plan shapes (`EXPLAIN`: nested loop, no merge join). The test will bill the round through `pg_stat_statements` as well. Thresholds stay loose (pathology detectors on a slow VM), and the top statements are printed.
-- **Two database sessions prove a lock.** The setup will use two FIFO-fed `psql` sessions from one script. A third connection will poll `pg_stat_activity` for `wait_event_type = 'Lock'` rows. The same interleaving is played twice, with and without the lock. The test will assert the contrast.
-    - Every wait is bounded, and the failure will carry a `pg_stat_activity` dump.
-    - Both backends are torn down on every exit path. Only synthetic rows are locked.
+- **Assert on the database's own accounting.** The e2e test can check plan shapes (`EXPLAIN`: nested loop, no merge join). The test can also bill the round through `pg_stat_statements`. Thresholds stay loose (pathology detectors on a slow VM). The top statements appear in the output.
+- **Two database sessions prove a lock.** The setup can use two FIFO-fed `psql` sessions from a single script. A third connection can poll `pg_stat_activity` for `wait_event_type = 'Lock'` rows. The test can play the same interleaving twice, with and without the lock, and assert the contrast.
+    - Waits have a bound. Failures print a `pg_stat_activity` dump.
+    - Every exit path can tear down both backends. Locks apply to synthetic rows only.
     - Rows offered by no fixture go into a phase-owned schema: `CREATE TABLE <schema>.<t> (LIKE public.<t> INCLUDING DEFAULTS INCLUDING INDEXES)` plus `SET search_path = <schema>, public`.
-    - Statements come from `gradient-sql-gate --print <NAME>`, never pasted. A pasted copy would still pass after the code changed.
+    - Statements stem from `gradient-sql-gate --print <NAME>`, not from a pasted copy. Pasted copies still pass after a code change.
 
 ### SQL Plan Check
 
-Every hand-written statement must be declared through `gradient_db::sql!` with its parameter kinds and tier. `backend/clippy.toml` will forbid any other way of building a `Statement` value. The e2e test's last phase will amplify the database to production scale before starting `gradient-sql-gate`. The check will draw real parameters and explain each statement in a rolled-back transaction.
+Hand-written statements go through `gradient_db::sql!` with parameter kinds and tier. `backend/clippy.toml` can forbid every other way of building a `Statement` value. The last phase of the e2e test can amplify the database to production scale and then start `gradient-sql-gate`. The check can pick real parameters and explain each statement in a rolled-back transaction.
 
 | Tier | Scope | Extra |
 |---|---|---|
@@ -102,16 +185,16 @@ Every hand-written statement must be declared through `gradient_db::sql!` with i
 
 - **Failures:** A sequential scan of a large relation throwing most of its read away. A buffer or amplification budget overrun. A per-row rescan. A disk spill.
 - **Exceptions:** Aggregates, statements returning nothing and batches each have their own rule.
-- **No wall-clock budgets:** The runner is shared and slow.
-- **Unmeasured statements** (empty relations) are reported, not passed. More than 40 will fail the phase.
-- **Tables filled only by users** (stars) are filled through the real API before the check. Values differing per round (commit hash prefixes) are drawn parameter kinds.
-- **Draws are ordered**, never heap order. Every kind except the evaluation will take the oldest rows by id.
-- **The evaluation is a copy** of the evaluation naming the most shared builds, the worst case its statements must fit.
-- **The copy is newer than the statistics.** The check will write the copy after the last ANALYZE, like a new evaluation in production. The planner will estimate the copy from the evaluations outside the most common values. A plain VACUUM after the copy can mark its pages all-visible and keep the statistics untouched.
+- **No wall-clock budgets:** CI runners are slow and busy with other jobs.
+- **Unmeasured statements** (empty relations) end up in the report, not in the passed list. More than 40 fail the phase.
+- **Tables filled only by users** (stars) get rows through the real API before the check. Values differing per round (commit hash prefixes) are parameter kinds with random draws.
+- **Draws are ordered**, not in heap order. Kinds other than the evaluation take the oldest rows by id.
+- **The evaluation is a copy** of the evaluation naming the most shared builds. That copy is the worst case for evaluation statements.
+- **The copy is newer than the statistics.** The check can write the copy after the last ANALYZE, like a new evaluation in production. The planner can then estimate the copy from the evaluations outside the most common values. A plain VACUUM after the copy can mark its pages all-visible and leave the statistics as they were.
 
 ### CLI and Lints
 
-- **CLI tests drive the real binary.** The `assert_cmd` crate will run `gradient` with `HOME` and `XDG_CONFIG_HOME` in a `TempDir` with a seeded `config.toml` file. The `wiremock` crate will stand in for the server.
+- **CLI tests drive the real binary.** The `assert_cmd` crate can run `gradient` with `HOME` and `XDG_CONFIG_HOME` in a `TempDir` with a seeded `config.toml` file. The `wiremock` crate can stand in for the server.
 - **`unwrap` only with a reason.** Both workspaces deny `clippy::unwrap_used` calls. Test scaffolding can opt out per file with the attribute below.
 
 ```rust
@@ -125,13 +208,13 @@ Every hand-written statement must be declared through `gradient_db::sql!` with i
 
 ## Mock Daemon
 
-`gradient-scheduler` and `gradient-cluster` are running the real server and workers. `gradient-daemon serve --backend mock` will replace each worker's `nix-daemon` on the stock socket. Both suites share the server node (`scheduler/server.nix`) and the script helpers (`scheduler/helpers.py`). The `mock` feature of `backend/gradient-daemon` will build the binary into the `daemon` output of the `gradient` package.
+`gradient-scheduler` and `gradient-cluster` are running the real server and workers. `gradient-daemon serve --backend mock` can replace the `nix-daemon` of each worker on the stock socket. Both suites share the server node (`scheduler/server.nix`) and the script helpers (`scheduler/helpers.py`). The `mock` feature of `backend/gradient-daemon` can add the binary to the `daemon` output of the `gradient` package.
 
 | Aspect | Behavior |
 |---|---|
 | Store spec | A plain attrset: `derivations.<id>` with `deps`, `outputs.<o>.references` (`"<node>.<output>"`), `build.outcome` (`success`, `fail`, `hang`), `present.workers`, `present.cache`, `sameAs` (a twin: another `.drv` with the same name, output paths and FOD content). Defaults and invariants in `nix/tests/store-spec/default.nix`. Presets `chain n`, `diamond`, `fanOut n`, `wide depth width` |
 | Paths | `derivations.nix` will feed both the published flake and the daemon config. The `store-spec` check can assert that drv and output paths agree |
-| Downloads | `download = true` will turn a node into a real `<nix/fetchurl.nix>` call with an SRI hash. The server node will host its content under `/downloads/`, and a worker can fetch it without the mock daemon |
+| Downloads | `download = true` will turn a node into a real `<nix/fetchurl.nix>` call with an SRI hash. The server node will host its content under `/downloads/` and a worker can fetch it without the mock daemon |
 | Presence | `present.workers` is seeded at boot. `present.cache` will become a signed file cache used as upstream cache |
 | Timing | Seeded lognormal delays (median 40 ms). `GRADIENT_DAEMON_SEED` can replay a round |
 | Violations | A build with a missing input, a rebuild of a valid output, an unknown derivation, an unmodelled op. Every phase must end with `violations == []` |
@@ -140,25 +223,25 @@ Every hand-written statement must be declared through `gradient_db::sql!` with i
 
 Every reference is inside the runtime closure of the requested inputs, as in Nix.
 
-**Production replay:** `gradient-report <report.db> store-spec -o spec.nix` can turn a report into a store spec with edges, references, sizes and scaled durations. The `--allow-failed` flag will replay failures. The `--anonymize` flag will rename packages to `n0`, `n1`, ...
+**Production replay:** `gradient-report <report.db> store-spec -o spec.nix` can turn a report into a store spec with edges, references, sizes and scaled durations. The `--allow-failed` flag can replay failures. The `--anonymize` flag can rename packages to `n0`, `n1`, ...
 
 ## Topologies
 
-The scheduler and e2e suites are `mk.nix { self, pkgs, topology }`. Their `default.nix` file will pass in `nix/tests/harness/topologies/direct.nix` as the topology. The flake will export both as `lib.tests.{scheduler,e2e} { system, topology }` for other repositories.
+The scheduler and e2e suites are `mk.nix { self, pkgs, topology }`. Both suites take `nix/tests/harness/topologies/direct.nix` as the topology in `default.nix`. The flake can export both as `lib.tests.{scheduler,e2e} { system, topology }` for other repositories.
 
 - A topology is `{ pkgs, lib, workers, token, ... }: { nodes, upstreamPeers, upstreamUrls?, workerNodes, provides, pythonPrelude }`.
 - The optional `upstreamUrls` attribute can map each upstream peer dialed from the server to its URL.
 - The `server` node (e2e also `client`) and each worker's role belong to the suite.
 - The way workers reach the server and the IDs registered by the server belong to the topology.
-- `nix/tests/harness/contract.nix` (`lib.tests.contract`) is asserted at evaluation. The `test-topologies` check in `check.nix` will pin the direct topology.
+- Assertions on the contract in `nix/tests/harness/contract.nix` (`lib.tests.contract`) take place at evaluation. The `test-topologies` check in `check.nix` can pin the direct topology.
 - Scripts use the prelude, never a hardcoded unit or ID: `WORKER_NODES`, `wait_workers_ready()`, `fleet_units()`, `requires(what, *tags)`.
 - Some assertions need the server to see each worker directly. These go under `requires(..., "distinct-upstream-workers")`.
-- The `requires` condition is placed on the assertion, not the phase, when later phases need the state.
+- `requires` conditions belong on the assertion, not the phase, when later phases need the state.
 - Both suites run in the proxy repository over its `proxied` and `server-dials` topologies as `scheduler-proxied`, `e2e-proxied`, `scheduler-server-dials` and `e2e-server-dials`.
 
 ## Conventions
 
 - One file per contract, named after the contract, like `cache_roles.rs`, `auth_middleware.rs` or `body_size_limit.rs` files.
-- A module doc comment must state the file's coverage and the harness setup, such as the query script replayed by the mocked database.
+- Module doc comments state the coverage and setup of the file. Suites on a mocked database name the replayed query script there.
 - Test names read as the asserted behaviour (`a_refused_session_backs_off`).
 - Regression tests carry a one-line comment naming the defect and the issue number.
