@@ -411,7 +411,7 @@ pub async fn serve_web(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> st
         Err(e) => tracing::error!(error = ?e, "failed to recover interrupted work"),
     }
 
-    match gradient_db::evaluations::draining::unpark_draining_evals(&state.worker_db).await {
+    match gradient_db::evaluations::draining::resume_drained_evals(&state.worker_db).await {
         Ok(n) if n > 0 => {
             tracing::warn!(evaluations = n, "recovered evaluations parked by draining")
         }

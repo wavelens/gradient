@@ -572,13 +572,16 @@ async fn q13_a_server_drain_makes_evaluations_wait_and_its_end_returns_them() {
     case.check("step 1").await;
 
     case.drain_server(false).await;
-    for e in [e1, e2] {
-        assert_eq!(
-            case.evaluation(e).await.status,
-            EvaluationStatus::Queued,
-            "after 2: evaluation({e}).status"
-        );
-    }
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::Queued,
+        "after 2: evaluation(E1).status"
+    );
+    assert_eq!(
+        case.evaluation(e2).await.status,
+        EvaluationStatus::Building,
+        "after 2: evaluation(E2).status, its walk had finished"
+    );
     case.check("step 2").await;
 
     case.refresh_waiting_state().await;

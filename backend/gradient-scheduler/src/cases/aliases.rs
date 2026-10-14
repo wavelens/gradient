@@ -55,12 +55,6 @@ pub(super) fn prepare_secs(membership: &ClusterMembership) -> u32 {
     membership.hold_secs
 }
 
-pub(super) async fn mark_evaluations_draining(db: &WorkerDb) {
-    gradient_db::evaluations::draining::park_active_evals(db)
-        .await
-        .expect("the active evaluations wait for the drain");
-}
-
 pub(super) async fn abandon_row(db: &WorkerDb, assignment: DispatchedJobId) {
     gradient_db::scheduling::assignment_record::abandon_open_assignment(db, assignment)
         .await

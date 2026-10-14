@@ -131,7 +131,7 @@ impl WaitingRefresh<'_> {
                     Some(WaitingReason::EvalWorkers { capability, .. }) => {
                         Some(decide_eval_recovery(capability, project_workers))
                     }
-                    Some(WaitingReason::Draining) => Some((EvaluationStatus::Queued, None)),
+                    Some(WaitingReason::Draining) => Some((eval.status_after_draining(), None)),
                     _ => match self
                         .build_phase_decision(eval.id, eval_counters, worker_caps, reason.as_ref())
                         .await?

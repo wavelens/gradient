@@ -10,8 +10,8 @@ use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 
 use gradient_types::*;
 
-pub async fn park_active_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, DbErr> {
-    let res = crate::status::evaluation_change(EvaluationStatus::PARK_FOR_DRAINING)
+pub async fn wait_active_evals_for_draining<C: ConnectionTrait>(conn: &C) -> Result<u64, DbErr> {
+    let res = crate::status::evaluation_change(EvaluationStatus::WAIT_FOR_DRAINING)
         .col_expr(
             CEvaluation::WaitingReason,
             Expr::value(Some(WaitingReason::Draining.to_json())),
@@ -23,36 +23,43 @@ pub async fn park_active_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, DbEr
     Ok(res.rows_affected)
 }
 
-pub async fn unpark_draining_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, DbErr> {
-    let waiting = EEvaluation::find()
+pub async fn resume_drained_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, DbErr> {
+    let drained: Vec<MEvaluation> = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
         .all(conn)
-        .await?;
-
-    let ids: Vec<EvaluationId> = waiting
-        .iter()
+        .await?
+        .into_iter()
         .filter(|e| {
             e.waiting_reason.as_ref().and_then(WaitingReason::from_json)
                 == Some(WaitingReason::Draining)
         })
-        .map(|e| e.id)
         .collect();
 
-    if ids.is_empty() {
-        return Ok(0);
+    let mut resumed = 0;
+    for target in [EvaluationStatus::Queued, EvaluationStatus::Building] {
+        let ids: Vec<EvaluationId> = drained
+            .iter()
+            .filter(|e| e.status_after_draining() == target)
+            .map(|e| e.id)
+            .collect();
+        if ids.is_empty() {
+            continue;
+        }
+
+        resumed += crate::status::evaluation_change(target.report())
+            .col_expr(
+                CEvaluation::WaitingReason,
+                Expr::value(None::<serde_json::Value>),
+            )
+            .col_expr(CEvaluation::UpdatedAt, Expr::value(now()))
+            .filter(CEvaluation::Id.is_in(ids))
+            .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
+            .exec(conn)
+            .await?
+            .rows_affected;
     }
 
-    let res = crate::status::evaluation_change(EvaluationStatus::UNPARK)
-        .col_expr(
-            CEvaluation::WaitingReason,
-            Expr::value(None::<serde_json::Value>),
-        )
-        .col_expr(CEvaluation::UpdatedAt, Expr::value(now()))
-        .filter(CEvaluation::Id.is_in(ids))
-        .exec(conn)
-        .await?;
-
-    Ok(res.rows_affected)
+    Ok(resumed)
 }
 
 #[cfg(test)]
@@ -90,7 +97,7 @@ mod tests {
             }])
             .into_connection();
 
-        assert_eq!(unpark_draining_evals(&db).await.unwrap(), 1);
+        assert_eq!(resume_drained_evals(&db).await.unwrap(), 1);
     }
 
     #[tokio::test]
@@ -99,6 +106,6 @@ mod tests {
             .append_query_results([vec![waiting_eval(Some(WaitingReason::NoCache))]])
             .into_connection();
 
-        assert_eq!(unpark_draining_evals(&db).await.unwrap(), 0);
+        assert_eq!(resume_drained_evals(&db).await.unwrap(), 0);
     }
 }

@@ -171,9 +171,11 @@ impl SchedulerCase {
         self.scheduler.draining.set(on).await;
         let db = &self.scheduler.db.worker_db;
         if on {
-            aliases::mark_evaluations_draining(db).await;
+            gradient_db::evaluations::draining::wait_active_evals_for_draining(db)
+                .await
+                .expect("the active evaluations wait for the drain");
         } else {
-            gradient_db::evaluations::draining::unpark_draining_evals(db)
+            gradient_db::evaluations::draining::resume_drained_evals(db)
                 .await
                 .expect("the draining evaluations return");
         }
@@ -184,7 +186,7 @@ impl SchedulerCase {
         gradient_db::maintenance::recovery::recover_interrupted_work(db)
             .await
             .expect("the startup recovery runs");
-        gradient_db::evaluations::draining::unpark_draining_evals(db)
+        gradient_db::evaluations::draining::resume_drained_evals(db)
             .await
             .expect("the draining evaluations return");
     }

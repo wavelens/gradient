@@ -100,12 +100,12 @@ paths:
       description: |-
         Enables or disables draining for the instance. While draining, the
         scheduler stops dispatching queued evaluations and builds, and every
-        in-flight evaluation is parked (`Waiting`, reason `draining`) so the
-        server can be stopped safely. Disabling recovers the parked evaluations
-        back to `Queued`.
+        in-flight evaluation waits (`Waiting`, reason `draining`) so the
+        server can be stopped safely. When draining ends, evaluations with a
+        finished walk go back to `Building` and the others to `Queued`.
 
         Draining is in-memory only, so it always clears on the next server
-        startup (parked evaluations are recovered automatically).
+        startup, and the waiting evaluations return automatically.
 
         Requires `superuser`.
       operationId: setDraining

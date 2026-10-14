@@ -35,7 +35,7 @@ The waiting pass, `refresh_waiting_state` (`gradient-scheduler/src/waiting_state
 | `eval_workers { capability, connected_workers }` | `Fetching` without a `fetch` worker. `Queued`, `EvaluatingFlake`, `EvaluatingDerivation` without an `eval` worker | To `Queued` once the capability is connected | Waiting pass |
 | `workers { unmet, connected_workers, available_architectures }` | `Building` with no worker fitting the `(architecture, required_features)` of any blocking shared build | To `Building` once one can fit. `Aborted` after 300 s on the same `unmet` set, unless `wait_for_workers` is set on the task | Waiting pass |
 | `graph_stuck { pending_shared_builds }` | `Building` with a fitting worker for every blocking shared build, yet none can be handed out | To `Building` once the heal can free a shared build | Waiting pass |
-| `draining` | Every in-flight evaluation during an instance drain | To `Queued` at the end of draining or at startup (`unpark_draining_evals`) | Waiting pass |
+| `draining` | Every in-flight evaluation during an instance drain | At the end of draining or at startup (`resume_drained_evals`): to `Building` when the walk had finished (`status_after_draining`), otherwise to `Queued` | Waiting pass |
 | `approval`, `no_cache`, `cache_storage_full` | Trigger conditions | Webhook and cache hooks (`gradient-ci/src/unpark.rs`) | Never touched by the waiting pass |
 
 - **Pre-build parks** skip each shared build the evaluation already batched. A stall mid-walk will still park.

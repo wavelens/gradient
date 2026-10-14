@@ -33,7 +33,7 @@ pub struct DrainingResponse {
     operation_id = "setDraining",
     tag = "admin",
     summary = "Toggle instance draining",
-    description = "Enables or disables draining for the instance. While draining, the\nscheduler stops dispatching queued evaluations and builds, and every\nin-flight evaluation is parked (`Waiting`, reason `draining`) so the\nserver can be stopped safely. Disabling recovers the parked evaluations\nback to `Queued`.\n\nDraining is in-memory only, so it always clears on the next server\nstartup (parked evaluations are recovered automatically).\n\nRequires `superuser`.",
+    description = "Enables or disables draining for the instance. While draining, the\nscheduler stops dispatching queued evaluations and builds, and every\nin-flight evaluation waits (`Waiting`, reason `draining`) so the\nserver can be stopped safely. When draining ends, evaluations with a\nfinished walk go back to `Building` and the others to `Queued`.\n\nDraining is in-memory only, so it always clears on the next server\nstartup, and the waiting evaluations return automatically.\n\nRequires `superuser`.",
     request_body = SetDrainingRequest,
     responses((status = OK, description = "Draining state applied", body = DrainingResponse), WebError)
 )]
@@ -45,9 +45,9 @@ pub async fn set_draining(
     scheduler.draining.set(req.enabled).await;
 
     let evaluations = if req.enabled {
-        gradient_db::evaluations::draining::park_active_evals(&state.worker_db).await
+        gradient_db::evaluations::draining::wait_active_evals_for_draining(&state.worker_db).await
     } else {
-        gradient_db::evaluations::draining::unpark_draining_evals(&state.worker_db).await
+        gradient_db::evaluations::draining::resume_drained_evals(&state.worker_db).await
     }
     .context("apply the draining transition")?;
 

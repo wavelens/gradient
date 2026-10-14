@@ -140,7 +140,7 @@ impl EvaluationStatus {
         to: Self::Aborted,
     };
 
-    pub const PARK_FOR_DRAINING: Transition<Self> = Transition {
+    pub const WAIT_FOR_DRAINING: Transition<Self> = Transition {
         from: &[
             Self::Queued,
             Self::Fetching,
@@ -357,6 +357,29 @@ pub struct Model {
     pub prioritized: bool,
 }
 
+impl Model {
+    pub fn walk_finished(&self) -> bool {
+        self.building_started_at.is_some_and(|building| {
+            [
+                self.fetch_started_at,
+                self.eval_flake_started_at,
+                self.eval_drv_started_at,
+            ]
+            .into_iter()
+            .flatten()
+            .all(|phase| phase <= building)
+        })
+    }
+
+    pub fn status_after_draining(&self) -> EvaluationStatus {
+        if self.walk_finished() {
+            EvaluationStatus::Building
+        } else {
+            EvaluationStatus::Queued
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
@@ -399,3 +422,37 @@ pub enum Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[cfg(test)]
+mod draining_tests {
+    use super::*;
+    use chrono::DateTime;
+
+    fn at(secs: i64) -> Option<NaiveDateTime> {
+        DateTime::from_timestamp(secs, 0).map(|t| t.naive_utc())
+    }
+
+    fn evaluation(fetch: i64, drv: Option<i64>, building: Option<i64>) -> Model {
+        Model {
+            fetch_started_at: at(fetch),
+            eval_drv_started_at: drv.and_then(at),
+            building_started_at: building.and_then(at),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_drained_evaluation_returns_to_building_only_after_its_latest_walk() {
+        for (case, expected) in [
+            (evaluation(10, Some(20), None), EvaluationStatus::Queued),
+            (
+                evaluation(10, Some(20), Some(30)),
+                EvaluationStatus::Building,
+            ),
+            (evaluation(40, Some(50), Some(30)), EvaluationStatus::Queued),
+            (evaluation(40, None, Some(30)), EvaluationStatus::Queued),
+        ] {
+            assert_eq!(case.status_after_draining(), expected, "{case:?}");
+        }
+    }
+}
