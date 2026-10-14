@@ -72,7 +72,7 @@ pub struct StateTask {
     /// `None` for the existing triggers. `Some([])` is an error, with at least a trigger per task.
     #[serde(default)]
     pub triggers: Option<Vec<StateTrigger>>,
-    #[serde(default = "default_soft_abort")]
+    #[serde(default)]
     pub concurrency: ConcurrencyPolicy,
     #[serde(default = "default_true")]
     pub sign_cache: bool,
@@ -105,10 +105,6 @@ pub struct StateFlakeInputOverride {
     pub url: Option<String>,
     #[serde(default)]
     pub keep_url: bool,
-}
-
-fn default_soft_abort() -> ConcurrencyPolicy {
-    ConcurrencyPolicy::SoftAbort
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

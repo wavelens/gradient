@@ -32,13 +32,15 @@ use crate::ids::{EvaluationId, ProjectId, TaskId, UserId};
 pub enum ConcurrencyPolicy {
     #[sea_orm(num_value = 0)]
     HardAbort = 0,
-    #[default]
     #[sea_orm(num_value = 1)]
     SoftAbort = 1,
     #[sea_orm(num_value = 2)]
     All = 2,
     #[sea_orm(num_value = 3)]
     Skip = 3,
+    #[default]
+    #[sea_orm(num_value = 4)]
+    Auto = 4,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]

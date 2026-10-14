@@ -149,13 +149,7 @@ impl Scheduler {
                     };
                 }
 
-                let r = self
-                    .graph
-                    .transition(Transition::EvalStreamCompleted {
-                        evaluation: j.evaluation_id,
-                    })
-                    .await
-                    .map(|_| ());
+                let r = self.complete_eval_stream(j.evaluation_id).await;
                 if worker_idle {
                     self.build_kick.kick();
                 }

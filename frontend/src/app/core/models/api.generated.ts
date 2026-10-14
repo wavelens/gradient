@@ -471,7 +471,7 @@ export interface ComparedEvaluation {
   commit: string;
 }
 
-export type ConcurrencyPolicy = "hard_abort" | "soft_abort" | "all" | "skip";
+export type ConcurrencyPolicy = "hard_abort" | "soft_abort" | "all" | "skip" | "auto";
 
 export type ConnectionDirection = "outbound" | "inbound";
 

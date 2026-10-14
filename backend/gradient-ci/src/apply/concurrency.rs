@@ -24,7 +24,13 @@ pub(super) async fn resolve_concurrency<C: ConnectionTrait>(
 
     let mut aborted_evaluation: Option<EvaluationId> = None;
     let mut hard_abort = false;
-    let concurrent_flag = matches!(concurrency, ConcurrencyPolicy::All);
+    let concurrent_flag = match concurrency {
+        ConcurrencyPolicy::All => true,
+        ConcurrencyPolicy::Auto => in_flight.is_some(),
+        ConcurrencyPolicy::HardAbort | ConcurrencyPolicy::SoftAbort | ConcurrencyPolicy::Skip => {
+            false
+        }
+    };
 
     if !concurrent_flag && let Some(running) = in_flight {
         match concurrency {
@@ -37,7 +43,7 @@ pub(super) async fn resolve_concurrency<C: ConnectionTrait>(
                 abort_evaluation(db, running.id, AbortKind::Soft).await?;
                 aborted_evaluation = Some(running.id);
             }
-            ConcurrencyPolicy::All => {}
+            ConcurrencyPolicy::All | ConcurrencyPolicy::Auto => {}
         }
     }
 

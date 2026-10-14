@@ -309,11 +309,16 @@
       };
 
       concurrency = mkOption {
-        type = types.enum [ "hard_abort" "soft_abort" "skip" "all" ];
-        default = "soft_abort";
+        type = types.enum [ "auto" "hard_abort" "soft_abort" "skip" "all" ];
+        default = "auto";
         description = ''
-          Behavior of a new trigger event while an evaluation runs.
+          Behavior of a new trigger event while an evaluation of the same branch runs.
+          Evaluations of other branches keep running.
 
+          - `auto` starts the new evaluation alongside the running one.
+            Once the new evaluation starts building, the older evaluations are cancelled like
+            with `hard_abort`, apart from builds the new evaluation also needs.
+            A failed evaluation of the new commit leaves the running evaluation alone.
           - `hard_abort` cancels the running evaluation and its builds and starts a new one.
           - `soft_abort` marks the running evaluation aborted and makes the new one canonical.
             Its builds finish, and their outputs flow into the new evaluation.

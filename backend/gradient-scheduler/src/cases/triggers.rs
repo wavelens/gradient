@@ -16,15 +16,17 @@ use gradient_entity::{commit, task};
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::branch_key;
-use gradient_wire::types::JobKind;
+use gradient_wire::types::{BuildFailureKind, JobKind};
 
 use super::{
-    A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, GitRepo, SchedulerCase, ago, attr_of, drv_path,
-    eval_key, is_recent, polling, time_trigger, w_all,
+    A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, GitRepo, S, S_OUT, SchedulerCase, ago, attr_of, drv,
+    drv_path, eval_key, failure, is_recent, output_nar, polling, time_trigger, w_all, with_attr,
+    with_output,
 };
 
 const W1: &str = "w1";
 const W2: &str = "w2";
+const W3: &str = "w3";
 const FAR: u64 = 5_000_000;
 
 #[tokio::test]
@@ -786,6 +788,213 @@ async fn t15_a_hard_abort_spares_a_build_a_live_third_evaluation_wants() {
 }
 
 #[tokio::test]
+async fn t16_auto_aborts_the_older_evaluation_once_the_new_one_builds() {
+    let (e1, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let repo = GitRepo::new();
+    let c0 = repo.commit("c0");
+    let c1 = repo.commit("c1");
+    repo.push("main", &c1);
+    let case = SchedulerCase::start(
+        polled(
+            e1,
+            t1,
+            &repo,
+            &c0,
+            EvaluationStatus::Queued,
+            ConcurrencyPolicy::Auto,
+        )
+        .startable(A, A_OUT)
+        .startable(S, S_OUT),
+    )
+    .await;
+    let [a, s] = auto_prefix(&case, e1).await;
+
+    case.fire_once().await;
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e1]).await;
+    let [e2] = fresh.as_slice() else {
+        panic!("after 1: a single new evaluation, got {fresh:?}");
+    };
+    assert_eq!(
+        (commit_of(&case, e2).await, e2.status, e2.concurrent),
+        (c1, EvaluationStatus::Queued, true),
+        "after 1: E2"
+    );
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::EvaluatingDerivation,
+        "after 1: evaluation(E1).status"
+    );
+    let signals = case.signals(W1);
+    assert!(
+        !signals
+            .iter()
+            .any(|s| matches!(s, SessionSignal::Abort { .. })),
+        "after 1: signals(W1) without Abort, got {signals:?}"
+    );
+    case.check("step 1").await;
+
+    let (e2, k2) = (e2.id, eval_key(e2.id));
+    let a2 = case.evalrun(W3, e2).await;
+    case.advance_evaluation(W3, &k2, EvaluationStatus::EvaluatingDerivation)
+        .await;
+    case.report_eval_result(
+        W3,
+        &k2,
+        vec![with_attr(with_output(drv(S, &[]), S_OUT), &attr_of(S))],
+    )
+    .await;
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::EvaluatingDerivation,
+        "after 2: evaluation(E1).status"
+    );
+    case.signals(W3);
+    case.check("step 2").await;
+
+    case.complete(W3, &k2, a2, Vec::new(), 1).await;
+    assert_eq!(
+        case.evaluation(e2).await.status,
+        EvaluationStatus::Building,
+        "after 3: evaluation(E2).status"
+    );
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::Aborted,
+        "after 3: evaluation(E1).status"
+    );
+    let signals = case.signals(W1);
+    for key in [eval_key(e1), a] {
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s, SessionSignal::Abort { job_id, .. } if *job_id == key)),
+            "after 3: signals(W1) contains Abort{{{key}}}, got {signals:?}"
+        );
+    }
+    let signals = case.signals(W2);
+    assert!(
+        !signals
+            .iter()
+            .any(|s| matches!(s, SessionSignal::Abort { .. })),
+        "after 3: signals(W2) without Abort, got {signals:?}"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Aborted,
+        "after 3: sb(A).status"
+    );
+    assert_eq!(
+        case.sb(S).await.status,
+        BuildStatus::Building,
+        "after 3: sb(S).status"
+    );
+    assert_eq!(
+        case.active(&s).await.as_deref(),
+        Some(W2),
+        "after 3: active(build:S)"
+    );
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn t17_auto_keeps_the_older_evaluation_when_the_new_one_fails_to_evaluate() {
+    let (e1, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let repo = GitRepo::new();
+    let c0 = repo.commit("c0");
+    let c1 = repo.commit("c1");
+    repo.push("main", &c1);
+    let case = SchedulerCase::start(
+        polled(
+            e1,
+            t1,
+            &repo,
+            &c0,
+            EvaluationStatus::Queued,
+            ConcurrencyPolicy::Auto,
+        )
+        .startable(A, A_OUT),
+    )
+    .await;
+    case.connect(W1, w_all().slots(2), &[]).await;
+    let k1 = eval_key(e1);
+    let a1 = case.evalrun(W1, e1).await;
+    case.advance_evaluation(W1, &k1, EvaluationStatus::EvaluatingDerivation)
+        .await;
+    case.admit_startable_moves().await;
+    case.offers_full(W1).await;
+    case.score_all(W1).await;
+    let a = case.key(A).await;
+    let build = case
+        .request_job(W1, JobKind::Build)
+        .await
+        .expect("step 0: W1 takes build:A");
+    assert_eq!(build.job_id(), a, "step 0: W1 takes build:A");
+    case.report_building(W1, &a).await;
+    case.signals(W1);
+    case.check("step 0").await;
+
+    case.fire_once().await;
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e1]).await;
+    let [e2] = fresh.as_slice() else {
+        panic!("after 1: a single new evaluation, got {fresh:?}");
+    };
+    assert_eq!(
+        (e2.status, e2.concurrent),
+        (EvaluationStatus::Queued, true),
+        "after 1: E2"
+    );
+    case.check("step 1").await;
+
+    let (e2, k2) = (e2.id, eval_key(e2.id));
+    let a2 = case.evalrun(W2, e2).await;
+    case.advance_evaluation(W2, &k2, EvaluationStatus::EvaluatingFlake)
+        .await;
+    case.fail(
+        W2,
+        &k2,
+        a2,
+        failure(BuildFailureKind::Permanent).error("evaluation error"),
+    )
+    .await;
+    assert_eq!(
+        case.evaluation(e2).await.status,
+        EvaluationStatus::Failed,
+        "after 2: evaluation(E2).status"
+    );
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::EvaluatingDerivation,
+        "after 2: evaluation(E1).status"
+    );
+    let signals = case.signals(W1);
+    assert!(
+        !signals
+            .iter()
+            .any(|s| matches!(s, SessionSignal::Abort { .. })),
+        "after 2: signals(W1) without Abort, got {signals:?}"
+    );
+    case.signals(W2);
+    case.check("step 2").await;
+
+    case.complete(W1, &k1, a1, Vec::new(), 1).await;
+    case.commit_nar(output_nar(A, A_OUT)).await;
+    case.complete(W1, &a, build.assignment_id(), Vec::new(), 1)
+        .await;
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::Completed,
+        "after 3: evaluation(E1).status"
+    );
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn t18_hard_abort_leaves_the_evaluation_of_another_pull_request_running() {
     let (e1, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
     let case = SchedulerCase::start(
@@ -1004,6 +1213,25 @@ async fn hard_abort_prefix(case: &SchedulerCase, e0: EvaluationId) -> [String; 3
     case.signals(W2);
     case.check("step 0").await;
     [a, b, c]
+}
+
+async fn auto_prefix(case: &SchedulerCase, e1: EvaluationId) -> [String; 2] {
+    case.connect(W1, w_all().slots(2), &[]).await;
+    case.connect(W2, w_all(), &[]).await;
+    start_eval_job(case, e1).await;
+    let (a, s) = (case.key(A).await, case.key(S).await);
+    case.offers_full(W1).await;
+    case.scores(W1, &[(&a, 0, 0, false), (&s, 5, FAR, false)])
+        .await;
+    case.offers_full(W2).await;
+    case.scores(W2, &[(&a, 5, FAR, false), (&s, 0, 0, false)])
+        .await;
+    take_build(case, W1, &a).await;
+    take_build(case, W2, &s).await;
+    case.signals(W1);
+    case.signals(W2);
+    case.check("step 0").await;
+    [a, s]
 }
 
 async fn evaluations_besides(

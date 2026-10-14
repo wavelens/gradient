@@ -175,7 +175,8 @@ Build jobs hold exactly 1 `BuildSpec`, meaning a shared build (`derivation_build
 - **API Abort:** Evaluation status `Aborted`. Pending jobs of the evaluation leave the queue.
     - `AbortJob` messages go to the evaluation job and to running builds wanted by no other live evaluation.
     - Only live evaluations wanting a build decide, not the evaluation that dispatched the build.
-- **Newer Evaluation:** Tasks with `hard_abort` concurrency abort the older evaluation like the API. Tasks with `soft_abort` cancel only its eval job.
+- **Newer Evaluation:** Tasks with `hard_abort` concurrency abort the older evaluation of the branch like the API. Tasks with `soft_abort` cancel only its eval job.
+    - Tasks with `auto` concurrency abort the older evaluations of the branch like `hard_abort`, after the move of the newer evaluation to `Building`.
 - **Unbuildable Evaluation:** Evaluations without a worker for their systems end `Aborted` the same way.
 - Workers stop the daemon build at once and answer `JobFailed { Aborted }`.
 - Assignments of an unconfirmed abort close as abandoned after 5 min.

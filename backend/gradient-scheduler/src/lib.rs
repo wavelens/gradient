@@ -28,6 +28,7 @@ mod eval_metrics;
 mod job_handlers;
 mod ram_shortage;
 mod scoring;
+mod supersede;
 pub mod trigger_firing;
 mod unbuildable;
 mod worker_lifecycle;

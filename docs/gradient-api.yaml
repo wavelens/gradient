@@ -13698,6 +13698,7 @@ components:
       - soft_abort
       - all
       - skip
+      - auto
     ConnectionDirection:
       type: string
       enum:

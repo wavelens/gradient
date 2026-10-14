@@ -408,20 +408,24 @@ pub(crate) async fn eval_completion_watchdog_pass(scheduler: &Scheduler) -> anyh
             "evaluation stranded past its job's terminal report - re-driving the lost transition"
         );
 
-        let transition = match repair {
-            EvalRepair::Complete => Transition::EvalStreamCompleted { evaluation },
-            EvalRepair::Fail => Transition::EvalFailed {
-                evaluation,
-                error: "the worker reported this evaluation failed, but the failure was never \
+        let repaired_one = match repair {
+            EvalRepair::Complete => scheduler.complete_eval_stream(evaluation).await,
+            EvalRepair::Fail => scheduler
+                .graph
+                .transition(Transition::EvalFailed {
+                    evaluation,
+                    error: "the worker reported this evaluation failed, but the failure was never \
                         recorded; recovered by the completion watchdog"
-                    .to_string(),
-                kind: BuildFailureKind::Permanent,
-                missing_paths: Vec::new(),
-            },
+                        .to_string(),
+                    kind: BuildFailureKind::Permanent,
+                    missing_paths: Vec::new(),
+                })
+                .await
+                .map(|_| ()),
         };
 
-        match scheduler.graph.transition(transition).await {
-            Ok(_) => repaired += 1,
+        match repaired_one {
+            Ok(()) => repaired += 1,
             Err(e) => {
                 warn!(error = %e, evaluation_id = %evaluation, "lost-completion repair failed")
             }

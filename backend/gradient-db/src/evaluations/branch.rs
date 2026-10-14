@@ -51,3 +51,15 @@ pub async fn newest_on_branch<C: ConnectionTrait>(
         .one(db)
         .await
 }
+
+pub async fn active_on_branch<C: ConnectionTrait>(
+    db: &C,
+    task: TaskId,
+    branch: &str,
+) -> Result<Vec<MEvaluation>, DbErr> {
+    EEvaluation::find()
+        .filter(on_branch(task, branch))
+        .filter(active())
+        .all(db)
+        .await
+}

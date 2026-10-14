@@ -239,7 +239,7 @@ pub async fn put(
         created_by: user.id,
         created_at: gradient_types::now(),
         keep_evaluations: state.config.eval.default_keep_evaluations(),
-        concurrency: body.concurrency.unwrap_or(ConcurrencyPolicy::SoftAbort),
+        concurrency: body.concurrency.unwrap_or_default(),
         sign_cache: body.sign_cache.unwrap_or(true),
         wait_for_workers: body.wait_for_workers.unwrap_or(false),
         retry_failed_builds: body.retry_failed_builds.unwrap_or(true),

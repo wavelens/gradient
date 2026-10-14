@@ -47,7 +47,8 @@ Evaluations of a pinned commit and `gradient build` requests belong to no branch
 
 | Policy | Running evaluation | Running builds |
 |---|---|---|
-| `soft_abort` (default) | Aborted, with the new evaluation taking over | Finish, and the new evaluation will reuse their outputs |
+| `auto` (default) | Running on until the new evaluation starts building, then aborted. Finishes after a failed evaluation of the new commit | Builds wanted by the new evaluation keep running. The rest are cancelled |
+| `soft_abort` | Aborted, with the new evaluation taking over | Finish, and the new evaluation will reuse the outputs |
 | `hard_abort` | Aborted | Cancelled |
 | `skip` | Running on | Keep running. The new event is dropped |
 | `all` | Running on, with the new evaluation running alongside | Keep running |

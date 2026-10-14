@@ -70,7 +70,7 @@ services.gradient.state = {
 | `actions.*.name` | string | - | Action name, unique within the task. |
 | `actions.*.type` | one of `send_mail` `send_web_request` `send_matrix_message` `send_slack_message` `git_host_status_report` `open_pr` | - | Action kind, determining the expected `config`. |
 | `active` | bool | `true` | Whether the task is active. |
-| `concurrency` | one of `hard_abort` `soft_abort` `skip` `all` | `"soft_abort"` | Behavior of a new trigger event while an evaluation is running. |
+| `concurrency` | one of `auto` `hard_abort` `soft_abort` `skip` `all` | `"auto"` | Behavior of a new trigger event while an evaluation of the same branch is running, see [concurrency](../concepts/projects-and-tasks.md#concurrency). |
 | `created_by` | string | - | User name of the task's creator. |
 | `description` | null or string | `null` | Description of the task. |
 | `display_name` | string | `name` | Display name of the task. |
