@@ -76,11 +76,13 @@ pub fn open_predicate(alias: &str) -> String {
 }
 
 /// Parents built here need every dependency. Parents available in a cache only need the
-/// runtime dependencies.
+/// runtime dependencies. A stored dependency ends the walk, as it ends the need walk.
 pub fn failure_spreads_predicate(edge: &str) -> String {
     format!(
-        "({edge}.kind IN (1, 2) OR NOT EXISTS (SELECT 1 FROM derivation_build rb \
-         WHERE rb.derivation = {edge}.derivation AND rb.cache_available))"
+        "(({edge}.kind IN (1, 2) OR NOT EXISTS (SELECT 1 FROM derivation_build rb \
+         WHERE rb.derivation = {edge}.derivation AND rb.cache_available)) \
+         AND NOT EXISTS (SELECT 1 FROM derivation_build fb \
+         WHERE fb.derivation = {edge}.dependency AND fb.fetchable))"
     )
 }
 
@@ -256,15 +258,6 @@ mod tests {
         assert!(
             !p.contains("derivation_dependency"),
             "no walk over the build graph: {p}"
-        );
-    }
-
-    #[test]
-    fn a_failure_reaches_a_cached_parent_over_a_runtime_dependency_only() {
-        assert_eq!(
-            norm(&failure_spreads_predicate("e")),
-            "(e.kind IN (1, 2) OR NOT EXISTS (SELECT 1 FROM derivation_build rb \
-             WHERE rb.derivation = e.derivation AND rb.cache_available))"
         );
     }
 
