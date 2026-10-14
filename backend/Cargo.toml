@@ -219,7 +219,7 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/eval-metrics-stats" }
+nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/nix-2.35.3" }
 sqlx             = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
 sqlx-core        = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
 sqlx-macros      = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }

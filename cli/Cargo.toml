@@ -145,4 +145,4 @@ tempfile   = { workspace = true }
 wiremock   = { workspace = true }
 
 [patch.crates-io]
-nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/eval-metrics-stats" }
+nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/nix-2.35.3" }
