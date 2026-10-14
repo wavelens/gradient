@@ -635,7 +635,7 @@ async fn t14_requeue_imports_thaws_the_failed_closure_except_reproducible_builde
     )
     .await;
 
-    case.requeue_imports(&[I]).await;
+    case.requeue_imports(e1, &[I]).await;
 
     let p = case.sb(P).await;
     assert_eq!(

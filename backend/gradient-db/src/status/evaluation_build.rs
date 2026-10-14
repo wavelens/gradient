@@ -122,6 +122,14 @@ fn check(
     Ok(())
 }
 
+pub async fn wanted_again(
+    ctx: &DbContext,
+    evaluation: EvaluationId,
+    derivations: &[DerivationId],
+) -> Result<(), DbErr> {
+    mark_aborted(ctx, evaluation, derivations, false).await
+}
+
 async fn mark_aborted(
     ctx: &DbContext,
     evaluation: EvaluationId,

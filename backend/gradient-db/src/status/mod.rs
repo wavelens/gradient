@@ -21,7 +21,9 @@ pub use derivation_build_status::{
 };
 pub use effects::{TransitionChange, collapse_transitions, emit_transition_effects};
 pub use eval_finalize::{check_evaluation_done, finalize_evals_for_derivations};
-pub use evaluation_build::{BuildRefusal, abort_evaluation_build, retry_evaluation_build};
+pub use evaluation_build::{
+    BuildRefusal, abort_evaluation_build, retry_evaluation_build, wanted_again,
+};
 pub use evaluation_message::{EvaluationFailure, EvaluationWarning};
 pub use evaluation_status::{
     change_evaluation_status, evaluation_change, update_evaluation_status,

@@ -545,10 +545,17 @@ impl Case {
         .await
     }
 
-    pub async fn requeue_imports(&self, paths: &[&str]) -> TransitionReport {
+    pub async fn requeue_imports(
+        &self,
+        evaluation: EvaluationId,
+        paths: &[&str],
+    ) -> TransitionReport {
         let derivations = self.ids(paths).await.into_iter().collect();
-        self.transition(Transition::RequeueImports { derivations })
-            .await
+        self.transition(Transition::RequeueImports {
+            evaluation,
+            derivations,
+        })
+        .await
     }
 
     pub async fn requeue(&self) -> u64 {

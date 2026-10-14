@@ -144,8 +144,11 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             .await?,
             ..Default::default()
         }),
-        Transition::RequeueImports { derivations } => {
-            requeue_imports(ctx, &derivations).await?;
+        Transition::RequeueImports {
+            evaluation,
+            derivations,
+        } => {
+            requeue_imports(ctx, evaluation, &derivations).await?;
             Ok(TransitionReport::default())
         }
         Transition::AbortBuild {
@@ -525,7 +528,11 @@ async fn build_completed(
     }
 }
 
-async fn requeue_imports(ctx: &DbContext, derivations: &[DerivationId]) -> Result<()> {
+async fn requeue_imports(
+    ctx: &DbContext,
+    evaluation: EvaluationId,
+    derivations: &[DerivationId],
+) -> Result<()> {
     let changes =
         gradient_db::graph::promotion::requeue_failed_import_closure(&ctx.worker_db, derivations)
             .await
@@ -537,6 +544,10 @@ async fn requeue_imports(ctx: &DbContext, derivations: &[DerivationId]) -> Resul
         .filter(|change| change.to == BuildStatus::Created)
         .map(|change| change.derivation)
         .collect();
+    gradient_db::status::wanted_again(ctx, evaluation, &thawed).await?;
+    let need =
+        gradient_db::graph::can_start::update_and_settle_need(&ctx.worker_db, &thawed).await?;
+    emit_transition_effects(ctx, &need.changes).await?;
     let settled = gradient_db::graph::can_start::settle_created(&ctx.worker_db, &thawed).await?;
     emit_transition_effects(ctx, &settled).await?;
 

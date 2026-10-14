@@ -173,6 +173,7 @@ pub enum Transition {
         shared_build: DerivationBuildId,
     },
     RequeueImports {
+        evaluation: EvaluationId,
         derivations: Vec<DerivationId>,
     },
     NotEnoughResources {

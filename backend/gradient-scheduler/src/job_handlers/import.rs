@@ -91,7 +91,10 @@ impl Scheduler {
 
         let derivations = builds.iter().map(|(_, row)| row.derivation).collect();
         self.graph
-            .transition(Transition::RequeueImports { derivations })
+            .transition(Transition::RequeueImports {
+                evaluation,
+                derivations,
+            })
             .await
             .context("requeue the failed builds of an import")?;
         self.imported_builds(evaluation, drv_paths).await
