@@ -142,7 +142,11 @@ fn oldest_aged<'a>(
     snapshot
         .clusters
         .iter()
-        .filter(|c| c.ready() && now - c.queued_at >= policy.reserve_after)
+        .filter(|c| {
+            c.ready()
+                && c.startable_since
+                    .is_some_and(|since| now - since >= policy.reserve_after)
+        })
         .min_by_key(|c| (!c.prioritized(), c.queued_at))
 }
 
@@ -199,6 +203,7 @@ mod tests {
             id: ClusterJobId::now_v7(),
             same_zone: false,
             queued_at: gradient_types::now() - chrono::Duration::seconds(age_secs),
+            startable_since: Some(gradient_types::now() - chrono::Duration::seconds(age_secs)),
             expected: members,
             members: (0..members)
                 .map(|i| ClusterMember {
@@ -256,6 +261,15 @@ mod tests {
 
         let short = snapshot(vec![cluster(3, 700, false)], &[], &["w1", "w2"]);
         assert!(matches!(step(&short), AgingStep::Keep));
+    }
+
+    #[test]
+    fn an_old_cluster_that_only_now_can_start_reserves_nothing() {
+        let mut late = cluster(2, 7_000, false);
+        late.startable_since = Some(gradient_types::now());
+        let s = snapshot(vec![late], &[], &["w1", "w2"]);
+
+        assert!(matches!(step(&s), AgingStep::Keep));
     }
 
     #[test]

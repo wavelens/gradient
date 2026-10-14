@@ -28,6 +28,7 @@ pub struct PendingCluster {
     pub id: ClusterJobId,
     pub same_zone: bool,
     pub queued_at: NaiveDateTime,
+    pub startable_since: Option<NaiveDateTime>,
     pub expected: usize,
     pub members: Vec<ClusterMember>,
     pub not_before: Option<Instant>,
@@ -39,6 +40,7 @@ impl PendingCluster {
             id: of.cluster.id,
             same_zone: of.cluster.same_zone,
             queued_at: of.cluster.created_at,
+            startable_since: None,
             expected: of.member_count as usize,
             members: Vec::new(),
             not_before: None,
@@ -47,6 +49,14 @@ impl PendingCluster {
 
     pub fn ready(&self) -> bool {
         self.members.len() == self.expected && self.members.iter().all(|m| m.job.is_some())
+    }
+
+    fn refresh_startable(&mut self) {
+        if self.ready() {
+            self.startable_since.get_or_insert_with(gradient_types::now);
+        } else {
+            self.startable_since = None;
+        }
     }
 
     pub fn prioritized(&self) -> bool {
@@ -85,6 +95,7 @@ impl ClusterBook {
                 job: Some(job),
             }),
         }
+        cluster.refresh_startable();
         self.by_key.insert(key, of.cluster.id);
     }
 
@@ -124,7 +135,9 @@ impl ClusterBook {
             .is_some_and(|id| !self.waiting.contains_key(id))
     }
 
-    pub fn restore(&mut self, cluster: PendingCluster) {
+    pub fn restore(&mut self, mut cluster: PendingCluster) {
+        cluster.startable_since = None;
+        cluster.refresh_startable();
         for member in cluster.members.iter().filter(|m| m.job.is_some()) {
             self.by_key.insert(member.key.clone(), cluster.id);
         }
@@ -141,6 +154,9 @@ impl ClusterBook {
             .and_then(|c| c.members.iter_mut().find(|m| m.key == key))
         {
             member.job = None;
+        }
+        if let Some(cluster) = self.waiting.get_mut(&id) {
+            cluster.refresh_startable();
         }
         true
     }

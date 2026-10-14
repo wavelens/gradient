@@ -222,6 +222,7 @@ mod tests {
                     id: cluster,
                     same_zone: false,
                     queued_at: gradient_types::now(),
+                    startable_since: None,
                     expected: 0,
                     members: Vec::new(),
                     not_before: None,

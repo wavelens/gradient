@@ -150,6 +150,7 @@ mod tests {
             id: ClusterJobId::now_v7(),
             same_zone,
             queued_at: gradient_types::now(),
+            startable_since: None,
             expected: members.len(),
             members,
             not_before: None,
