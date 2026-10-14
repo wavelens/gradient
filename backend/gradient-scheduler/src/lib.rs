@@ -32,6 +32,7 @@ mod supersede;
 pub mod trigger_firing;
 mod unbuildable;
 mod worker_lifecycle;
+mod worker_memory;
 
 use std::sync::Arc;
 
@@ -72,6 +73,7 @@ pub struct Scheduler {
     pub draining: draining::Draining,
     pub connection_failures: Arc<connection_failures::ConnectionFailures>,
     pub(crate) import_waits: import_waits::ImportWaits,
+    pub(crate) workers: worker_memory::WorkerMemory,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -95,6 +97,7 @@ impl Scheduler {
             draining: draining::Draining::default(),
             connection_failures: Arc::default(),
             import_waits: import_waits::ImportWaits::default(),
+            workers: worker_memory::WorkerMemory::default(),
         }
     }
 

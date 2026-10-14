@@ -91,6 +91,7 @@ impl Scheduler {
     ) -> Result<Registered> {
         let caps_json = serde_json::to_value(&capabilities).unwrap_or(serde_json::Value::Null);
         let projects = authorized_peers.iter().copied().collect();
+        self.workers.forget(worker_id);
         let registered = self
             .reattach_worker(
                 worker_id,
@@ -138,15 +139,25 @@ impl Scheduler {
         session: Arc<dyn SessionPort>,
         active: Vec<crate::jobs::Reattached>,
     ) -> Result<Registered> {
+        let reports = self.workers.reports(worker_id);
         let registration = Registration {
             worker: worker_id.to_owned(),
             capabilities,
-            authorized_peers,
+            authorized_peers: reports.authorized_peers.unwrap_or(authorized_peers),
             session,
             active,
         };
-        self.call(|reply| SchedulerMsg::Register(registration, reply))
-            .await
+        let registered = self
+            .call(|reply| SchedulerMsg::Register(registration, reply))
+            .await?;
+        if let Some(caps) = reports.capabilities {
+            self.update_worker_capabilities(worker_id, caps).await;
+        }
+        if let Some(metrics) = reports.metrics {
+            self.update_worker_metrics(worker_id, metrics).await;
+        }
+
+        Ok(registered)
     }
 
     async fn record_worker_connection(&self, worker_id: &str, capabilities: serde_json::Value) {
@@ -188,6 +199,9 @@ impl Scheduler {
         worker_id: &str,
         authorized_peers: HashSet<ProjectId>,
     ) {
+        self.workers.update(worker_id, |r| {
+            r.authorized_peers = Some(authorized_peers.clone())
+        });
         let worker = worker_id.to_owned();
         let _ = self
             .call(|reply| SchedulerMsg::UpdatePeers {
@@ -241,6 +255,8 @@ impl Scheduler {
     }
 
     pub async fn update_worker_capabilities(&self, worker_id: &str, caps: WorkerCapabilities) {
+        self.workers
+            .update(worker_id, |r| r.capabilities = Some(caps.clone()));
         let worker = worker_id.to_owned();
         let _ = self
             .call(|reply| SchedulerMsg::UpdateCapabilities {
@@ -254,6 +270,8 @@ impl Scheduler {
     }
 
     pub async fn update_worker_metrics(&self, worker_id: &str, metrics: WorkerMetrics) {
+        self.workers
+            .update(worker_id, |r| r.metrics = Some(metrics.clone()));
         let worker = worker_id.to_owned();
         let _ = self
             .call(|reply| SchedulerMsg::UpdateMetrics {
@@ -275,6 +293,7 @@ impl Scheduler {
     }
 
     pub async fn unregister_worker(&self, worker_id: &str) {
+        self.workers.forget(worker_id);
         self.close_worker_connection(worker_id).await;
         let worker = worker_id.to_owned();
         let gone = self
