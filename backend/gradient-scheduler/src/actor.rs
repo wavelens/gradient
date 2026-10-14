@@ -986,13 +986,12 @@ impl Actor for CoreActor {
                 aborted_shared_builds,
                 reply,
             } => {
-                let aborted_shared_builds: HashSet<DerivationBuildId> =
-                    aborted_shared_builds.into_iter().collect();
-                let to_abort = core.abort_running(|_, job| match job.derivation_build() {
-                    Some(shared_build) => aborted_shared_builds.contains(&shared_build),
-                    None => job.evaluation_id() == evaluation_id,
-                });
-                core.tracker.remove_pending_for_evaluation(evaluation_id);
+                let aborted = crate::jobs::AbortedJobs {
+                    evaluation: evaluation_id,
+                    shared_builds: aborted_shared_builds.into_iter().collect(),
+                };
+                let to_abort = core.abort_running(|_, job| aborted.contains(job));
+                core.tracker.remove_waiting_jobs(&aborted);
                 let _ = reply.send(to_abort);
             }
             SchedulerMsg::Prioritize {

@@ -355,6 +355,20 @@ fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     }
 }
 
+pub(crate) struct AbortedJobs {
+    pub evaluation: EvaluationId,
+    pub shared_builds: HashSet<DerivationBuildId>,
+}
+
+impl AbortedJobs {
+    pub fn contains(&self, job: &PendingJob) -> bool {
+        match job.derivation_build() {
+            Some(shared_build) => self.shared_builds.contains(&shared_build),
+            None => job.evaluation_id() == self.evaluation,
+        }
+    }
+}
+
 pub(crate) fn visible_to(
     job: &PendingJob,
     authorized: Option<&HashSet<ProjectId>>,
@@ -1448,21 +1462,21 @@ impl JobTracker {
             .collect()
     }
 
-    pub fn remove_pending_for_evaluation(&mut self, evaluation_id: EvaluationId) {
-        let removed: Vec<String> = self
+    pub(crate) fn remove_waiting_jobs(&mut self, aborted: &AbortedJobs) {
+        let pending: Vec<String> = self
             .pending
             .iter()
-            .filter(|(_, job)| job.evaluation_id() == evaluation_id)
+            .filter(|(_, job)| aborted.contains(job))
             .map(|(id, _)| id.clone())
             .collect();
-        for id in &removed {
+        for id in &pending {
             self.pending.remove(id);
             self.forget_job_scores(id);
         }
         let members: Vec<String> = self
             .clusters
             .jobs()
-            .filter(|(_, job)| job.evaluation_id() == evaluation_id)
+            .filter(|(_, job)| aborted.contains(job))
             .map(|(key, _)| key.clone())
             .collect();
         for key in &members {
@@ -2467,6 +2481,7 @@ mod tests {
         let peer = ProjectId::now_v7();
         let job = build_job(peer, vec![]);
         let eval_id = job.evaluation_id();
+        let shared_build = job.derivation_build().expect("a build job");
 
         tracker.add_pending("build:j1".into(), job);
         tracker.record_scores(
@@ -2478,7 +2493,10 @@ mod tests {
                 outputs_present: false,
             }],
         );
-        tracker.remove_pending_for_evaluation(eval_id);
+        tracker.remove_waiting_jobs(&AbortedJobs {
+            evaluation: eval_id,
+            shared_builds: HashSet::from([shared_build]),
+        });
         assert!(
             tracker
                 .scores
@@ -2486,6 +2504,21 @@ mod tests {
                 .all(|ws| !ws.contains_key("build:j1")),
             "aborting an evaluation must not leak its pending jobs' score entries"
         );
+    }
+
+    #[test]
+    fn an_abort_keeps_a_pending_build_another_evaluation_still_wants() {
+        let mut tracker = JobTracker::new();
+        let job = build_job(ProjectId::now_v7(), vec![]);
+        let driving = job.evaluation_id();
+        tracker.add_pending("build:j1".into(), job);
+
+        tracker.remove_waiting_jobs(&AbortedJobs {
+            evaluation: driving,
+            shared_builds: HashSet::new(),
+        });
+
+        assert!(tracker.contains_job("build:j1"));
     }
 
     #[test]
@@ -2917,7 +2950,10 @@ mod tests {
         let mut tracker = JobTracker::new();
         tracker.add_member(member(ClusterJobId::now_v7(), 1), "eval:x".into(), job);
 
-        tracker.remove_pending_for_evaluation(evaluation);
+        tracker.remove_waiting_jobs(&AbortedJobs {
+            evaluation,
+            shared_builds: HashSet::new(),
+        });
 
         assert!(!tracker.contains_job("eval:x"));
         assert_eq!(tracker.ready_clusters().count(), 0);
