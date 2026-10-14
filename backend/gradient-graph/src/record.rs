@@ -614,7 +614,7 @@ impl BatchWriter<'_> {
         locked.sort_unstable();
         locked.dedup();
         if locked.is_empty() {
-            return Ok(Vec::new());
+            return self.move_batch_need(&to_seed, entry_points).await;
         }
 
         let txn = self.txn()?;
