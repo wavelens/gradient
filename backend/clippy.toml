@@ -2,11 +2,11 @@ allow-unwrap-in-tests = true
 
 disallowed-methods = [
     { path = "tokio::task::spawn", reason = "use Shutdown::spawn for a tracked task or Shutdown::supervise for a loop" },
-    { path = "reqwest::Client::new", reason = "use gradient_util::http::build_client, build_download_client or the process-wide download_client; a bare client leaks a pool and panics without a CA bundle" },
-    { path = "sea_orm::Statement::from_sql_and_values", reason = "declare the query with gradient_db::sql! and run it through Query::bind or bind_built, so the plan gate sees it" },
+    { path = "reqwest::Client::new", reason = "use gradient_util::http::build_client, build_download_client or the process-wide download_client; a client built by hand leaks a pool and panics without a CA bundle" },
+    { path = "sea_orm::Statement::from_sql_and_values", reason = "declare the query with gradient_db::sql! and run it through Query::bind or bind_built, so the query plan check sees it" },
     { path = "sea_orm::Statement::from_string", reason = "declare the query with gradient_db::sql!, or use execute_unprepared for DDL and SET" },
     { path = "uuid::Uuid::new_v4", reason = "use Uuid::now_v7 or the id type's now_v7; a deliberate v4 carries #[expect(clippy::disallowed_methods, reason = ...)]", allow-invalid = true },
-    { path = "sea_orm::MockDatabase::new", reason = "use gradient_fixtures::mock::mock_db or empty_db" },
+    { path = "sea_orm::MockDatabase::new", reason = "add no new mock test: use gradient_fixtures::shape and a TestDatabase; existing mock tests use gradient_fixtures::mock::mock_db" },
     { path = "std::env::var", reason = "declare the value as an option in a config_group struct, so it is in options.json, the NixOS module and the docs; a variable of another program carries #[expect(clippy::disallowed_methods, reason = ...)]" },
     { path = "std::env::var_os", reason = "declare the value as an option in a config_group struct, so it is in options.json, the NixOS module and the docs; a variable of another program carries #[expect(clippy::disallowed_methods, reason = ...)]" },
     { path = "std::env::set_var", reason = "pass the variable to the child process with Command::env; a change of the own environment carries #[expect(clippy::disallowed_methods, reason = ...)]" },
