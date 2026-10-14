@@ -129,6 +129,7 @@ mod tests {
     use gradient_types::ids::{
         ClusterJobId, ClusterMemberId, DerivationBuildId, EvaluationId, ProjectId,
     };
+    use gradient_wire::types::GradientCapabilities;
 
     fn build_member(role: &str, pin: Option<&str>) -> ClusterMember {
         let shared_build = DerivationBuildId::now_v7();
@@ -162,6 +163,10 @@ mod tests {
             zone: zone.map(str::to_owned),
             caps: WorkerCaps {
                 architectures: vec![arch.into()],
+                capabilities: GradientCapabilities {
+                    build: true,
+                    ..Default::default()
+                },
                 ..WorkerCaps::default()
             },
             authorized: None,

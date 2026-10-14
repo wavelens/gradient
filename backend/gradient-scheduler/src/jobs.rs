@@ -1797,14 +1797,13 @@ mod tests {
         BuildWorker {
             authorized: None,
             caps: WorkerCaps {
-                architectures: vec!["x86_64-linux".into()],
                 metrics: Some(gradient_pool::score::WorkerMetricsView {
                     ram_total_mb: total_mb,
                     ram_free_mb: Some(free_mb),
                     ram_reserved_mb: reserved_mb,
                     ..Default::default()
                 }),
-                ..Default::default()
+                ..build_caps(&["x86_64-linux"], &[])
             },
         }
     }
@@ -1952,14 +1951,21 @@ mod tests {
         assert_eq!(eval_job(peer).as_candidate("eval:1").requirement, None);
     }
 
+    fn build_caps(architectures: &[&str], features: &[&str]) -> WorkerCaps {
+        WorkerCaps {
+            architectures: architectures.iter().map(|a| (*a).into()).collect(),
+            system_features: features.iter().map(|f| (*f).into()).collect(),
+            capabilities: GradientCapabilities {
+                build: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn can_build_multi_arch_worker_accepts_one_of_many() {
-        let caps = WorkerCaps {
-            fetch: false,
-            architectures: vec!["x86_64-linux".into(), "aarch64-linux".into()],
-            system_features: vec![],
-            ..Default::default()
-        };
+        let caps = build_caps(&["x86_64-linux", "aarch64-linux"], &[]);
         assert!(caps.can_build("x86_64-linux", &[]));
         assert!(caps.can_build("aarch64-linux", &[]));
         assert!(!caps.can_build("riscv64-linux", &[]));
@@ -1967,12 +1973,7 @@ mod tests {
 
     #[test]
     fn can_build_requires_all_features() {
-        let caps = WorkerCaps {
-            fetch: false,
-            architectures: vec!["x86_64-linux".into()],
-            system_features: vec!["kvm".into()],
-            ..Default::default()
-        };
+        let caps = build_caps(&["x86_64-linux"], &["kvm"]);
         assert!(caps.can_build("x86_64-linux", &["kvm".into()]));
         assert!(!caps.can_build("x86_64-linux", &["kvm".into(), "big-parallel".into()],));
     }
@@ -2164,12 +2165,7 @@ mod tests {
             build_job_arch(peer, vec![], "builtin", vec![]),
         );
 
-        let x86_caps = WorkerCaps {
-            fetch: false,
-            architectures: vec!["x86_64-linux".into()],
-            system_features: vec![],
-            ..Default::default()
-        };
+        let x86_caps = build_caps(&["x86_64-linux"], &[]);
         let candidates = tracker.candidates_for_worker(None, Some(&x86_caps));
         let mut ids: Vec<_> = candidates.iter().map(|c| c.job_id.clone()).collect();
         ids.sort();
@@ -2288,12 +2284,7 @@ mod tests {
             "arm".into(),
             build_job_arch(peer, vec![], "aarch64-linux", vec![]),
         );
-        let x86_caps = WorkerCaps {
-            fetch: false,
-            architectures: vec!["x86_64-linux".into()],
-            system_features: vec![],
-            ..Default::default()
-        };
+        let x86_caps = build_caps(&["x86_64-linux"], &[]);
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         let assignment =
@@ -2310,18 +2301,8 @@ mod tests {
             "kvm".into(),
             build_job_arch(peer, vec![], "x86_64-linux", vec!["kvm".into()]),
         );
-        let no_kvm = WorkerCaps {
-            fetch: false,
-            architectures: vec!["x86_64-linux".into()],
-            system_features: vec![],
-            ..Default::default()
-        };
-        let with_kvm = WorkerCaps {
-            fetch: false,
-            architectures: vec!["x86_64-linux".into()],
-            system_features: vec!["kvm".into()],
-            ..Default::default()
-        };
+        let no_kvm = build_caps(&["x86_64-linux"], &[]);
+        let with_kvm = build_caps(&["x86_64-linux"], &["kvm"]);
         for w in ["w1", "w2"] {
             tracker.record_scores(
                 w,

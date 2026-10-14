@@ -346,13 +346,6 @@ pub struct CoreArgs {
     pub policy: Arc<dyn ScoringPolicy>,
 }
 
-fn runs(caps: &WorkerCaps, kind: crate::cluster::SlotKind) -> bool {
-    match kind {
-        crate::cluster::SlotKind::Eval => caps.capabilities.eval || caps.fetch,
-        crate::cluster::SlotKind::Build => caps.capabilities.build,
-    }
-}
-
 pub struct SchedulerCore {
     pool: WorkerPool,
     tracker: JobTracker,
@@ -446,7 +439,7 @@ impl SchedulerCore {
             .into_iter()
             .filter_map(|worker| {
                 let (authorized, caps) = self.auth_and_caps(&worker.id);
-                caps.filter(|caps| runs(caps, crate::cluster::SlotKind::Build))
+                caps.filter(|caps| caps.takes_jobs_of(&JobKind::Build))
                     .map(|caps| crate::jobs::BuildWorker { authorized, caps })
             })
             .collect();
@@ -523,7 +516,7 @@ impl SchedulerCore {
         slot: crate::cluster::SlotKind,
         caps: Option<&WorkerCaps>,
     ) -> AssignOutcome {
-        if caps.is_some_and(|c| runs(c, slot)) {
+        if caps.is_some_and(|c| c.takes_jobs_of(&slot.job_kind())) {
             self.idle.record(worker, slot, Instant::now());
         }
         AssignOutcome::Nothing
@@ -675,7 +668,7 @@ impl SchedulerCore {
                 continue;
             };
             for kind in [SlotKind::Eval, SlotKind::Build] {
-                if runs(&caps, kind) {
+                if caps.takes_jobs_of(&kind.job_kind()) {
                     slots.push(Slot {
                         worker: worker.id.clone(),
                         kind,
