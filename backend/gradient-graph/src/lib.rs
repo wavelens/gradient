@@ -349,6 +349,38 @@ pub(crate) mod test_ctx {
         graph.record(batch).await
     }
 
+    pub(crate) async fn apply_in(scoped: &DbContext, batch: &Batch) -> anyhow::Result<BatchReport> {
+        crate::record::apply_batch(scoped, batch).await
+    }
+
+    pub(crate) async fn claim_build(
+        db: &WorkerDb,
+        assignment: gradient_entity::dispatched_job::Model,
+        shared_build: gradient_types::ids::DerivationBuildId,
+        substitute: bool,
+    ) -> bool {
+        use gradient_db::scheduling::assignment_record::{ClaimGate, claim_assignment};
+
+        let build = ClaimGate::Build {
+            shared_build,
+            substitute,
+        };
+        claim_assignment(db, assignment, build)
+            .await
+            .expect("the claim runs")
+    }
+
+    pub(crate) fn worker_loss(
+        shared_builds: Vec<gradient_types::ids::DerivationBuildId>,
+        cause: crate::OrphanCause,
+    ) -> crate::Transition {
+        crate::Transition::OrphanedBuilds {
+            shared_builds,
+            cause,
+            observed_peak_ram_mb: Default::default(),
+        }
+    }
+
     pub(crate) async fn ctx_with_probes(
         db: DatabaseConnection,
     ) -> (

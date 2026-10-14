@@ -6,19 +6,15 @@
 
 use gradient_entity::build::BuildStatus;
 use gradient_entity::cached_path_signature;
-use gradient_entity::ids::{CacheId, CachedPathSignatureId, EvaluationId};
+use gradient_entity::ids::{CacheId, EvaluationId};
 use gradient_fixtures::shape::shape;
-use gradient_fixtures::test_date;
-use sea_orm::{ActiveModelTrait, IntoActiveModel};
 
-use super::{A, A_OUT, B, B_OUT, Case, batch, chain, drv, nar, with_attr, with_output};
+use super::{
+    A, A_OUT, A2, A2_OUT, B, B_OUT, Case, SOURCE, X_OUT, batch, chain, drv, nar, with_attr,
+    with_output,
+};
 use crate::messages::{NarCommit, SignTargets};
 use crate::test_ctx::{Batch, BatchReport};
-
-const A2: &str = "22222222222222222222222222222222-a2.drv";
-const A2_OUT: &str = "20202020202020202020202020202020";
-const X_OUT: &str = "x0x0x0x0x0x0x0x0x0x0x0x0x0x0x0x0";
-const SOURCE: &str = "s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0";
 
 fn commit_of_b(targets: SignTargets) -> NarCommit {
     NarCommit {
@@ -26,10 +22,6 @@ fn commit_of_b(targets: SignTargets) -> NarCommit {
         targets,
         ..nar(B_OUT, "b")
     }
-}
-
-async fn project_caches(case: &Case, evaluation: EvaluationId) -> SignTargets {
-    SignTargets::ProjectCaches(case.db.project_of(evaluation).await)
 }
 
 async fn walk_above_b(
@@ -45,21 +37,6 @@ async fn walk_above_b(
         ..batch(evaluation)
     })
     .await
-}
-
-async fn seed_signature(case: &Case, hash: &str, cache: CacheId, signature: Option<Vec<u8>>) {
-    cached_path_signature::Model {
-        id: CachedPathSignatureId::now_v7(),
-        cached_path: case.cached_path(hash).await.id,
-        cache,
-        signature,
-        created_at: test_date(),
-        ..Default::default()
-    }
-    .into_active_model()
-    .insert(&case.db.connection())
-    .await
-    .expect("the signature row is written");
 }
 
 async fn row(case: &Case, hash: &str, cache: CacheId, line: &str) -> cached_path_signature::Model {
@@ -105,7 +82,7 @@ async fn k01_a_keyed_project_cache_gets_a_signed_row_and_an_unkeyed_cache_a_null
     let case = Case::start(chain(e1).into_cache(c1).keyed(Case::key()).into_cache(c2)).await;
     let commit = NarCommit {
         built_by_worker: true,
-        ..commit_of_b(project_caches(&case, e1).await)
+        ..commit_of_b(case.project_caches(e1).await)
     };
 
     case.commit_nar(commit.clone()).await;
@@ -162,7 +139,7 @@ async fn k03_a_private_path_gets_a_null_row_and_a_signing_task_among_its_produce
         })
         .await;
 
-        let commit = commit_of_b(project_caches(&case, e1).await);
+        let commit = commit_of_b(case.project_caches(e1).await);
         case.commit_nar(commit).await;
 
         if signing_producer {
@@ -313,7 +290,7 @@ async fn k06_a_batch_claims_the_cached_outputs_of_its_jobs_for_keyed_signing_pro
     .await;
 
     let sig_old = vec![7; 64];
-    seed_signature(&case, B_OUT, c3, Some(sig_old.clone())).await;
+    case.seed_signature(B_OUT, c3, Some(sig_old.clone())).await;
 
     walk_above_b(&case, e1, A, A_OUT, "pkg.a").await;
 
@@ -384,7 +361,7 @@ async fn k08_a_null_row_is_filled_by_a_later_claim_from_a_signing_project() {
     )
     .await;
 
-    seed_signature(&case, B_OUT, c1, None).await;
+    case.seed_signature(B_OUT, c1, None).await;
 
     walk_above_b(&case, e2, A2, A2_OUT, "pkg.a2").await;
 
@@ -422,7 +399,7 @@ async fn k09_a_drv_path_without_a_producer_is_signed_for_the_uploading_project()
     let (drv_hash, package) = B.split_once('-').expect("B is a drv path");
 
     case.commit_nar(NarCommit {
-        targets: project_caches(&case, e1).await,
+        targets: case.project_caches(e1).await,
         ..nar(drv_hash, package)
     })
     .await;
