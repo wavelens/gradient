@@ -194,8 +194,9 @@ async fn k04_a_repeated_worker_commit_with_the_same_content_changes_no_signature
         ..commit_of_b(targets)
     };
 
-    case.commit_nar(commit(SignTargets::Cache(c1))).await;
+    let report = case.commit_nar(commit(SignTargets::Cache(c1))).await;
 
+    assert_eq!(report.signed, vec![c1], "after 1: report.signed");
     let targeted = signed(&case, B_OUT, c1, "after 1: C1 non-null").await;
     let claimed = signed(&case, B_OUT, c2, "after 1: C2 signed by the claim").await;
     case.zero_drift("step 1").await;
@@ -203,13 +204,15 @@ async fn k04_a_repeated_worker_commit_with_the_same_content_changes_no_signature
     let report = case.commit_nar(commit(SignTargets::Cache(c1))).await;
 
     assert!(!report.created, "after 2: report.created == false");
+    assert_eq!(report.signed, vec![c1], "after 2: report.signed");
     unchanged(&case, B_OUT, c1, &targeted, "after 2: C1 as after 1").await;
     let rows = case.signatures(B_OUT).await.len();
     assert_eq!(rows, 2, "after 2: the target row and the claimed row");
     case.zero_drift("step 2").await;
 
-    case.commit_nar(commit(SignTargets::Cache(c2))).await;
+    let report = case.commit_nar(commit(SignTargets::Cache(c2))).await;
 
+    assert_eq!(report.signed, vec![c2], "after 3: only the new target");
     unchanged(&case, B_OUT, c2, &claimed, "after 3: C2 unchanged").await;
     unchanged(&case, B_OUT, c1, &targeted, "after 3: C1 unchanged").await;
     case.zero_drift("step 3").await;
@@ -240,14 +243,16 @@ async fn k05_a_recommit_with_other_content_changes_nothing_on_the_row_or_its_sig
     let in_c2 = signed_over(&case, B_OUT, c2, &first, "after 1: C2 claimed over fh1").await;
     case.zero_drift("step 1").await;
 
-    case.commit_nar(NarCommit {
-        file_hash: "fh2".into(),
-        references: vec![format!("{B_OUT}-b"), format!("{X_OUT}-x")],
-        built_by_worker: true,
-        ..commit_of_b(SignTargets::Cache(c1))
-    })
-    .await;
+    let by_worker = case
+        .commit_nar(NarCommit {
+            file_hash: "fh2".into(),
+            references: vec![format!("{B_OUT}-b"), format!("{X_OUT}-x")],
+            built_by_worker: true,
+            ..commit_of_b(SignTargets::Cache(c1))
+        })
+        .await;
 
+    assert_eq!(by_worker.signed, vec![c1], "after 2: a worker signs");
     let (row, references) = (case.cached_path(B_OUT).await, format!("{B_OUT}-b"));
     assert_eq!(row.file_hash.as_deref(), Some("fh1"), "after 2: file_hash");
     assert_eq!(row.references, Some(references), "after 2: references");
@@ -256,12 +261,14 @@ async fn k05_a_recommit_with_other_content_changes_nothing_on_the_row_or_its_sig
     unchanged(&case, B_OUT, c1, &in_c1, "after 2: C1 unchanged").await;
     case.zero_drift("step 2").await;
 
-    case.commit_nar(NarCommit {
-        file_hash: "fh2".into(),
-        ..commit_of_b(SignTargets::Cache(c2))
-    })
-    .await;
+    let by_client = case
+        .commit_nar(NarCommit {
+            file_hash: "fh2".into(),
+            ..commit_of_b(SignTargets::Cache(c2))
+        })
+        .await;
 
+    assert_eq!(by_client.signed, vec![], "after 3: a client signs nothing");
     unchanged(&case, B_OUT, c2, &in_c2, "after 3: C2 as after step 1").await;
     let row = case.cached_path(B_OUT).await;
     assert_eq!(row, stored, "after 3: row unchanged");
