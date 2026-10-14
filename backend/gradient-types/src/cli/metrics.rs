@@ -13,7 +13,7 @@ use gradient_derive::config_group;
 #[derive(Args, Debug, Clone)]
 pub struct MetricsArgs {
     /// Path to a file containing the bearer token required to scrape `/metrics`. An unset path is
-    /// disabling the metrics endpoint with 404. The server is reading the file once at startup.
+    /// disabling the metrics endpoint with 404. The server reads the file once at startup.
     #[arg(id = "metrics-token-file")]
     pub token_file: Option<String>,
 

@@ -51,11 +51,10 @@ in {
           Whether to wait for an in-flight evaluation to produce a deployable build instead of
           giving up while the newest commit is still in CI.
 
-          Waiting is ending once the deployment is built, the evaluation or build is failing, or the
-          target is already running the evaluated system. None of these outcomes is failing the
-          unit. {option}`system.gradient-deploy.websockets` is controlling how progress is
-          observed. Waiting is unbounded, and systemd is skipping the next trigger while a run is
-          still going.
+          Waiting ends once the deployment is built, the evaluation or build has failed, or the
+          target already runs the evaluated system. None of these outcomes fails the unit.
+          {option}`system.gradient-deploy.websockets` controls how progress is observed. Waiting
+          is unbounded, and systemd skips the next trigger while a run is still going.
         '';
       };
 
@@ -64,8 +63,8 @@ in {
         default = true;
         description = ''
           Whether to follow the task's WebSocket while waiting instead of polling. Disable it when
-          the connection to the server cannot carry a WebSocket upgrade. The service is then polling
-          every {option}`system.gradient-deploy.pollIntervalSec`. It is only used with
+          the connection to the server cannot carry a WebSocket upgrade. The service then polls
+          every {option}`system.gradient-deploy.pollIntervalSec`. Only used with
           {option}`system.gradient-deploy.waitForBuild`.
         '';
       };
@@ -85,7 +84,7 @@ in {
         default = "04:00";
         example = "daily";
         description = ''
-          How often or when the deployment is running, in the format described in
+          How often or when the deployment runs, in the format described in
           {manpage}`systemd.time(7)`.
         '';
       };
@@ -257,7 +256,7 @@ in {
               -H="Authorization: Bearer $API_KEY" "${liveUrl}" </dev/null)
             stream=$!
 
-            # The socket is only reporting transitions after the connect. A reconnect gap is replaying
+            # The socket only reports transitions after the connect. A reconnect gap replays
             # nothing, and every connect must settle again.
             if settle; then
               exit 0

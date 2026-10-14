@@ -15,31 +15,29 @@ use gradient_derive::config_group;
 #[derive(Parser, Debug, Clone)]
 #[command(name = "gradient-worker", about = "Gradient build worker")]
 pub struct WorkerConfig {
-    /// WebSocket URL of the Gradient server's `/proto` endpoint. `null` leaves the worker
+    /// WebSocket URL of the Gradient server's `/proto` endpoint. `null` keeps the worker
     /// waiting for the server to connect.
     pub server_url: String,
 
     /// Peer-to-token mappings for challenge-response authentication.
-    /// Each line is holding one `peer_id:token` pair.
-    /// A `*:token` line is answering every challenged peer UUID with `token`.
+    /// Each line holds one `peer_id:token` pair.
+    /// A `*:token` line answers every challenged peer UUID with `token`.
     /// Each named peer is a project, cache, or proxy UUID.
-    /// This option is mutually exclusive with `--peers-file`.
+    /// Mutually exclusive with `--peers-file`.
     pub peers: Option<String>,
 
-    /// File of peer tokens for challenge-response authentication with the server, one
-    /// `peer_id:token` per line. Lines starting with `#` are ignored.
+    /// File of peer tokens for challenge-response authentication with the server,
+    /// with `peer_id:token` per line and `#` starting a comment.
     ///
     /// ```
     /// <uuid>:<token>
     /// *:<token>
     /// ```
     ///
-    /// The peer ID `*` matches any UUID in the server's challenge. Each token is a 48 byte
-    /// random secret, for example from {command}`openssl rand -base64 48`, registered through
-    /// `POST /api/v1/projects/{project}/workers`. Pin a project UUID with
-    /// {option}`services.gradient.state.projects.<name>.id` to reference it here.
-    ///
-    /// `null` connects in open mode, where the server accepts the worker without a token.
+    /// Use peer ID `*` to match any UUID in the server's challenge.
+    /// Tokens are 48 byte random secrets, for example from {command}`openssl rand -base64 48`.
+    /// Register them via the API through `POST /api/v1/projects/{project}/workers`.
+    /// Set it to `null` for open mode without authentication; avoid that in a production setup.
     pub peers_file: Option<PathBuf>,
 
     /// Directory holding the worker's state.
@@ -47,16 +45,17 @@ pub struct WorkerConfig {
     pub base_dir: PathBuf,
 
     /// Worker UUID. `null` generates one on first start and stores it in
-    /// {file}`<services.gradient.worker.baseDir>/worker-id`. Set it when the UUID must be known in
-    /// advance, for example to register the worker in {option}`services.gradient.state.workers`.
+    /// {file}`<services.gradient.worker.baseDir>/worker-id`. Set it when the UUID must be known
+    /// in advance, for example to register the worker in
+    /// {option}`services.gradient.state.workers`.
     pub id: Option<String>,
 
     /// Locality label advertised to the scheduler. A cluster job asking for one zone places
-    /// every member on workers with the same label. `null` puts the worker in the zone of
-    /// all unlabelled workers.
+    /// every member on workers with the same label. `null` places the worker among the
+    /// unlabelled workers.
     pub zone: Option<String>,
 
-    /// Address at which other members of a cluster job reach this worker, passed through
+    /// Address at which other members of a cluster job connect to this worker, passed through
     /// verbatim in the cluster roster. `null` advertises none.
     pub endpoint: Option<String>,
 
@@ -65,7 +64,7 @@ pub struct WorkerConfig {
     pub nix_bin: String,
 
     /// Path to the `ssh` binary, resolved via `PATH` by default.
-    /// Nix is using it as `GIT_SSH_COMMAND` for private flake inputs.
+    /// Nix uses it as `GIT_SSH_COMMAND` for private flake inputs.
     #[arg(default_value = "ssh")]
     pub ssh_bin: String,
 
@@ -86,13 +85,13 @@ pub struct WorkerConfig {
     #[arg(default_value_t = 3100)]
     pub port: u16,
 
-    /// File of token hashes a server must present when it connects to this worker, one
-    /// `peer_id:hash` per line. Lines starting with `#` are ignored. A hash is an argon2 PHC
-    /// string or the lowercase SHA-256 hex digest of the token, for example from
-    /// {command}`printf %s "$TOKEN" | sha256sum`. The peer ID `*` matches any peer. The file
-    /// is only read with {option}`services.gradient.worker.discoverable`.
-    ///
-    /// `null` accepts every server, and the worker logs a warning at start.
+    /// File of token hashes required from connecting servers,
+    /// with `peer_id:hash` per line and `#` starting a comment.
+    /// A hash is an argon2 PHC string or the lowercase SHA-256 hex digest of the token itself,
+    /// for example from {command}`printf %s "$TOKEN" | sha256sum`.
+    /// Peer ID `*` matches any peer.
+    /// The worker reads this file only with {env}`GRADIENT_WORKER_DISCOVERABLE`.
+    /// Set it to `null` to accept every server; avoid that in a production setup.
     pub accepted_server_tokens_file: Option<PathBuf>,
 
     /// Re-exec as a Nix evaluator subprocess (internal - do not set manually).
@@ -100,7 +99,7 @@ pub struct WorkerConfig {
     pub eval_subprocess: bool,
 
     /// Drive one eval subprocess over the production rkyv transport from a JSONL request file.
-    /// This internal harness is serving the NixOS VM integration test.
+    /// This internal harness serves the NixOS VM integration test.
     #[arg(hide = true)]
     pub eval_driver: Option<String>,
 
@@ -153,19 +152,19 @@ impl Default for WorkerConfig {
 #[config_group("capabilities", env = "worker_capabilities")]
 #[derive(Args, Debug, Clone)]
 pub struct CapabilitiesArgs {
-    /// Whether to enable forwarding work and NARs between workers and servers (requiring `discoverable`).
+    /// Whether to forward work and NARs between workers and servers (requires `discoverable`).
     #[arg(default_value = "false")]
     pub federate: bool,
 
-    /// Whether to enable prefetching flake inputs and sources.
+    /// Whether to prefetch flake inputs and sources.
     #[arg(default_value = "true")]
     pub fetch: bool,
 
-    /// Whether to enable Nix flake evaluations.
+    /// Whether to run Nix flake evaluations.
     #[arg(default_value = "true")]
     pub eval: bool,
 
-    /// Whether to enable Nix builds.
+    /// Whether to run Nix builds.
     #[arg(default_value = "true")]
     pub build: bool,
 }
@@ -182,13 +181,13 @@ pub struct SystemArgs {
     #[arg(value_delimiter = ',')]
     pub features: Vec<String>,
 
-    /// Single-core speed score advertised to the scheduler, higher is faster. `null`
+    /// Single-core speed score advertised to the scheduler; higher is faster. `null`
     /// benchmarks the host at startup.
     pub cpu_core_score: Option<NonZeroU32>,
 
     /// Free memory in MiB below which the worker kills the one evaluation subprocess large
-    /// enough to restore the margin. The worker reports that evaluation as failed instead of
-    /// letting the host freeze. `0` uses 10% of total memory, clamped to 128 MiB to 1 GiB.
+    /// enough to restore the margin and reports that evaluation as failed instead of letting
+    /// the host freeze. `0` uses 10% of total memory, clamped to 128 MiB to 1 GiB.
     /// {option}`services.gradient.worker.eval.maxRss` still bounds steady-state memory.
     #[arg(default_value_t = 0)]
     pub min_free_ram_mb: u64,
@@ -215,14 +214,14 @@ pub struct EvalArgs {
     pub fork_workers: Option<NonZeroUsize>,
 
     /// Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit
-    /// restart after the call and free the Nix heap. A call growing past the limit is fine, with
-    /// {option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.
-    /// Keep it above a typical evaluation's heap.
+    /// restart after the call and free the Nix heap. A call growing past the limit is fine,
+    /// with {option}`services.gradient.worker.system.minFreeRamMb` as the host's guard. Keep it
+    /// above a typical evaluation's heap.
     #[arg(default_value = "2147483648")]
     pub max_rss: NonZeroU64,
 
     /// Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots,
-    /// flake graph). Disable it to leave that overhead out.
+    /// flake graph). Disable it to skip that overhead.
     #[arg(default_value = "true")]
     pub metrics: bool,
 
@@ -235,7 +234,7 @@ pub struct EvalArgs {
     pub cache_share: bool,
 
     /// Ceiling in MiB for the resident memory of all evaluation subprocesses together.
-    /// Subprocesses leave the pool, largest first, while the sum is over the ceiling.
+    /// Subprocesses leave the pool largest first while the total exceeds the ceiling.
     /// Conflicts with {option}`services.gradient.worker.system.minFreeRamMb`.
     pub max_memory: Option<NonZeroU64>,
 }
@@ -262,12 +261,12 @@ pub struct BuildArgs {
 #[derive(Args, Debug, Clone)]
 pub struct NarArgs {
     /// Upload requests over 1 MiB open at once, waiting for a server grant or transferring.
-    /// Half of the limit for any job. A window of 128 for smaller uploads.
-    /// How many run: the server's upload budget. A bound on worker memory.
+    /// Half of the limit for any job, a window of 128 for smaller uploads.
+    /// The server's upload budget decides how many run and bounds the worker's memory.
     #[arg(default_value = "16")]
     pub max_concurrent_uploads: NonZeroU32,
 
-    /// Seconds after the last write before the deletion of an unfinished NAR download under
+    /// Seconds after the last write before the worker deletes an unfinished NAR download under
     /// {file}`<services.gradient.worker.baseDir>/nar-partial`. `0` for no cleanup.
     #[arg(default_value_t = 86400)]
     pub partial_ttl_secs: u64,

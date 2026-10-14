@@ -51,12 +51,13 @@ in {
     enable = lib.mkEnableOption "the Gradient worker";
 
     environmentVariables = lib.mkOption {
-      type = with lib.types; attrsOf (nullOr (either (either bool int) (either str path)));
+      type = with lib.types; lazyAttrsOf (nullOr (oneOf [ bool int str path ]));
       default = { };
       example = { GRADIENT_WORKER_BUILD_MAX_CONCURRENT = 8; };
       description = ''
-        Extra environment variables of the Gradient worker, taking precedence over variables
-        from other options. `null` unsets a variable.
+        Environment variables of the Gradient worker.
+        The [configuration reference](https://wavelens.github.io/gradient/reference/configuration) lists every variable and its default.
+        Set a variable to `null` to unset it.
       '';
     };
 
@@ -67,7 +68,7 @@ in {
         default = pkgs.gradient-nix;
         defaultText = lib.literalExpression "pkgs.gradient-nix";
         description = ''
-          Nix package whose {command}`nix` the worker runs to detect its system features.
+          Nix package providing the {command}`nix` for system feature detection.
           The default is Gradient's Nix fork, matching the worker's embedded evaluator.
         '';
       };
@@ -97,9 +98,9 @@ in {
           type = lib.types.nullOr lib.types.str;
           default = null;
           description = ''
-            Host of an existing ACME certificate to use, passed to
-            {option}`services.caddy.virtualHosts.<name>.useACMEHost`. No certificate is requested
-            for it. `null` leaves certificate management to Caddy.
+            Host of an existing ACME certificate, passed to
+            {option}`services.caddy.virtualHosts.<name>.useACMEHost`. Caddy reuses it instead of
+            requesting a new certificate. `null` keeps certificate management with Caddy.
           '';
         };
 
@@ -121,7 +122,7 @@ in {
       default = "";
       example = "worker.example.com";
       description = ''
-        Domain of the worker's reverse proxy virtual host. It only applies with a reverse proxy
+        Domain of the worker's reverse proxy virtual host. Only applies with a reverse proxy
         enabled.
       '';
     };
@@ -131,7 +132,7 @@ in {
       default = null;
       example = "wss://gradient.example.com/proto";
       description = ''
-        WebSocket URL of the Gradient server's `/proto` endpoint. `null` leaves the worker
+        WebSocket URL of the Gradient server's `/proto` endpoint. `null` keeps the worker
         waiting for the server to connect.
       '';
     };
@@ -140,20 +141,18 @@ in {
       type = lib.types.nullOr lib.types.path;
       default = null;
       description = ''
-        File of peer tokens for challenge-response authentication with the server, one
-        `peer_id:token` per line. Lines starting with `#` are ignored.
+        File of peer tokens for challenge-response authentication with the server,
+        with `peer_id:token` per line and `#` starting a comment.
 
         ```
         <uuid>:<token>
         *:<token>
         ```
 
-        The peer ID `*` matches any UUID in the server's challenge. Each token is a 48 byte
-        random secret, for example from {command}`openssl rand -base64 48`, registered through
-        `POST /api/v1/projects/{project}/workers`. Pin a project UUID with
-        {option}`services.gradient.state.projects.<name>.id` to reference it here.
-
-        `null` connects in open mode, where the server accepts the worker without a token.
+        Use peer ID `*` to match any UUID in the server's challenge.
+        Tokens are 48 byte random secrets, for example from {command}`openssl rand -base64 48`.
+        Register them via the API through `POST /api/v1/projects/{project}/workers`.
+        Set it to `null` for open mode without authentication; avoid that in a production setup.
       '';
     };
 
@@ -161,13 +160,13 @@ in {
       type = lib.types.nullOr lib.types.path;
       default = null;
       description = ''
-        File of token hashes a server must present when it connects to this worker, one
-        `peer_id:hash` per line. Lines starting with `#` are ignored. A hash is an argon2 PHC
-        string or the lowercase SHA-256 hex digest of the token, for example from
-        {command}`printf %s "$TOKEN" | sha256sum`. The peer ID `*` matches any peer. The file
-        is only read with {option}`services.gradient.worker.discoverable`.
-
-        `null` accepts every server, and the worker logs a warning at start.
+        File of token hashes required from connecting servers,
+        with `peer_id:hash` per line and `#` starting a comment.
+        A hash is an argon2 PHC string or the lowercase SHA-256 hex digest of the token itself,
+        for example from {command}`printf %s "$TOKEN" | sha256sum`.
+        Peer ID `*` matches any peer.
+        The worker reads this file only with {env}`GRADIENT_WORKER_DISCOVERABLE`.
+        Set it to `null` to accept every server; avoid that in a production setup.
       '';
     };
 
@@ -209,11 +208,12 @@ in {
         type = lib.types.bool;
         default = false;
         description = ''
-          Whether to record per-build peak memory, CPU time, disk I/O and out-of-memory kills. Enabling
-          it is turning on Nix's experimental `cgroups` feature and `use-cgroups` and delegating cgroup
-          controllers to {file}`nix-daemon.service`. The daemon is reporting the values in each build
-          result. Peak memory, disk I/O and out-of-memory kills need Gradient's Nix fork on the daemon,
-          and {option}`nix.package` is defaulting to its package. Wall-clock time is always recorded.
+          Whether to record per-build peak memory, CPU time, disk I/O and out-of-memory kills.
+          This turns on Nix's experimental `cgroups` feature and `use-cgroups` setting and
+          delegates cgroup controllers to {file}`nix-daemon.service`. The daemon reports the
+          values in each build result. Peak memory, disk I/O and out-of-memory kills need
+          Gradient's Nix fork on the daemon, and {option}`nix.package` then defaults to its
+          package. Wall-clock time is always recorded.
         '';
       };
 
@@ -226,9 +226,9 @@ in {
           else null
         '';
         description = ''
-          Cgroup directory of {file}`nix-daemon.service`, the parent of the build cgroups. The worker
-          is reading the peak memory of each running build from it and sending the values with its
-          heartbeat. The scheduler is reserving the larger of the predicted and the reported peak.
+          Cgroup directory of {file}`nix-daemon.service`, the parent of the build cgroups. The
+          worker reads each running build's peak memory from it and sends the values with its
+          heartbeat. The scheduler reserves the larger of the predicted and the reported peak.
           The build cgroups need {option}`services.gradient.worker.build.metrics` and Gradient's
           Nix fork on the daemon. `null` reports nothing.
         '';
@@ -239,9 +239,9 @@ in {
         default = 500;
         description = ''
           Out-of-memory score adjustment for {file}`nix-daemon.service`, inherited by every build
-          process. With a positive value the kernel is killing a build process before the worker
-          on a host out of memory, failing that build alone. Evaluation subprocesses use 600 and
-          go first. `null` leaves the daemon unchanged.
+          process. A positive value makes the kernel kill a build process before the worker when
+          the host runs out of memory, failing only that build. Evaluation subprocesses use 600
+          and die first. `null` leaves the daemon unchanged.
         '';
       };
     };

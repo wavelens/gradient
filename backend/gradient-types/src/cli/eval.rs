@@ -34,7 +34,7 @@ pub struct EvalArgs {
 }
 
 impl EvalArgs {
-    /// The configured value is saturating rather than wrapping. A value past `i32::MAX` would
+    /// The configured value saturates rather than wraps. A value past `i32::MAX` would
     /// otherwise become a negative ceiling rejecting everything.
     pub fn keep_evaluations_max(&self) -> Option<i32> {
         match self.max_keep {
@@ -43,7 +43,7 @@ impl EvalArgs {
         }
     }
 
-    /// Creating a task above the ceiling would leave it unsaveable. The frontend is sending the
+    /// Creating a task above the ceiling would leave it unsaveable. The frontend sends the
     /// whole form back and the handed value would fail validation (#561).
     pub fn default_keep_evaluations(&self) -> i32 {
         match self.keep_evaluations_max() {

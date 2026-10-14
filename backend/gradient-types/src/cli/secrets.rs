@@ -8,7 +8,7 @@ use clap::Args;
 use gradient_derive::config_group;
 
 /// Both files are required to run the server but deliberately default to empty. `--state-validate`,
-/// a DB-free and secret-free build check, must parse without them. `init_state` is rejecting an
+/// a DB-free and secret-free build check, must parse without them. `init_state` rejects an
 /// empty value on the live server path.
 #[config_group("secrets")]
 #[derive(Args, Debug, Clone)]

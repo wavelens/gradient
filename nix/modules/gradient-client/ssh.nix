@@ -25,7 +25,7 @@ in {
     project = lib.mkOption {
       type = lib.types.str;
       example = "my-project";
-      description = "Project the builds are running in. It is the SSH user name.";
+      description = "Project the builds run in. Also the SSH user name.";
     };
 
     identityFile = lib.mkOption {
@@ -42,26 +42,26 @@ in {
       default = [ pkgs.stdenv.hostPlatform.system ];
       defaultText = lib.literalExpression "[ pkgs.stdenv.hostPlatform.system ]";
       example = [ "x86_64-linux" "aarch64-linux" ];
-      description = "Systems the Gradient workers are building for.";
+      description = "Systems the Gradient workers build for.";
     };
 
     supportedFeatures = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
       example = [ "benchmark" "big-parallel" "kvm" "nixos-test" ];
-      description = "System features the Gradient workers are offering.";
+      description = "System features the Gradient workers offer.";
     };
 
     maxJobs = lib.mkOption {
       type = lib.types.ints.positive;
       default = 128;
-      description = "Number of builds Nix is sending to Gradient at once.";
+      description = "Number of builds Nix sends to Gradient at once.";
     };
 
     speedFactor = lib.mkOption {
       type = lib.types.ints.positive;
       default = 128;
-      description = "Preference of Gradient over other build machines. A higher value is preferring Gradient.";
+      description = "Preference of Gradient over other build machines. A higher value prefers Gradient.";
     };
   };
 

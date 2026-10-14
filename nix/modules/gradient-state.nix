@@ -18,8 +18,7 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Name of the internal Gradient cache to use. It is required for `internal` upstream
-          caches.
+          Name of the internal Gradient cache to use. Required for `internal` upstream caches.
         '';
       };
 
@@ -27,7 +26,7 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Display name of the upstream cache. It is required for `external` upstream caches. `null`
+          Display name of the upstream cache. Required for `external` upstream caches. `null`
           uses the name of the internal cache.
         '';
       };
@@ -43,15 +42,14 @@
       url = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "URL of the external Nix binary cache. It is required for `external` upstream caches.";
+        description = "URL of the external Nix binary cache. Required for `external` upstream caches.";
       };
 
       public_key = mkOption {
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Public key of the external Nix binary cache. It is required for `external` upstream
-          caches.
+          Public key of the external Nix binary cache. Required for `external` upstream caches.
         '';
       };
 
@@ -213,8 +211,8 @@
         type = types.bool;
         default = false;
         description = ''
-          Whether to force-update this input from its flake-declared URL. It is mutually exclusive
-          with `url`, and exactly one of the two must be set.
+          Whether to force-update this input from its flake-declared URL. Mutually exclusive with
+          `url`; set exactly one of the two.
         '';
       };
     };
@@ -462,8 +460,7 @@
       git_host_type = mkOption {
         type = types.enum [ "gitea" "forgejo" "gitlab" "github" ];
         description = ''
-          Target Git host of this integration. It is display metadata only for inbound
-          integrations. One inbound row covers Gitea, Forgejo and GitLab through the Git host
+          Target Git host of this integration. Display metadata only for inbound integrations. One inbound row covers Gitea, Forgejo and GitLab through the Git host
           segment of the webhook URL.
 
           `github` requires `installation_id` instead of a secret, token or endpoint and
@@ -476,8 +473,8 @@
         type = types.nullOr types.int;
         default = null;
         description = ''
-          GitHub App installation ID, the trailing number of the installation URL. It is required
-          for `git_host_type = "github"` and ignored otherwise.
+          GitHub App installation ID, the trailing number of the installation URL. Required for
+          `git_host_type = "github"`, ignored otherwise.
         '';
       };
 
@@ -491,8 +488,8 @@
         type = types.nullOr types.path;
         default = null;
         description = ''
-          File containing the HMAC signing secret of an inbound integration. It is loaded as a
-          systemd credential and stored encrypted. Outbound integrations ignore it.
+          File containing the HMAC signing secret of an inbound integration. Loaded as a systemd
+          credential and stored encrypted. Outbound integrations ignore it.
         '';
       };
 
@@ -509,7 +506,7 @@
         type = types.nullOr types.path;
         default = null;
         description = ''
-          File containing the Git host API token of an outbound integration. It is loaded as a systemd
+          File containing the Git host API token of an outbound integration. Loaded as a systemd
           credential and stored encrypted. GitHub integrations do not use it and take their
           credentials from {option}`services.gradient.githubApp`.
         '';
@@ -535,9 +532,9 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Name of an inbound integration in the same project backing this trigger. It is required
-          for `reporter_push` and `reporter_pull_request` and ignored for `polling` and `time`. It
-          must name an integration in {option}`services.gradient.state.integrations` or a GitHub App
+          Name of an inbound integration in the same project backing this trigger. Required for
+          `reporter_push` and `reporter_pull_request`, ignored for `polling` and `time`. It must
+          name an integration in {option}`services.gradient.state.integrations` or a GitHub App
           installation of the project.
         '';
       };
@@ -783,7 +780,7 @@
         default = null;
         description = ''
           Role of the team's users: a built-in `Admin`, `Write` or `View`, or a custom role of the
-          project. It is required when `users` is true.
+          project. Required when `users` is true.
         '';
       };
       users = mkOption {
@@ -1011,7 +1008,7 @@
         example = "platform";
         description = ''
           Team owning this worker. A team worker can build for every project granting the team's
-          workers. It is mutually exclusive with `projects`.
+          workers. Mutually exclusive with `projects`.
         '';
       };
 
@@ -1136,9 +1133,9 @@
         type = types.bool;
         default = true;
         description = ''
-          Whether to validate the generated state at build time with the server's
-          `--state-validate`. Schema and reference errors then fail the Nix build instead of
-          the first server start. No database is touched.
+          Whether to check the state option with the server's `--state-validate` flag at
+          build time. Schema and reference errors then fail at build time instead of at
+          runtime.
         '';
       };
 
@@ -1317,7 +1314,14 @@ in
           };
         }
       '';
-      description = "Declarative Gradient state: users, projects, tasks, caches and more.";
+      description = ''
+        Declarative Gradient state, written as JSON to the server's state file.
+        The [state reference](https://wavelens.github.io/gradient/reference/state) documents the available fields.
+        Fields naming an entry, such as `name`, `username` and `display_name`, default to its attribute name.
+        Files in `password_file`, `private_key_file`, `signing_key_file`, `key_file`,
+        `token_file`, `secret_file`, `access_token_file` and the secret files of task
+        actions become systemd credentials of the server.
+      '';
     };
   };
 

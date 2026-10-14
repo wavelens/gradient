@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Each module is one config group. Its NixOS option path, flag and env var are sharing one name,
+//! Each module is one config group. Its NixOS option path, flag and env var share one name,
 //! like `upload.bytesBudget`, `--upload-bytes-budget` and `GRADIENT_UPLOAD_BYTES_BUDGET`.
 
 mod build;

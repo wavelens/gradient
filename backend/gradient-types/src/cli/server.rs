@@ -19,7 +19,7 @@ pub struct ServerArgs {
     /// Port for the Gradient server to listen on.
     #[arg(value_parser = port_in_range, default_value_t = 3000)]
     pub port: u16,
-    /// Public URL under which clients reach Gradient. Set this for a URL other than
+    /// Public URL of Gradient. Set this for a URL other than
     /// {option}`services.gradient.domain`, for example behind a port mapping.
     #[arg(default_value = "http://127.0.0.1:8000")]
     pub serve_url: String,

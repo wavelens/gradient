@@ -4,14 +4,14 @@
 |---|---|---|---|---|
 | `baseDir` | path | `"/var/lib/gradient"` | `GRADIENT_BASE_DIR` | Directory holding Gradient's state, NAR files and caches. |
 | `domain` | string | - | - | Domain under which Gradient is reachable. |
-| `enable` | bool | `false` | - | Whether to enable Gradient. |
-| `environmentVariables` | attribute set of (null or bool or int or string or path) | `{ }` | - | Extra environment variables of the Gradient server, taking precedence over variables from other options. `null` unsets a variable. |
+| `enable` | bool | `false` | - | Whether to enable Gradient, a Nix-CI for Teams. |
+| `environmentVariables` | lazy attribute set of (null or bool or int or string or path) | `{ }` | - | Environment variables of the Gradient server. The [configuration reference](https://wavelens.github.io/gradient/reference/configuration) lists every variable and its default. Set a variable to `null` to unset it. Secrets belong into `secrets`. |
 | `listenAddr` | string | `"127.0.0.1"` | `GRADIENT_LISTEN_ADDR` | IP address for the Gradient server to listen on. |
-| `localWorker` | bool | `worker.enable` | - | Whether to register the `worker` on this host automatically, with an ID from the hostname and a token and peers file from the first start. Members of the state-declared team `server` reach every new project, the local worker included. No UUID, token or web UI step is necessary. Disable it to register the local worker like a remote worker, with `worker.id` and `worker.peersFile`. |
+| `localWorker` | bool | `worker.enable` | - | Whether to register the `worker` on this host automatically, with an ID from the hostname and a token and peers file from the first start. The state-declared team `server` is part of every new project. |
 | `port` | port | `3000` | `GRADIENT_PORT` | Port for the Gradient server to listen on. |
 | `publicStats` | bool | `false` | `GRADIENT_PUBLIC_STATS` | Expose `GET /api/v1/workers` and worker stats without authentication. Only superusers can access those endpoints with `false` (default). |
 | `retentionDays` | unsigned int | `90` | `GRADIENT_RETENTION_DAYS` | Days to keep job assignment records, finished deliveries, worker connection history, webhook and task action deliveries, expired sessions and CLI logins. Finished admin tasks, the audit log, per-build resource samples and finished cluster jobs share the same limit. Removed resource samples no longer feed build predictions. Finished cluster jobs without remaining members go on the next hourly pass. Active cluster jobs and the newest finished admin task of each kind stay exempt. Open worker connections stay until the next connection of the same worker. Set it to `0` to keep every record forever. |
-| `serveUrl` | string | derived | `GRADIENT_SERVE_URL` | Public URL under which clients reach Gradient. Set this for a URL other than `domain`, for example behind a port mapping. |
+| `serveUrl` | string | derived | `GRADIENT_SERVE_URL` | Public URL of Gradient. Set this for a URL other than `domain`, for example behind a port mapping. |
 | `storePath` | null or string | `null` | `GRADIENT_STORE_PATH` |  |
 | `useQuic` | bool | `false` | `GRADIENT_USE_QUIC` | Whether to enable advertising HTTP/3 (QUIC) to clients. |
 | `useTls` | bool | `true` | `GRADIENT_USE_TLS` | Whether to enable TLS. |
@@ -193,7 +193,7 @@
 | `postgres.enable` | bool | `false` | - | Whether to enable a local PostgreSQL database for Gradient. |
 | `postgres.maintenanceWorkMem` | null or string | `null` | - | `maintenance_work_mem` of the cluster set up by `postgres.enable`, used for building indexes and by autovacuum. Each of `autovacuum_max_workers` can claim this much at once. Set it to `null` to keep the PostgreSQL default. |
 | `postgres.sharedBuffers` | null or string | `"512MB"` | - | `shared_buffers` of the cluster set up by `postgres.enable`. Size it to a quarter of the host's RAM. Gradient's working set is the build graph's indexes, and the stock 128 MB cannot keep them resident. This value is a single fixed allocation, unlike `work_mem` and `maintenance_work_mem`. The default is a quarter of the smallest supported host. Raise it on larger hosts. Set it to `null` to keep the PostgreSQL default. |
-| `postgres.workMem` | null or string | `null` | - | `work_mem` of the cluster set up by `postgres.enable`. It is the floor for every query. Graph walks raise their own ceiling for a statement, except the walks seeded by a root array, which keep the PostgreSQL default. Every sort or hash node in a query can claim this much. Use `"32MB"` on a host sized for the three server pools. It is too much for a small host. Set it to `null` to keep the PostgreSQL default. |
+| `postgres.workMem` | null or string | `null` | - | `work_mem` of the cluster set up by `postgres.enable`. Every sort or hash node in a query can claim this much. The scheduler's graph walks set a higher per-statement limit, except walks seeded by a root array, which keep the PostgreSQL default. Use `"32MB"` on a host sized for the three server pools; that is too much for a small host. `null` keeps the PostgreSQL default. |
 
 ## `proto`
 
@@ -226,9 +226,9 @@
 |---|---|---|---|---|
 | `reverseProxy.caddy.enable` | bool | `false` | - | Whether to enable a Caddy virtual host for Gradient. |
 | `reverseProxy.caddy.extraConfig` | strings concatenated with "\n" | `""` | - | Additional lines appended to `services.caddy.virtualHosts.<name>.extraConfig` after the reverse proxy setup. |
-| `reverseProxy.caddy.useACMEHost` | null or string | `null` | - | Host of an existing ACME certificate for `services.caddy.virtualHosts.<name>.useACMEHost`, used instead of requesting a new certificate. Set it to `null` to leave certificate management to Caddy. |
+| `reverseProxy.caddy.useACMEHost` | null or string | `null` | - | Host of an existing ACME certificate, passed to `services.caddy.virtualHosts.<name>.useACMEHost`. Caddy reuses it instead of requesting a new certificate. `null` keeps certificate management with Caddy. |
 | `reverseProxy.nginx.enable` | bool | `!reverseProxy.caddy.enable` | - | Whether to enable an nginx virtual host for Gradient. |
-| `reverseProxy.nginx.manageTls` | bool | `true` | - | Whether to let nginx obtain and present the TLS certificate itself through the virtual host's `enableACME` and `forceSSL` settings. Disable it for upstream proxies (Traefik, Cloudflare, load balancers) that terminate TLS and forward plain HTTP to nginx. Keep `useTls` enabled in that case for `https://` URLs and `Secure` session cookies. It has no effect with `useTls` disabled. |
+| `reverseProxy.nginx.manageTls` | bool | `true` | - | Whether to let nginx obtain and present the TLS certificate itself through the virtual host's `enableACME` and `forceSSL` settings. Disable it for upstream proxies (Traefik, Cloudflare, load balancers) that terminate TLS and forward plain HTTP to nginx. Keep `useTls` enabled in that case for `https://` URLs and `Secure` session cookies. Has no effect with `useTls` disabled. |
 
 ## `s3`
 
@@ -300,40 +300,40 @@
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.acceptedServerTokensFile` | null or path | `null` | `GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE` | File of token hashes a server must present when it connects to this worker, one `peer_id:hash` per line. Lines starting with `#` are ignored. A hash is an argon2 PHC string or the lowercase SHA-256 hex digest of the token, for example from `printf %s "$TOKEN" \| sha256sum`. The peer ID `*` matches any peer. The file is only read with `worker.discoverable`. `null` accepts every server, and the worker logs a warning at start. |
+| `worker.acceptedServerTokensFile` | null or path | `null` | `GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE` | File of token hashes required from connecting servers, with `peer_id:hash` per line and `#` starting a comment. A hash is an argon2 PHC string or the lowercase SHA-256 hex digest of the token itself, for example from `printf %s "$TOKEN" \| sha256sum`. Peer ID `*` matches any peer. The worker reads this file only with `GRADIENT_WORKER_DISCOVERABLE`. Set it to `null` to accept every server; avoid that in a production setup. |
 | `worker.baseDir` | path | `"/var/lib/gradient-worker"` | `GRADIENT_WORKER_BASE_DIR` | Directory holding the worker's state. |
 | `worker.discoverable` | bool | `false` | `GRADIENT_WORKER_DISCOVERABLE` | Whether to enable incoming server connections on `/proto`. |
-| `worker.domain` | string | `""` | - | Domain of the worker's reverse proxy virtual host. It only applies with a reverse proxy enabled. |
+| `worker.domain` | string | `""` | - | Domain of the worker's reverse proxy virtual host. Only applies with a reverse proxy enabled. |
 | `worker.enable` | bool | `false` | - | Whether to enable the Gradient worker. |
-| `worker.endpoint` | null or string | `null` | `GRADIENT_WORKER_ENDPOINT` | Address at which other members of a cluster job reach this worker, passed through verbatim in the cluster roster. `null` advertises none. |
-| `worker.environmentVariables` | attribute set of (null or bool or int or string or path) | `{ }` | - | Extra environment variables of the Gradient worker, taking precedence over variables from other options. `null` unsets a variable. |
+| `worker.endpoint` | null or string | `null` | `GRADIENT_WORKER_ENDPOINT` | Address at which other members of a cluster job connect to this worker, passed through verbatim in the cluster roster. `null` advertises none. |
+| `worker.environmentVariables` | lazy attribute set of (null or bool or int or string or path) | `{ }` | - | Environment variables of the Gradient worker. The [configuration reference](https://wavelens.github.io/gradient/reference/configuration) lists every variable and its default. Set a variable to `null` to unset it. |
 | `worker.gcrootsDir` | string | `"/nix/var/nix/gcroots/gradient"` | `GRADIENT_WORKER_GCROOTS_DIR` | Directory for the indirect GC roots pinning each running build's inputs and outputs against a concurrent `nix-collect-garbage`. An empty string disables pinning. |
 | `worker.id` | null or string | `null` | `GRADIENT_WORKER_ID` | Worker UUID. `null` generates one on first start and stores it in `<worker.baseDir>/worker-id`. Set it when the UUID must be known in advance, for example to register the worker in `state.workers`. |
 | `worker.listenAddr` | string | `"127.0.0.1"` | `GRADIENT_WORKER_LISTEN_ADDR` | IP address the worker listens on for incoming server connections. |
-| `worker.peersFile` | null or path | `null` | `GRADIENT_WORKER_PEERS_FILE` | File of peer tokens for challenge-response authentication with the server, one `peer_id:token` per line. Lines starting with `#` are ignored. ``` <uuid>:<token> *:<token> ``` The peer ID `*` matches any UUID in the server's challenge. Each token is a 48 byte random secret, for example from `openssl rand -base64 48`, registered through `POST /api/v1/projects/{project}/workers`. Pin a project UUID with `state.projects.<name>.id` to reference it here. `null` connects in open mode, where the server accepts the worker without a token. |
+| `worker.peersFile` | null or path | `null` | `GRADIENT_WORKER_PEERS_FILE` | File of peer tokens for challenge-response authentication with the server, with `peer_id:token` per line and `#` starting a comment. ``` <uuid>:<token> *:<token> ``` Use peer ID `*` to match any UUID in the server's challenge. Tokens are 48 byte random secrets, for example from `openssl rand -base64 48`. Register them via the API through `POST /api/v1/projects/{project}/workers`. Set it to `null` for open mode without authentication; avoid that in a production setup. |
 | `worker.port` | port | `3100` | `GRADIENT_WORKER_PORT` | Port the worker listens on for incoming server connections. |
-| `worker.serverUrl` | null or string | `null` | `GRADIENT_WORKER_SERVER_URL` | WebSocket URL of the Gradient server's `/proto` endpoint. `null` leaves the worker waiting for the server to connect. |
+| `worker.serverUrl` | null or string | `null` | `GRADIENT_WORKER_SERVER_URL` | WebSocket URL of the Gradient server's `/proto` endpoint. `null` keeps the worker waiting for the server to connect. |
 | `worker.useTls` | bool | `true` | - | Whether to enable TLS. |
-| `worker.zone` | null or string | `null` | `GRADIENT_WORKER_ZONE` | Locality label advertised to the scheduler. A cluster job asking for one zone places every member on workers with the same label. `null` puts the worker in the zone of all unlabelled workers. |
+| `worker.zone` | null or string | `null` | `GRADIENT_WORKER_ZONE` | Locality label advertised to the scheduler. A cluster job asking for one zone places every member on workers with the same label. `null` places the worker among the unlabelled workers. |
 
 ## `worker.build`
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.build.cgroup` | null or string | `if worker.build.metrics then "/sys/fs/cgroup/system.slice/nix-daemon.service" else null` | `GRADIENT_WORKER_BUILD_CGROUP` | Cgroup directory of `nix-daemon.service`, the parent of the build cgroups. The worker is reading the peak memory of each running build from it and sending the values with its heartbeat. The scheduler is reserving the larger of the predicted and the reported peak. The build cgroups need `worker.build.metrics` and Gradient's Nix fork on the daemon. `null` reports nothing. |
+| `worker.build.cgroup` | null or string | `if worker.build.metrics then "/sys/fs/cgroup/system.slice/nix-daemon.service" else null` | `GRADIENT_WORKER_BUILD_CGROUP` | Cgroup directory of `nix-daemon.service`, the parent of the build cgroups. The worker reads each running build's peak memory from it and sends the values with its heartbeat. The scheduler reserves the larger of the predicted and the reported peak. The build cgroups need `worker.build.metrics` and Gradient's Nix fork on the daemon. `null` reports nothing. |
 | `worker.build.maxConcurrent` | positive int | `32` | `GRADIENT_WORKER_BUILD_MAX_CONCURRENT` | Maximum simultaneous builds. |
 | `worker.build.maxCores` | null or (positive int) | `null` | `GRADIENT_WORKER_BUILD_MAX_CORES` | CPU cores for a build, passed as `--cores`. `null` for every core. |
-| `worker.build.metrics` | bool | `false` | - | Whether to record per-build peak memory, CPU time, disk I/O and out-of-memory kills. Enabling it is turning on Nix's experimental `cgroups` feature and `use-cgroups` and delegating cgroup controllers to `nix-daemon.service`. The daemon is reporting the values in each build result. Peak memory, disk I/O and out-of-memory kills need Gradient's Nix fork on the daemon, and `nix.package` is defaulting to its package. Wall-clock time is always recorded. |
-| `worker.build.oomScoreAdjust` | null or integer between -1000 and 1000 (both inclusive) | `500` | - | Out-of-memory score adjustment for `nix-daemon.service`, inherited by every build process. With a positive value the kernel is killing a build process before the worker on a host out of memory, failing that build alone. Evaluation subprocesses use 600 and go first. `null` leaves the daemon unchanged. |
+| `worker.build.metrics` | bool | `false` | - | Whether to record per-build peak memory, CPU time, disk I/O and out-of-memory kills. This turns on Nix's experimental `cgroups` feature and `use-cgroups` setting and delegates cgroup controllers to `nix-daemon.service`. The daemon reports the values in each build result. Peak memory, disk I/O and out-of-memory kills need Gradient's Nix fork on the daemon, and `nix.package` then defaults to its package. Wall-clock time is always recorded. |
+| `worker.build.oomScoreAdjust` | null or integer between -1000 and 1000 (both inclusive) | `500` | - | Out-of-memory score adjustment for `nix-daemon.service`, inherited by every build process. A positive value makes the kernel kill a build process before the worker when the host runs out of memory, failing only that build. Evaluation subprocesses use 600 and die first. `null` leaves the daemon unchanged. |
 
 ## `worker.capabilities`
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.capabilities.build` | bool | `true` | `GRADIENT_WORKER_CAPABILITIES_BUILD` | Whether to enable Nix builds. |
-| `worker.capabilities.eval` | bool | `true` | `GRADIENT_WORKER_CAPABILITIES_EVAL` | Whether to enable Nix flake evaluations. |
-| `worker.capabilities.federate` | bool | `false` | `GRADIENT_WORKER_CAPABILITIES_FEDERATE` | Whether to enable forwarding work and NARs between workers and servers (requiring `discoverable`). |
-| `worker.capabilities.fetch` | bool | `true` | `GRADIENT_WORKER_CAPABILITIES_FETCH` | Whether to enable prefetching flake inputs and sources. |
+| `worker.capabilities.build` | bool | `true` | `GRADIENT_WORKER_CAPABILITIES_BUILD` | Whether to run Nix builds. |
+| `worker.capabilities.eval` | bool | `true` | `GRADIENT_WORKER_CAPABILITIES_EVAL` | Whether to run Nix flake evaluations. |
+| `worker.capabilities.federate` | bool | `false` | `GRADIENT_WORKER_CAPABILITIES_FEDERATE` | Whether to forward work and NARs between workers and servers (requires `discoverable`). |
+| `worker.capabilities.fetch` | bool | `true` | `GRADIENT_WORKER_CAPABILITIES_FETCH` | Whether to prefetch flake inputs and sources. |
 
 ## `worker.eval`
 
@@ -343,9 +343,9 @@
 | `worker.eval.cache.share` | bool | `true` | `GRADIENT_WORKER_EVAL_CACHE_SHARE` | Whether to share eval cache blobs with other workers through the server. |
 | `worker.eval.forkWorkers` | null or (positive int) | `null` | `GRADIENT_WORKER_EVAL_FORK_WORKERS` | Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` sizes the pool to the host's core count, capped at 16. |
 | `worker.eval.maxConcurrent` | positive int | `1` | `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` | Maximum simultaneous evaluations. |
-| `worker.eval.maxMemory` | null or (positive int) | `null` | `GRADIENT_WORKER_EVAL_MAX_MEMORY` | Ceiling in MiB for the resident memory of all evaluation subprocesses together. Subprocesses leave the pool, largest first, while the sum is over the ceiling. Conflicts with `worker.system.minFreeRamMb`. |
+| `worker.eval.maxMemory` | null or (positive int) | `null` | `GRADIENT_WORKER_EVAL_MAX_MEMORY` | Ceiling in MiB for the resident memory of all evaluation subprocesses together. Subprocesses leave the pool largest first while the total exceeds the ceiling. Conflicts with `worker.system.minFreeRamMb`. |
 | `worker.eval.maxRss` | positive int | `2147483648` | `GRADIENT_WORKER_EVAL_MAX_RSS` | Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit restart after the call and free the Nix heap. A call growing past the limit is fine, with `worker.system.minFreeRamMb` as the host's guard. Keep it above a typical evaluation's heap. |
-| `worker.eval.metrics` | bool | `true` | `GRADIENT_WORKER_EVAL_METRICS` | Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots, flake graph). Disable it to leave that overhead out. |
+| `worker.eval.metrics` | bool | `true` | `GRADIENT_WORKER_EVAL_METRICS` | Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots, flake graph). Disable it to skip that overhead. |
 
 ## `worker.log`
 
@@ -365,8 +365,8 @@
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `worker.nar.chunkBytes` | int from 4096 to 4194304 | `524288` | `GRADIENT_WORKER_NAR_CHUNK_BYTES` | Size in bytes of each outbound NAR upload chunk, from 4 KiB to 4 MiB. Smaller chunks can help slow or high-latency links like Tailscale over DERP. |
-| `worker.nar.maxConcurrentUploads` | positive int | `16` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | Upload requests over 1 MiB open at once, waiting for a server grant or transferring. Half of the limit for any job. A window of 128 for smaller uploads. How many run: the server's upload budget. A bound on worker memory. |
-| `worker.nar.partialTtlSecs` | unsigned int | `86400` | `GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS` | Seconds after the last write before the deletion of an unfinished NAR download under `<worker.baseDir>/nar-partial`. `0` for no cleanup. |
+| `worker.nar.maxConcurrentUploads` | positive int | `16` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | Upload requests over 1 MiB open at once, waiting for a server grant or transferring. Half of the limit for any job, a window of 128 for smaller uploads. The server's upload budget decides how many run and bounds the worker's memory. |
+| `worker.nar.partialTtlSecs` | unsigned int | `86400` | `GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS` | Seconds after the last write before the worker deletes an unfinished NAR download under `<worker.baseDir>/nar-partial`. `0` for no cleanup. |
 
 ## `worker.nixDaemon`
 
@@ -380,7 +380,7 @@
 |---|---|---|---|---|
 | `worker.packages.git` | package | derived | - | Git package available to the worker for cloning repositories. |
 | `worker.packages.gradient` | package | derived | - | The gradient package to use. |
-| `worker.packages.nix` | package | derived | - | Nix package whose `nix` the worker runs to detect its system features. The default is Gradient's Nix fork, matching the worker's embedded evaluator. |
+| `worker.packages.nix` | package | derived | - | Nix package providing the `nix` for system feature detection. The default is Gradient's Nix fork, matching the worker's embedded evaluator. |
 | `worker.packages.ssh` | package | derived | - | OpenSSH package used as `GIT_SSH_COMMAND` to fetch private flake inputs. |
 
 ## `worker.reverseProxy`
@@ -389,7 +389,7 @@
 |---|---|---|---|---|
 | `worker.reverseProxy.caddy.enable` | bool | `false` | - | Whether to enable a Caddy virtual host for the worker listener. |
 | `worker.reverseProxy.caddy.extraConfig` | strings concatenated with "\n" | `""` | - | Additional lines appended to `services.caddy.virtualHosts.<name>.extraConfig` after the reverse proxy setup. |
-| `worker.reverseProxy.caddy.useACMEHost` | null or string | `null` | - | Host of an existing ACME certificate to use, passed to `services.caddy.virtualHosts.<name>.useACMEHost`. No certificate is requested for it. `null` leaves certificate management to Caddy. |
+| `worker.reverseProxy.caddy.useACMEHost` | null or string | `null` | - | Host of an existing ACME certificate, passed to `services.caddy.virtualHosts.<name>.useACMEHost`. Caddy reuses it instead of requesting a new certificate. `null` keeps certificate management with Caddy. |
 | `worker.reverseProxy.nginx.enable` | bool | `false` | - | Whether to enable an nginx virtual host for the worker listener. |
 
 ## `worker.system`
@@ -397,6 +397,6 @@
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `worker.system.architectures` | list of string | derived | `GRADIENT_WORKER_SYSTEM_ARCHITECTURES` | Nix system types this worker builds for. |
-| `worker.system.cpuCoreScore` | null or (positive int) | `null` | `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` | Single-core speed score advertised to the scheduler, higher is faster. `null` benchmarks the host at startup. |
+| `worker.system.cpuCoreScore` | null or (positive int) | `null` | `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` | Single-core speed score advertised to the scheduler; higher is faster. `null` benchmarks the host at startup. |
 | `worker.system.features` | list of string | `[ ]` | `GRADIENT_WORKER_SYSTEM_FEATURES` | Nix system features this worker advertises. An empty list detects them at runtime from `nix config show system-features`, including CPU-derived `gccarch-*` levels. |
-| `worker.system.minFreeRamMb` | unsigned int | `0` | `GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB` | Free memory in MiB below which the worker kills the one evaluation subprocess large enough to restore the margin. The worker reports that evaluation as failed instead of letting the host freeze. `0` uses 10% of total memory, clamped to 128 MiB to 1 GiB. `worker.eval.maxRss` still bounds steady-state memory. |
+| `worker.system.minFreeRamMb` | unsigned int | `0` | `GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB` | Free memory in MiB below which the worker kills the one evaluation subprocess large enough to restore the margin and reports that evaluation as failed instead of letting the host freeze. `0` uses 10% of total memory, clamped to 128 MiB to 1 GiB. `worker.eval.maxRss` still bounds steady-state memory. |

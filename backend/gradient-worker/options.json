@@ -5,7 +5,7 @@
     "flag": "server-url",
     "env": "GRADIENT_WORKER_SERVER_URL",
     "type": "String",
-    "description": "WebSocket URL of the Gradient server's `/proto` endpoint. `null` leaves the worker\nwaiting for the server to connect.",
+    "description": "WebSocket URL of the Gradient server's `/proto` endpoint. `null` keeps the worker\nwaiting for the server to connect.",
     "default": null,
     "values": []
   },
@@ -15,7 +15,7 @@
     "flag": "peers",
     "env": "GRADIENT_WORKER_PEERS",
     "type": "Option<String>",
-    "description": "Peer-to-token mappings for challenge-response authentication.\nEach line is holding one `peer_id:token` pair.\nA `*:token` line is answering every challenged peer UUID with `token`.\nEach named peer is a project, cache, or proxy UUID.\nThis option is mutually exclusive with `--peers-file`.",
+    "description": "Peer-to-token mappings for challenge-response authentication.\nEach line holds one `peer_id:token` pair.\nA `*:token` line answers every challenged peer UUID with `token`.\nEach named peer is a project, cache, or proxy UUID.\nMutually exclusive with `--peers-file`.",
     "default": null,
     "values": []
   },
@@ -25,7 +25,7 @@
     "flag": "peers-file",
     "env": "GRADIENT_WORKER_PEERS_FILE",
     "type": "Option<PathBuf>",
-    "description": "File of peer tokens for challenge-response authentication with the server, one\n`peer_id:token` per line. Lines starting with `#` are ignored.\n\n```\n<uuid>:<token>\n*:<token>\n```\n\nThe peer ID `*` matches any UUID in the server's challenge. Each token is a 48 byte\nrandom secret, for example from {command}`openssl rand -base64 48`, registered through\n`POST /api/v1/projects/{project}/workers`. Pin a project UUID with\n{option}`services.gradient.state.projects.<name>.id` to reference it here.\n\n`null` connects in open mode, where the server accepts the worker without a token.",
+    "description": "File of peer tokens for challenge-response authentication with the server,\nwith `peer_id:token` per line and `#` starting a comment.\n\n```\n<uuid>:<token>\n*:<token>\n```\n\nUse peer ID `*` to match any UUID in the server's challenge.\nTokens are 48 byte random secrets, for example from {command}`openssl rand -base64 48`.\nRegister them via the API through `POST /api/v1/projects/{project}/workers`.\nSet it to `null` for open mode without authentication; avoid that in a production setup.",
     "default": null,
     "values": []
   },
@@ -45,7 +45,7 @@
     "flag": "id",
     "env": "GRADIENT_WORKER_ID",
     "type": "Option<String>",
-    "description": "Worker UUID. `null` generates one on first start and stores it in\n{file}`<services.gradient.worker.baseDir>/worker-id`. Set it when the UUID must be known in\nadvance, for example to register the worker in {option}`services.gradient.state.workers`.",
+    "description": "Worker UUID. `null` generates one on first start and stores it in\n{file}`<services.gradient.worker.baseDir>/worker-id`. Set it when the UUID must be known\nin advance, for example to register the worker in\n{option}`services.gradient.state.workers`.",
     "default": null,
     "values": []
   },
@@ -55,7 +55,7 @@
     "flag": "zone",
     "env": "GRADIENT_WORKER_ZONE",
     "type": "Option<String>",
-    "description": "Locality label advertised to the scheduler. A cluster job asking for one zone places\nevery member on workers with the same label. `null` puts the worker in the zone of\nall unlabelled workers.",
+    "description": "Locality label advertised to the scheduler. A cluster job asking for one zone places\nevery member on workers with the same label. `null` places the worker among the\nunlabelled workers.",
     "default": null,
     "values": []
   },
@@ -65,7 +65,7 @@
     "flag": "endpoint",
     "env": "GRADIENT_WORKER_ENDPOINT",
     "type": "Option<String>",
-    "description": "Address at which other members of a cluster job reach this worker, passed through\nverbatim in the cluster roster. `null` advertises none.",
+    "description": "Address at which other members of a cluster job connect to this worker, passed through\nverbatim in the cluster roster. `null` advertises none.",
     "default": null,
     "values": []
   },
@@ -85,7 +85,7 @@
     "flag": "ssh-bin",
     "env": "GRADIENT_WORKER_SSH_BIN",
     "type": "String",
-    "description": "Path to the `ssh` binary, resolved via `PATH` by default.\nNix is using it as `GIT_SSH_COMMAND` for private flake inputs.",
+    "description": "Path to the `ssh` binary, resolved via `PATH` by default.\nNix uses it as `GIT_SSH_COMMAND` for private flake inputs.",
     "default": "ssh",
     "values": []
   },
@@ -138,7 +138,7 @@
     "flag": "accepted-server-tokens-file",
     "env": "GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE",
     "type": "Option<PathBuf>",
-    "description": "File of token hashes a server must present when it connects to this worker, one\n`peer_id:hash` per line. Lines starting with `#` are ignored. A hash is an argon2 PHC\nstring or the lowercase SHA-256 hex digest of the token, for example from\n{command}`printf %s \"$TOKEN\" | sha256sum`. The peer ID `*` matches any peer. The file\nis only read with {option}`services.gradient.worker.discoverable`.\n\n`null` accepts every server, and the worker logs a warning at start.",
+    "description": "File of token hashes required from connecting servers,\nwith `peer_id:hash` per line and `#` starting a comment.\nA hash is an argon2 PHC string or the lowercase SHA-256 hex digest of the token itself,\nfor example from {command}`printf %s \"$TOKEN\" | sha256sum`.\nPeer ID `*` matches any peer.\nThe worker reads this file only with {env}`GRADIENT_WORKER_DISCOVERABLE`.\nSet it to `null` to accept every server; avoid that in a production setup.",
     "default": null,
     "values": []
   },
@@ -161,7 +161,7 @@
     "flag": "eval-driver",
     "env": "GRADIENT_WORKER_EVAL_DRIVER",
     "type": "Option<String>",
-    "description": "Drive one eval subprocess over the production rkyv transport from a JSONL request file.\nThis internal harness is serving the NixOS VM integration test.",
+    "description": "Drive one eval subprocess over the production rkyv transport from a JSONL request file.\nThis internal harness serves the NixOS VM integration test.",
     "default": null,
     "values": []
   },
@@ -171,7 +171,7 @@
     "flag": "capabilities-federate",
     "env": "GRADIENT_WORKER_CAPABILITIES_FEDERATE",
     "type": "bool",
-    "description": "Whether to enable forwarding work and NARs between workers and servers (requiring `discoverable`).",
+    "description": "Whether to forward work and NARs between workers and servers (requires `discoverable`).",
     "default": "false",
     "values": [
       "true",
@@ -184,7 +184,7 @@
     "flag": "capabilities-fetch",
     "env": "GRADIENT_WORKER_CAPABILITIES_FETCH",
     "type": "bool",
-    "description": "Whether to enable prefetching flake inputs and sources.",
+    "description": "Whether to prefetch flake inputs and sources.",
     "default": "true",
     "values": [
       "true",
@@ -197,7 +197,7 @@
     "flag": "capabilities-eval",
     "env": "GRADIENT_WORKER_CAPABILITIES_EVAL",
     "type": "bool",
-    "description": "Whether to enable Nix flake evaluations.",
+    "description": "Whether to run Nix flake evaluations.",
     "default": "true",
     "values": [
       "true",
@@ -210,7 +210,7 @@
     "flag": "capabilities-build",
     "env": "GRADIENT_WORKER_CAPABILITIES_BUILD",
     "type": "bool",
-    "description": "Whether to enable Nix builds.",
+    "description": "Whether to run Nix builds.",
     "default": "true",
     "values": [
       "true",
@@ -243,7 +243,7 @@
     "flag": "system-cpu-core-score",
     "env": "GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE",
     "type": "Option<NonZeroU32>",
-    "description": "Single-core speed score advertised to the scheduler, higher is faster. `null`\nbenchmarks the host at startup.",
+    "description": "Single-core speed score advertised to the scheduler; higher is faster. `null`\nbenchmarks the host at startup.",
     "default": null,
     "values": []
   },
@@ -253,7 +253,7 @@
     "flag": "system-min-free-ram-mb",
     "env": "GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB",
     "type": "u64",
-    "description": "Free memory in MiB below which the worker kills the one evaluation subprocess large\nenough to restore the margin. The worker reports that evaluation as failed instead of\nletting the host freeze. `0` uses 10% of total memory, clamped to 128 MiB to 1 GiB.\n{option}`services.gradient.worker.eval.maxRss` still bounds steady-state memory.",
+    "description": "Free memory in MiB below which the worker kills the one evaluation subprocess large\nenough to restore the margin and reports that evaluation as failed instead of letting\nthe host freeze. `0` uses 10% of total memory, clamped to 128 MiB to 1 GiB.\n{option}`services.gradient.worker.eval.maxRss` still bounds steady-state memory.",
     "default": "0",
     "values": []
   },
@@ -293,7 +293,7 @@
     "flag": "eval-max-rss",
     "env": "GRADIENT_WORKER_EVAL_MAX_RSS",
     "type": "NonZeroU64",
-    "description": "Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit\nrestart after the call and free the Nix heap. A call growing past the limit is fine, with\n{option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.\nKeep it above a typical evaluation's heap.",
+    "description": "Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit\nrestart after the call and free the Nix heap. A call growing past the limit is fine,\nwith {option}`services.gradient.worker.system.minFreeRamMb` as the host's guard. Keep it\nabove a typical evaluation's heap.",
     "default": "2147483648",
     "values": []
   },
@@ -303,7 +303,7 @@
     "flag": "eval-metrics",
     "env": "GRADIENT_WORKER_EVAL_METRICS",
     "type": "bool",
-    "description": "Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots,\nflake graph). Disable it to leave that overhead out.",
+    "description": "Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots,\nflake graph). Disable it to skip that overhead.",
     "default": "true",
     "values": [
       "true",
@@ -339,7 +339,7 @@
     "flag": "eval-max-memory",
     "env": "GRADIENT_WORKER_EVAL_MAX_MEMORY",
     "type": "Option<NonZeroU64>",
-    "description": "Ceiling in MiB for the resident memory of all evaluation subprocesses together.\nSubprocesses leave the pool, largest first, while the sum is over the ceiling.\nConflicts with {option}`services.gradient.worker.system.minFreeRamMb`.",
+    "description": "Ceiling in MiB for the resident memory of all evaluation subprocesses together.\nSubprocesses leave the pool largest first while the total exceeds the ceiling.\nConflicts with {option}`services.gradient.worker.system.minFreeRamMb`.",
     "default": null,
     "values": []
   },
@@ -379,7 +379,7 @@
     "flag": "nar-max-concurrent-uploads",
     "env": "GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS",
     "type": "NonZeroU32",
-    "description": "Upload requests over 1 MiB open at once, waiting for a server grant or transferring.\nHalf of the limit for any job. A window of 128 for smaller uploads.\nHow many run: the server's upload budget. A bound on worker memory.",
+    "description": "Upload requests over 1 MiB open at once, waiting for a server grant or transferring.\nHalf of the limit for any job, a window of 128 for smaller uploads.\nThe server's upload budget decides how many run and bounds the worker's memory.",
     "default": "16",
     "values": []
   },
@@ -389,7 +389,7 @@
     "flag": "nar-partial-ttl-secs",
     "env": "GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS",
     "type": "u64",
-    "description": "Seconds after the last write before the deletion of an unfinished NAR download under\n{file}`<services.gradient.worker.baseDir>/nar-partial`. `0` for no cleanup.",
+    "description": "Seconds after the last write before the worker deletes an unfinished NAR download under\n{file}`<services.gradient.worker.baseDir>/nar-partial`. `0` for no cleanup.",
     "default": "86400",
     "values": []
   },

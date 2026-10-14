@@ -131,7 +131,7 @@ in {
 
   options = {
     services.gradient = {
-      enable = lib.mkEnableOption "Gradient";
+      enable = lib.mkEnableOption "Gradient, a Nix-CI for Teams";
 
       packages = {
         server = lib.mkPackageOption pkgs "gradient" { };
@@ -139,12 +139,14 @@ in {
       };
 
       environmentVariables = lib.mkOption {
-        type = with lib.types; attrsOf (nullOr (either (either bool int) (either str path)));
+        type = with lib.types; lazyAttrsOf (nullOr (oneOf [ bool int str path ]));
         default = { };
         example = { GRADIENT_GC_INTERVAL_SECS = 600; };
         description = ''
-          Extra environment variables of the Gradient server, taking precedence over variables
-          from other options. `null` unsets a variable.
+          Environment variables of the Gradient server.
+          The [configuration reference](https://wavelens.github.io/gradient/reference/configuration) lists every variable and its default.
+          Set a variable to `null` to unset it.
+          Secrets belong into {option}`services.gradient.secrets`.
         '';
       };
 
@@ -160,7 +162,7 @@ in {
         defaultText = lib.literalExpression ''"http''${lib.optionalString config.services.gradient.useTls "s"}://''${config.services.gradient.domain}"'';
         example = "http://localhost:8080";
         description = ''
-          Public URL under which clients reach Gradient. Set this for a URL other than
+          Public URL of Gradient. Set this for a URL other than
           {option}`services.gradient.domain`, for example behind a port mapping.
         '';
       };
@@ -171,12 +173,8 @@ in {
         defaultText = lib.literalExpression "config.services.gradient.worker.enable";
         description = ''
           Whether to register the {option}`services.gradient.worker` on this host automatically,
-          with an ID from the hostname and a token and peers file from the first start. Members of
-          the state-declared team `server` reach every new project, the local worker included. No
-          UUID, token or web UI step is necessary.
-
-          Disable it to register the local worker like a remote worker, with
-          {option}`services.gradient.worker.id` and {option}`services.gradient.worker.peersFile`.
+          with an ID from the hostname and a token and peers file from the first start.
+          The state-declared team `server` is part of every new project.
         '';
       };
 
@@ -195,7 +193,7 @@ in {
               host's `enableACME` and `forceSSL` settings. Disable it for upstream proxies (Traefik,
               Cloudflare, load balancers) that terminate TLS and forward plain HTTP to nginx. Keep
               {option}`services.gradient.useTls` enabled in that case for `https://` URLs and
-              `Secure` session cookies. It has no effect with {option}`services.gradient.useTls`
+              `Secure` session cookies. Has no effect with {option}`services.gradient.useTls`
               disabled.
             '';
           };
@@ -207,9 +205,9 @@ in {
             type = lib.types.nullOr lib.types.str;
             default = null;
             description = ''
-              Host of an existing ACME certificate for
-              {option}`services.caddy.virtualHosts.<name>.useACMEHost`, used instead of requesting a
-              new certificate. Set it to `null` to leave certificate management to Caddy.
+              Host of an existing ACME certificate, passed to
+              {option}`services.caddy.virtualHosts.<name>.useACMEHost`. Caddy reuses it instead of
+              requesting a new certificate. `null` keeps certificate management with Caddy.
             '';
           };
 
@@ -283,12 +281,11 @@ in {
           default = null;
           example = "32MB";
           description = ''
-            `work_mem` of the cluster set up by {option}`services.gradient.postgres.enable`. It is
-            the floor for every query. Graph walks raise their own ceiling for a statement, except
-            the walks seeded by a root array, which keep the PostgreSQL default.
-            Every sort or hash node in a query can claim this much. Use `"32MB"` on a host sized for
-            the three server pools. It is too much for a small host. Set it to `null` to keep the
-            PostgreSQL default.
+            `work_mem` of the cluster set up by {option}`services.gradient.postgres.enable`. Every
+            sort or hash node in a query can claim this much. The scheduler's graph walks set a
+            higher per-statement limit, except walks seeded by a root array, which keep the
+            PostgreSQL default. Use `"32MB"` on a host sized for the three server pools; that is
+            too much for a small host. `null` keeps the PostgreSQL default.
           '';
         };
 
@@ -308,9 +305,9 @@ in {
       database = {
         url = lib.mkOption {
           type = lib.types.str;
-          # Peer auth on the local socket is requiring a role named like the unit's system user.
-          # sqlx is no longer inferring the user from the process. It is asking whoami instead,
-          # which is answering "anonymous" under systemd.
+          # Peer auth on the local socket requires a role named like the unit's system user.
+          # sqlx no longer infers the user from the process; it asks whoami, which answers
+          # "anonymous" under systemd.
           default = "postgresql://gradient@localhost/gradient?host=/run/postgresql";
           description = "PostgreSQL connection URL.";
         };

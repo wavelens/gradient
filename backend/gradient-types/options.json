@@ -25,7 +25,7 @@
     "flag": "serve-url",
     "env": "GRADIENT_SERVE_URL",
     "type": "String",
-    "description": "Public URL under which clients reach Gradient. Set this for a URL other than\n{option}`services.gradient.domain`, for example behind a port mapping.",
+    "description": "Public URL of Gradient. Set this for a URL other than\n{option}`services.gradient.domain`, for example behind a port mapping.",
     "default": "http://127.0.0.1:8000",
     "values": []
   },
@@ -886,7 +886,7 @@
     "flag": "metrics-token-file",
     "env": "GRADIENT_METRICS_TOKEN_FILE",
     "type": "Option<String>",
-    "description": "Path to a file containing the bearer token required to scrape `/metrics`. An unset path is\ndisabling the metrics endpoint with 404. The server is reading the file once at startup.",
+    "description": "Path to a file containing the bearer token required to scrape `/metrics`. An unset path is\ndisabling the metrics endpoint with 404. The server reads the file once at startup.",
     "default": null,
     "values": []
   },
