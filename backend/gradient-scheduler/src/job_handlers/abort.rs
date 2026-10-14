@@ -57,6 +57,7 @@ impl Scheduler {
     }
 
     pub async fn stop_aborted_evaluation(&self, evaluation: EvaluationId, hard_abort: bool) {
+        self.drop_import_waits(evaluation).await;
         let shared_builds = self
             .abort_evaluation_shared_builds(evaluation, hard_abort)
             .await;
