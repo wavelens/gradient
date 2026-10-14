@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::BTreeSet;
 use std::time::Duration;
 
 use chrono::NaiveDateTime;
@@ -20,7 +19,6 @@ use gradient_graph::{
 };
 use gradient_pool::score::{HistoryPrediction, InstanceContext};
 use gradient_util::supervision::Pass;
-use gradient_wire::types::ClusterAddress;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
     QuerySelect,
@@ -198,18 +196,6 @@ impl SchedulerCase {
         self.settled().await;
     }
 
-    pub async fn cluster_signal(
-        &self,
-        worker: &str,
-        attempt: &str,
-        to: Option<ClusterAddress>,
-        payload: &[u8],
-    ) {
-        self.scheduler
-            .forward_cluster_signal(worker, attempt, to, payload.to_vec())
-            .await;
-    }
-
     pub async fn fire_once(&self) {
         crate::trigger_firing::fire_once(&self.scheduler.db)
             .await
@@ -315,10 +301,6 @@ impl SchedulerCase {
 
     pub async fn probe_sweep(&self) {
         self.probe.sweep().await.expect("the probe sweep runs");
-    }
-
-    pub async fn probe_requests(&self) -> BTreeSet<DerivationId> {
-        self.probe.requested().await.into_iter().collect()
     }
 
     async fn derivation_ids(&self, paths: &[&str]) -> Vec<DerivationId> {

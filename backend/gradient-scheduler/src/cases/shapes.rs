@@ -83,10 +83,6 @@ impl Profile {
         self.hardware(|h| h.ram_total_mb = ram_total_mb)
     }
 
-    pub fn zone(self, zone: &str) -> Self {
-        self.hardware(|h| h.zone = Some(zone.into()))
-    }
-
     pub fn without_profile(mut self) -> Self {
         self.hardware = None;
         self

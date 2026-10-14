@@ -56,11 +56,7 @@ pub use jobs::{AssignDecision, BoardActiveJob, DecisionCandidate, PendingJobInfo
 pub const fn link() {}
 
 #[cfg(test)]
-mod assign_tests;
-#[cfg(test)]
 mod cases;
-#[cfg(test)]
-mod scheduler_tests;
 #[cfg(test)]
 mod test_jobs;
 

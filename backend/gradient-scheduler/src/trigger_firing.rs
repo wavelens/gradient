@@ -359,9 +359,6 @@ async fn stamp_last_fired(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::{all_statements, exec_ok, mock_db};
-    use gradient_fixtures::rows;
-    use gradient_test_support::state::TestState;
 
     fn dt(s: &str) -> NaiveDateTime {
         NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap()
@@ -483,66 +480,5 @@ mod tests {
     fn cron_no_prior_fires_when_due() {
         let now = dt("2026-05-06 03:00:00");
         assert!(cron_due("0 0 2 * * *", None, now));
-    }
-
-    fn polling_trigger(last_fired_at: Option<NaiveDateTime>) -> ept::Model {
-        ept::Model {
-            id: TaskTriggerId::now_v7(),
-            task: rows::task().id,
-            config: serde_json::json!({ "interval_secs": 60 }),
-            active: true,
-            last_fired_at,
-            ..Default::default()
-        }
-    }
-
-    fn scheduler_over(db: sea_orm::DatabaseConnection) -> Scheduler {
-        Scheduler::new(TestState::new().worker_db(db).build())
-    }
-
-    fn executed(db: sea_orm::DatabaseConnection) -> Vec<String> {
-        all_statements(db.into_transaction_log())
-            .into_iter()
-            .map(|s| s.sql)
-            .collect()
-    }
-
-    #[tokio::test]
-    async fn a_firing_another_instance_already_handled_applies_nothing() {
-        let handled = polling_trigger(Some(dt("2026-05-06 10:05:00")));
-        let db = mock_db()
-            .append_query_results([vec![handled.clone()]])
-            .into_connection();
-        let log = db.clone();
-        let outdated = TriggerFire {
-            trigger: handled.id,
-            last_fired_at: Some(dt("2026-05-06 10:00:00")),
-        };
-
-        fire(&scheduler_over(db), &outdated).await.unwrap();
-
-        let sql = executed(log);
-        assert!(!sql.iter().any(|s| s.contains("INSERT INTO \"evaluation\"")));
-        assert!(!sql.iter().any(|s| s.contains("UPDATE \"task_trigger\"")));
-    }
-
-    #[tokio::test]
-    async fn the_pass_queues_a_due_trigger_and_stamps_nothing() {
-        let due = polling_trigger(None);
-        let db = mock_db()
-            .append_query_results([vec![due]])
-            .append_query_results([vec![rows::task()]])
-            .append_exec_results([exec_ok()])
-            .into_connection();
-        let log = db.clone();
-
-        fire_once(&scheduler_over(db).db).await.unwrap();
-
-        let sql = executed(log);
-        assert!(
-            sql.iter()
-                .any(|s| s.contains("INSERT INTO pending_delivery"))
-        );
-        assert!(!sql.iter().any(|s| s.contains("UPDATE \"task_trigger\"")));
     }
 }

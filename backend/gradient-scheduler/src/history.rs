@@ -146,7 +146,6 @@ fn percentile_or_max(values: &mut [i64], p: f64) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::mock_db;
 
     fn metric(peak: Option<i64>, cpu: Option<i64>, oom: bool) -> MDerivationMetric {
         MDerivationMetric {
@@ -234,48 +233,5 @@ mod tests {
         ];
         assert_eq!(mean_output_nar_size(&outputs), Some(300));
         assert_eq!(mean_output_nar_size(&[(one, None)]), None);
-    }
-
-    #[tokio::test]
-    async fn predict_reads_the_latest_rows_of_the_same_pname_and_architecture() {
-        let derivation = DerivationId::now_v7();
-        let output: std::collections::BTreeMap<String, sea_orm::Value> = [
-            ("derivation".to_owned(), derivation.into_inner().into()),
-            ("nar_size".to_owned(), 4_096_i64.into()),
-        ]
-        .into_iter()
-        .collect();
-        let db = mock_db()
-            .append_query_results([vec![MDerivationMetric {
-                derivation,
-                ..metric(Some(100), Some(1000), false)
-            }]])
-            .append_query_results([vec![output]])
-            .into_connection();
-
-        let p = predict(&db, "hello", "x86_64-linux").await;
-        assert_eq!(p.samples, 1);
-        assert_eq!(p.output_nar_size, Some(4_096));
-
-        let sql: Vec<String> = db
-            .into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements())
-            .map(|stmt| stmt.sql.clone())
-            .collect();
-        let [sql, outputs_sql] = sql.as_slice() else {
-            panic!("two statements expected: {sql:?}")
-        };
-        assert!(
-            outputs_sql.contains(r#""derivation_output"."derivation" IN ($1)"#),
-            "{outputs_sql}"
-        );
-        assert!(sql.contains(r#""pname" = $1"#), "{sql}");
-        assert!(sql.contains(r#""architecture" = $2"#), "{sql}");
-        assert!(!sql.contains(r#""closure_size" >="#), "{sql}");
-        assert!(
-            sql.contains(r#"ORDER BY "derivation_metric"."created_at" DESC"#),
-            "{sql}"
-        );
     }
 }

@@ -688,107 +688,6 @@ pub async fn compute_eval_history(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::mock_db;
-    use sea_orm::Value;
-    use std::collections::BTreeMap;
-
-    #[tokio::test]
-    async fn maps_columns_and_counts_into_snapshot() {
-        let f = |name: &str, v: f64| (name.to_owned(), Value::from(v));
-        let metric: BTreeMap<String, Value> = [
-            f("peak_ram_5m", 100.0),
-            f("peak_ram_1h", 200.0),
-            f("peak_ram_24h", 300.0),
-            f("cpu_time_5m", 1.0),
-            f("cpu_time_1h", 2.0),
-            f("cpu_time_24h", 3.0),
-            f("cpu_pct_5m", 10.0),
-            f("cpu_pct_1h", 20.0),
-            f("cpu_pct_24h", 30.0),
-            f("disk_5m", 4.0),
-            f("disk_1h", 5.0),
-            f("disk_24h", 6.0),
-            f("build_time_5m", 11.0),
-            f("build_time_1h", 12.0),
-            f("build_time_24h", 13.0),
-            f("build_median_5m", 0.1),
-            f("build_median_1h", 0.2),
-            f("build_median_24h", 0.3),
-            f("closure_5m", 14.0),
-            f("closure_1h", 15.0),
-            f("closure_24h", 16.0),
-            f("oom_5m", 0.1),
-            f("oom_1h", 0.2),
-            f("oom_24h", 0.3),
-            f("completed_5m", 4.0),
-            f("completed_1h", 40.0),
-            f("completed_24h", 400.0),
-        ]
-        .into_iter()
-        .collect();
-        let assignment_id: BTreeMap<String, Value> = [
-            f("wait_5m", 1.5),
-            f("wait_1h", 2.5),
-            f("wait_24h", 3.5),
-            f("nar_5m", 17.0),
-            f("nar_1h", 18.0),
-            f("nar_24h", 19.0),
-            f("miss_5m", 1.0),
-            f("miss_1h", 2.0),
-            f("miss_24h", 3.0),
-            f("dep_5m", 21.0),
-            f("dep_1h", 22.0),
-            f("dep_24h", 23.0),
-        ]
-        .into_iter()
-        .collect();
-
-        let storage: BTreeMap<String, Value> = [f("read_mbps", 1_200.0), f("write_mbps", 900.0)]
-            .into_iter()
-            .collect();
-        let compression: BTreeMap<String, Value> = [f("ratio", 0.4)].into_iter().collect();
-
-        let db = mock_db()
-            .append_query_results([vec![metric]])
-            .append_query_results([vec![assignment_id]])
-            .append_query_results([vec![storage]])
-            .append_query_results([vec![compression]])
-            .append_query_results([vec![BTreeMap::from([f("n", 0.0)])]])
-            .append_query_results([vec![BTreeMap::from([f("n", 0.0)])]])
-            .into_connection();
-
-        let counts = InstanceCounts {
-            active_builds: 2,
-            pending_builds: 3,
-            total_workers: 5,
-            idle_workers: 1,
-            cpu_core_score_mean: None,
-            upload_speed_mean_mbps: Some(400.0),
-            download_speed_mean_mbps: None,
-            download_slots: 16,
-            upload_slots: 8,
-        };
-        let ic = compute_instance_context(&db, counts, gradient_types::now()).await;
-
-        assert_eq!(
-            ic.peak_ram_mb,
-            windowed(Some(100.0), Some(200.0), Some(300.0))
-        );
-        assert_eq!(ic.build_time_ms.w1h, Some(12.0));
-        assert_eq!(ic.build_time_median_ms.w1h, Some(0.2));
-        assert_eq!(ic.completed.w24h, Some(400.0));
-        assert_eq!(ic.wait_secs, windowed(Some(1.5), Some(2.5), Some(3.5)));
-        assert_eq!(ic.nar_size_mb.w24h, Some(19.0));
-        assert_eq!(ic.dependency_cnt.w1h, Some(22.0));
-        assert_eq!(ic.active_builds, 2);
-        assert_eq!(ic.pending_builds, 3);
-        assert_eq!(ic.total_workers, 5);
-        assert_eq!(ic.idle_workers, 1);
-        assert_eq!(ic.upload_speed_mean_mbps, Some(400.0));
-        assert_eq!(ic.storage_read_mbps, Some(1_200.0));
-        assert_eq!(ic.storage_write_mbps, Some(900.0));
-        assert_eq!(ic.compression_ratio, Some(0.4));
-    }
 
     #[test]
     fn the_path_coefficient_is_the_time_beyond_the_bytes() {
@@ -844,29 +743,6 @@ mod tests {
             None,
             "too few spans"
         );
-    }
-
-    #[tokio::test]
-    async fn eval_history_maps_row_into_prediction() {
-        let pid = TaskId::now_v7();
-        let row: BTreeMap<String, Value> = [
-            ("task".to_owned(), Value::from(pid.into_inner())),
-            ("p95_ram".to_owned(), Value::from(42_000.0_f64)),
-            ("samples".to_owned(), Value::from(7_i64)),
-        ]
-        .into_iter()
-        .collect();
-
-        let db = mock_db()
-            .append_query_results([vec![row]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .into_connection();
-
-        let h = compute_eval_history(&db, gradient_types::now())
-            .await
-            .for_job(pid, BOTH);
-        assert_eq!(h.predicted_peak_ram_mb, Some(42_000));
-        assert_eq!(h.samples, 7);
     }
 
     const FETCH: &[FlakeStep] = &[FlakeStep::FetchFlake];

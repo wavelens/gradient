@@ -14,7 +14,7 @@ use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::dispatched_job::{DispatchedJobKind, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{ClusterAttemptId, ClusterJobId, EvaluationId};
-use gradient_fixtures::shape::{Shape, shape};
+use gradient_fixtures::shape::shape;
 use gradient_pool::session_port::SessionSignal;
 use gradient_wire::types::{BuildFailureKind, ClusterPeer, JobKind};
 

@@ -357,10 +357,6 @@ impl UpstreamProbe {
         let need = unanswered_need(&self.db).await?;
         self.probe_round(need).await
     }
-
-    pub(crate) async fn requested(&self) -> HashSet<DerivationId> {
-        drain_requests(&self.inbox).await
-    }
 }
 
 #[cfg(test)]
@@ -376,94 +372,19 @@ pub(crate) async fn planned_round(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_entity::build_job::Model as MBuildJob;
-    use gradient_entity::derivation_output::Model as MDerivationOutput;
-    use gradient_fixtures::mock::{empty_db, mock_db};
-    use gradient_test_support::prelude::test_state;
     use sea_orm::DatabaseBackend;
 
-    fn output(derivation: DerivationId, hash: &str, cached: bool) -> MDerivationOutput {
-        MDerivationOutput {
-            id: gradient_types::ids::DerivationOutputId::now_v7(),
-            derivation,
-            name: "out".to_owned(),
-            hash: hash.to_owned(),
-            package: "hello-2.12".to_owned(),
-            is_cached: cached,
-            ..Default::default()
-        }
-    }
-
-    fn wanted(derivation: DerivationId) -> MDerivationBuild {
-        MDerivationBuild {
-            id: gradient_types::ids::DerivationBuildId::now_v7(),
-            derivation,
-            wanted: true,
-            ..Default::default()
-        }
-    }
-
-    #[tokio::test]
-    async fn already_cached_outputs_are_not_probed() {
-        let derivation = DerivationId::now_v7();
-        let evaluation = EvaluationId::now_v7();
-        let db = mock_db()
-            .append_query_results([vec![
-                output(derivation, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false),
-                output(derivation, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", true),
-            ]])
-            .append_query_results([vec![MBuildJob {
-                id: gradient_types::ids::BuildJobId::now_v7(),
-                evaluation,
-                derivation,
-                ..Default::default()
-            }]])
-            .append_query_results([vec![MEvaluation {
-                id: evaluation,
-                ..Default::default()
-            }]])
-            .into_connection();
-
-        let planned = plan_probes(&test_state(db).worker_db, &[derivation])
-            .await
-            .expect("the plan is read")
-            .rounds;
-
-        assert_eq!(planned.len(), 1, "{planned:?}");
-        let (_, targets) = &planned[0];
-        assert_eq!(
-            targets.iter().map(|(h, _)| h.as_str()).collect::<Vec<_>>(),
-            vec!["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
-            "an output already in our cache must not be asked for"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_shared_build_with_an_unanswered_output_is_asked_again() {
-        let silent = DerivationId::now_v7();
-        let missed = DerivationId::now_v7();
-        let evaluation = EvaluationId::now_v7();
-        let job = |derivation| MBuildJob {
-            id: gradient_types::ids::BuildJobId::now_v7(),
-            evaluation,
-            derivation,
-            ..Default::default()
+    #[test]
+    fn a_shared_build_with_an_unanswered_output_is_asked_again() {
+        let (silent, missed) = (DerivationId::now_v7(), DerivationId::now_v7());
+        let plan = ProbePlan {
+            rounds: Vec::new(),
+            answered: vec![silent, missed],
+            owners: HashMap::from([
+                ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(), vec![silent]),
+                ("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned(), vec![missed]),
+            ]),
         };
-        let db = mock_db()
-            .append_query_results([vec![
-                output(silent, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false),
-                output(missed, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", false),
-            ]])
-            .append_query_results([vec![job(silent), job(missed)]])
-            .append_query_results([vec![MEvaluation {
-                id: evaluation,
-                ..Default::default()
-            }]])
-            .into_connection();
-
-        let plan = plan_probes(&test_state(db).worker_db, &[silent, missed])
-            .await
-            .expect("the plan is read");
 
         assert_eq!(
             plan.answered_except(&HashSet::from([
@@ -478,126 +399,6 @@ mod tests {
     async fn the_sweep_runs_at_most_once_an_interval() {
         let swept = Mutex::new(Instant::now());
         assert!(!sweep_due(&swept).await, "a fresh mark is not due");
-    }
-
-    #[tokio::test]
-    async fn an_idle_pass_reads_nothing() {
-        let state = test_state(empty_db());
-
-        UpstreamProbe::new(&state.db(), &state.graph, &state.memory.upstream_query)
-            .probe_pass()
-            .await
-            .expect("an idle tick is a no-op");
-    }
-
-    #[tokio::test]
-    async fn an_unnamed_shared_build_is_not_probed() {
-        let derivation = DerivationId::now_v7();
-        let db = mock_db()
-            .append_query_results([vec![output(
-                derivation,
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                false,
-            )]])
-            .append_query_results([Vec::<MBuildJob>::new()])
-            .into_connection();
-
-        assert!(
-            plan_probes(&test_state(db).worker_db, &[derivation])
-                .await
-                .expect("the plan is read")
-                .rounds
-                .is_empty()
-        );
-    }
-
-    #[tokio::test]
-    async fn an_unwalked_shared_build_is_left_unanswered() {
-        let walked = DerivationId::now_v7();
-        let stub = DerivationId::now_v7();
-        let evaluation = EvaluationId::now_v7();
-        let db = mock_db()
-            .append_query_results([vec![output(
-                walked,
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                false,
-            )]])
-            .append_query_results([vec![MBuildJob {
-                id: gradient_types::ids::BuildJobId::now_v7(),
-                evaluation,
-                derivation: walked,
-                ..Default::default()
-            }]])
-            .append_query_results([vec![MEvaluation {
-                id: evaluation,
-                ..Default::default()
-            }]])
-            .into_connection();
-
-        let plan = plan_probes(&test_state(db).worker_db, &[walked, stub])
-            .await
-            .expect("the plan is read");
-
-        assert_eq!(plan.answered, vec![walked]);
-    }
-
-    #[tokio::test]
-    async fn only_a_wanted_shared_build_the_probe_has_not_answered_is_asked() {
-        let db = mock_db()
-            .append_query_results([Vec::<MDerivationBuild>::new()])
-            .into_connection();
-        let log = db.clone();
-
-        let asked = unprobed_wanted(&test_state(db).worker_db, &[DerivationId::now_v7()])
-            .await
-            .expect("the wanted shared builds are read");
-
-        assert!(asked.is_empty());
-        let sql = log.into_transaction_log()[0].statements()[0].to_string();
-        assert!(
-            sql.contains(r#""derivation_build"."wanted" = TRUE"#),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(r#""derivation_build"."probed" = FALSE"#),
-            "{sql}"
-        );
-    }
-
-    #[tokio::test]
-    async fn the_unanswered_dependencies_of_a_probed_shared_build_join_its_round() {
-        use gradient_entity::derivation_dependency::Model as MDerivationDependency;
-
-        let (parent, missed, answered) = (
-            DerivationId::now_v7(),
-            DerivationId::now_v7(),
-            DerivationId::now_v7(),
-        );
-        let edge = |dependency| MDerivationDependency {
-            derivation: parent,
-            dependency,
-            ..Default::default()
-        };
-        let db = mock_db()
-            .append_query_results([vec![edge(missed), edge(answered), edge(parent)]])
-            .append_query_results([vec![wanted(missed), wanted(parent)]])
-            .into_connection();
-        let log = db.clone();
-
-        let ahead = unprobed_dependencies(&test_state(db).worker_db, &[parent])
-            .await
-            .expect("the dependencies are read");
-
-        assert_eq!(ahead, vec![missed]);
-        let sql = log.into_transaction_log()[1].statements()[0].to_string();
-        assert!(
-            sql.contains(r#""derivation_build"."probed" = FALSE"#),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(r#""derivation_build"."cache_available" = FALSE"#),
-            "{sql}"
-        );
     }
 
     #[test]

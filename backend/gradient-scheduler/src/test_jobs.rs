@@ -97,10 +97,3 @@ pub(crate) fn eval_worker_caps() -> GradientCapabilities {
         ..GradientCapabilities::default()
     }
 }
-
-pub(crate) fn build_worker_caps() -> GradientCapabilities {
-    GradientCapabilities {
-        build: true,
-        ..GradientCapabilities::default()
-    }
-}

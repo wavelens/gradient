@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![allow(
-    dead_code,
-    unused_imports,
-    reason = "the theme files of the scheduler cases call the shared layer"
-)]
-
 mod abort;
 mod aliases;
 mod case_layer;

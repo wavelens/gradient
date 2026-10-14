@@ -12,7 +12,7 @@ use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{DispatchedJobId, EvaluationId};
-use gradient_fixtures::shape::{Shape, shape};
+use gradient_fixtures::shape::shape;
 use gradient_pool::score::{HistoryPrediction, ScoreBreakdown, Windowed};
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, FlakeStep, JobKind, JobPhase};
 

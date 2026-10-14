@@ -11,17 +11,17 @@ use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_entity::ids::{ClusterJobId, DispatchedJobId, EvaluationId, TaskTriggerId};
 use gradient_entity::{
-    build_attempt, build_job, cached_path, cluster_attempt, cluster_job, cluster_member,
-    derivation_build, derivation_metric, derivation_output, dispatched_job, dispatched_job_phase,
-    eval_cache_store, evaluation, evaluation_input_update, evaluation_message, evaluation_metric,
-    pending_delivery, task_trigger, upstream_metric, worker_connection, worker_sample,
+    build_attempt, build_job, cached_path, cluster_attempt, cluster_job, derivation_build,
+    derivation_metric, derivation_output, dispatched_job, dispatched_job_phase, eval_cache_store,
+    evaluation, evaluation_input_update, evaluation_message, evaluation_metric, pending_delivery,
+    task_trigger, upstream_metric, worker_connection, worker_sample,
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use super::SchedulerCase;
 use crate::actor::{Offer, SchedulerMsg};
 use crate::cluster::{PendingCluster, Reservation, SlotKind};
-use crate::jobs::{AssignDecision, PendingBuildJob, PendingJob, build_job_key};
+use crate::jobs::{PendingBuildJob, PendingJob, build_job_key};
 use crate::probe::ProbePlan;
 use gradient_wire::types::FlakeJob;
 
@@ -221,14 +221,6 @@ impl SchedulerCase {
             .unwrap_or_else(|| panic!("no cluster job {id}"))
     }
 
-    pub async fn members(&self, cluster: ClusterJobId) -> Vec<cluster_member::Model> {
-        cluster_member::Entity::find()
-            .filter(cluster_member::Column::ClusterJob.eq(cluster))
-            .all(&self.db.connection())
-            .await
-            .expect("the cluster members read")
-    }
-
     pub async fn cluster_attempts(&self, cluster: ClusterJobId) -> Vec<cluster_attempt::Model> {
         cluster_attempt::Entity::find()
             .filter(cluster_attempt::Column::ClusterJob.eq(cluster))
@@ -341,23 +333,11 @@ impl SchedulerCase {
             .expect("the scheduler core names the worker of a job")
     }
 
-    pub async fn active_job(&self, key: &str) -> Option<PendingJob> {
-        self.scheduler.active_job(key).await
-    }
-
     pub async fn tracked(&self, key: &str) -> bool {
         self.scheduler
             .untracked(vec![key.to_owned()])
             .await
             .is_empty()
-    }
-
-    pub async fn is_aborting(&self, key: &str) -> bool {
-        let job_id = key.to_owned();
-        self.scheduler
-            .call(|reply| SchedulerMsg::IsAborting { job_id, reply })
-            .await
-            .expect("the scheduler core answers")
     }
 
     pub async fn totals(&self) -> Totals {
@@ -401,13 +381,5 @@ impl SchedulerCase {
 
     pub async fn reservation(&self) -> Option<Reservation> {
         self.scheduler.reservation().await
-    }
-
-    pub async fn board_workers(&self) -> Vec<gradient_pool::WorkerInfo> {
-        self.scheduler.board_workers().await
-    }
-
-    pub async fn recent_decisions(&self) -> Vec<AssignDecision> {
-        self.scheduler.recent_decisions().await
     }
 }
