@@ -7,11 +7,34 @@ A flake built by Gradient, with the outputs in a binary cache.
 - A running instance, see [Quick Start](quick-start.md) or [Standalone](standalone.md)
 - A flake in a Git repository the server can reach
 
-## 1. Register
+## 1. First User
 
-Open `https://gradient.example.com/account/register` and create the first user.
+=== "UI"
 
-The server will refuse registration with `registration.enable = false` or `oidc.required`. Sign in through OIDC instead, or declare the first user in [`services.gradient.state.users`](../reference/state.md#usersname).
+    Open `https://gradient.example.com/account/register` and create the first user.
+
+    The server will refuse registration with `registration.enable = false` or `oidc.required`. Use the declarative tab or sign in through OIDC then.
+
+=== "Declarative"
+
+    ```sh
+    install -d -m 700 /var/lib/gradient-secrets
+    gradient hash > /var/lib/gradient-secrets/admin-password # (1)!
+    ```
+
+    1.  Password prompt twice, then an argon2id hash as output. The [CLI](../reference/cli.md#install) page lists the install steps.
+
+    ```nix
+    services.gradient.state.users.admin = {
+      email = "admin@example.com";
+      password_file = "/var/lib/gradient-secrets/admin-password"; # (1)!
+      superuser = true;
+    };
+    ```
+
+    1.  The file contains the hash, not the password. A plaintext password in it would make the server fail on start.
+
+    Sign in as `admin` with the password. Registration can stay off. Other user options are in [Declarative State](../concepts/declarative-state.md).
 
 ## 2. Create a Cache
 
