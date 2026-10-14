@@ -430,8 +430,8 @@ impl Shape {
     }
 
     pub async fn insert_into(mut self, db: &DatabaseConnection) {
-        self.attempts_follow_the_builds();
         self.open_member_rows();
+        self.attempts_follow_the_builds();
         insert::all(self, db).await;
     }
 
@@ -930,6 +930,7 @@ mod tests {
     }
 
     mod scheduling {
+        use gradient_entity::build_attempt::AttemptOutcome;
         use gradient_entity::cache_upstream::CacheUpstreamKind;
         use gradient_entity::cluster_job::ClusterJobStatus;
         use gradient_entity::dispatched_job::DispatchedJobOutcome;
@@ -1084,10 +1085,11 @@ mod tests {
 
             let rows = db.rows::<dispatched_job::Entity>().await;
             let key = eval_job_key(e);
-            let evals: Vec<_> = rows
+            let mut evals: Vec<_> = rows
                 .iter()
                 .filter(|r| r.job_id.as_deref() == Some(key.as_str()))
                 .collect();
+            evals.sort_by_key(|r| r.created_at);
             let [closed, open] = evals.as_slice() else {
                 panic!("two eval rows: {rows:?}");
             };
@@ -1101,7 +1103,8 @@ mod tests {
             );
             assert_eq!(closed.outcome, Some(DispatchedJobOutcome::Completed));
             assert!(open.finished_at.is_none());
-            let phases = db.rows::<dispatched_job_phase::Entity>().await;
+            let mut phases = db.rows::<dispatched_job_phase::Entity>().await;
+            phases.sort_by_key(|p| p.seq);
             assert!(
                 matches!(phases.as_slice(), [p0, p1] if p0.dispatched_job == closed.id && p1.seq == 1 && p1.phase == 2),
                 "{phases:?}"
@@ -1151,6 +1154,15 @@ mod tests {
                     .any(|r| r.job_id == Some(build_key.clone()) && r.evaluation_id == e2)
             );
             assert_ne!(rows[0].worker_id, rows[1].worker_id);
+            let build_row = rows
+                .iter()
+                .find(|r| r.job_id == Some(build_key.clone()))
+                .expect("the build member row");
+            let running = db.attempts(A).await;
+            assert!(
+                matches!(running.as_slice(), [a] if a.outcome == AttemptOutcome::Running && a.dispatched_job == Some(build_row.id)),
+                "{running:?}"
+            );
             db.finish().await;
         }
 

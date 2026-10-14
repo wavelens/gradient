@@ -12,7 +12,7 @@ use gradient_db::deliveries::pending::{self, Outcome, PendingDeliveryKind};
 use gradient_db::deliveries::trigger_fire::{TriggerFire, enqueue_trigger_fires};
 use gradient_db::status::BuildRefusal;
 use gradient_entity::ids::{DerivationId, DispatchedJobId, EvaluationId, TaskTriggerId};
-use gradient_entity::{dispatched_job, evaluation};
+use gradient_entity::{dispatched_job, evaluation, pending_delivery};
 use gradient_fixtures::shape::build_assignment;
 use gradient_graph::{
     Demotion, NarCommit, NarCommitted, RequeueScope, SignTargets, Transition, TransitionReport,
@@ -21,7 +21,10 @@ use gradient_graph::{
 use gradient_pool::score::{HistoryPrediction, InstanceContext};
 use gradient_util::supervision::Pass;
 use gradient_wire::types::ClusterAddress;
-use sea_orm::{ActiveModelTrait, IntoActiveModel};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
+    QuerySelect,
+};
 
 use super::{SchedulerCase, aliases, lock};
 use crate::instance::{EvalHistory, InstanceCounts};
@@ -215,14 +218,9 @@ impl SchedulerCase {
 
     pub async fn deliver_trigger_fires(&self) -> usize {
         let db = &self.scheduler.db.worker_db;
-        let rows = pending::claim_due(db, DELIVERY_BATCH)
-            .await
-            .expect("the due deliveries are claimed");
+        let rows = self.claim_due_trigger_fires().await;
         let mut fired = 0;
-        for row in rows
-            .iter()
-            .filter(|r| r.kind == PendingDeliveryKind::TriggerFire)
-        {
+        for row in &rows {
             let fire: TriggerFire =
                 serde_json::from_value(row.payload.clone()).expect("a trigger fire payload");
             let outcome = match crate::trigger_firing::fire(&self.scheduler, &fire).await {
@@ -236,6 +234,44 @@ impl SchedulerCase {
         }
         self.settled().await;
         fired
+    }
+
+    async fn claim_due_trigger_fires(&self) -> Vec<pending::PendingDelivery> {
+        let db = &self.scheduler.db.worker_db;
+        let now = gradient_types::now();
+        let due = pending_delivery::Entity::find()
+            .filter(pending_delivery::Column::Kind.eq(PendingDeliveryKind::TriggerFire))
+            .filter(pending_delivery::Column::DeliveredAt.is_null())
+            .filter(pending_delivery::Column::FailedAt.is_null())
+            .filter(pending_delivery::Column::NextAttemptAt.lte(now))
+            .order_by_asc(pending_delivery::Column::NextAttemptAt)
+            .order_by_asc(pending_delivery::Column::Id)
+            .limit(DELIVERY_BATCH as u64)
+            .all(db)
+            .await
+            .expect("the due trigger fires read");
+        let leased = now + chrono::Duration::seconds(pending::CLAIM_LEASE_SECS);
+        let mut claimed = Vec::with_capacity(due.len());
+        for row in due {
+            let delivery = pending::PendingDelivery {
+                id: row.id,
+                kind: row.kind,
+                key: row.key.clone(),
+                payload: row.payload.clone(),
+                attempts: row.attempts,
+            };
+            pending_delivery::Model {
+                next_attempt_at: leased,
+                ..row
+            }
+            .into_active_model()
+            .reset_all()
+            .update(db)
+            .await
+            .expect("the trigger fire is leased");
+            claimed.push(delivery);
+        }
+        claimed
     }
 
     pub async fn enqueue_trigger_fire(
@@ -375,10 +411,13 @@ impl SchedulerCase {
     }
 
     pub async fn requeue_transient_retries(&self) -> u64 {
-        self.graph
+        let requeued = self
+            .graph
             .requeue(RequeueScope::TransientRetries)
             .await
-            .expect("the requeue runs")
+            .expect("the requeue runs");
+        self.settled().await;
+        requeued
     }
 
     pub async fn backdate_shared_build(&self, path: &str, updated_at: NaiveDateTime) {

@@ -5,13 +5,14 @@
  */
 
 use chrono::NaiveDateTime;
+use gradient_entity::build_attempt::AttemptOutcome;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::cluster_attempt::ClusterAttemptOutcome;
 use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::dispatched_job::{DispatchedJobKind, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationKind;
 use gradient_entity::ids::{
-    CacheUpstreamId, ClusterAttemptId, ClusterJobId, ClusterMemberId, CommitId,
+    BuildAttemptId, CacheUpstreamId, ClusterAttemptId, ClusterJobId, ClusterMemberId, CommitId,
     DerivationFeatureId, DerivationMetricId, DispatchedJobId, DispatchedJobPhaseId,
     EvalCacheStoreId, EvaluationFlakeInputOverrideId, EvaluationId, EvaluationInputUpdateId,
     EvaluationMetricId, FeatureId, ProjectId, TaskId, TaskTriggerId,
@@ -19,10 +20,10 @@ use gradient_entity::ids::{
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_entity::task_trigger::TriggerType;
 use gradient_entity::{
-    cache_upstream, cluster_attempt, cluster_job, cluster_member, derivation, derivation_feature,
-    derivation_metric, dispatched_job, dispatched_job_phase, eval_cache_store, evaluation,
-    evaluation_flake_input_override, evaluation_input_update, evaluation_metric, feature,
-    task_trigger,
+    build_attempt, cache_upstream, cluster_attempt, cluster_job, cluster_member, derivation,
+    derivation_feature, derivation_metric, dispatched_job, dispatched_job_phase, eval_cache_store,
+    evaluation, evaluation_flake_input_override, evaluation_input_update, evaluation_metric,
+    feature, task_trigger,
 };
 
 use super::Shape;
@@ -462,8 +463,37 @@ impl Shape {
                     ..row
                 })
                 .collect();
+            for row in &rows {
+                self.running_attempt_of(row, at);
+            }
             self.assignments.extend(rows);
         }
+    }
+
+    fn running_attempt_of(&mut self, row: &dispatched_job::Model, at: NaiveDateTime) {
+        let Some(build) = self
+            .shared_builds
+            .iter()
+            .find(|b| Some(super::build_job_key(b.id)) == row.job_id)
+        else {
+            return;
+        };
+        let (shared_build, derivation) = (build.id, build.derivation);
+        let build_job = self
+            .jobs
+            .iter()
+            .find(|j| j.evaluation == row.evaluation_id && j.derivation == derivation)
+            .map(|j| j.id);
+        self.attempts.push(build_attempt::Model {
+            id: BuildAttemptId::now_v7(),
+            build_job,
+            derivation_build: shared_build,
+            dispatched_job: Some(row.id),
+            outcome: AttemptOutcome::Running,
+            build_context: serde_json::json!({}),
+            created_at: at,
+            ..Default::default()
+        });
     }
 
     fn member_row(
