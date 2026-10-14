@@ -25,6 +25,10 @@ use std::collections::HashMap;
 pub const EVAL_KEY_PREFIX: &str = "eval:";
 pub const BUILD_KEY_PREFIX: &str = "build:";
 
+pub fn shared_build_of_key(job_id: &str) -> Option<DerivationBuildId> {
+    job_id.strip_prefix(BUILD_KEY_PREFIX)?.parse().ok()
+}
+
 pub fn eval_job_key_sql(id_expr: &str) -> String {
     format!("'{EVAL_KEY_PREFIX}' || {id_expr}::text")
 }
@@ -404,6 +408,20 @@ mod tests {
             sql.ends_with("ORDER BY \"dispatched_job\".\"dispatched_at\" ASC"),
             "{sql}"
         );
+    }
+
+    #[test]
+    fn only_a_build_key_names_a_shared_build() {
+        let shared_build = DerivationBuildId::now_v7();
+        assert_eq!(
+            shared_build_of_key(&format!("{BUILD_KEY_PREFIX}{shared_build}")),
+            Some(shared_build)
+        );
+        assert_eq!(
+            shared_build_of_key(&format!("{EVAL_KEY_PREFIX}{}", EvaluationId::now_v7())),
+            None
+        );
+        assert_eq!(shared_build_of_key("build:not-a-uuid"), None);
     }
 
     #[test]

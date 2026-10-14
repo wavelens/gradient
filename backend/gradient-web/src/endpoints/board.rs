@@ -168,18 +168,8 @@ pub async fn get_dispatched_jobs(
         .partition(|j| scope.allows(&Uuid::from(j.project)));
     let other_running = other_running.len() as u64;
 
-    // Three reads are made for the whole page instead of three per row. The board is polling this
-    // list, and it can carry up to 500 open dispatches.
-    let job_ids: Vec<DispatchedJobId> = visible.iter().map(|j| j.id).collect();
-    let attempts: HashMap<DispatchedJobId, build_attempt::Model> =
-        gradient_db::scheduling::build_attempt::of_dispatched_jobs(&state.web_db, job_ids)
-            .await?
-            .into_iter()
-            .filter_map(|a| Some((a.dispatched_job?, a)))
-            .collect();
-
     let shared_builds: Vec<DerivationBuildId> =
-        attempts.values().map(|a| a.derivation_build).collect();
+        visible.iter().filter_map(shared_build_of).collect();
     let evaluations: Vec<EvaluationId> = visible
         .iter()
         .filter(|j| j.kind == DispatchedJobKind::Eval)
@@ -196,7 +186,7 @@ pub async fn get_dispatched_jobs(
     let jobs = visible
         .into_iter()
         .map(|j| {
-            let shared_build = attempts.get(&j.id).map(|a| a.derivation_build);
+            let shared_build = shared_build_of(&j);
             let subject = subjects.subject(shared_build, j.evaluation_id);
             let worker_name = worker_names.name(&j.worker_id);
 
@@ -569,14 +559,7 @@ pub async fn get_dispatched_job(
     let (project, worker_name) =
         job_names(&state.web_db, &scope, j.project.into(), &j.worker_id).await?;
 
-    let this_attempt =
-        gradient_db::scheduling::build_attempt::of_dispatched_job(&state.web_db, j.id)
-            .await
-            .ok()
-            .flatten();
-
-    let shared_build_id: Option<DerivationBuildId> =
-        this_attempt.as_ref().map(|a| a.derivation_build);
+    let shared_build_id = shared_build_of(&j);
     let build_id: Option<Uuid> = match shared_build_id {
         Some(shared_build) => resolve_build_jobs(&state.web_db, j.evaluation_id, &[shared_build])
             .await
@@ -655,6 +638,12 @@ pub async fn get_dispatched_job(
         previous_attempts,
         passed_over: false,
     }))
+}
+
+fn shared_build_of(job: &dispatched_job::Model) -> Option<DerivationBuildId> {
+    job.job_id
+        .as_deref()
+        .and_then(gradient_db::scheduling::assignment_record::shared_build_of_key)
 }
 
 async fn job_names<C: ConnectionTrait>(
