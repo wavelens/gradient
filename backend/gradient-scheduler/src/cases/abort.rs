@@ -119,7 +119,7 @@ async fn a01_aborting_an_evaluation_with_a_running_eval_job_keeps_it_active_unti
 }
 
 #[tokio::test]
-async fn a01b_a_worker_abort_of_a_build_requeues_it_without_failure() {
+async fn a01b_a_worker_cancel_of_a_build_requeues_it_without_failure() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
     case.connect(W1, w_all(), &[]).await;
@@ -146,7 +146,7 @@ async fn a01b_a_worker_abort_of_a_build_requeues_it_without_failure() {
         W1,
         &a,
         a1,
-        failure(BuildFailureKind::Aborted).error("aborted by worker"),
+        failure(BuildFailureKind::Canceled).error("the worker stopped before the job finished"),
     )
     .await;
     let rows: Vec<_> = case
@@ -197,7 +197,7 @@ async fn a01b_a_worker_abort_of_a_build_requeues_it_without_failure() {
 }
 
 #[tokio::test]
-async fn a01c_a_worker_abort_of_an_eval_job_requeues_it_without_failure() {
+async fn a01c_a_worker_cancel_of_an_eval_job_requeues_it_without_failure() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().evalq(e1)).await;
     let a1 = case.evalrun(W1, e1).await;
@@ -211,7 +211,7 @@ async fn a01c_a_worker_abort_of_an_eval_job_requeues_it_without_failure() {
         W1,
         &key,
         a1,
-        failure(BuildFailureKind::Aborted).error("aborted by worker"),
+        failure(BuildFailureKind::Canceled).error("the worker stopped before the job finished"),
     )
     .await;
     let rows: Vec<_> = case

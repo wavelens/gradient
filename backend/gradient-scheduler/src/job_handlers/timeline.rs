@@ -15,7 +15,7 @@ use gradient_entity::dispatched_job::{DispatchedJobOutcome, Entity as EDispatche
 use gradient_entity::dispatched_job_phase::Model as MDispatchedJobPhase;
 use gradient_entity::ids::{DispatchedJobId, DispatchedJobPhaseId};
 use gradient_types::*;
-use gradient_wire::types::{JobPhase, JobPhaseSpan};
+use gradient_wire::types::{BuildFailureKind, JobPhase, JobPhaseSpan};
 
 use crate::Scheduler;
 
@@ -87,6 +87,13 @@ impl ReportedTimeline {
     }
 }
 
+pub(crate) fn failed_job_outcome(kind: BuildFailureKind) -> DispatchedJobOutcome {
+    match kind {
+        BuildFailureKind::Canceled | BuildFailureKind::Aborted => DispatchedJobOutcome::Abandoned,
+        _ => DispatchedJobOutcome::Failed,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TimelineLanding {
     Closed,
@@ -97,12 +104,13 @@ pub(crate) enum TimelineLanding {
 }
 
 impl Scheduler {
-    pub fn record_job_timeline(
+    pub fn close_failed_job_timeline(
         self: &Arc<Self>,
         assignment_id: DispatchedJobId,
-        outcome: DispatchedJobOutcome,
+        kind: BuildFailureKind,
         report: ReportedTimeline,
     ) {
+        let outcome = failed_job_outcome(kind);
         let scheduler = Arc::clone(self);
         self.db.shutdown.spawn(async move {
             let _ = scheduler
@@ -111,8 +119,7 @@ impl Scheduler {
         });
     }
 
-    /// A fetch job's cached follow-up is reusing the job key. Its claim would lose to the fetch's
-    /// own row while that row is still open.
+    /// Cached follow-ups of fetch jobs claim the same job key and open fetch rows block them.
     pub async fn close_job_timeline(
         &self,
         assignment_id: DispatchedJobId,

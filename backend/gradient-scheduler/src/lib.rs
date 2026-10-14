@@ -50,9 +50,7 @@ use scoring::Scoring;
 pub use job_handlers::timeline::ReportedTimeline;
 pub use jobs::{AssignDecision, BoardActiveJob, DecisionCandidate, PendingJobInfo};
 
-/// This function is pulling the crate into binaries that reference nothing else from it. A linker
-/// is dropping an unmentioned rlib, and with it the `gradient_db::sql!` entries the plan gate is
-/// reading.
+/// Linkers drop an unmentioned rlib and with it the `gradient_db::sql!` entries of the plan check.
 pub const fn link() {}
 
 #[cfg(test)]

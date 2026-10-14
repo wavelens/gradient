@@ -8,7 +8,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
-use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_types::events::{build, evaluation};
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId, TaskId};
 use gradient_types::{BuildProgress, BuildProgressPhase, EvaluationProgress};
@@ -24,8 +23,7 @@ use gradient_wire::messages::{
     CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership, JobKind, ServerMessage,
 };
 use gradient_wire::types::{
-    BuildFailureKind, BuildProgressPhase as WireBuildProgressPhase,
-    EvalProgress as WireEvalProgress,
+    BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
 };
 
 use super::SessionHandles;
@@ -304,17 +302,13 @@ impl<'a> InboundContext<'a> {
                 if self.owned(&job_id, &assignment_id).is_some()
                     && self.scheduler.cluster_member_released(&job_id).await
                 {
-                    info!(peer_id = %self.peer_id, %job_id, %error, "held cluster member released before its start");
+                    info!(peer_id = %self.peer_id, %job_id, %error, "waiting cluster member released before its start");
                     self.active.remove(&job_id);
                 } else if let Some(assignment_id) = self.owned(&job_id, &assignment_id) {
                     warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = report.spans.len(), "job failed");
                     self.active.remove(&job_id);
-                    let outcome = match kind {
-                        BuildFailureKind::Canceled => DispatchedJobOutcome::Abandoned,
-                        _ => DispatchedJobOutcome::Failed,
-                    };
                     self.scheduler
-                        .record_job_timeline(assignment_id, outcome, report);
+                        .close_failed_job_timeline(assignment_id, kind, report);
                     self.job_events
                         .push(JobEvent::Failed {
                             job_id,

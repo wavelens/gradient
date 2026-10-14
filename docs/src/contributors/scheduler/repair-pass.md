@@ -113,24 +113,25 @@ The watchdogs are scheduler loops in `backend/gradient-scheduler/src/loops/backg
 | `abandoned-dispatch-sweep` | 60 s | Open `dispatched_job` row older than 1800 s | Reaping aborts unconfirmed after 300 s first, then closing the row `Abandoned` |
 | `graph-stuck-reheal` | Consistency check interval | `Waiting` evaluations with reason `GraphStuck` | Sending `Repair { Unstick }` |
 
-- The 900 s grace must cover a transition still queued in the graph writer. A re-send racing that transition is harmless.
+- A transition still queued in the graph writer gets 900 s of grace. A re-send racing that transition is harmless.
 - Both re-sent transitions are idempotent.
 
-## Assignment Record Closers
+## Closers of Assignment Rows
 
-A `dispatched_job` row is the proof of a job being out. `claim_assignment` must insert the row. `idx-dispatched_job-open-job` can admit one open row per job key (`build:<shared_build>`, `eval:<evaluation>`).
+A `dispatched_job` row is the proof of a job being out. Claims insert the row through `claim_assignment`. `idx-dispatched_job-open-job` can admit a single open row per job key (`build:<shared_build>`, `eval:<evaluation>`).
 
 | Closer | Outcome |
 |---|---|
 | Worker's terminal report, matched on the assignment ID | `Completed` / `Failed` |
+| Worker's `JobFailed` of kind `Aborted` (confirmed server abort) or `Canceled` (worker stopped), `failed_job_outcome` | `Abandoned` |
 | Claim with an `Assigned` transition failing or exceeding its budget (`assignment.rs`) | `Abandoned` |
 | Worker rejecting the assignment (`withdraw_assignment`) | `Abandoned` |
-| Worker disconnect (`requeue_orphaned_jobs`) | `Abandoned` |
+| Worker disconnect (requeue of its jobs) | `Abandoned` |
 | Worker registration: rows assigned before this process started | `Abandoned` |
 | Startup recovery (`abandon_all_open_assignments`) | `Abandoned` |
 | Overdue abort reap, `abandoned-dispatch-sweep` | `Abandoned` |
 
-- `Abandoned` is not `Failed`. The build may have succeeded before contact was lost. A failure would skew the board's rates and history-based scoring.
+- `Abandoned` is not `Failed`. The build can have succeeded before the server lost contact. These rows stay out of the board's failure rates and of history-based scoring.
 
 ## Missing Inputs
 

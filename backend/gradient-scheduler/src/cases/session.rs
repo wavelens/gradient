@@ -20,6 +20,7 @@ use super::shapes::{Profile, eval_key, w_all};
 use super::{SchedulerCase, Session, SessionJob, lock, new_port};
 use crate::ReportedTimeline;
 use crate::actor::{Offer, SchedulerMsg};
+use crate::job_handlers::timeline::failed_job_outcome;
 use crate::jobs::{Assignment, PendingJob, Reattached, build_job_key};
 use crate::test_jobs;
 
@@ -346,15 +347,11 @@ impl SchedulerCase {
             return;
         }
         self.forget(worker, key);
-        let outcome = match failure.kind {
-            BuildFailureKind::Canceled => DispatchedJobOutcome::Abandoned,
-            _ => DispatchedJobOutcome::Failed,
-        };
         let _ = self
             .scheduler
             .persist_job_timeline(
                 assignment,
-                outcome,
+                failed_job_outcome(failure.kind),
                 ReportedTimeline::received(failure.spans, failure.elapsed_ms),
             )
             .await;
