@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! No edge may join twins producing the same output paths, and no edge may close a cycle.
-//! Real Nix references can form neither, and either edge would make two closures wait on
-//! each other, so no build of them could ever become fetchable.
+//! No edge may join twins producing the same output paths, and no edge may close a cycle with a
+//! direct edge back. Real Nix references can form neither, and either edge would make two closures
+//! wait on each other, so no build of them could ever become fetchable.
 
 use gradient_types::ids::DerivationId;
 use sea_orm::{ConnectionTrait, DbErr, Value};
@@ -14,12 +14,10 @@ use std::sync::LazyLock;
 
 use crate::graph::can_start::ids;
 
-fn closes_no_cycle(referrer: &str, producer: &str) -> String {
+fn no_edge_back(referrer: &str, producer: &str) -> String {
     format!(
-        "NOT EXISTS (WITH RECURSIVE below(derivation) AS (SELECT {producer} \
-         UNION SELECT e.dependency FROM below b \
-         JOIN derivation_dependency e ON e.derivation = b.derivation) \
-         SELECT 1 FROM below WHERE below.derivation = {referrer})"
+        "NOT EXISTS (SELECT 1 FROM derivation_dependency back \
+         WHERE back.derivation = {producer} AND back.dependency = {referrer})"
     )
 }
 
@@ -35,7 +33,7 @@ WHERE d.dependency <> $1
   AND {no_cycle}
 ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 0
 "#,
-        no_cycle = closes_no_cycle("$1", "d.dependency"),
+        no_cycle = no_edge_back("$1", "d.dependency"),
     )
 });
 
@@ -77,7 +75,7 @@ WHERE {no_cycle}
 ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 0
 RETURNING derivation
 "#,
-        no_cycle = closes_no_cycle("a.referrer", "a.producer"),
+        no_cycle = no_edge_back("a.referrer", "a.producer"),
     )
 });
 
