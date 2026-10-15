@@ -90,14 +90,23 @@ Push events work with the automatic setup. Pull requests require the **Pull Requ
 
 Fork pull requests wait for maintainer approval before they run. To enable this check, set **Require maintainer approval for PRs from non-writers** on the **Pull Request (reporter)** trigger.
 
+## Merge Queue
+
+Merge queue entries count as a push to the target branch of the queue. A **Push (reporter)** trigger with a branch filter on the target branch can start the evaluation.
+
+1. Add the status check `gradient/<task>: Evaluation` to the required checks of the target branch.
+2. Enable **Require merge queue** on the same branch ruleset.
+
+GitHub can merge an entry after a passed check, or drop the entry after a failed one.
+
 ??? note "Registering the App by Hand"
     Use [GitHub's documentation](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) to register the App by hand if the manifest flow does not fit. Enter these values during registration.
 
     | Setting | Value |
     |---|---|
     | Webhook URL | `https://gradient.example.com/api/v1/hooks/github` |
-    | Permissions | `metadata: read`, `contents: read`, `pull_requests: write`, `issues: write`, `statuses: write`, `checks: write` |
-    | Events | `push`, `pull_request`, `release`, `check_run`, `issue_comment`, `pull_request_review` |
+    | Permissions | `metadata: read`, `contents: read`, `pull_requests: write`, `issues: write`, `statuses: write`, `checks: write`, `merge_queues: read` |
+    | Events | `push`, `pull_request`, `release`, `check_run`, `issue_comment`, `pull_request_review`, `merge_group` |
 
 ## Troubleshooting
 
@@ -107,6 +116,7 @@ Fork pull requests wait for maintainer approval before they run. To enable this 
 | `404 Pending credentials` after App creation | The credentials got shown once already, or the server restarted. Repeat step 1 |
 | `403 superuser required` | The account lacks the superuser flag |
 | An approving review does not release a fork pull request | The App predates the `pull_request_review` event. Enable **Pull request review** under the App's **Permissions & events** |
+| Merge queue entries wait for the Gradient check without end | The App predates the `merge_group` event. Grant **Merge queues** read access and enable **Merge group** under the App's **Permissions & events** |
 | Pushes arrive but no evaluation starts | No task repository URL matches the pushed repository |
 | `403 forbidden_source_ip` | The integration's allowed source IPs do not cover GitHub's `hooks` ranges from `https://api.github.com/meta` |
 
