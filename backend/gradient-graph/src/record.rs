@@ -1070,7 +1070,15 @@ pub(crate) async fn apply_upstream_hits(
         "UpstreamHits must run inside a transaction: the complete-closure seed takes shared build locks",
     )?;
 
-    let hashes: Vec<String> = hits.keys().cloned().collect();
+    let stored =
+        gradient_db::cached_paths::stored_by_hash(db, &hits.keys().cloned().collect::<Vec<_>>())
+            .await
+            .context("find the hit paths our cache already stores")?;
+    let hashes: Vec<String> = hits
+        .keys()
+        .filter(|hash| !stored.contains_key(*hash))
+        .cloned()
+        .collect();
     let hit_rows = gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
         EDerivationOutput::find()
             .filter(CDerivationOutput::Hash.is_in(chunk))
@@ -1195,11 +1203,8 @@ async fn persist_narinfo(
     rows: &[MDerivationOutput],
     hits: &HashMap<String, UpstreamHit>,
 ) -> Result<()> {
-    let cached = gradient_db::derivation_outputs::cached_anywhere(db, rows)
-        .await
-        .context("find the outputs some cache already holds")?;
     let mut learned: Vec<(DerivationId, Vec<String>)> = Vec::new();
-    for o in rows.iter().filter(|o| !cached.contains(&o.id)) {
+    for o in rows {
         let Some(hit) = hits.get(&o.hash) else {
             continue;
         };
