@@ -42,6 +42,7 @@ pub fn build_manifest(serve_url: &str) -> Value {
             "checks": "write",
             "pull_requests": "write",
             "issues": "write",
+            "merge_queues": "read",
         },
         "default_events": [
             "push",
@@ -50,6 +51,7 @@ pub fn build_manifest(serve_url: &str) -> Value {
             "check_run",
             "issue_comment",
             "pull_request_review",
+            "merge_group",
         ],
     })
 }

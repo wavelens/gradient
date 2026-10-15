@@ -77,3 +77,11 @@ pub struct WebhookTriggerOutcome {
     pub queued: Vec<QueuedEvaluation>,
     pub skipped: Vec<SkippedTask>,
 }
+
+impl WebhookTriggerOutcome {
+    pub(super) fn merge(&mut self, other: Self) {
+        self.tasks_scanned += other.tasks_scanned;
+        self.queued.extend(other.queued);
+        self.skipped.extend(other.skipped);
+    }
+}

@@ -20,6 +20,6 @@ pub use provider::GitHostProvider;
 pub use registry::GitHostRegistry;
 pub use reporter::*;
 pub use webhook::{
-    ParsedPullRequestEvent, ParsedPullRequestReviewEvent, ParsedPushEvent, ParsedReleaseEvent,
-    PushCommit, PushOutcome, WebhookEventKind,
+    MergeGroupOutcome, ParsedMergeGroupEvent, ParsedPullRequestEvent, ParsedPullRequestReviewEvent,
+    ParsedPushEvent, ParsedReleaseEvent, PushCommit, PushOutcome, WebhookEventKind,
 };

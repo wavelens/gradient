@@ -5781,6 +5781,8 @@ paths:
           repository URL matches the matching trigger. A `push` carrying an
           all-zero `after` SHA (a branch/tag deletion or a Git host "test" delivery)
           is accepted as a `200` no-op rather than rejected.
+        - `merge_group` - `checks_requested` evaluates the merge group head on every push
+          trigger whose branch filter matches the queue's base branch.
         - `check_run` - the "Approve and Run" action clears a fork-PR approval gate.
         - `issue_comment` - `/gradient run` / `/gradient approve` / `/gradient summary` maintainer commands.
         - `pull_request_review` - a maintainer's approving review clears a fork-PR approval gate.
