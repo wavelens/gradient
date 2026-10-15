@@ -567,18 +567,17 @@ in {
         User = "gradient-worker";
         Group = "gradient-worker";
         StateDirectory = "gradient-worker";
-        UMask = "0077";
+        UMask = "0277";
       };
 
       script = ''
-        umask 077
+        rm -f ${localTokenFile}.new ${localPeersFile}.new
         if [ ! -s ${localTokenFile} ]; then
           ${lib.getExe pkgs.openssl} rand -base64 48 > ${localTokenFile}.new
           mv ${localTokenFile}.new ${localTokenFile}
         fi
         printf '*:%s\n' "$(cat ${localTokenFile})" > ${localPeersFile}.new
         mv ${localPeersFile}.new ${localPeersFile}
-        chmod 0400 ${localTokenFile} ${localPeersFile}
       '';
     };
 
