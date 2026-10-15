@@ -127,8 +127,8 @@ async fn x02_a_second_walk_with_an_extra_dependency_makes_the_first_evaluation_w
         "after 1: build_job(E2,N) exists"
     );
     assert!(
-        case.job(e1, N).await.is_none(),
-        "after 1: no build_job(E1,N)"
+        case.job(e1, N).await.is_some(),
+        "after 1: build_job(E1,N) exists, E1 reaches N through A (I12)"
     );
     let (top, added) = (case.sb(A).await, case.sb(N).await);
     assert_eq!(top.status, BuildStatus::Created, "after 1: sb(A).status");
@@ -143,7 +143,7 @@ async fn x02_a_second_walk_with_an_extra_dependency_makes_the_first_evaluation_w
     assert!(case.gv(e1).await > version, "after 1: gv(E1) rose");
     assert_eq!(
         case.counters(e1).await,
-        [2, 1, 0, 0, 0],
+        [3, 2, 0, 0, 0],
         "after 1: counters(E1)"
     );
     assert_eq!(
