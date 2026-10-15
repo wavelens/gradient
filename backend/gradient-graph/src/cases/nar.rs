@@ -299,9 +299,9 @@ async fn n06_a_reference_to_a_missing_path_leaves_the_producer_incomplete() {
     assert_eq!(b, (Building, 1, false), "after 1: sb(B)");
     let d = case.sb(D).await;
     let d = (d.status, d.attempt, d.wanted);
-    assert_eq!(d, (Created, 0, true), "after 1: sb(D)");
+    assert_eq!(d, (Queued, 0, true), "after 1: sb(D)");
     let counters = case.counters(e1).await;
-    assert_eq!(counters, [3, 3, 0, 0, 1], "after 1: counters(E1)");
+    assert_eq!(counters, [3, 3, 0, 1, 1], "after 1: counters(E1)");
     case.zero_drift("step 1").await;
 
     case.build_completed(B).await;
@@ -312,7 +312,7 @@ async fn n06_a_reference_to_a_missing_path_leaves_the_producer_incomplete() {
     let a = case.queue_state(A).await;
     assert_eq!(a, (Created, 1), "after 2: sb(A)");
     let counters = case.counters(e1).await;
-    assert_eq!(counters, [3, 2, 0, 0, 0], "after 2: counters(E1)");
+    assert_eq!(counters, [3, 2, 0, 1, 0], "after 2: counters(E1)");
     case.zero_drift("step 2").await;
 
     case.commit_nar(commit_of(D_OUT, "d", &[(D_OUT, "d")]))
@@ -465,9 +465,9 @@ async fn n09_a_single_path_backs_every_output_with_its_hash_and_both_producers_a
     assert!(case.sb(F1).await.fetchable, "after 1: sb(F1).fetchable");
     let f2 = case.sb(F2).await;
     let f2 = (f2.status, f2.fetchable, f2.missing_runtime_deps, f2.wanted);
-    assert_eq!(f2, (Created, false, 0, true), "after 1: sb(F2)");
+    assert_eq!(f2, (Queued, false, 0, true), "after 1: sb(F2)");
     let counters = case.counters(e1).await;
-    assert_eq!(counters, [2, 1, 0, 0, 0], "after 1: counters(E1)");
+    assert_eq!(counters, [2, 1, 0, 1, 0], "after 1: counters(E1)");
     case.zero_drift("step 1").await;
     case.finish().await;
 }

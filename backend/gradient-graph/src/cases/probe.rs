@@ -365,7 +365,7 @@ async fn p07_hits_and_probed_end_in_the_same_state_in_either_order() {
             let (a, b) = (case.sb(A).await, case.sb(B).await);
             assert_eq!(
                 (b.status, b.wanted),
-                (BuildStatus::Created, true),
+                (BuildStatus::Queued, true),
                 "variant b after 1: sb(B) status, wanted"
             );
 
