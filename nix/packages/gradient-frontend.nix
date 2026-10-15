@@ -54,7 +54,7 @@
     runHook preInstall
 
     mkdir -p $out/share/gradient-frontend
-    cp -r dist/gradient-frontend/browser/* $out/share/gradient-frontend/
+    cp -rL dist/gradient-frontend/browser/* $out/share/gradient-frontend/
     install -Dm444 dist/gradient-frontend/3rdpartylicenses.txt \
       $out/share/doc/gradient-frontend/3rdpartylicenses.txt
 
