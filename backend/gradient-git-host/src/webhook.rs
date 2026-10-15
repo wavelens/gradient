@@ -63,6 +63,22 @@ pub struct GitHubRepository {
 }
 
 #[derive(Deserialize)]
+pub struct GitHubMergeGroupPayload {
+    pub action: String,
+    pub merge_group: GitHubMergeGroup,
+    pub repository: GitHubRepository,
+}
+
+#[derive(Deserialize)]
+pub struct GitHubMergeGroup {
+    pub head_sha: String,
+    pub head_ref: String,
+    pub base_ref: String,
+    #[serde(default)]
+    pub head_commit: Option<WebhookCommit>,
+}
+
+#[derive(Deserialize)]
 pub struct GiteaPushPayload {
     #[serde(rename = "ref")]
     pub git_ref: String,
@@ -328,6 +344,20 @@ pub struct ParsedPushEvent {
 
 pub enum PushOutcome {
     Build(ParsedPushEvent),
+    Ignored,
+}
+
+pub struct ParsedMergeGroupEvent {
+    pub commit_hash: Vec<u8>,
+    pub repository_urls: Vec<String>,
+    pub commit_message: Option<String>,
+    pub author_name: Option<String>,
+    pub queue_branch: String,
+    pub base_branch: String,
+}
+
+pub enum MergeGroupOutcome {
+    Build(ParsedMergeGroupEvent),
     Ignored,
 }
 
@@ -763,6 +793,35 @@ impl ParsedReleaseEvent {
     }
 }
 
+impl ParsedMergeGroupEvent {
+    pub fn from_github(body: &[u8]) -> Option<MergeGroupOutcome> {
+        let payload: GitHubMergeGroupPayload = match serde_json::from_slice(body) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!(error = %e, "Failed to parse GitHub merge_group payload");
+                return None;
+            }
+        };
+        if payload.action != "checks_requested" {
+            return Some(MergeGroupOutcome::Ignored);
+        }
+
+        let group = payload.merge_group;
+        let commit_hash = decode_sha_hex(&group.head_sha, "github", "merge_group.head_sha")?;
+        let head = group.head_commit.as_ref();
+        Some(MergeGroupOutcome::Build(Self {
+            commit_hash,
+            repository_urls: vec![payload.repository.clone_url, payload.repository.ssh_url],
+            commit_message: head.and_then(commit_subject),
+            author_name: head
+                .and_then(|c| c.author.as_ref())
+                .and_then(|a| a.name.clone()),
+            queue_branch: group.head_ref.strip_prefix("refs/heads/")?.to_owned(),
+            base_branch: group.base_ref.strip_prefix("refs/heads/")?.to_owned(),
+        }))
+    }
+}
+
 impl ParsedPullRequestReviewEvent {
     pub fn from_github(body: &[u8]) -> Option<Self> {
         let payload: GitHubReviewPayload = match serde_json::from_slice(body) {
@@ -817,6 +876,50 @@ mod tests {
 
     const VALID_SHA: &str = "abcdef0123456789abcdef0123456789abcdef01";
     const ZERO_SHA: &str = "0000000000000000000000000000000000000000";
+
+    fn merge_group_payload(action: &str) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "action": action,
+            "merge_group": {
+                "head_sha": VALID_SHA,
+                "head_ref": "refs/heads/gh-readonly-queue/main/pr-7-0123",
+                "base_sha": ZERO_SHA,
+                "base_ref": "refs/heads/main",
+                "head_commit": {
+                    "id": VALID_SHA,
+                    "message": "Merge pull request #7\n\nbody",
+                    "author": { "name": "octocat" },
+                },
+            },
+            "repository": {
+                "clone_url": "https://github.com/acme/widgets.git",
+                "ssh_url": "git@github.com:acme/widgets.git",
+            },
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_requested_merge_group_builds_its_head_on_the_queue_branch() {
+        let Some(MergeGroupOutcome::Build(ev)) =
+            ParsedMergeGroupEvent::from_github(&merge_group_payload("checks_requested"))
+        else {
+            panic!("expected a buildable merge group");
+        };
+        assert_eq!(ev.commit_hash, hex::decode(VALID_SHA).unwrap());
+        assert_eq!(ev.queue_branch, "gh-readonly-queue/main/pr-7-0123");
+        assert_eq!(ev.base_branch, "main");
+        assert_eq!(ev.commit_message.as_deref(), Some("Merge pull request #7"));
+        assert_eq!(ev.author_name.as_deref(), Some("octocat"));
+    }
+
+    #[test]
+    fn a_destroyed_merge_group_builds_nothing() {
+        assert!(matches!(
+            ParsedMergeGroupEvent::from_github(&merge_group_payload("destroyed")),
+            Some(MergeGroupOutcome::Ignored)
+        ));
+    }
 
     #[track_caller]
     fn build(outcome: Option<PushOutcome>) -> ParsedPushEvent {

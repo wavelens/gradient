@@ -12,6 +12,7 @@ use gradient_ci::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, parse_o
 use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
 use gradient_entity::task_trigger as ept;
+use gradient_git_host::ParsedMergeGroupEvent;
 use gradient_scheduler::Scheduler;
 use gradient_types::branch_key;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
@@ -78,6 +79,45 @@ pub(super) async fn trigger_push_for_integration(
                     FilterResult::SkipFilter
                 }
             }
+            _ => FilterResult::Skip,
+        },
+        None,
+        None,
+        false,
+        None,
+        None,
+    )
+    .await
+}
+
+/// The queue branch is the branch key, and the push event for that branch dedups against this
+/// evaluation. The base branch picks the trigger.
+pub(super) async fn trigger_merge_group_for_integration(
+    ci: &CiContext,
+    scheduler: &Arc<Scheduler>,
+    integration_id: IntegrationId,
+    group: &ParsedMergeGroupEvent,
+) -> WebhookTriggerOutcome {
+    fan_out_triggers(
+        ci,
+        scheduler,
+        integration_id,
+        &group.repository_urls,
+        TriggerType::ReporterPush,
+        branch_key::branch(&group.queue_branch),
+        group.commit_hash.clone(),
+        group.commit_message.clone(),
+        group.author_name.clone(),
+        |cfg| match cfg {
+            TriggerConfig::ReporterPush {
+                branches,
+                releases_only: false,
+                ..
+            } if glob_matches(branches, &group.base_branch) => FilterResult::Fire,
+            TriggerConfig::ReporterPush {
+                releases_only: false,
+                ..
+            } => FilterResult::SkipFilter,
             _ => FilterResult::Skip,
         },
         None,

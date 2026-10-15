@@ -43,10 +43,13 @@ use crate::helpers::ok_json;
 use refusal::GitHostHookRefusal;
 
 use fanout::{
-    PushRefKind, trigger_pr_for_integration, trigger_push_for_integration,
-    trigger_release_for_integration,
+    PushRefKind, trigger_merge_group_for_integration, trigger_pr_for_integration,
+    trigger_push_for_integration, trigger_release_for_integration,
 };
-use gradient_git_host::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome};
+use gradient_git_host::{
+    MergeGroupOutcome, ParsedMergeGroupEvent, ParsedPullRequestEvent, ParsedPushEvent,
+    ParsedReleaseEvent, PushOutcome,
+};
 use installation::{handle_github_installation, resolve_github_app_targets};
 
 #[utoipa::path(
@@ -55,7 +58,7 @@ use installation::{handle_github_installation, resolve_github_app_targets};
     operation_id = "githubAppWebhook",
     tag = "git-host-webhooks",
     summary = "Receive GitHub App webhook",
-    description = "Receives events from a configured GitHub App. Payloads are authenticated using\n`X-Hub-Signature-256` HMAC-SHA256 verification against the configured\n`GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.\n\n**Handled events:**\n- `push` / `pull_request` / `release` - trigger an evaluation on any task whose\n  repository URL matches the matching trigger. A `push` carrying an\n  all-zero `after` SHA (a branch/tag deletion or a Git host \"test\" delivery)\n  is accepted as a `200` no-op rather than rejected.\n- `check_run` - the \"Approve and Run\" action clears a fork-PR approval gate.\n- `issue_comment` - `/gradient run` / `/gradient approve` / `/gradient summary` maintainer commands.\n- `pull_request_review` - a maintainer's approving review clears a fork-PR approval gate.\n- `installation` / `installation_repositories` - stores or clears the GitHub App\n  `installation_id` on the matching Gradient project.\n- `ping` - always returns 200.\n\nThis endpoint is unauthenticated (verified via HMAC signature).",
+    description = "Receives events from a configured GitHub App. Payloads are authenticated using\n`X-Hub-Signature-256` HMAC-SHA256 verification against the configured\n`GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.\n\n**Handled events:**\n- `push` / `pull_request` / `release` - trigger an evaluation on any task whose\n  repository URL matches the matching trigger. A `push` carrying an\n  all-zero `after` SHA (a branch/tag deletion or a Git host \"test\" delivery)\n  is accepted as a `200` no-op rather than rejected.\n- `merge_group` - `checks_requested` evaluates the merge group head on every push\n  trigger whose branch filter matches the queue's base branch.\n- `check_run` - the \"Approve and Run\" action clears a fork-PR approval gate.\n- `issue_comment` - `/gradient run` / `/gradient approve` / `/gradient summary` maintainer commands.\n- `pull_request_review` - a maintainer's approving review clears a fork-PR approval gate.\n- `installation` / `installation_repositories` - stores or clears the GitHub App\n  `installation_id` on the matching Gradient project.\n- `ping` - always returns 200.\n\nThis endpoint is unauthenticated (verified via HMAC signature).",
     params(("X-GitHub-Event" = String, Header), ("X-Hub-Signature-256" = String, Header)),
     request_body(content = serde_json::Value, content_type = "application/json"),
     responses((status = OK, description = "Webhook processed (may include zero queued evaluations)", body = IncomingWebhookResponse), WebError)
@@ -126,6 +129,16 @@ pub async fn github_app_webhook(
             let outcome = route_github_app_pr(&ci, &scheduler, parsed, &body, client_ip).await;
             IncomingWebhookResponse::new("pull_request", urls, outcome)
         }
+        "merge_group" => match ParsedMergeGroupEvent::from_github(&body) {
+            None => return Err(GitHostHookRefusal::MalformedPayload.into()),
+            Some(MergeGroupOutcome::Ignored) => IncomingWebhookResponse::empty("merge_group"),
+            Some(MergeGroupOutcome::Build(parsed)) => {
+                let urls = parsed.repository_urls.clone();
+                let outcome =
+                    route_github_app_merge_group(&ci, &scheduler, parsed, &body, client_ip).await;
+                IncomingWebhookResponse::new("merge_group", urls, outcome)
+            }
+        },
         "release" => {
             let Some(parsed) = ParsedReleaseEvent::from_github(&body) else {
                 return Err(GitHostHookRefusal::MalformedPayload.into());
@@ -180,6 +193,32 @@ fn github_installation_id_from_body(body: &[u8]) -> Option<i64> {
         .map(|i| i.id)
 }
 
+async fn github_app_integrations(
+    ci: &CiContext,
+    body: &[u8],
+    repository_urls: &[String],
+    client_ip: IpAddr,
+    event: &str,
+) -> Vec<IntegrationId> {
+    let Some(installation_id) = github_installation_id_from_body(body) else {
+        warn!(event, "GitHub App webhook: missing installation_id");
+        return Vec::new();
+    };
+    let targets =
+        resolve_github_app_targets(&ci.db.web_db, installation_id, repository_urls, client_ip)
+            .await;
+    if targets.is_empty() {
+        warn!(
+            installation_id,
+            event,
+            urls = ?repository_urls,
+            "GitHub App webhook: no integration owns a task matching the webhook's repository"
+        );
+    }
+
+    targets
+}
+
 async fn route_github_app_push(
     ci: &CiContext,
     scheduler: &Arc<Scheduler>,
@@ -187,49 +226,49 @@ async fn route_github_app_push(
     body: &[u8],
     client_ip: IpAddr,
 ) -> WebhookTriggerOutcome {
-    let Some(installation_id) = github_installation_id_from_body(body) else {
-        warn!("GitHub App push: missing installation_id");
-        return WebhookTriggerOutcome::default();
-    };
-    let targets = resolve_github_app_targets(
-        &ci.db.web_db,
-        installation_id,
-        &parsed.repository_urls,
-        client_ip,
-    )
-    .await;
-    if targets.is_empty() {
-        warn!(
-            installation_id,
-            urls = ?parsed.repository_urls,
-            "GitHub App push: no integration owns a task matching the webhook's repository"
-        );
-        return WebhookTriggerOutcome::default();
-    }
-    let ref_name = parsed.ref_name.clone();
-    let is_tag = parsed.is_tag;
-    let ref_kind = if is_tag {
-        PushRefKind::Tag(&ref_name)
+    let ref_kind = if parsed.is_tag {
+        PushRefKind::Tag(&parsed.ref_name)
     } else {
-        PushRefKind::Branch(&ref_name)
+        PushRefKind::Branch(&parsed.ref_name)
     };
     let mut combined = WebhookTriggerOutcome::default();
-    for integration_id in targets {
-        let outcome = trigger_push_for_integration(
-            ci,
-            scheduler,
-            integration_id,
-            &parsed.repository_urls,
-            ref_kind,
-            parsed.commit_hash.clone(),
-            parsed.commit_message.clone(),
-            parsed.author_name.clone(),
-        )
-        .await;
-        combined.tasks_scanned += outcome.tasks_scanned;
-        combined.queued.extend(outcome.queued);
-        combined.skipped.extend(outcome.skipped);
+    for integration_id in
+        github_app_integrations(ci, body, &parsed.repository_urls, client_ip, "push").await
+    {
+        combined.merge(
+            trigger_push_for_integration(
+                ci,
+                scheduler,
+                integration_id,
+                &parsed.repository_urls,
+                ref_kind,
+                parsed.commit_hash.clone(),
+                parsed.commit_message.clone(),
+                parsed.author_name.clone(),
+            )
+            .await,
+        );
     }
+
+    combined
+}
+
+async fn route_github_app_merge_group(
+    ci: &CiContext,
+    scheduler: &Arc<Scheduler>,
+    parsed: ParsedMergeGroupEvent,
+    body: &[u8],
+    client_ip: IpAddr,
+) -> WebhookTriggerOutcome {
+    let mut combined = WebhookTriggerOutcome::default();
+    for integration_id in
+        github_app_integrations(ci, body, &parsed.repository_urls, client_ip, "merge_group").await
+    {
+        combined.merge(
+            trigger_merge_group_for_integration(ci, scheduler, integration_id, &parsed).await,
+        );
+    }
+
     combined
 }
 
@@ -240,50 +279,32 @@ async fn route_github_app_pr(
     body: &[u8],
     client_ip: IpAddr,
 ) -> WebhookTriggerOutcome {
-    let Some(installation_id) = github_installation_id_from_body(body) else {
-        warn!("GitHub App pull_request: missing installation_id");
-        return WebhookTriggerOutcome::default();
-    };
-    let targets = resolve_github_app_targets(
-        &ci.db.web_db,
-        installation_id,
-        &parsed.repository_urls,
-        client_ip,
-    )
-    .await;
-    if targets.is_empty() {
-        warn!(
-            installation_id,
-            urls = ?parsed.repository_urls,
-            "GitHub App pull_request: no integration owns a task matching the webhook's repository"
-        );
-        return WebhookTriggerOutcome::default();
-    }
     let approval_ctx = approval::PullRequestApprovalContext::from(&parsed);
-    let head_clone = parsed.head_repo_clone_url.clone();
     let mut combined = WebhookTriggerOutcome::default();
-    for integration_id in targets {
-        let outcome = trigger_pr_for_integration(
-            ci,
-            scheduler,
-            integration_id,
-            &parsed.repository_urls,
-            parsed.branch.as_deref(),
-            &parsed.action,
-            parsed.commit_hash.clone(),
-            parsed.title.clone(),
-            None,
-            approval_ctx.clone(),
-            head_clone.clone(),
-            false,
-            None,
-            None,
-        )
-        .await;
-        combined.tasks_scanned += outcome.tasks_scanned;
-        combined.queued.extend(outcome.queued);
-        combined.skipped.extend(outcome.skipped);
+    for integration_id in
+        github_app_integrations(ci, body, &parsed.repository_urls, client_ip, "pull_request").await
+    {
+        combined.merge(
+            trigger_pr_for_integration(
+                ci,
+                scheduler,
+                integration_id,
+                &parsed.repository_urls,
+                parsed.branch.as_deref(),
+                &parsed.action,
+                parsed.commit_hash.clone(),
+                parsed.title.clone(),
+                None,
+                approval_ctx.clone(),
+                parsed.head_repo_clone_url.clone(),
+                false,
+                None,
+                None,
+            )
+            .await,
+        );
     }
+
     combined
 }
 
@@ -294,42 +315,25 @@ async fn route_github_app_release(
     body: &[u8],
     client_ip: IpAddr,
 ) -> WebhookTriggerOutcome {
-    let Some(installation_id) = github_installation_id_from_body(body) else {
-        warn!("GitHub App release: missing installation_id");
-        return WebhookTriggerOutcome::default();
-    };
-    let targets = resolve_github_app_targets(
-        &ci.db.web_db,
-        installation_id,
-        &parsed.repository_urls,
-        client_ip,
-    )
-    .await;
-    if targets.is_empty() {
-        warn!(
-            installation_id,
-            urls = ?parsed.repository_urls,
-            "GitHub App release: no integration owns a task matching the webhook's repository"
-        );
-        return WebhookTriggerOutcome::default();
-    }
     let mut combined = WebhookTriggerOutcome::default();
-    for integration_id in targets {
-        let outcome = trigger_release_for_integration(
-            ci,
-            scheduler,
-            integration_id,
-            &parsed.repository_urls,
-            parsed.tag.as_deref(),
-            parsed.commit_hash.clone(),
-            None,
-            None,
-        )
-        .await;
-        combined.tasks_scanned += outcome.tasks_scanned;
-        combined.queued.extend(outcome.queued);
-        combined.skipped.extend(outcome.skipped);
+    for integration_id in
+        github_app_integrations(ci, body, &parsed.repository_urls, client_ip, "release").await
+    {
+        combined.merge(
+            trigger_release_for_integration(
+                ci,
+                scheduler,
+                integration_id,
+                &parsed.repository_urls,
+                parsed.tag.as_deref(),
+                parsed.commit_hash.clone(),
+                None,
+                None,
+            )
+            .await,
+        );
     }
+
     combined
 }
 
