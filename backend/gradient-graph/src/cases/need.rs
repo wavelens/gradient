@@ -725,3 +725,61 @@ async fn d11_a_build_wanted_through_two_parents_stays_wanted_until_both_stop_wan
     case.zero_drift("step 2").await;
     case.finish().await;
 }
+
+#[tokio::test]
+async fn d12_a_chain_of_three_probed_skipped_builds_thaws_to_its_end() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .output(A_OUT)
+            .depends_on(B)
+            .derivation(B)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(B_OUT)
+            .build_status(BuildStatus::Skipped)
+            .depends_on(C)
+            .derivation(C)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(C_OUT)
+            .build_status(BuildStatus::Skipped)
+            .depends_on(D)
+            .derivation(D)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(D_OUT)
+            .build_status(BuildStatus::Skipped),
+    )
+    .await;
+
+    case.upstream_probed(&[A]).await;
+
+    for path in [B, C] {
+        let build = case.sb(path).await;
+        assert_eq!(
+            (build.status, build.wanted),
+            (BuildStatus::Created, true),
+            "after 1: sb({path}) is Created, wanted true"
+        );
+    }
+    let d = case.sb(D).await;
+    assert_eq!(
+        (d.status, d.attempt, d.wanted),
+        (BuildStatus::Queued, 0, true),
+        "after 1: sb(D) is Queued, attempt 0, wanted true"
+    );
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}

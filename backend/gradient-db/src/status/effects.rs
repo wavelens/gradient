@@ -53,31 +53,27 @@ fn ci_reports(status: BuildStatus) -> bool {
     matches!(status, BuildStatus::Queued | BuildStatus::Building) || status.is_terminal()
 }
 
-/// The second round cannot need a third.
-/// It is only moving rows between `Created` and `Queued`, both inside [`BUILDER_STATUSES`].
+/// A thaw or skip of one round crosses [`BUILDER_STATUSES`] and moves the need one level
+/// further, so the rounds repeat until a round crosses nothing.
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn emit_transition_effects(
     ctx: &DbContext,
     changes: &[TransitionChange],
 ) -> Result<(), DbErr> {
-    if changes.is_empty() {
-        return Ok(());
-    }
-
-    ctx.memory.startable_set.record(changes);
-    announce(ctx, changes).await?;
-    let Moved {
-        regated,
-        unwanted,
-        gained,
-    } = move_need(ctx, changes).await?;
-    ctx.memory.probe_requests.send(gained);
-    if !regated.is_empty() {
-        ctx.memory.startable_set.record(&regated);
-        announce(ctx, &regated).await?;
-    }
-    if !unwanted.is_empty() {
-        super::eval_finalize::finalize_evals_for_derivations(ctx, &unwanted).await?;
+    let mut round = changes.to_vec();
+    while !round.is_empty() {
+        ctx.memory.startable_set.record(&round);
+        announce(ctx, &round).await?;
+        let Moved {
+            regated,
+            unwanted,
+            gained,
+        } = move_need(ctx, &round).await?;
+        ctx.memory.probe_requests.send(gained);
+        if !unwanted.is_empty() {
+            super::eval_finalize::finalize_evals_for_derivations(ctx, &unwanted).await?;
+        }
+        round = regated;
     }
 
     Ok(())
@@ -273,22 +269,6 @@ mod tests {
             ]),
             vec![thawed, finished, aborted],
         );
-    }
-
-    #[test]
-    fn re_gating_can_never_need_a_third_round() {
-        let d = DerivationId::now_v7();
-        for (from, to) in [
-            (BuildStatus::Created, BuildStatus::Queued),
-            (BuildStatus::Queued, BuildStatus::Created),
-        ] {
-            let moved = need_moves(&[TransitionChange {
-                derivation: d,
-                from,
-                to,
-            }]);
-            assert!(moved.is_empty(), "{from:?} to {to:?}");
-        }
     }
 
     #[test]
