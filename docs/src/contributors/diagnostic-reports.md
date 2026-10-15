@@ -103,7 +103,7 @@ sqlite3 report.db \
 
 `dispatched_job.outcome`: `0` completed, `1` failed, `2` abandoned (disconnect, restart, overdue abort), null while running.
 
-**Cached but Not Delivered:** The cache will only deliver a path with a `cached_path_signature` row for that cache and `signed = 1` set. The query below will join both. Only then is `derivation_output.is_cached` trustworthy.
+**Cached but Not Delivered:** The cache will only deliver a path with a `cached_path_signature` row for that cache and `signed = 1` set. The query below will join both. Without such a row, a stored path is present for the graph but not deliverable.
 
 ```sh
 sqlite3 report.db \
