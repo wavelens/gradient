@@ -9,6 +9,7 @@ use super::fanout::trigger_pr_for_integration;
 use super::installation::resolve_github_app_targets;
 use super::payloads::CommentPayload;
 use gradient_ci::CiContext;
+use gradient_ci::pull_request_summary::enable_pull_request_summary;
 use gradient_ci::{
     find_approval_gated_eval, set_evaluation_source_comment, unpark_approval,
     unpark_approval_with_wildcard,
@@ -255,6 +256,9 @@ async fn handle_comment_for_integration(ctx: &CommentRoute<'_>) -> bool {
         return false;
     }
 
+    if matches!(ctx.cmd, GradientCommand::Summary) {
+        return enable_summaries(ctx, &task_ids).await;
+    }
     if unpark_existing_approvals(ctx, &task_ids).await {
         return true;
     }
@@ -262,6 +266,22 @@ async fn handle_comment_for_integration(ctx: &CommentRoute<'_>) -> bool {
         return false;
     }
     run_fresh_evaluation(ctx, &task_ids).await
+}
+
+async fn enable_summaries(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bool {
+    let mut enabled_any = false;
+    for task_id in task_ids {
+        let enabled =
+            enable_pull_request_summary(ctx.ci, *task_id, ctx.owner, ctx.repo, ctx.pr_number).await;
+        match enabled {
+            Ok(enabled) => enabled_any |= enabled,
+            Err(e) => {
+                warn!(error = %e, %task_id, pr_number = ctx.pr_number, "/gradient summary failed")
+            }
+        }
+    }
+
+    enabled_any
 }
 
 async fn unpark_existing_approvals(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bool {
@@ -476,7 +496,7 @@ async fn post_wildcard_error_comment(
                 .post_pr_comment(owner, repo, pr_number, &body)
                 .await
             {
-                Ok(()) => return,
+                Ok(_) => return,
                 Err(e) => {
                     warn!(error = %e, %task_id, "/gradient run wildcard: reply comment post failed, trying next task");
                 }
@@ -489,6 +509,7 @@ async fn post_wildcard_error_comment(
 pub(super) enum GradientCommand {
     Run { wildcard: Option<String> },
     Approve,
+    Summary,
 }
 
 /// The command must be on its own line. Blank lines and `> ...` quote-reply lines are skipped. Any
@@ -526,14 +547,17 @@ pub(super) fn parse_gradient_command(body: &str) -> Option<GradientCommand> {
             });
             continue;
         }
-        if verb.eq_ignore_ascii_case("approve") {
-            if !arg.is_empty() {
-                return None;
-            }
-            found = Some(GradientCommand::Approve);
-            continue;
+        let bare = if verb.eq_ignore_ascii_case("approve") {
+            GradientCommand::Approve
+        } else if verb.eq_ignore_ascii_case("summary") {
+            GradientCommand::Summary
+        } else {
+            return None;
+        };
+        if !arg.is_empty() {
+            return None;
         }
-        return None;
+        found = Some(bare);
     }
     found
 }
@@ -721,6 +745,15 @@ mod tests {
     #[test]
     fn parse_gradient_approve_rejects_trailing_args() {
         assert!(parse_gradient_command("/gradient approve packages.*").is_none());
+    }
+
+    #[test]
+    fn parse_gradient_summary_takes_no_arguments() {
+        assert_eq!(
+            parse_gradient_command("/gradient Summary"),
+            Some(GradientCommand::Summary)
+        );
+        assert!(parse_gradient_command("/gradient summary packages.*").is_none());
     }
 
     #[test]

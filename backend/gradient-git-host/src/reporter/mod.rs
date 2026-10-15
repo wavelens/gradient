@@ -10,7 +10,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use gradient_types::GitHostType;
 use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::warn;
 
@@ -29,6 +29,13 @@ fn author_or_bot(resolved: Result<CommitIdent>, base_url: &str) -> CommitIdent {
         warn!(error = %e, "resolving Git host commit author; using Gradient bot default");
         CommitIdent::gradient_bot(base_url)
     })
+}
+
+fn comment_exists(edited: Result<(), crate::client::HostError>) -> Result<bool> {
+    match edited {
+        Err(e) if e.status() == Some(reqwest::StatusCode::NOT_FOUND) => Ok(false),
+        other => other.map(|()| true).map_err(Into::into),
+    }
 }
 
 fn validate_safe_outbound_url(url: &str) -> Result<(), WebhookUrlError> {
@@ -128,8 +135,19 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
         _repo: &str,
         _pr_number: u64,
         _body: &str,
-    ) -> Result<()> {
-        Ok(())
+    ) -> Result<Option<i64>> {
+        Ok(None)
+    }
+
+    async fn edit_pr_comment(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _pr_number: u64,
+        _comment_id: i64,
+        _body: &str,
+    ) -> Result<bool> {
+        Ok(false)
     }
 
     async fn get_pull_request(
@@ -190,6 +208,11 @@ impl CiReporter for NoopCiReporter {
 #[derive(Debug, Serialize)]
 struct GitHostCommentPayload<'a> {
     body: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreatedComment {
+    id: i64,
 }
 
 #[derive(Debug, Serialize)]

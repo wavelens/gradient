@@ -50,13 +50,13 @@ impl CiReporter for RecordingCiReporter {
         repo: &str,
         pr_number: u64,
         body: &str,
-    ) -> Result<()> {
+    ) -> Result<Option<i64>> {
         self.comments.lock().unwrap().push(RecordedComment {
             owner: owner.to_string(),
             repo: repo.to_string(),
             pr_number,
             body: body.to_string(),
         });
-        Ok(())
+        Ok(None)
     }
 }
