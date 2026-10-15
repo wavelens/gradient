@@ -417,7 +417,7 @@ mod tests {
         let sql = norm(RECOUNT_WANTED_SQL.as_str());
         assert!(
             sql.contains(&format!(
-                "WHERE {} AND db.wanted <>",
+                "WHERE ({} OR db.fetchable) AND db.wanted <>",
                 norm(&open_predicate("db"))
             )),
             "{sql}"

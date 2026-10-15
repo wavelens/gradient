@@ -207,7 +207,7 @@ async fn b03_walking_a_stub_marks_it_walked_and_drops_the_unwalked_inputs_of_its
     assert_eq!(jobs, 2, "after 1: build jobs of E1");
     let known = case.known(&[A, B]).await;
     assert_eq!(known, [A, B], "after 1: known_derivations");
-    assert_eq!(case.gv(e1).await, gv, "after 1: gv(E1) unchanged");
+    assert!(case.gv(e1).await > gv, "after 1: gv(E1) rose");
     let counters = case.counters(e1).await;
     assert_eq!(counters, [2, 2, 0, 0, 0], "after 1: counters(E1)");
     case.zero_drift("step 1").await;
@@ -725,7 +725,7 @@ async fn b16_an_empty_batch_changes_nothing() {
     assert_eq!(case.rows().await, rows, "after 1: all rows of CHAIN");
     let counters = case.counters(e1).await;
     assert_eq!(counters, [2, 2, 0, 1, 0], "after 1: counters(E1)");
-    assert!(case.gv(e1).await > gv, "after 1: gv(E1) rose");
+    assert_eq!(case.gv(e1).await, gv, "after 1: gv(E1) unchanged");
     case.zero_drift("step 1").await;
     case.finish().await;
 }

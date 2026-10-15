@@ -143,7 +143,7 @@ mod tests {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
         let fence = norm(failure_spreads_predicate("e"));
         assert!(
-            fence.starts_with("(e.kind IN (1, 2) OR NOT EXISTS")
+            fence.starts_with("((e.kind IN (1, 2) OR NOT EXISTS")
                 && fence.contains("rb.cache_available"),
             "a build input of a passthrough is no failure of the passthrough: {fence}"
         );

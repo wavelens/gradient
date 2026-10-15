@@ -157,7 +157,7 @@ async fn p02_cache_available_needs_every_output_and_the_second_hit_supplies_it()
     let a = case.sb(A).await;
     assert_eq!(
         (a.status, a.cache_available, a.missing_runtime_deps),
-        (BuildStatus::Created, true, 0),
+        (BuildStatus::Queued, true, 0),
         "after 2: sb(A) status, cache_available, missing_runtime_deps (answers Q5)"
     );
 
@@ -519,7 +519,7 @@ async fn p09_a_hit_reference_adds_an_edge_to_each_known_producer_and_none_for_an
     let a = case.sb(A).await;
     assert_eq!(
         (a.status, a.cache_available, a.missing_runtime_deps),
-        (BuildStatus::Created, true, 2),
+        (BuildStatus::Queued, true, 2),
         "after 1: sb(A) status, cache_available, missing_runtime_deps (answers Q7)"
     );
 

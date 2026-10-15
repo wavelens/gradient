@@ -342,9 +342,10 @@ mod tests {
         let x = DerivationId::now_v7();
         let d = DerivationId::now_v7();
         let db = mock_db()
-            .append_exec_results([exec(1)])
+            .append_exec_results([exec(1), exec(0), exec(1)])
             .append_query_results([vec![drv(x)]])
             .append_query_results([vec![ripple_row(d, false)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
 
         let txn = db.begin().await.unwrap();
@@ -358,8 +359,9 @@ mod tests {
         let inside: Vec<&str> = raw[0].statements().iter().map(|s| s.sql.as_str()).collect();
         assert_eq!(
             inside.len(),
-            5,
-            "BEGIN, lock, mark, ripple, COMMIT: {inside:?}"
+            10,
+            "BEGIN, lock, mark, ripple, then the need update of the marked build in a \
+             savepoint (work_mem, lock, walk), COMMIT: {inside:?}"
         );
         assert!(
             inside[1].contains("ORDER BY derivation FOR NO KEY UPDATE"),
@@ -376,10 +378,11 @@ mod tests {
         let d1 = DerivationId::now_v7();
         let d2 = DerivationId::now_v7();
         let db = mock_db()
-            .append_exec_results([exec(2)])
+            .append_exec_results([exec(2), exec(0), exec(1)])
             .append_query_results([vec![drv(flipped)]])
             .append_query_results([vec![ripple_row(d1, true), ripple_row(d2, false)]])
             .append_query_results([vec![drv(d1)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
 
         let txn = db.begin().await.unwrap();
@@ -397,7 +400,11 @@ mod tests {
         );
 
         let log = statements(db.into_transaction_log());
-        assert_eq!(log.len(), 4, "lock, mark, ripple, promote: {log:?}");
+        assert_eq!(
+            log.len(),
+            7,
+            "lock, mark, ripple, promote, then the need update of the marked build: {log:?}"
+        );
         assert!(
             log[1].contains(&flipped.to_string()) && log[1].contains(&untouched.to_string()),
             "the mark is offered both shared builds: {log:?}"
