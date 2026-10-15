@@ -1,6 +1,6 @@
 # Connect an AI Assistant
 
-Every evaluation, build and build log readable through `gradient mcp` by any [Model Context Protocol](https://modelcontextprotocol.io) client (Claude Code, Claude Desktop, Cursor). An assistant can find the failed build and read the log line that broke the build.
+Any [Model Context Protocol](https://modelcontextprotocol.io) client, such as Claude Code, Claude Desktop or Cursor, can connect through `gradient mcp`. The connection exposes every evaluation, build and build log. An assistant can locate a failed build and read the log line that broke it.
 
 **Requirements:**
 
@@ -12,7 +12,7 @@ Every evaluation, build and build log readable through `gradient mcp` by any [Mo
 gradient login https://gradient.example.com
 ```
 
-Every tool call will run as this user. Tool calls see only the user's projects. `gradient project select <name>` can set the default project for tools that take one.
+Tool calls execute with the identity of the logged-in user. Each call has access only to that user's projects. To set a default project for commands that accept one, run `gradient project select <name>`.
 
 ## 2. Add the Server to the Client
 
@@ -37,7 +37,9 @@ Every tool call will run as this user. Tool calls see only the user's projects. 
 
 ## Verify Deployment
 
-Ask the assistant: "Explain the last failed evaluation of `web-app`." The assistant will walk down the tools.
+Ask the assistant: "Explain the last failed evaluation of `web-app`."
+
+The assistant then works through the available tools step by step.
 
 ```mermaid
 flowchart LR
@@ -48,32 +50,32 @@ flowchart LR
 
 | Tool | Result |
 |---|---|
-| `list_projects`, `list_tasks` | The user's projects and their tasks |
-| `list_evaluations`, `get_evaluation` | A task's evaluations with build counts. One evaluation with commit, status and error |
-| `list_builds`, `get_build` | The builds of an evaluation. One build with derivation, system and outputs |
-| `get_build_log` | A log, whole or by line range. More than 10 lines go to a temp file, and the tool is returning its path |
-| `search_build_log` | Matching log lines with line numbers |
+| `list_projects`, `list_tasks` | All projects of the user, with the tasks in each project |
+| `list_evaluations`, `get_evaluation` | All evaluations of a task, each with its build count. A single evaluation includes the commit, status and error |
+| `list_builds`, `get_build` | All builds of an evaluation. A single build includes the derivation, system and outputs |
+| `get_build_log` | A build log, either complete or limited to a line range. Logs with more than 10 lines go into a temp file, and the tool returns the path to that file |
+| `search_build_log` | All matching log lines, each with its line number |
 
 ## Control Tools
 
-`gradient mcp --control` will let the assistant act on the CI, limited by the user's project permissions.
+With `gradient mcp --control`, the assistant can act on CI. Project permissions still apply.
 
 | Tool | Effect |
 |---|---|
-| `start_evaluation` | Starting an evaluation of a task, optionally at a commit |
-| `abort_evaluation` | Aborting the running and queued builds of an evaluation |
-| `watch_evaluation` | Waiting until an evaluation is finished, up to `timeout_seconds` (600 by default, at most 3600) |
+| `start_evaluation` | Start an evaluation for a task, optionally pinned to a commit |
+| `abort_evaluation` | Abort all running and queued builds of an evaluation |
+| `watch_evaluation` | Block until an evaluation finishes, up to `timeout_seconds` (default 600, max 3600) |
 
-The server is read-only without `--control`.
+Without `--control`, the server runs in read-only mode.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `Server URL not set` | Run `gradient login` first |
-| Client reporting a protocol error in a wrapper script | The server is speaking JSON-RPC on stdout. Keep stderr out of stdout |
+| `Server URL not set` | Run `gradient login` before starting the client |
+| Protocol errors from a wrapper script | The server sends JSON-RPC over stdout. Redirect all stderr output away from stdout |
 
 ## Next Steps
 
-- [Evaluations and Builds](../concepts/evaluations-and-builds.md): what the tools return
-- [CLI](../reference/cli.md): the other `gradient` commands
+- [Evaluations and Builds](../concepts/evaluations-and-builds.md) explains the data returned by these tools.
+- [CLI](../reference/cli.md) documents the remaining `gradient` commands.

@@ -1,6 +1,6 @@
 # Add a Remote Worker
 
-A second machine evaluating and building for a project, next to or instead of the local worker.
+A remote worker is an extra machine that can evaluate and build for a project. It can run alongside the local worker or take over from it.
 
 **Requirements:**
 
@@ -9,7 +9,7 @@ A second machine evaluating and building for a project, next to or instead of th
 
 ## 1. Pick a Worker ID
 
-Every worker has a UUID as its ID. The command below can generate one.
+A worker ID is a UUID. Generate one with this command:
 
 ```sh
 cat /proc/sys/kernel/random/uuid
@@ -19,13 +19,13 @@ cat /proc/sys/kernel/random/uuid
 
 === "UI"
 
-    Open **Settings -> Workers -> Register Worker** in the project. Enter a name and the worker ID from step 1.
+    In the project, go to **Settings -> Workers -> Register Worker**. Provide a name and the worker ID from step 1.
 
-    The dialog will show a **Peers file entry** once. Store the entry as a secret on the worker machine, e.g. `/run/secrets/gradient-worker-peers`.
+    The dialog then shows a **Peers file entry** once. Save that entry as a secret on the worker machine, for example at `/run/secrets/gradient-worker-peers`.
 
 === "Declarative"
 
-    Server configuration:
+    Configure the server with:
 
     ```nix
     services.gradient.state = {
@@ -38,21 +38,21 @@ cat /proc/sys/kernel/random/uuid
     };
     ```
 
-    1.  Pinned for the worker's peers file. The peers file must name the project before the server's first start.
-    2.  Created with `openssl rand -base64 48`. The worker's peers file must hold the same token.
+    1.  The peers file for the worker references this ID. Add the project to the peers file before the server's first start.
+    2.  Generate the token with `openssl rand -base64 48`. Put the same token in the worker's peers file.
 
-    The peers file entry on the worker machine is `<project uuid>:<token>`.
+    On the worker machine, write the peers file entry as `<project uuid>:<token>`.
 
 ## 3. Open the Server to Workers
 
-Remote workers connect over a WebSocket on `/proto`. The bundled nginx will forward `/proto` only with `proto.public` enabled.
+Remote workers use a WebSocket at `/proto` to reach the server. The bundled nginx forwards `/proto` only when `proto.public` is enabled.
 
 ```nix
 # configuration.nix on the server
 services.gradient.proto.public = true;
 ```
 
-The local worker can connect on the loopback address without this setting.
+Without this setting, the local worker can still connect on the loopback address.
 
 ## 4. Configure the Machine
 
@@ -71,20 +71,20 @@ The local worker can connect on the loopback address without this setting.
 }
 ```
 
-1.  One line per project on this worker, see [Peers File](#peers-file).
-2.  Optional. Recording memory and CPU per build. The scheduler will use the numbers to place heavy builds on machines that fit them.
+1.  This file holds one line per project on this worker. See [Peers File](#peers-file).
+2.  Optional. With this enabled, the worker records memory and CPU usage for each build. The scheduler can use those numbers to place heavy builds on machines with matching capacity.
 
 ## Verify Deployment
 
-- The page **Settings -> Workers** will list the worker as connected, with the detected systems and features.
-- The next evaluation of the project will show builds on the new worker.
+- Check **Settings -> Workers**. The worker appears as connected, together with the detected systems and features.
+- The next project evaluation places builds on the new worker.
 
 !!! tip "One Machine, Many Projects"
-    Register the same worker ID in each project. Add each project's peers file entry as its own line. A [team worker](../concepts/teams.md#team-workers) is the alternative for a worker of one team.
+    Register the same worker ID in each project. Give each project its own line in the peers file. To share a worker across a whole team, use a [team worker](../concepts/teams.md#team-workers) instead.
 
 ## Peers File
 
-The worker will authenticate with one line per project.
+The worker authenticates with one line per project.
 
 ```text
 # /run/secrets/gradient-worker-peers
@@ -96,12 +96,12 @@ A single `*:<token>` line can cover every project with the same token instead.
 
 | | One line per project | `*:<token>` |
 |---|---|---|
-| Setup | A new line for every project | One line. Each project is registering the worker with the same pre-generated token |
-| Leaked token | Exposing one project | Exposing every project of the worker |
+| Setup | One new line per project | One line. Every project must register the worker with the same pre-generated token |
+| Leaked token | One project exposed | Every project of the worker exposed |
 | Revoking | Per project | Everywhere at once |
 | Fit | Workers shared between teams | A worker owned by one team, serving all of that team's projects |
 
-Prefer one line per project. Use `*` only for workers whose projects all share one owner.
+Prefer one line per project. Reserve `*` for workers where a single owner holds every project.
 
 A [team worker](../concepts/teams.md#team-workers) needs one line for its team, `<team id>:<token>`, or `*:<token>`.
 

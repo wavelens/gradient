@@ -1,18 +1,18 @@
 # Connect GitHub
 
-Evaluations on every push and pull request, with a status on each commit, through one GitHub App per Gradient instance.
+A GitHub App links one Gradient instance to GitHub. With this connection in place, every push and pull request can trigger evaluations. Each commit then shows a status check.
 
 **Requirements:**
 
 - A Gradient account with the superuser flag.
-- Admin rights on the GitHub user or organization owning the repositories.
-- A task with a repository URL pointing to GitHub, see [First Project](../get-started/first-project.md).
+- Admin rights on the GitHub user or organization that owns the repositories.
+- A task with a GitHub repository URL, see [First Project](../get-started/first-project.md).
 
 ## 1. Register the GitHub App
 
-This step is needed once per instance. Open `https://gradient.example.com/admin/github-app`, then **Create on GitHub** and confirm on GitHub. GitHub Enterprise instances need their host entered first.
+Register the app once per instance. GitHub Enterprise users first enter their host address. Then open `https://gradient.example.com/admin/github-app`, click **Create on GitHub** and confirm the registration on GitHub.
 
-The Gradient page will then show three credentials once: the **App ID**, the **private key** and the **webhook secret**. Store the key and the secret as files on the server.
+Gradient now shows the **App ID**, the **private key** and the **webhook secret** one time only. Save the key and the secret as files on the server.
 
 ## 2. Configure the Server
 
@@ -25,30 +25,30 @@ services.gradient.githubApp = {
 };
 ```
 
-1.  The App ID from step 1.
+1. The App ID obtained in step 1.
 
 ## 3. Install the App
 
-Install the App from its GitHub page on the account owning the repositories. A project's **Integrations** page will link to the App page while no installation is linked.
+Install the App from its GitHub page on the account that owns the repositories. Until an installation is linked, the **Integrations** page of a project links to the App page.
 
-Gradient will match the granted repositories against task repository URLs. `https://`, SSH and `github:owner/repo` URLs all match. Each matching project will receive a `github-<account>` integration pair.
+Gradient compares the granted repositories with task repository URLs. `https://`, SSH and `github:owner/repo` URLs all match. Gradient links each matching project to a `github-<account>` integration pair.
 
-Projects created after the installation need the integration by hand. Open **Integrations -> New Integration** and pick **Git Host** GitHub. Enter the **App Installation ID** from the App's installation page on GitHub.
+Projects created after the installation lack the integration. Open **Integrations -> New Integration** and pick **Git Host** GitHub. Enter the **App Installation ID** from the App's installation page on GitHub.
 
 ## 4. Wire the Task
 
-Tasks connect the two integrations. Triggers point at the inbound integration, actions at the outbound integration. Both share the name `github-<account>`.
+A task links the two integrations: triggers use the inbound one, actions use the outbound one. Both carry the name `github-<account>`.
 
 === "UI"
 
-    Tasks with a matching repository URL get a **Push (reporter)** trigger and a **Git Status** action automatically. Other tasks need both added by hand.
+    A task whose repository URL matches gets a **Push (reporter)** trigger and a **Git Status** action without manual work. All other tasks require adding both by hand.
 
-    - **Triggers -> New Trigger**: **Push (reporter)** and, for pull requests, **Pull Request (reporter)**, each with the `github-<account>` integration.
-    - **Actions -> New Action**: **Git Status** with the `github-<account>` integration.
+    - **Triggers -> New Trigger**: add **Push (reporter)**, plus **Pull Request (reporter)** for pull requests, each bound to the `github-<account>` integration.
+    - **Actions -> New Action**: add **Git Status** bound to the `github-<account>` integration.
 
 === "Declarative"
 
-    Declared tasks get no automatic trigger or action. Both belong in the task's `triggers` and `actions` lists.
+    Declared tasks receive no trigger or action automatically. Add both to the task's `triggers` and `actions` lists.
 
     ```nix
     services.gradient.state.tasks.app = {
@@ -69,17 +69,17 @@ Tasks connect the two integrations. Triggers point at the inbound integration, a
     };
     ```
 
-    1.  Trigger-level `integration`, naming the inbound integration of the App installation.
-    2.  `config.integration`, naming the outbound integration of the App installation.
+    1.  The trigger-level `integration` field points at the inbound integration of the App installation.
+    2.  The `config.integration` field points at the outbound integration of the App installation.
 
 ## Verify Deployment
 
-- A push to the repository will start an evaluation within seconds.
-- The commit on GitHub will show Gradient's status checks.
+- A push to the repository triggers an evaluation within seconds.
+- Gradient reports its status on the GitHub commit page.
 
 ## Pull Requests
 
-The automatic setup can cover pushes only. Pull requests need the **Pull Request (reporter)** trigger from step 4.
+Push events work with the automatic setup. Pull requests require the **Pull Request (reporter)** trigger from step 4.
 
 | Action on GitHub | Effect |
 |---|---|
@@ -87,10 +87,10 @@ The automatic setup can cover pushes only. Pull requests need the **Pull Request
 | Comment `/gradient run` | New evaluation of the pull request |
 | Comment `/gradient approve` or approve the review | Release of a pull request from a fork waiting for maintainer approval |
 
-The approval check is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers**.
+Fork pull requests wait for maintainer approval before they run. To enable this check, set **Require maintainer approval for PRs from non-writers** on the **Pull Request (reporter)** trigger.
 
 ??? note "Registering the App by Hand"
-    Register the App following [GitHub's documentation](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) where the manifest flow does not fit. The values for the registration are in the table below.
+    Use [GitHub's documentation](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) to register the App by hand if the manifest flow does not fit. Enter these values during registration.
 
     | Setting | Value |
     |---|---|
@@ -102,12 +102,12 @@ The approval check is a setting of the **Pull Request (reporter)** trigger: **Re
 
 | Symptom | Fix |
 |---|---|
-| `400 manifest state invalid or expired` | More than 10 minutes passed. Start step 1 again |
-| `404 Pending credentials` after creating the App | The credentials were already shown or the server restarted. Start step 1 again |
-| `403 superuser required` | The account is lacking the superuser flag |
-| An approving review does not release a fork pull request | The App is older than the `pull_request_review` event. Enable **Pull request review** under the App's **Permissions & events** |
-| Push arriving, no evaluation running | No task repository URL is matching the pushed repository |
-| `403 forbidden_source_ip` | The integration's allowed source IPs miss GitHub's `hooks` ranges from `https://api.github.com/meta` |
+| `400 manifest state invalid or expired` | Over 10 minutes elapsed. Repeat step 1 |
+| `404 Pending credentials` after App creation | The credentials got shown once already, or the server restarted. Repeat step 1 |
+| `403 superuser required` | The account lacks the superuser flag |
+| An approving review does not release a fork pull request | The App predates the `pull_request_review` event. Enable **Pull request review** under the App's **Permissions & events** |
+| Pushes arrive but no evaluation starts | No task repository URL matches the pushed repository |
+| `403 forbidden_source_ip` | The integration's allowed source IPs do not cover GitHub's `hooks` ranges from `https://api.github.com/meta` |
 
 ## Next Steps
 

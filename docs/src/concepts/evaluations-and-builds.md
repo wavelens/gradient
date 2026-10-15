@@ -14,69 +14,71 @@ flowchart LR
 
 | Status | Meaning |
 |---|---|
-| Queued | Waiting for an evaluating worker |
-| Fetching | A worker is cloning the repository and its flake inputs |
-| Evaluating | A worker is walking the flake and reporting derivations in batches |
+| Queued | The evaluation awaits an evaluating worker |
+| Fetching | A worker clones the repository and its flake inputs |
+| Evaluating | A worker walks the flake and reports derivations in batches |
 | Building | All derivations are known. Builds are running |
-| Waiting | No connected worker can make progress, e.g. no worker with the needed system or features. The evaluation will resume on its own. Builds needing a system or features absent from every connected worker abort the evaluation after 5 minutes with a warning. A task can opt into waiting for workers instead |
+| Waiting | No connected worker can make progress, e.g. no worker with the needed system or features. The evaluation resumes on its own. Builds needing a system or features absent from every connected worker abort the evaluation after 5 minutes with a warning. A task can opt into waiting for workers instead |
 | Completed | Every build succeeded |
 | Failed | The evaluation or at least one build failed |
 | Aborted | Stopped by hand or replaced by a newer evaluation |
 
-Evaluations skip every dependency subtree that earlier evaluations already recorded. **Full rewalk** in the task menu will start an evaluation walking the whole closure again.
+Evaluations skip every dependency subtree that earlier evaluations already recorded. To walk the whole closure again, run **Full rewalk** from the task menu. This starts a new evaluation.
 
-The evaluation page shows the builds grouped by status, each entry point above its dependencies. The page also has the merged live log and **Abort**. A right-click on a build will open **Graph**, **Show Job** (the [Job Board](../ui/job-board.md) assignment), **Artefacts** and **Download Log**.
+The evaluation page groups builds by status, with each entry point above its dependencies. The merged live log and **Abort** appear on the same page. Right-click a build to reach **Graph**, **Show Job** (the [Job Board](../ui/job-board.md) assignment), **Artefacts** and **Download Log**.
 
 ## Summary
 
-**Summary** in the evaluation menu can open a report page for package maintainers. The link is shareable. Public projects need no login.
+The evaluation menu has a **Summary** entry. Click it to reach a report page for package maintainers. Share the link freely. Public projects need no login to view it.
+
+The page lists build outcomes in a table.
 
 | Part | Content |
 |---|---|
 | Headline | Number of packages that did not build |
-| **Newly failing** | Failed builds breaking a package that built in the previous evaluation |
-| **Still failing** | Failed builds with every affected package already broken in the previous evaluation |
+| **Newly failing** | Failed builds that break a package which built in the previous evaluation |
+| **Still failing** | Failed builds where every affected package was already broken in the previous evaluation |
 | **Failed to evaluate** | Attributes without a derivation, with the first line of the error |
-| **Fixed** | Packages broken in the previous evaluation and built now |
+| **Fixed** | Packages broken in the previous evaluation that built now |
 
-Rows list only builds that failed themselves. Packages blocked by a failed dependency appear under that build. A row can open the build on the evaluation page. **Timed out** and **Worker fault** mark failures not caused by the package.
+Rows list only builds that failed themselves. Packages blocked by a failed dependency appear under that dependency's build. Click a row to open the build on the evaluation page. **Timed out** and **Worker fault** mark failures not caused by the package.
 
 ## Build
 
-A build is tied to the derivation, not to the evaluation. All evaluations needing the same derivation share the one build and its log, across all projects.
+Builds belong to a derivation, not to an evaluation. Every evaluation that needs the same derivation shares one build and one log, across all projects.
 
 | Status | Meaning |
 |---|---|
-| Queued | Waiting for the dependencies or for a free worker |
-| Building | Running on a worker |
-| Completed | Built successfully |
-| Substituted | Not built. The outputs already existed in a cache or an upstream cache |
-| Failed | The builder failed or timed out. Infrastructure errors (out of memory, disk full, network) get retried first |
-| Dependency Failed | Not started, because a dependency failed |
+| Queued | Wait for dependencies or for a free worker |
+| Building | Run on a worker |
+| Completed | The build succeeded |
+| Substituted | No build ran. The outputs already exist in a cache or an upstream cache |
+| Failed | The builder failed or timed out. Infrastructure errors such as out of memory, a full disk or a network problem get retried first |
+| Dependency Failed | The build never started because a dependency failed |
 | Aborted | Cancelled by hand or together with the evaluation |
-| Skipped | An unneeded build-time dependency, with the outputs above already cached |
+| Skipped | An unneeded build-time dependency whose outputs already sit in a cache |
 
 ## Abort and Retry
 
-- **Abort** on a running build can stop the build for its evaluation. Dependents in that evaluation fail, and a later evaluation can build the build again.
-- **Retry** on a failed or aborted build can queue the build and the dependents failing through the build again, inside the running evaluation.
-- **Retry** on a finished evaluation can start a new evaluation of the same commit, with all failed builds queued again.
-- Both kinds of retry ask the [upstream caches](caches.md#upstream-types) again. A worker can then substitute a build found there.
+- **Abort** on a running build stops that build for the current evaluation. Dependents in the same evaluation then fail, and a later evaluation can build the build again.
+- **Retry** on a failed or aborted build queues the build again, together with the dependents that failed through it. This queueing happens inside the running evaluation.
+- **Retry** on a finished evaluation starts a new evaluation of the same commit. That new evaluation queues all failed builds again.
+- Both kinds of retry query the [upstream caches](caches.md#upstream-types) again. A worker can then substitute a build found there.
 - A new evaluation can queue every failed build it needs again. The task option **Retry failed builds on new evaluation** (`retry_failed_builds`, on by default) can keep permanent failures failed until a retry instead.
 
 ## Imported Derivations
 
-A flake can read the output of a derivation during evaluation. This is import from derivation (IFD).
+Import from derivation (IFD) allow a flake to read a derivation's output during evaluation.
 
-- Any worker with its system can build the imported derivation as a normal build.
-- The evaluating worker can wait for that build and then pull the outputs from the cache.
-- The task page can list the build as the entry point `other.<system>.<name>` with an **IFD** tag.
-- An imported build and every unfinished dependency below get a priority lift, see [Scheduler Policies](../reference/scheduler-policies.md).
-- The attributes reading a failed import fail as well, with `import from derivation '<name>' failed: build <build id> <status>` as the error.
-- Imports for a system missing from all connected workers fail after 5 minutes. A task can opt into waiting for workers instead.
+- A worker with a matching system can build the imported derivation like any other build.
+- The evaluating worker can wait for that build and then fetch the outputs from the cache.
+- On the task page, the build can be listed under the entry point `other.<system>.<name>` with an **IFD** tag.
+- An imported build and all its unfinished dependencies below it receive a priority lift, see [Scheduler Policies](../reference/scheduler-policies.md).
+- When an import fail, every attribute that depend on it fail too, with the error `import from derivation '<name>' failed: build <build id> <status>`.
+- If no connected worker has the target system, the import fail after 5 minutes. A task can opt into waiting for workers instead.
 
 ## Related
 
-- [Projects and Tasks](projects-and-tasks.md): the source of evaluations
-- [Overview](overview.md): workers and caches
-- [First Project](../get-started/first-project.md): start an evaluation
+- [Projects and Tasks](projects-and-tasks.md): where evaluations come from
+- [Overview](overview.md): how workers and caches work
+- [First Project](../get-started/first-project.md): run an evaluation for the first time

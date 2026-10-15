@@ -1,6 +1,6 @@
 # Workers
 
-A **worker** is a machine running `gradient-worker`. Workers connect to the server and take jobs queued by projects with the worker enabled. Results go back to the server. The server itself has no Nix. Every clone, evaluation and build is the job of a worker.
+A **worker** is a machine with `gradient-worker` installed. Workers connect to the server, take jobs from the queues of projects with the worker feature enabled, and return the results to the server. The server holds no Nix. A worker handles every clone, evaluation and build.
 
 ```mermaid
 flowchart LR
@@ -9,7 +9,7 @@ flowchart LR
 
 ## Capabilities
 
-Workers advertise which of the three job kinds they can take.
+Each worker declares which job kinds it accepts. Three kinds exist.
 
 | Capability | Job |
 |---|---|
@@ -17,7 +17,7 @@ Workers advertise which of the three job kinds they can take.
 | Evaluate | Walk the flake and report derivations |
 | Build | Build derivations and upload the outputs |
 
-One machine can take all three, or the kinds can be split, e.g. a large-memory machine for evaluation and a few smaller builders.
+A single machine can handle all three kinds. Splitting them across machines also works: one machine with a lot of memory can evaluate, while several smaller machines build.
 
 ## Matching Builds
 
@@ -27,9 +27,9 @@ The scheduler will score each queued job among the matching workers. The schedul
 
 ## Zones
 
-Workers in one datacenter share a zone label, `services.gradient.worker.zone` (default: none). A [cluster job](../contributors/scheduler/clusters.md) needing a fast interconnect will start all members in one zone. All workers without a zone share one unnamed zone.
+Workers in a single datacenter can share a zone label, `services.gradient.worker.zone`. By default, workers carry no label. A [cluster job](../contributors/scheduler/clusters.md) that needs a fast interconnect places all of its members in one zone. Workers without a label together form one unnamed zone.
 
-`services.gradient.worker.endpoint` is the address the other members of a cluster reach the worker at. The server will hand every member the endpoints of the others at cluster start.
+`services.gradient.worker.endpoint` specifies the address at which cluster peers can reach a worker. At cluster start, the server hands every member the endpoints of all other members.
 
 ## Access
 
@@ -43,7 +43,9 @@ Workers only receive jobs from projects with a cache subscription.
 
 ## Team Workers
 
-A team worker is part of one [team](teams.md), with one token for the whole team. Granted projects list the team worker read-only. Changes take place on the team's **Workers** page.
+Each [team](teams.md) can have workers. A team worker works with a single token for the entire team. Projects that granted the team get read-only access to these workers.
+
+Manage team workers on the team's **Workers** page.
 
 | Setting | Effect |
 |---|---|
@@ -51,11 +53,11 @@ A team worker is part of one [team](teams.md), with one token for the whole team
 | `new_projects.workers` | Team workers granted to every new project |
 | `enabled` | Global switch for the worker in every granted project |
 
-A worker ID is either a team worker or a set of project registrations, never both.
+A worker ID can point to a team worker or to a set of project registrations. Never to both at once.
 
 ## Worker Stop
 
-Any worker can stop at any time, a throwaway VM included. A stop can lose no job.
+Workers can stop at any time. This include throwaway VMs. A stop never lose a job.
 
 - The stopping worker will announce draining. The server will then send no new jobs.
 - The worker will abort its running jobs.
@@ -63,6 +65,6 @@ Any worker can stop at any time, a throwaway VM included. A stop can lose no job
 
 ## Related
 
-- [Quick Start](../get-started/quick-start.md): the local worker
-- [Add a Remote Worker](../guides/remote-worker.md): add build machines
-- [Evaluations and Builds](evaluations-and-builds.md): what workers run
+- [Quick Start](../get-started/quick-start.md): run a worker locally
+- [Add a Remote Worker](../guides/remote-worker.md): hook up extra build machines
+- [Evaluations and Builds](evaluations-and-builds.md): the work a worker performs

@@ -1,36 +1,36 @@
 # Settings
 
-Three settings pages: the user's own, a project's and a cache's. Fields of entities [declared in Nix](../guides/manage-with-nix.md) show disabled, with the hint **Managed by Nix**.
+Settings exist on three levels: user, project and cache. When an entity comes from a [Nix declaration](../guides/manage-with-nix.md), its fields appear disabled and carry the hint **Managed by Nix**.
 
 ![Project Settings](../assets/screenshots/project_settings.png)
 
 ## User Settings
 
-**Settings** in the header.
+Open **Settings** from the header.
 
 | Page | Content | Actions |
 |---|---|---|
-| Profile | Username, full name, email | Edit. Pick the theme under **Appearance**. **Delete Account** |
-| API Keys | Keys with their scope and permissions | **New API Key**, edit, revoke, delete |
-| Sessions | Every device signed in to the account | **Revoke** a session |
-| My Invites | Open invitations to projects and caches | Accept or decline |
+| Profile | Username, full name, email | Edit fields. Choose a theme under **Appearance**. **Delete Account** |
+| API Keys | Keys, each with scope and permissions | **New API Key**, edit, revoke, delete |
+| Sessions | All devices currently signed in | **Revoke** a single session |
+| My Invites | Pending invitations to projects and caches | Accept or decline |
 
-The browser will store the theme (**System**, **Light**, **Dark**), not the account.
+The theme choice (**System**, **Light**, **Dark**) lives in the browser, not in the account.
 
 ![API Keys](../assets/screenshots/api_keys.png)
 
-## Project Settings
+# Project Settings
 
-**Settings** on the project page.
+Open **Settings** from the project page.
 
 | Section | Content | Actions |
 |---|---|---|
-| General | Name, display name, description, visibility | Edit. **Hide Build Requests task** will hide the task holding `gradient build` evaluations from task lists. The evaluations continue |
+| General | Name, display name, description, visibility | Edit. **Hide Build Requests task** removes the task holding `gradient build` evaluations from task lists. The evaluations themselves continue to run |
 | More Settings | Links to Members & Roles, Workers, Cache Subscriptions, Integrations, Webhooks | Open each page |
-| SSH Key | The public key for cloning the project's repositories | Copy as a deploy key on the Git host |
-| Danger Zone | | **Regenerate Key**, invalidating the old key at once. **Delete Project** |
+| SSH Key | Public key used for cloning the project's repositories | Copy and add it as a deploy key on the Git host |
+| Danger Zone | | **Regenerate Key** invalidates the old key immediately. **Delete Project** removes the project |
 
-Every evaluation and build of a public project is visible to everyone, signed in or not.
+Anyone can view every evaluation and build on a public project, signed in or not.
 
 ## Cache Settings
 
@@ -44,12 +44,12 @@ Every evaluation and build of a public project is visible to everyone, signed in
 | Pull-Through | Nix clients receive paths from the [upstream caches](../concepts/caches.md#pull-through) through the cache. **Disabled**: only paths the cache holds |
 | Visibility | Public caches hand out paths without credentials |
 
-The cache page also has **Upstream Caches**, **NARs**, **Members & Roles**, **Subscriptions** and **Webhooks**.
+The cache page also includes **Upstream Caches**, **NARs**, **Members & Roles**, **Subscriptions** and **Webhooks**.
 
 ![Cache NARs](../assets/screenshots/cache_nars.png)
 
 ## Related
 
-- [Members and Roles](members-and-roles.md): members, invitations and permissions
-- [Caches](../concepts/caches.md): upstream caches and substitution order
-- [Share a Cache](../guides/share-a-cache.md): subscriptions and netrc
+- [Members and Roles](members-and-roles.md) covers members, invitations and permissions
+- [Caches](../concepts/caches.md) explains upstream caches and substitution order
+- [Share a Cache](../guides/share-a-cache.md) shows subscriptions and netrc

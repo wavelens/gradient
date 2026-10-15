@@ -1,6 +1,6 @@
 # Projects and Tasks
 
-A **project** is a group of people, machines and caches. A **task** inside a project is one repository plus the flake outputs to build from that repository.
+A **project** bundles people, machines and caches. Each **task** in a project points to one repository and lists the flake outputs that need building from it.
 
 ```mermaid
 flowchart LR
@@ -14,12 +14,12 @@ flowchart LR
 
 ## Project
 
-- **Members and Roles**: Admin, Write, View, or custom roles built from single permissions.
-- **SSH Key**: one Ed25519 key per project, generated automatically, for cloning private repositories.
-- **Workers**: workers only receive jobs from projects with the worker enabled.
-- **Teams**: granted [teams](teams.md) bring their users with a role, their workers, or both.
-- **Cache Subscriptions**: build outputs of a project go to every subscribed cache.
-- **Integrations**: connections to GitHub, Gitea / Forgejo or GitLab for incoming events and outgoing status.
+- **Members and Roles**: Admin, Write, View, or custom roles assembled from single permissions.
+- **SSH Key**: Each project receive one Ed25519 key, generated automatically, for cloning private repositories.
+- **Workers**: Jobs from a project reach workers only when the worker flag on that project enable.
+- **Teams**: A granted [team](teams.md) bring its users with a role, its workers, or both.
+- **Cache Subscriptions**: Build outputs of a project go to every subscribed cache.
+- **Integrations**: Connections to GitHub, Gitea / Forgejo or GitLab handle incoming events and outgoing status.
 
 ## Task
 
@@ -34,7 +34,7 @@ flowchart LR
 
 ## Concurrency
 
-Tasks allow a single active evaluation per branch. Triggers firing during a running evaluation of the same branch follow the task's concurrency policy. Evaluations of other branches keep running.
+Each task allows one active evaluation per branch. A trigger that fires while the same branch already has an evaluation in progress follows the task's concurrency policy. Evaluations on other branches continue unaffected.
 
 | Trigger | Branch of the evaluation |
 |---|---|
@@ -43,19 +43,19 @@ Tasks allow a single active evaluation per branch. Triggers firing during a runn
 | Polling | Polled branch, or the default branch of the remote without a configured branch |
 | Cron schedule, manual start, API | Default branch of the remote |
 
-Polls, cron schedules, manual starts and API starts look up the name of the default branch on the remote. A push to `main` and a poll of the default branch `main` share the branch.
+Polls, cron schedules, manual starts and API starts resolve the default branch name on the remote. A push to `main` and a poll of the default branch `main` therefore share one branch.
 
 Evaluations of a pinned commit and `gradient build` requests belong to no branch. Concurrency policies skip them.
 
 | Policy | Running evaluation | Running builds |
 |---|---|---|
-| `auto` (default) | Running on until the new evaluation starts building, then aborted. Finishes after a failed evaluation of the new commit | Builds wanted by the new evaluation keep running. The rest are cancelled |
-| `soft_abort` | Aborted, with the new evaluation taking over | Finish, and the new evaluation will reuse the outputs |
+| `auto` (default) | Kept running until the new evaluation starts building, then aborted. Finished after a failed evaluation of the new commit | Builds wanted by the new evaluation keep running. The rest get cancelled |
+| `soft_abort` | Aborted, with the new evaluation taking over | Finish, and the new evaluation reuses the outputs |
 | `hard_abort` | Aborted | Cancelled |
-| `skip` | Running on | Keep running. The new event is dropped |
-| `all` | Running on, with the new evaluation running alongside | Keep running |
+| `skip` | Kept running | Kept running. The new event got dropped |
+| `all` | Kept running, with the new evaluation running alongside | Kept running |
 
 ## Related
 
-- [First Project](../get-started/first-project.md): create a project and a task
-- [Overview](overview.md): the whole path from evaluation and build to worker and cache
+- [First Project](../get-started/first-project.md): set up a project with a task
+- [Overview](overview.md): the full flow from evaluation and build to worker and cache

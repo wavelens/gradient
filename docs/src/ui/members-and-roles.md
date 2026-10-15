@@ -1,30 +1,36 @@
 # Members and Roles
 
-Who can do what in a project or a cache. Projects and caches each have their own members and roles. **Settings -> Members & Roles** on a project and **Members & Roles** on a cache lead there.
+Members and roles define who can access a project or cache and what they can do there. Each project and each cache keeps its own member list. Open the page through **Settings -> Members & Roles** on a project or **Members & Roles** on a cache.
 
 ![Members & Roles](../assets/screenshots/members_and_roles.png)
 
+The page has three areas:
+
 | Area | Content | Actions |
 |---|---|---|
-| Members | Every member with their role | Invite a user with **Add Member**. Change a role. Remove a member |
+| Members | All members and their assigned role | Invite a user with **Add Member**, change a role, or remove a member |
 | Pending Invitations | Invitations not yet accepted | **Revoke** |
-| Roles | The built-in roles and custom roles | **New Role**: a name and single permissions |
+| Roles | Built-in roles and custom roles | **New Role**: pick a name and single permissions |
 
 ## Invitations
 
-- **Add Member** will send an invitation. The user has no access before accepting the invitation on the **My Invites** page of the user settings.
-- Invitations expire after 7 days. One user can hold at most one open invitation per project or cache.
-- The invitee will also receive a link by mail with [email](../reference/configuration.md#email) configured.
-- A superuser already holding the permission can add members directly.
-- Projects and caches [declared in Nix](../guides/manage-with-nix.md) take their members from the configuration only.
+- Use **Add Member** to send an invitation. The invitee got no access until the invitation got accepted on the **My Invites** page in the user settings.
+- Each invitation expired after 7 days. One user could hold at most one open invitation per project or cache.
+- With [email](../reference/configuration.md#email) configured, the invitee also got the invitation link by mail.
+- A superuser with the permission could add members directly.
+- Projects and caches [declared in Nix](../guides/manage-with-nix.md) took their members from the configuration alone.
 
 ## Project Roles
 
+Each project has three roles. The table below shows what each role allows.
+
 | Role | Can |
 |---|---|
-| Admin | Everything, including settings, members, roles and deleting the project |
+| Admin | Everything: settings, members, roles, project deletion |
 | Write | Tasks, triggers, actions, evaluations, integrations, workers, webhooks, cache subscriptions, SSH key |
-| View | See the project. Also change workers, integrations, cache subscriptions and the SSH key |
+| View | See the project. Change workers, integrations, cache subscriptions and the SSH key |
+
+Roles map to individual permissions. Each permission covers one area of the project.
 
 | Permission | Scope |
 |---|---|
@@ -39,11 +45,15 @@ Who can do what in a project or a cache. Projects and caches each have their own
 
 ## Cache Roles
 
+Roles control what a member can do with a cache.
+
 | Role | Can |
 |---|---|
-| Admin | Everything |
+| Admin | Do everything |
 | Write | See the cache, download and upload paths |
 | View | See the cache and download paths |
+
+Each role combines the permissions below.
 
 | Permission | Scope |
 |---|---|
@@ -57,12 +67,12 @@ Who can do what in a project or a cache. Projects and caches each have their own
 
 ## Rules
 
-- Built-in roles cannot be edited or deleted.
-- A custom role still assigned to a member cannot be deleted.
-- The last Admin of a cache cannot be removed.
-- Roles can come from identity provider groups, described in [Set Up Single Sign-On](../guides/sso.md#3-map-groups-to-roles).
+- Edit and delete of built-in roles: not possible.
+- Delete a custom role only after removal of all member assignments.
+- Keep at least one Admin per cache. Removal of the last Admin fails.
+- Identity provider groups can supply roles. See [Set Up Single Sign-On](../guides/sso.md#3-map-groups-to-roles) for the group-to-role mapping.
 
 ## Related
 
-- [Share a Cache](../guides/share-a-cache.md): subscriptions and cache members
-- [Caches](../concepts/caches.md#roles): the roles in context
+- [Share a Cache](../guides/share-a-cache.md) covers subscriptions and cache members
+- [Caches](../concepts/caches.md#roles) describes the roles in context

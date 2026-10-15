@@ -1,6 +1,6 @@
 # Dashboard
 
-The start page after sign-in, listing every task needing attention across all projects.
+The dashboard opens after sign-in. It lists every task that needs attention across all projects.
 
 ![Dashboard](../assets/screenshots/dashboard.png)
 
@@ -12,30 +12,30 @@ The start page after sign-in, listing every task needing attention across all pr
 | Activity | A calendar of the last year | Switch between evaluations and failures |
 | Rail | Projects by rank, caches with starred first | Star a project or cache. Open its tasks |
 
-Bar height in the task list is the duration. Bar color is the status.
+In the task list, bar height shows the duration and bar color shows the status.
 
-New users without projects or caches see the first steps instead. These steps cover creating a project, adding a task, connecting a worker and creating or subscribing to a cache.
+New users without projects or caches see first steps instead of the dashboard. These steps cover creating a project, adding a task, connecting a worker and creating or subscribing to a cache.
 
 ## Ranking
 
-The task list has the tasks of the user's projects, plus starred tasks of public projects. Four tiers set the order of the list.
+The task list shows two kinds of tasks: tasks from the user's projects and starred tasks from public projects. Four tiers determine the order:
 
 1. Starred and active
 2. Active
 3. Starred
 4. Member only
 
-A task is active with an evaluation other than a pull request in the last 14 days. The newest evaluation is first within a tier. Pull request evaluations count toward the stats only.
+A task with an evaluation in the last 14 days other than a pull request is active. Tasks in a tier sort by their newest evaluation, newest first. Pull request evaluations contribute to the stats only.
 
 ## Stars
 
-- Star a project, task or cache from the page header, or a project or cache from the rail.
-- Stars are personal. Stars rank and filter only the user's own view.
-- Starred items come first in the task list, the rail and the command palette.
+- Mark a project, task or cache as a star. The page header and the rail both offer this control.
+- Stars stay private. Ranking and filtering apply to the user's own view only.
+- Starred items appear at the top of the task list, the rail and the command palette.
 
 ## Command Palette
 
-`/` anywhere outside a text field, or the search field in the header.
+Open the palette with `/` from anywhere outside a text field, or with the search field in the header.
 
 | Query | Results |
 |---|---|
@@ -44,9 +44,9 @@ A task is active with an evaluation other than a pull request in the last 14 day
 | A store path or NAR hash | NARs in every readable cache |
 | Empty | The starred items |
 
-Arrow keys or Ctrl+J / Ctrl+K move the selection. Enter will open the item, and Escape will close the palette.
+Move the selection with the arrow keys or with Ctrl+J / Ctrl+K. Enter will open the selected item. Escape will close the palette.
 
 ## Related
 
-- [Projects and Tasks](../concepts/projects-and-tasks.md): the content of the task list
-- [Evaluations and Builds](../concepts/evaluations-and-builds.md): the statuses behind the bars
+- [Projects and Tasks](../concepts/projects-and-tasks.md) - what the task list displays
+- [Evaluations and Builds](../concepts/evaluations-and-builds.md) - the statuses shown in the bars

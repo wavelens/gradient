@@ -26,8 +26,8 @@ A running Gradient instance with its own worker, on one NixOS host. [Standalone]
 }
 ```
 
-1.  Stable releases only. `github:wavelens/gradient/beta` for pre-releases as well, `github:wavelens/gradient` for every commit on `main`.
-2.  Source of the `services.gradient` options for the server, the worker and the declarative state.
+1.  The flake ref `github:wavelens/gradient` tracks every commit on `main`. Use `github:wavelens/gradient/beta` to include pre-releases.
+2.  The flake provides the `services.gradient` options for the server, the worker and the declarative state.
 
 ## 2. Create Secrets
 
@@ -43,6 +43,8 @@ openssl rand -base64 48 > /var/lib/gradient-secrets/crypt
     Manage these files with [sops-nix](https://github.com/Mic92/sops-nix) or [agenix](https://github.com/ryantm/agenix) on a production host.
 
 ## 3. Enable Gradient
+
+Add this to `configuration.nix`:
 
 ```nix
 # configuration.nix
@@ -71,10 +73,10 @@ openssl rand -base64 48 > /var/lib/gradient-secrets/crypt
 - The login page is reachable at `https://gradient.example.com`.
 - `systemctl status gradient-server gradient-worker` shows both services running.
 
-The worker will stay in a reconnect loop until the first project with a cache is in place. This loop is expected. The next page will create both.
+The worker keeps trying to reconnect until a project with a cache exists. This loop is normal at this stage. The next page covers creation of both.
 
 ## Next Steps
 
-- [First Project](first-project.md): a project, a cache and the first green build
-- [Installation](installation.md): TLS, reverse proxies and production setup
-- [Configuration](../reference/configuration.md): every server and worker option
+- [First Project](first-project.md) walks through creating a project, warming the cache and getting the first build to pass
+- [Installation](installation.md) covers TLS, reverse proxies and a production-ready setup
+- [Configuration](../reference/configuration.md) documents every server and worker option

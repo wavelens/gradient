@@ -4,8 +4,8 @@ A flake built by Gradient, with the outputs in a binary cache.
 
 **Requirements:**
 
-- A running instance, see [Quick Start](quick-start.md) or [Standalone](standalone.md)
-- A flake in a Git repository the server can reach
+- A running instance. Setup options: [Quick Start](quick-start.md) or [Standalone](standalone.md)
+- A flake inside a Git repository that the server can access
 
 ## 1. First User
 
@@ -38,42 +38,42 @@ A flake built by Gradient, with the outputs in a binary cache.
 
 ## 2. Create a Cache
 
-**Caches -> Create Cache**, then pick a name and a visibility.
+Go to **Caches -> Create Cache**. Choose a name and set the visibility.
 
-Caches store every build output of the project. `nix` can fetch those outputs from the cache as a substituter.
+A cache holds all build outputs of the project. `nix` treats the cache as a substituter and can pull those outputs from it.
 
 ## 3. Create a Project
 
-**Projects -> Create Project**, then open **Settings -> Cache Subscriptions -> Subscribe to Cache** and pick the cache from step 2.
+Open **Projects -> Create Project** and set up a new project. Then go to **Settings -> Cache Subscriptions -> Subscribe to Cache** and select the cache created in step 2.
 
-A project is the unit of access. Members, workers and caches belong to a project. The local worker will appear under **Settings -> Workers** within a minute of the subscription.
+A project acts as the access boundary. All members, workers and caches live inside one project. After the subscription, the local worker shows up under **Settings -> Workers** within about a minute.
 
 ## 4. Create a Task
 
-**Create Task** on the project page, then fill in these fields.
+A task combines one repository with the flake outputs to build from it.
+
+Open the project page and select **Create Task**. Then fill in the two fields in the form.
 
 | Field | Value |
 |---|---|
-| Repository URL | The flake's Git URL, e.g. `https://github.com/wavelens/gradient` |
-| Evaluation Wildcard | Which flake outputs to build, e.g. `packages.x86_64-linux.*`, see [wildcards](../reference/wildcards.md) |
-
-A task is one repository plus the outputs to build from that repository.
+| Repository URL | Git URL of the flake, e.g. `https://github.com/wavelens/gradient` |
+| Evaluation Wildcard | Flake outputs to build, e.g. `packages.x86_64-linux.*`, see [wildcards](../reference/wildcards.md) |
 
 !!! tip "Private Repositories"
-    Every project has its own SSH key under **Settings -> SSH Key**. Add the public key as a deploy key on the Git host.
+    Each project ships with an SSH key, listed under **Settings -> SSH Key**. Add the public key as a deploy key on the Git host to access private repositories.
 
 ## 5. Start an Evaluation
 
-**Start Evaluation** on the task page. Gradient will read the flake and find every derivation matching the wildcard. The builds then go to the worker.
+Press **Start Evaluation** on the task page. Gradient will then scan the flake and locate every derivation that fit the wildcard. All those builds go to the worker.
 
 ## Verify Deployment
 
-- The evaluation page shows every build with live logs, grouped by status.
-- Every finished build has the status completed, with the outputs in the cache.
+- The evaluation page lists all builds with live logs, sorted by status.
+- Completed builds show the status `completed` and store their outputs in the cache.
 
 ## Next Steps
 
-- [Evaluation wildcards](../reference/wildcards.md): pick the outputs to build
-- [Connect GitHub](../guides/github.md): evaluate on every push and pull request
-- [Share a Cache](../guides/share-a-cache.md): use the cache from other machines
-- [Add a Remote Worker](../guides/remote-worker.md): add build machines
+- [Evaluation wildcards](../reference/wildcards.md): choose which outputs to build
+- [Connect GitHub](../guides/github.md): run evaluations on every push and pull request
+- [Share a Cache](../guides/share-a-cache.md): reuse the cache across other machines
+- [Add a Remote Worker](../guides/remote-worker.md): attach extra build machines

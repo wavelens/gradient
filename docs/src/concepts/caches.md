@@ -1,6 +1,8 @@
 # Caches
 
-A **cache** is a Nix binary cache built into Gradient. Projects subscribe to caches. Build outputs of a project land in every cache the project subscribed to. `nix` on any machine can substitute from those caches.
+Gradient includes a own Nix binary cache. A **cache** stores build outputs so any machine with `nix` can substitute from it.
+
+Projects subscribe to caches. Every build a project produces goes into each cache the project subscribed to.
 
 ```mermaid
 flowchart LR
@@ -11,13 +13,13 @@ flowchart LR
 
 ## Using a Cache
 
-The cache page shows the substituter URL and the public key for the Nix configuration. Public caches are open to anyone. Private caches need credentials, described in [Authentication](../guides/share-a-cache.md#1-use-the-cache-on-a-machine).
+The cache page lists two values needed for Nix configuration: the substituter URL and the public key. Public caches accept any client. Private caches require credentials. See [Authentication](../guides/share-a-cache.md#1-use-the-cache-on-a-machine) for details.
 
-Caches announce a priority to `nix`, with a default of `10`. Lower values win. A cache can announce a different priority to clients on the local network. Machines next to the server then prefer the Gradient cache over remote ones.
+Each cache sends a priority to `nix`. The default value is `10`, and lower numbers take precedence. A cache can also send a separate priority to machines on the local network. Those machines then prefer the Gradient cache over remote caches.
 
 ## Upstream Types
 
-Upstream caches live under **Settings -> Upstream Caches** on the cache page.
+Find upstream caches under **Settings -> Upstream Caches** on the cache page.
 
 | Type | Upstream Cache | Modes |
 |---|---|---|
@@ -25,30 +27,32 @@ Upstream caches live under **Settings -> Upstream Caches** on the cache page.
 | Gradient Proto | A cache on another Gradient instance, reached over that instance's cache protocol | Read & Write, Read Only, Write Only |
 | HTTP | Any Nix binary cache, e.g. `cache.nixos.org` | Read Only |
 
+The modes control traffic direction:
+
 - **Read & Write**: pull through and push results upstream.
 - **Read Only**: pull through only.
 - **Write Only**: push only.
 
-Declared caches in [`services.gradient.state`](../reference/state.md#cachesname) take Internal and HTTP (`external` in Nix) upstream caches. Gradient Proto upstream caches are configurable in the UI.
+Caches declared in [`services.gradient.state`](../reference/state.md#cachesname) accept Internal and HTTP upstream caches (`external` in Nix). Configure Gradient Proto upstream caches in the UI.
 
-**Deactivate** can disable an upstream cache without removing the entry. **Activate** can turn the upstream cache back on. Inactive upstream caches keep their settings. Gradient will never query an inactive upstream cache. Paths then come from the remaining upstream caches. Declared caches also accept **Deactivate** and **Activate**. The next server start will restore the declared `active` value.
+Use **Deactivate** to disable an upstream cache while keeping the entry. Use **Activate** to switch it back on. Inactive upstream caches keep their settings. Gradient never queries an inactive upstream cache. Paths then come from the remaining upstream caches. Declared caches also accept **Deactivate** and **Activate**. The next server start will restore the declared `active` value.
 
-**Test** on an HTTP upstream can fetch its `nix-cache-info` over HTTP/1.1 and over HTTP/2. The test will report each result. HTTP upstream caches with broken HTTP/2 transfers switch to HTTP/1.1 for good. Such upstream caches show an **HTTP/1.1** badge.
+Use **Test** on an HTTP upstream to fetch its `nix-cache-info` over HTTP/1.1 and over HTTP/2. The test reports each result. HTTP upstream caches with broken HTTP/2 transfers switch to HTTP/1.1 for good. Such upstream caches show an **HTTP/1.1** badge.
 
 ## Pull-Through
 
-Caches deliver paths from their upstream caches as if the cache held them. A client asking for a missing path will receive the upstream copy through the cache. The cache will re-sign that copy with its own key. Clients configure one URL and one key, wherever a path came from.
+Pull-through lets a cache serve paths it does not store. On a request for a missing path, the cache fetched the copy from an upstream cache, re-signed it with its own key, and sent it to the client. Clients therefore needed only one URL and one key, no matter where a path came from.
 
-**Pull-Through** under **Settings** on the cache page can turn pull-through off. Caches without pull-through only deliver the paths they hold. Builds still [substitute](#substitution) from the upstream caches.
+To disable pull-through, toggle **Pull-Through** under **Settings** on the cache page. A cache with pull-through off served only the paths it held. Builds could still [substitute](#substitution) from the upstream caches.
 
 ## Substitution
 
 Gradient will decide per derivation whether a build is needed at all, before building anything.
 
-1. Outputs already in any cache on the instance need no work.
-2. Outputs missing on the instance are looked up in the upstream caches of the subscribed caches.
-3. A build with every output found is **substituted**. A worker will fetch the outputs. Nothing below the derivation is built or fetched.
-4. Derivations with a missing output go to a worker for building. Their inputs go through the same check.
+1. Outputs present in a cache on the instance require no work.
+2. For outputs absent on the instance, check the upstream caches of the subscribed caches.
+3. A build with all outputs found counts as **substituted**. A worker downloads the outputs. Nothing below the derivation is built or downloaded.
+4. Derivations with a missing output land on a worker for building. Their inputs pass through the same check.
 
 Lookups only cover derivations an evaluation actually needs. Unresponsive upstream caches pause for a minute instead of slowing every lookup.
 
@@ -58,16 +62,16 @@ Projects subscribe to a cache for pushing outputs there and substituting from th
 
 ## Roles
 
-| Role | Can |
+| Role | Access |
 |---|---|
-| Admin | Everything, including settings, members, roles and subscriptions |
-| Write | Read and upload paths |
-| View | See the cache and download paths |
+| Admin | Full control: settings, members, roles and subscriptions |
+| Write | Read access plus path uploads |
+| View | Cache visibility plus path downloads |
 
-Custom roles combine single permissions, described in [Members and Roles](../ui/members-and-roles.md#cache-roles).
+[Members and Roles](../ui/members-and-roles.md#cache-roles) explains how to build custom roles from individual permissions.
 
 ## Related
 
-- [First Project](../get-started/first-project.md): create a cache and subscribe a project
-- [Share a Cache](../guides/share-a-cache.md): share a cache and authenticate clients
-- [Projects and Tasks](projects-and-tasks.md): where builds come from
+- [First Project](../get-started/first-project.md) - create a cache, then subscribe a project to it
+- [Share a Cache](../guides/share-a-cache.md) - grant client access to a cache
+- [Projects and Tasks](projects-and-tasks.md) - how builds produce cache entries

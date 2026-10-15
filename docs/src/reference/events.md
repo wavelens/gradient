@@ -1,15 +1,17 @@
 # Events and Webhooks
 
-Every state change in Gradient is a typed event with a dotted name (`build.completed`, `task.star`, `proto.client.nar_push`).
+Gradient records each state change as a typed event. Event names use dotted notation, such as `build.completed`, `task.star`, or `proto.client.nar_push`.
 
-- **Durable** events are landing in pending deliveries together with the change that caused them. Gradient is then delivering them to webhooks and task actions, with retries.
-- **Firehose-only** events are high-rate telemetry. They are only visible on the debug stream.
+Two delivery classes exist:
 
-`GET /api/v1/events/catalog` will list every name with its `durable` flag.
+- **Durable** events land in pending deliveries alongside the change that triggered them. Gradient then delivers them to webhooks and task actions and retries on failure.
+- **Firehose-only** events carry high-rate telemetry. The debug stream is the only place where they appear.
+
+`GET /api/v1/events/catalog` lists all event names together with their `durable` flag.
 
 ## Envelope
 
-One JSON shape for websocket frames, webhook bodies and task action bodies.
+All three payloads use one JSON structure: websocket messages, webhook bodies, and task action bodies.
 
 ```json
 {
@@ -28,17 +30,17 @@ One JSON shape for websocket frames, webhook bodies and task action bodies.
 | `project.*`, `task.*`, `cache.*` | yes | `project.create`, `task.star`, `task.action.update`, `cache.nar.upload`, `cache.member.create` |
 | `gc.*` | yes | `gc.swept`, `gc.deep_finished` |
 | account activity | yes, instance webhooks only | `login.success`, `api_key.create`, `session.revoke` |
-| `build.status_changed`, `build.progress`, `evaluation.progress`, `evaluation.activity` | no | every build job transition, build transfer progress, fetch and eval progress |
+| `build.status_changed`, `build.progress`, `evaluation.progress`, `evaluation.activity` | no | each build job transition, build transfer progress, fetch and eval progress |
 | `graph.*` | no | `graph.recorded`, `graph.demoted`, `graph.collected` |
 | `worker.*` | no | `worker.connected`, `worker.job_dispatched`, `worker.queue_depth` |
 | `proto.client.*`, `proto.server.*` | no | message type, worker, job id and size, never the payload |
-| `cache.changed`, `cache.nar.fetched`, `cache.narinfo.served`, `cache.nar.signed` | no | cache traffic. `cache.nar.signed` is naming the cache a fresh upload was signed into |
+| `cache.changed`, `cache.nar.fetched`, `cache.narinfo.served`, `cache.nar.signed` | no | cache traffic. `cache.nar.signed` marks a fresh upload as signed into a cache |
 
-Every `build.*` event with a per-evaluation `build_id` will also carry `derivation_build`. The field `derivation_build` is the shared build that `worker.job_dispatched` will name as its `build_id`.
+Every `build.*` event with a per-evaluation `build_id` also includes `derivation_build`. That field identifies the shared build, and `worker.job_dispatched` names this same build as its `build_id`.
 
 ## Webhooks
 
-Webhook management is available under **Webhooks** in the project settings and on the cache page. Superusers are managing instance webhooks under **Job Board -> System Health -> Instance Webhooks**. [Task actions](../guides/actions.md) are receiving the same envelope for single tasks.
+Manage webhooks under **Webhooks** in the project settings or on the cache page. Superusers manage instance webhooks under **Job Board -> System Health -> Instance Webhooks**. [Task actions](../guides/actions.md) receive the same envelope for single tasks.
 
 | Scope | API | Who may manage | Receives |
 |---|---|---|---|
@@ -46,10 +48,10 @@ Webhook management is available under **Webhooks** in the project settings and o
 | Cache | `/api/v1/caches/{cache}/webhooks` | `manageCacheWebhooks` | events of the cache |
 | Instance | `/api/v1/admin/webhooks` | superuser | every durable event |
 
-- `events` is a list of globs (`build.*`, `task.star`). An empty list will receive everything in scope.
-- The API will return the signing secret once, on create and on `rotate-secret`.
-- Gradient will try a failed delivery (transport error or non-2xx) 6 times in total. The backoff will grow from 30 s to 8 min. The delivery is then dead-lettered.
-- `POST .../{id}/test` will send a `webhook.ping` immediately and return the recorded delivery.
+- `events` is a list of globs (`build.*`, `task.star`). With an empty list, the webhook receives everything in scope.
+- The API exposes the signing secret exactly once, on create and on `rotate-secret`.
+- Gradient retries a failed delivery (transport error or non-2xx) up to 6 times in total. Backoff starts at 30 s and caps at 8 min. After the last attempt, Gradient dead-letters the delivery.
+- `POST .../{id}/test` dispatches a `webhook.ping` immediately and gives back the recorded delivery.
 
 **Request Headers**
 
@@ -76,7 +78,7 @@ def verify(secret: str, body: bytes, header: str) -> bool:
 !!! warning
     The firehose is for debugging only. Delivery is best-effort, per server process, and dropped on lag. Integrations are using webhooks.
 
-`GET /api/v1/metrics/events` (superuser) will upgrade to a websocket. The websocket will stream every event, durable or not, as one JSON envelope per frame. The `?events=` parameter can take comma-separated globs.
+`GET /api/v1/metrics/events` (superuser) upgrades to a websocket. Every event, durable or not, flows through it as one JSON envelope per frame. The `?events=` parameter accepts comma-separated globs.
 
 ```sh
 websocat -H "Authorization: Bearer $TOKEN" "wss://gradient.example.com/api/v1/metrics/events?events=build.*,proto.client.*"

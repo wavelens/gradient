@@ -1,15 +1,15 @@
 # Artefacts
 
-Build outputs can offer files for download, and a fixed link can point to the newest build of a task.
+Every build can expose files for download. A stable link can always point to the most recent build of a task.
 
 **Requirements:**
 
-- A task with a [wildcard](../reference/wildcards.md) matching the package.
-- An [API key](../reference/api.md#api-keys) for links into a private project.
+- A task whose [wildcard](../reference/wildcards.md) matches the package.
+- An [API key](../reference/api.md#api-keys) for links to a private project.
 
 ## 1. Declare the Files
 
-Builds list their downloadable files in `$out/nix-support/hydra-build-products`, in the Hydra format.
+A build can declare downloadable files through `$out/nix-support/hydra-build-products`. Hydra picks up this file and shows the entries on the build page. Create the directory and append one line per file in a `postInstall` hook:
 
 ```nix
 # package.nix
@@ -19,22 +19,24 @@ postInstall = ''
 '';
 ```
 
+Each line contains three space-separated fields:
+
 | Field | Example | Meaning |
 |---|---|---|
 | Type | `file`, `doc` | Kind of the file, shown as a badge |
 | Subtype | `binary-dist`, `html` | Finer kind. HTML files open in a new browser tab |
 | Path | `$out/bin/gradient` | File or directory inside the output |
 
-- Lines name a file each, with the three fields separated by spaces.
-- Directories download as a `<name>.tar.zst` archive.
+- Use one line per file.
+- Declare a directory to offer it as a `<name>.tar.zst` archive.
 
 ## 2. Find the Artefacts
 
 === "UI"
 
-    Open the task, then the menu of an entry point, then **Artefacts**. Entry points with files show a box icon. Menu entries for unfinished builds appear disabled.
+    Open the task. Open the menu of an entry point and choose **Artefacts**. Entry points that contain files show a box icon. While a build is still in progress, the menu entry appear disabled.
 
-    Rows on the **Build Artefacts** page show the type, name and size of each file, next to a **Download** or **Open** button.
+    On the **Build Artefacts** page, each row show the type, name and size of a file. Use **Download** or **Open** to retrieve or view it.
 
 === "CLI"
 
@@ -42,11 +44,11 @@ postInstall = ''
     gradient download
     ```
 
-    The [CLI](../reference/cli.md) can pick the evaluation and the files interactively.
+    The [CLI](../reference/cli.md) ask for the evaluation and the files interactively.
 
 ## 3. Link the Newest Build
 
-Fixed links read the newest evaluation of a task.
+A fixed link always points to the latest evaluation of a task.
 
 ```text
 https://gradient.example.com/api/v1/tasks/<project>/<task>/entry-point-downloads?eval=<attribute>&filename=<file>
@@ -54,35 +56,35 @@ https://gradient.example.com/api/v1/tasks/<project>/<task>/entry-point-downloads
 
 | Parameter | Value |
 |---|---|
-| `<project>`, `<task>` | Names of the project and the task |
-| `eval` | Attribute path of the entry point, such as `packages.x86_64-linux.gradient-cli-static`. URL-encode `"` as `%22` |
-| `filename` | File name from `hydra-build-products`, such as `gradient` |
-| `token` | Optional API key for a private project |
+| `<project>`, `<task>` | Project name and task name |
+| `eval` | Attribute path of the entry point, for example `packages.x86_64-linux.gradient-cli-static`. Encode `"` as `%22` |
+| `filename` | File name taken from `hydra-build-products`, for example `gradient` |
+| `token` | API key, needed only for private projects |
 
-Real-world example from the Gradient CLI install.
+This command downloads the Gradient CLI:
 
 ```sh
 curl -fLo gradient "https://public.gradient.ci/api/v1/tasks/gradient/main/entry-point-downloads?eval=packages.x86_64-linux.gradient-cli-static&filename=gradient"
 ```
 
-- Links to an unchanged derivation keep working during a new evaluation.
-- Links to a changed derivation return `404` until the new build is done (`Completed` or `Substituted`). Downloads from the previous build remain unavailable meanwhile.
-- Markdown pages can embed the link as a button: `[Download](<link>){ .md-button }`.
+- The link survives new evaluations as long as the derivation stay unchanged.
+- After a derivation change, the link return `404` until the new build reach `Completed` or `Substituted`. The old build stay unavailable in the meantime.
+- Markdown pages can render the link as a button: `[Download](<link>){ .md-button }`.
 
 ## 4. Share Private Files
 
-Public projects need no credentials. Private projects offer two kinds of links.
+Public projects serve files without credentials. Private projects support two link types.
 
 | Link | Lifetime | Use |
 |---|---|---|
 | `entry-point-downloads?...&token=GRAD...` | Until the API key expires | Fixed links for scripts and deployments |
 | `/builds/<build>/download/<file>?token=<token>` | 1 hour | Sharing a file of a specific build |
 
-- Create a dedicated API key for fixed links, pinned to the project, with `viewProject` only and `allowed_ips` where possible.
-- Request the 1-hour token from `GET /builds/<build>/download-token`. Links on the **Build Artefacts** page include this token already.
+- For fixed links, create a dedicated API key. Pin it to the project, grant only `viewProject`, and restrict it with `allowed_ips` where the setup permits.
+- For short-lived links, request a 1-hour token from `GET /builds/<build>/download-token`. Links on the **Build Artefacts** page already include this token.
 
 !!! warning
-    Tokens in a URL end up in shell histories and proxy logs. Prefer the 1-hour token for links shared with people.
+    A token inside a URL ends up in shell histories and proxy logs. Use the 1-hour token for links shared with people.
 
 ## Verify Deployment
 
@@ -90,7 +92,7 @@ Public projects need no credentials. Private projects offer two kinds of links.
 curl -fsSI "https://gradient.example.com/api/v1/tasks/<project>/<task>/entry-point-downloads?eval=<attribute>&filename=<file>"
 ```
 
-Working links answer `200` with a `Content-Disposition` header naming the file.
+A working link return `200` and include a `Content-Disposition` header with the file name.
 
 ## Next Steps
 

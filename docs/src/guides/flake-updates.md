@@ -11,7 +11,7 @@ Pull requests that bump `flake.lock`, opened only after a successful build of th
 
 === "UI"
 
-    Open **Settings -> Flake Inputs -> New Override** on the task. Set the **Input Name** and enable **Force update using the URL declared in flake.nix**.
+    On the task, go to **Settings -> Flake Inputs -> New Override**. Fill in the **Input Name** and turn on **Force update using the URL declared in flake.nix**.
 
 === "Declarative"
 
@@ -22,18 +22,18 @@ Pull requests that bump `flake.lock`, opened only after a successful build of th
     };
     ```
 
-    1.  `*` and `?` match many inputs. A bare `*` will track every input.
+    1.  `*` and `?` act as wildcards across input names. A bare `*` tracks every input.
 
-`github`, `gitlab` and `git` inputs are supported, including `git` over SSH with the project's SSH key.
+Supported input types: `github`, `gitlab` and `git`, including `git` over SSH with the project's SSH key.
 
 !!! warning
-    An override with a **URL** will pin that input. The pin will block every update run of the task. No pull request can land while an input is held.
+    An override with a **URL** pins that input at the given address. The pin blocks every update run of the task. No pull request can land while the pin is in place.
 
 ## 2. Add the PR Action
 
 === "UI"
 
-    Open **Actions -> New Action** on the task. Pick the type **PR** and the **Outbound Integration**. The defaults fit most repositories.
+    On the task, go to **Actions -> New Action**. Select **PR** as the type and choose the **Outbound Integration**. Default settings work for most repositories.
 
 === "Declarative"
 
@@ -47,33 +47,33 @@ Pull requests that bump `flake.lock`, opened only after a successful build of th
 
 | Field | Default | Effect |
 |---|---|---|
-| Granularity | `per_run` | `per_input` is opening one pull request per input instead of one for all |
-| Verify Gate | `build` | `eval` and `none` open the pull request once the updated flake is evaluated, before the builds finish |
-| Branch Pattern | `gradient/flake-lock-update` | Must contain `{input}` with `per_input` |
-| Title Template | `flake.lock: update <inputs>` | Placeholders `{input}`, `{inputs}`, `{count}` |
-| Body Template | Each input's old and new revision | Same placeholders as the title |
-| Update existing PR | on | Refreshing an open pull request instead of opening a second one |
+| Granularity | `per_run` | With `per_input`, one pull request gets opened per input rather than a single one for all inputs |
+| Verify Gate | `build` | With `eval` or `none`, the pull request opens after evaluation of the updated flake, before builds complete |
+| Branch Pattern | `gradient/flake-lock-update` | With `per_input`, `{input}` must appear in the pattern |
+| Title Template | `flake.lock: update <inputs>` | Accepts the placeholders `{input}`, `{inputs}`, `{count}` |
+| Body Template | Old and new revision for each input | Accepts the same placeholders as the title |
+| Update existing PR | on | An open pull request gets refreshed instead of a second one being opened |
 
 ## Update Run
 
-Each trigger fire (and each **Start Evaluation**) will start an update evaluation next to the normal one.
+Every trigger fire and every click on **Start Evaluation** launches an update evaluation in addition to the normal one.
 
 ```mermaid
 flowchart LR
     bump[Bump tracked inputs] --> verify[Evaluate and build] --> pr[Open or update the PR]
 ```
 
-- Gradient is force-pushing the branch as one commit on the current base.
-- The pull request is never falling behind.
-- No pull request for an unchanged `flake.lock`.
-- No pull request after a failed build, with the default `build` check.
+- Gradient force-pushes the branch as a single commit on top of the current base.
+- The pull request never falls behind.
+- An unchanged `flake.lock` leads to no pull request.
+- A failed build with the default `build` check blocks pull request creation.
 
 ## Verify Deployment
 
-- A click on **Start Evaluation** in the task will add a second evaluation for the update.
-- The Git host will show the pull request with each input's old and new revision after the evaluation.
+- A second evaluation of the update can be triggered with **Start Evaluation** in the task.
+- After the evaluation, the pull request on the Git host will list the old and new revision of each input.
 
 ## Next Steps
 
-- [Notify with Actions](actions.md): mails and web requests on failed updates
-- [Projects and Tasks](../concepts/projects-and-tasks.md): triggers and actions
+- [Notify with Actions](actions.md): send mail and web requests when an update fails
+- [Projects and Tasks](../concepts/projects-and-tasks.md): how triggers and actions work together

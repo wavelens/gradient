@@ -9,19 +9,21 @@ NixOS machines that fetch and switch to their newest configuration built by Grad
 
 ## 1. Build the System
 
-The task's wildcard must select the system of every machine to deploy.
+Set the task's wildcard to the system attribute path so every machine builds its own NixOS closure:
 
 ```text
 nixosConfigurations.*.config.system.build.toplevel
 ```
 
-Each machine will pick the output named `nixos-system-<hostname>-...`. The host name in the configuration must match the machine's `deployFor`.
+Each machine resolves to an output named `nixos-system-<hostname>-...`. Keep the host name in the configuration identical to that machine's `deployFor` value.
 
 ## 2. Create an API Key
 
-Open **Settings -> API Keys -> New API Key** and set **Scope** Project to the task's project. A leaked key can then reach nothing else. Store the key on the machine as a secret, e.g. `/run/secrets/gradient-deploy-key`.
+Generate a key under **Settings -> API Keys -> New API Key**. Set **Scope** Project to the project that owns the task, so a leaked key grants no access beyond it. Save the key on the machine as a secret, for example at `/run/secrets/gradient-deploy-key`.
 
 ## 3. Enable the Deploy Module
+
+Add the client module to the machine in `flake.nix`:
 
 ```nix
 # flake.nix
@@ -32,6 +34,8 @@ nixosConfigurations.office-pc = nixpkgs.lib.nixosSystem {
   ];
 };
 ```
+
+Then turn on deployment in `configuration.nix`:
 
 ```nix
 # configuration.nix
@@ -54,35 +58,35 @@ sudo gradient-update
 journalctl -u gradient-deploy
 ```
 
-Start a deployment at once with `gradient-update`, without waiting for the timer. The last journal lines read `Deployment to /nix/store/...-nixos-system-office-pc-... completed successfully`, or the reason no deployment ran.
+To run a deployment right away instead of waiting for the timer, use `gradient-update`. The last journal lines show either `Deployment to /nix/store/...-nixos-system-office-pc-... completed successfully` or the reason why no deployment ran.
 
-`... without a deployment for <name>` is a sign that no system matched. The `networking.hostName` of the built configuration does not match `deployFor`.
+The message `... without a deployment for <name>` means no system matched: the `networking.hostName` of the built configuration did not match `deployFor`.
 
-An `Error:` line in the journal is the sign of a failed fetch or switch. No switch took place.
+An `Error:` line in the journal means a failed fetch or switch. In that case no switch happened.
 
 ## Run Behavior
 
-Read the task's newest evaluation every round, then act on the outcome below.
+Each round evaluates the task's latest evaluation and reacts to the result.
 
-| Newest system for the machine | Result |
+| Latest system on the machine | Action |
 |---|---|
-| Already running | Stopping at once |
-| Built | Fetched from the cache and switched to |
-| Still building | Waiting for the build, then switching |
-| Failed, or the evaluation failed | Stopping, reported in the journal |
-| Not fetchable, or the switch failed | `Error:` in the journal, a retry after 10 seconds, no switch |
+| Already running | Immediate stop |
+| Built | Fetch from cache and switch |
+| Still building | Wait for the build, then switch |
+| Failed, or evaluation failed | Stop, report in the journal |
+| Not fetchable, or switch failed | `Error:` in the journal, retry after 10 seconds, no switch |
 
-The waiting outcomes leave the unit successful. The waiting service can follow the task's live WebSocket. A finished build can turn into a switch at once.
+The waiting outcomes keep the unit in a successful state. The waiting service can track the task's live WebSocket. A finished build can turn into an immediate switch.
 
 | Option | Default | Effect |
 |---|---|---|
 | `deployFor` | host name | Which `nixos-system-<name>` to deploy |
-| `waitForBuild` | `true` | `false` is stopping at once while the newest system is not built yet |
-| `websockets` | `true` | `false` is checking every `pollIntervalSec` instead, for networks blocking WebSocket upgrades |
+| `waitForBuild` | `true` | `false` stops at once if the latest system has not been built yet |
+| `websockets` | `true` | `false` checks every `pollIntervalSec` instead, for networks that block WebSocket upgrades |
 | `pollIntervalSec` | `60` | Check interval without WebSockets |
-| `randomizedDelaySec` | `"0"` | Spreading the deployments of many machines |
+| `randomizedDelaySec` | `"0"` | Spread out deployments across many machines |
 
 ## Next Steps
 
-- [Share a Cache](share-a-cache.md): the substituter and netrc on the machine
-- [Evaluations and Builds](../concepts/evaluations-and-builds.md): the build states a machine can wait for
+- [Share a Cache](share-a-cache.md): set up the substituter and netrc on the machine
+- [Evaluations and Builds](../concepts/evaluations-and-builds.md): learn which build states a machine can wait for

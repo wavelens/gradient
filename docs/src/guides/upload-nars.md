@@ -1,10 +1,10 @@
 # Upload NARs
 
-Store paths built outside Gradient, pushed into a cache with the `gradient` CLI.
+Build store paths outside of Gradient and push them into a cache with the `gradient` CLI.
 
 **Requirements:**
 
-- A cache and the Write role on the cache, see [Share a Cache](share-a-cache.md)
+- A cache with the Write role, see [Share a Cache](share-a-cache.md)
 - The CLI: `nix shell github:wavelens/gradient/latest#gradient-cli`
 
 ## 1. Log In
@@ -13,7 +13,7 @@ Store paths built outside Gradient, pushed into a cache with the `gradient` CLI.
 gradient login https://gradient.example.com
 ```
 
-The CLI will open the browser to confirm the login. The CLI is then storing the server and the token.
+The command opens a browser window for confirmation. After approval, the CLI stores the server address and the token for later use.
 
 ## 2. Upload
 
@@ -37,24 +37,26 @@ Large NARs go up in 32 MiB chunks, below the reverse proxy's body limit. The ser
 
 ## Verify Deployment
 
+Check the upload with the CLI:
+
 ```sh
 gradient cache nar list main --package hello
 ```
 
-The UI will show the same list under **NARs** on the cache page, with filters by hash and package.
+The cache page shows the same entries under **NARs**, filterable by hash and package.
 
 ## Manage NARs
 
 | Command | Effect |
 |---|---|
-| `gradient cache nar list <cache>` | Listing NARs, filtered with `--hash` and `--package`, sorted with `--sort` |
-| `gradient cache nar show <cache> <hash>` | One NAR: store path, sizes, signature and fetch count |
-| `gradient cache nar stats <cache>` | The NAR count and total size |
-| `gradient cache nar delete <cache> <hash>` | Removing the NAR from the cache |
+| `gradient cache nar list <cache>` | List NARs. Filter with `--hash` and `--package`, sort with `--sort`. |
+| `gradient cache nar show <cache> <hash>` | Show one NAR: store path, sizes, signature and fetch count. |
+| `gradient cache nar stats <cache>` | Show the NAR count and total size. |
+| `gradient cache nar delete <cache> <hash>` | Delete the NAR from the cache. |
 
-NARs held by more than one cache stay stored until deleted from the last cache. A deletion from one cache can never break another.
+A NAR can live in several caches at once. Storage of a NAR continue until the last cache delete it. A delete in one cache leave all other caches intact.
 
 ## Next Steps
 
-- [Share a Cache](share-a-cache.md): use the uploaded paths on other machines
+- [Share a Cache](share-a-cache.md): reuse the uploaded paths on other machines
 - [Caches](../concepts/caches.md): upstream caches, pull-through and substitution order

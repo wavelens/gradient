@@ -1,15 +1,15 @@
 # Connect Gitea or Forgejo
 
-Evaluations on push and pull request. Commit statuses back on the Git host.
+Pushes and pull requests trigger evaluations. Commit statuses appear back on the Git host.
 
 **Requirements:**
 
-- A task with a repository URL on the Gitea or Forgejo instance, see [First Project](../get-started/first-project.md)
-- Admin access to the Gitea or Forgejo instance, or to the repository's owner, for a bot account
+- A task with a repository URL pointing to the Gitea or Forgejo instance, see [First Project](../get-started/first-project.md)
+- Admin rights on the Gitea or Forgejo instance, or on the repository's owner, so a bot account can be created
 
 ## Inbound and Outbound
 
-Gradient and the Git host exchange data in two directions. Each direction is a separate integration of the project.
+Gradient exchanges data with the Git host in two directions. Each direction is a separate integration of the project.
 
 ```mermaid
 flowchart LR
@@ -29,7 +29,7 @@ flowchart LR
 | Covers | Evaluations on push, pull request and release. `/gradient` comment commands | Commit statuses. Reactions to `/gradient` comments. Writer check of pull request authors. [Flake update](flake-updates.md) pull requests |
 | Without | Git host events never reach Gradient | No status on commits. `/gradient` comments ignored. All pull request authors count as non-writers |
 
-- A inbound integration can receive webhooks from all repositories of the project's tasks. Incoming events match tasks by the `owner/repo` part of the repository URL.
+- The inbound integration can receive webhooks from all repositories of the project's tasks. Events match a task by the `owner/repo` part of the repository URL.
 - Outbound calls act as the token's account. Statuses and comments appear under that account's name.
 - Writer checks and comment reactions use the outbound integration of the task's **Git Status** action.
 
@@ -37,14 +37,14 @@ flowchart LR
 
 ### Bot Account and Token
 
-Gitea and Forgejo issue tokens per user only. Dedicated bot accounts keep statuses and comments apart from personal accounts.
+Gitea and Forgejo tie tokens to individual users. A dedicated bot account keeps statuses and comments apart from personal accounts.
 
 | Repository owner | Access for the bot account |
 |---|---|
-| User | **Settings -> Collaborators** of each repository, permission **Admin** |
-| Organization | Member of a team with **Administrator Access** to the repositories |
+| User | In each repository, open **Settings -> Collaborators** and grant the **Admin** permission |
+| Organization | Make the bot a member of a team with **Administrator Access** to the repositories |
 
-Admin rights allow the writer check of pull request authors. Gitea and Forgejo answer permission queries for repository admins only. **Write** access is enough for tasks without a **Pull Request (reporter)** trigger.
+Gitea and Forgejo only answer permission queries for repository admins, so the writer check on pull request authors needs admin rights. Tasks without a **Pull Request (reporter)** trigger work with **Write** access alone.
 
 The token needs these scopes.
 
@@ -102,7 +102,7 @@ The token needs these scopes.
     ```
 
     1.  `forgejo` for Forgejo.
-    2.  Any random string, e.g. `openssl rand -hex 32`. The Git host webhook must use the same value.
+    2.  Any random string, e.g. `openssl rand -hex 32`. Set the same value in the Git host webhook.
     3.  Base URL of the Git host, without `/api/v1`.
     4.  The bot's token from above, as the only content of the file.
 
@@ -110,7 +110,7 @@ The token needs these scopes.
 
 ## 2. Add the Webhook on the Git Host
 
-Open **Settings -> Webhooks -> Add Webhook** in the repository (or organization) on the Git host.
+In the repository or organization on the Git host, go to **Settings -> Webhooks -> Add Webhook**.
 
 | Field | Value |
 |---|---|
@@ -119,27 +119,27 @@ Open **Settings -> Webhooks -> Add Webhook** in the repository (or organization)
 | Secret | The secret from step 1 |
 | Trigger on | Custom events: **Push**, **Pull Request**, **Issue Comment**, **Pull Request Comment**, **Pull Request Review**, **Release** |
 
-A push-only webhook can never deliver pull requests or the `/gradient` comment commands.
+A webhook limited to push events cannot deliver pull requests or the `/gradient` comment commands.
 
 ## 3. Wire the Task
 
-Tasks connect the two integrations. Triggers point at the inbound integration, actions at the outbound integration.
+A task links the two integrations. Triggers point to the inbound integration, actions to the outbound integration.
 
 === "UI"
 
-    New tasks get a **Push (reporter)** trigger and a **Git Status** action automatically. Two conditions apply.
+    Tasks created in the UI come with a **Push (reporter)** trigger and a **Git Status** action by default. Both apply under two conditions.
 
-    - Task created after both integrations.
-    - A single inbound and a single outbound integration matching the repository host.
+    - The task came into existence after both integrations.
+    - Exactly one inbound and one outbound integration exist for the repository host.
 
-    Other tasks need both added by hand.
+    Any other task needs both entries added manually.
 
-    - **Triggers -> New Trigger**: **Push (reporter)** and, for pull requests, **Pull Request (reporter)**, each with the inbound integration.
-    - **Actions -> New Action**: **Git Status** with the outbound integration.
+    - **Triggers -> New Trigger**: add **Push (reporter)** and, for pull requests, **Pull Request (reporter)**, each bound to the inbound integration.
+    - **Actions -> New Action**: add **Git Status** bound to the outbound integration.
 
 === "Declarative"
 
-    Declared tasks get no automatic trigger or action. Both belong in the task's `triggers` and `actions` lists.
+    Declaratively defined tasks ship without a trigger or action. Add both to the task's `triggers` and `actions` lists.
 
     ```nix
     services.gradient.state.tasks.app = {
@@ -160,41 +160,41 @@ Tasks connect the two integrations. Triggers point at the inbound integration, a
     };
     ```
 
-    1.  Trigger-level `integration`, naming the inbound integration. Branch and tag filters go into `config`, see [Trigger Types](../reference/state.md#trigger-types).
-    2.  Optional. Evaluations of pull requests, with fork pull requests waiting for maintainer approval.
-    3.  `config.integration`, naming the outbound integration.
+    1.  The `integration` field at trigger level points to the inbound integration. Put branch and tag filters into `config`, see [Trigger Types](../reference/state.md#trigger-types).
+    2.  Optional. Covers evaluations of pull requests. Fork pull requests stay pending until a maintainer gives approval.
+    3.  The `config.integration` field points to the outbound integration.
 
 ## Verify Deployment
 
-- Pushes start an evaluation within seconds.
-- Webhook deliveries on the Git host answer `200`.
-- Gradient's commit status visible on the Git host.
+- An evaluation starts within seconds after a push.
+- The Git host reports `200` for each webhook delivery.
+- The Git host shows a commit status from Gradient.
 
 ## Pull Requests
 
-| Action on the Git host | Effect |
+| Git host action | Result |
 |---|---|
-| Open or update a pull request | Evaluation of the pull request's head commit |
-| Comment `/gradient run` | New evaluation of the pull request |
-| Comment `/gradient approve` or approve the review | Release of a pull request from a fork waiting for maintainer approval |
+| Open or update a pull request | The head commit of the pull request get evaluated |
+| Comment `/gradient run` | A new evaluation of the pull request start |
+| Comment `/gradient approve` or approve the review | A pull request from a fork that waited for maintainer approval get released |
 
-The approval check is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers** (`require_approval` in `config`).
+The **Pull Request (reporter)** trigger include a setting called **Require maintainer approval for PRs from non-writers** (`require_approval` in `config`). This setting controls the approval check.
 
-Only repository writers can issue `/gradient` commands. Accepted commands get a 👀 reaction, rejected commands a 😕.
+Only repository writers can send `/gradient` commands. Accepted commands receive a 👀 reaction, rejected ones a 😕.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `401` in the Git host's delivery log | Secret mismatch. Enter the secret again on both sides (**Edit -> Webhook Secret** in Gradient) |
-| `403 forbidden_source_ip` | The Git host's address is missing from the integration's allowed source IPs |
-| `404` | Wrong project or integration name in the webhook URL, or an inbound integration without a secret |
-| `200`, but no evaluation | No task trigger is using this integration, or no task repository URL is matching |
-| No status on the commit | Task without **Git Status** action, or token without `write:repository` |
-| 😕 on a maintainer's `/gradient` comment | Bot account without admin access to the repository |
+| `401` in the Git host's delivery log | The secret on the two sides differ. Re-enter the secret on both sides (**Edit -> Webhook Secret** in Gradient) |
+| `403 forbidden_source_ip` | Add the Git host's address to the integration's allowed source IPs |
+| `404` | The webhook URL contain a wrong project or integration name, or the inbound integration lack a secret |
+| `200`, but no evaluation | No task trigger use this integration, or no task repository URL match |
+| No status on the commit | The task lack a **Git Status** action, or the token lack `write:repository` |
+| 😕 on a maintainer's `/gradient` comment | The bot account lack admin access to the repository |
 
 ## Next Steps
 
-- [Actions](actions.md): mail, web requests and flake update pull requests
-- [Declarative State](../reference/state.md): all task, trigger and action options
-- [Connect GitLab](gitlab.md): the same setup for GitLab
+- [Actions](actions.md) - send mail, make web requests and open flake update pull requests
+- [Declarative State](../reference/state.md) - every option for tasks, triggers and actions
+- [Connect GitLab](gitlab.md) - the same setup, adapted for GitLab

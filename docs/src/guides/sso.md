@@ -9,15 +9,15 @@ Sign-in through the company identity provider (Keycloak, Kanidm, Authentik, Okta
 
 ## 1. Register Gradient in the Provider
 
-Create an OIDC client with the settings below.
+Set up an OIDC client on the provider side. Gradient needs the following configuration.
 
 | Setting | Value |
 |---|---|
 | Redirect URL | `https://gradient.example.com/api/v1/auth/oidc/callback` |
 | Scopes | `openid`, `email`, `profile`, plus `groups` for team mapping |
-| PKCE | `S256`. Gradient is always sending PKCE |
+| PKCE | `S256`. Gradient always sends PKCE |
 
-Store the client secret as a file on the server.
+The client secret belongs in a file on the server.
 
 ## 2. Enable OIDC
 
@@ -32,13 +32,13 @@ services.gradient.oidc = {
 };
 ```
 
-1.  Gradient will read every endpoint from `<discoveryUrl>/.well-known/openid-configuration`.
-2.  `groups` is not in the default scopes. Add `groups` for [team mapping](#3-map-groups-to-teams) where the provider can offer the scope.
-3.  Hiding the username and password login. Leave out to offer both.
+1. All provider endpoints come from `<discoveryUrl>/.well-known/openid-configuration`.
+2. The `groups` scope is off by default. Providers that support it need `groups` here for [team mapping](#3-map-groups-to-teams).
+3. With `required = true`, the username and password form disappear. Omit it to keep both login methods.
 
 ## 3. Map Groups to Teams
 
-A [team](../concepts/teams.md) can follow one provider group. Grants of the team then decide the projects and caches of its members.
+Each [team](../concepts/teams.md) can follow one provider group. Team grants then control which projects and caches its members can access.
 
 === "UI"
 
@@ -56,11 +56,11 @@ A [team](../concepts/teams.md) can follow one provider group. Grants of the team
     ];
     ```
 
-Members of `acme-eng` join the team on each sign-in. Users without `acme-eng` in the claim leave the team on the next sign-in. Members added by hand stay.
+Users with `acme-eng` in their claim join the team at sign-in. Users without that group in the claim leave the team at their next sign-in. Hand-added members stay.
 
 ## 4. Provision with SCIM
 
-Optional. The provider can create, update and disable Gradient accounts before the first sign-in. Group changes apply at once.
+SCIM provisioning is optional. The identity provider can create, update and disable Gradient accounts before anyone signs in for the first time. Group changes take effect immediately.
 
 ```nix
 services.gradient.scim = {
@@ -71,34 +71,34 @@ services.gradient.scim = {
 services.gradient.state.teams.acme-eng.scim_group = "acme-eng";
 ```
 
-1.  Any random string, e.g. `openssl rand -hex 32`. The provider must send the same value as bearer token.
+1.  Any random string, e.g. `openssl rand -hex 32`. The provider sends this value as the bearer token.
 
-Set the SCIM base URL `https://gradient.example.com/scim/v2` and the bearer token in the provider. Enable pushing users, profile updates and groups.
+Configure the provider with the SCIM base URL `https://gradient.example.com/scim/v2` and the bearer token. Turn on pushing of users, profile updates and groups.
 
 | Provider action | Effect in Gradient |
 |---|---|
 | Add a user | A new passwordless account, claimed on the first OIDC sign-in |
 | Add to a group | Member of the team with that `scim_group` |
 | Remove from a group | Team membership removed |
-| Deactivate or delete | Sign-in blocked, history kept. `scim.hardDelete = true` is deleting the account |
+| Deactivate or delete | Sign-in blocked, history kept. `scim.hardDelete = true` deletes the account |
 
 ## Verify Deployment
 
-- The login page will show the provider's button.
-- A sign-in will land on the dashboard.
-- The user is now listed on the `acme-eng` team page, with the **Group** badge.
+- The provider button appears on the login page.
+- A successful sign-in lands on the dashboard.
+- The new user shows up on the `acme-eng` team page with the **Group** badge.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `An account already exists with this username or email` | A password account is holding the same name or email. Delete or rename the account, or sign in with the password |
-| No team after sign-in | The `groups` scope is missing, or the group name does not match the team's `oidc_group` |
-| `account is deactivated` | SCIM deactivated the account in the provider |
-| SCIM calls return `404` for a group | No team has the group as `scim_group` |
+| `An account already exists with this username or email` | A password account already holds that name or email. Delete the account, rename it, or sign in with the password instead |
+| No team after sign-in | The `groups` scope is missing from the request, or the group name does not match the team's `oidc_group` |
+| `account is deactivated` | SCIM deactivated this account at the provider |
+| SCIM calls return `404` for a group | No team lists that group as its `scim_group` |
 
 ## Next Steps
 
-- [Teams](../concepts/teams.md): grants, roles and team workers
-- [Declarative State](../concepts/declarative-state.md): teams, projects and members as NixOS options
-- [Configuration](../reference/configuration.md#oidc): every OIDC and SCIM option
+- [Teams](../concepts/teams.md) - grants, roles and team workers
+- [Declarative State](../concepts/declarative-state.md) - teams, projects and members as NixOS options
+- [Configuration](../reference/configuration.md#oidc) - all OIDC and SCIM options

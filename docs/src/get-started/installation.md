@@ -1,11 +1,11 @@
 # Installation
 
-A production instance with managed secrets, a chosen database, and TLS matching the network in front of the server. The steps below extend the [Quick Start](quick-start.md) configuration.
+This guide covers a production setup: managed secrets, a database of choice, and TLS that matches the network layer in front of the server. It builds on the [Quick Start](quick-start.md) configuration.
 
 **Requirements:**
 
-- A NixOS host configured through a flake, with the Gradient module added ([Quick Start, step 1](quick-start.md#1-flake-input))
-- PostgreSQL 18 or newer. The server will refuse to start against older versions.
+- A NixOS host managed by a flake with the Gradient module included ([Quick Start, step 1](quick-start.md#1-flake-input))
+- PostgreSQL 18 or newer. Older versions prevent the server from starting.
 
 ## 1. Public Binary Cache
 
@@ -22,7 +22,7 @@ nix.settings = {
 
 ## 2. Secrets
 
-Gradient needs two secrets, each 48 random bytes in base64.
+Gradient requires two secrets. Each one must contain 48 random bytes in base64.
 
 - `jwtFile`: key for signing login sessions.
 - `cryptFile`: key for encrypting secrets stored in the database.
@@ -66,10 +66,10 @@ Gradient needs two secrets, each 48 random bytes in base64.
     };
     ```
 
-Root can keep ownership of the files. The server will read them as systemd credentials.
+The server loads these files as systemd credentials. Leave ownership with root.
 
 !!! warning
-    Every secret stored in the database is unreadable without `cryptFile`. Back up `cryptFile` together with the database.
+    Without `cryptFile`, no secret in the database can be recovered. Back up `cryptFile` together with the database.
 
 ## 3. Database
 
@@ -80,7 +80,7 @@ Root can keep ownership of the files. The server will read them as systemd crede
     services.postgresql.package = pkgs.postgresql_18;
     ```
 
-    A PostgreSQL 18 cluster on the same host, with a `gradient` role and database.
+    This option runs PostgreSQL 18 on the same machine. A `gradient` role and a matching database get created automatically.
 
 === "External"
 
@@ -88,7 +88,7 @@ Root can keep ownership of the files. The server will read them as systemd crede
     services.gradient.database.urlFile = "/run/secrets/gradient-database-url";
     ```
 
-    The file must hold a connection URL such as `postgresql://gradient:<password>@db.example.com/gradient`.
+    Point this option at a file with a connection URL, for example `postgresql://gradient:<password>@db.example.com/gradient`.
 
 ## 4. Reverse Proxy and TLS
 
@@ -96,7 +96,7 @@ The server will handle the API, the worker protocol and the cache. A reverse pro
 
 === "nginx (default)"
 
-    Enabled by default, with a Let's Encrypt certificate.
+    This proxy runs by default and provisions a certificate through Let's Encrypt.
 
     ```nix
     services.gradient.domain = "gradient.example.com";
@@ -111,18 +111,18 @@ The server will handle the API, the worker protocol and the cache. A reverse pro
     };
     ```
 
-    1.  Used instead of nginx.
-    2.  An existing certificate from `security.acme.certs`. Caddy will request no certificate for this host.
+    1.  Use Caddy in place of nginx.
+    2.  Name of a certificate already defined in `security.acme.certs`. Caddy will request no certificate for this host.
 
 === "TLS terminated upstream"
 
-    A load balancer or Cloudflare will terminate TLS and forward plain HTTP.
+    A load balancer or Cloudflare can terminate TLS and pass plain HTTP to Gradient.
 
     ```nix
     services.gradient.reverseProxy.nginx.manageTls = false; # (1)!
     ```
 
-    1.  nginx will no longer request a certificate. `useTls` will stay `true`, and Gradient will still emit `https://` links and secure cookies.
+    1.  With this setting, nginx will request no certificate. `useTls` will stay `true`, and Gradient will still emit `https://` links and secure cookies.
 
 === "Own proxy"
 
@@ -136,7 +136,7 @@ The server will handle the API, the worker protocol and the cache. A reverse pro
     | everything else | static files from `${pkgs.gradient-frontend}/share/gradient-frontend` |
 
 !!! warning
-    `services.gradient.useTls = false` is only for plain HTTP end to end. Browsers then drop the session cookie behind any HTTPS proxy, and login will break.
+    Set `services.gradient.useTls = false` only for plain HTTP end to end. With an HTTPS proxy in the chain, browsers will drop the session cookie and login will fail.
 
 ## 5. Workers
 
@@ -145,14 +145,14 @@ The server will handle the API, the worker protocol and the cache. A reverse pro
 
 ## Verify Deployment
 
-- `https://gradient.example.com` shows the login page with a valid certificate.
-- `journalctl -u gradient-server` shows no database or secret errors.
+- The login page at `https://gradient.example.com` loads with a valid certificate.
+- `journalctl -u gradient-server` shows no errors about the database or secrets.
 
 ??? note "Crash Reports"
-    `services.gradient.sentry.enable = true` will send crash reports to the Gradient developers. Crash reports are off by default.
+    Set `services.gradient.sentry.enable = true` to send crash reports to the Gradient developers. This option is off by default.
 
 ??? note "Network Tuning for Fast or Distant Links"
-    A default deployment is fine without tuning. BBR and larger TCP buffers help on a high-bandwidth or high-latency link between workers and server.
+    A default deployment needs no tuning. On a high-bandwidth or high-latency link between workers and server, BBR and larger TCP buffers help.
 
     ```nix
     boot.kernel.sysctl = {
@@ -162,11 +162,11 @@ The server will handle the API, the worker protocol and the cache. A reverse pro
     };
     ```
 
-    Jumbo frames save little CPU. Jumbo frames can hang large transfers on an MTU mismatch at any hop. Enable them only where every hop is under control.
+    Jumbo frames save little CPU. An MTU mismatch at any hop can hang large transfers. Enable them only where every hop is under your control.
 
 ## Next Steps
 
-- [First Project](first-project.md): the first user, project and build
-- [Add a Remote Worker](../guides/remote-worker.md): build machines beyond the server host
-- [Configuration](../reference/configuration.md): every server and worker option
-- [Options search](https://wavelens.github.io/gradient-search): all NixOS options
+- [First Project](first-project.md) walks through the first user, project and build
+- [Add a Remote Worker](../guides/remote-worker.md) covers build machines outside the server host
+- [Configuration](../reference/configuration.md) lists all server and worker options
+- The [options search](https://wavelens.github.io/gradient-search) indexes every NixOS option

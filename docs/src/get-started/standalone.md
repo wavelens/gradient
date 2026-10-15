@@ -1,6 +1,6 @@
 # Standalone
 
-A complete Gradient on a single host for trying Gradient on a personal repository. Server, web UI, PostgreSQL and a worker share a container or VM.
+Standalone mode runs the whole Gradient stack on one machine. This setup suits personal projects and evaluation. Server, web UI, PostgreSQL and worker all live in a single container or VM.
 
 **Requirements:**
 
@@ -19,7 +19,7 @@ A complete Gradient on a single host for trying Gradient on a personal repositor
       ghcr.io/wavelens/gradient-standalone
     ```
 
-    Systemd and the Nix build sandbox both run inside the container. Both need `--privileged`. The boot output is not in `docker logs`. The tabs in step 2 read the password. The port is open on `127.0.0.1` only. Projects, the cache and every build stay in the `gradient` volume after a restart.
+    Run the container with `--privileged`. Systemd and the Nix build sandbox both run inside it and need that flag. The boot output does not appear in `docker logs`. Step 2 shows the password in its tabs. The port binds to `127.0.0.1` only. The `gradient` volume stores projects, the cache and every build across a restart.
 
 === "Nix"
 
@@ -27,24 +27,26 @@ A complete Gradient on a single host for trying Gradient on a personal repositor
     nix run github:wavelens/gradient/latest#standalone
     ```
 
-    A QEMU VM on the terminal, logged in as root. Projects, the cache and every build stay in the disk image `gradient.qcow2` in the current directory after a restart. Stop the VM with `Ctrl-a x`.
+    This runs a QEMU VM in the terminal with a root login. Projects, the cache and every build persist in the disk image `gradient.qcow2` in the current directory across a restart. Stop the VM with `Ctrl-a x`.
 
 ??? note "Image Provenance"
-    Release images have a signed build provenance and an SBOM. The GitHub CLI can check the provenance against the repository.
+    Release images come with a signed build provenance and an SBOM. The GitHub CLI can verify the provenance against the repository.
 
     ```sh
     gh attestation verify oci://ghcr.io/wavelens/gradient-standalone:latest -R wavelens/gradient
     ```
 
-The first boot can take a minute for the PostgreSQL database and the Gradient secrets.
+The first boot can take a minute. PostgreSQL has to initialize, and Gradient generates its secrets.
 
 ## 2. Log In
 
-Gradient can generate a random admin password on the first boot. Every boot can print the password in this line.
+On first boot, Gradient creates a random password for the `admin` account. Each boot prints that password in this line:
 
 ```text
 Gradient is running at http://localhost:8080 - log in with admin / <password>
 ```
+
+To read the current password directly from disk, run one of these commands.
 
 === "Docker"
 
@@ -58,19 +60,19 @@ Gradient is running at http://localhost:8080 - log in with admin / <password>
     cat /var/lib/gradient-standalone/admin-password
     ```
 
-Open `http://localhost:8080` and log in as `admin`. Self-registration is unavailable.
+Then open `http://localhost:8080` and sign in as `admin`. New users cannot register themselves.
 
 ## 3. Build a Repository
 
-Follow [First Project](first-project.md) from step 2 for a cache, a project and a task. The worker inside the standalone instance can join every new project on its own.
+Set up a cache, a project and a task by following [First Project](first-project.md) from step 2 onward. The standalone instance's worker joins each new project automatically.
 
 !!! tip "Private Repositories"
-    Add the project's public SSH key from **Settings -> SSH Key** as a deploy key on the Git host.
+    On the Git host, register the project's public SSH key from **Settings -> SSH Key** as a deploy key.
 
 ## Verify Deployment
 
-- `http://localhost:8080` shows the login page.
-- The builds show as completed on the evaluation page after the first evaluation.
+- The login page loads at `http://localhost:8080`.
+- The evaluation page lists the builds as completed once the first evaluation has run.
 
 ## Upgrade
 
@@ -81,7 +83,7 @@ Follow [First Project](first-project.md) from step 2 for a cache, a project and 
     docker rm -f gradient
     ```
 
-    Then start the container again with the command from step 1. The data is in the `gradient` volume.
+    Start the container again with the command from step 1. All data stays in the `gradient` volume.
 
 === "Nix"
 
@@ -90,11 +92,11 @@ Follow [First Project](first-project.md) from step 2 for a cache, a project and 
     ```
 
 !!! warning
-    The standalone instance has plain HTTP, a single worker and no backups. Deploy with the NixOS module from the [Quick Start](quick-start.md) for a team.
+    The standalone instance uses plain HTTP, a single worker and no backups. To run it for a team, deploy with the NixOS module from the [Quick Start](quick-start.md).
 
 ## Next Steps
 
-- [First Project](first-project.md): a cache, a project and the first green build
-- [Quick Start](quick-start.md): NixOS deployment with TLS
-- [Remote Worker](../guides/remote-worker.md): more build capacity
-- [Share a Cache](../guides/share-a-cache.md): build outputs on other machines
+- [First Project](first-project.md): set up a project, add a cache, and run the first successful build
+- [Quick Start](quick-start.md): deploy on NixOS with TLS enabled
+- [Remote Worker](../guides/remote-worker.md): add extra build capacity
+- [Share a Cache](../guides/share-a-cache.md): make build outputs available on other machines

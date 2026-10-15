@@ -1,6 +1,6 @@
 # Closure View
 
-The origin of a build output's size, as a Sankey diagram of the closure. Useful for trimming ISOs, netboot images and container layers. **View Closure** on an entry point's metrics page will open the closure of the newest build.
+The Closure View show where the size of a build output originate, drawn as a Sankey diagram of the closure. Use it to trim ISOs, netboot images and container layers. Open the closure of the newest build with **View Closure** on an entry point's metrics page.
 
 ![Closure view](../assets/screenshots/closure_view.png)
 
@@ -9,16 +9,18 @@ The origin of a build output's size, as a Sankey diagram of the closure. Useful 
 | Header | Total closure size, closure type, truncation warning | Zoom in, zoom out, fit to screen |
 | Diagram | Packages as bars, flowing from dependencies on the left into the root on the right | Scroll to zoom, drag to pan |
 
-A bar's height is the package's closure size. This size is the package's own NAR plus everything the package pulled in. The tallest bars are the best candidates to remove.
+A bar's height match the package's closure size. That size include the package's own NAR plus everything the package pulled in. The tallest bars be the best candidates to remove.
 
 ## Runtime and Build Closure
 
-| Closure | Contains | Open with |
-|---|---|---|
-| Runtime | Store paths referenced by the outputs, required at runtime | Default |
-| Build | Every derivation needed to build the output | `?type=build` in the URL |
+Two closure types exist:
 
-The runtime closure can only cover outputs already in the cache.
+| Closure | Contents | How to view |
+|---|---|---|
+| Runtime | Store paths that the outputs reference and that the system needs at runtime | Default view |
+| Build | All derivations involved in building the output | Append `?type=build` to the URL |
+
+Only outputs present in the cache can have a runtime closure.
 
 ## Large Closures
 
@@ -28,5 +30,5 @@ The runtime closure can only cover outputs already in the cache.
 
 ## Related
 
-- [Evaluations and Builds](../concepts/evaluations-and-builds.md): entry points and the build model
-- [API](../reference/api.md#examples): the closure endpoints for scripts
+- [Evaluations and Builds](../concepts/evaluations-and-builds.md): entry points and how the build model works
+- [API](../reference/api.md#examples): closure endpoints available in scripts

@@ -9,7 +9,7 @@ Evaluations on every push and merge request. Commit statuses back on GitLab.
 
 ## Inbound and Outbound
 
-Gradient and GitLab exchange data in two directions. Each direction is a separate integration of the project.
+Data flows between GitLab and Gradient in both directions. Each direction forms its own project integration.
 
 ```mermaid
 flowchart LR
@@ -29,33 +29,33 @@ flowchart LR
 | Covers | Evaluations on push, merge request and release. `/gradient` comment commands | Commit statuses. Reactions to `/gradient` comments. Writer check of merge request authors. [Flake update](flake-updates.md) merge requests |
 | Without | GitLab events never reach Gradient | No status on commits. `/gradient` comments ignored. All merge request authors count as non-writers |
 
-- A single inbound integration can receive webhooks from all repositories of the project's tasks. Incoming events match tasks by the `owner/repo` part of the repository URL.
-- Outbound calls act as the token's account. Statuses and comments appear under that account's name.
-- Writer checks and comment reactions use the outbound integration of the task's **Git Status** action.
+- One inbound integration handles webhooks from every repository used by the project's tasks. Events get matched to tasks through the `owner/repo` portion of the repository URL.
+- Outbound requests run under the token's account. Statuses and comments show up under that account's name.
+- Writer checks and comment reactions rely on the outbound integration tied to the task's **Git Status** action.
 
 ## 1. Create the Integrations
 
 ### Access Token
 
-Project and group access tokens come with their own bot user on GitLab. Group tokens cover all projects of the group.
+GitLab project and group access tokens each create a bot user. A group token applies to every project in that group.
 
 | Setting | Value |
 |---|---|
-| Where | **Settings -> Access tokens -> Add new token** of the GitLab project or group |
-| Role | **Developer**. Writer checks treat Developer and above as writers |
+| Where | **Settings -> Access tokens -> Add new token** in the GitLab project or group |
+| Role | **Developer**. Writer checks count Developer and higher as writers |
 | Scopes | `api` |
 
-A personal access token of a dedicated account also works. The account then needs the Developer role on each project.
+A personal access token from a dedicated account works as an alternative. That account needs the Developer role on each project.
 
 ### Integrations
 
 === "UI"
 
-    Open **Integrations -> New Integration** in the project twice, once per kind.
+    Create two integrations in the project under **Integrations -> New Integration**, one of each kind.
 
     | Kind | Fields |
     |---|---|
-    | Inbound | Name, **Git Host** GitLab and a **Webhook Secret**. The refresh button can generate a secret. The secret is visible only once, copy it right away. Created integrations display the **Webhook URL**. |
+    | Inbound | Name, **Git Host** GitLab and a **Webhook Secret**. The refresh button generates a secret. The secret shows only once, so copy it immediately. Created integrations show the **Webhook URL**. |
     | Outbound | Name, **Git Host** GitLab, **Endpoint URL** (e.g. `https://gitlab.com`, without `/api/v4`) and the **Access Token** |
 
 === "Declarative"
@@ -88,7 +88,7 @@ A personal access token of a dedicated account also works. The account then need
 
 ## 2. Add the Webhook on GitLab
 
-Open **Settings -> Webhooks -> Add new webhook** in the GitLab project (or group).
+In the GitLab project or group, go to **Settings -> Webhooks -> Add new webhook**.
 
 | Field | Value |
 |---|---|
@@ -96,27 +96,27 @@ Open **Settings -> Webhooks -> Add new webhook** in the GitLab project (or group
 | Secret token | The secret from step 1 |
 | Trigger | **Push events**, **Tag push events**, **Comments**, **Merge request events**, **Releases events** |
 
-A push-only webhook can never deliver merge requests or the `/gradient` comment commands.
+Merge request events and the `/gradient` comment commands need their own triggers. A push-only webhook cannot deliver them.
 
 ## 3. Wire the Task
 
-Tasks connect the two integrations. Triggers point at the inbound integration, actions at the outbound integration.
+A task links the two integrations: triggers use the inbound one, actions use the outbound one.
 
 === "UI"
 
-    New tasks get a **Push (reporter)** trigger and a **Git Status** action automatically. Two conditions apply.
+    A new task receives a **Push (reporter)** trigger and a **Git Status** action on its own. Two requirements must hold.
 
-    - Task created after both integrations.
-    - A single inbound and a single outbound integration matching the repository host.
+    - The task came into existence after both integrations.
+    - Exactly one inbound and one outbound integration match the repository host.
 
-    Other tasks need both added by hand.
+    In all other cases, add trigger and action by hand.
 
-    - **Triggers -> New Trigger**: **Push (reporter)** and, for merge requests, **Pull Request (reporter)**, each with the inbound integration.
-    - **Actions -> New Action**: **Git Status** with the outbound integration.
+    - **Triggers -> New Trigger**: add **Push (reporter)**, plus **Pull Request (reporter)** for merge requests. Each points at the inbound integration.
+    - **Actions -> New Action**: add **Git Status** pointing at the outbound integration.
 
 === "Declarative"
 
-    Declared tasks get no automatic trigger or action. Both belong in the task's `triggers` and `actions` lists.
+    A declared task ships without any trigger or action. Define both in the task's `triggers` and `actions` lists.
 
     ```nix
     services.gradient.state.tasks.app = {
@@ -137,40 +137,40 @@ Tasks connect the two integrations. Triggers point at the inbound integration, a
     };
     ```
 
-    1.  Trigger-level `integration`, naming the inbound integration. Branch and tag filters go into `config`, see [Trigger Types](../reference/state.md#trigger-types).
-    2.  Optional. Evaluations of merge requests, with fork merge requests waiting for maintainer approval.
-    3.  `config.integration`, naming the outbound integration.
+    1.  The `integration` field on the trigger names the inbound integration. Branch and tag filters belong in `config`, see [Trigger Types](../reference/state.md#trigger-types).
+    2.  Optional. Covers merge request evaluations, with fork merge requests held until a maintainer approves them.
+    3.  `config.integration` names the outbound integration.
 
 ## Verify Deployment
 
-- Pushes start an evaluation within seconds.
-- A `200` delivery on the webhook's **Settings -> Webhooks -> Edit -> Recent events** page.
-- Gradient's pipeline status visible on the GitLab commit.
+- A push to GitLab starts an evaluation within seconds.
+- The webhook logs a `200` delivery on the **Settings -> Webhooks -> Edit -> Recent events** page.
+- The GitLab commit shows the pipeline status from Gradient.
 
 ## Merge Requests
 
 | Action on GitLab | Effect |
 |---|---|
-| Open or update a merge request | Evaluation of the merge request's head commit |
-| Comment `/gradient run` | New evaluation of the merge request |
-| Comment `/gradient approve` | Release of a merge request from a fork waiting for maintainer approval |
+| Open or update a merge request | Evaluate the head commit of that merge request |
+| Comment `/gradient run` | Trigger a new evaluation of the merge request |
+| Comment `/gradient approve` | Release a fork-based merge request that waits on maintainer approval |
 
-The approval check is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers** (`require_approval` in `config`). Review approvals on GitLab trigger no webhook. The comment is the only way to approve.
+The **Pull Request (reporter)** trigger has an option called **Require maintainer approval for PRs from non-writers** (`require_approval` in `config`). GitLab does not fire a webhook when a reviewer approves a merge request through the review UI. A `/gradient approve` comment therefore remains the only way to grant approval.
 
-Only project members with the Developer role or above can issue `/gradient` commands. Accepted commands get a 👀 reaction, rejected commands a 😕.
+Only project members with the Developer role or higher can use `/gradient` commands. Accepted commands get a 👀 reaction, rejected ones a 😕.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `401` in the webhook's recent events | Secret mismatch. Enter the secret again on both sides (**Edit -> Webhook Secret** in Gradient) |
-| `403 forbidden_source_ip` | GitLab's address is missing from the integration's allowed source IPs |
-| `404` | Wrong project or integration name in the webhook URL, or an inbound integration without a secret |
-| `200`, but no evaluation | No task trigger is using this integration, or no task repository URL is matching |
-| No status on the commit | Task without **Git Status** action, or token without the `api` scope or the Developer role |
+| `401` in the webhook's recent events | The secret does not match. Re-enter it on both sides (**Edit -> Webhook Secret** in Gradient) |
+| `403 forbidden_source_ip` | The integration's allowed source IPs do not include the GitLab address |
+| `404` | The webhook URL contains a wrong project or integration name, or the inbound integration lacks a secret |
+| `200`, but no evaluation | No task trigger uses this integration, or no task repository URL matches |
+| No status on the commit | The task lacks a **Git Status** action, or the token lacks the `api` scope or the Developer role |
 
 ## Next Steps
 
-- [Actions](actions.md): mail, web requests and flake update merge requests
-- [Declarative State](../reference/state.md): all task, trigger and action options
-- [Connect Gitea or Forgejo](gitea.md): the same setup for Gitea and Forgejo
+- [Actions](actions.md) - send mail, make web requests and open flake update merge requests
+- [Declarative State](../reference/state.md) - the full reference for tasks, triggers and actions
+- [Connect Gitea or Forgejo](gitea.md) - use this setup with Gitea and Forgejo as well

@@ -1,11 +1,11 @@
 # Build over SSH
 
-The Gradient cache as an `ssh-ng://` store. Paths go in and out with `nix copy`. Builds from `nixos-rebuild --build-host` take place on the CI workers.
+Gradient exposes its cache as an `ssh-ng://` store. `nix copy` moves store paths in and out. CI workers run builds started with `nixos-rebuild --build-host`.
 
 **Requirements:**
 
 - A project with a cache subscription and a worker, see [First Project](../get-started/first-project.md)
-- The `TriggerEvaluation` permission in the project for copying in and building, see [Members and Roles](../ui/members-and-roles.md)
+- The `TriggerEvaluation` permission on the project, needed for copying paths in and building, see [Members and Roles](../ui/members-and-roles.md)
 
 ## 1. Enable the SSH Server
 
@@ -21,19 +21,21 @@ services.gradient.ssh = {
 
 ## 2. Add a Key
 
-**Settings** -> **SSH Keys** -> **Add SSH Key** can take an OpenSSH public key line.
+Paste an OpenSSH public key line into **Settings** -> **SSH Keys** -> **Add SSH Key**.
+
+Generate a key and print the public part:
 
 ```sh
 ssh-keygen -t ed25519 -f ~/.ssh/gradient -C laptop
 cat ~/.ssh/gradient.pub
 ```
 
-- Keys belong to their owner only.
-- The SSH user name is the project name. The key can open all projects of its user.
+- Each key has a single owner.
+- The SSH user name and the project name share one value. A key can open every project of its user.
 
 ## 3. Add the Client Module
 
-The `client` module can point SSH at the server and register Gradient as a Nix remote builder. The CI workers then take over builds for the listed systems.
+The `client` module registers Gradient as a Nix remote builder over SSH. CI workers then take over builds for every system listed in the configuration.
 
 ```nix
 # flake.nix
@@ -57,8 +59,8 @@ nix.gradient-ssh = {
 };
 ```
 
-1.  The project name is the SSH user. Store URLs work without `myproject@`.
-2.  The Nix daemon can read the key as `root`. Plain `nix copy` and `nixos-rebuild` are using the calling user's access to the key.
+1.  The SSH user name matches the project name. Store URLs work without the `myproject@` prefix.
+2.  The Nix daemon must be able to read the key as `root`. Plain `nix copy` and `nixos-rebuild` use the calling user's access to the key instead.
 
 ## 4. Use the Store
 
@@ -70,15 +72,15 @@ nix.gradient-ssh = {
 | Build host | `nixos-rebuild switch --build-host ssh-ng://myproject@ci.example.com` |
 | Remote store | `nix build --eval-store auto --store ssh-ng://myproject@ci.example.com .#hello` |
 
-- Gradient can answer reads from the project's subscribed caches.
-- Copied paths land in the project's caches with a signature, like build outputs.
-- Build requests from a user share an evaluation in the project's **Build Requests** task, across SSH connections.
-- New requests add their entry points to the running evaluation of their user.
-- Requests after the evaluation finished start a new evaluation.
-- Builds keep running after a disconnect. Evaluations end with their last build.
-- Missing systems appear in the Nix output while no connected worker can build them.
-- Aborts of the evaluation stop all unfinished builds with an error, e.g. after [5 minutes without a matching worker](../concepts/evaluations-and-builds.md).
-- Build logs stream back like logs of local builds. Log lines of `nix build -L` start with the package name.
+- Read requests can be answered from the caches the project subscribed to.
+- Copied paths enter the project's caches with a signature, like build outputs.
+- All build requests from a user share one evaluation in the project's **Build Requests** task, even across several SSH connections.
+- Each new request adds its entry points to the evaluation already running for that user.
+- Once the evaluation has finished, further requests start a new one.
+- Builds continue after a disconnect. Evaluations finish together with their last build.
+- The Nix output lists missing systems as long as no connected worker can build them.
+- Aborting an evaluation fails every unfinished build with an error, e.g. after [5 minutes without a matching worker](../concepts/evaluations-and-builds.md).
+- Build logs stream back like local build logs. Log lines of `nix build -L` start with the package name.
 
 ## Verify Deployment
 
@@ -90,9 +92,9 @@ Expected output: the store URL and `Trusted: 0`. Build requests appear in the UI
 
 ## Limits
 
-- Gradient is not supporting `ssh://`. Use the `ssh-ng://` prefix with `--build-host`.
-- Gradient is not accepting content-addressed derivations.
-- Pass `--eval-store auto` to `nix build --store`. Gradient is not taking evaluation writes.
+- `ssh://` has no support in Gradient. Use `--build-host` with the `ssh-ng://` prefix instead.
+- Content-addressed derivations have no support in Gradient.
+- Pass `--eval-store auto` to `nix build --store`. Gradient rejects evaluation writes.
 
 ## Next Steps
 

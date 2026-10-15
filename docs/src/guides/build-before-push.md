@@ -1,6 +1,6 @@
 # Build Before Pushing
 
-Uncommitted changes built on the CI workers with `gradient build`. A `result` link at the end, like `nix build`. No builders and no Nix evaluation on the laptop.
+Push work to CI workers and build there with `gradient build`. The workers build uncommitted changes. The output shows a `result` link at the end, the same way `nix build` does. The laptop needs no builders and no Nix evaluation.
 
 **Requirements:**
 
@@ -9,31 +9,31 @@ Uncommitted changes built on the CI workers with `gradient build`. A `result` li
 
 ## 1. Build
 
-`gradient build` must start inside the Git working tree.
+Run `gradient build` from inside the Git working tree.
 
 ```sh
 gradient build .#hello
 ```
 
-- The CLI will upload the tracked files, including uncommitted changes.
-- Unchanged files are never sent twice.
-- A worker will evaluate the upload under the project's `build-request` task.
-- The workers are building the result.
-- Logs are streaming until every build is finished.
+- The CLI uploads all tracked files, including uncommitted changes.
+- Files without changes skip a second upload.
+- A worker evaluates the upload as the project's `build-request` task.
+- Workers produce the build results.
+- Logs stream until every build finishes.
 
 | Target | Evaluated |
 |---|---|
 | none | The wildcard of the `build-request` task |
-| `.#hello` | `packages.<system>.hello`, with `--system` picking another system |
+| `.#hello` | `packages.<system>.hello`, with `--system` selecting a different system |
 | `checks.x86_64-linux.*` | Any [wildcard](../reference/wildcards.md) |
 
 ## 2. Use the Result
 
-The primary output will land in a `result` symlink, fetched from the project cache into the local store. `--no-link` can skip the link.
+The build output lands in a `result` symlink. The symlink points into the local store, populated from the project cache. Pass `--no-link` to skip the link creation.
 
-The local Nix daemon will only accept the fetched paths with the cache's public key in `trusted-public-keys`. [Share a Cache](share-a-cache.md) has the setup. Users in `trusted-users` need no key.
+The local Nix daemon trusts fetched paths only if the cache public key sits in `trusted-public-keys`. Setup steps live in [Share a Cache](share-a-cache.md). Users in `trusted-users` need no key.
 
-The [static binary](../reference/cli.md#install) has no Nix support. This binary will download the build products into a `result/` folder instead.
+The [static binary](../reference/cli.md#install) has no Nix support. This binary downloads build products into a `result/` folder instead.
 
 ## Override Inputs
 
@@ -41,11 +41,9 @@ The [static binary](../reference/cli.md#install) has no Nix support. This binary
 gradient build .#hello --override-input nixpkgs github:NixOS/nixpkgs/nixos-unstable
 ```
 
-The override will apply to this run only. The flag is repeatable for more inputs.
+The `--override-input` flag replaces a flake input for a single build. Pass it once per input. Workers perform the evaluation, so the replacement must point to a remote source such as `github:`, `git+ssh://` or `https://`. Local paths do not work.
 
-Workers handle the evaluation. The reference must be remote (`github:`, `git+ssh://`, `https://`, ...), never a local path.
-
-[Update Flake Inputs](flake-updates.md) can cover an override on every run.
+To apply an override on every build, see [Update Flake Inputs](flake-updates.md).
 
 ## Background Evaluations
 
@@ -56,19 +54,19 @@ gradient watch "$eval"
 
 | Command | Effect |
 |---|---|
-| `gradient build -b` | Printing the evaluation ID and returning at once |
-| `gradient watch <evaluation>` | A live dashboard with status, builds and a merged log. `f` to follow, `q` to quit |
-| `gradient logs <evaluation>` | The full log of every build, live or finished |
+| `gradient build -b` | Run in the background. The command prints the evaluation ID and exits immediately |
+| `gradient watch <evaluation>` | Open a live dashboard with status, builds and a merged log. Press `f` to follow output, `q` to quit |
+| `gradient logs <evaluation>` | Print the complete log of all builds, whether live or finished |
 
 ## Verify Deployment
 
-The command will end with every build completed and `result` pointing into `/nix/store`. The UI will list the run under the project's **Build Requests** task.
+A successful run ends with all builds finished and `result` resolved to a path in `/nix/store`. The run also appears in the project's **Build Requests** task list in the UI.
 
 ## Limits
 
-- The upload can hold only files tracked by Git. Untracked files are left out.
-- `http.maxSourceUploadSize` can cap the upload, 512 MiB by default.
-- Private `git+ssh://` inputs are using the project's SSH key.
+- Uploads contain only Git-tracked files. Untracked files stay out.
+- `http.maxSourceUploadSize` caps the upload size. The default is 512 MiB.
+- Private `git+ssh://` inputs authenticate with the project's SSH key.
 
 ## Next Steps
 

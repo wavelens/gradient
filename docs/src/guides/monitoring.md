@@ -1,6 +1,6 @@
 # Monitor Gradient
 
-Server metrics in Prometheus or any OpenTelemetry collector: workers, queue, build and evaluation counts, cache size and HTTP traffic. The [Job Board](../ui/job-board.md) can show the same data inside Gradient. This guide is for feeding existing dashboards and alerts.
+Gradient reports server metrics that Prometheus or any OpenTelemetry collector can consume. The metrics cover workers, the queue, build and evaluation counts, cache size and HTTP traffic. The [Job Board](../ui/job-board.md) can display the same data inside Gradient. Use the setup below to feed dashboards and alerts that already exist.
 
 **Requirements:**
 
@@ -25,8 +25,8 @@ services.prometheus.scrapeConfigs = [{
 }];
 ```
 
-1.  Any random string, e.g. `openssl rand -base64 32`. `GET /metrics` will answer `404` without the file.
-2.  The bundled reverse proxy does not forward `/metrics`. The scraper must talk to `listenAddr` and `port` directly.
+1. Generate a random secret, for example with `openssl rand -base64 32`. Without this file, a `GET /metrics` request can receive a `404` response.
+2. The bundled reverse proxy does not forward `/metrics`. The scraper must connect to `listenAddr` and `port` directly.
 
 The endpoint rate limit will refill one request per second, with a burst of 5.
 
@@ -39,12 +39,12 @@ services.gradient.metrics.otlp = {
 };
 ```
 
-1.  OTLP over HTTP with protobuf, including the `/v1/metrics` path. The service name is `gradient`.
+1. The endpoint uses OTLP over HTTP with protobuf encoding and must include the `/v1/metrics` path. Metrics get reported under the service name `gradient`.
 
 ## Verify Deployment
 
-- Prometheus: the `gradient` target will show **UP**. `gradient_workers_connected` will return the number of connected workers.
-- OpenTelemetry: the server log will show `OTLP metric push enabled`. The collector will receive `gradient_jobs_pending`.
+- Prometheus: confirm the `gradient` target shows **UP**. The `gradient_workers_connected` metric reports the count of connected workers.
+- OpenTelemetry: check the server log for `OTLP metric push enabled`. The collector then receives `gradient_jobs_pending`.
 
 ## Metrics
 
@@ -77,5 +77,5 @@ groups:
 
 ## Next Steps
 
-- [Job Board](../ui/job-board.md): scheduler scores, worker load and build cost
-- [Configuration](../reference/configuration.md#metrics): retention and sampling intervals
+- [Job Board](../ui/job-board.md) shows scheduler scores, worker load and build cost.
+- The [Configuration](../reference/configuration.md#metrics) reference covers retention and sampling intervals.

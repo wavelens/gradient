@@ -1,6 +1,6 @@
 # Manage Gradient with Nix
 
-Users, projects, tasks and caches declared under `services.gradient.state`, starting from a setup built in the UI. [Declarative State](../concepts/declarative-state.md) can explain how declared and UI-created entities live side by side.
+A Nix setup can declare users, projects, tasks and caches under `services.gradient.state`. A good starting point is a setup created in the UI. See [Declarative State](../concepts/declarative-state.md) for how declared and UI-created entities coexist.
 
 **Requirements:**
 
@@ -18,7 +18,7 @@ The file `state.nix` will hold every user, project, task, cache, custom role, AP
 
 ## 2. Fill In the Secrets
 
-Secrets are stored hashed or encrypted. The export will return every `*_file` field as `null`. Each field must point at a secret file on the server.
+The export stores secrets in hashed or encrypted form. Every `*_file` field comes back as `null` and needs to point at a secret file on the server.
 
 | Field | Content | Generate |
 |---|---|---|
@@ -31,7 +31,7 @@ Secrets are stored hashed or encrypted. The export will return every `*_file` fi
 | `tasks.<name>.actions.*.config.token_file` | Web request token | `openssl rand -hex 32` |
 
 !!! tip "Superuser Through OIDC"
-    A user with `superuser = true` and no `password_file` will become the superuser on the first OIDC sign-in with a matching username or email.
+    On the first OIDC sign-in with a matching username or email, a user with `superuser = true` and no `password_file` becomes the superuser.
 
 ## 3. Apply
 
@@ -39,18 +39,18 @@ Secrets are stored hashed or encrypted. The export will return every `*_file` fi
 services.gradient.state = import ./state.nix;
 ```
 
-The NixOS build will check the state with `state.validate`, on by default. Unknown users or projects and broken references fail the build, not the server start.
+The NixOS build runs `state.validate` on the state. This check is on by default. Unknown users, unknown projects and broken references cause a build failure, not a failure at server start.
 
 !!! warning
-    `state.delete` is on by default. Gradient will delete users, projects and caches from the database once they are removed from the configuration.
+    `state.delete` is on by default. Once users, projects or caches disappear from the configuration, Gradient removes them from the database.
 
 ## Verify Deployment
 
-- `journalctl -u gradient-server` will show `State configuration validated successfully` for the new state.
-- Declared entities show their form fields disabled in the UI, with the hint **Managed by Nix - edit via declarative config**.
+- `journalctl -u gradient-server` shows `State configuration validated successfully` after the new state loads.
+- Declared entities appear in the UI with their form fields disabled and the hint **Managed by Nix - edit via declarative config**.
 
 ## Next Steps
 
-- [State reference](../reference/state.md): every option with examples
-- [Add a Remote Worker](remote-worker.md): workers declared next to their projects
-- [Set Up Single Sign-On](sso.md): roles from OIDC and SCIM groups
+- [State reference](../reference/state.md) - all options, each with an example
+- [Add a Remote Worker](remote-worker.md) - declare workers alongside their projects
+- [Set Up Single Sign-On](sso.md) - map OIDC and SCIM groups to roles

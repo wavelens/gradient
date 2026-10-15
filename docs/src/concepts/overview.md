@@ -1,6 +1,6 @@
 # Overview
 
-CI in Gradient is organised around **projects**. Projects hold **tasks**. Tasks turn a flake into **evaluations**. Evaluations split into **builds**. **Workers** run the builds, and the outputs end up in **caches**.
+CI in Gradient is organised around **projects**. Projects hold **tasks**. Tasks turn a flake into **evaluations**. Evaluations split into **builds**. **Workers** execute the builds, and the outputs end up in **caches**.
 
 ```mermaid
 flowchart LR

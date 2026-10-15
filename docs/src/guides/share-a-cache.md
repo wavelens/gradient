@@ -9,7 +9,7 @@ One cache, used by machines, other projects and other people.
 
 ## 1. Use the Cache on a Machine
 
-The cache page will show the substituter URL and the public key.
+The cache page displays two values: the substituter URL and the public key.
 
 ```nix
 nix.settings = {
@@ -29,7 +29,7 @@ Public caches need nothing more. Private caches need an API key from **Settings 
       --server https://gradient.example.com --cache main --token <api key>
     ```
 
-    The command will write the entry to `/etc/nix/netrc`.
+The command stores the entry in `/etc/nix/netrc`.
 
 === "Declarative"
 
@@ -45,18 +45,18 @@ Public caches need nothing more. Private caches need an API key from **Settings 
     };
     ```
 
-    1.  The default `nix.settings.netrc-file`. Gradient will ignore the login and read the password as the API key.
+1.  The default `nix.settings.netrc-file`. Gradient can ignore the login field and read the API key from the password field.
 
 ## 2. Share with Another Project
 
-Subscribed projects push their outputs to the cache. The project is also substituting from the cache.
+A subscribed project both pushes build outputs to the cache and pulls packages from it.
 
 === "UI"
 
-    Open **Settings -> Cache Subscriptions -> Subscribe to Cache** in the other project.
+    In the other project, go to **Settings -> Cache Subscriptions -> Subscribe to Cache**.
 
-    - The subscription is active at once with the Admin role on both sides.
-    - Any other subscription will wait as a request, marked **Pending approval**. A cache admin can approve or deny the request under **Subscriptions** on the cache page.
+    - With the Admin role on both sides, the subscription activate at once.
+    - Any other subscription wait as a request, marked **Pending approval**. A cache admin can approve or deny requests under **Subscriptions** on the cache page.
 
 === "Declarative"
 
@@ -64,18 +64,18 @@ Subscribed projects push their outputs to the cache. The project is also substit
     services.gradient.state.caches.main.projects = [ "acme" "widgets" ];
     ```
 
-    Declared subscriptions skip the approval.
+    Declared subscriptions skip the approval step.
 
 ## 3. Invite Members
 
-Members get a role on the cache itself, independent of any project.
+Roles on a cache belong to members of the cache itself. Project roles do not carry over.
 
 === "UI"
 
-    Open **Members & Roles -> Add Member** on the cache page. Enter a user name and a role. The invitee can accept on the **My Invites** page under **Settings**. Access is granted only after accepting.
+    On the cache page, open **Members & Roles -> Add Member**. Enter a user name and a role. The invited user accepts the invite on the **My Invites** page under **Settings**. Cache access only begins after acceptance.
 
-    - Invitations expire after 7 days.
-    - The invitee will also receive a mail with a link once [mail](../reference/configuration.md#email) is configured.
+    - Invites expire after 7 days.
+    - With [mail](../reference/configuration.md#email) configured, the invitee also gets an email with a link.
 
 === "Declarative"
 
@@ -86,7 +86,7 @@ Members get a role on the cache itself, independent of any project.
     ];
     ```
 
-    Declared members skip the invitation.
+    Members declared this way skip the invitation flow.
 
 ## Verify Deployment
 
@@ -94,13 +94,13 @@ Members get a role on the cache itself, independent of any project.
 nix store info --store https://gradient.example.com/cache/main
 ```
 
-- The command will print the cache's store info.
-- A private cache will answer `401` without a valid netrc entry.
-- The other project will list the cache under **Settings -> Cache Subscriptions** without a pending badge.
-- The member is listed under **Members & Roles** on the cache page.
+- The output shows the store info of the cache.
+- A private cache return `401` without a valid netrc entry.
+- The other project list the cache under **Settings -> Cache Subscriptions** with no pending badge.
+- The member show up under **Members & Roles** on the cache page.
 
 ## Next Steps
 
-- [Caches](../concepts/caches.md): upstream caches, pull-through and substitution order
-- [Members and Roles](../ui/members-and-roles.md#cache-roles): custom roles with single permissions
-- [Upload NARs](upload-nars.md): push paths built outside Gradient
+- [Caches](../concepts/caches.md): how upstream caches, pull-through, and substitution order work
+- [Members and Roles](../ui/members-and-roles.md#cache-roles): build custom roles with single permissions
+- [Upload NARs](upload-nars.md): push paths that were built outside Gradient

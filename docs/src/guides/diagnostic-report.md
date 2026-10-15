@@ -1,18 +1,18 @@
 # Report a Bug with a Diagnostic Report
 
-One SQLite file explaining a stuck or failed evaluation, for attaching to a [bug report](https://github.com/wavelens/gradient/issues). Maintainers answer from the file, without access to the instance.
+A diagnostic report is a single SQLite file that describes a stuck or failed evaluation. Attach it to a [bug report](https://github.com/wavelens/gradient/issues). Maintainers can diagnose the problem from the file alone and need no access to the instance.
 
 **Requirements:**
 
-- The evaluation in question, on its task page
+- The affected evaluation, opened on its task page
 
 ## 1. Generate the Report
 
 === "UI"
 
-    Select the evaluation on the task page. Then open the three-dot menu on the evaluation panel -> **Diagnostic report** -> **Generate**.
+    Open the task page and pick an evaluation. In the evaluation panel, use the three-dot menu and choose **Diagnostic report**, then **Generate**.
 
-    Building the file can take a few minutes on a large evaluation.
+    Large evaluations can take several minutes to build.
 
 === "API"
 
@@ -30,25 +30,25 @@ One SQLite file explaining a stuck or failed evaluation, for attaching to a [bug
 | Include build logs | off | On: the full log of every failed or aborted attempt |
 | Include instance context | on | Workers, upstream caches and the server settings. The `manageWorkers` permission is required |
 
-- The API can take the options as query parameters (`anonymize_identities`, `anonymize_packages`, `include_logs`, `include_instance`).
-- `include_logs` is on by default in the API.
-- The same name will always map to the same token within one report.
-- Dependencies stay readable.
-- Two reports cannot be linked.
-- Store hashes stay in the file for checking a path against public caches.
+- The options work as query parameters in the API: `anonymize_identities`, `anonymize_packages`, `include_logs`, `include_instance`.
+- In the API, `include_logs` defaults to on.
+- Within one report, one name always produces the same token.
+- Dependencies remain readable.
+- No one can link two reports to each other.
+- Store hashes remain in the file, so a reader can check a path against public caches.
 
 !!! note "Never in the File"
-    API keys, sessions, passwords, worker tokens, upstream cache keys and Git host credentials are left out entirely, not redacted.
+    API keys, sessions, passwords, worker tokens, upstream cache keys and Git host credentials stay out of the file entirely. The tool does not redact them; it omits them.
 
 ## 3. Attach the Report
 
-GitHub cannot take `.db` attachments. Compress the file first.
+GitHub rejects `.db` files as attachments, so compress the report before uploading:
 
 ```sh
 gzip gradient-report-*.db
 ```
 
-Open a [Bug report (backend)](https://github.com/wavelens/gradient/issues/new?template=bug-report-backend.yml) with what went wrong and attach `gradient-report-<id>-<date>.db.gz`.
+Then open a [Bug report (backend)](https://github.com/wavelens/gradient/issues/new?template=bug-report-backend.yml), describe the problem, and attach the resulting `gradient-report-<id>-<date>.db.gz` file.
 
 ## Verify Deployment
 
@@ -62,5 +62,5 @@ The inspector can read only the report schema of its own source revision. Report
 
 ## Next Steps
 
-- [Diagnostic reports in depth](../contributors/diagnostic-reports.md): tables, scopes and the `gradient-report` inspector
-- [Evaluations and Builds](../concepts/evaluations-and-builds.md): statuses in the summary
+- [Diagnostic reports in depth](../contributors/diagnostic-reports.md) covers report tables, scopes and the `gradient-report` inspector.
+- [Evaluations and Builds](../concepts/evaluations-and-builds.md) explains the statuses shown in the summary.

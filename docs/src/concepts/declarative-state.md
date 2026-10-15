@@ -1,6 +1,6 @@
 # Declarative State
 
-Everything created in the UI can also be declared in Nix under `services.gradient.state`. Every start of Gradient will apply the declared state. Declared entities become read-only in the UI. The Nix configuration is the source of truth.
+Gradient supports declaring State in Nix under `services.gradient.state`. Each startup applies this state to the server. Entities that come from Nix appear as read-only in the UI, so the Nix configuration acts as the single source of truth.
 
 ```mermaid
 flowchart LR
@@ -12,34 +12,34 @@ flowchart LR
 
 | Entity | Content |
 |---|---|
-| Users | Password or OIDC-only accounts, superusers |
-| Projects | Members, SSH key, workers, cache subscriptions |
-| Tasks | Repository, wildcard, triggers, actions, concurrency |
-| Integrations | Git host connections for incoming events and outgoing status |
-| Caches | Signing key, upstream caches, members |
-| Roles | Custom project and cache roles |
-| Teams | Members, OIDC and SCIM groups, grants on projects and caches |
-| API Keys | Scoped keys, the token hash read from a secret file |
-| Workers | Project workers and team workers |
+| Users | Accounts with a password or OIDC-only login, plus superusers |
+| Projects | Member lists, an SSH key, workers, and cache subscriptions |
+| Tasks | Repository, wildcard, triggers, actions, and concurrency settings |
+| Integrations | Connections to a Git host for incoming events and outgoing status updates |
+| Caches | Signing key, upstream caches, and members |
+| Roles | Custom roles for projects and caches |
+| Teams | Members, OIDC and SCIM groups, and grants on projects and caches |
+| API Keys | Scoped keys, with the token hash read from a secret file |
+| Workers | Workers at the project level and the team level |
 
 ## UI-Managed and Nix-Managed
 
 | | Created in the UI | Declared in Nix |
 |---|---|---|
-| Editing | In the UI and the API | Only in Nix. UI controls are visible but disabled |
-| Removal | Delete button | Removed from Nix, then deleted on the next start |
-| Validation | On save | While building the NixOS configuration |
-| Activate / Deactivate | In the UI and the API | Also in the UI for caches, upstream caches and workers, with the declared value back on the next start |
+| Editing | Through the UI and the API | Through Nix alone. The UI shows the controls but keeps them disabled |
+| Removal | Via the delete button | By dropping the entry from Nix, after which the next start deletes it |
+| Validation | At save time | During the NixOS configuration build |
+| Activate / Deactivate | Through the UI and the API | Through the UI as well, for caches, upstream caches and workers. The declared value comes back on the next start |
 
-Both kinds live side by side. A declared project can hold tasks created in the UI.
+Both kinds coexist. A declared project can contain tasks created in the UI.
 
 ## Validation
 
-`services.gradient.state.validate` can check the declared state during the build of the NixOS configuration. The option is on by default. Unknown users or projects, duplicate ids and broken references fail the build instead of the server start.
+State declarations can be checked while the NixOS configuration builds. Enable this through `services.gradient.state.validate`, which is on by default. The check catches unknown users or projects, duplicate ids, and broken references. Errors surface at build time rather than at server start.
 
 ## Secrets
 
-Secrets never go into the Nix store. All `*_file` options point at a file on the server, e.g. from sops-nix or agenix. The server will read the files on start.
+The Nix store never uses secret material. Each `*_file` option points to a path on the server, commonly managed with sops-nix or agenix. The server loads these files at startup.
 
 | Option | Content | Generate |
 |---|---|---|
@@ -51,20 +51,20 @@ Secrets never go into the Nix store. All `*_file` options point at a file on the
 | `integrations.<name>.secret_file` | Webhook secret shared with the Git host | `openssl rand -hex 32` |
 | `integrations.<name>.access_token_file` | Git host access token | From the Git host |
 
-- `gradient hash` will prompt for the password twice and print the hash. A password piped through `<<<` would carry a trailing newline into the hash. Later sign-ins then fail.
-- The public half `acme-ssh-key.pub` is the deploy key on the Git host.
-- `nix-store` will write `main:<key>`. The key file must hold the key without the `main:` prefix. Gradient can derive the public key itself.
+- Run `gradient hash` to enter the password twice and get the hash. Piping a password through `<<<` puts a trailing newline into the hash, and later sign-ins then fail.
+- Upload `acme-ssh-key.pub` to the Git host as the deploy key.
+- `nix-store` writes the key as `main:<key>`. Store only the key in the file, without the `main:` prefix. Gradient can derive the public key itself.
 - A user without `password_file` can sign in through OIDC only.
 
 ### API Key Files
 
-The server will store only a digest of each API key. `key_file` must hold that digest. Clients send the token with a `GRAD` prefix.
+The server stores only a digest of each API key. Put that digest in `key_file`. Clients send the token with a `GRAD` prefix.
 
 ```sh
 gradient generate apikey
 ```
 
-The command will print the `API token` for clients (`Authorization: Bearer GRAD...`). The command will also print the `key_file digest` for the `key_file`.
+The command outputs two values: the `API token` for clients (`Authorization: Bearer GRAD...`) and the `key_file digest` for the `key_file`.
 
 ??? note "Without the CLI"
     ```sh
@@ -73,17 +73,17 @@ The command will print the `API token` for clients (`Authorization: Bearer GRAD.
     echo "GRAD$TOKEN"
     ```
 
-    1.  `printf %s` will keep a trailing newline out of the digest.
+    1.  `printf %s` excludes the trailing newline from the digest.
 
 ## Removal
 
-`services.gradient.state.delete` will delete users, projects and caches that disappear from the configuration. The option is on by default. These entities stay in the database and become editable in the UI with the option off.
+The `services.gradient.state.delete` option controls removal of users, projects and caches that no longer appear in the configuration. Removal is on by default. Turn the option off to keep those entities in the database, where they remain editable in the UI.
 
 ## Export
 
-`GET /api/v1/admin/state` will return the running instance in the shape of `services.gradient.state`. The export is useful for moving a UI-built setup into Nix.
+A `GET /api/v1/admin/state` request returns the live configuration in the `services.gradient.state` format. This output can serve as a starting point for a Nix setup built through the UI.
 
 ## Related
 
-- [State reference](../reference/state.md): every option with examples
-- [Projects and Tasks](projects-and-tasks.md): what the entities mean
+- [State reference](../reference/state.md): all options, each with examples
+- [Projects and Tasks](projects-and-tasks.md): definitions of these entities
