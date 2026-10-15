@@ -1642,9 +1642,21 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"recount {hello_recount}")
 
     hello_missing, hello_fetchable = shared_build_complete(drv_hash)
+    hello_edges = sql(
+        f"SELECT d2.hash || ' kind=' || e.kind || ' status=' || coalesce(dep.status::text, '-') "
+        f"|| ' fetchable=' || coalesce(dep.fetchable::int::text, '-') "
+        f"FROM derivation_dependency e JOIN derivation d ON d.id = e.derivation "
+        f"JOIN derivation d2 ON d2.id = e.dependency "
+        f"LEFT JOIN derivation_build dep ON dep.derivation = e.dependency "
+        f"WHERE d.hash = '{drv_hash}';"
+    )
+    dep_producers = sql(
+        f"SELECT d.hash FROM derivation_output o JOIN derivation d ON d.id = o.derivation "
+        f"WHERE o.hash = '{dep_hash}';"
+    )
     assert int(hello_missing) >= 1, (
         f"hello's shared build must count the retired reference as a missing runtime dep, "
-        f"has {hello_missing}")
+        f"has {hello_missing}; hello's edges: {hello_edges!r}; producers of {dep_hash}: {dep_producers!r}")
     assert hello_fetchable == "0", "a shared build that is not complete must not be fetchable"
 
     hello_build = sql(
