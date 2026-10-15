@@ -10,10 +10,10 @@ use gradient_entity::{dispatched_job, evaluation};
 use gradient_fixtures::shape::shape;
 
 use super::{
-    A, A_OUT, B, B_OUT, Case, S, S_OUT, X, X_OUT, Y, Y_OUT, assert_only_unstored_outputs, chain,
-    chain_done, drv, drv_nar, nar, narinfo, pass, with_attr, with_output, with_references,
+    A, A_OUT, B, B_OUT, Case, X, X_OUT, Y, Y_OUT, assert_only_unstored_outputs, chain, chain_done,
+    drv, drv_nar, nar, narinfo, pass, with_attr, with_output, with_references,
 };
-use crate::messages::{Demotion, GcRequest};
+use crate::messages::{Demotion, GcRequest, Transition};
 
 #[tokio::test]
 async fn q01_a_build_queues_only_after_the_walk_and_the_probe_answer() {
@@ -420,38 +420,29 @@ async fn q08_a_created_build_with_all_conditions_is_reported_and_queued_by_the_c
 }
 
 #[tokio::test]
-async fn q09_ready_queues_a_lost_move_and_leaves_incomplete_and_skipped_builds() {
+async fn q09_ready_stamps_the_builds_and_their_closure_sizes_and_moves_no_status() {
     let e1 = EvaluationId::now_v7();
-    let case = Case::start(
-        chain(e1)
-            .derivation(S)
-            .walked()
-            .job()
-            .probed()
-            .drv_cached()
-            .output(S_OUT)
-            .build_status(BuildStatus::Skipped),
-    )
-    .await;
-    case.override_sb(B, |build| build.status = BuildStatus::Created)
-        .await;
-
-    let gv = case.gv(e1).await;
-    case.ready(&[A, B, S]).await;
-
-    let queued = case.status(B).await;
-    assert_eq!(queued, BuildStatus::Queued, "after 1: sb(B).status");
-    let a = case.sb(A).await;
-    assert_eq!(
-        (a.status, a.blocking_deps),
-        (BuildStatus::Created, 1),
-        "after 1: sb(A) is Created, blocking_deps 1"
+    let case = Case::start(chain(e1)).await;
+    let (statuses, gv) = (
+        (case.status(A).await, case.status(B).await),
+        case.gv(e1).await,
     );
-    let skipped = case.status(S).await;
-    assert_eq!(skipped, BuildStatus::Skipped, "after 1: sb(S).status");
-    assert!(case.gv(e1).await > gv, "after 1: gv(E1) rose");
-    let counters = case.counters(e1).await;
-    assert_eq!(counters, [3, 2, 0, 1, 0], "after 1: counters(E1)");
+
+    case.transition(Transition::Ready {
+        shared_builds: case.sb_ids(&[A, B]).await,
+        closure_sizes: vec![(case.db.id_of(B).await, 7)],
+    })
+    .await;
+
+    for path in [A, B] {
+        let stamped = case.sb(path).await.ready_at.is_some();
+        assert!(stamped, "after 1: sb({path}).ready_at set");
+    }
+    let size = case.derivation(B).await.closure_size;
+    assert_eq!(size, Some(7), "after 1: derivation(B).closure_size");
+    let now = (case.status(A).await, case.status(B).await);
+    assert_eq!(now, statuses, "after 1: sb(A), sb(B) status unchanged");
+    assert_eq!(case.gv(e1).await, gv, "after 1: gv(E1) unchanged");
     case.zero_drift("step 1").await;
     case.finish().await;
 }

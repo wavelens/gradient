@@ -14,8 +14,7 @@ use gradient_wire::types::BuildFailureKind;
 
 use super::{
     A, A_OUT, A1, A1_OUT, A2, A2_OUT, B, B_OUT, BUILDER_EXIT, C, C_OUT, Case, D, D_OUT, G, G_OUT,
-    H, H_OUT, P, P_OUT, Q, Q_OUT, R, R_OUT, S, S_OUT, X, X_OUT, Y, Y_OUT, chain, diamond, nar,
-    with_references,
+    H, H_OUT, P, P_OUT, Q, Q_OUT, R, R_OUT, S, S_OUT, X, X_OUT, Y, Y_OUT, chain, diamond,
 };
 
 #[tokio::test]
@@ -65,7 +64,7 @@ async fn f01_a_permanent_failure_below_a_diamond_fails_both_middles_and_the_top_
 }
 
 #[tokio::test]
-async fn f02_a_build_edge_into_a_passthrough_does_not_spread_the_failure() {
+async fn f02_a_build_edge_into_a_passthrough_does_not_spread_the_failure_and_skips_it() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(
         shape()
@@ -114,46 +113,25 @@ async fn f02_a_build_edge_into_a_passthrough_does_not_spread_the_failure() {
     );
     let a = case.sb(A).await;
     assert_eq!(
-        (a.status, a.cache_available),
-        (BuildStatus::Queued, true),
-        "after 1: sb(A)"
-    );
-    assert_eq!(
-        case.evaluation(e1).await.status,
-        EvaluationStatus::Building,
-        "after 1: evaluation(E1)"
-    );
-    assert_eq!(
-        case.counters(e1).await,
-        [3, 1, 2, 1, 0],
-        "after 1: counters(E1)"
-    );
-    case.zero_drift("step 1").await;
-
-    case.commit_nar(with_references(nar(A_OUT, "a"), &[(A_OUT, "a")]))
-        .await;
-    let assignment = case.assigned(e1, A, true).await;
-    case.build_started(A).await;
-    case.build_output(A, true).await;
-    case.build_completed(A).await;
-
-    assert!(assignment.is_some(), "step 2: Assigned(E1, A) is accepted");
-    let a = case.sb(A).await;
-    assert_eq!(
-        (a.status, a.fetchable),
-        (BuildStatus::Substituted, true),
-        "after 2: sb(A)"
+        (a.status, a.cache_available, a.wanted),
+        (BuildStatus::Skipped, true, false),
+        "after 1: sb(A), not failed and no longer wanted"
     );
     assert_eq!(
         case.evaluation(e1).await.status,
         EvaluationStatus::Failed,
-        "after 2: evaluation(E1)"
+        "after 1: evaluation(E1)"
     );
     assert_eq!(
         case.counters(e1).await,
         [3, 0, 2, 0, 0],
-        "after 2: counters(E1)"
+        "after 1: counters(E1)"
     );
+    case.zero_drift("step 1").await;
+
+    let assignment = case.assigned(e1, A, true).await;
+
+    assert!(assignment.is_none(), "after 2: Assigned(E1, A) is refused");
     case.zero_drift("step 2").await;
     case.finish().await;
 }
@@ -448,12 +426,12 @@ async fn f05_abort_build_is_refused_on_a_terminal_build_a_finished_evaluation_an
     );
     assert_eq!(
         case.evaluation(e1).await.status,
-        EvaluationStatus::Building,
-        "after 5: evaluation(E1), S is still Queued"
+        EvaluationStatus::Failed,
+        "after 5: evaluation(E1), S lost its need at step 4"
     );
     assert_eq!(
         case.counters(e1).await,
-        [5, 1, 3, 1, 0],
+        [5, 0, 3, 0, 0],
         "after 5: counters(E1)"
     );
     case.zero_drift("step 5").await;

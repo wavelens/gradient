@@ -498,14 +498,6 @@ impl Case {
         self.transition(worker_loss(shared_builds, cause)).await
     }
 
-    pub async fn ready(&self, paths: &[&str]) -> TransitionReport {
-        self.transition(Transition::Ready {
-            shared_builds: self.sb_ids(paths).await,
-            closure_sizes: Vec::new(),
-        })
-        .await
-    }
-
     pub async fn abort_build(&self, evaluation: EvaluationId, path: &str) -> TransitionReport {
         self.transition(Transition::AbortBuild {
             evaluation,
