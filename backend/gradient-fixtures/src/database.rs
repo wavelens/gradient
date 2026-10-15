@@ -271,6 +271,7 @@ impl TestDatabase {
 
     pub async fn finish(mut self) {
         self.finished = true;
+        let _ = tokio::time::timeout(Duration::from_secs(5), self.connection.clone().close()).await;
         let (admin, name) = (connect(self.server.clone(), 1).await, &self.name);
         run(
             &admin,

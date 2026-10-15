@@ -23,6 +23,7 @@ chrono        = { workspace = true }
 password-auth = { workspace = true }
 sea-orm       = { workspace = true }
 serde_json    = { workspace = true }
+tokio         = { workspace = true, features = ["time"] }
 uuid          = { workspace = true }
 
 [dev-dependencies]
