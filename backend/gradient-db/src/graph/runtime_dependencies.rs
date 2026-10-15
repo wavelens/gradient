@@ -4,31 +4,44 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Twin derivations producing the same output paths must never get an edge between them.
-//! Each twin's complete closure would wait on the other's.
-//! Neither twin could then become fetchable.
+//! No edge may join twins producing the same output paths, and no edge may close a cycle.
+//! Real Nix references can form neither, and either edge would make two closures wait on
+//! each other, so no build of them could ever become fetchable.
 
 use gradient_types::ids::DerivationId;
 use sea_orm::{ConnectionTrait, DbErr, Value};
+use std::sync::LazyLock;
 
 use crate::graph::can_start::ids;
 
-crate::sql! {
-    INSERT_RUNTIME_DEPENDENCIES = r#"
+fn closes_no_cycle(referrer: &str, producer: &str) -> String {
+    format!(
+        "NOT EXISTS (WITH RECURSIVE below(derivation) AS (SELECT {producer} \
+         UNION SELECT e.dependency FROM below b \
+         JOIN derivation_dependency e ON e.derivation = b.derivation) \
+         SELECT 1 FROM below WHERE below.derivation = {referrer})"
+    )
+}
+
+static INSERT_RUNTIME_DEPENDENCIES_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r#"
 INSERT INTO derivation_dependency (derivation, dependency, kind)
 SELECT $1, d.dependency, 1 FROM unnest($2::uuid[]) AS d(dependency)
 WHERE d.dependency <> $1
   AND NOT EXISTS (SELECT 1 FROM derivation_output own
                   JOIN derivation_output twin ON twin.hash = own.hash
                   WHERE own.derivation = $1 AND twin.derivation = d.dependency)
+  AND {no_cycle}
 ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 0
 "#,
-        params = [DerivationId, DerivationIds(64)];
+        no_cycle = closes_no_cycle("$1", "d.dependency"),
+    )
+});
 
-    /// The producer lookup is fenced.
-    /// A generic plan is guessing thousands of parents per GIN probe.
-    /// It would hash-join them against a sequential scan of every output.
-    ADOPT_REFERENCED_OUTPUTS = r#"
+static ADOPT_REFERENCED_OUTPUTS_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r#"
 INSERT INTO derivation_dependency (derivation, dependency, kind)
 SELECT DISTINCT a.referrer, a.producer, 1
 FROM (
@@ -60,9 +73,19 @@ FROM (
      AND p.derivation <> ALL(tw.twins)
     WHERE o.derivation = ANY($1::uuid[])
 ) a
+WHERE {no_cycle}
 ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 0
 RETURNING derivation
 "#,
+        no_cycle = closes_no_cycle("a.referrer", "a.producer"),
+    )
+});
+
+crate::sql_lazy! {
+    INSERT_RUNTIME_DEPENDENCIES = || INSERT_RUNTIME_DEPENDENCIES_SQL.as_str(),
+        params = [DerivationId, DerivationIds(64)];
+
+    ADOPT_REFERENCED_OUTPUTS = || ADOPT_REFERENCED_OUTPUTS_SQL.as_str(),
         params = [DerivationIds(64)],
         tier = Bulk;
 }

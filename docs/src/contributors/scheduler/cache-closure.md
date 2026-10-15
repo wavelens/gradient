@@ -33,7 +33,7 @@ Runtime dependencies are living in `derivation_dependency` next to build depende
 
 1. Upsert the `cached_path` row under `FOR NO KEY UPDATE`. Read `was_backed` under that lock. No later statement can recover this endpoint.
 2. Overwrite `references` with the line the worker reported, in order. `references_for_hash` can rebuild the narinfo `References:` line and the signature fingerprint verbatim from that line.
-3. Insert a runtime dependency for each path in `references` (add-only), then update `wanted` for the producers.
+3. Insert a runtime dependency for each path in `references` (add-only), then update `wanted` for the producers. A reference to a twin or one closing a cycle gets no edge. Real Nix references can form neither, and either edge would block both closures.
 4. `seed_runtime_deps` (`gradient-db/src/graph/runtime_can_start.rs`): an absolute recount of the producers. Paths without an earlier NAR become `freshly_present`. Re-pushes of a backed path get only a recount.
 5. Spread the newly complete closures to the shared builds needing them at runtime. `ripple_shared_builds_complete` can count down their missing dependencies level by level in one call of `ripple_missing_runtime_deps`, a SQL function. Then `became_fetchable` must set `fetchable` and move the `blocking_deps` counter.
 6. Apply `ripple_shared_builds_incomplete`, then `lost_fetchability`, to shared builds left incomplete by a new dependency on a missing path.

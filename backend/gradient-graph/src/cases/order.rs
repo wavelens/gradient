@@ -8,7 +8,6 @@ use std::collections::BTreeSet;
 
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::AttemptOutcome;
-use gradient_entity::derivation_dependency::EdgeKind;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{CacheId, DerivationId, EvaluationId};
 use gradient_entity::{
@@ -309,7 +308,7 @@ async fn o03_a_replay_of_every_mutating_operation_changes_nothing_the_second_tim
 }
 
 #[tokio::test]
-async fn o04_a_runtime_reference_closing_a_cycle_ends_the_spread_with_finite_counters() {
+async fn o04_a_runtime_reference_closing_a_cycle_is_refused() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(
         chain(e1)
@@ -322,17 +321,17 @@ async fn o04_a_runtime_reference_closing_a_cycle_ends_the_spread_with_finite_cou
     let commit = with_references(nar(B_OUT, "b"), &[(B_OUT, "b"), (A_OUT, "a")]);
     case.commit_nar(commit).await;
 
-    let edge = case.edge(B, A).await.expect("after 1: edge(B,A)");
-    assert_eq!(edge.kind, EdgeKind::Runtime, "after 1: edge(B,A).kind");
+    let edge = case.edge(B, A).await;
+    assert!(edge.is_none(), "after 1: no edge(B,A): {edge:?}");
     let (a, b) = (case.sb(A).await, case.sb(B).await);
     assert_eq!(
         (b.status, b.missing_runtime_deps),
-        (BuildStatus::Building, 1),
+        (BuildStatus::Building, 0),
         "after 1: sb(B)"
     );
     assert_eq!(
-        (a.status, a.blocking_deps, a.missing_runtime_deps),
-        (BuildStatus::Created, 1, 0),
+        (a.status, a.blocking_deps),
+        (BuildStatus::Created, 1),
         "after 1: sb(A)"
     );
     case.zero_drift("step 1").await;
@@ -341,24 +340,15 @@ async fn o04_a_runtime_reference_closing_a_cycle_ends_the_spread_with_finite_cou
 
     let (a, b) = (case.sb(A).await, case.sb(B).await);
     assert_eq!(
-        (b.status, b.fetchable, b.wanted),
-        (BuildStatus::Completed, false, true),
+        (b.status, b.fetchable),
+        (BuildStatus::Completed, true),
         "after 2: sb(B)"
     );
     assert_eq!(
         (a.status, a.blocking_deps),
-        (BuildStatus::Created, 1),
+        (BuildStatus::Queued, 0),
         "after 2: sb(A)"
     );
     case.zero_drift("step 2").await;
-
-    let report = case.drift().await;
-
-    assert_eq!(report.total(), 0, "after 3: total: {report:?}");
-    assert_eq!(
-        case.counters(e1).await,
-        [2, 1, 0, 0, 0],
-        "after 3: counters(E1)"
-    );
     case.finish().await;
 }
