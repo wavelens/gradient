@@ -42,7 +42,7 @@ def graph_db(
             prefer_local_build INTEGER, allow_substitutes INTEGER, is_fixed_output INTEGER);
         CREATE TABLE derivation_dependency (id TEXT, derivation TEXT, dependency TEXT, kind INTEGER);
         CREATE TABLE derivation_output (id TEXT, derivation TEXT, name TEXT, hash TEXT,
-            nar_size INTEGER, is_cached INTEGER, references_list TEXT);
+            nar_size INTEGER, references_list TEXT);
         CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER);
         CREATE TABLE build_attempt (id TEXT, derivation_build TEXT, substitute INTEGER,
             build_started_at TEXT, build_finished_at TEXT);
@@ -75,7 +75,7 @@ def graph_db(
     references = {"a": path("c") if cyclic else "", "b": path("a"), "c": f"{path('x')} {path('c')}"}
     for node in "abc":
         conn.execute(
-            "INSERT INTO derivation_output VALUES (?, ?, 'out', ?, 5000, 0, ?)",
+            "INSERT INTO derivation_output VALUES (?, ?, 'out', ?, 5000, ?)",
             (f"o{node}", f"d{node}", HASH[node], references[node]),
         )
 
@@ -193,15 +193,6 @@ def test_substituted_and_previously_built_nodes_are_cached(tmp_path):
     assert d["lib"]["present"]["cache"] is True
     assert d["app"]["present"]["cache"] is False
     assert d["app"]["build"]["durationMs"] == 2000
-
-
-def test_is_cached_after_the_run_does_not_make_a_built_node_present(tmp_path):
-    file = tmp_path / "r.db"
-    graph_db(file)
-    with sqlite3.connect(file) as conn:
-        conn.execute("UPDATE derivation_output SET is_cached = 1")
-    spec = spec_of(open_report(file))
-    assert not any(n["present"]["cache"] for k, n in spec["derivations"].items() if not k.startswith("x-"))
 
 
 def test_failed_evaluation_needs_allow_failed_and_replays_the_failure(tmp_path):

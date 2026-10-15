@@ -182,7 +182,7 @@ def from_report(
         nodes[keys[drv_id]] = node
 
     outputs = conn.execute(
-        "SELECT derivation, name, hash, nar_size, is_cached, references_list FROM derivation_output"
+        "SELECT derivation, name, hash, nar_size, references_list FROM derivation_output"
     ).fetchall()
     graph = Graph(nodes, {o[2]: (keys[o[0]], o[1]) for o in outputs if o[0] in keys}, max_size, anonymize)
 
@@ -197,7 +197,7 @@ def from_report(
             continue
         nodes[keys[drv_id]]["deps"].append(keys[dep_id])
 
-    for drv_id, out_name, _, nar_size, _, refs in outputs:
+    for drv_id, out_name, _, nar_size, refs in outputs:
         if drv_id not in keys:
             continue
         key = keys[drv_id]
