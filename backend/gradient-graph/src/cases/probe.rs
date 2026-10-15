@@ -404,7 +404,7 @@ async fn p07_hits_and_probed_end_in_the_same_state_in_either_order() {
 }
 
 #[tokio::test]
-async fn p08_a_probe_answer_marks_a_stub_probed_and_its_walk_queues_it() {
+async fn p08_a_probe_answer_leaves_a_stub_unprobed_until_its_walk_is_answered() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(
         shape()
@@ -441,7 +441,10 @@ async fn p08_a_probe_answer_marks_a_stub_probed_and_its_walk_queues_it() {
     let gained = case.upstream_probed(&[B]).await;
 
     let probed = case.sb(B).await.probed;
-    assert!(probed, "after 2: sb(B).probed (answers Q6)");
+    assert!(
+        !probed,
+        "after 2: sb(B).probed, a stub has no outputs to ask for"
+    );
     assert!(gained.is_empty(), "after 2: result == []: {gained:?}");
     case.zero_drift("step 2").await;
 
@@ -451,17 +454,25 @@ async fn p08_a_probe_answer_marks_a_stub_probed_and_its_walk_queues_it() {
     let b = case.sb(B).await;
     assert_eq!(
         (b.status, b.probed, b.wanted),
-        (BuildStatus::Queued, true, true),
-        "after 3: sb(B) status, probed, wanted (answers Q6)"
+        (BuildStatus::Created, false, true),
+        "after 3: sb(B) status, probed, wanted"
     );
-
     assert_eq!(
         as_set(&report.to_probe),
         case.ids(&[B]).await,
         "after 3: report.to_probe"
     );
-
     case.zero_drift("step 3").await;
+
+    case.upstream_probed(&[B]).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.probed),
+        (BuildStatus::Queued, true),
+        "after 4: sb(B) status, probed"
+    );
+    case.zero_drift("step 4").await;
     case.finish().await;
 }
 
