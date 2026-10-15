@@ -50,7 +50,7 @@ The graph writer, `GraphWriter` (`gradient-graph/src/writer.rs`), is a root chil
 | `Transition` | Evaluation and shared build state: stream completed, eval failed, build started/output/completed/failed, assigned, orphaned, can start, repair, abort, prioritize |
 | `Requeue` | `FailedTransient` shared builds whose backoff elapsed, back to `Created`, queued once they can start |
 | `Demote` | `MissingNar`, operator `Path` invalidation, one cache dropping its `CacheClaim` |
-| `Gc` | Bounded deletes of derivations, stale paths and evaluations, re-checked against rows that became live since the scan |
+| `Gc` | Bounded deletes of derivations, stale paths and evaluations, re-checked against the current rows |
 
 All other messages flush the queue first. A write after a batch or a commit will see that batch or commit.
 

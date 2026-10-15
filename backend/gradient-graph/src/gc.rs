@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The re-check after the pool scan is exact because reachability can only grow through
-//! new roots. An evaluation walking a derivation is writing its own `build_job` rows in the
-//! same batch. The closure of every root created since the scan is covering all it missed.
-
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
@@ -36,15 +32,19 @@ fn fresh_cte() -> String {
     )
 }
 
-fn delete_derivations_sql() -> String {
-    format!(
-        "WITH RECURSIVE {fresh} \
-         DELETE FROM derivation d WHERE d.id = ANY($1) \
-           AND NOT EXISTS (SELECT 1 FROM fresh f WHERE f.derivation = d.id) \
-         RETURNING d.id",
-        fresh = fresh_cte(),
-    )
-}
+const DELETE_DERIVATIONS_SQL: &str = "WITH RECURSIVE kept(derivation) AS ( \
+         SELECT c.id FROM unnest($1::uuid[]) AS c(id) \
+         WHERE EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = c.id) \
+            OR EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = c.id) \
+            OR EXISTS (SELECT 1 FROM derivation_dependency e \
+                       WHERE e.dependency = c.id AND NOT e.derivation = ANY($1::uuid[])) \
+         UNION \
+         SELECT e.dependency FROM kept k \
+         JOIN derivation_dependency e ON e.derivation = k.derivation \
+         WHERE e.dependency = ANY($1::uuid[])) \
+     DELETE FROM derivation d WHERE d.id = ANY($1::uuid[]) \
+       AND NOT EXISTS (SELECT 1 FROM kept k WHERE k.derivation = d.id) \
+     RETURNING d.id";
 
 fn stale_after_scan_sql() -> String {
     format!(
@@ -65,12 +65,13 @@ fn stale_after_scan_sql() -> String {
     )
 }
 
-gradient_db::sql_fn! {
-    GC_DELETE_DERIVATIONS = delete_derivations_sql,
-        params = [OrphanDerivationIds(64), Now],
-        tier = Walk,
-        flags = [Walk];
+gradient_db::sql! {
+    GC_DELETE_DERIVATIONS = DELETE_DERIVATIONS_SQL,
+        params = [OrphanDerivationIds(64)],
+        tier = Walk;
+}
 
+gradient_db::sql_fn! {
     GC_STALE_AFTER_SCAN = stale_after_scan_sql,
         params = [CachedPathHashes(64), Now],
         tier = Sweep,
@@ -81,11 +82,6 @@ gradient_db::sql! {
     GC_CANDIDATE_ATTEMPTS = "SELECT b.derivation AS derivation, a.id AS attempt \
              FROM build_attempt a JOIN derivation_build b ON b.id = a.derivation_build \
              WHERE b.derivation = ANY($1)",
-        params = [DerivationIds(64)],
-        tier = Sweep;
-
-    GC_CANDIDATE_PARENTS = "SELECT e.derivation, e.dependency FROM derivation_dependency e \
-             WHERE e.dependency = ANY($1)",
         params = [DerivationIds(64)],
         tier = Sweep;
 
@@ -133,10 +129,7 @@ pub(crate) async fn gc_task_evaluations(
 
 pub(crate) async fn apply(ctx: &DbContext, req: GcRequest) -> Result<GcReport> {
     match req {
-        GcRequest::Derivations {
-            candidates,
-            scanned_at,
-        } => delete_derivations(ctx, &candidates, scanned_at).await,
+        GcRequest::Derivations { candidates } => delete_derivations(ctx, &candidates).await,
         GcRequest::Paths { hashes, scanned_at } => {
             retire_stale_paths(ctx, &hashes, scanned_at).await
         }
@@ -152,11 +145,7 @@ fn ids(derivations: &[DerivationId]) -> Value {
         .into()
 }
 
-async fn delete_derivations(
-    ctx: &DbContext,
-    candidates: &[DerivationId],
-    scanned_at: NaiveDateTime,
-) -> Result<GcReport> {
+async fn delete_derivations(ctx: &DbContext, candidates: &[DerivationId]) -> Result<GcReport> {
     let db = &ctx.worker_db;
     if candidates.is_empty() {
         return Ok(GcReport::default());
@@ -165,18 +154,9 @@ async fn delete_derivations(
     let attempts = pairs(db, GC_CANDIDATE_ATTEMPTS.bind([ids(candidates)]), "attempt")
         .await
         .context("GC: snapshot the candidates' build attempts")?;
-    let wanted_by = pairs(
-        db,
-        GC_CANDIDATE_PARENTS.bind([ids(candidates)]),
-        "dependency",
-    )
-    .await
-    .context("GC: snapshot the edges into the candidates")?;
 
     let deleted: HashSet<DerivationId> = db
-        .query_all_raw(
-            GC_DELETE_DERIVATIONS.bind([ids(candidates), Value::ChronoDateTime(Some(scanned_at))]),
-        )
+        .query_all_raw(GC_DELETE_DERIVATIONS.bind([ids(candidates)]))
         .await
         .context("GC: delete the orphan derivations")?
         .iter()
@@ -186,21 +166,6 @@ async fn delete_derivations(
 
     if deleted.is_empty() {
         return Ok(GcReport::default());
-    }
-
-    let survivors: Vec<DerivationId> = orphaned_survivors(&wanted_by, &deleted);
-    if !survivors.is_empty() {
-        let txn = db.begin().await.context("GC: begin the survivor un-walk")?;
-        gradient_db::graph::walk_completeness::unwalk(&txn, &survivors)
-            .await
-            .context("GC: re-walk the survivors of a deleted dependency")?;
-        txn.commit()
-            .await
-            .context("GC: commit the survivor un-walk")?;
-        let changes = gradient_db::graph::can_start::unpromote_ungated(db, &survivors)
-            .await
-            .context("GC: settle the survivors of a deleted dependency")?;
-        gradient_db::status::emit_transition_effects(ctx, &changes).await?;
     }
 
     info!(deleted = deleted.len(), "Orphan derivation GC done");
@@ -353,45 +318,4 @@ async fn pairs<C: ConnectionTrait>(
             ))
         })
         .collect())
-}
-
-fn orphaned_survivors(
-    wanted_by: &[(DerivationId, Uuid)],
-    deleted: &HashSet<DerivationId>,
-) -> Vec<DerivationId> {
-    let mut survivors: Vec<DerivationId> = wanted_by
-        .iter()
-        .filter(|(parent, dependency)| {
-            deleted.contains(&DerivationId::new(*dependency)) && !deleted.contains(parent)
-        })
-        .map(|(parent, _)| *parent)
-        .collect();
-    survivors.sort_unstable();
-    survivors.dedup();
-
-    survivors
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_a_survivor_of_a_reclaimed_dependency_is_re_walked() {
-        let survivor = DerivationId::now_v7();
-        let gone_parent = DerivationId::now_v7();
-        let dependency = DerivationId::now_v7();
-        let deleted: HashSet<DerivationId> = [dependency, gone_parent].into_iter().collect();
-
-        assert_eq!(
-            orphaned_survivors(
-                &[
-                    (survivor, dependency.into_inner()),
-                    (gone_parent, dependency.into_inner()),
-                ],
-                &deleted,
-            ),
-            vec![survivor],
-        );
-    }
 }

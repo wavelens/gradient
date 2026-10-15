@@ -71,7 +71,7 @@ pub(crate) async fn cleanup_old_evaluations(db: &DbContext, graph: &Graph) -> Re
 }
 
 pub(crate) async fn collect_orphan_derivations(db: &DbContext, graph: &Graph) -> Result<usize> {
-    let (candidates, scanned_at) = gradient_db::maintenance::gc::orphan_derivation_candidates(
+    let candidates = gradient_db::maintenance::gc::orphan_derivation_candidates(
         &db.worker_db,
         i64::from(db.config.gc.orphan_derivation_hours),
     )
@@ -82,7 +82,6 @@ pub(crate) async fn collect_orphan_derivations(db: &DbContext, graph: &Graph) ->
         let report = match graph
             .gc(GcRequest::Derivations {
                 candidates: chunk.to_vec(),
-                scanned_at,
             })
             .await
         {

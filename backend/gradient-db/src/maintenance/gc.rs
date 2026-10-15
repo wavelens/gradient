@@ -239,19 +239,16 @@ fn evaluations_to_gc(
     delete
 }
 
-/// The returned timestamp is taken before the walk.
-/// The graph writer's delete is re-checking exactly what became live since then.
 pub async fn orphan_derivation_candidates<C>(
     db: &C,
     grace_hours: i64,
-) -> Result<(Vec<DerivationId>, chrono::NaiveDateTime), sea_orm::DbErr>
+) -> Result<Vec<DerivationId>, sea_orm::DbErr>
 where
     C: ConnectionTrait
         + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>
         + Sync,
 {
-    let scanned_at = gradient_types::now();
-    let cutoff = scanned_at - ChronoDuration::hours(grace_hours.max(0));
+    let cutoff = gradient_types::now() - ChronoDuration::hours(grace_hours.max(0));
 
     let walk = crate::graph::walks::begin_walk(db, &GC_ORPHAN_CANDIDATES).await?;
     let rows = walk
@@ -267,7 +264,7 @@ where
         info!(count = candidates.len(), "Running orphan derivation GC");
     }
 
-    Ok((candidates, scanned_at))
+    Ok(candidates)
 }
 
 #[cfg(test)]

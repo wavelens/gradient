@@ -10,8 +10,8 @@ use chrono::{Duration, NaiveDateTime};
 use gradient_db::maintenance::gc::expired_cached_paths;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{self, AttemptOutcome};
+use gradient_entity::derivation_build;
 use gradient_entity::ids::EvaluationId;
-use gradient_entity::{derivation_build, derivation_dependency};
 use gradient_fixtures::shape::shape;
 
 use super::{
@@ -32,7 +32,6 @@ fn drv_hash(path: &str) -> &str {
 async fn gc_derivations(case: &Case, candidates: &[&str]) -> GcReport {
     case.gc(GcRequest::Derivations {
         candidates: case.ids(candidates).await.into_iter().collect(),
-        scanned_at: t0(),
     })
     .await
 }
@@ -157,29 +156,63 @@ async fn c02_a_candidate_named_through_a_job_created_since_the_scan_stays() {
 }
 
 #[tokio::test]
-async fn c03_a_candidate_named_by_an_old_job_is_deleted_and_its_parent_is_unwalked_and_unqueued() {
+async fn c03_a_listed_candidate_still_named_or_referenced_stays_and_only_the_orphan_goes() {
     let e1 = EvaluationId::now_v7();
-    let case = Case::start(chain(e1).derivation(B).created_at(older_than_the_scan())).await;
+    let completed_and_old = |shape: gradient_fixtures::shape::Shape, path, out| {
+        shape
+            .derivation(path)
+            .walked()
+            .probed()
+            .drv_cached()
+            .output(out)
+            .build_status(BuildStatus::Completed)
+            .cached_output(path)
+            .created_at(older_than_the_scan())
+    };
+    let seed = shape()
+        .evaluation(e1)
+        .derivation(A)
+        .walked()
+        .entry_point("pkg.a")
+        .job()
+        .probed()
+        .drv_cached()
+        .output(A_OUT)
+        .depends_on(B)
+        .runtime_depends_on(O)
+        .derivation(B)
+        .walked()
+        .job()
+        .probed()
+        .drv_cached()
+        .output(B_OUT)
+        .build_status(BuildStatus::Queued)
+        .created_at(older_than_the_scan());
+    let seed = completed_and_old(seed, O, O_OUT).depends_on(O2);
+    let seed = completed_and_old(completed_and_old(seed, O2, O2_OUT), Y, Y_OUT);
+    let case = Case::start(seed).await;
+    let (build_of_a, counters) = (case.sb(A).await, case.counters(e1).await);
+    let orphan = case.db.id_of(Y).await;
 
-    let (a, b) = (case.db.id_of(A).await, case.db.id_of(B).await);
+    let report = gc_derivations(&case, &[B, O, O2, Y]).await;
 
-    gc_derivations(&case, &[B]).await;
-
-    let deleted = case.find_derivation(B).await.is_none();
-    assert!(deleted, "after 1: derivation(B) gone");
-    let edge = case.db.find::<derivation_dependency::Entity>((a, b)).await;
-    assert!(edge.is_none(), "after 1: edge(A,B) gone: {edge:?}");
-    let jobs = case.jobs(e1).await;
-    let unnamed = jobs.iter().all(|job| job.derivation != b);
-    assert!(unnamed, "after 1: build_job(E1,B) gone: {jobs:?}");
-    let parent = case.derivation(A).await;
-    let walk = (parent.walked, parent.unwalked_inputs);
-    assert_eq!(walk, (false, 0), "after 1: derivation(A) walked, inputs");
-    let build = case.sb(A).await;
-    let state = (build.status, build.blocking_deps, build.wanted);
-    assert_eq!(state, (BuildStatus::Created, 0, true), "after 1: sb(A)");
-    let counters = case.counters(e1).await;
-    assert_eq!(counters, [1, 1, 0, 0, 0], "after 1: counters(E1)");
+    for path in [B, O, O2] {
+        let present = case.find_derivation(path).await.is_some();
+        assert!(present, "after 1: derivation({path}) present");
+    }
+    let gone = case.find_derivation(Y).await.is_none();
+    assert!(gone, "after 1: derivation(Y) gone");
+    assert_eq!(
+        report.deleted_derivations,
+        vec![orphan],
+        "after 1: report.deleted"
+    );
+    assert_eq!(case.sb(A).await, build_of_a, "after 1: sb(A) unchanged");
+    assert_eq!(
+        case.counters(e1).await,
+        counters,
+        "after 1: counters(E1) unchanged"
+    );
     case.zero_drift("step 1").await;
     case.finish().await;
 }

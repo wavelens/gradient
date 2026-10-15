@@ -254,7 +254,6 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
     let collected = case
         .gc(GcRequest::Derivations {
             candidates: Vec::new(),
-            scanned_at: gradient_types::now(),
         })
         .await;
 

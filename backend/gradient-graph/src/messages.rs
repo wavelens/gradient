@@ -234,7 +234,6 @@ pub struct DemoteReport {
 pub enum GcRequest {
     Derivations {
         candidates: Vec<DerivationId>,
-        scanned_at: NaiveDateTime,
     },
     Paths {
         hashes: Vec<String>,

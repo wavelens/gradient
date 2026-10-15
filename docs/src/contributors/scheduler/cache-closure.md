@@ -97,7 +97,8 @@ The `cache-maintenance` pass (`gradient-cache/src/schedule.rs`) can start every 
 | Zombie purge | Confirmed rows with the object missing from storage | Storage probe per row. A probe error will preserve the row |
 | Orphan NAR files | Objects without any referencing row | Older than `gc.narUploadGraceHours` (24 h) |
 
-- **Re-check:** the graph writer must re-check each chunk against roots created since the scan (`scanned_at`). The writer can delete only rows that stayed dead. Object removal is limited to rows the graph writer reported as retired.
+- **Derivation re-check:** the graph writer can delete a listed derivation only while the current rows leave it unreachable. A job, an entry point or a dependent outside the list will keep the derivation and its listed closure.
+- **Path re-check:** the graph writer must re-check each chunk of paths against roots created since the scan (`scanned_at`). Object removal is limited to rows the graph writer reported as retired.
 - **Live paths:** outputs of the keep-set's runtime closure, plus the `.drv` NAR and `inputSrcs` of every reachable derivation.
 - **Fetch time:** `cached_path_signature.last_fetched_at` and `fetch_count` move on every NAR download (`gradient-web/src/endpoints/caches/nar.rs`).
 
