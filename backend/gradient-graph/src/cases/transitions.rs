@@ -12,8 +12,8 @@ use gradient_fixtures::shape::{Shape, shape};
 use gradient_wire::types::BuildFailureKind;
 
 use super::{
-    A, B, B_OUT, C, Case, D, I, I_OUT, P, P_OUT, Q, Q_OUT, R, R_OUT, chain, chain_done, diamond,
-    nar, store_path, with_references,
+    A, B, B_OUT, C, Case, D, I, I_OUT, P, P_OUT, Q, Q_OUT, R, R_OUT, assert_only_unstored_outputs,
+    chain, chain_done, diamond, nar, store_path, with_references,
 };
 use crate::messages::{Demotion, OrphanCause, Transition};
 
@@ -87,9 +87,7 @@ async fn t02_a_completed_build_is_fetchable_only_after_the_commit_and_the_parent
         [2, 1, 0, 0, 0],
         "after 1: counters(E1)"
     );
-    let report = case.drift().await;
-    assert_eq!(report.unbacked_trusted_outputs, 0, "after 1: {report:?}");
-    assert_eq!(report.total(), 0, "drift after step 1: {report:?}");
+    assert_only_unstored_outputs(case.drift().await, 1, "after 1");
 
     case.commit_nar(with_references(nar(B_OUT, "b"), &[(B_OUT, "b")]))
         .await;

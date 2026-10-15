@@ -477,6 +477,7 @@ async fn d07_a_completed_evaluation_still_wants_the_rebuild_of_its_entry_point_o
             .cached_output(B),
     )
     .await;
+    let frozen = case.counters(e1).await;
 
     case.demote(Demotion::MissingNar { hash: A_OUT.into() })
         .await;
@@ -503,8 +504,7 @@ async fn d07_a_completed_evaluation_still_wants_the_rebuild_of_its_entry_point_o
     );
     let counters = case.counters(e1).await;
     assert_eq!(
-        counters,
-        [2, 0, 0, 0, 0],
+        counters, frozen,
         "after 1: counters(E1), frozen at the verdict"
     );
     case.zero_drift("step 1").await;

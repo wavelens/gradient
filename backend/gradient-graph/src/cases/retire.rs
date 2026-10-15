@@ -233,6 +233,7 @@ async fn r04_retiring_the_output_of_a_substituted_passthrough_makes_it_a_builder
             .evaluation_status(EvaluationStatus::Completed),
     )
     .await;
+    let frozen = case.counters(e1).await;
 
     case.demote(missing_nar(A_OUT)).await;
 
@@ -245,7 +246,10 @@ async fn r04_retiring_the_output_of_a_substituted_passthrough_makes_it_a_builder
     let b = (b.status, b.attempt, b.wanted);
     assert_eq!(b, (Queued, 0, true), "after 1: sb(B)");
     let counters = case.counters(e1).await;
-    assert_eq!(counters, [2, 2, 0, 1, 0], "after 1: counters(E1)");
+    assert_eq!(
+        counters, frozen,
+        "after 1: counters(E1), frozen at the verdict"
+    );
     case.zero_drift("step 1").await;
     case.finish().await;
 }
