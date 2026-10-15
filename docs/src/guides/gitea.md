@@ -177,6 +177,7 @@ A task links the two integrations. Triggers point to the inbound integration, ac
 | Open or update a pull request | The head commit of the pull request get evaluated |
 | Comment `/gradient run` | A new evaluation of the pull request start |
 | Comment `/gradient approve` or approve the review | A pull request from a fork that waited for maintainer approval get released |
+| Comment `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
 
 The **Pull Request (reporter)** trigger include a setting called **Require maintainer approval for PRs from non-writers** (`require_approval` in `config`). This setting controls the approval check.
 

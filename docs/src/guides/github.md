@@ -86,6 +86,7 @@ Push events work with the automatic setup. Pull requests require the **Pull Requ
 | Open or update a pull request | Evaluation of the pull request's head commit |
 | Comment `/gradient run` | New evaluation of the pull request |
 | Comment `/gradient approve` or approve the review | Release of a pull request from a fork waiting for maintainer approval |
+| Comment `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
 
 Fork pull requests wait for maintainer approval before they run. To enable this check, set **Require maintainer approval for PRs from non-writers** on the **Pull Request (reporter)** trigger.
 

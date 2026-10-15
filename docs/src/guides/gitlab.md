@@ -154,6 +154,7 @@ A task links the two integrations: triggers use the inbound one, actions use the
 | Open or update a merge request | Evaluate the head commit of that merge request |
 | Comment `/gradient run` | Trigger a new evaluation of the merge request |
 | Comment `/gradient approve` | Release a fork-based merge request that waits on maintainer approval |
+| Comment `/gradient summary` | Post one comment with the built, failed and unchanged packages, and update it after every push |
 
 The **Pull Request (reporter)** trigger has an option called **Require maintainer approval for PRs from non-writers** (`require_approval` in `config`). GitLab does not fire a webhook when a reviewer approves a merge request through the review UI. A `/gradient approve` comment therefore remains the only way to grant approval.
 
