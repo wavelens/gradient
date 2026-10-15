@@ -6,43 +6,43 @@ Test structure and the patterns new tests follow. The source tree is the catalog
 
 | Layer | Location | Coverage |
 |---|---|---|
-| Backend unit | `#[cfg(test)] mod tests` beside the code | Pure logic, no I/O |
-| Backend integration | `backend/gradient-*/tests/*.rs` | The real router and handlers over a mocked database |
-| Shape tests | `backend/gradient-graph/src/cases/`, `backend/gradient-scheduler/src/cases/` | The graph writer and the scheduler on a real Postgres 18 database ([Shape Tests](#shape-tests)) |
-| Test support | `backend/gradient-fixtures/`, `backend/gradient-test-support/` | Test database, shape builder, fakes and fixtures for every suite ([Test Support](#test-support)) |
-| CLI | `cli/tests/*.rs` | The `gradient` binary against a stub HTTP server |
+| Backend unit | `#[cfg(test)] mod tests` next to the code | Pure logic with no I/O |
+| Backend integration | `backend/gradient-*/tests/*.rs` | Real router and handlers on top of a mocked database |
+| Shape tests | `backend/gradient-graph/src/cases/`, `backend/gradient-scheduler/src/cases/` | Graph writer and scheduler on a real Postgres 18 database ([Shape Tests](#shape-tests)) |
+| Test support | `backend/gradient-fixtures/`, `backend/gradient-test-support/` | Test database, shape builder, fakes and fixtures for all suites ([Test Support](#test-support)) |
+| CLI | `cli/tests/*.rs` | The `gradient` binary against a stubbed HTTP server |
 | Frontend | `frontend/src/**/*.spec.ts` | Components and services under vitest |
-| Report inspector | `nix/tools/report-inspector/tests/` | Inspector commands over a report fixture built in the test |
-| NixOS VM | `nix/tests/gradient/<name>/`, `nix/tests/harness/` | A booted machine running the packaged server, or a module against a scripted API |
-| SQL plan check | `backend/src/sql_gate/`, started by the e2e VM test | Every registered statement's plan at production scale |
+| Report inspector | `nix/tools/report-inspector/tests/` | Inspector commands on a report fixture built during the test |
+| NixOS VM | `nix/tests/gradient/<name>/`, `nix/tests/harness/` | A booted machine with the packaged server, or a module against a scripted API |
+| SQL plan check | `backend/src/sql_gate/`, started by the e2e VM test | The plan of every registered statement at production scale |
 | Mock daemon | `backend/gradient-daemon/`, `nix/tests/store-spec/`, `nix/tests/gradient/scheduler/`, `nix/tests/gradient/cluster/` | Scheduler and workers against a scripted Nix store |
 | Eval benchmark | `nix/tests/bench/evalbench/`, on request | Evaluation speed per stage, with a capture bundle per round ([Eval Benchmark](eval-benchmark.md)) |
 
-- A crate's `tests/` directory is for public entry points (an HTTP route, a CLI call). All other tests go into a `#[cfg(test)]` module next to the code.
-- Tests build the inspector fixture at test time. Committed `.db` binaries drift from the schema.
+- Put tests for public entry points (an HTTP route, a CLI call) in a crate's `tests/` directory. Keep all other tests in a `#[cfg(test)]` module next to the code.
+- Build the inspector fixture at test time. Committed `.db` binaries drift from the schema.
 
 ## Running
 
 | Command | Checks |
 |---|---|
-| `nix flake check` | Every check below |
-| `nix build .#checks.x86_64-linux.unittest` | Backend tests (nextest, then doc tests) on a throwaway Postgres 18 |
+| `nix flake check` | All checks listed below |
+| `nix build .#checks.x86_64-linux.unittest` | Backend tests (nextest, followed by doc tests) against a disposable Postgres 18 |
 | `nix build .#checks.x86_64-linux.cli-unittest` | CLI tests |
-| `nix build .#checks.x86_64-linux.gradient-<name>` | One VM test |
-| `nix build .#gradient-evalbench` | The eval benchmark, outside `nix flake check` |
+| `nix build .#checks.x86_64-linux.gradient-<name>` | A single VM test |
+| `nix build .#gradient-evalbench` | The eval benchmark, kept outside `nix flake check` |
 | `pnpm -C frontend exec ng test --watch=false` | Frontend tests |
 
 !!! warning
-    Local `cargo test` and `cargo nextest` over the whole backend workspace exceed the memory of a typical workstation. The Nix checks are the supported way.
+    A full `cargo test` or `cargo nextest` run over the backend workspace can exhaust the memory of a typical workstation. The Nix checks are the supported path.
 
-- The cargo suites are checks, not the packages' check phase. `nix build .#gradient` can only build the binary.
-- Tests build under `[profile.test]`, unoptimised and without the full DWARF of the released binary. Dependencies stay optimised through `[profile.dev.package."*"]`.
-- Folders under `nix/tests/gradient/` become the check `gradient-<folder>` without wiring.
-- VM tests store NARs on local disk. S3 storage has no VM test.
+- The cargo suites exist as checks and not as the packages' check phase. `nix build .#gradient` can only build the binary.
+- The `[profile.test]` profile compiles tests unoptimised and without the full DWARF of a released binary. Dependencies remain optimised through `[profile.dev.package."*"]`.
+- Each folder under `nix/tests/gradient/` becomes a check named `gradient-<folder>`, with no extra wiring required.
+- VM tests write NARs to local disk. S3 storage has no VM test.
 
 ## Shape Tests
 
-The graph writer and the scheduler have tests on a real Postgres 18 database. Tests declare the rows as a shape. The real graph writer and scheduler then work on those rows. Assertions on every table follow each step.
+Tests cover the graph writer and the scheduler against a real Postgres 18 database. Each test declares its rows as a shape. The real graph writer and scheduler then work on those rows, and assertions on every table follow each step.
 
 ```mermaid
 flowchart LR
@@ -57,14 +57,14 @@ flowchart LR
 
 | Aspect | Behavior |
 |---|---|
-| Server | `PGHOST`, `PGUSER` and `PGDATABASE`. The role must have the `CREATEDB` attribute |
+| Server | `PGHOST`, `PGUSER` and `PGDATABASE`. The role must hold the `CREATEDB` attribute |
 | Template | Every migration applied to `gradient_template` by the first test on a server, under an advisory lock |
 | Clone | A `test_<uuid>` database per test, created with `CREATE DATABASE ... TEMPLATE gradient_template` |
 | Cleanup | `finish()` with `DROP DATABASE ... WITH (FORCE)`. Tests without `finish()` panic on drop |
 | Failure | Failing tests leave the database behind for inspection and print the name |
 | Readers | `rows::<E>()`, `find::<E>(id)`, `shared_build(path)`, `attempts(path)`, `output_of(path, name)` and more |
 
-The `unittest` check can start Postgres 18 through `postgresqlTestHook`, with `fsync = off` and 500 connections.
+The `unittest` check can bring up Postgres 18 through `postgresqlTestHook`, with `fsync = off` and 500 connections.
 
 ### Shape Builder
 
@@ -82,10 +82,10 @@ let seed = shape()
     .build_status(BuildStatus::Queued);
 ```
 
-- Setters act on the evaluation, derivation, cache or assignment named last.
-- New evaluations get a fresh project, task and commit each. All projects share a single owner.
+- Each setter acts on the evaluation, derivation, cache or assignment named last.
+- Every new evaluation receives a fresh project, task and commit. All projects share a single owner.
 - `into_database()` can create the test database and insert the rows. `insert_into(connection)` can add a second shape to a running test.
-- `declared_statuses()` can list the declared build statuses. The case layers assert those statuses after the seed settled.
+- `declared_statuses()` can list the declared build statuses. Once the seed has settled, the case layers assert those statuses.
 - Scheduler setters (`shape/scheduling.rs`) add triggers, clusters, eval assignments, metrics, upstream caches and worker registrations.
 
 ### Case Layers
@@ -136,20 +136,20 @@ Case layers start the real component on a shape. Tests read like the case steps,
 
 ## Test Support
 
-Two crates contain the shared test code. Missing helpers belong in those crates rather than in a single test file.
+Shared test code lives in two crates. Place new helpers there instead of inside individual test files.
 
 | Crate | Module | Contents |
 |---|---|---|
-| `gradient-fixtures` | `database.rs`, `shape/` | Test database and shape builder |
+| `gradient-fixtures` | `database.rs`, `shape/` | Test database plus a shape builder |
 | | `rows/`, `ids.rs` | Entity models with stable IDs (`project()`, `user()`, `task()`, ...) |
-| | `mock.rs` | `MockDatabase` helpers for suites still on a mocked database |
+| | `mock.rs` | `MockDatabase` helpers for suites that still use a mocked database |
 | `gradient-test-support` | `fakes/` | In-memory doubles such as `FakeDrvReader`, `FakeWorkerStore`, `RecordingJobReporter` |
 | | `fakes/store_fixture.rs` | `StoreFixture`: a real 951-derivation `hello` closure from `backend/test-store/` |
 | | `state.rs` | `TestState` and `test_state()`: a wired `ServerState` |
 | | `web.rs` | `make_test_server()`, `make_token()`, `signed_in()` for authenticated requests |
 | | `cli.rs`, `log_storage.rs`, `cache_fixture.rs` | `test_cli()`, log storage doubles, populated cache states |
 
-`use gradient_test_support::prelude::*` can bring in the common items and the scripted protocol peers (`MockProtoServer`, `ProtoPeer`).
+The common items and the scripted protocol peers (`MockProtoServer`, `ProtoPeer`) come in through `use gradient_test_support::prelude::*`.
 
 ## Patterns
 
@@ -208,7 +208,7 @@ Hand-written statements go through `gradient_db::sql!` with parameter kinds and 
 
 ## Mock Daemon
 
-`gradient-scheduler` and `gradient-cluster` are running the real server and workers. `gradient-daemon serve --backend mock` can replace the `nix-daemon` of each worker on the stock socket. Both suites share the server node (`scheduler/server.nix`) and the script helpers (`scheduler/helpers.py`). The `mock` feature of `backend/gradient-daemon` can add the binary to the `daemon` output of the `gradient` package.
+The `gradient-scheduler` and `gradient-cluster` suites drive the real server and workers. To test without that, `gradient-daemon serve --backend mock` can replace the `nix-daemon` of each worker on the stock socket. Both suites share the server node (`scheduler/server.nix`) and the script helpers (`scheduler/helpers.py`). Enable the `mock` feature of `backend/gradient-daemon` to add the binary to the `daemon` output of the `gradient` package.
 
 | Aspect | Behavior |
 |---|---|
@@ -221,9 +221,9 @@ Hand-written statements go through `gradient_db::sql!` with parameter kinds and 
 | Control | `gradient-daemon ctl` with the query commands `journal`, `builds`, `latency`, `violations` and `running` and the steering commands `seed`, `forget`, `outcome` and `release` |
 | Latency | Each phase will append to `latency.jsonl` the spreads from can-start to assignment and of builds, the critical path and the overhead factor |
 
-Every reference is inside the runtime closure of the requested inputs, as in Nix.
+As in Nix, every reference points inside the runtime closure of the requested inputs.
 
-**Production replay:** `gradient-report <report.db> store-spec -o spec.nix` can turn a report into a store spec with edges, references, sizes and scaled durations. The `--allow-failed` flag can replay failures. The `--anonymize` flag can rename packages to `n0`, `n1`, ...
+**Production replay:** `gradient-report <report.db> store-spec -o spec.nix` can turn a report into a store spec with edges, references, sizes and scaled durations. Pass `--allow-failed` to replay failures. Pass `--anonymize` to rename packages to `n0`, `n1`, ...
 
 ## Topologies
 
@@ -241,7 +241,7 @@ The scheduler and e2e suites are `mk.nix { self, pkgs, topology }`. Both suites 
 
 ## Conventions
 
-- One file per contract, named after the contract, like `cache_roles.rs`, `auth_middleware.rs` or `body_size_limit.rs` files.
-- Module doc comments state the coverage and setup of the file. Suites on a mocked database name the replayed query script there.
-- Test names read as the asserted behaviour (`a_refused_session_backs_off`).
-- Regression tests carry a one-line comment naming the defect and the issue number.
+- Each contract lives in its own file, named after the contract: `cache_roles.rs`, `auth_middleware.rs` or `body_size_limit.rs`.
+- Module doc comments describe the scope and the setup of the file. A suite built on a mocked database records the replayed query script there.
+- Test names state the asserted behaviour, as in `a_refused_session_backs_off`.
+- Regression tests start with a one-line comment: the defect plus the issue number.

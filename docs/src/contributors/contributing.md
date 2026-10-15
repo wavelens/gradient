@@ -1,17 +1,17 @@
 # Contributing
 
-Development environment, checks and the steps to send a change. All contributors follow the [Code of Conduct](https://github.com/wavelens/gradient/blob/main/CODE_OF_CONDUCT.md).
+Set up a development environment, run the checks and submit changes. All contributors follow the [Code of Conduct](https://github.com/wavelens/gradient/blob/main/CODE_OF_CONDUCT.md).
 
 ## Workflow
 
-1. Open an issue to discuss a significant change first.
-2. Fork and branch from `main`.
-3. Implement with tests, see [Tests](tests.md).
-4. Open a pull request against `main`.
+1. Discuss large changes in an issue before writing code.
+2. Create a fork, then a branch based on `main`.
+3. Write the change together with tests. See [Tests](tests.md).
+4. Send a pull request that targets `main`.
 
 ## Licensing
 
-Gradient is **AGPL-3.0-only**. Contributions are released under the same license. All files carry the SPDX header below.
+Gradient uses the **AGPL-3.0-only** license. Contributions fall under the same license. Every file must include this SPDX header:
 
 ```rust
 // SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
@@ -30,7 +30,7 @@ Gradient is **AGPL-3.0-only**. Contributions are released under the same license
     cd backend && cargo run
     ```
 
-    1.  An interactive NixOS test driver. `run_tests()` will boot a VM with a packaged server, PostgreSQL 18 forwarded to the host port, a user `test` (password `password`) and a project. `cargo run` in `backend/` can then work against that database.
+    1.  Start an interactive NixOS test driver. `run_tests()` boots a VM with a packaged server, PostgreSQL 18 forwarded to a host port, a user `test` with password `password`, and a project. Run `cargo run` in `backend/` to work against that database.
 
 === "Frontend"
 
@@ -39,9 +39,9 @@ Gradient is **AGPL-3.0-only**. Contributions are released under the same license
     cd frontend && pnpm install && pnpm start
     ```
 
-    1.  A VM with a superuser `admin` (password `admin_password`), a team, a project, a task and a worker from declarative state. Evaluations and build jobs can run end to end against `pnpm start`.
+    1.  Start a VM built from declarative state. It contains a superuser `admin` with password `admin_password`, a team, a project, a task, and a worker. With `pnpm start` running, evaluations and build jobs can run end to end.
 
-`backend/.cargo/config.toml` will cap parallel `rustc` jobs at 1 (`[build] jobs = 1`) to bound peak memory. `cargo build -j N` can override the cap.
+`backend/.cargo/config.toml` caps parallel `rustc` jobs at 1 with `[build] jobs = 1` to bound peak memory. Override the cap with `cargo build -j N`.
 
 ## Checks
 
@@ -54,18 +54,18 @@ Gradient is **AGPL-3.0-only**. Contributions are released under the same license
 | Format | `cargo fmt --all --check`, in `backend/` and `cli/` |
 | Licenses and advisories | `cargo deny check`, in `backend/` and `cli/`. GPL-family dependencies are banned |
 
-CI (`.github/workflows/rust.yml`) will check fmt, the `#[allow]` grep check and cargo-deny over both workspaces. Clippy is part of the flake checks.
+CI (`.github/workflows/rust.yml`) runs fmt, the `#[allow]` grep check and cargo-deny across both workspaces. The flake checks include Clippy.
 
 ## Rust
 
-- `cargo fmt` before committing. Toolchain versions come from the devShell (`flake.lock`), mirrored in `rust-toolchain.toml` for rustup users.
-- The `style_edition = "2024"` setting is part of the `rustfmt.toml` file.
-- Workspaces each carry their own `deny.toml`, `clippy.toml` and `rustfmt.toml`, kept in step.
-- The `tokio::spawn` and raw `Statement` bans are part of the backend `clippy.toml` file.
-- No `unwrap()` in production paths (`clippy::unwrap_used = "deny"`). The alternatives are `?`, an explicit error branch, or `.expect("<the invariant>")` where the call cannot fail by construction.
-- Shared state must use `gradient_util::sync::Mutex` instead of `std::sync::Mutex`. Poisoning is ignored, and one panicking critical section cannot break every later `lock()` call.
-- Logging must go through `tracing` (`info`, `debug`, `warn`, `error`) and never through `println!` macros.
-- `#[instrument]` on significant async functions.
+- Run `cargo fmt` before each commit. The devShell in `flake.lock` pins the toolchain version, and `rust-toolchain.toml` mirrors that pin for rustup users.
+- `rustfmt.toml` sets `style_edition = "2024"`.
+- Every workspace has its own `deny.toml`, `clippy.toml` and `rustfmt.toml`. Keep these files in sync across workspaces.
+- The backend `clippy.toml` bans `tokio::spawn` and raw `Statement`.
+- Production code must not call `unwrap()` (`clippy::unwrap_used = "deny"`). Use `?`, an explicit error branch, or `.expect("<the invariant>")` where the call cannot fail by construction.
+- For shared state, use `gradient_util::sync::Mutex` rather than `std::sync::Mutex`. Poisoning gets ignored, so a panic in one critical section cannot break every later `lock()` call.
+- Log through `tracing` (`info`, `debug`, `warn`, `error`). Never use `println!` macros for logging.
+- Add `#[instrument]` to significant async functions.
 
 | Change | Also update |
 |---|---|
@@ -99,11 +99,11 @@ nix eval --json --file docs/tools/options.nix | python3 docs/tools/options.py > 
 
 ## Angular and TypeScript
 
-- Standalone components with signals (`signal()`, `computed()`), feature folders under `frontend/src/app/features/` in the app.
-- UI components from `gr-ui` (`@gradient/ui/ui`, on `@angular/cdk`), charts through `<gr-metric-chart>` (Apache ECharts), colours and spacing from the `@gradient/ui/styles/variables` module. See the [Frontend Style Guide](frontend-style-guide.md).
-- No UI or chart dependency with a field-of-use restriction. The bundle is distributed under AGPL-3.0. A dependency licensed beyond MIT, BSD or Apache-2.0 cannot be passed on.
-- A refreshed `pnpm-lock.yaml` will change the `pnpmDeps` hash in `nix/packages/gradient-frontend.nix`. The new hash is obtainable by setting `lib.fakeHash`, running `nix build .#gradient-frontend.pnpmDeps` and taking the reported hash.
-- `minimumReleaseAge` in `pnpm-workspace.yaml` will refuse packages younger than 24 hours. A local `pnpm update` will then resolve the same versions the Nix build would accept.
+- Build standalone components with signals (`signal()`, `computed()`). Keep feature code in feature folders under `frontend/src/app/features/`.
+- Take UI components from `gr-ui` (`@gradient/ui/ui`, built on `@angular/cdk`). Render charts through `<gr-metric-chart>` (Apache ECharts). Get colours and spacing from the `@gradient/ui/styles/variables` module. See the [Frontend Style Guide](frontend-style-guide.md).
+- Avoid UI or chart dependencies with a field-of-use restriction. The bundle is distributed under AGPL-3.0, and we cannot pass on a dependency licensed beyond MIT, BSD or Apache-2.0.
+- A refreshed `pnpm-lock.yaml` will change the `pnpmDeps` hash in `nix/packages/gradient-frontend.nix`. To get the new hash, set `lib.fakeHash`, run `nix build .#gradient-frontend.pnpmDeps` and take the reported hash.
+- `minimumReleaseAge` in `pnpm-workspace.yaml` will refuse packages younger than 24 hours. Run a local `pnpm update` to pin the same versions the Nix build would take.
 
 ## Nix
 

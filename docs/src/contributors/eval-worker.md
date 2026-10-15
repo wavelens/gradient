@@ -13,23 +13,23 @@ flowchart LR
 
 ## Subprocess IPC
 
-- **Frames:** a `u32` little-endian length prefix plus an rkyv payload (`gradient-eval/src/ipc.rs`).
-- **Version byte:** subprocesses write `EVAL_IPC_VERSION` (currently 10) before the first frame. A binary swapped mid-evaluation can no longer pass the handshake and send undecodable frames.
-- **Responses:** request and response pair up. `Stats` ticks and [build requests](#import-from-derivation) can arrive before the response. `List` responses hold the derivation path of each attribute found, resolved in the subprocess that forced the attribute.
+- **Frames:** each frame start with a `u32` little-endian length prefix, followed by an rkyv payload (`gradient-eval/src/ipc.rs`).
+- **Version byte:** before the first frame, subprocesses write `EVAL_IPC_VERSION` (currently 10). A binary swapped mid-evaluation then fail the handshake instead of sending undecodable frames.
+- **Responses:** each request pair with one response. `Stats` ticks and [build requests](#import-from-derivation) can arrive before that response. `List` responses carry the derivation path of every attribute found, resolved in the subprocess that forced the attribute.
 - **Shards:** `Plan` can split each include at its first wildcard.
-    - Wildcards followed by more segments give a sub-pattern per child (`packages.**.hello` -> `packages.x86_64-linux.hello`).
-    - Wildcards at the end give the unchanged pattern and its child names (`only`), read without forcing any child.
+    - With more segments after the wildcard, each child receive a sub-pattern (`packages.**.hello` -> `packages.x86_64-linux.hello`).
+    - With the wildcard at the end, the pattern stay unchanged and the child names (`only`) get read without forcing any child.
     - The parent can list those names in batches of `names / (pool * 4)` (at most 64).
-    - `List` can limit the first wildcard to the batch.
-- **Deferred sets:** `List` can skip the children of a nested set under a trailing `**` (all checks of a system).
+    - `List` can restrict the first wildcard to one batch.
+- **Deferred sets:** under a trailing `**`, `List` can skip the children of a nested set (all checks of a system).
     - Those children appear in `deferred` as a `*` shard.
     - The parent can queue those names in batches.
-    - One heavy set will spread across the pool instead of keeping one subprocess busy while the rest sit idle.
-- **Warm walker:** A subprocess can keep one walker (locked flake plus open eval cache) across consecutive requests for the same repository. A Plan / List sequence can pay for the lock and the cache open only once.
+    - One heavy set then spread across the pool instead of keeping one subprocess busy while the rest sit idle.
+- **Warm walker:** a subprocess can keep one walker (locked flake plus open eval cache) across consecutive requests for the same repository. A Plan / List sequence then pay for the lock and the cache open only once.
 
 ## Import From Derivation
 
-An import from a derivation (IFD) needs a build in the middle of an evaluation. Subprocesses never build through the local daemon. The parent must request a Gradient build from the server instead.
+An import from a derivation (IFD) requires a build in the middle of an evaluation. Subprocesses cannot build through the local daemon. The parent has to request a Gradient build from the server instead.
 
 | Frame | Direction | Content |
 |---|---|---|
@@ -38,7 +38,7 @@ An import from a derivation (IFD) needs a build in the middle of an evaluation. 
 
 - The patched Nix of Gradient can hand an import to a realise hook instead of the local daemon.
 - The hook in the subprocess must send `NeedsBuild` and block until `BuildDone` arrives.
-- A different request during the wait is a protocol error. Subprocesses then stop reading and exit.
+- A different request during the wait counts as a protocol error. Subprocesses then stop reading and exit.
 - Nix can raise the `error` of `BuildDone` as the error of the import. Later attributes with the same import receive the same error.
 
 ### Import Builder (`gradient-worker/src/executor/import.rs`)
@@ -53,7 +53,7 @@ An import from a derivation (IFD) needs a build in the middle of an evaluation. 
 
 ## Parent Side
 
-The pool, in `gradient-eval/src/pool/`. The worker and `gradient eval` both drive it.
+The pool code sits in `gradient-eval/src/pool/`. Both `gradient eval` and the worker drive it.
 
 | File | Role |
 |---|---|
@@ -67,7 +67,7 @@ The pool, in `gradient-eval/src/pool/`. The worker and `gradient eval` both driv
 | `download.rs` | The `@nix` log parser and the download progress seam |
 | `driver.rs` | The hidden `--eval-driver <file>` harness: JSONL requests through the real transport, JSON responses out. The NixOS VM test can drive both sides of the wire through the harness from Python |
 
-The worker adapter, in `gradient-worker/src/worker_pool/`:
+The worker adapter sits in `gradient-worker/src/worker_pool/`.
 
 | File | Role |
 |---|---|
@@ -77,40 +77,40 @@ The worker adapter, in `gradient-worker/src/worker_pool/`:
 
 ## Memory Safety
 
-Three layers of evaluation memory.
+Evaluation memory is guarded at three layers.
 
 | Layer | Option | Behavior |
 |---|---|---|
-| Recycling | `worker.eval.maxRss` (2 GiB) | Subprocesses over the limit will restart **between** calls. Pool size: `worker.eval.forkWorkers`, independent of the limit |
-| Free-RAM reaper | `worker.system.minFreeRamMb` (`0` = 10% of RAM, clamped to 128 MiB - 1 GiB) | Sampling `MemAvailable` every 500 ms. A shortfall below the margin will trigger a SIGKILL of the largest evaluation subprocess with resident memory covering the whole shortfall. A 5 s wait will follow |
-| Pool ceiling | `worker.eval.maxMemory` (MiB) | Samples of every subprocess every 500 ms. Killing the largest subprocess while the sum is over the ceiling, then a 5 s wait |
+| Recycling | `worker.eval.maxRss` (2 GiB) | Subprocesses above the limit restart **between** calls. Pool size: `worker.eval.forkWorkers`, independent of the limit |
+| Free-RAM reaper | `worker.system.minFreeRamMb` (`0` = 10% of RAM, clamped to 128 MiB - 1 GiB) | Sample `MemAvailable` every 500 ms. If free RAM drops below the margin, SIGKILL the largest evaluation subprocess, chosen so its resident memory covers the whole shortfall. Wait 5 s afterwards |
+| Pool ceiling | `worker.eval.maxMemory` (MiB) | Sample every subprocess every 500 ms. If the sum exceeds the ceiling, kill the largest subprocess. Wait 5 s afterwards |
 
-- The recycle check will happen after a call. One unit (a large aggregate, IFD chains, runaway recursion) can grow the Boehm heap past the cap within a call. The reaper is the guard against that peak.
-- Nothing is killed when no evaluation is large enough to cover the shortfall. The pressure is then coming from elsewhere.
+- The recycle check happen after a call. A single unit (a large aggregate, IFD chains, runaway recursion) can grow the Boehm heap past the cap within one call. The reaper guard against that peak.
+- No evaluation large enough to cover the shortfall means nothing is killed. The pressure then originate elsewhere.
 - A fixed 1 GiB floor on a 2 GiB host killed evaluations that were never the cause (#579).
-- A killed subprocess will close its pipe. The parent will retry the call once, then fail only that attribute.
-- One bounded failure will replace a host OOM that could kill the worker and strand the job. The server will only register a clean disconnect.
-- The idle subprocesses shut down once discovery is over. Their heaps are not sitting through the rest of the closure walk.
-- The next evaluation will start fresh subprocesses.
-- `acquire` will serialise evaluations under sustained pressure, always letting one proceed.
-- `worker.system.minFreeRamMb` and `worker.eval.maxMemory` are alternatives. Startup failure for a worker with both.
-- Evaluation subprocesses are running with `oom_score_adj = 600` as the kernel's last resort.
+- A killed subprocess close its pipe. The parent retry the call once, then fail only that attribute.
+- One bounded failure replace a host OOM that could kill the worker and strand the job. The server only register a clean disconnect.
+- Idle subprocesses shut down once discovery is over. Their heaps do not sit through the rest of the closure walk.
+- The next evaluation start fresh subprocesses.
+- `acquire` serialise evaluations under sustained pressure and always allow one to proceed.
+- `worker.system.minFreeRamMb` and `worker.eval.maxMemory` are alternatives. A worker with both set fail at startup.
+- Evaluation subprocesses run with `oom_score_adj = 600` as the kernel's last resort.
 
 ## Compared to nix-eval-jobs
 
 | | Gradient | nix-eval-jobs |
 |---|---|---|
-| Parallelism | Long-lived pool. One evaluation sharded across the pool | Short-lived children forked from a warm parent |
-| Warmth across evaluations | Persistent eval cache per flake fingerprint | None. Copy-on-write warmth lasting one evaluation |
-| Across machines | Fleet-shared `<fp>.sqlite` cache (pull and push). Staging a pulled blob will drop the previous local `-wal` / `-shm` sidecars | None |
-| Concurrent writers | Shards writing a shared cache, each write in an immediate transaction of its own, and a checkpoint at the end | Not applicable |
-| Memory | Automatic pool sizing. A many-system flake can degrade to one shard and still complete | Manual `--workers` and `--max-memory-size` |
-| Pipeline | Discovery writes rows, and build assignment starts mid-evaluation. The closure walk skips server-known derivations | JSON job stream for the consumer (Hydra and similar) |
-| Failure isolation | A bad attribute will become an error, and the evaluation will go on. A crashed batch comes back attribute by attribute, down to the attribute that sank the subprocess | Per-job errors through the fork boundary |
-| Compute across machines | Single-host pool today | Single host |
+| Parallelism | Long-lived worker pool. One evaluation can be sharded across it | Short-lived children forked from a warm parent |
+| Warmth across evaluations | A persistent eval cache keyed by flake fingerprint | None. Copy-on-write warmth lasts for a single evaluation |
+| Across machines | A fleet-shared `<fp>.sqlite` cache with pull and push. Staging a pulled blob will drop the previous local `-wal` / `-shm` sidecars | None |
+| Concurrent writers | Shards write to a shared cache. Each write runs in its own immediate transaction, and a checkpoint follow at the end | Not applicable |
+| Memory | The pool can size itself. A flake with many systems can degrade to a single shard and still complete | Manual `--workers` and `--max-memory-size` |
+| Pipeline | Discovery writes rows, and build assignment can start mid-evaluation. The closure walk will skip derivations already known to the server | A JSON job stream for consumers such as Hydra |
+| Failure isolation | A bad attribute turn into an error while the evaluation continue. A crashed batch come back attribute by attribute, down to the one that sank the subprocess | Per-job errors across the fork boundary |
+| Compute across machines | A single-host pool today | Single host |
 
 ## Related
 
-- [Evaluation Metrics](eval-metrics.md): the pool's per-evaluation records
-- [Transfer](proto/transfer.md): upload of the eval cache (`UploadObject::EvalCache`)
-- [Configuration](../reference/configuration.md#worker): every worker option
+- [Evaluation Metrics](eval-metrics.md): per-evaluation records kept by the pool
+- [Transfer](proto/transfer.md): how the eval cache gets uploaded (`UploadObject::EvalCache`)
+- [Configuration](../reference/configuration.md#worker): a list of all worker options

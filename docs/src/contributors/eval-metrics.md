@@ -1,6 +1,6 @@
 # Evaluation Metrics
 
-Evaluation workers record Nix metrics per evaluation, the same way build jobs record resource metrics. The numbers are feeding the Job Board's **Evals** tab. They are also routing RAM-heavy evaluations to big machines.
+Each evaluation run produces metrics, collected the same way build jobs collect resource metrics. The Job Board's **Evals** tab shows these numbers. They also drive routing: evaluations that need a lot of RAM go to large machines.
 
 ```mermaid
 flowchart LR
@@ -15,29 +15,29 @@ flowchart LR
 
 | Table | Contents |
 |---|---|
-| `evaluation_metric` | Per evaluation: thunks, function calls, primop calls, lookups, allocated bytes, peak GC heap and RSS (MB), `total_eval_ms`, `worker_id`, and the phase columns `fetch_ms`, `eval_flake_ms`, `eval_drv_ms` |
+| `evaluation_metric` | Per evaluation: thunks, function calls, primop calls, lookups, allocated bytes, peak GC heap and RSS (MB), `total_eval_ms`, `worker_id`, plus the phase columns `fetch_ms`, `eval_flake_ms`, `eval_drv_ms` |
 | `evaluation_attr_cost` | Per entry point: thunks, function calls, wall clock and allocated bytes, bucketed by the wildcard target |
 | `flake_output_node` | The walked flake-output tree: `path`, `parent`, `name`, `kind`, `is_derivation`, `drv_path` |
 
-- The phase columns are not coming from the Nix stats.
-- The phase columns hold the sum of the job timeline's `fetch`, `eval_flake` and `eval_derivations` spans. The server will compute them on the job's terminal message.
-- The phase columns are 0 between `EvalStats` and completion. They stay 0 when the worker vanished before reporting. Phase names are on the [Job Board](../ui/job-board.md#job-inspection).
-- Entry-point costs are aggregated in the resolver on each completed request.
-- `flake_output_node` can only record the nodes visited by the discovery walk. Nothing extra is evaluated.
-- The frontend will render the rows as a `nix flake show`-like tree.
+- The Nix stats do not contain the phase columns.
+- The phase columns hold the sum of the job timeline's `fetch`, `eval_flake` and `eval_derivations` spans. The server computes them on the job's terminal message.
+- The phase columns read 0 between `EvalStats` and completion. They also stay 0 when the worker vanished before reporting. Phase names appear on the [Job Board](../ui/job-board.md#job-inspection).
+- The resolver aggregates entry-point costs on each completed request.
+- `flake_output_node` records only the nodes visited by the discovery walk. No extra evaluation happens.
+- The frontend renders the rows as a `nix flake show`-like tree.
 
 ## RAM Routing
 
-`EstimatedTimeRule` (see [Scoring](scheduler/scoring.md)) can read a per-task rolling p95 of `peak_rss_mb` over the last 24 h. Predicted RAM above a worker's free memory can add the expected time of a repeated evaluation. Tasks whose evaluations needed much RAM go to big-RAM workers. The prediction can update as evaluations finish, with no manual thresholds.
+`EstimatedTimeRule` (see [Scoring](scheduler/scoring.md)) can use a rolling per-task p95 of `peak_rss_mb` from the last 24 h. Predicted RAM above a worker's free memory can add the expected time of a repeated evaluation to the score. Tasks with heavy memory needs then go to workers with large free memory. As evaluations finish, the prediction can improve on its own, with no manual thresholds.
 
 ## Endpoints
 
 | Endpoint | Response |
 |---|---|
-| `GET /api/v1/board/evals/expensive-by-resource?metric=...&window_days=N` | Top evaluations by `time`, `rss`, `heap`, `thunks`, `fncalls` or `alloc`, project-scoped. `metric` is matched against a closed list |
-| `GET /api/v1/evals/{evaluation}/flake-graph` | The walked flake-output tree of one evaluation |
+| `GET /api/v1/board/evals/expensive-by-resource?metric=...&window_days=N` | Project-scoped rankings of evaluations by `time`, `rss`, `heap`, `thunks`, `fncalls` or `alloc`. The `metric` parameter must match a closed list of values |
+| `GET /api/v1/evals/{evaluation}/flake-graph` | The full flake-output tree for a single evaluation, produced by walking it |
 
 ## Overhead
 
-- `GRADIENT_WORKER_EVAL_METRICS` (default `true`) can switch capture off. The value `false` will skip the stats read entirely.
-- The enabled cost is one cumulative-counter read per resolver request, diffed per worker. No `--count-calls`-style instrumentation.
+- `GRADIENT_WORKER_EVAL_METRICS` controls capture. It defaults to `true`. Set it to `false` to skip the stats read entirely.
+- With capture on, each resolver request triggers one cumulative-counter read per worker, and the metrics come from diffing those counters. No `--count-calls`-style instrumentation involved.

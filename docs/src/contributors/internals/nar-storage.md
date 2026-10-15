@@ -1,6 +1,6 @@
 # NAR Storage
 
-NAR object locations, the write path into storage and the sync between storage and database. Delivery of NARs to clients is on [Cache Serving](cache-serving.md) instead.
+NAR objects live in dedicated storage. This page describes where they reside, how writes reach that storage, and how the storage and database stay in sync. [Cache Serving](cache-serving.md) handles delivery of NARs to clients.
 
 ```mermaid
 flowchart LR
@@ -29,31 +29,31 @@ ${baseDir}/nars/<2 chars>/<rest>.nar.zst
 
 | Path | Write |
 |---|---|
-| Presigned upload (S3) | The worker is writing to S3 directly. The server is completing multipart on `UploadFinished` |
-| Passthrough (local storage) | Every upload is streaming through the server. The commit is checking length and SHA-256, then moving the file in with `adopt_file` |
+| Presigned upload (S3) | The worker writes directly to S3. On `UploadFinished`, the server completes the multipart upload. |
+| Passthrough (local storage) | Every upload streams through the server. At commit time, the server checks length and SHA-256, then moves the file in with `adopt_file`. |
 | REST upload (`nix copy`) | `import_nar_reader` -> `put_nar_idempotent_reader`: skipped for a stored path, see [First Content](#first-content) |
 
 ### First Content
 
-Stored paths keep the first content they received, like valid paths in Nix. Non-reproducible builds can produce other bytes for one input-addressed path.
+A stored path retains the first content it received, mirroring valid paths in Nix. Non-reproducible builds can produce different bytes for one input-addressed path.
 
 - **Stored:** A confirmed `cached_path` row with a `file_hash` (`MCachedPath::is_stored`).
-- **Grant:** Workers asking to upload a stored path get a `Skip` grant. They drop the NAR and count the output as uploaded.
+- **Grant:** Workers requesting an upload of a stored path get a `Skip` grant. They discard the NAR and count the output as uploaded.
 - **Writes:** Passthrough, REST and SSH leave the object of a stored path untouched. Only identical bytes can replace a missing object.
-- **Commit:** The NAR commit must keep the content fields of a stored row. Only `deriver` can change.
-- **Signatures:** Workers with other bytes get the stored content signed into their project caches. REST and SSH clients with other bytes get no signature.
-- **SSH:** An `AddMultipleToStore` with other bytes must succeed. The server can drain and drop those bytes.
-- **Concurrent Uploads:** Uploads of a path take turns on a server and check the row again on their turn, see [Transfer](../proto/transfer.md#upload).
-- **Self-Heal:** The verify-on-read self-heal can demote a path with an object not matching its `file_hash`.
+- **Commit:** Always preserve the content fields of a stored row during the NAR commit. Only `deriver` can change.
+- **Signatures:** Workers with different bytes get the stored content signed into their project caches. REST and SSH clients with different bytes get no signature.
+- **SSH:** An `AddMultipleToStore` with different bytes can still succeed. The server drains and drops those bytes.
+- **Concurrent Uploads:** Uploads of a path take turns on a server, and each upload rechecks the row on its turn, see [Transfer](../proto/transfer.md#upload).
+- **Self-Heal:** The verify-on-read self-heal can demote a path whose object does not match its `file_hash`.
 
 !!! warning "Bucket Requirements"
     - No object versioning, object lock or replication. Object lock and replication force versioning.
-    - Versioned buckets keep a copy of every deleted NAR. No S3 GC can reclaim those copies.
-    - An `AbortIncompleteMultipartUpload` lifecycle rule (e.g. 7 days). NARs over 1 GiB go up as multipart. A worker dying mid-upload will leave the parts behind.
+    - Versioned buckets retain a copy of every deleted NAR. No S3 GC can reclaim those copies.
+    - Configure an `AbortIncompleteMultipartUpload` lifecycle rule (e.g. 7 days). NARs over 1 GiB upload as multipart. A worker dying mid-upload leaves the parts behind.
 
 ## Build Logs
 
-Build logs share the NAR backend (`gradient-storage/src/log.rs`). The shard is the last byte of the `BuildAttemptId` value. That byte is the random tail of a UUIDv7.
+Build logs share the NAR backend with other artifacts (`gradient-storage/src/log.rs`). To pick a shard, take the last byte of the `BuildAttemptId` value. That byte form the random tail of a UUIDv7.
 
 ```text
 logs/<last 2 chars>/<attempt>.log                  # live log

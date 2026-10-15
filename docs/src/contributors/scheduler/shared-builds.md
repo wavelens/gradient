@@ -1,6 +1,6 @@
 # Shared Builds
 
-A derivation is built once, globally. The build state of the derivation is on one `derivation_build` row, the *shared build*. All evaluations of that derivation point at this row. Each write to shared builds and the surrounding graph must go through one graph writer (`backend/gradient-graph`).
+The system builds each derivation once, globally. That build lives in a single `derivation_build` row, the *shared build*. Every evaluation of the derivation points at this one row. All writes to shared builds and the surrounding graph must pass through the single graph writer (`backend/gradient-graph`).
 
 ```mermaid
 flowchart LR
@@ -17,29 +17,29 @@ flowchart LR
 
 | Table | Key | Role |
 |---|---|---|
-| `derivation` | UNIQUE `(hash, name)` | The global graph node. `walked` and `unwalked_inputs` record whether the subtree is known |
-| `derivation_build` | UNIQUE `derivation` | The shared build: `status`, `attempt`, `cache_available`, `probed`, `fetchable`, `wanted`, `blocking_deps`, `missing_runtime_deps`, limits |
-| `build_job` | `evaluation`, `derivation_build` | Link from one evaluation to a shared build, carrying the assignment `score` |
-| `build_attempt` | `derivation_build`, `dispatched_job` | One execution: `outcome`, `reason`, timings, `build_context` |
-| `build_log_chunk` | `build_attempt` | The attempt's log |
+| `derivation` | UNIQUE `(hash, name)` | A node in the global graph. `walked` and `unwalked_inputs` track whether the subtree has been explored |
+| `derivation_build` | UNIQUE `derivation` | The shared build itself: `status`, `attempt`, `cache_available`, `probed`, `fetchable`, `wanted`, `blocking_deps`, `missing_runtime_deps`, and limits |
+| `build_job` | `evaluation`, `derivation_build` | Ties a single evaluation to a shared build and stores the assignment `score` |
+| `build_attempt` | `derivation_build`, `dispatched_job` | A single execution, with `outcome`, `reason`, timings, and `build_context` |
+| `build_log_chunk` | `build_attempt` | Holds the log output of an attempt |
 
 | Foreign key | On delete | Effect |
 |---|---|---|
-| `derivation_build.derivation` | `CASCADE` | The shared build will live as long as the derivation |
-| `build_job.evaluation` | `CASCADE` | Evaluation GC will drop its links |
-| `build_attempt.build_job` | `SET NULL` | An attempt and its log outlive the driving evaluation |
-| `build_attempt.derivation_build` | `CASCADE` | Attempts go with the shared build |
+| `derivation_build.derivation` | `CASCADE` | A shared build gets removed together with its derivation |
+| `build_job.evaluation` | `CASCADE` | Garbage collection of an evaluation also removes its links |
+| `build_attempt.build_job` | `SET NULL` | An attempt and its log can outlive the evaluation that drove them |
+| `build_attempt.derivation_build` | `CASCADE` | Attempts get removed together with their shared build |
 
 ## Sharing
 
-- Two evaluations (same or different projects) needing one derivation share its build. There is no leader, follower or link row. Sharing is the global graph itself.
-- `BatchWriter::resolve_shared_builds` (`record.rs`) can insert new shared builds with `ON CONFLICT (derivation) DO NOTHING` semantics. A shared build from an earlier evaluation will stay untouched.
-- The first assignment will build. All other evaluations see the result once the shared build is `Completed` or `Substituted` (`BuildStatus::TERMINAL_SUCCESS`).
-- A `Completed` shared build reused later will keep its attempts and logs until garbage collection of the derivation.
+- One derivation can serve several evaluations, even across projects. They all share the same build. No leader, follower or link row exists. The global graph itself handles sharing.
+- `BatchWriter::resolve_shared_builds` (`record.rs`) inserts new shared builds with `ON CONFLICT (derivation) DO NOTHING` semantics. A shared build from an earlier evaluation stay untouched.
+- The first assignment triggers the build. Every other evaluation see the result once the shared build reach `Completed` or `Substituted` (`BuildStatus::TERMINAL_SUCCESS`).
+- A `Completed` shared build reused later keep its attempts and logs until garbage collection of the derivation.
 
 ## Graph Writer
 
-The graph writer, `GraphWriter` (`gradient-graph/src/writer.rs`), is a root child of the supervision tree, stopped after every sibling. Callers use the `Graph` handle (`lib.rs`). One message is one transaction. Queued `Record` and `CommitNar` messages are the exception and share one.
+`GraphWriter` lives in `gradient-graph/src/writer.rs`. As a root child of the supervision tree, it stop after every sibling. Callers reach it through the `Graph` handle in `lib.rs`. One message count as one transaction. Queued `Record` and `CommitNar` messages share a single transaction instead.
 
 | `GraphMsg` | Written |
 |---|---|
@@ -52,9 +52,9 @@ The graph writer, `GraphWriter` (`gradient-graph/src/writer.rs`), is a root chil
 | `Demote` | `MissingNar`, operator `Path` invalidation, one cache dropping its `CacheClaim` |
 | `Gc` | Bounded deletes of derivations, stale paths and evaluations, re-checked against the current rows |
 
-All other messages flush the queue first. A write after a batch or a commit will see that batch or commit.
+Every other message flush the queue first. A write after a batch or a commit can see that batch or commit.
 
-`Graph::known_derivations` is not a message. The call can read from the pool which `drv_hashes` hold a recorded subtree (`walked` and `unwalked_inputs = 0`). The next wave of a walk can then start before its previous batch is recorded. A recorded subtree can only ever gain its record. A read missing a queued write will skip less, never wrongly.
+`Graph::known_derivations` bypass the message path. The call read straight from the pool to find which `drv_hashes` hold a recorded subtree (`walked` and `unwalked_inputs = 0`). The next wave of a walk can then start before the writer record the previous batch. A recorded subtree only ever gain its record. A read that skip a queued write skip less, never wrongly.
 
 ## Batching
 
@@ -71,15 +71,15 @@ All other messages flush the queue first. A write after a batch or a commit will
 | Constant | Value | Meaning |
 |---|---|---|
 | `CALL_TIMEOUT` | 30 s | Wait for the graph writer to exist after a restart |
-| `GRAPH_TX_BUDGET` | 120 s | Per transaction. The transaction will roll back past this budget, and the caller will get `graph transaction exceeded 120s` as error. Also set as the transaction's `statement_timeout`. The rollback must wait for the running statement, and only Postgres can end that statement |
+| `GRAPH_TX_BUDGET` | 120 s | Per transaction. Past this budget, the transaction will roll back and the caller will receive `graph transaction exceeded 120s` as an error. Also set as the transaction's `statement_timeout`. The rollback must wait for the running statement, and only Postgres can end that statement |
 | `GRAPH_TX_ATTEMPTS` | 3 | Attempts of a transaction aborted with SQLSTATE `40P01`, `40001` or `25P02` |
 
-- A caller will wait for its reply without a deadline. The graph writer may still apply a message whose caller gave up. A caller-side timeout would report a still-landing write as failed. A worker session behind a backlog will block its reader as backpressure.
-- A deadlock inside one batch will fail the whole flush (`escalate_retryable`), and `transact` will retry the flush.
-- Status updates and their effects return every database error to the `transact` function. A `SELECT 1` probe before `COMMIT` can turn a transaction aborted with a merely logged error into a `25P02` error. Postgres would otherwise answer that `COMMIT` with a silent rollback.
-- The retry may re-send board events and probe requests already sent in an aborted attempt.
-- `Transition::Repair` (`gradient_db::graph::repair::repair_build_graph`) and cache demotion take place inside the graph writer. The consistency check (`consistency_check_pass`, `gradient-scheduler`) is outside, without retries. Its next pass will pick the work up.
-- The graph writer can hold no state between messages. A restart will lose only batches still queued, and their callers get an error.
+- Callers wait for replies with no deadline. The graph writer can still apply a message from a caller that gave up. A caller-side timeout would report a write that later lands as failed. A worker session stuck behind a backlog will block its reader as backpressure.
+- A deadlock inside one batch will fail the whole flush (`escalate_retryable`), and `transact` will retry that flush.
+- Status updates and their effects return every database error to the `transact` function. A `SELECT 1` probe before `COMMIT` can convert a transaction aborted with a merely logged error into a `25P02` error. Postgres would otherwise roll back silently on that `COMMIT`.
+- A retry can re-send board events and probe requests already sent in an aborted attempt.
+- `Transition::Repair` (`gradient_db::graph::repair::repair_build_graph`) and cache demotion run inside the graph writer. The consistency check (`consistency_check_pass`, `gradient-scheduler`) runs outside, with no retries. Its next pass will pick up the remaining work.
+- The graph writer can keep no state between messages. A restart will lose only batches still queued, and their callers will get an error.
 
 ## Concurrent Walks
 
@@ -99,16 +99,16 @@ All other messages flush the queue first. A write after a batch or a commit will
 
 ## Counter Locking
 
-Counters stay correct without the graph writer's serialisation. A second writer can share them (`gradient-db/src/graph/shared_build_guard.rs`).
+The counters stay correct even without serialisation by the graph writer. Multiple writers can operate on shared builds at the same time (`gradient-db/src/graph/shared_build_guard.rs`).
 
-- Advisory keys: namespace `SHARED_BUILD_LOCK_NAMESPACE` (643), key `hashtext(derivation id)`, taken sorted in one pass before any row lock.
-- A seed of `blocking_deps` or `missing_runtime_deps` must hold the keys of its dependencies in shared mode.
-- A change of the complete-closure state or of `fetchable` must hold the key of the shared build exclusively. The hold is in place before the spread can read the edges into the shared build.
-- The second of a seed and a concurrent state change will wait for the first to commit, then read its rows.
-- Shared keys never wait on each other. A dependency referenced by every `.drv` (`source-stdenv.sh`) will cause no queueing.
-- `wanted` is the exception. `update_need` can lock only its roots. The `recount_wanted` step of the consistency check can correct drift. A lost update can leave a shared build `Skipped` until the next check.
+- Advisory keys live in the namespace `SHARED_BUILD_LOCK_NAMESPACE` (643). The key value is `hashtext(derivation id)`. Take all keys, sorted, in one pass before any row lock.
+- Take the dependency keys in shared mode for a seed that has `blocking_deps` or `missing_runtime_deps`.
+- Hold the shared build key exclusively for a change to the complete-closure state or to `fetchable`. Place this exclusive hold before the spread reads edges into the shared build.
+- Two transactions of this kind can collide: a seed and a concurrent state change. The second one waits for the first to commit and then reads its rows.
+- Shared keys never block each other. A dependency referenced by every `.drv` (`source-stdenv.sh`) therefore causes no queueing.
+- `wanted` is the exception. `update_need` can lock only its roots. The `recount_wanted` step of the consistency check can correct drift. A lost update can leave a shared build in the `Skipped` state until the next check runs.
 
 ## Related
 
-- [Jobs](../proto/jobs.md) - build job reports that drive `Transition`
+- [Jobs](../proto/jobs.md) - how job reports trigger `Transition`
 - [Architecture](../architecture.md)

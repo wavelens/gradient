@@ -1,6 +1,8 @@
 # Repair Pass
 
-The repair pass can heal graph state beyond the reach of any event. One emitter must carry the consequences of every status move of a shared build. Both live inside the graph writer. Background loops in the scheduler re-drive whatever a lost message left behind.
+Some graph state sits beyond the reach of any event. The `repair_build_graph` function heals that state. Background loops in the scheduler re-drive what a lost message left behind.
+
+Every status move on a shared build carries consequences. One emitter, `emit_transition_effects`, covers all of them. Both functions live inside the graph writer.
 
 ```mermaid
 flowchart LR
@@ -15,7 +17,7 @@ flowchart LR
 
 ## Repair Scopes
 
-`gradient_db::graph::repair::repair_build_graph(ctx, scope)` (`backend/gradient-db/src/graph/repair.rs`) must run as `Transition::Repair` in the graph writer. A repair pass can never interleave with a batch import. All scopes name an evaluation. Every statement is bounded to that evaluation's dependency closure.
+Run `gradient_db::graph::repair::repair_build_graph(ctx, scope)` (`backend/gradient-db/src/graph/repair.rs`) as `Transition::Repair` in the graph writer. A repair pass and a batch import cannot interleave. Each scope targets one evaluation. The pass bounds every statement to that evaluation's dependency closure.
 
 | Scope | Sent by | Thaw |
 |---|---|---|
@@ -23,10 +25,10 @@ flowchart LR
 | `Unstick(id)` | A `Building` evaluation judged graph-stuck (`waiting_state::attempt_graph_unstick`), and the `graph-stuck-reheal` pass | Same, minus the `deterministic_build_failure` subtree too |
 | `Retry(id)` | An evaluation retry starting `Building` (`POST /evals/{id}/retry`) | Every `REQUEUEABLE` shared build in the closure, without exception |
 
-- A failure is valid for the evaluation that recorded the failure. A fresh evaluation will rebuild the shared build once. An unstick of the same evaluation will leave the shared build alone.
-- `kept_failed` starts from the shared builds a user aborted in the evaluation (`build_job.aborted`). With the task's `retry_failed_builds` off, the `FailedPermanent` shared builds of the closure join the start set.
-- An evaluation retry will never walk. `inherit_names` must copy the `build_job` rows of the retried evaluation, and the `Retry` heal will operate on those rows.
-- No tick will start a repair pass, and no step will iterate to a fixpoint.
+- A recorded failure counts only for the evaluation that recorded it. A fresh evaluation rebuilds the shared build once. An unstick of the same evaluation leaves the shared build alone.
+- Base the `kept_failed` set on the shared builds a user aborted in the evaluation (`build_job.aborted`). Turn on the task's `retry_failed_builds` or the `FailedPermanent` shared builds of the closure also join the start set.
+- An evaluation retry never walks. `inherit_names` copies the `build_job` rows of the retried evaluation, and the `Retry` heal operates on those copied rows.
+- Never start a repair pass from a tick, and never iterate a step to a fixpoint.
 
 ## Repair Steps
 
@@ -45,26 +47,26 @@ All steps share the graph writer's transaction. The first failed step will end t
 
 ## Transition Effects
 
-Both mutation models report `(derivation, from, to)` moves to `emit_transition_effects` (`backend/gradient-db/src/status/effects.rs`). The models are the single-row path `update_derivation_build_status` and the bulk passes (queueing, cascades, repairs, abort, GC). No shared build can move without its consequences.
+Every status change reports a `(derivation, from, to)` move to `emit_transition_effects` (`backend/gradient-db/src/status/effects.rs`). Two kinds of callers exist: the single-row path `update_derivation_build_status`, and the bulk passes for queueing, cascades, repairs, abort and GC. Each move of a shared build carries its consequences.
 
 | Effect | Condition |
 |---|---|
-| `StartableSet::record` | Shared build entered or left `Queued` |
-| `bump_graph_version` | Once per emit, for every evaluation with a `build_job` on a moved shared build (`from != to`) |
+| `StartableSet::record` | A shared build entered or left `Queued` |
+| `bump_graph_version` | Once per emit, for each evaluation with a `build_job` on a moved shared build (`from != to`) |
 | Board `build::StatusChanged` | Every `build_job` of a moved shared build |
-| `build::Reported` event, written as an `Event` pending-delivery row | Entry-point `build_job` moving to `Queued`, `Building` or a terminal status |
+| `build::Reported` event, written as an `Event` pending-delivery row | An entry-point `build_job` that reached `Queued`, `Building` or a terminal status |
 | `cache::Changed` | Any move into `Completed` or `Substituted` |
-| `check_evaluation_done` | Every evaluation of a shared build that turned terminal |
-| `LogFinalize` pending-delivery row | Latest attempt of every shared build that really finished |
-| Needs-build update, queue settle, upstream probe request | Shared build crossed the `BUILDER_STATUSES` boundary. A second round will announce shared builds with re-checked queue conditions |
+| `check_evaluation_done` | Each evaluation of a shared build that turned terminal |
+| `LogFinalize` pending-delivery row | The latest attempt of each shared build that really finished |
+| Needs-build update, queue settle, upstream probe request | A shared build crossed the `BUILDER_STATUSES` boundary. A second round will announce shared builds with re-checked queue conditions |
 
-- The transaction moving the shared build must also write the pending-delivery rows (`pending_delivery`). The `gradient-effects` actor can expand `Event` rows into Git host, action and webhook deliveries. The actor will send those deliveries with retries.
-- The `StartableSet` must stage moves inside a graph transaction and publish them after the commit. The assigner can read on its own connection.
+- Write the `pending_delivery` rows in the same transaction as the shared build move. The `gradient-effects` actor can expand `Event` rows into Git host, action and webhook deliveries, and send them with retries.
+- Stage `StartableSet` moves inside a graph transaction and publish them after the commit. The assigner can read on its own connection.
 - `collapse_transitions` can reduce two moves of one shared build in one transaction to the net move.
 
 ## Task Page Histogram
 
-`evaluation.graph_version` can invalidate the per-entry-point status histogram (`backend/gradient-db/src/task_board/dep_counts.rs`).
+Changes to `evaluation.graph_version` can invalidate the per-entry-point status histogram (`backend/gradient-db/src/task_board/dep_counts.rs`).
 
 | Bumped by | Scope |
 |---|---|
@@ -73,11 +75,11 @@ Both mutation models report `(derivation, from, to)` moves to `emit_transition_e
 | Adoption (repair pass, consistency check, evaluation GC) | The adopting evaluations |
 | Startup recovery | Evaluations of re-queued and aborted shared builds (no emitter in recovery) |
 
-- `task_board::entry_point_dep_counts` can walk one page of entry points. Rows land in `entry_point_dep_count` with the `dep_counts_computed_at` timestamp and the `entry_point.dep_counts_version` value.
-- A read will refresh an entry point only when the version moved and the rows are older than `DEP_COUNTS_REFRESH_SECS` (120 s).
-- A read will claim the refresh before the walk. Concurrent reads keep the stored rows until the walk has finished.
-- A walk that never stored its rows will leave the claim to expire after `DEP_COUNTS_REFRESH_SECS`.
-- Rows older than `DEP_COUNTS_MAX_AGE_SECS` (600 s) refresh regardless. The forced refresh can heal a bump the emitter logged and swallowed.
+- `task_board::entry_point_dep_counts` can walk one page of entry points. Each walk stores rows in `entry_point_dep_count` with the `dep_counts_computed_at` timestamp and the `entry_point.dep_counts_version` value.
+- A read can trigger a refresh only when the version has moved and the stored rows predate `DEP_COUNTS_REFRESH_SECS` (120 s).
+- A read can claim the refresh before the walk starts. Concurrent reads keep the stored rows until the walk has finished.
+- A walk that never stored its rows can leave the claim to expire after `DEP_COUNTS_REFRESH_SECS`.
+- Rows older than `DEP_COUNTS_MAX_AGE_SECS` (600 s) refresh regardless. This forced refresh can heal a bump that the emitter logged and swallowed.
 
 ## Consistency Check
 
@@ -104,7 +106,7 @@ Both mutation models report `(derivation, from, to)` moves to `emit_transition_e
 
 ## Watchdogs
 
-The watchdogs are scheduler loops in `backend/gradient-scheduler/src/loops/background.rs`. No pass will touch a job still held by the scheduler tracker.
+Scheduler loops live in `backend/gradient-scheduler/src/loops/background.rs`. A pass never touches a job that the scheduler tracker still holds.
 
 | Pass | Every | Target | Action |
 |---|---|---|---|
@@ -113,64 +115,66 @@ The watchdogs are scheduler loops in `backend/gradient-scheduler/src/loops/backg
 | `abandoned-dispatch-sweep` | 60 s | Open `dispatched_job` row older than 1800 s | Reaping aborts unconfirmed after 300 s first, then closing the row `Abandoned` |
 | `graph-stuck-reheal` | Consistency check interval | `Waiting` evaluations with reason `GraphStuck` | Sending `Repair { Unstick }` |
 
-- A transition still queued in the graph writer gets 900 s of grace. A re-send racing that transition is harmless.
-- Both re-sent transitions are idempotent.
+- The graph writer can hold a queued transition for up to 900 s. A re-send that races such a transition does no harm.
+- Both re-sent transitions can run repeatedly with the same result.
 
 ## Closers of Assignment Rows
 
-A `dispatched_job` row is the proof of a job being out. Claims insert the row through `claim_assignment`. `idx-dispatched_job-open-job` can admit a single open row per job key (`build:<shared_build>`, `eval:<evaluation>`).
+A `dispatched_job` row records that a job went out. `claim_assignment` writes the row as part of a claim. The index `idx-dispatched_job-open-job` allows at most one open row per job key (`build:<shared_build>`, `eval:<evaluation>`).
 
 | Closer | Outcome |
 |---|---|
-| Worker's terminal report, matched on the assignment ID | `Completed` / `Failed` |
-| Worker's `JobFailed` of kind `Aborted` (confirmed server abort) or `Canceled` (worker stopped), `failed_job_outcome` | `Abandoned` |
-| Claim with an `Assigned` transition failing or exceeding its budget (`assignment.rs`) | `Abandoned` |
-| Worker rejecting the assignment (`withdraw_assignment`) | `Abandoned` |
-| Worker disconnect (requeue of its jobs) | `Abandoned` |
-| Project access revoked for a worker (`abort_project_jobs_on_worker`), its jobs of that project only | `Abandoned` |
-| Worker registration: rows assigned before this process started | `Abandoned` |
+| Terminal report from the worker, matched on the assignment ID | `Completed` / `Failed` |
+| Worker `JobFailed` of kind `Aborted` (confirmed server abort) or `Canceled` (worker stopped), with `failed_job_outcome` | `Abandoned` |
+| Claim whose `Assigned` transition failed or exceeded its budget (`assignment.rs`) | `Abandoned` |
+| Worker rejection of the assignment (`withdraw_assignment`) | `Abandoned` |
+| Worker disconnect (its jobs get requeued) | `Abandoned` |
+| Revoked project access for a worker (`abort_project_jobs_on_worker`), limited to that worker's jobs in the project | `Abandoned` |
+| Worker registration: rows assigned before the process started | `Abandoned` |
 | Startup recovery (`abandon_all_open_assignments`) | `Abandoned` |
 | Overdue abort reap, `abandoned-dispatch-sweep` | `Abandoned` |
 
-- `Abandoned` is not `Failed`. The build can have succeeded before the server lost contact. These rows stay out of the board's failure rates and of history-based scoring.
+- `Abandoned` and `Failed` differ. The build can have succeeded before the server lost contact. These rows stay out of the board's failure rates and of history-based scoring.
 
 ## Missing Inputs
 
-A build failing `InputsUnavailable` must call `self_heal::repair_missing_inputs` (`backend/gradient-graph/src/self_heal.rs`) per missing path.
+A build that reports `InputsUnavailable` must call `self_heal::repair_missing_inputs` (`backend/gradient-graph/src/self_heal.rs`) once for every missing path. Four cases can apply:
 
-1. `demote_cached_output`: clearing `is_cached` and `external_url`, clearing `cache_available`, retiring the `cached_path` row, deleting the NAR.
-2. A producerless path (`.drv`, source) will stay while its NAR is still present. `demote_parents_of` will demote the rebuildable outputs referencing the path instead.
-3. An unreachable producer: the outputs referencing the path get demoted and un-walked. `demote_output_only_cached_deps` will demote the output-only-cached direct deps of the failing build when no such output is present.
-4. Terminal-failed producers re-queue on the spot (`requeue_failed_shared_builds`).
+1. `demote_cached_output`: clear `is_cached` and `external_url`, clear `cache_available`, retire the `cached_path` row, and delete the NAR.
+2. Producerless path (`.drv`, source): the path can stay while its NAR exists. Call `demote_parents_of` to demote the rebuildable outputs that reference it.
+3. Unreachable producer: demote the outputs that reference the path and un-walk them. When no such output exists, call `demote_output_only_cached_deps` to demote the output-only-cached direct deps of the failing build.
+4. Terminal-failed producer: re-queue it on the spot with `requeue_failed_shared_builds`.
 
-- The failed build itself will retry in-eval as `FailedTransient` with the transient backoff. The raised `blocking_deps` counter will hold the build out of the queue until the input is back.
-- The self-heal is skipped after `build.inputsUnavailableMaxLoops` (3) prior `InputsUnavailable` attempts. The build will then fail with `Permanent` status.
+- The failed build itself retries in-eval as `FailedTransient` with the transient backoff. A raised `blocking_deps` counter keeps it out of the queue until the input returns.
+- After `build.inputsUnavailableMaxLoops` (3) prior `InputsUnavailable` attempts, skip the self-heal. The build then fails with `Permanent` status.
 
 ## Cache Deletions
 
-`runtime_can_start::retire_outputs` is the one way to delete a `cached_path` row, running in the deleting transaction.
+A `cached_path` row can be removed by exactly one code path: `runtime_can_start::retire_outputs`, which run inside the deleting transaction.
 
-- Locking the `cached_path` rows in hash order, then the shared builds. The lock must wait out a concurrent signature insert before the DELETE can open its snapshot.
-- Raising `missing_runtime_deps` of every shared build that trusted the rows. The spread will take the complete closure and `fetchable` from the builds referencing those rows.
-- Resetting to `Created` only producers whose artifact is actually gone. A referencing build that only lost its complete closure will keep its terminal status.
-- Un-queueing the owners of a retired `.drv` file.
+The function work through these steps:
+
+- Lock the `cached_path` rows in hash order, then lock the shared builds. A concurrent signature insert can delay the lock, so the DELETE cannot open its snapshot before that insert finish.
+- Raise `missing_runtime_deps` on every shared build that trusted the deleted rows. The spread then compute the complete closure and `fetchable` from the builds referencing those rows.
+- Reset producers to `Created` only if their artifact has actually vanished. A referencing build that merely lost its complete closure keep its terminal status.
+- Un-queue the owners of a retired `.drv` file.
 
 | Caller | Path |
 |---|---|
 | Stale-path eviction, zombie purge | `GcRequest::Paths` -> `retire_stale_paths` in the graph writer |
 | Missing inputs, path invalidation | `demote_cached_output` |
 
-Gradient must prevent an unbacked terminal-success output instead of repairing one. A failed NAR commit will answer `Retry` and fail the build. `JobCompleted` must wait for every `UploadCommitted` message. A substitution can succeed only with a complete closure for every output. Every retire will reset the producers of the deleted paths. A non-zero `unbacked_trusted_outputs` is a bug report.
+Gradient prevent an unbacked terminal-success output instead of repairing one. On a failed NAR commit, the build answer `Retry` and fail. `JobCompleted` wait for every `UploadCommitted` message. A substitution can succeed only with a complete closure for every output. Every retire reset the producers of the deleted paths. A non-zero `unbacked_trusted_outputs` count as a bug report.
 
 ## Garbage Collection
 
 | Pass | Reclaimed |
 |---|---|
-| Evaluation GC (`gc_task_evaluations`, per task, keeping `keep_evaluations`) | Old evaluations. Live evaluations adopt pending shared builds first (`adopt_pending_closures`) |
-| Derivation GC (`collect_orphan_derivations`) | Derivations outside the dependency closure of every `entry_point` and `build_job`, after `gc.orphanDerivationHours` (24). The same pass will delete their attempt logs from log storage |
-| Stale-path eviction (`evict_expired_cached_paths`) | Unreachable paths unfetched for `gc.narTtlHours` (336) |
-| Orphan NAR files | Stored NARs kept by no row, probed in batches of 5000, older than `gc.narUploadGraceHours` (24) |
+| Evaluation GC (`gc_task_evaluations`, per task, keeping `keep_evaluations`) | Old evaluations. Live evaluations first adopt pending shared builds via `adopt_pending_closures` |
+| Derivation GC (`collect_orphan_derivations`) | Derivations outside the dependency closure of every `entry_point` and `build_job` once they exceed `gc.orphanDerivationHours` (24). This pass also removes their attempt logs from log storage |
+| Stale-path eviction (`evict_expired_cached_paths`) | Unreachable paths with no fetch in `gc.narTtlHours` (336) |
+| Orphan NAR files | Stored NARs referenced by no row, probed in batches of 5000 and older than `gc.narUploadGraceHours` (24) |
 
-- GC will keep `.drv` and input-source NARs of any derivation with a shared build regardless of status. Nothing but an evaluation can re-push them.
-- An active evaluation will block the GC of its task, unless the current phase is older than `gc.wedgedEvalHours` (24). The phase stamps provide the age, not `updated_at`.
-- Derivation GC must re-check roots created since its scan inside the graph writer. Surviving derivations needing a deleted derivation get un-walked.
+- Keep the `.drv` and input-source NARs of any derivation with a shared build, regardless of status. Only an evaluation can re-push them.
+- An active evaluation blocks GC of its task. Skip the block only when the current phase is older than `gc.wedgedEvalHours` (24). Age comes from the phase stamps, not `updated_at`.
+- Inside the graph writer, always re-check roots created since the Derivation GC scan. Un-walk surviving derivations that need a deleted derivation.

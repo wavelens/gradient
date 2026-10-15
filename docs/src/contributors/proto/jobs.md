@@ -1,11 +1,11 @@
 # Jobs
 
-Workers handle two job kinds: flake jobs and build jobs. The sections below list their messages and reports, and the handling of failed, aborted and lost jobs.
+Workers process two job kinds: flake jobs and build jobs. The sections below document the messages, the reports, and failed, aborted and lost jobs.
 
-- Jobs arrive as `AssignJob { job_id, assignment_id, job, cluster }` messages.
-- Echo the `assignment_id` in `JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress` and `EvalProgress`. Stale `assignment_id` values make the server drop the report.
-- Workers accept a re-sent `AssignJob` for a job already running. Later reports of the job then echo the new `assignment_id`.
-- Only [cluster members](../scheduler/clusters.md) get a `cluster` field.
+- The server delivers work as `AssignJob { job_id, assignment_id, job, cluster }` messages.
+- Echo the `assignment_id` in `JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress` and `EvalProgress`. Reports with a stale `assignment_id` will be rejected by the server.
+- Workers accept a re-sent `AssignJob` for a job already in progress. Reports for that job then echo the new `assignment_id`.
+- Only [cluster members](../scheduler/clusters.md) receive a `cluster` field.
 - Reports of a session go into a queue of 64 events, off the session's read loop. Reports apply in arrival order.
 
 ## Flake Jobs
@@ -86,42 +86,42 @@ sequenceDiagram
 
 ## Build Jobs
 
-Build jobs hold exactly 1 `BuildSpec`, meaning a shared build (`derivation_build`).
+Each build job contains a single `BuildSpec` and maps to one shared build (a `derivation_build`).
 
-| `kind` | When | Action |
+| `kind` | Condition | Work performed |
 |---|---|---|
-| `Build` | Default | Prefetching inputs, then building the derivation with the Nix daemon |
-| `Substitute` | The outputs are available in an upstream cache | Fetching the outputs without a Nix store |
-| `Download` | A fixed-output derivation of the `builtin` system | Downloading the file without a Nix store |
+| `Build` | Default | Prefetch the inputs, then build the derivation with the Nix daemon |
+| `Substitute` | Outputs exist in an upstream cache | Fetch the outputs without a Nix store |
+| `Download` | Fixed-output derivation on the `builtin` system | Download the file without a Nix store |
 
-- `Substitute` and `Download` jobs can start on any worker (system `builtin`).
-- Build jobs also get `drv_path`, `outputs`, `is_fixed_output`, `timeout_secs` and `max_silent_secs` from the spec.
-- Default limits: `build.defaultTimeoutSecs` (14400) and `build.defaultMaxSilentSecs` (3600).
+- `Substitute` and `Download` jobs can run on any worker, since these use the `builtin` system.
+- Build jobs also receive `drv_path`, `outputs`, `is_fixed_output`, `timeout_secs` and `max_silent_secs` from the spec.
+- Defaults: `build.defaultTimeoutSecs` (14400) and `build.defaultMaxSilentSecs` (3600).
 
-1. Check for an abort, then report `Building` before anything that can fail.
-2. Skip prefetch and build with all outputs already in the local store. Report `BuildOutput { substituted: true }` and upload the outputs anyway.
-3. **Prefetch:** Read the `.drv`, drop inputs already in the store, and pull the rest over the [transfer](transfer.md) protocol.
-4. Build through the daemon. Stream the log as `LogChunk` messages.
-5. Report `BuildOutput` with outputs, `hydra-build-products` and metrics.
-6. Upload the outputs, then send `JobCompleted`. Upload errors fail the job as `Transient`.
+1. Check for an abort request first. Then report `Building`, before anything that can fail.
+2. If all outputs already exist in the local store, skip prefetch and build. Report `BuildOutput { substituted: true }` and upload the outputs anyway.
+3. **Prefetch:** Read the `.drv`, drop inputs already present in the store, and fetch the remaining ones over the [transfer](transfer.md) protocol.
+4. Run the build through the daemon. Stream the log as `LogChunk` messages.
+5. Report `BuildOutput` with the outputs, `hydra-build-products` and metrics.
+6. Upload the outputs, then send `JobCompleted`. An upload failure marks the job as `Transient`.
 
 ## Reports
 
 | `JobUpdate` kind | Effect on the server |
 |---|---|
 | `Fetching`, `EvaluatingFlake`, `EvaluatingDerivations` | Evaluation status |
-| `FetchResult { flake_source }` | Storing the fetched source in `evaluation.flake_source` |
-| `EvalResult` | Storing a batch of derivations in the graph |
+| `FetchResult { flake_source }` | Store the fetched source in `evaluation.flake_source` |
+| `EvalResult` | Store a batch of derivations in the graph |
 | `EvalStats` | Evaluation metrics |
 | `InputUpdateResult` | Flake update candidate lock and bumped inputs |
-| `InputUpdateExpansion` | Input names matching a glob in a `discover_only` pass. A new evaluation per name |
-| `Building { build_id }` | Build turning `Building`. Already aborted builds get `AbortJob` instead |
+| `InputUpdateExpansion` | Input names matched by a glob in a `discover_only` pass. A new evaluation per name |
+| `Building { build_id }` | Build turned `Building`. Already aborted builds get `AbortJob` instead |
 | `BuildOutput` | Output sizes, build products, metrics, the `substituted` flag |
-| `Stage(Prefetch / Build / Upload)` | Live stage of the job in the worker pool, for the [estimated time](../../reference/scheduler-policies.md#estimated-time). `Prefetch` and `Build` for the `Build` kind only |
+| `Stage(Prefetch / Build / Upload)` | Live stage of the job in the worker pool, used for the [estimated time](../../reference/scheduler-policies.md#estimated-time). `Prefetch` and `Build` apply to the `Build` kind only |
 | `Compressing` | No change. Workers no longer send it |
 
-- `EvalProgress` messages hold a download row per flake input while fetching, and the live thunk count while evaluating.
-- Download rows appear only with a missing input. Eval workers download the inputs themselves, up to 1 download per second-level domain.
+- `EvalProgress` messages hold one download row per flake input during fetch, and the live thunk count during evaluation.
+- Download rows appear only with a missing input. Eval workers download the inputs themselves, with at most 1 download per second-level domain.
 - `JobCompleted` and `JobFailed` hold the phase timeline shown on the [Job Board](../../ui/job-board.md#job-inspection).
 - Build metrics also hold the number of concurrent builds on the worker, the cores of the build and the worker's CPU score.
 
@@ -154,37 +154,37 @@ Build jobs hold exactly 1 `BuildSpec`, meaning a shared build (`derivation_build
 
 ## Cluster Members
 
-[Cluster members](../scheduler/clusters.md) arrive as `AssignJob` with `cluster = { attempt, role, index, hold_secs }`.
+[Cluster members](../scheduler/clusters.md) reach workers in an `AssignJob` with `cluster = { attempt, role, index, hold_secs }`.
 
 | Event | Worker |
 |---|---|
-| `AssignJob` with `cluster` | Holding the slot without running the job, then accepting. Rejecting a second member of the same attempt |
-| `StartCluster { attempt, roster }` | Running the held member. The member's signal route opens with the roster |
-| `ClusterSignal` from the server | Delivered to the inbox of the running member of that attempt. Dropped once the member finished. No executor reads the inbox yet |
-| `ClusterSignal` to the server | Wire and server routing only. No executor sends signals yet. `to = None` reaches all other started members |
-| `AbortCluster { attempt }` | Dropping a held member unreported and aborting a running member (`JobFailed { Aborted }`) |
-| `AbortJob` for a held member | Releasing the slot with `JobFailed { Aborted }` and `aborted by server` |
-| No `StartCluster` within `hold_secs` | Releasing the slot and reporting `JobFailed { Aborted }` with `cluster start timed out`. Checks happen on the 10 s heartbeat, up to 10 s late |
-| Worker stop | Releasing all held members the same way, with `worker draining` |
+| `AssignJob` with `cluster` | The worker reserves the slot without running the job, then accepts it. A second member of the same attempt gets rejected |
+| `StartCluster { attempt, roster }` | The worker starts the held member. The roster opens the member's signal route |
+| `ClusterSignal` from the server | The worker delivers the signal to the inbox of the running member of that attempt. After that member finished, the worker drops signals. No executor reads the inbox yet |
+| `ClusterSignal` to the server | The worker forwards signals on the wire only. The server handles routing. No executor sends signals yet. `to = None` reaches all other started members |
+| `AbortCluster { attempt }` | The worker drops a held member without a report and aborts a running member with `JobFailed { Aborted }` |
+| `AbortJob` for a held member | The worker releases the slot and reports `JobFailed { Aborted }` with `aborted by server` |
+| No `StartCluster` within `hold_secs` | The worker releases the slot and reports `JobFailed { Aborted }` with `cluster start timed out`. The check runs on the 10 s heartbeat, so detection can lag by up to 10 s |
+| Worker stop | The worker releases all held members the same way, with `worker draining` |
 
 - Held members count against `eval.maxConcurrent` / `build.maxConcurrent` like running jobs.
 - `hold_secs`: the server's `scheduler.clusterPrepareTimeoutSecs` (30 s) plus a 10 s margin.
 
 ## Abort and Lost Workers
 
-- **API Abort:** Evaluation status `Aborted`. Pending jobs of the evaluation leave the queue.
-    - `AbortJob` messages go to the evaluation job and to running builds wanted by no other live evaluation.
-    - Only live evaluations wanting a build decide, not the evaluation that dispatched the build.
-- **Newer Evaluation:** Tasks with `hard_abort` concurrency abort the older evaluation of the branch like the API. Tasks with `soft_abort` cancel only its eval job.
-    - Tasks with `auto` concurrency abort the older evaluations of the branch like `hard_abort`, after the move of the newer evaluation to `Building`.
-- **Unbuildable Evaluation:** Evaluations without a worker for their systems end `Aborted` the same way.
-- Workers stop the daemon build at once and answer `JobFailed { Aborted }`.
+- **API Abort:** The evaluation receive the status `Aborted`. Pending jobs of the evaluation leave the queue.
+    - `AbortJob` messages go to the evaluation job and to running builds that no other live evaluation want.
+    - The decision count all live evaluations that want a build, not the evaluation that dispatched the build.
+- **Newer Evaluation:** A task with `hard_abort` concurrency abort the older evaluation of the branch in the same way as an API abort. A task with `soft_abort` cancel only its eval job.
+    - A task with `auto` concurrency act like `hard_abort`. The abort take place after the newer evaluation moved to `Building`.
+- **Unbuildable Evaluation:** An evaluation with no worker for its systems also finish `Aborted`.
+- Workers stop the daemon build at once and answer with `JobFailed { Aborted }`.
 - Assignments of an unconfirmed abort close as abandoned after 5 min.
 - **Lost Worker:** Open assignments close as abandoned.
-    - Back to `Queued` for each build in `Building`, with its running attempt closed as `Aborted` with the reason `WorkerLost`.
-    - Builds with 10 lost workers in a row end `FailedPermanent`. An attempt closed any other way will start the row again. A requeue after an ended cluster attempt is no lost worker.
-    - Running evaluations go to `Waiting` and back into the queue.
-    - Evaluations with 10 eval dispatches fail on the next lost worker. Dispatches of all outcomes count, fetch-only and canceled jobs too.
+    - Each build in `Building` return to `Queued`. Its running attempt close as `Aborted` with the reason `WorkerLost`.
+    - A build with 10 lost workers in a row finish `FailedPermanent`. An attempt closed in any other way reset the row. A requeue after an ended cluster attempt do not count as a lost worker.
+    - Running evaluations move to `Waiting` and back into the queue.
+    - An evaluation with 10 recorded eval dispatches fail on the next lost worker. Dispatches of all outcomes count, fetch-only and canceled jobs included.
 
 ## Worker Stop
 

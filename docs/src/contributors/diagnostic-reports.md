@@ -32,30 +32,30 @@ flowchart LR
 | `include_logs` | `true` |
 | `include_instance` | `true`, requiring `manageWorkers` |
 
-The dialog will always send all four explicitly.
+All four values get sent explicitly by the dialog on every call.
 
 ## Never Exported
 
-- API keys, sessions, device-authorization records, worker token hashes, upstream cache keys, password hashes and Git host credentials are absent, not redacted.
-- Every exported column is named in the extractor. A table gaining a secret column later cannot start exporting that column.
-- The `cached_path_signature` export can only hold the presence of a signature, never the signature.
+- No export contains API keys, sessions, device-authorization records, worker token hashes, upstream cache keys, password hashes or Git host credentials. These fields stay absent from the output rather than redacted.
+- The extractor names every exported column. A secret column added to a table later cannot appear in exports, because the extractor never picks it up.
+- The `cached_path_signature` export holds only a flag that a signature exists. The signature value itself cannot appear.
 
 ## Scope
 
-The `report_manifest` table will record per table the rows included against the rows existing, the scope and the filter. A report without logs will say so and can never look like an evaluation without logs.
+The `report_manifest` table records, for each table, how many rows existed and how many the report included, along with the scope and the filter. A report that lacks logs states this explicitly, so it can never pass as an evaluation without logs.
 
 | Scope | Tables |
 |---|---|
-| This evaluation only | The evaluation's own rows, `dispatched_job`, `dispatched_job_phase` |
-| Shared builds | `build_attempt`, `phase_event`, `derivation`, `derivation_build`, `derivation_output`, `derivation_dependency`: rows made for other evaluations of the same derivation, older attempts included |
+| This evaluation only | The evaluation's own rows in `dispatched_job` and `dispatched_job_phase` |
+| Shared builds | `build_attempt`, `phase_event`, `derivation`, `derivation_build`, `derivation_output`, `derivation_dependency`. Rows created for other evaluations of the same derivation, including older attempts |
 | Whole instance | `worker_registration`, `team_worker`, `upstream_metric` |
 | This project | `team_project` |
 | This evaluation's derivations, while it ran | `derivation_metric` |
-| Workers of this evaluation | `worker_connection`, `worker_sample`, from creation until finish or the report |
+| Workers of this evaluation | `worker_connection` and `worker_sample`, from worker creation until finish or until the report |
 
-- The `scope` column is worth reading before trusting a count.
-- `worker_connection` and `worker_sample` carry no project. Their telemetry rows describe the worker.
-- `worker_registration` is empty under a fleet of team workers. The names are in `team_worker`.
+- Check the `scope` column before trusting any count.
+- `worker_connection` and `worker_sample` carry no project. Their telemetry rows describe the worker itself.
+- Under a fleet of team workers, `worker_registration` stays empty. Worker names live in `team_worker`.
 
 ## Closure Boundary
 
@@ -76,7 +76,7 @@ The start counters count edges. The far end of every edge is in the file. An abs
 
 ## Queries
 
-Any SQLite client can open the file.
+Open the file with any SQLite client.
 
 **Substitute-miss loops** per shared build and evaluation.
 
@@ -113,7 +113,7 @@ sqlite3 report.db \
     WHERE s.id IS NULL OR s.signed = 0'
 ```
 
-**Incomplete Closures:** A shared build has a *complete closure* when every output has a NAR and `missing_runtime_deps` is zero. The `fetchable` flag and every assignment condition are reading this state. A non-zero count will keep every assignment from trusting the shared build. A negative count can point at a lost counter update.
+**Incomplete Closures:** A shared build has a *complete closure* when two conditions hold: each output has a NAR, and `missing_runtime_deps` count at zero. The `fetchable` flag and all assignment conditions read this state. A non-zero count blocks every assignment from trusting the shared build. A negative count points to a lost counter update.
 
 ```sh
 sqlite3 report.db \
@@ -131,31 +131,31 @@ sqlite3 report.db \
 
 | Shape | Meaning |
 |---|---|
-| Evaluation in `EvaluatingFlake` / `EvaluatingDerivation`, newest eval job has `finished_at` | The terminal report never landed. The `eval-completion-watchdog` pass will re-drive the transition |
-| `evaluation_input_update` row on an active evaluation | No further input-update round can start for the task while the row is active. A wedged one will stop the flake updater |
-| Shared build `Created`, `cache_available`, not wanted | Nothing will fetch the shared build. A cached output referencing the path will stay without a complete closure |
+| Evaluation stuck in `EvaluatingFlake` / `EvaluatingDerivation` with a `finished_at` on the newest eval job | The terminal report did not arrive. The `eval-completion-watchdog` pass can re-drive the transition |
+| `evaluation_input_update` row present on an active evaluation | No further input-update round for the task can start while that row stays active. A wedged row blocks the flake updater |
+| Shared build in `Created` with `cache_available` and not wanted | No process will fetch the shared build. A cached output that references its path remains without a complete closure |
 
 ## Inspector
 
-`gradient-report` is on `PATH` in `nix develop`. `nix run .#gradient-report` is enough outside the shell.
+The `nix develop` shell has `gradient-report` on `PATH`. Outside the shell, run `nix run .#gradient-report`.
 
 | Command | Output |
 |---|---|
 | `summary` | Status, timings, build and failure counts (default) |
 | `timeline` | Phase events, assignments and attempts in order |
 | `why-stuck` | The condition holding each waiting shared build |
-| `failed` | Failed attempts. `--log ATTEMPT` will dump one log |
+| `failed` | Failed attempts. Dump one log with `--log ATTEMPT` |
 | `workers` | Registration and connection history |
 | `manifest` | The report's contents and omissions |
-| `estimate-accuracy` | The recorded time estimate of each job against the job's phases. `--element NAME` will list the jobs of an element |
+| `estimate-accuracy` | The recorded time estimate of each job against the job's phases. List the jobs of an element with `--element NAME` |
 | `sql "QUERY"` | Raw access |
 | `store-spec -o FILE` | A `gradient-daemon` store spec replaying the evaluation |
 
-**`why-stuck`** is the first stop on a hung evaluation. The command will cover every shared build driven by the evaluation that never finished.
+Start with **`why-stuck`** on a hung evaluation. The command covers every shared build driven by the evaluation that never finished.
 
-- The output will name the holding condition (`walked`, `wanted`, `probed`, `blocking_deps`).
-- The output will list every dependency below that is not `fetchable` yet.
-- A complete `.drv` closure will appear as the only condition left when that closure is absent from the report.
+- The output names the holding condition (`walked`, `wanted`, `probed`, `blocking_deps`).
+- The output lists every dependency below that is not `fetchable` yet.
+- A complete `.drv` closure appears as the only condition left when that closure is absent from the report.
 
 ```text
 vendor-registry: Queued, waiting on walked, blocking_deps = 1
@@ -169,11 +169,11 @@ vendor-registry: Queued, waiting on walked, blocking_deps = 1
 | `is a stub: never walked` | A walk named the derivation but never read the derivation |
 | `walked over N unwalked inputs` | `derivation.unwalked_inputs`: a subtree below was never recorded, as after a walk abandoned between batches |
 
-- The `wanted` condition is outside the `(cache_available OR blocking_deps = 0)` arm. The `wanted` marking will stop at passthroughs and finished builds.
-- The line `ed-1.22.5: Created, waiting on wanted` is a shared build nothing will ever fetch.
+- The `wanted` condition is outside the `(cache_available OR blocking_deps = 0)` arm. The `wanted` marking stops at passthroughs and finished builds.
+- The line `ed-1.22.5: Created, waiting on wanted` describes a shared build nothing will ever fetch.
 - A stub or unwalked line can point at the walk, not the build.
 
-**`estimate-accuracy`** will set the time estimate of each finished job against the phases the worker recorded.
+**`estimate-accuracy`** compares the time estimate of each finished job with the phases the worker recorded.
 
 | Element | Phase |
 |---|---|
@@ -185,18 +185,18 @@ vendor-registry: Queued, waiting on walked, blocking_deps = 1
 | `eval`, `total` | `dispatched_job.worker_elapsed_ms` |
 
 - Ratios above `x1.00` mark jobs slower than their estimate.
-- The `zero` column will count jobs with an estimate of 0 that still took time.
+- The `zero` column counts jobs with an estimate of 0 that still took time.
 - The `fallbacks` lines name the inputs the estimate had to guess. Their ratios stand against the jobs without the guess.
-- `--element build` will list the build jobs, the worst estimate first.
-- The out of memory line will also count failed jobs. A build killed for memory will end its job.
+- `--element build` lists the build jobs, the worst estimate first.
+- The out of memory line also counts failed jobs. A build killed for memory ends its job.
 
 ## Schema Versions
 
-- The inspector can read exactly one schema (currently 20) and will refuse every other. The error message will name both schemas.
-- A schema bump must change `SCHEMA_VERSION` in `backend/gradient-report/src/schema.rs` and `SUPPORTED_SCHEMA` in `nix/tools/report-inspector/gradient_report/db.py` together.
-- The inspector package will fail to evaluate while the two differ.
-- The schema version can move on its own, not with the release (12 to 16 inside 1.3.0).
-- The matching inspector is built from the revision that wrote the report, with `nix build .#gradient-report` there.
-- A `nix develop` shell entered before a schema bump will keep the old inspector until re-entered.
-- Reports before schema 19 carry no `team_worker` table.
-- Reports before schema 20 hold no `derivation_metric` table, no `worker_elapsed_ms` and no estimates.
+- The inspector reads one schema only. Version 20 works; all others get rejected with an error that names both the expected and the actual version.
+- A schema bump requires two changes in lockstep: `SCHEMA_VERSION` in `backend/gradient-report/src/schema.rs` and `SUPPORTED_SCHEMA` in `nix/tools/report-inspector/gradient_report/db.py`.
+- While these two values differ, the inspector package cannot be evaluated.
+- Schema versions move independently of releases. Version 1.3.0 contained the jump from 12 to 16.
+- Build the matching inspector with `nix build .#gradient-report` on the revision that produced the report.
+- A `nix develop` shell opened before a schema bump keeps the old inspector. Re-enter the shell to pick up the new one.
+- Reports older than schema 19 lack the `team_worker` table.
+- Reports older than schema 20 lack the `derivation_metric` table, `worker_elapsed_ms` and estimates.

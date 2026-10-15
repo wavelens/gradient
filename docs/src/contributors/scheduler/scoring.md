@@ -1,6 +1,6 @@
 # Scoring
 
-The scheduler can rank every eligible pending job for the requesting worker with a `ScoringPolicy` implementation. The scheduler will then assign the top candidate. The scoring code is in the `backend/gradient-pool/src/score` module. The scheduler in `backend/gradient-scheduler` must fill the inputs. The rule list and magnitudes are in [Scheduler Policies](../../reference/scheduler-policies.md).
+To pick a job for a worker, the scheduler scores every eligible pending job with a `ScoringPolicy` implementation and picks the top candidate. The scoring code is in `backend/gradient-pool/src/score`. The scheduler in `backend/gradient-scheduler` fills in the inputs. For the rule list and weights, see [Scheduler Policies](../../reference/scheduler-policies.md).
 
 ```mermaid
 flowchart LR
@@ -23,9 +23,9 @@ flowchart LR
 | `ScoreBreakdown` | `breakdown.rs` | `rules`, `total`, `vetoes`, stored in `dispatched_job.score_breakdown` |
 | Weights | `weights.rs` | Every rule magnitude and `ASSIGN_FLOOR` in one file |
 
-- `policy_by_name` can map `scheduler.scoringPolicy` to a `RulePolicy` value. An unknown name will log a warning and fall back to the `resource-aware` policy.
-- Policies are declarative tables (`simple_table`, `resource_aware_table`) of `spec(enabled, rule)` rows. `FairShareRule` is present with `enabled = false` there.
-- `uses_project_work_share` is derived from the enabled rules. `uses_history` is a constructor flag of `RulePolicy::new`.
+- `policy_by_name` maps `scheduler.scoringPolicy` to a `RulePolicy` value. An unknown name logs a warning and falls back to the `resource-aware` policy.
+- Policies are declarative tables (`simple_table`, `resource_aware_table`) of `spec(enabled, rule)` rows. `FairShareRule` is present there with `enabled = false`.
+- The enabled rules determine `uses_project_work_share`. `uses_history` is a constructor flag of `RulePolicy::new`.
 
 ## Contexts
 
@@ -36,31 +36,31 @@ flowchart LR
 | `WorkerMetricsView` | `cpu_count`, `cpu_core_score`, `ram_total_mb`, `ram_free_mb`, `cpu_usage_pct`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps`, `running_builds`, `ram_reserved_mb`, `ram_reserved_unused_mb`, `ram_reserved_for_waiting_build_mb` | `WorkerCapabilities` (static), the 10 s `WorkerMetrics` heartbeat, the build stages, the assigned jobs and the waiting build (live) |
 | `InstanceContext` | 13 `Windowed` averages, `active_builds`, `pending_builds`, `total_workers`, `idle_workers`, `cpu_core_score_mean`, `upload_speed_mean_mbps`, `download_speed_mean_mbps`, `storage_read_mbps`, `storage_write_mbps`, `compression_ratio`, `per_path_secs`, `substitute_cost`, `download_slots`, `upload_slots`, `downloads_in_flight`, `uploads_in_flight` | `instance_metrics_pass`, see below. The two in-flight counts come from the build stages at assignment time |
 
-- `missing_count`, `missing_nar_size` and `outputs_present` are per worker. The worker must score each offered candidate against its store and send a `CandidateScore` (see [Offers](../proto/capabilities-and-dispatch.md#offers)). The values are `None` until that worker reported.
-- `dependency_count` is the number of direct input derivations (`derivation_dependency` rows without runtime-only edges), not the number of builds needing the derivation.
-- `ready_at` is the moment the dependencies finished. `WaitTimeRule` will measure from that moment, not from the `queued_at` time.
-- `ifd` is true for a build of an imported derivation and for its unfinished dependencies while evaluations wait on the import. `import_lifted_shared_builds` can walk that set from the builds of the open import requests.
-- `rescore_count` will grow by one per 5 s assignment timer tick (`BumpRescore`). Reactive kicks leave the count unchanged.
-- The caller must pass `now` in. Rules never read the wall clock.
-- `JobContext::build_history` will return an empty prediction when `outputs_present` is set. A worker holding every output will build nothing.
-- `ram_reserved_mb` is the sum over the jobs assigned to the worker. Each job counts the larger of `RamNeed::reserved_mb` and its observed peak.
-- `WorkerMetrics::build_peak_ram_mb` holds the `memory.peak` of each running build, read from the cgroup `nix-build@<derivation hash>-<build user>`. `None` is a worker without `worker.build.cgroup`.
-- `ram_reserved_unused_mb` is the sum of reserved minus observed memory per job, on a worker reporting build memory. A build missing from the report has not started and counts as 0.
-- `SchedulerCore::unregister` will raise the prediction of a lost build to its observed peak. The graph writer will store the peak as a `derivation_metric` row.
+- Three fields, `missing_count`, `missing_nar_size` and `outputs_present`, are per worker. Each worker scores every offered candidate against its own store and reports a `CandidateScore` (see [Offers](../proto/capabilities-and-dispatch.md#offers)). Until that report, the values stay `None`.
+- `dependency_count` counts direct input derivations (`derivation_dependency` rows without runtime-only edges), not builds needing the derivation.
+- `ready_at` marks the moment the dependencies finished. `WaitTimeRule` measures from that moment, not from `queued_at`.
+- `ifd` marks a build of an imported derivation and its unfinished dependencies while evaluations wait on the import. `import_lifted_shared_builds` can walk that set from the builds of the open import requests.
+- Every 5 s assignment timer tick (`BumpRescore`) adds one to `rescore_count`. Reactive kicks leave the count unchanged.
+- Pass `now` in as a caller. Rules never read the wall clock.
+- With `outputs_present` set, `JobContext::build_history` returns an empty prediction. A worker holding every output has nothing to build.
+- `ram_reserved_mb` sums over the jobs assigned to the worker. Per job, count the larger of `RamNeed::reserved_mb` and its observed peak.
+- `WorkerMetrics::build_peak_ram_mb` holds the `memory.peak` of each running build, read from the cgroup `nix-build@<derivation hash>-<build user>`. A worker without `worker.build.cgroup` reports `None`.
+- `ram_reserved_unused_mb` sums reserved minus observed memory per job, on a worker reporting build memory. A build absent from the report has not started and counts as 0.
+- `SchedulerCore::unregister` raises the prediction of a lost build to its observed peak, and the graph writer stores that peak as a `derivation_metric` row.
     - `Predicted` is the predicted peak RAM of a build.
     - `Unmeasured` is a build without a prediction, held at `InstanceContext::unmeasured_build_ram_mb`. That value is the 24 h mean of `peak_ram_mb`, or the 1 h mean.
-    - `Negligible` is a substitution, a fetch without a prediction or an evaluation. An evaluation can wait on a build of an imported derivation while it holds the worker.
-- `WorkerMetricsView::ram_available_mb` is the lower of `ram_free_mb - ram_reserved_unused_mb` and `ram_total_mb - ram_reserved_mb`, less `ram_reserved_for_waiting_build_mb`. The measured value alone would lag behind a burst of assignments.
+    - `Negligible` is a substitution, a fetch without a prediction or an evaluation. An evaluation can hold the worker while it waits on a build of an imported derivation.
+- `WorkerMetricsView::ram_available_mb` takes the lower of `ram_free_mb - ram_reserved_unused_mb` and `ram_total_mb - ram_reserved_mb`, then subtracts `ram_reserved_for_waiting_build_mb`. The measured value alone lags behind a burst of assignments.
 - `ResourceSaturationRule` can veto a build that fits `ram_total_mb` but not `ram_available_mb`, while `WorkerMetricsView::will_release_ram` is true.
 - `JobTracker` can keep `RamNeed::needed_to_start_mb` of a held build free on a worker, as `ram_reserved_for_waiting_build_mb`.
-    - Prioritized builds qualify at once, other builds `HELD_BUILD_RESERVES_RAM_AFTER_SECS` (60 s) after `ready_at`.
+    - Prioritized builds qualify at once. Other builds qualify `HELD_BUILD_RESERVES_RAM_AFTER_SECS` (60 s) after `ready_at`.
     - Each worker can wait for a single build, and each build on a single worker. Prioritized builds go first, then the oldest `ready_at`.
-    - Scoring of the waiting build will leave its own kept memory out. The build will win the round as soon as it fits.
-    - An assignment anywhere, a lost or draining worker, or a round without a RAM veto for the build will end the wait.
+    - Scoring of the waiting build excludes its own kept memory, so the build wins the round as soon as it fits.
+    - The wait ends on an assignment anywhere, on a lost or draining worker, or on a round without a RAM veto for the build.
 
 ## Build Stages
 
-Workers report `JobUpdateKind::Stage` on entering `Prefetch`, `Build` or `Upload` in a build job. The worker pool can store the stage next to each assigned job.
+A build job passes through `Prefetch`, `Build` and `Upload`. On each entry into one of these stages, workers report `JobUpdateKind::Stage` to the pool. The pool can record the stage with each job assignment.
 
 | Count | Meaning |
 |---|---|
@@ -68,45 +68,45 @@ Workers report `JobUpdateKind::Stage` on entering `Prefetch`, `Build` or `Upload
 | `downloads_in_flight` | Jobs of every worker in `Prefetch`, presigned downloads included |
 | `uploads_in_flight` | Jobs of every worker in `Upload`, jobs waiting for their grant included |
 
-A released job will drop out of the counts with its slot.
+A released job drops out of these counts together with its slot.
 
 ## History and Closure Size
 
-`ScoredJob` can hold only owned values. Scoring itself will compute nothing. `load_sizes_and_histories` in `loops/build.rs` can materialize both on the pending job, only when `policy.uses_history()` is true.
+`ScoredJob` can hold owned values only. Scoring by itself computes nothing. `load_sizes_and_histories` in `loops/build.rs` can materialize both values on the pending job, but only when `policy.uses_history()` is true.
 
 | Value | Source |
 |---|---|
-| Closure size | `derivation.closure_size`, else one batched `transitive_closure_sizes` walk. The graph writer will persist computed sizes |
-| Build history | `history::predict`: latest 20 `derivation_metric` rows with the same `history_name` (`pname`, else `name`) and architecture, within [`retentionDays`](../../reference/configuration.md#general). One query per distinct pair |
-| Output size | `derivation_output.nar_size` of the derivations behind those rows, summed per derivation. One more query per pair with history. The job's own outputs will replace the mean once all of them have a `nar_size` |
+| Closure size | `derivation.closure_size`, or one batched `transitive_closure_sizes` walk as fallback. The graph writer can persist computed sizes |
+| Build history | `history::predict`: the latest 20 `derivation_metric` rows with the same `history_name` (`pname`, else `name`) and architecture, within [`retentionDays`](../../reference/configuration.md#general). One query per distinct pair |
+| Output size | `derivation_output.nar_size` of the derivations behind those rows, summed per derivation. One more query per pair with history. Once all of the job's own outputs have a `nar_size`, they replace the mean |
 | Evaluation history | `compute_eval_history`: per-task p95 of `evaluation_metric.peak_rss_mb` over 24 h |
 
-- Only real builds can write a `derivation_metric` row. A substituted output will write none.
-- A failed build will write a row only after an out-of-memory kill.
+- Only real builds can write a `derivation_metric` row. A substituted output writes none.
+- A failed build can write a row only after an out-of-memory kill.
 
-`HistoryPrediction` must carry the p95 peak RAM, mean CPU time, mean build time, mean disk bytes, mean output NAR size, OOM rate and a `samples` count. The mean build time without contention and the mean CPU score of the building workers are part of it too. A value will stay `None` when no build in the window measured it. Rules add nothing for a `None` value. Evaluations carry the mean run time of their task in the build time fields.
+`HistoryPrediction` must carry the p95 peak RAM, mean CPU time, mean build time, mean disk bytes, mean output NAR size, OOM rate and a `samples` count. The mean build time without contention and the mean CPU score of the building workers belong in it as well. A value remains `None` when no build in the window measured it. Rules add nothing for a `None` value. Evaluations contribute the mean run time of their task in the build time fields.
 
 - Each `derivation_metric` row records `concurrent_builds`, `build_cores` and `cpu_core_score` from the worker's `BuildMetrics`.
-- `contention_factor` can turn each row into a build time without contention, dividing by `1 + 0.04 * concurrent_builds`.
+- `contention_factor` can convert each row into a build time without contention by dividing by `1 + 0.04 * concurrent_builds`.
 
 ## Instance Windows
 
-`instance_metrics_pass` can start every `metrics.instanceIntervalSecs` (30 s) and publish the snapshot through an `ArcSwap` value.
+Every `metrics.instanceIntervalSecs` (30 s), `instance_metrics_pass` can run and publish a snapshot through an `ArcSwap` value.
 
 | Source table | Windows |
 |---|---|
 | `derivation_metric` | `peak_ram_mb`, `cpu_time_ms`, `avg_cpu_pct`, `disk_bytes`, `build_time_ms`, `build_time_median_ms`, `closure_size`, `oom_rate`, `completed` |
 | `dispatched_job` (builds with `ready_at`) | `wait_secs`, `nar_size_mb`, `missing_paths`, `dependency_cnt` |
 
-- `STORAGE_PEAK_THROUGHPUT` can read the `NarFetch` and `NarPush` spans of the last hour. Spans contribute their rate between their start and end on the server clock. The highest sum of rates will be `storage_read_mbps` or `storage_write_mbps`.
-- `PREFETCH_TIME_FIT` can fit the `Prefetch` seconds of the last 24 hours over a constant, megabytes and paths. Least squares on these sums yield `per_path_secs` from 100 spans on.
+- `STORAGE_PEAK_THROUGHPUT`: read the `NarFetch` and `NarPush` spans of the last hour. Between start and end on the server clock, each span contributes its rate. The maximum sum of rates gives `storage_read_mbps` or `storage_write_mbps`.
+- `PREFETCH_TIME_FIT`: fit the `Prefetch` seconds of the last 24 hours over a constant, megabytes and paths. Least squares on these sums yield `per_path_secs` from 100 spans on.
 - The same fit on C3D2 gave the fallback of 0.18 s per path. The data were 16938 prefetches in 3 days, with 3.6 s fixed and 29 MB/s.
-- `SUBSTITUTE_TIME_FIT` can fit the `SubstituteFetch` seconds of the last 24 hours over a constant and megabytes. Spans hold the NAR bytes of their output. Least squares yield `substitute_cost` from 20 spans on.
-- `EVAL_HISTORY_DURATION` can average the top-level `Fetch` span and the remaining time of completed eval jobs per task over 7 days. The rest counts only for jobs with an evaluation span. Tasks without runs of a part use the mean of all runs.
-- `STORED_TO_NAR_RATIO` can divide the `NarPush` bytes by the NAR bytes of their parent `Compress` span. Spans record stored bytes. The ratio can convert the throughput into NAR bytes.
-- Each `Windowed` value can hold 5 min, 1 h and 24 h averages. `None` will stand for no samples. A measured zero will stay zero.
+- `SUBSTITUTE_TIME_FIT`: fit the `SubstituteFetch` seconds of the last 24 hours over a constant and megabytes. Spans carry the NAR bytes of their output. Least squares yield `substitute_cost` from 20 spans on.
+- `EVAL_HISTORY_DURATION`: average the top-level `Fetch` span and the remaining time of completed eval jobs per task over 7 days. Only jobs with an evaluation span contribute the remaining time. Tasks without runs of a part use the mean of all runs.
+- `STORED_TO_NAR_RATIO`: divide the `NarPush` bytes by the NAR bytes of their parent `Compress` span. Spans record stored bytes. This ratio can convert the throughput into NAR bytes.
+- Each `Windowed` value can hold 5 min, 1 h and 24 h averages. `None` means no samples. A measured zero stays zero.
 - Rules read `w1h_or(fallback)` or `w24h_or(fallback)` for instance-relative thresholds.
-- A failed query will leave its windows empty. The in-memory counts always survive.
+- A failed query leaves its windows empty. The in-memory counts always survive.
 
 ## Assignment Floor and Vetoes
 
@@ -119,30 +119,30 @@ A released job will drop out of the counts with its slot.
 
 | Signal | Measured in | Formula |
 |---|---|---|
-| `upload_speed_mbps` | Each NAR upload batch (`upload_all`), passthrough, presigned PUT and multipart alike | NAR bits / seconds from the first grant to the end of the batch, packing and compression included / 10^6 |
-| `download_speed_mbps` | Each NAR fetch round (`fetch_round`) and each substitution from an upstream cache | NAR bits / transfer seconds / 10^6 |
+| `upload_speed_mbps` | Every NAR upload batch (`upload_all`), for passthrough, presigned PUT and multipart uploads | NAR bits / seconds from the first grant to the end of the batch, packing and compression included / 10^6 |
+| `download_speed_mbps` | Every NAR fetch round (`fetch_round`) and every substitution from an upstream cache | NAR bits / transfer seconds / 10^6 |
 | `disk_speed_mbps` | `build_metrics.rs` after each build | Daemon `io_read_bytes + io_write_bytes` in MiB / build seconds |
 | `cpu_core_score` | Startup micro-benchmark, or `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` | Static, sent with `WorkerCapabilities` |
 
-- Upload, download and disk are EWMAs (`alpha = 0.3`) in `gradient-worker-client/src/throughput.rs`, `None` until the first sample.
-- Batches under 1 MiB stay out of the upload and download speeds. Connection setup would dominate their time.
-- Eval-cache blobs feed neither speed.
-- `cpu_core_score_mean`, `upload_speed_mean_mbps` and `download_speed_mean_mbps` are means over connected workers with a measured value.
-- The wait for the server's upload grant has its own `UploadWait` span. The `NarPush` span can only start at the first grant.
-- Substitutions measure the worker's own link, the same link as a cache download. The storage share in `EstimatedTimeRule` models the server side.
-- `EstimatedTimeRule` can use the fleet mean speed for a worker without a measurement.
+- Upload, download and disk throughput live in `gradient-worker-client/src/throughput.rs` as EWMAs with `alpha = 0.3`. They hold `None` until the first sample.
+- Upload and download speeds exclude batches under 1 MiB. Connection setup dominates their measured time.
+- Eval-cache blobs contribute to neither speed.
+- `cpu_core_score_mean`, `upload_speed_mean_mbps` and `download_speed_mean_mbps` average over connected workers with a measured value.
+- The wait for the server's upload grant has its own `UploadWait` span. The `NarPush` span can only begin at the first grant.
+- Substitutions measure the worker's own link, the same link a cache download uses. `EstimatedTimeRule` models the server side as the storage share.
+- For a worker without a measurement, `EstimatedTimeRule` can use the fleet mean speed.
 
 ## Adding a Rule
 
-1. Add the magnitudes to `weights.rs`.
-2. Implement `ScoreRule` in `rules/<area>.rs` with a stable `name` and a `description`. Override `veto` for a hold, and `uses_project_work_share` when reading the share.
-3. Re-export the rule in `rules/mod.rs` and add a `spec(true, ...)` row to a policy table in the `policy.rs` file.
-4. New policies need a `policy_by_name` arm and the enum value in the `nix/modules/gradient.nix` file. Set `uses_history = true` when a rule must read history.
-5. Unit tests sit next to the rule in `#[cfg(test)] mod tests`.
+1. Add the magnitudes in `weights.rs`.
+2. Implement `ScoreRule` in `rules/<area>.rs`. Give the rule a stable `name` and a `description`. Override `veto` to place a hold, and `uses_project_work_share` when the rule reads that share.
+3. Re-export the rule from `rules/mod.rs`. Add a `spec(true, ...)` row to a policy table in `policy.rs`.
+4. For new policies, add a `policy_by_name` arm and the enum value in `nix/modules/gradient.nix`. Set `uses_history = true` when the rule reads history.
+5. Keep unit tests in a `#[cfg(test)] mod tests` block next to the rule.
 
-`rule_catalog` (`GET /board/scoring/rules`) can list every rule of the `resource-aware` table, disabled ones included. The board can use the list to explain any rule named in a recorded breakdown.
+`rule_catalog` (`GET /board/scoring/rules`) can list every rule in the `resource-aware` table, including disabled ones. The board can use this list to explain any rule named in a recorded breakdown.
 
 ## Related
 
-- [Scheduler Policies](../../reference/scheduler-policies.md): every rule and its magnitude
+- [Scheduler Policies](../../reference/scheduler-policies.md): all rules with their weights
 - [Capabilities and Assignment](../proto/capabilities-and-dispatch.md): offers, candidate scores and assignment

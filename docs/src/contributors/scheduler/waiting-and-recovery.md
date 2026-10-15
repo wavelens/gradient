@@ -1,6 +1,6 @@
 # Waiting and Recovery
 
-The scheduler splitting a flake job across workers, parking an evaluation without progress, re-offering a returned job and cleaning up after a server restart.
+The scheduler covers four recovery cases: it splits a flake job across several workers, parks an evaluation that makes no progress, re-offers a job a worker returned, and cleans up leftover state after a server restart.
 
 ```mermaid
 flowchart LR
@@ -28,31 +28,31 @@ flowchart LR
 
 ## Waiting Reasons
 
-The waiting pass, `refresh_waiting_state` (`gradient-scheduler/src/waiting_state.rs`), can start at the end of every build assignment pass (5 s tick or kick) over every in-flight evaluation. The pass will write the reason into `evaluation.waiting_reason` only on a change of its JSON.
+The waiting pass `refresh_waiting_state` (`gradient-scheduler/src/waiting_state.rs`) can run at the end of every build assignment pass (5 s tick or kick). It scans all in-flight evaluations. It writes a reason into `evaluation.waiting_reason` only when the JSON changes.
 
 | `WaitingReason` | Parked from | Unparked | Owner |
 |---|---|---|---|
-| `eval_workers { capability, connected_workers }` | `Fetching` without a `fetch` worker. `Queued`, `EvaluatingFlake`, `EvaluatingDerivation` without an `eval` worker | To `Queued` once the capability is connected | Waiting pass |
-| `workers { unmet, connected_workers, available_architectures }` | `Building` with no worker fitting the `(architecture, required_features)` of any blocking shared build | To `Building` once one can fit. `Aborted` after 300 s on the same `unmet` set, unless `wait_for_workers` is set on the task | Waiting pass |
+| `eval_workers { capability, connected_workers }` | `Fetching` with no `fetch` worker. `Queued`, `EvaluatingFlake`, `EvaluatingDerivation` with no `eval` worker | To `Queued` once the capability can connect | Waiting pass |
+| `workers { unmet, connected_workers, available_architectures }` | `Building` with no worker that can fit the `(architecture, required_features)` of any blocking shared build | To `Building` once one worker can fit. To `Aborted` after 300 s on the same `unmet` set, unless `wait_for_workers` can be set on the task | Waiting pass |
 | `graph_stuck { pending_shared_builds }` | `Building` with a fitting worker for every blocking shared build, yet none can be handed out | To `Building` once the heal can free a shared build | Waiting pass |
 | `draining` | Every in-flight evaluation during an instance drain | At the end of draining or at startup (`resume_drained_evals`): to `Building` when the walk had finished (`status_after_draining`), otherwise to `Queued` | Waiting pass |
 | `approval`, `no_cache`, `cache_storage_full` | Trigger conditions | Webhook and cache hooks (`gradient-ci/src/unpark.rs`) | Never touched by the waiting pass |
 
-- **Pre-build parks** skip each shared build the evaluation already batched. A stall mid-walk will still park.
-- **Blocking builds** are the named shared builds kept by `blocks_evaluation`, in a status that can still be wanted. A shared build wanted by nothing is left out.
-- **Counters first:** `phase_from_counters` can decide without reading a shared build. `named = 0` will hand the evaluation to the pre-build rules. `active = 0` will finalize the evaluation through `check_evaluation_done`. `building > 0` will keep the `Building` status.
-- **Unbuildable abort:** `unbuildable` (`gradient-scheduler/src/unbuildable.rs`) can hand a `workers` park with a non-empty `unmet` set back to the scheduler. The hand-back will take place once the park is older than 300 s. The task must also have `wait_for_workers = false` set. `abort_unbuildable_evaluation` will mark the evaluation `Aborted` and abort its shared builds. The function will also record a warning naming each missing architecture and feature set. The grace must keep a server restart or worker redeploy from aborting work before the pool is back.
-- **Shared build read:** `BuildabilityChecker` will otherwise read every blocking shared build. `AssessmentMemo` can reuse the verdict for up to 60 s while the counters and the pool fingerprint stay equal. An empty read will recount the drifted counters and finalize.
+- **Pre-build parks** can skip each shared build the evaluation already batched. A stall mid-walk can still park.
+- **Blocking builds** name the shared builds kept by `blocks_evaluation`, in a status that can still be wanted. The pass can leave out a shared build that nothing wants.
+- **Counters first:** `phase_from_counters` can decide without reading a shared build. `named = 0` can hand the evaluation to the pre-build rules. `active = 0` can let `check_evaluation_done` finalize the evaluation. `building > 0` can keep the `Building` status.
+- **Unbuildable abort:** `unbuildable` (`gradient-scheduler/src/unbuildable.rs`) can hand a `workers` park with a non-empty `unmet` set back to the scheduler. Two conditions apply: the park is older than 300 s, and the task can have `wait_for_workers = false` set. `abort_unbuildable_evaluation` can mark the evaluation `Aborted` and abort its shared builds. The function can also record a warning naming each missing architecture and feature set. The grace period can keep a server restart or worker redeploy from aborting work before the pool is back.
+- **Shared build read:** otherwise `BuildabilityChecker` can read every blocking shared build. `AssessmentMemo` can reuse the verdict for up to 60 s while the counters and the pool fingerprint stay equal. An empty read can recount the drifted counters and finalize.
 
 ## Graph-Stuck Heal
 
-A `workers` verdict with an empty `unmet` set will turn into the heal. `attempt_graph_unstick` must send `Transition::Repair { scope: RepairScope::Unstick }` to the [graph writer](shared-builds.md#graph-writer). The function will then re-assess without the memo. The [repair pass](repair-pass.md) `repair_build_graph` (`gradient-db/src/graph/repair.rs`) will run the steps below. The first failed step will fail the transition.
+A `workers` verdict with an empty `unmet` set triggers the heal. `attempt_graph_unstick` then sends `Transition::Repair { scope: RepairScope::Unstick }` to the [graph writer](shared-builds.md#graph-writer) and re-assesses without the memo. The [repair pass](repair-pass.md) `repair_build_graph` (`gradient-db/src/graph/repair.rs`) performs the steps below. The first failed step fails the transition.
 
-1. `requeue_failed_closure`: thawing failed shared builds in the closure to `Created`. `Unstick` will leave a deterministic build failure and its subtree alone.
-2. `repair_cached_shared_builds_for_eval`: completing shared builds with every output in the cache, then `advance_fetchable` for the builds needing them.
-3. `repair_dependency_failed`: failing the builds needing a build with a lasting failure.
-4. `adopt_pending_closure`: naming orphaned pending shared builds for the evaluation, then updating their needs-build marks.
-5. `promote_closure`: queueing every build now passing the queue conditions.
+1. `requeue_failed_closure`: thaw failed shared builds in the closure back to `Created`. Under `Unstick`, a deterministic build failure and its subtree stay untouched.
+2. `repair_cached_shared_builds_for_eval`: complete shared builds whose outputs all sit in the cache, then run `advance_fetchable` for the builds that need it.
+3. `repair_dependency_failed`: mark builds as failed when they depend on a build with a lasting failure.
+4. `adopt_pending_closure`: name orphaned pending shared builds for the evaluation, then update their needs-build marks.
+5. `promote_closure`: queue every build that now meets the queue conditions.
 
 | Driver | When |
 |---|---|
@@ -60,11 +60,11 @@ A `workers` verdict with an empty `unmet` set will turn into the heal. `attempt_
 | `graph-stuck-reheal` pass | Every `metrics.graphConsistencyIntervalSecs` (300 s) for each `graph_stuck` evaluation |
 | Counters | Queueing the set the moment its queue conditions hold |
 
-- **Lost `.drv`:** `recover_drv_stuck_evals` will check evaluations in `graph_stuck` for over 120 s. Its target is a walked shared build needing a build and not available in a cache. That build must have every dependency done and no `.drv` NAR. `trigger_drv_recovery` will start a `DrvRecovery` evaluation of the same commit for such a build. A `DrvRecovery` evaluation stuck the same way will fail.
+- **Lost `.drv`:** `recover_drv_stuck_evals` checks evaluations stuck in `graph_stuck` for over 120 s. The target is a walked shared build that needs a build and is not available in a cache. Such a build has every dependency done and no `.drv` NAR. `trigger_drv_recovery` starts a `DrvRecovery` evaluation of the same commit for it. A `DrvRecovery` evaluation stuck the same way fails.
 
 ## Re-Offering Returned Jobs
 
-Offers are deltas. The server will send a worker only candidates missing from its `sent_candidates` set. The worker must score every offered candidate. Each offer will reset the set to the candidates currently visible to the worker. A claimed, finished or aborted job will drop out of the set. Returning a job to the pool will clear its sent flag.
+An offer carries only a delta: the server sends a worker only the candidates absent from its `sent_candidates` set. Score every offered candidate. Each offer replaces the set with the candidates currently visible to the worker. Claimed, finished and aborted jobs drop out of the set. Returning a job to the pool clears its sent flag.
 
 | Event | Mechanism |
 |---|---|
@@ -74,13 +74,13 @@ Offers are deltas. The server will send a worker only candidates missing from it
 
 ## Startup Recovery
 
-`recover_interrupted_work` (`gradient-db/src/maintenance/recovery.rs`) will run once at server start (`gradient-web/src/lib.rs`), before `unpark_draining_evals` starts.
+At server start, `gradient-web/src/lib.rs` runs `recover_interrupted_work` (`gradient-db/src/maintenance/recovery.rs`) one time. `unpark_draining_evals` can only start after that. The function restores work left behind by the previous run.
 
-1. **Assignments:** all open `dispatched_job` rows close as `Abandoned` rows. Both assignment selections refuse a job with an open row. Re-queued work would otherwise wait for its worker to reconnect or for the 1800 s check for abandoned assignments.
-2. **Attempts:** `Running` build attempts turn `Aborted`.
-3. **Shared builds:** every `Building` shared build must turn `Queued` first. `unpromote_ungated` will move those with failing queue conditions back to `Created` status.
-4. **Evaluations:** `Fetching`, `EvaluatingFlake` and `EvaluatingDerivation` evaluations turn `Queued`, with a phase event each. Their eval job was on a worker. `Building` evaluations keep their status and their re-queued builds.
-5. **Clusters:** all open [cluster attempts](clusters.md) close (`PrepareFailed` when unstarted, `Aborted` otherwise). A `Running` cluster will go back to `Queued`, or to `Aborted` when a member evaluation or shared build can no longer finish.
+1. **Assignments:** every open `dispatched_job` row turns into an `Abandoned` row. Both assignment selections reject a job with an open row. Without this cleanup, re-queued work had to wait for its worker to reconnect or for the 1800 s check on abandoned assignments.
+2. **Attempts:** build attempts in `Running` state turn `Aborted`.
+3. **Shared builds:** each `Building` shared build has to turn `Queued` first. `unpromote_ungated` then moves builds with failing queue conditions back to `Created`.
+4. **Evaluations:** evaluations in `Fetching`, `EvaluatingFlake` or `EvaluatingDerivation` state turn `Queued`, each with a phase event. Their eval job lived on a worker. Evaluations in `Building` state keep their status and their re-queued builds.
+5. **Clusters:** every open [cluster attempt](clusters.md) closes (`PrepareFailed` when it never started, `Aborted` otherwise). A cluster in `Running` state goes back to `Queued`, or to `Aborted` when a member evaluation or shared build can no longer finish.
 
-- `Queued` evaluations return through the eval assignment pass. `Waiting` ones through the waiting pass.
-- Recovery will skip the live effects of `update_evaluation_status` calls. The rows are consistent on their own.
+- The eval assignment pass returns `Queued` evaluations. The waiting pass returns `Waiting` ones.
+- Recovery omits the live effects of `update_evaluation_status` calls. The rows stay consistent on their own.

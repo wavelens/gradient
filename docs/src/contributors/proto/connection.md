@@ -1,6 +1,6 @@
 # Connection
 
-Workers talk to the server over a single WebSocket at `/proto`, with binary frames from the `Proto` derive. Sessions pass through **version agreement -> handshake -> authorization -> capabilities -> job loop**.
+A worker holds one WebSocket connection to the server at `/proto`. All frames are binary and encoded by the `Proto` derive. A session moves through five stages: **version agreement -> handshake -> authorization -> capabilities -> job loop**.
 
 ```mermaid
 sequenceDiagram
@@ -21,6 +21,8 @@ sequenceDiagram
 
 ## Handshake
 
+Four steps make up the handshake:
+
 | Step | Message | Content |
 |---|---|---|
 | 1 | `InitConnection` | `capabilities`, the worker's persistent `id` |
@@ -28,11 +30,11 @@ sequenceDiagram
 | 3 | `AuthResponse` | A token for each challenged peer |
 | 4 | `InitAck` or `Reject` | Authorized peers, failed peers with reasons |
 
-Worker IDs live in `/var/lib/gradient-worker/worker-id` on the worker. The server can match reconnects by that ID, reject duplicates and label the worker in the UI and logs.
+Each worker stores its ID in `/var/lib/gradient-worker/worker-id`. The server can match reconnects by that ID, reject duplicates and label the worker in the UI and logs.
 
-The cap of a handshake message is `MAX_HANDSHAKE_MESSAGE_SIZE` (64 KiB). A larger message can end the session with close code `1002`, without decoding.
+Handshake messages can be at most `MAX_HANDSHAKE_MESSAGE_SIZE` (64 KiB) in size. A larger message can end the session with close code `1002`, before any decoding.
 
-**Rejections:** The server can reject a session with the codes below. The connected worker can reject the server with `400`, `401`, `403` or `503`, see [Server-Initiated Handshake](#server-initiated-handshake).
+**Rejections:** The server can end a session with the codes below. A connected worker can reject the server with `400`, `401`, `403` or `503`, see [Server-Initiated Handshake](#server-initiated-handshake).
 
 | Code | Reason |
 |---|---|
@@ -44,7 +46,7 @@ The cap of a handshake message is `MAX_HANDSHAKE_MESSAGE_SIZE` (64 KiB). A large
 
 ## Server-Initiated Handshake
 
-The server can connect to every registration and team worker holding a `url`. The server's tokens and the worker's TLS certificate prove each side.
+The server can open a connection to each registration and team worker with a `url`. Server tokens plus the worker's TLS certificate prove both sides.
 
 ```mermaid
 sequenceDiagram
@@ -57,43 +59,43 @@ sequenceDiagram
 
 | Step | Message | Content |
 |---|---|---|
-| 1 | `Authenticate` | The worker ID, a `(peer, token)` per registration holding a stored token at the URL |
-| 2 | `InitConnection` or `Reject` | `401` for an unknown worker ID or any wrong token, `400` for any other first message |
-| 3 | `InitAck` or `Reject` | The projects whose tokens the worker accepted, without a challenge round |
+| 1 | `Authenticate` | The worker ID and one `(peer, token)` pair for each registration with a stored token at that URL |
+| 2 | `InitConnection` or `Reject` | `401` on an unknown worker ID or a wrong token, `400` on any other first message |
+| 3 | `InitAck` or `Reject` | The projects whose tokens the worker accepted, with no challenge round |
 
-A refusing side can answer with these codes.
+A side that refuses the handshake can reply with these codes.
 
 | Code | Reason |
 |---|---|
 | `400` | A first message other than `InitConnection` |
-| `401` | An unknown worker ID or any wrong token |
+| `401` | An unknown worker ID or a wrong token |
 | `403` | `the link is disabled`, `the upstream is not allowed to run` |
 | `503` | `the upstream is unreadable right now`, `the allowance is not checked yet` |
 
-- The server can send its tokens over `wss://` URLs.
-- A `ws://` URL is for local and operator setups only. The server can still send the tokens and log a warning.
-- Workers check server tokens against the hashes in `services.gradient.worker.acceptedServerTokensFile` on the worker. Workers without the file accept every server.
-- Reauths of a server-connected session get `AuthUpdate`, never `AuthChallenge`.
-- Reauths finding a new registration close the session. The next connection can send the new project's token.
+- Over `wss://` URLs, the server can send its tokens.
+- Use a `ws://` URL only for local and operator setups. The server can still send the tokens there and log a warning.
+- Workers verify server tokens against the hashes in `services.gradient.worker.acceptedServerTokensFile` on the worker. Workers without this file accept every server.
+- A server-connected session that reauths receives `AuthUpdate`, never `AuthChallenge`.
+- A reauth that discovers a new registration ends the session. The next connection can carry the new project's token.
 - Projects granting a team's workers join the running session. All of them share the team worker's single token for the team ID.
-- A registration cannot reuse the worker ID of a team worker. Gradient.CI worker IDs belong to a single registration or team worker only.
-- The server can keep the last failure of every worker ID in memory as the worker's offline reason.
-- The server can keep a failure before the token check only for a registered worker ID.
+- A registration cannot reuse the worker ID of a team worker. Each Gradient.CI worker ID can belong to exactly one registration or team worker.
+- The server can hold the last failure of each worker ID in memory as that worker's offline reason.
+- The server can hold a failure from before the token check only for a registered worker ID.
 
 ## Capabilities
 
-A capability is active when both sides support it. Only the server can set `core` and `cache`.
+Two sides of a connection negotiate capabilities during the handshake. A capability counts as active only when both sides support it. The server alone can enable `core` and `cache`.
 
 | Capability | Meaning |
 |---|---|
-| `core` | The server side of the protocol. Always on for the server, off for workers |
-| `cache` | Serving as a binary cache. Always on for the server |
+| `core` | The server side of the protocol. Always enabled on the server, disabled on workers |
+| `cache` | Acting as a binary cache. Always enabled on the server |
 | `fetch` | Cloning repositories and prefetching flake inputs |
 | `eval` | Running flake evaluations |
 | `build` | Running Nix builds |
-| `federate` | Reserved. Negotiated in the handshake, no behavior yet |
+| `federate` | Reserved. Part of the handshake, with no behavior attached yet |
 
-Capability flags guard new features, not version numbers.
+Capability flags mark feature support. They do not stand in for protocol versions.
 
 ## Authorization
 
@@ -130,22 +132,22 @@ The `timeout_secs` and `max_silent_secs` of a `BuildSpec` follow the derivation'
 
 ## Server Restart
 
-A restart can lose work in flight, but no queued job.
+In-flight work can be lost during a restart. Queued jobs survive.
 
 | Side | Behavior |
 |---|---|
-| Worker | Aborting every running job and reconnecting with backoff (1 s, doubling up to 60 s) |
-| Worker | Sending a full handshake, then `RequestJobList` and a `RequestJob` per kind |
-| Server | Dropping every report whose `assignment_id` is not the live dispatch of the job in the scheduler core |
-| Server | `recover_interrupted_work` is closing open assignments and aborting running attempts before the first session. Every `Building` build and every interrupted evaluation is queued again |
+| Worker | Aborts all running jobs. Reconnects with backoff that starts at 1 s, doubles each try, and caps at 60 s |
+| Worker | Performs a full handshake, then sends `RequestJobList` plus one `RequestJob` per kind |
+| Server | Drops every report whose `assignment_id` does not match the live dispatch of that job in the scheduler core |
+| Server | Runs `recover_interrupted_work` before the first session. This closes open assignments and aborts running attempts. Every `Building` build and every interrupted evaluation goes back into the queue |
 
 ## Server Stop
 
-- Server sessions all close at once on `SIGTERM`.
-- Workers abort every running job of the closed session.
-- The next start can re-queue the interrupted work through [Startup recovery](../scheduler/waiting-and-recovery.md#startup-recovery).
-- Workers reconnect once the server is back.
-- A `Draining` message from the server can end the session, never the worker process.
+- `SIGTERM` shut down every server session at the same time.
+- Workers abort all running jobs that belong to a closed session.
+- [Startup recovery](../scheduler/waiting-and-recovery.md#startup-recovery) can re-queue the interrupted work on the next start.
+- Workers reconnect after the server is back.
+- A `Draining` message from the server can terminate the session. The worker process stay alive.
 
 ## Version Agreement
 
@@ -168,28 +170,28 @@ A restart can lose work in flight, but no queued job.
 
 | Change | Annotation | Effect |
 |---|---|---|
-| New field | `#[proto(N)]` | Field present since N. The oldest supported version is rising to N |
-| New field with a fallback | `#[proto(N, default)]` | Older peers are leaving the field out. Decoding is filling `Default::default()` |
-| New variant | `#[proto(N)]` on the variant | Appended at the end. Sending the variant to a peer below N is an `EncodeError` |
-| Removed or reordered field or variant, changed meaning | `#[proto(oldest = N)]` on `ClientMessage` and `ServerMessage` | The oldest supported version is rising to N |
+| New field | `#[proto(N)]` | The field exist since version N. The oldest supported version rise to N |
+| New field with a fallback | `#[proto(N, default)]` | Older peers omit the field. Decoding fill in `Default::default()` |
+| New variant | `#[proto(N)]` on the variant | The variant get appended at the end. Sending it to a peer below N trigger an `EncodeError` |
+| Removed or reordered field or variant, changed meaning | `#[proto(oldest = N)]` on `ClientMessage` and `ServerMessage` | The oldest supported version rise to N |
 
-- A field without `default` is mandatory. A forgotten `default` can cost compatibility, never correctness.
-- Variants are append-only. A variant older than its predecessor is a compile error.
-- The files `gradient-wire/schema/v{N}.txt` hold the wire shape of each supported version. The `schema` test can compare the files to the code.
-- `cargo run --example wire_schema` can write the file of a new version and delete files below the oldest. Existing files stay untouched.
+- A field without `default` count as mandatory. A missing `default` break compatibility, not correctness.
+- New variant can only be appended. Placing a variant before an older one fail to compile.
+- The files `gradient-wire/schema/v{N}.txt` describe the wire shape of each supported version. The `schema` test can check them against the code.
+- `cargo run --example wire_schema` can write the file for a new version and remove files below the oldest version. Existing files remain untouched.
 
 ## Cache Sessions
 
-The `/cache/{cache}/proto` endpoint can offer the same frames as a read-only session for a single cache.
+A read-only session for one cache is available through the `/cache/{cache}/proto` endpoint. It serves the same frames as a normal session.
 
 | Aspect | Rule |
 |---|---|
-| Public cache | No credentials, unless `proto.anonymousCache.enable` is off |
-| Private cache | `Authorization: GRAD<key>` on the upgrade request |
-| Handshake | `InitConnection`, then `InitAck` with no peers. No challenge |
-| Allowed | `CacheQuery` in `Normal` or `Pull` mode, `NarRequest`. The server is rejecting everything else with `403` |
-| Limits | `proto.anonymousCache.maxConnectionsPerIp` (32) anonymous connections per IP. Every session is counting against `proto.maxConnections` (256). `SAFE_INFLIGHT_MESSAGE_SIZE` (2 MiB) is capping each message, enough for a `CacheQuery` of 1000 paths |
-| Idle | Closed after 120 s without a NAR transfer |
+| Public cache | Credentials are not required. The setting `proto.anonymousCache.enable` can turn this off |
+| Private cache | The upgrade request needs the header `Authorization: GRAD<key>` |
+| Handshake | The client sends `InitConnection`. The server answers with `InitAck` and no peers, without a challenge |
+| Allowed | Requests permitted here are `CacheQuery` in `Normal` or `Pull` mode, and `NarRequest`. Everything else gets a `403` rejection |
+| Limits | Each IP can hold `proto.anonymousCache.maxConnectionsPerIp` (32) anonymous connections. Every session also counts toward `proto.maxConnections` (256). Each message is limited by `SAFE_INFLIGHT_MESSAGE_SIZE` (2 MiB), which fits a `CacheQuery` with 1000 paths |
+| Idle | The server closes the session after 120 s without a NAR transfer |
 
 ## Implementation
 

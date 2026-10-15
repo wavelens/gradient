@@ -14,7 +14,7 @@ flowchart LR
 
 ## Probe Loop
 
-`gradient-scheduler/src/probe.rs`, a supervised periodic child outside the [graph writer](shared-builds.md#graph-writer). Probing is HTTP. A round trip inside a graph transaction would hold the single graph writer.
+Probe work happens over HTTP, in `gradient-scheduler/src/probe.rs`. The loop is a supervised periodic child, kept outside the [graph writer](shared-builds.md#graph-writer). A round trip inside a graph transaction can block the single graph writer, so the two stay apart.
 
 | Constant | Value | Role |
 |---|---|---|
@@ -24,73 +24,73 @@ flowchart LR
 | `PROBE_BATCH` | 256 | Outputs per request round, and rows per recovery check |
 | `PROBE_SWEEP` | 60 s | Recovery check interval, only on an idle tick |
 
-- **Requests:** an in-memory channel (`ProbeRequests`). Batch recording must feed the channel with every shared build the batch walked, plus the needs-build marks the batch moved. The transition emitter (`gradient-db/src/status/effects.rs`) and the graph writer after `UpstreamHits` / `UpstreamProbed` feed the channel too.
+- **Requests:** probe work enters through an in-memory channel (`ProbeRequests`). Batch recording must enqueue every shared build the batch walked, plus the needs-build marks the batch moved. The transition emitter (`gradient-db/src/status/effects.rs`) and the graph writer after `UpstreamHits` / `UpstreamProbed` enqueue as well.
 - **Wake-Up:** requests inside a graph transaction stay staged until the commit. The commit can then wake the loop without waiting for the tick.
-- **Descent:** the answer of each round will move the needs-build marks and hand the next level straight back. One pass can follow the closure down instead of one level per tick.
+- **Descent:** each round answer can update the needs-build marks and hand back the next level directly. One pass can follow the closure down instead of one level per tick.
 - **Look-Ahead:** a round can also ask about the unanswered dependencies of the wanted shared builds. A miss makes these dependencies needed, and the next level then costs no extra round. Only the dependencies of an upstream hit go unused.
 - **Recovery check:** every walked shared build needing a build, with `probed = false` set. The check must cover a process stopped between a commit and the channel send.
 - **Retry:** `probed` is the only memory of an answer. User retries of an evaluation or a build clear the flag on every requeued shared build missing from the caches. The probe can then ask again.
 
 ## One Round
 
-`plan_probes` can build the round. `probe_round` can apply the round.
+Two functions handle the round. `plan_probes` build the plan, `probe_round` apply it.
 
-1. Keep wanted shared builds without an answer (`wanted`, `probed = false`). Add their dependencies without an answer and not available in a cache.
-2. Drop each shared build without `derivation_output` rows (unwalked stubs). A stub will stay unanswered until the batch walking the stub can send the stub again.
-3. Skip outputs already cached anywhere (`is_cached` or `external_url`).
-4. Group the rest by an evaluation naming the shared build (`build_job`). The project of the evaluation will pick the upstream caches.
-5. `probe_outputs` (`gradient-scheduler/src/eval.rs`) must ask for the `<hash>.narinfo` of each output and flush `upstream_metric` afterwards.
-6. Hits go to `GraphMsg::UpstreamHits` as a message. All shared builds of step 2 then go to `GraphMsg::UpstreamProbed`, hit or miss, unless one of their outputs got [no answer](#no-answer).
+1. Keep every wanted shared build without an answer (`wanted`, `probed = false`). Add dependencies that lack an answer and that no cache hold.
+2. Drop each shared build without `derivation_output` rows. These unwalked stubs remain unanswered until a later batch walk the stub and send it again.
+3. Skip outputs that any cache already hold, marked by `is_cached` or `external_url`.
+4. Group the remaining outputs by the evaluation that name the shared build (`build_job`). The project of that evaluation pick the upstream caches.
+5. `probe_outputs` (`gradient-scheduler/src/eval.rs`) must request the `<hash>.narinfo` for each output and flush `upstream_metric` afterwards.
+6. Send hits as a `GraphMsg::UpstreamHits` message. Then send all shared builds from step 2 in a `GraphMsg::UpstreamProbed` message, hit or miss, unless one of their outputs got [no answer](#no-answer).
 
-A shared build with `probed = false` is not yet a real build. Nothing below the shared build can get built or handed out until the answer is in. A build queued on "no answer yet" cannot be recalled once a worker took the job.
+A shared build with `probed = false` do not count as a real build yet. Nothing below such a shared build can get built or handed out before the answer arrive. A build queued with "no answer yet" cannot be recalled after a worker take the job.
 
 ### No Answer
 
-A miss is final only after every upstream cache answered with `404` or an unsigned narinfo. A timeout, an error status, a tripped breaker or an unreadable upstream list is no answer.
+A miss count as final only after every upstream cache answered with `404` or with an unsigned narinfo. A timeout, an error status, a tripped breaker or an unreadable upstream list do not count as an answer.
 
-- The shared build will keep `probed = false` and is not buildable yet.
-- The recovery check will ask again within one `PROBE_SWEEP` interval.
-- The server will log a warning per silent upstream cache and round.
-- The evaluation will show that warning once per upstream cache, with `upstream-probe` as its source.
-- An admin can deactivate a silent upstream cache. The next round will then ask only the remaining upstream caches.
+- The shared build keep `probed = false` and stay unbuildable.
+- The recovery check ask again within one `PROBE_SWEEP` interval.
+- The server log one warning per silent upstream cache and round.
+- The evaluation show that warning once per upstream cache, with `upstream-probe` as the source.
+- An admin can deactivate a silent upstream cache. The next round then ask only the remaining upstream caches.
 
 ## Applying a Hit
 
-The steps of `apply_upstream_hits` in `gradient-graph/src/record.rs` are the following.
+`apply_upstream_hits` in `gradient-graph/src/record.rs` does the following.
 
-- **Persist:** `external_url`, `nar_hash`, `file_hash`, `file_size`, `references_list`, `deriver`, plus `nar_size` and `ca` when unset. The target is every `derivation_output` row sharing the hash and not already cached.
-- **Runtime dependencies:** the narinfo `References:` line must record runtime dependencies on the referenced producers.
-- **Passthrough:** `cache_available = true` only when every output of the shared build is available upstream. The flag change will skip a terminal-success shared build. A failed one will turn into a passthrough.
-- **Needs build:** updated for touched shared builds and those newly available in a cache. The newly needed set will go back to the probe.
+- **Persist:** write `external_url`, `nar_hash`, `file_hash`, `file_size`, `references_list` and `deriver` to every `derivation_output` row with the same hash and no cache entry. Also write `nar_size` and `ca` where unset.
+- **Runtime dependencies:** record the narinfo `References:` line as runtime dependencies on the referenced producers.
+- **Passthrough:** set `cache_available = true` only if every output of the shared build is available upstream. A terminal-success shared build with this flag can skip its build. A failed one can become a passthrough.
+- **Needs build:** update the mark for touched shared builds and for builds newly available in a cache. Send the newly needed set back to the probe.
 
-`mark_probed` must set `probed = true` (`MARK_PROBED`) and update the needs-build marks. A miss will leave the shared build a real build. From then on that build will need its build inputs.
+`mark_probed` must set `probed = true` (`MARK_PROBED`) and update the needs-build marks. On a miss, the shared build remains a real build and from then on needs its build inputs.
 
 ## Upstream Selection
 
-`gradient-core/src/upstream.rs`, shared by the probe and the worker cache query.
+`gradient-core/src/upstream.rs` holds this logic. The probe and the worker cache query both use it.
 
 | Rule | Detail |
 |---|---|
-| Candidates | `cache_upstream` rows with `kind = Http`, a URL, neither upstream nor project subscription `WriteOnly` (`upstream_endpoints_for_project`) |
-| Trust | A hit must carry a `Sig` verifying against the upstream's `public_key` and a `StorePath` matching the asked hash (`verified_narinfo`). An upstream without a key can never hit |
-| Order | Hit rate, then average latency over the last 60 min of `upstream_metric`. Unmeasured upstream caches last |
-| At most 4 upstream caches | Asked in parallel. The lowest-latency hit will win |
-| More than 4 | Asked in order. The first hit will win |
+| Candidates | Rows in `cache_upstream` with `kind = Http` and a URL. Rows with `WriteOnly` on the upstream or project subscription get excluded (`upstream_endpoints_for_project`) |
+| Trust | A hit needs a `Sig` that verifies against the upstream `public_key` and a `StorePath` that matches the asked hash (`verified_narinfo`). An upstream without a key can never produce a hit |
+| Order | Hit rate first, then average latency over the last 60 min of `upstream_metric`. Upstream caches without measurements rank last |
+| At most 4 upstream caches | Queried in parallel. The fastest hit wins |
+| More than 4 | Queried in order. The first hit wins |
 | Timeout | 2 s per narinfo request. 30 s for a `upstream_query` semaphore permit |
 | Concurrency | `GRADIENT_CACHE_UPSTREAM_QUERY_CONCURRENCY` (default 32), server-wide |
 
-**Breaker:** 3 consecutive errors (transport failure, or a status other than 2xx and 404) trip an upstream for 60 s. Requests pass again after the cooldown. One more error will trip the breaker again. A 404 is a miss, not an error, and will reset the count. The breakers are process-wide and shared with the cache narinfo endpoint.
+**Breaker:** 3 consecutive errors trip an upstream for 60 s. Transport failures count, as do any status codes outside 2xx except 404. After the cooldown, requests pass again and a single further error trips the breaker again. A 404 counts as a miss and resets the error count. Breakers live process-wide and the cache narinfo endpoint shares them.
 
-**HTTP/1.1 pin:** requests offer HTTP/2. Some upstream caches negotiate HTTP/2 and then reset streams mid-body. A proxied NAR will then break after its `200`. Nix will report `HTTP error 200 (curl error: Stream error in the HTTP/2 framing layer)`. The first HTTP/2 error from an upstream will pin that upstream to HTTP/1.1 (`gradient-util/src/http1_fallback.rs`, `http1_pins` in `gradient-core/src/upstream.rs`).
+**HTTP/1.1 pin:** requests offer HTTP/2. Some upstream caches negotiate HTTP/2 and then reset streams mid-body. A proxied NAR breaks after the `200` in that case. Nix reports this as `HTTP error 200 (curl error: Stream error in the HTTP/2 framing layer)`. The first HTTP/2 error from an upstream pins that upstream to HTTP/1.1 (`gradient-util/src/http1_fallback.rs`, `http1_pins` in `gradient-core/src/upstream.rs`).
 
-- The client will re-send the failed request over HTTP/1.1.
-- A body cut short will resume over HTTP/1.1 with a `Range: bytes=<sent>-` header. The client can splice in only a `206` with a `Content-Range` starting at that offset. Anything else will end the body with the original error.
-- The pin will apply process-wide at once and persist in the `cache_upstream.http1_only` column. All later requests to that upstream, also after a restart, use HTTP/1.1. The API will return the flag read-only. The upstream list will show an `HTTP/1.1` badge.
-- `POST /caches/{cache}/upstreams/{id}/test` (`probe_protocol` in `gradient-core/src/upstream_source.rs`) can fetch `nix-cache-info` twice. One request must use HTTP/1.1 only and one HTTP/2 only, each with its own single-protocol ALPN. The test will leave the pin untouched. A small `nix-cache-info` passing over HTTP/2 can prove nothing about resets inside large NAR bodies.
+- The client re-sends the failed request over HTTP/1.1.
+- A cut-short body resumes over HTTP/1.1 with a `Range: bytes=<sent>-` header. Only a `206` with a `Content-Range` starting at that offset can splice in. Any other response ends the body with the original error.
+- The pin applies process-wide at once and persists in the `cache_upstream.http1_only` column. All later requests to that upstream use HTTP/1.1, including after a restart. The API returns the flag read-only. The upstream list shows an `HTTP/1.1` badge.
+- `POST /caches/{cache}/upstreams/{id}/test` (`probe_protocol` in `gradient-core/src/upstream_source.rs`) can fetch `nix-cache-info` twice. One request must use HTTP/1.1 only and one HTTP/2 only, each with its own single-protocol ALPN. The test leaves the pin untouched. A small `nix-cache-info` over HTTP/2 proves nothing about resets inside large NAR bodies.
 
 ## Substitute Jobs
 
-`decide_build_spec_kind` (`gradient-scheduler/src/assign_mode.rs`) can read only the flag and nothing else.
+`decide_build_spec_kind` in `gradient-scheduler/src/assign_mode.rs` reads the flag alone. No other input enters that decision.
 
 | Shared build | Kind | Worker |
 |---|---|---|
@@ -98,29 +98,29 @@ The steps of `apply_upstream_hits` in `gradient-graph/src/record.rs` are the fol
 | `builtin` system, fixed-output | `Download` | Any, no Nix store |
 | Everything else, `builtin:buildenv` included | `Build` | Matching system |
 
-The `BuildSpec` must carry the `(name, store_path)` pairs. The worker will never read the `.drv` file (`gradient-worker/src/executor/substitute.rs`).
+The `(name, store_path)` pairs have to travel inside the `BuildSpec`. The worker never opens the `.drv` file (`gradient-worker/src/executor/substitute.rs`).
 
-1. Skip outputs the Gradient cache is already holding.
-2. Locate each remaining output with `CacheQuery { external: true }` (one path per query). The server can answer from the persisted `external_url`, else from probing `Http` upstream caches, else from `GradientProto` upstream caches.
-3. Download with the redirect-following client. A body length differing from the declared `file_size` must still match `nar_hash` after decompression. Any other body is a missing output.
+1. Skip outputs the Gradient cache already stored.
+2. Locate each remaining output with `CacheQuery { external: true }`, one path per query. The server can answer from the persisted `external_url`. Without that, it probes `Http` upstream caches first, then `GradientProto` upstream caches.
+3. Download with the redirect-following client. A body length other than the declared `file_size` can still pass, but only, if the decompressed bytes match `nar_hash`. Every other body means a missing output.
 4. Detect compression from the magic bytes, with the URL extension as fallback.
 5. Check the NAR against `nar_hash`, then push the bytes like any other output.
 
-The job will fetch nothing below the outputs. The referenced paths are shared builds of their own, marked as needed by the server. Build jobs keep `use_substitutes = false` in the daemon.
+The job fetches nothing below the outputs. The referenced paths are shared builds in their own right, and the server marked them as needed. Build jobs keep `use_substitutes = false` in the daemon.
 
 ## Failures and the Miss Budget
 
 | Worker error | Kind | Server |
 |---|---|---|
-| No upstream holding an output | `SubstituteUnavailable` | Penalty-free requeue to `Queued` |
-| Upstream NAR missing, wrong size or not matching `nar_hash` (`CorruptCachedNar`) | `InputsUnavailable` | Self-heal repair pass, retry |
-| Anything else, hash mismatch included | `Transient` | Retry |
+| No upstream held the output | `SubstituteUnavailable` | Requeue to `Queued` with no penalty |
+| Upstream NAR missing, wrong size, or not matching `nar_hash` (`CorruptCachedNar`) | `InputsUnavailable` | Run a self-heal repair pass, then retry |
+| Everything else, including hash mismatch | `Transient` | Retry |
 
 ### Escalation to a Build
 
-- A passthrough with exhausted `InputsUnavailable` / `Transient` retries will enter the same budget instead of `FailedPermanent` status.
-- `exhaust_substitution` will act after `build.substituteMissEscalationThreshold` (default 2) missed substitutions within one evaluation. The function must clear `cache_available`, the upstream columns of the outputs and `attempt` too. The function must also set the shared build to `Created` status.
-- The shared build will then build through the ordinary queue conditions.
+- A passthrough that used up its `InputsUnavailable` / `Transient` retries enter the same budget instead of moving to `FailedPermanent` status.
+- After `build.substituteMissEscalationThreshold` (default 2) missed substitutions within one evaluation, `exhaust_substitution` take action. The function clear `cache_available`, the upstream columns of the outputs, and `attempt`. The function also set the shared build to `Created` status.
+- The shared build then build through the ordinary queue conditions.
 
 ## Cache Endpoints
 

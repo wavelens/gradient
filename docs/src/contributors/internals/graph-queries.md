@@ -1,6 +1,6 @@
 # Graph Queries
 
-SQL access to the dependency graph, covering recursive walks, the fence keeping them fast, their indexes, counter updates, instance metrics and the graph API.
+The dependency graph can be queried with SQL. Recursive walks traverse it, a fence bounds their cost, and dedicated indexes serve them. This file also documents counter updates, instance metrics and the graph API.
 
 ```mermaid
 flowchart LR
@@ -13,7 +13,7 @@ flowchart LR
 
 ## Walks
 
-The shared walks come from `gradient-db/src/graph/walks.rs` in the backend. Callers pass a seed and a direction and receive a `WITH RECURSIVE` prelude. Walks are running under `begin_walk`, with `work_mem` raised to `64MB` for the statement. A walk seeded by a root array, such as the need update, declares `DefaultWorkMem` and keeps the PostgreSQL default of `4MB`, a cap on the dedup tables of its recursive `UNION`s.
+All shared walks live in `gradient-db/src/graph/walks.rs` in the backend. Each caller passes in a seed and a direction, and the module returns a `WITH RECURSIVE` prelude. Walks run under `begin_walk`, with `work_mem` set to `64MB` for the statement. A root-array seed, such as the need update, follows a different path. It declares `DefaultWorkMem` and sticks with the PostgreSQL default of `4MB`. That default caps the dedup tables of the recursive `UNION`s.
 
 | Walk | Generator | Fenced |
 |---|---|---|
@@ -53,16 +53,16 @@ WITH RECURSIVE closure(derivation) AS (
 
 | Index | Shape | Use |
 |---|---|---|
-| `derivation_dependency_pkey` | `(derivation, dependency)` | Walks down. The pair is the key, no surrogate |
-| `idx-derivation_dependency-reverse-pair` | `(dependency, derivation)` | Walks up |
-| `idx-derivation_dependency-runtime` | `(dependency) INCLUDE (derivation) WHERE kind IN (1, 2)` | The complete-closure counter update, from a dependency to the shared builds counting that dependency |
+| `derivation_dependency_pkey` | `(derivation, dependency)` | Downward walks. The pair serves as the key, with no surrogate column |
+| `idx-derivation_dependency-reverse-pair` | `(dependency, derivation)` | Upward walks |
+| `idx-derivation_dependency-runtime` | `(dependency) INCLUDE (derivation) WHERE kind IN (1, 2)` | The complete-closure counter update. It goes from a dependency to the shared builds that count it |
 | `idx-build_job-created_at`, `idx-entry_point-created_at` | `created_at INCLUDE (derivation)` | The GC freshness seed |
 
-All edge indexes are covering, and walks are index-only. The cutoff of the GC freshness seed is the start of the candidate scan. The seed will match almost nothing and must not scan to find that out.
+Every edge index covers its query, so walks read from indexes alone. For the GC freshness seed, the cutoff matches the start of the candidate scan. Almost no row can match the seed, and the engine must detect this without a scan.
 
 ## Counter Updates
 
-One call of a SQL function will carry a change of `missing_runtime_deps` (or `derivation.unwalked_inputs`) up the graph. The functions are `ripple_missing_runtime_deps` and `ripple_unwalked_inputs`. Each level will take three steps inside the function.
+The functions `ripple_missing_runtime_deps` and `ripple_unwalked_inputs` carry changes to `missing_runtime_deps` (or `derivation.unwalked_inputs`) one level up the graph. A single SQL function call handles one level. Each level runs three steps.
 
 ```mermaid
 flowchart LR
@@ -70,35 +70,35 @@ flowchart LR
     b --> c["update by the bound set<br/>next level = the rows that changed"]
 ```
 
-Deriving the set inside the update left the planner without a small driver. The result was a sequential scan of `cached_path`, taking row locks in physical order. That scan deadlocked the NAR commit against maintenance about every six minutes. Locking the bound set in `derivation` order first removed both problems. A level per statement then cost 163 round trips for the batch walking the bootstrap leaves. The function will fold those round trips into one.
+An early version derived the bound set inside the update statement. The planner then lacked a small driver table and fell back to a sequential scan of `cached_path`, taking row locks in physical order. That scan deadlocked the NAR commit against maintenance roughly every six minutes. Two changes fixed both problems. First, lock the bound set in `derivation` order before the update. Second, execute one level per statement. The bootstrap-leaf batch needed 163 round trips under that scheme, so the function now packs them into a single call.
 
 ## Instance Metrics
 
-The instance pass will average nine `derivation_metric` values and four `dispatched_job` values over 5 min, 1 h and 24 h windows. The pass will repeat every 30 s (`GRADIENT_METRICS_INSTANCE_INTERVAL_SECS`).
+Nine `derivation_metric` values and four `dispatched_job` values feed the instance pass. It averages each value over three windows: 5 min, 1 h and 24 h. A 30 s schedule controls the pass through `GRADIENT_METRICS_INSTANCE_INTERVAL_SECS`.
 
-- `missing_nar_size`, `missing_count` and `dependency_count` are columns on `dispatched_job`.
-- The `idx-dispatched_job-build-window` index will carry these columns next to `ready_at`, and the aggregate is an index-only scan.
-- Reading these values out of the `job_context` jsonb measured 1.94M buffers and 1.6 s for 449k rows in production.
-- The columns are not backfilled.
-- The `AVG` aggregate will skip nulls the way the jsonb read skipped a missing key.
-- No window is longer than a day.
+- `missing_nar_size`, `missing_count` and `dependency_count` live as columns on `dispatched_job`.
+- The `idx-dispatched_job-build-window` index stores these columns beside `ready_at`, so the aggregate can run as an index-only scan.
+- In production, reading the same values from the `job_context` jsonb took 1.94M buffers and 1.6 s for 449k rows.
+- No backfill of the columns is planned.
+- The `AVG` aggregate skips nulls, the same way the jsonb read behaved on a missing key.
+- The longest window is one day.
 
 ## Graph API
 
-The `GET /builds/{build}/graph` endpoint (`gradient-web/src/endpoints/builds/graph.rs`) will walk `derivation_dependency` breadth-first from the build's derivation.
+The endpoint `GET /builds/{build}/graph` lives in `gradient-web/src/endpoints/builds/graph.rs`. It performs a breadth-first walk over `derivation_dependency`, starting at the build's derivation.
 
 | Aspect | Behavior |
 |---|---|
-| Frontier | `DerivationId`s. An evaluation is listing only the derivations of its own walk and their direct inputs, and the walk is ignoring `build_job` for that reason |
-| Nodes | Derivation id, status of the shared build or null without one, and `build`: the `build_job` of the same evaluation, or null |
-| Cap | 500 nodes. The walk is still reading the edges of every kept node |
+| Frontier | `DerivationId`s. An evaluation lists only the derivations reached by its own walk plus their direct inputs, and the walk ignores `build_job` for that reason |
+| Nodes | Derivation id, the status of the shared build or null when none exists, and `build`: the `build_job` of the same evaluation, or null |
+| Cap | 500 nodes. The walk still reads the edges of every kept node |
 | Cost | One query per wave, plus three for the nodes |
-| Edges | No `kind` filter, and runtime dependencies appear too. `DependencyEdge { source, target }`: `source` is first in build order, `target` second |
+| Edges | No `kind` filter, so runtime dependencies appear as well. `DependencyEdge { source, target }`: `source` come first in build order, `target` second |
 
 ## SQL/PGQ
 
-The SQL/PGQ of PostgreSQL 19 (`GRAPH_TABLE`) is not in use in Gradient. The first implementation can match fixed-length patterns only. Every walk here is of unbounded depth.
+Gradient does not use the PostgreSQL 19 `GRAPH_TABLE` feature. Its first release can only match fixed-length patterns, while every walk in Gradient has unbounded depth.
 
-- `derivation` and `derivation_dependency` already have the vertex and edge table shape required by `CREATE PROPERTY GRAPH`.
-- A switch would touch `graph/walks.rs` and the hand-written walks above.
-- Revisit when quantified path patterns land.
+- `derivation` and `derivation_dependency` already have the vertex and edge table shape that `CREATE PROPERTY GRAPH` needs.
+- A migration would affect `graph/walks.rs` and the hand-written walks above.
+- Revisit once quantified path patterns land.

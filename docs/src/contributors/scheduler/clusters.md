@@ -1,6 +1,6 @@
 # Cluster Jobs
 
-Cluster jobs group existing jobs (evaluation jobs, build jobs) for a joint start on distinct workers, all or nothing. Members remain ordinary jobs with a cluster reference. Each try of the group is a cluster *attempt*.
+A cluster job bundles existing jobs, such as evaluation jobs and build jobs, so they start together on separate workers. The group either starts in full or not at all. Members stay regular jobs and carry a reference to their cluster. Every try of the whole group counts as a cluster *attempt*.
 
 ```mermaid
 flowchart LR
@@ -15,22 +15,22 @@ flowchart LR
 
 | Table | Links to | Role |
 |---|---|---|
-| `cluster_job` | - | The group: `status` (`Queued`, `Running`, `Completed`, `Failed`, `Aborted`), `same_zone`, `attempts`, `retry_budget` |
-| `cluster_member` | `cluster_job` | One member job: exactly one of `evaluation` or `derivation_build` (the shared build), plus `role`, `primary`, `pin` |
-| `cluster_attempt` | `cluster_job` | One try: `created_at`, `started_at` (unset until every member accepted), `finished_at`, `outcome` (`Succeeded`, `Failed`, `PrepareFailed`, `Aborted`) |
-| `dispatched_job` | `cluster_attempt` | A member's assignment row. `NULL` for a single assignment |
+| `cluster_job` | - | The group record. Holds `status` (`Queued`, `Running`, `Completed`, `Failed`, `Aborted`), `same_zone`, `attempts`, and `retry_budget` |
+| `cluster_member` | `cluster_job` | One job in the group. Names exactly one of `evaluation` or `derivation_build` (the shared build), plus `role`, `primary`, and `pin` |
+| `cluster_attempt` | `cluster_job` | One try of the group. Tracks `created_at`, `started_at` (set only after every member accepted), `finished_at`, and `outcome` (`Succeeded`, `Failed`, `PrepareFailed`, `Aborted`) |
+| `dispatched_job` | `cluster_attempt` | The assignment row for a single member. Stays `NULL` for a standalone assignment |
 
 | Constraint | Effect |
 |---|---|
-| `CHECK (num_nonnulls(evaluation, derivation_build) = 1)` | A member must name one job, never both or neither |
-| `idx-cluster_member-evaluation`, `idx-cluster_member-derivation_build` (unique, partial) | At most one cluster per job |
-| `idx-cluster_attempt-open` (unique on `cluster_job WHERE finished_at IS NULL`) | At most one open attempt per cluster |
-| `dispatched_job.cluster_attempt` `ON DELETE SET NULL` | Member rows outlive their attempt as plain telemetry |
-| `cluster_member`, `cluster_attempt` `ON DELETE CASCADE` | The hourly retention pass can delete a finished cluster job past [`retentionDays`](../../reference/configuration.md#general). Deletion is immediate once evaluation garbage collection removed the members. The pass will never delete an active cluster job |
+| `CHECK (num_nonnulls(evaluation, derivation_build) = 1)` | A member names exactly one job. Both or neither count as invalid |
+| `idx-cluster_member-evaluation`, `idx-cluster_member-derivation_build` (unique, partial) | A job can belong to at most one cluster |
+| `idx-cluster_attempt-open` (unique on `cluster_job WHERE finished_at IS NULL`) | A cluster can hold at most one open attempt |
+| `dispatched_job.cluster_attempt` `ON DELETE SET NULL` | Member rows survive their attempt as plain telemetry |
+| `cluster_member`, `cluster_attempt` `ON DELETE CASCADE` | The hourly retention pass can remove a finished cluster job past [`retentionDays`](../../reference/configuration.md#general). Once evaluation garbage collection removed the members, deletion happens immediately. Active cluster jobs never get deleted by the pass |
 
 ## Claim
 
-`claim_cluster` (`backend/gradient-db/src/scheduling/cluster/claim.rs`) must execute every step in one transaction.
+The `claim_cluster` function in `backend/gradient-db/src/scheduling/cluster/claim.rs` runs all of its steps inside a single transaction.
 
 1. Insert the `cluster_attempt` row, on the condition `cluster_job.status = Queued`. A conflict on `idx-cluster_attempt-open` will insert nothing (`ON CONFLICT`).
 2. Claim each member with the single-assignment claim statement (`claim_assignment`): its own job key (`eval:<evaluation>`, `build:<shared_build>`), its own start condition, and `cluster_attempt` set.
@@ -49,51 +49,51 @@ flowchart LR
 
 | Stage | Where a member is | Rule |
 |---|---|---|
-| Can start | Cluster book, under its own key | The eval and build assignment passes look up each batch's memberships in one query (`cluster_membership`). Members of a `Queued` cluster join the book. Members of any other cluster wait for that cluster. Non-members queue as before. |
-| Waiting | Cluster book | A cluster can start once every member arrived. A member key in the book is considered tracked. A member unable to start any more (resync removal, evaluation cancel) will hold its cluster back until the feed can bring the member back. |
-| Offered | Job offers | Workers score members under their own key. Single assignment (`take_best_of_kind`) will never see them. |
+| Can start | Cluster book, under its own key | The eval and build assignment passes fetch each batch's memberships with one query (`cluster_membership`). Members of a `Queued` cluster enter the book. Members of any other cluster wait for that cluster. Non-members queue as before. |
+| Waiting | Cluster book | A cluster can start only after every member arrived. A member key in the book count as tracked. A member that can no longer run (resync removal, evaluation cancel) hold its cluster back until the feed bring the member back. |
+| Offered | Job offers | Workers score members under their own key. Single assignment (`take_best_of_kind`) never see them. |
 | Running | Active jobs, marked with its attempt | A reject, a revoked peer or a disconnect can never requeue a member as a single job. |
 
-- Member evaluations always evaluate in one job, never as a split fetch-only job. The follow-up of a split job would start outside the cluster.
-- An empty answer to `RequestJob` will record an idle slot `(worker, kind)` for the worker. An assignment, a full worker or a disconnect will clear the slot. The planner can ignore entries older than 25 s (two worker heartbeats). Idle slots are the planner's only view of free capacity.
+- Member evaluations always run in one job, never as a split fetch-only job. A split job would place its follow-up outside the cluster.
+- An empty answer to `RequestJob` record an idle slot `(worker, kind)` for the worker. An assignment, a full worker or a disconnect clear the slot. The planner can ignore entries older than 25 s (two worker heartbeats). Idle slots give the planner the only view of free capacity.
 
 ## Placement
 
-The `cluster-dispatch` pass can start every 5 s and whenever `RequestJob` messages go unanswered. The pass must first expire overdue prepares. Then all clusters able to start get a placement, prioritized clusters first, then the oldest.
+The `cluster-dispatch` pass can run every 5 s. It can also run whenever `RequestJob` messages go unanswered. Expire overdue prepares first. Then place all clusters that can start, prioritized clusters before the oldest ones.
 
-- A worker is a seat for a member when holding an idle slot of the member's kind and matching the `pin` of the member. The worker must also be able to take the job (capabilities, project access).
-- Members sit on their own workers, one each (bipartite matching).
-- All members sit in one zone under `same_zone`. Workers without a zone form one zone of their own.
-- The winning zone is the one with the lowest summed missing NAR size among zones seating every member.
-- The pass will not offer a worker seated for one cluster to the next cluster.
-- A cluster without a full placement must keep waiting. Single assignment is unaffected.
+- A worker can seat a member when three conditions hold. It must have an idle slot of the member's kind, match the member's `pin`, and be able to run the job (capabilities, project access).
+- Bipartite matching: each member sits on its own worker, one worker per member.
+- Under `same_zone`, all members sit in one zone. Workers without a zone form a zone of their own.
+- Among zones able to seat every member, pick the one with the lowest summed missing NAR size.
+- Once the pass seats a worker for one cluster, it cannot offer that worker to the next cluster.
+- A cluster that cannot fill all seats must wait. Single assignment follow separate rules and remain unchanged.
 
 ## Prepare and Start
 
-1. The scheduler can take the cluster and its seats in one step. The scheduler will refuse the step when the worker of a seat went busy since the snapshot.
-2. `claim_cluster` must write the attempt and the `dispatched_job` row of every member. Build members get their `Assigned` transition.
-3. The session of each seat will send `AssignJob` with `cluster` (`attempt`, `role`, `index`, `hold_secs`). The worker must hold the job without starting the job.
-4. `start_cluster_attempt` can mark the attempt started and the cluster `Running` once every member accepted. All members then receive `StartCluster` with the roster.
+1. The scheduler can claim the cluster and all its seats in a single step. It refuse the claim when a seat's worker turned busy after the snapshot.
+2. `claim_cluster` write the attempt plus a `dispatched_job` row for every member. Each build member get an `Assigned` transition.
+3. Every seat session send `AssignJob` with `cluster` (`attempt`, `role`, `index`, `hold_secs`). The worker hold the job and do not start it.
+4. Once every member accept, `start_cluster_attempt` mark the attempt started and the cluster `Running`. All member then receive `StartCluster` with the roster.
 
 | Event | Result |
 |---|---|
 | Every member accepted | `StartCluster` to every member |
 | A member rejected | Attempt closed `PrepareFailed`, `AbortCluster` to every member, cluster waiting again after 30 s |
 | `scheduler.clusterPrepareTimeoutSecs` passed without every acceptance | Same as a reject |
-| A held member reporting `JobFailed` before the start (hold expired, drain, `AbortJob`) | Same as a reject. The report will never reach the build or evaluation |
-| The claim is lost | Nothing written. The members go back to the assignment passes, and those passes re-read their cluster |
+| A held member reporting `JobFailed` before the start (hold expired, drain, `AbortJob`) | Same as a reject. The report never reach the build or evaluation |
+| The claim is lost | Nothing written. The member go back to the assignment pass, and those pass re-read their cluster |
 
-- A failed prepare does not consume the cluster's retry budget.
-- `hold_secs` is `clusterPrepareTimeoutSecs` plus 10 s. A worker never hearing `StartCluster` will release the slot on its own.
+- A failed prepare do not consume the cluster's retry budget.
+- Set `hold_secs` to `clusterPrepareTimeoutSecs` plus 10 s. A worker that never receive `StartCluster` release the slot on its own.
 
 ## Signals
 
-- The server can forward a `ClusterSignal` only within a started attempt and only from one of its members. The server will drop anything else.
-- `to` can name one member by role and index. All other members receive the signal when `to` is absent.
+- A `ClusterSignal` can be forwarded by the server only from a member of a started attempt. In every other case the server discards the signal.
+- Set `to` to target a single member by role and index. Omit `to` to deliver the signal to every member.
 
 ## Recovery
 
-A `JobCompleted` or `JobFailed` from a member will release its job. The report must hold back the build or evaluation transition until the attempt is decided. The first deciding report will resolve the attempt. That verdict must then settle every member.
+When a member reports `JobCompleted` or `JobFailed`, its job can be released. The build or evaluation transition has to wait for the attempt verdict. The first deciding report settles the attempt, and that verdict then applies to every member.
 
 | Verdict | When | Attempt | Cluster | Members |
 |---|---|---|---|---|
@@ -102,20 +102,20 @@ A `JobCompleted` or `JobFailed` from a member will release its job. The report m
 | Fail | Same as Retry without budget, or a member can no longer start | `Failed` | `Failed` | Members settle with their own outcome. Requeueing failure kinds become `Permanent`. Survivors end `Aborted` |
 | Abort | An evaluation abort reached a member | `Aborted` | `Aborted` | Survivors end `Aborted` |
 
-- Reports arriving during the resolution of the attempt settle by the decided verdict.
-- Members count as tracked while their attempt is open. `abandoned-dispatch-sweep` and the evaluation watchdog skip them.
-- `cluster_job.retry_budget` is the number of automatic retries after the first start (`attempts <= retry_budget` allows a requeue), separate from the per-evaluation assignment budget. A user retry of a build ignores it.
+- Reports that arrive while the attempt is being settled follow the decided verdict.
+- A member with an open attempt count as tracked, so `abandoned-dispatch-sweep` and the evaluation watchdog skip them.
+- `cluster_job.retry_budget` set the number of automatic retries after the first start (`attempts <= retry_budget` permit a requeue). This budget is separate from the per-evaluation assignment budget. A user retry of a build disregard it.
 - Members lost with their worker, or reaped after an unconfirmed abort, report into the same verdict.
 
 ## Aging Reservations
 
-A cluster able to start may find no simultaneously idle workers for `scheduler.clusterReserveAfterSecs` (600 s). Such a cluster will then reserve a placement instead of waiting for idle workers to line up by chance.
+A cluster can be ready to start while no set of workers remain idle long enough to satisfy `scheduler.clusterReserveAfterSecs` (600 s). In that case, the cluster reserve a placement instead of waiting for idle workers to line up by chance.
 
-- Target: the planner's match over every connected eligible worker, idle workers seated first.
-- Seats: reserved workers keep their running jobs but get no new single job of the reserved kind.
-- Commit: the reservation will commit like an ordinary placement once every seat is idle.
-- One at a time: only one cluster can hold a reservation. Other clusters plan over the unreserved idle workers.
-- Release: after `scheduler.clusterReserveTimeoutSecs` (1800 s), on a seat's worker disconnecting, or on the cluster leaving the queue. The next planning pass can reserve again.
+- Target: the planner select a match across all connected eligible workers, seating idle workers first.
+- Seats: a reserved worker keeps its current jobs, but the scheduler assign no new job of the reserved kind to it.
+- Commit: once every seat reach an idle state, the reservation commit like a normal placement.
+- One at a time: a single cluster can hold a reservation at any moment. Other clusters plan over the unreserved idle workers.
+- Release: the reservation expire after `scheduler.clusterReserveTimeoutSecs` (1800 s), when a seated worker disconnect, or when the cluster leave the queue. The next planning pass can reserve again.
 
 ## Related
 

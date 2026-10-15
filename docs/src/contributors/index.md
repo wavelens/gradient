@@ -20,7 +20,7 @@ flowchart LR
 
 -   :material-source-pull: **[Contributing](contributing.md)**
 
-    Licensing, development setup, workflow and code conventions.
+License, setup instructions, contribution workflow and coding standards.
 
 -   :material-test-tube: **[Tests](tests.md)**
 
@@ -34,11 +34,11 @@ flowchart LR
 
 -   :material-graph: **[Scheduler](scheduler/index.md)**
 
-    Shared builds, start counters, upstream substitution, cache closure and scoring.
+    Build sharing, start counters, upstream substitution, cache closure and scoring.
 
 -   :material-lan-connect: **[Proto](proto/index.md)**
 
-    The worker protocol on `/proto`: handshake, assignment, jobs, transfers and federation.
+    The worker protocol under `/proto`: handshake, assignment, jobs, transfers and federation.
 
 -   :material-code-braces: **[Internals](internals/index.md)**
 
@@ -46,7 +46,7 @@ flowchart LR
 
 -   :material-database-arrow-up: **[Migrations](migrations.md)**
 
-    Writing, registering and retiring database migrations.
+    How to write, register and retire database migrations.
 
 </div>
 
@@ -56,11 +56,11 @@ flowchart LR
 
 -   :material-cpu-64-bit: **[Eval Worker Setup](eval-worker.md)**
 
-    The evaluation subprocess pool, discovery sharding and the shared eval cache.
+    Covers the subprocess pool for evaluations, shard discovery across workers and the shared eval cache.
 
 -   :material-chart-line: **[Evaluation Metrics](eval-metrics.md)**
 
-    Per-evaluation Nix metrics, how they are stored and shown on the Job Board.
+    Explains per-evaluation Nix metrics, their storage format and display on the Job Board.
 
 </div>
 
@@ -70,10 +70,10 @@ flowchart LR
 
 -   :material-file-search: **[Diagnostic Reports](diagnostic-reports.md)**
 
-    The report file, its scopes and the `gradient-report` inspector.
+    How to read the report file, its scopes and the `gradient-report` inspector.
 
 -   :material-palette: **[Frontend Style Guide](frontend-style-guide.md)**
 
-    The style guide page with the form, layout and grid primitives of the web UI.
+    A reference page covering the form, layout and grid primitives used across the web UI.
 
 </div>

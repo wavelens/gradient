@@ -1,6 +1,6 @@
 # Frontend Style Guide
 
-The frontend has its own design system page at `/styleguide`. The page can show every shared primitive, colour role and layout pattern live. New features must reuse a primitive before building a new one.
+A design system page at `/styleguide` renders every shared primitive, colour role and layout pattern in the browser. Check it for an existing primitive before building a new one.
 
 ```mermaid
 flowchart LR
@@ -24,16 +24,16 @@ flowchart LR
 
 ## Rules
 
-- Any store path, hash, key, ID or URL is a `gr-copy-field`, never a bare code span.
-- Colours come from semantic roles. No hex outside the palette, and no component reading a palette token directly.
-- New shared classes go into the design system, never into a component stylesheet.
-- Content shapes are `gr-row-list` or `gr-card-grid`, never named per entity.
-- All elements stay legible in both themes. No component may hard-code black or white.
-- Text sizes stay at most one step from body. Sizes are 16px for interactive text, 14px for secondary text and 12px for badges only.
+- Wrap every store path, hash, key, ID and URL in a `gr-copy-field`. A bare code span is not enough.
+- Take all colours from semantic roles. Hex values belong only in the palette, and components read roles rather than palette tokens.
+- Put new shared classes in the design system. Component stylesheets take none.
+- Build content layouts from `gr-row-list` or `gr-card-grid`. Avoid entity-specific names.
+- Keep every element readable in both themes. Never hard-code black or white in a component.
+- Keep text sizes within one step of body size: 16px for interactive text, 14px for secondary text, 12px for badges only.
 
 ## Shared UI Package
 
-`@gradient/ui` is a pnpm workspace package at `frontend/packages/ui`. Gradient and the frontend of [`gradient-proxy`](architecture.md) for servers.gradient.ci are both building on the package.
+The package `@gradient/ui` lives in the pnpm workspace at `frontend/packages/ui`. Two consumers build on it: Gradient itself and the frontend of [`gradient-proxy`](architecture.md) for servers.gradient.ci.
 
 | Entry | Content |
 |---|---|
@@ -42,15 +42,15 @@ flowchart LR
 | `@gradient/ui/tokens` | Colour tokens from `tokens.ts` |
 | `@gradient/ui/styles/*` | SCSS partials `variables`, `themes`, `grids` and the global `base` styles |
 
-- Only primitives without imports from `@core`, `@shared` or `@features` go into the package.
-- An ESLint rule will block such imports in the `packages/ui` code.
-- `pnpm tokens:generate` and `pnpm tokens:check` are delegating to the package.
-- `ng test` will cover the package specs too.
+- The package must stay free of imports from `@core`, `@shared` or `@features`. Only primitives without such imports belong there.
+- An ESLint rule blocks these imports in `packages/ui` code.
+- `pnpm tokens:generate` and `pnpm tokens:check` delegate their work to the package.
+- `ng test` runs the package specs as well.
 - The `gradient-proxy` frontend can link the package with `link:../../frontend/packages/ui`.
 
 ## `gr-ui`
 
-Generic primitives live in `frontend/packages/ui/src/ui/`, built on `@angular/cdk`. The Gradient-specific ones (`gr-eval-status-badge`, `gr-status-icon`, `gr-metric-chart`, `gr-star-button`, `gr-label-help`) live in `frontend/src/app/shared/ui/`. Each layer is imported from its own barrel.
+The generic building blocks live in `frontend/packages/ui/src/ui/` and build on `@angular/cdk`. Gradient-specific components (`gr-eval-status-badge`, `gr-status-icon`, `gr-metric-chart`, `gr-star-button`, `gr-label-help`) live in `frontend/src/app/shared/ui/`. Imports go through the barrel of each layer.
 
 ```ts
 import { FormFieldComponent, PageLayoutComponent, SettingsSectionComponent } from '@gradient/ui/ui';
@@ -66,8 +66,8 @@ import { MetricChartComponent } from '@shared/ui';
 | Overlays | `gr-dialog`, `gr-popover`, `[grTooltip]` |
 | Layout | `gr-page-layout`, `gr-settings-section`, `gr-row-list` / `gr-row`, `gr-card-grid`, `gr-nav-card`, `gr-tab-switch`, `[grInView]` |
 
-- `gr-page-layout`: title and subtitle header, breadcrumb, optional `[slot=actions]` buttons and `[slot=banner]`, then the content.
-- `gr-settings-section`: a titled section with an optional description, inside a card unless `[card]="false"`.
+- `gr-page-layout`: a header with title and subtitle, a breadcrumb, optional `[slot=actions]` buttons and an optional `[slot=banner]`, then the content.
+- `gr-settings-section`: a titled section with an optional description. A card contains it by default. Set `[card]="false"` to drop the card.
 
 ## Grid Utilities
 
@@ -83,4 +83,4 @@ import { MetricChartComponent } from '@shared/ui';
 
 ## Related
 
-- [Contributing](contributing.md#angular-and-typescript): dependency and lockfile rules
+- [Contributing](contributing.md#angular-and-typescript) covers the rules for dependencies and lockfiles.

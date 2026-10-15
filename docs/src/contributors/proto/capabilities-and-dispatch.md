@@ -17,23 +17,23 @@ sequenceDiagram
 
 ## Capabilities
 
-Workers with the `build` capability send `WorkerCapabilities` after the handshake. Workers without `build` never get build jobs.
+After the handshake, workers with the `build` capability send a `WorkerCapabilities` message. Workers without `build` never receive build jobs.
 
 | Field | Meaning | Worker default |
 |---|---|---|
-| `architectures` | Nix systems the worker can build, free-form strings | The host system (`macos` reported as `darwin`) |
-| `system_features` | Nix system features | `nix config show system-features` of the local daemon |
-| `max_concurrent_builds` | Build slots | `GRADIENT_WORKER_BUILD_MAX_CONCURRENT` (1) |
-| `cpu_count`, `ram_total_mb` | Hardware | Detected |
+| `architectures` | Nix systems the worker can build, as free-form strings | The host system (`macos` show up as `darwin`) |
+| `system_features` | Nix system features | The local daemon's `nix config show system-features` output |
+| `max_concurrent_builds` | Number of build slots | `GRADIENT_WORKER_BUILD_MAX_CONCURRENT` (1) |
+| `cpu_count`, `ram_total_mb` | Hardware details | Detected at startup |
 | `cpu_core_score` | Relative single-core speed | A startup micro-benchmark, or `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` |
-| `zone` | Locality label for cluster placement. Unset workers share one implicit zone | `GRADIENT_WORKER_ZONE`, unset |
-| `endpoint` | Address listed for this worker in a cluster roster | `GRADIENT_WORKER_ENDPOINT`, unset |
+| `zone` | Locality label used for cluster placement. Workers without a zone share one implicit zone | `GRADIENT_WORKER_ZONE`, unset |
+| `endpoint` | Address published for this worker in a cluster roster | `GRADIENT_WORKER_ENDPOINT`, unset |
 
 - `GRADIENT_WORKER_SYSTEM_ARCHITECTURES` and `GRADIENT_WORKER_SYSTEM_FEATURES` replace the detected lists.
-- An override must list every system and feature the worker should accept.
+- List every system and feature the worker must accept in an override.
 - A build can match a worker when the worker's `architectures` contain the build's system and its `system_features` contain every required feature.
-- Every `builtin` build will skip the system check.
-- A later `WorkerCapabilities` will replace the fields and trigger job assignment. Running jobs and existing offers stay.
+- Every `builtin` build will bypass the system check.
+- A later `WorkerCapabilities` message will replace the fields and start job assignment again. Running jobs and existing offers remain in place.
 
 ## Metrics and Liveness
 
@@ -48,40 +48,40 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 
 | Message | When |
 |---|---|
-| `JobListChunk` | Answer to `RequestJobList`: the full candidate list in pages of 1 000, the last one `is_final` |
-| `JobOffer` | Candidates not sent to this worker yet, up to 1 000 each. The server is offering a requeued job again |
+| `JobListChunk` | The server replies to `RequestJobList` with the full candidate list, split into pages of 1 000. The final page has `is_final` set. |
+| `JobOffer` | The server offers the worker jobs it has not received before, up to 1 000 per message. This also covers requeued jobs that the server offers again. |
 
-- Candidates are evaluations or build jobs the worker is authorized for and can run.
-- The fields `required_paths` (with NAR sizes when cached), `drv_paths` and `output_paths` are part of every `JobCandidate` message.
-- A build candidate and its `BuildJob` also carry a `requirement` with the Nix system and the required system features. Evaluation candidates carry no requirement.
-- Workers keep no candidate cache.
-- Workers score every offered candidate against the local store.
-- The worker will send the answer in `RequestJobChunk` with the fields `missing_count`, `missing_nar_size` and `outputs_present` set.
+- Candidates represent evaluations or build jobs that the worker can run and has authorization for.
+- Every `JobCandidate` message includes `required_paths` (with NAR sizes for cached paths), `drv_paths` and `output_paths`.
+- Build candidates and their `BuildJob` messages include a `requirement` with the Nix system and the required system features. Evaluations omit this field.
+- Workers do not cache candidates.
+- Workers compare each offered candidate against the local store and score it.
+- The worker then replies with a `RequestJobChunk` message. Set `missing_count`, `missing_nar_size` and `outputs_present` in that reply.
 
 ## Assignment
 
-- Workers send `RequestJob { kind }` for each free slot.
-- Workers repeat the request after every `AssignJob` while slots remain, and every 10 s while idle.
-- The server will remember an unanswered request as an idle slot for [cluster placement](../scheduler/clusters.md#tracking), not as a queued request.
-- The server will score every pending job of that kind for this worker on each `RequestJob` message.
-- The [scheduling policy](../../reference/scheduler-policies.md) can provide the score, and the server will pick the highest. Ties go to the smaller job ID.
-- Nothing below the assignment floor of 0 is handed out.
-- The server will claim the winner with a new `dispatched_job` row.
-- A lost race can move the server on to the next job, up to 3 times.
-- The `AssignJob` message will go out only after the claim.
-- The claim's ID is `AssignJob.assignment_id`, and every report must echo the ID.
-- Reports are the messages `JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress` and `EvalProgress` from the worker.
-- The server will drop reports with a stale ID.
-- Workers answer with an `AssignJobResponse` message.
-- The server will re-queue a declined job (worker draining or full) and offer the job again.
+- A worker sends `RequestJob { kind }` for each free slot.
+- While slots remain open, the worker repeats the request after every `AssignJob`, and every 10 s while idle.
+- The server records an unanswered request as an idle slot for [cluster placement](../scheduler/clusters.md#tracking), not as a queued request.
+- On each `RequestJob` message, the server scores every pending job of that kind for that worker.
+- The [scheduling policy](../../reference/scheduler-policies.md) provides the score, and the server picks the highest. Ties go to the smaller job ID.
+- Jobs below the assignment floor of 0 never leave the queue.
+- The server claims the winner by inserting a new `dispatched_job` row.
+- A lost race allows the server to move on to the next job, up to 3 attempts.
+- Only after the claim does the server send the `AssignJob` message.
+- The claim ID appears in `AssignJob.assignment_id`, and every report echoes that ID.
+- The worker reports through `JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress` and `EvalProgress`.
+- The server discards reports with a stale ID.
+- The worker answers with an `AssignJobResponse` message.
+- On a decline (worker draining or full), the server re-queues the job and offers it again.
 - An `AssignJob` with `cluster` set is one member of a [cluster job](../scheduler/clusters.md).
-- The server will push such a job instead of answering a `RequestJob` message.
-- The worker will hold the slot and run nothing until the `StartCluster` message.
-- The worker will free the slot after `cluster.hold_secs` without a `StartCluster` message.
+- Instead of answering a `RequestJob` message, the server pushes such a job.
+- The worker keeps the slot and runs nothing until the `StartCluster` message.
+- Without a `StartCluster` message within `cluster.hold_secs`, the worker releases the slot.
 
 ## Candidate Sources
 
 | Kind | Pool Entry |
 |---|---|
-| Evaluation | Each `Queued` evaluation without an open assignment, every 5 s. The worker is limiting itself with `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` (1) |
-| Build | From the set of builds that can start. Entry on a kick (a build that can now start, a capability change, a finished job) or every 5 s. A full resync every 60 s |
+| Evaluation | Every 5 s, each `Queued` evaluation without an open assignment joins the pool. The worker caps this with `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` (1) |
+| Build | Every build ready to start joins the pool. A kick (a build that can now start, a capability change, a finished job) or a 5 s tick adds entries. A full resync happens every 60 s |

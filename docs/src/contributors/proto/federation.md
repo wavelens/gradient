@@ -14,11 +14,11 @@ flowchart RL
 
 ## Upstream Leg
 
-The proxy will open one normal worker session per tenant. These sessions follow `InitConnection`, `AuthChallenge`, `AuthResponse` and `InitAck` from the [connection page](connection.md) like any worker session. Customers register the proxy's worker ID and token on their server like any worker. The operator will store both as the tenant's upstream link.
+Each tenant gets one regular worker session toward the customer server. The handshake uses the standard flow from the [connection page](connection.md): `InitConnection`, `AuthChallenge`, `AuthResponse` and `InitAck`. On the customer side, the proxy registers as a normal worker with a worker ID and token. The operator stores both as the tenant's upstream link.
 
-- A session is open while the link is `enabled` and the tenant may run.
-- An auth rejection (401 or 403) will mark the link `failing` with the reason.
-- No new session can start until the link is set again.
+- The session remains open while the link state is `enabled` and the tenant has permission to run.
+- A rejected auth response (401 or 403) marks the link `failing` and records the reason.
+- Sessions cannot start again until an operator resets the link.
 
 | Aspect | Behavior |
 |---|---|
@@ -30,27 +30,27 @@ The proxy will open one normal worker session per tenant. These sessions follow 
 
 ## Downstream Leg
 
-The proxy will authorize its own workers from its small Postgres database.
+Workers authorized by the proxy get recorded in a small local Postgres database.
 
-- Each authorized worker is a row: ID, name, tenant, argon2 token hash and allowed capabilities.
-- The `AuthChallenge` will name only the worker's own ID.
-- The negotiated capabilities are the worker's offer AND the allowed set, with `federate` always off.
-- Revoking a row will close the worker's live session.
-- Every worker can take jobs from every peer its tenant's server authorized.
+- One row per authorized worker, with ID, name, tenant, argon2 token hash and allowed capabilities.
+- An `AuthChallenge` names only the ID of the worker being challenged.
+- Negotiated capabilities come from the worker's offer intersected with the allowed set, and `federate` remains off in all cases.
+- Row deletion closes the live session of that worker.
+- A worker can take jobs from any peer authorized by its tenant's server.
 
 ## Job Forwarding
 
 | Step | Proxy behavior |
 |---|---|
-| Tenants | One hub per tenant. A worker's row is naming its tenant, and frames never cross tenants |
-| Offers | Mirroring the upstream offer book and handing candidates out to capable workers |
-| Scores | Forwarding the best score per candidate, changes only, once per second |
-| `RequestJob` | A worker's poll is becoming an upstream poll. The best capable waiting worker is getting the `AssignJob`. The proxy is declining without such a worker |
-| Reports | Routed by `job_id`. Queries get a fresh `query_id`. The proxy is dropping reports for jobs the worker does not own |
-| Uploads | Each `UploadRequest` is getting a fresh `request_id`. The proxy is mapping grants, chunks and commits back to the requesting worker |
-| Cluster jobs | `StartCluster`, `ClusterSignal` and `AbortCluster` reach every worker holding a member of the attempt. The roster is naming the worker behind the proxy, with its zone and endpoint |
-| Worker lost | Reporting `JobFailed` (transient) upstream on a disconnect or a 120 s heartbeat timeout |
-| Upstream lost | Sending `AbortJob` to that tenant's workers and answering the tenant's open queries with errors. Closing the tenant's worker sessions after `Draining`. Other tenants stay untouched |
+| Tenants | One hub per tenant. A worker row names its tenant, and frames never cross tenant boundaries |
+| Offers | The upstream offer book gets mirrored, and candidates go out to capable workers |
+| Scores | The best score per candidate gets forwarded as deltas, at most once per second |
+| `RequestJob` | A worker poll turns into an upstream poll. The best capable waiting worker receives the `AssignJob`. Without such a worker, the proxy declines |
+| Reports | Routing happens by `job_id`. Queries receive a fresh `query_id`. Reports for jobs outside a worker's ownership get dropped |
+| Uploads | Every `UploadRequest` receives a fresh `request_id`. Grants, chunks and commits map back to the requesting worker |
+| Cluster jobs | `StartCluster`, `ClusterSignal` and `AbortCluster` reach every worker that holds a member of the attempt. The roster names the worker behind the proxy, together with its zone and endpoint |
+| Worker lost | A disconnect or a 120 s heartbeat timeout triggers an upstream `JobFailed` (transient) |
+| Upstream lost | `AbortJob` goes to that tenant's workers, and open queries receive error responses. Worker sessions close after `Draining`. Other tenants remain unaffected |
 
 ## Passthrough
 
@@ -62,25 +62,27 @@ The proxy will authorize its own workers from its small Postgres database.
 
 ## Hetzner Workers
 
-The proxy can boot Hetzner Cloud VMs dedicated to one tenant. A reconcile pass every 60 s will compare each tenant's pending jobs with the tenant's VMs and the servers labelled `gradient-tenant`.
+The proxy can boot Hetzner Cloud VMs, each dedicated to a single tenant. Every 60 s, a reconcile pass compares pending jobs per tenant with that tenant's VMs and with servers labelled `gradient-tenant`.
 
 | Rule | Behavior |
 |---|---|
-| Scale up | `min(max VMs, ceil(pending / slots))` VMs per system with a configured server type |
-| Boot | From the uploaded worker snapshot. The user data is holding the proxy URL, a worker ID and a one-time token, stored as an argon2 hash |
-| Scale down | The proxy is deleting an idle VM within the last 5 minutes of its billing unit (default 60 minutes) |
-| Boot deadline | The proxy is deleting a VM not connected within the boot deadline (default 5 minutes). The VM's usage row is ending as `failed_boot`, without a bill |
-| Failing link or tenant may not run | The tenant is stopping upstream polls. The tenant's VMs drain, and the proxy is deleting the VMs after the drain grace (default 15 minutes) |
-| Leak guard | The proxy is deleting a labelled server without a VM row. The proxy is closing a row with a missing server |
-| Rate limit | Hetzner `429` and `5xx` back the tenant off from 1 s to 5 minutes. Billing is starting only after server creation |
+| Scale up | The proxy targets `min(max VMs, ceil(pending / slots))` VMs per system with a configured server type |
+| Boot | VMs start from the uploaded worker snapshot. User data carries the proxy URL, a worker ID and a one-time token, stored as an argon2 hash |
+| Scale down | The proxy deletes idle VMs within the last 5 minutes of their billing unit (default 60 minutes) |
+| Boot deadline | A VM that failed to connect within the boot deadline (default 5 minutes) gets deleted. Its usage row ends as `failed_boot` and no bill gets issued |
+| Failing link or tenant may not run | The tenant stops upstream polls. Its VMs drain, and the proxy deletes them after the drain grace (default 15 minutes) |
+| Leak guard | The proxy deletes a labelled server without a VM row, and closes a row whose server has gone missing |
+| Rate limit | Hetzner `429` and `5xx` responses back the tenant off from 1 s to 5 minutes. Billing starts only after server creation |
 
-Deleting a VM will revoke the VM's token. The `vm_usage` table will meter each VM's uptime, from creation to deletion.
+Deletion of a VM revokes its token. The `vm_usage` table meters uptime for each VM, from creation to deletion.
 
 ## Access Control
+
+Access control works at two levels.
 
 | Level | Controlled by |
 |---|---|
 | Server -> proxy | Per project: the proxy's `worker_registration` rows, tokens and `enable_fetch` / `enable_eval` / `enable_build` |
 | Proxy -> worker | Per worker: `authorized_peers` rows with tenant, token hash and allowed capabilities |
 
-The handshake will negotiate the `federate` capability, `proto.federate` on the server and `capabilities.federate` on the worker. The flag has no effect in the code yet.
+The handshake negotiates the `federate` capability. The server exposes this as `proto.federate`, the worker as `capabilities.federate`. The flag has no effect in the code yet.

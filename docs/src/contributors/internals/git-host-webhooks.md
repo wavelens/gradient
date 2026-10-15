@@ -1,6 +1,6 @@
 # Git Host Webhooks
 
-The endpoints in `gradient-web/src/endpoints/git_host_hooks/` receive Git host events. The routes carry no session. Every delivery must prove its origin with the Git host's signature. A push will end as a `Queued` evaluation.
+Git hosts send events to the endpoints in `gradient-web/src/endpoints/git_host_hooks/`. These routes use no session. Each request must prove its origin through the Git host's signature before the endpoint acts on it. A push event results in a `Queued` evaluation.
 
 ```mermaid
 sequenceDiagram
@@ -20,16 +20,18 @@ sequenceDiagram
 
 | Route | Verification |
 |---|---|
-| `POST /api/v1/hooks/github` | `X-Hub-Signature-256` against `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`. `503` until the App is fully configured |
-| `POST /api/v1/hooks/{git_host}/{project}/{integration_name}` | `gitea` / `forgejo`: HMAC from `X-Forgejo-Signature`, then `X-Gitea-Signature`. `gitlab`: `X-Gitlab-Token` compared in constant time. `github` is answering `400` |
+| `POST /api/v1/hooks/github` | `X-Hub-Signature-256` checked against `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`. `503` until the App is fully configured |
+| `POST /api/v1/hooks/{git_host}/{project}/{integration_name}` | `gitea` / `forgejo`: HMAC from `X-Forgejo-Signature`, then `X-Gitea-Signature`. `gitlab`: `X-Gitlab-Token` compared in constant time. `github` answers `400` |
 
-- The generic route can find the integration by `(project, inbound, name)`, without `git_host_type`.
-- One inbound row can answer all three Git hosts.
-- The server will decrypt the secret with the crypt file.
-- `allowed_ips` will reject other sources with `403`.
-- GitHub `installation` / `installation_repositories` events upsert or clear `github_installation` and seed the `github-<login>` integration pair (`github-<installation_id>` without a login).
+- The generic route finds an integration by `(project, inbound, name)`, with no need for `git_host_type`.
+- A single inbound row can serve all three Git hosts.
+- The crypt file handles secret decryption on the server.
+- Requests from other sources fail `allowed_ips` with `403`.
+- GitHub `installation` / `installation_repositories` events upsert or clear `github_installation` and seed the `github-<login>` integration pair (`github-<installation_id>` when no login is present).
 
 ## GitHub App Events
+
+GitHub App webhooks reach the following handlers:
 
 | Event | Handler |
 |---|---|
@@ -45,13 +47,13 @@ sequenceDiagram
 
 | Step | Code | Action |
 |---|---|---|
-| 1 | `fan_out_triggers` (`git_host_hooks/fanout.rs`) | Active `task_trigger` rows of type `ReporterPush` whose branch and tag globs match |
-| 2 | `normalize_repo_url`, `event_repo_matches_task` | Stripping `.git` and a trailing `/`, rewriting `git@` URLs. Comparing lowercased `owner/repo`, ignoring the host |
-| 3 | `gradient_ci::apply_trigger` | Dedup and concurrency, aborting the running evaluation or parking the new one in `Waiting`. A violation of `uq_evaluation_one_active_per_task` is mapping to `SkippedConcurrency` |
-| 4 | `gradient_ci::trigger::trigger_evaluation` | Inserting the `Commit` row and a `Queued` evaluation, setting `task.force_evaluation`, resetting `last_check_at` |
-| 5 | `eval-dispatch` | Woken by the created evaluation (`record_evaluation_created`), offering the evaluation to workers. The 5 s tick is the fallback |
+| 1 | `fan_out_triggers` (`git_host_hooks/fanout.rs`) | Selects active `task_trigger` rows of type `ReporterPush` where the branch and tag globs match the push |
+| 2 | `normalize_repo_url`, `event_repo_matches_task` | Strips a trailing `/` and `.git`, rewrites `git@` URLs. Compares `owner/repo` in lowercase and ignores the host |
+| 3 | `gradient_ci::apply_trigger` | Applies dedup and concurrency rules. A running evaluation can be aborted, or the new one parks in `Waiting`. A violation of `uq_evaluation_one_active_per_task` maps to `SkippedConcurrency` |
+| 4 | `gradient_ci::trigger::trigger_evaluation` | Inserts the `Commit` row and a `Queued` evaluation, sets `task.force_evaluation`, and resets `last_check_at` |
+| 5 | `eval-dispatch` | Gets woken through `record_evaluation_created` and offers the evaluation to workers. A 5 s tick serves as the fallback |
 
 ## Related
 
-- [Connect GitHub](../../guides/github.md): the setup side
-- [Events and Webhooks](../../reference/events.md): outbound events
+- [Connect GitHub](../../guides/github.md) covers the initial setup
+- [Events and Webhooks](../../reference/events.md) documents outbound events

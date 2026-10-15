@@ -1,6 +1,6 @@
 # Proto
 
-The protocol between server and workers: one WebSocket at `/proto` with binary frames from the `Proto` derive. Sessions pass through version agreement, handshake, authorization, capabilities, then the job loop.
+Server and workers share one WebSocket at `/proto`. The `Proto` derive encodes all frames as binary. A session must pass version agreement, handshake, authorization and capability exchange before the job loop can start.
 
 ```mermaid
 flowchart LR
@@ -40,5 +40,5 @@ flowchart LR
 
 ## Related
 
-- [Scheduler](../scheduler/index.md): the logic choosing a worker's next job
-- [Add a Remote Worker](../../guides/remote-worker.md): the setup side
+- [Scheduler](../scheduler/index.md): how the next job for a worker gets picked
+- [Add a Remote Worker](../../guides/remote-worker.md): the setup guide

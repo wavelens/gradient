@@ -50,5 +50,5 @@ flowchart LR
 
 ## Related
 
-- [Scheduler Policies](../../reference/scheduler-policies.md): the rules and their magnitudes
-- [Capabilities and Assignment](../proto/capabilities-and-dispatch.md): the worker side of assignment
+- [Scheduler Policies](../../reference/scheduler-policies.md): the rules with their weights
+- [Capabilities and Assignment](../proto/capabilities-and-dispatch.md): assignment from the worker's perspective
