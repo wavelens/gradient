@@ -1629,11 +1629,17 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"the retired output's producer must lose fetchability and its terminal-success "
         f"status, has (status fetchable) = ({producer})"
     )
-    hello_blocking = int(sql(
-        f"SELECT db.blocking_deps FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
+    hello_blocking, hello_recount = sql(
+        f"SELECT db.blocking_deps::text || ' ' || (SELECT count(*) FROM derivation_dependency e "
+        f"LEFT JOIN derivation_build dep ON dep.derivation = e.dependency "
+        f"WHERE e.derivation = db.derivation AND e.kind IN (0, 2) "
+        f"AND (dep.derivation IS NULL OR NOT dep.fetchable))::text "
+        f"FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
         f"WHERE d.hash = '{drv_hash}';"
-    ))
-    assert hello_blocking >= 1, f"hello must count its unfetchable dependencies as blocking: {hello_blocking}"
+    ).split()
+    assert hello_blocking == hello_recount, (
+        f"hello's blocking build inputs must match their recount, has {hello_blocking}, "
+        f"recount {hello_recount}")
 
     hello_missing, hello_fetchable = shared_build_complete(drv_hash)
     assert int(hello_missing) >= 1, (
