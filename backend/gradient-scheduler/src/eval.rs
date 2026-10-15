@@ -9,60 +9,12 @@ use std::sync::Arc;
 
 use gradient_db::WorkerDb;
 use gradient_db::status::EvaluationWarning;
-use gradient_entity::StorePath;
 use gradient_graph::UpstreamHit;
 use gradient_types::*;
-use gradient_wire::types::DiscoveredDerivation;
 use tokio::sync::Semaphore;
-use tracing::{error, warn};
+use tracing::warn;
 
 const UPSTREAM_WINDOW_MINUTES: i64 = 60;
-
-#[tracing::instrument(level = "debug", skip_all, fields(derivations = derivations.len()))]
-pub async fn assess_cached(db: &WorkerDb, derivations: &[DiscoveredDerivation]) -> HashSet<String> {
-    let mut truly_substituted = HashSet::new();
-    let outputs_by_drv: HashMap<&str, Vec<String>> = derivations
-        .iter()
-        .map(|d| {
-            let hashes = d
-                .outputs
-                .iter()
-                .filter_map(|o| StorePath::parse(&o.path).ok())
-                .map(|sp| sp.hash().to_owned())
-                .collect();
-            (d.drv_path.as_str(), hashes)
-        })
-        .collect();
-    let all_hashes: Vec<String> = outputs_by_drv
-        .values()
-        .flatten()
-        .cloned()
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    if all_hashes.is_empty() {
-        return truly_substituted;
-    }
-
-    let fully_cached: HashSet<String> =
-        gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
-            gradient_db::graph::runtime_can_start::complete_output_hashes(db, &chunk).await
-        })
-        .await
-        .unwrap_or_else(|e| {
-            error!(error = %e, "cache availability: complete-output lookup failed");
-            Vec::new()
-        })
-        .into_iter()
-        .collect();
-    for (drv, hashes) in &outputs_by_drv {
-        if !hashes.is_empty() && hashes.iter().all(|h| fully_cached.contains(h)) {
-            truly_substituted.insert((*drv).to_owned());
-        }
-    }
-
-    truly_substituted
-}
 
 #[derive(Debug, Default)]
 pub struct ProbeAnswer {

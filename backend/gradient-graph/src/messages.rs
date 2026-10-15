@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashSet;
-
 use chrono::NaiveDateTime;
 use gradient_db::graph::repair::RepairScope;
 use gradient_db::status::BuildRefusal;
@@ -25,7 +23,6 @@ pub struct RecordBatch {
     pub derivations: Vec<DiscoveredDerivation>,
     pub warnings: Vec<String>,
     pub errors: Vec<String>,
-    pub truly_substituted: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

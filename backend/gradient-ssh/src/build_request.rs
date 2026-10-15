@@ -323,8 +323,6 @@ async fn add_batches(
         .collect();
 
     for batch in derivations.chunks(RECORD_BATCH_SIZE) {
-        let truly_substituted =
-            gradient_scheduler::eval::assess_cached(&handles.db.worker_db, batch).await;
         let report = handles
             .graph
             .record(RecordBatch {
@@ -333,7 +331,6 @@ async fn add_batches(
                 derivations: batch.to_vec(),
                 warnings: vec![],
                 errors: vec![],
-                truly_substituted,
             })
             .await?;
         if report.skipped {

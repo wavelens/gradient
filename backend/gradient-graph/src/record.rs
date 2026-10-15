@@ -441,11 +441,55 @@ impl BatchWriter<'_> {
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
+    async fn stored_derivations(
+        &self,
+        derivations: &[DiscoveredDerivation],
+        ids: &HashMap<String, DerivationId>,
+    ) -> Result<HashSet<DerivationId>> {
+        let outputs_by_drv: Vec<(DerivationId, Vec<String>)> = derivations
+            .iter()
+            .filter_map(|d| {
+                let hashes: Vec<String> = d
+                    .outputs
+                    .iter()
+                    .filter_map(|o| StorePath::parse(&o.path).ok())
+                    .map(|sp| sp.hash().to_owned())
+                    .collect();
+                ids.get(&d.drv_path)
+                    .filter(|_| !hashes.is_empty())
+                    .map(|id| (*id, hashes))
+            })
+            .collect();
+        let all_hashes: Vec<String> = outputs_by_drv
+            .iter()
+            .flat_map(|(_, hashes)| hashes.iter().cloned())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        let db = self.db();
+        let complete: HashSet<String> =
+            gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
+                gradient_db::graph::runtime_can_start::complete_output_hashes(db, &chunk).await
+            })
+            .await
+            .context("look up the batch's complete outputs")?
+            .into_iter()
+            .collect();
+
+        Ok(outputs_by_drv
+            .into_iter()
+            .filter(|(_, hashes)| hashes.iter().all(|h| complete.contains(h)))
+            .map(|(id, _)| id)
+            .collect())
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn resolve_shared_builds(
         &self,
         ids: &HashMap<String, DerivationId>,
         derivations: &[DiscoveredDerivation],
-        batch: &RecordBatch,
+        stored: &HashSet<DerivationId>,
     ) -> Result<()> {
         let now = gradient_types::now();
         let all_ids: Vec<DerivationId> = ids
@@ -453,11 +497,6 @@ impl BatchWriter<'_> {
             .copied()
             .collect::<HashSet<_>>()
             .into_iter()
-            .collect();
-        let truly: HashSet<DerivationId> = batch
-            .truly_substituted
-            .iter()
-            .filter_map(|p| ids.get(p).copied())
             .collect();
         let limits: HashMap<DerivationId, (Option<i64>, Option<i64>)> = derivations
             .iter()
@@ -477,7 +516,7 @@ impl BatchWriter<'_> {
         let shared_builds: Vec<ADerivationBuild> = all_ids
             .iter()
             .map(|&drv_id| {
-                let status = if truly.contains(&drv_id) {
+                let status = if stored.contains(&drv_id) {
                     BuildStatus::Substituted
                 } else {
                     BuildStatus::Created
@@ -570,10 +609,10 @@ impl BatchWriter<'_> {
             }
         }
 
-        if !truly.is_empty() {
-            let truly_ids: Vec<DerivationId> = truly.iter().copied().collect();
+        if !stored.is_empty() {
+            let stored_ids: Vec<DerivationId> = stored.iter().copied().collect();
             let changes =
-                gradient_db::graph::promotion::substitute_created_shared_builds(db, &truly_ids)
+                gradient_db::graph::promotion::substitute_created_shared_builds(db, &stored_ids)
                     .await
                     .context("substitute created shared builds")?;
             gradient_db::status::emit_transition_effects(self.ctx, &changes).await?;
@@ -588,7 +627,7 @@ impl BatchWriter<'_> {
     #[tracing::instrument(level = "debug", skip_all)]
     async fn advance_can_start(
         &self,
-        batch: &RecordBatch,
+        stored: &HashSet<DerivationId>,
         resolved: &Resolved,
         newly_walked: &HashSet<String>,
         grew: &[DerivationId],
@@ -605,12 +644,7 @@ impl BatchWriter<'_> {
         to_seed.dedup();
 
         let mut locked = to_seed.clone();
-        locked.extend(
-            batch
-                .truly_substituted
-                .iter()
-                .filter_map(|p| resolved.by_path.get(p).copied()),
-        );
+        locked.extend(stored.iter().copied());
         locked.sort_unstable();
         locked.dedup();
         if locked.is_empty() {
@@ -945,8 +979,9 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
             .record_walk_completeness(&resolved, &newly_walked, &grew)
             .await?;
         writer.persist_input_sources(&batch.derivations, ids).await;
+        let stored = writer.stored_derivations(&batch.derivations, ids).await?;
         writer
-            .resolve_shared_builds(ids, &batch.derivations, batch)
+            .resolve_shared_builds(ids, &batch.derivations, &stored)
             .await?;
         writer.add_system_features(&batch.derivations, ids).await;
         let adopted = writer.adopt_references(&resolved, &newly_walked).await?;
@@ -960,7 +995,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
         };
         report.to_probe = writer
             .advance_can_start(
-                batch,
+                &stored,
                 &resolved,
                 &newly_walked,
                 &grew,

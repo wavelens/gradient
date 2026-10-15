@@ -15,7 +15,6 @@ use gradient_util::store_path::strip_nix_store_prefix;
 use gradient_wire::types::DiscoveredDerivation;
 
 use crate::Scheduler;
-use crate::eval;
 use crate::jobs::PendingJob;
 
 impl Scheduler {
@@ -194,7 +193,6 @@ impl Scheduler {
             }
         }
 
-        let truly_substituted = eval::assess_cached(&self.db.worker_db, &derivations).await;
         self.graph
             .record(RecordBatch {
                 evaluation: job.evaluation_id,
@@ -202,7 +200,6 @@ impl Scheduler {
                 derivations,
                 warnings,
                 errors,
-                truly_substituted,
             })
             .await?;
 

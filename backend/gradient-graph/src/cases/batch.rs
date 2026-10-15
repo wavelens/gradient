@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashSet;
-
 use gradient_entity::build::BuildStatus::{self, Completed, Created, Queued, Skipped, Substituted};
 use gradient_entity::derivation_dependency::EdgeKind;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -15,8 +13,7 @@ use gradient_wire::types::DiscoveredDerivation;
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, Case, D, F_OUT, F1, F2, X, X_OUT, Y, Y_OUT, Z, Z_OUT, as_set,
-    batch, chain, drv, drv_nar, nar, with_attr, with_ifd, with_limits, with_output,
-    with_references,
+    batch, chain, chain_done, drv, drv_nar, with_attr, with_ifd, with_limits, with_output,
 };
 use crate::messages::Transition;
 use crate::test_ctx::{Batch, BatchReport};
@@ -71,16 +68,9 @@ fn a_above_b() -> DiscoveredDerivation {
     with_attr(walked(A, A_OUT, &[B]), "pkg.a")
 }
 
-fn with_b_truly_substituted(batch: Batch) -> Batch {
-    Batch {
-        truly_substituted: HashSet::from([B.to_owned()]),
-        ..batch
-    }
-}
-
-async fn a_above_a_truly_substituted_b(case: &Case, evaluation: EvaluationId) -> Batch {
+async fn a_above_a_walked_b(case: &Case, evaluation: EvaluationId) -> Batch {
     let derivations = vec![a_above_b(), walked(B, B_OUT, &[])];
-    with_b_truly_substituted(case.tasked(evaluation, derivations).await)
+    case.tasked(evaluation, derivations).await
 }
 
 #[tokio::test]
@@ -471,7 +461,7 @@ async fn b08_the_limits_of_a_walked_derivation_are_written_onto_its_shared_build
 }
 
 #[tokio::test]
-async fn b09_a_truly_substituted_derivation_with_a_stored_output_is_fetchable_at_once() {
+async fn b09_a_derivation_with_a_stored_output_starts_substituted_and_fetchable() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(
         shape()
@@ -481,9 +471,9 @@ async fn b09_a_truly_substituted_derivation_with_a_stored_output_is_fetchable_at
     )
     .await;
 
-    let truly_substituted = a_above_a_truly_substituted_b(&case, e1).await;
+    let batch = a_above_a_walked_b(&case, e1).await;
 
-    let report = case.walk(truly_substituted).await;
+    let report = case.walk(batch).await;
 
     let substituted = SharedBuild {
         status: Substituted,
@@ -524,56 +514,47 @@ async fn b09_a_truly_substituted_derivation_with_a_stored_output_is_fetchable_at
 }
 
 #[tokio::test]
-async fn b10_a_truly_substituted_derivation_without_a_stored_output_waits_for_its_commit() {
+async fn b10_a_derivation_without_a_stored_output_is_not_substituted() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(shape().evaluation(e1)).await;
-    let truly_substituted = a_above_a_truly_substituted_b(&case, e1).await;
+    let batch = a_above_a_walked_b(&case, e1).await;
 
-    case.walk(truly_substituted).await;
+    case.walk(batch).await;
 
-    let b = case.sb(B).await;
-    let columns = (b.status, b.fetchable, b.wanted);
-    assert_eq!(columns, (Substituted, false, false), "after 1: sb(B)");
+    let skipped = SharedBuild {
+        status: Skipped,
+        ..Default::default()
+    };
+
+    assert_eq!(shared_build(&case, B).await, skipped, "after 1: sb(B)");
     let output = case.output_of(B, "out").await;
     assert!(!output.is_cached, "after 1: output(B,out).is_cached");
     let blocking_deps = case.sb(A).await.blocking_deps;
     assert_eq!(blocking_deps, 1, "after 1: sb(A).blocking_deps");
-    case.zero_drift("step 1").await;
-
-    case.upstream_probed(&[A]).await;
-
-    let b = case.sb(B).await;
-    assert_eq!((b.wanted, b.status), (true, Substituted), "after 2: sb(B)");
     let counters = case.counters(e1).await;
-    assert_eq!(counters, [2, 1, 0, 0, 0], "after 2: counters(E1)");
-    case.zero_drift("step 2").await;
-    let commit = with_references(nar(B_OUT, "b"), &[(B_OUT, "b")]);
-
-    case.commit_nar(commit).await;
-
-    let b = case.sb(B).await;
-    assert!(b.fetchable, "after 3: sb(B).fetchable");
-    let a = case.sb(A).await;
-    let columns = (a.blocking_deps, a.status);
-    assert_eq!(columns, (0, Created), "after 3: sb(A)");
-    case.zero_drift("step 3").await;
+    assert_eq!(counters, [2, 1, 0, 0, 0], "after 1: counters(E1)");
+    case.zero_drift("step 1").await;
     case.finish().await;
 }
 
 #[tokio::test]
-async fn b11_an_existing_shared_build_listed_as_truly_substituted_keeps_its_status() {
+async fn b11_an_existing_shared_build_with_a_stored_output_keeps_its_status() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
-    let case = Case::start(chain(e1).evaluation(e2)).await;
+    let case = Case::start(chain_done(e1).evaluation(e2)).await;
     let attempt = case.sb(B).await.attempt;
     let b = case.tasked(e2, vec![walked(B, B_OUT, &[])]).await;
 
-    case.walk(with_b_truly_substituted(b)).await;
+    case.walk(b).await;
 
     let b = case.sb(B).await;
-    assert_eq!((b.status, b.attempt), (Queued, attempt), "after 1: sb(B)");
+    assert_eq!(
+        (b.status, b.attempt),
+        (Completed, attempt),
+        "after 1: sb(B)"
+    );
     assert!(named(&case, e2, B).await, "after 1: build_job(E2,B)");
     let counters = case.counters(e2).await;
-    assert_eq!(counters, [1, 1, 0, 1, 0], "after 1: counters(E2)");
+    assert_eq!(counters, [1, 0, 0, 0, 0], "after 1: counters(E2)");
     case.zero_drift("step 1").await;
     case.finish().await;
 }
