@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ lib, config, options, ... }: with lib; let
+{ lib, config, ... }: with lib; let
   upstreamType = types.submodule {
     options = {
       type = mkOption {

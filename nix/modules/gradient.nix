@@ -305,9 +305,6 @@ in {
       database = {
         url = lib.mkOption {
           type = lib.types.str;
-          # Peer auth on the local socket requires a role named like the unit's system user.
-          # sqlx no longer infers the user from the process; it asks whoami, which answers
-          # "anonymous" under systemd.
           default = "postgresql://gradient@localhost/gradient?host=/run/postgresql";
           description = "PostgreSQL connection URL.";
         };
@@ -519,171 +516,170 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [{
+      assertion = cfg.localWorker -> cfg.worker.enable;
+      message = "services.gradient.localWorker provisions credentials for a worker on this host and requires services.gradient.worker.enable.";
+    } {
+      assertion = cfg.proto.federate -> cfg.proto.discoverable;
+      message = "proto.federate requires proto.discoverable to be enabled";
+    } {
+      assertion = !(cfg.reverseProxy.nginx.enable && cfg.reverseProxy.caddy.enable);
+      message = "You can only use one reverse proxy at a time";
+    }];
+
     networking.firewall.allowedTCPPorts = lib.mkIf (cfg.ssh.enable && cfg.ssh.openFirewall) [ cfg.ssh.port ];
-
-    services.gradient = lib.mkIf localWorker {
-      state.teams.server = {
-        display_name = "Server";
-        new_projects.workers = true;
+    systemd = {
+      tmpfiles.settings."10-gradient-trace" = lib.mkIf (cfg.log.traceDir != null) {
+        ${cfg.log.traceDir}.d = {
+          user = "gradient";
+          group = "gradient";
+          mode = "0750";
+        };
       };
 
-      state.workers.local = {
-        display_name = "Local Worker";
-        worker_id = localIdentity;
-        token_file = localTokenFile;
-        team = "server";
+      services = {
+        gradient-local-worker-token = lib.mkIf localWorker {
+          description = "Gradient local worker credentials";
+          requiredBy = [ "gradient-worker.service" ];
+          before = [ "gradient-worker.service" ];
+
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            User = "gradient-worker";
+            Group = "gradient-worker";
+            StateDirectory = "gradient-worker";
+            UMask = "0277";
+          };
+
+          script = ''
+            rm -f ${localTokenFile}.new ${localPeersFile}.new
+            if [ ! -s ${localTokenFile} ]; then
+              ${lib.getExe pkgs.openssl} rand -base64 48 > ${localTokenFile}.new
+              mv ${localTokenFile}.new ${localTokenFile}
+            fi
+            printf '*:%s\n' "$(cat ${localTokenFile})" > ${localPeersFile}.new
+            mv ${localPeersFile}.new ${localPeersFile}
+          '';
+        };
+
+        gradient-worker = lib.mkIf localWorker {
+          after = [ "gradient-local-worker-token.service" ];
+        };
+
+        gradient-server = {
+          wantedBy = [ "multi-user.target" ];
+          after = [
+            "network.target"
+            "systemd-tmpfiles-setup.service"
+          ] ++ lib.optional cfg.postgres.enable "postgresql.target"
+            ++ lib.optional localWorker "gradient-local-worker-token.service";
+          requires = lib.optional localWorker "gradient-local-worker-token.service";
+
+          serviceConfig = {
+            Type = "notify";
+            ExecStart = lib.getExe cfg.packages.server;
+            TimeoutStartSec = "infinity";
+            StateDirectory = "gradient";
+            User = "gradient";
+            Group = "gradient";
+            PrivateTmp = true;
+            ProtectHome = true;
+            ProtectHostname = true;
+            ProtectKernelLogs = true;
+            ProtectKernelModules = true;
+            ProtectKernelTunables = true;
+            ProtectProc = "invisible";
+            ProtectSystem = "strict";
+            ReadWritePaths = [ cfg.baseDir ] ++ lib.optional (cfg.log.traceDir != null) cfg.log.traceDir;
+            Restart = "on-failure";
+            RestartSec = 10;
+            LimitNOFILE = 65535;
+            RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
+            RestrictNamespaces = true;
+            RestrictRealtime = true;
+            RestrictSUIDSGID = true;
+            WorkingDirectory = cfg.baseDir;
+            LoadCredential = [
+              "gradient_database_url:${cfg.database.urlFile}"
+              "gradient_crypt_secret:${cfg.secrets.cryptFile}"
+              "gradient_jwt_secret:${cfg.secrets.jwtFile}"
+              "gradient_state:${validatedStateJsonFile}"
+            ] ++ lib.optionals cfg.oidc.enable [
+              "gradient_oidc_client_secret:${cfg.oidc.clientSecretFile}"
+            ] ++ lib.optionals cfg.scim.enable [
+              "gradient_scim_token:${cfg.scim.tokenFile}"
+            ] ++ lib.optionals cfg.email.enable [
+              "gradient_email_smtp_password:${cfg.email.smtp.passwordFile}"
+            ] ++ lib.optionals (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) [
+              "gradient_s3_secret_access_key:${cfg.s3.secretAccessKeyFile}"
+            ] ++ lib.optionals cfg.githubApp.enable [
+              "gradient_github_app_private_key:${cfg.githubApp.privateKeyFile}"
+              "gradient_github_app_webhook_secret:${cfg.githubApp.webhookSecretFile}"
+            ] ++ lib.optional (cfg.ssh.enable && cfg.ssh.hostKeyFile != null)
+              "gradient_ssh_host_key:${cfg.ssh.hostKeyFile}"
+            ++ lib.optional (cfg.metrics.tokenFile != null)
+              "gradient_metrics_token:${cfg.metrics.tokenFile}"
+            ++ userPasswordFiles ++ projectPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
+              ++ workerTokenFiles ++ integrationSecretFiles ++ integrationTokenFiles
+              ++ actionSecretFiles;
+          };
+
+          unitConfig = {
+            StartLimitIntervalSec = 60;
+            StartLimitBurst = 5;
+          };
+
+          environment = {
+            NIX_REMOTE = "daemon";
+            XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
+            GRADIENT_SECRETS_CRYPT_FILE = "%d/gradient_crypt_secret";
+            GRADIENT_SECRETS_JWT_FILE = "%d/gradient_jwt_secret";
+            GRADIENT_STATE_FILE = "%d/gradient_state";
+            GRADIENT_STATE_DELETE = lib.boolToString cfg.state.delete;
+            GRADIENT_CREDENTIALS_DIR = "%d";
+            GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
+          } // lib.optionalAttrs cfg.oidc.enable {
+            GRADIENT_OIDC_CLIENT_SECRET_FILE = "%d/gradient_oidc_client_secret";
+          } // lib.optionalAttrs cfg.scim.enable {
+            GRADIENT_SCIM_TOKEN_FILE = "%d/gradient_scim_token";
+          } // lib.optionalAttrs cfg.email.enable {
+            GRADIENT_EMAIL_SMTP_PASSWORD_FILE = "%d/gradient_email_smtp_password";
+          } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) {
+            GRADIENT_S3_SECRET_ACCESS_KEY_FILE = "%d/gradient_s3_secret_access_key";
+          } // lib.optionalAttrs cfg.githubApp.enable {
+            GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE = "%d/gradient_github_app_private_key";
+            GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE = "%d/gradient_github_app_webhook_secret";
+          } // lib.optionalAttrs (cfg.ssh.enable && cfg.ssh.hostKeyFile != null) {
+            GRADIENT_SSH_HOST_KEY_FILE = "%d/gradient_ssh_host_key";
+          } // lib.optionalAttrs (cfg.metrics.tokenFile != null) {
+            GRADIENT_METRICS_TOKEN_FILE = "%d/gradient_metrics_token";
+          } // serverOptions.environment cfg // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
+        };
       };
-
-      worker = {
-        id = lib.mkDefault localIdentity;
-        peersFile = lib.mkDefault localPeersFile;
-        serverUrl = lib.mkDefault "ws://127.0.0.1:${toString cfg.port}/proto";
-      };
-    };
-
-    assertions = [
-      {
-        assertion = cfg.localWorker -> cfg.worker.enable;
-        message = "services.gradient.localWorker provisions credentials for a worker on this host and requires services.gradient.worker.enable.";
-      }
-      {
-        assertion = cfg.proto.federate -> cfg.proto.discoverable;
-        message = "proto.federate requires proto.discoverable to be enabled";
-      }
-      {
-        assertion = !(cfg.reverseProxy.nginx.enable && cfg.reverseProxy.caddy.enable);
-        message = "You can only use one reverse proxy at a time";
-      }
-    ];
-
-    systemd.services.gradient-local-worker-token = lib.mkIf localWorker {
-      description = "Gradient local worker credentials";
-      requiredBy = [ "gradient-worker.service" ];
-      before = [ "gradient-worker.service" ];
-
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        User = "gradient-worker";
-        Group = "gradient-worker";
-        StateDirectory = "gradient-worker";
-        UMask = "0277";
-      };
-
-      script = ''
-        rm -f ${localTokenFile}.new ${localPeersFile}.new
-        if [ ! -s ${localTokenFile} ]; then
-          ${lib.getExe pkgs.openssl} rand -base64 48 > ${localTokenFile}.new
-          mv ${localTokenFile}.new ${localTokenFile}
-        fi
-        printf '*:%s\n' "$(cat ${localTokenFile})" > ${localPeersFile}.new
-        mv ${localPeersFile}.new ${localPeersFile}
-      '';
-    };
-
-    systemd.services.gradient-worker = lib.mkIf localWorker {
-      after = [ "gradient-local-worker-token.service" ];
-    };
-
-    systemd.tmpfiles.settings."10-gradient-trace" = lib.mkIf (cfg.log.traceDir != null) {
-      ${cfg.log.traceDir}.d = {
-        user = "gradient";
-        group = "gradient";
-        mode = "0750";
-      };
-    };
-
-    systemd.services.gradient-server = {
-      wantedBy = [ "multi-user.target" ];
-      after = [
-        "network.target"
-        "systemd-tmpfiles-setup.service"
-      ] ++ lib.optional cfg.postgres.enable "postgresql.target"
-        ++ lib.optional localWorker "gradient-local-worker-token.service";
-      requires = lib.optional localWorker "gradient-local-worker-token.service";
-
-      serviceConfig = {
-        Type = "notify";
-        ExecStart = lib.getExe cfg.packages.server;
-        TimeoutStartSec = "infinity";
-        StateDirectory = "gradient";
-        User = "gradient";
-        Group = "gradient";
-        PrivateTmp = true;
-        ProtectHome = true;
-        ProtectHostname = true;
-        ProtectKernelLogs = true;
-        ProtectKernelModules = true;
-        ProtectKernelTunables = true;
-        ProtectProc = "invisible";
-        ProtectSystem = "strict";
-        ReadWritePaths = [ cfg.baseDir ] ++ lib.optional (cfg.log.traceDir != null) cfg.log.traceDir;
-        Restart = "on-failure";
-        RestartSec = 10;
-        LimitNOFILE = 65535;
-        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
-        RestrictNamespaces = true;
-        RestrictRealtime = true;
-        RestrictSUIDSGID = true;
-        WorkingDirectory = cfg.baseDir;
-        LoadCredential = [
-          "gradient_database_url:${cfg.database.urlFile}"
-          "gradient_crypt_secret:${cfg.secrets.cryptFile}"
-          "gradient_jwt_secret:${cfg.secrets.jwtFile}"
-          "gradient_state:${validatedStateJsonFile}"
-        ] ++ lib.optionals cfg.oidc.enable [
-          "gradient_oidc_client_secret:${cfg.oidc.clientSecretFile}"
-        ] ++ lib.optionals cfg.scim.enable [
-          "gradient_scim_token:${cfg.scim.tokenFile}"
-        ] ++ lib.optionals cfg.email.enable [
-          "gradient_email_smtp_password:${cfg.email.smtp.passwordFile}"
-        ] ++ lib.optionals (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) [
-          "gradient_s3_secret_access_key:${cfg.s3.secretAccessKeyFile}"
-        ] ++ lib.optionals cfg.githubApp.enable [
-          "gradient_github_app_private_key:${cfg.githubApp.privateKeyFile}"
-          "gradient_github_app_webhook_secret:${cfg.githubApp.webhookSecretFile}"
-        ] ++ lib.optional (cfg.ssh.enable && cfg.ssh.hostKeyFile != null)
-          "gradient_ssh_host_key:${cfg.ssh.hostKeyFile}"
-        ++ lib.optional (cfg.metrics.tokenFile != null)
-          "gradient_metrics_token:${cfg.metrics.tokenFile}"
-        ++ userPasswordFiles ++ projectPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
-          ++ workerTokenFiles ++ integrationSecretFiles ++ integrationTokenFiles
-          ++ actionSecretFiles;
-      };
-
-      unitConfig = {
-        StartLimitIntervalSec = 60;
-        StartLimitBurst = 5;
-      };
-
-      environment = {
-        NIX_REMOTE = "daemon";
-        XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
-        GRADIENT_SECRETS_CRYPT_FILE = "%d/gradient_crypt_secret";
-        GRADIENT_SECRETS_JWT_FILE = "%d/gradient_jwt_secret";
-        GRADIENT_STATE_FILE = "%d/gradient_state";
-        GRADIENT_STATE_DELETE = lib.boolToString cfg.state.delete;
-        GRADIENT_CREDENTIALS_DIR = "%d";
-        GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
-      } // lib.optionalAttrs cfg.oidc.enable {
-        GRADIENT_OIDC_CLIENT_SECRET_FILE = "%d/gradient_oidc_client_secret";
-      } // lib.optionalAttrs cfg.scim.enable {
-        GRADIENT_SCIM_TOKEN_FILE = "%d/gradient_scim_token";
-      } // lib.optionalAttrs cfg.email.enable {
-        GRADIENT_EMAIL_SMTP_PASSWORD_FILE = "%d/gradient_email_smtp_password";
-      } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) {
-        GRADIENT_S3_SECRET_ACCESS_KEY_FILE = "%d/gradient_s3_secret_access_key";
-      } // lib.optionalAttrs cfg.githubApp.enable {
-        GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE = "%d/gradient_github_app_private_key";
-        GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE = "%d/gradient_github_app_webhook_secret";
-      } // lib.optionalAttrs (cfg.ssh.enable && cfg.ssh.hostKeyFile != null) {
-        GRADIENT_SSH_HOST_KEY_FILE = "%d/gradient_ssh_host_key";
-      } // lib.optionalAttrs (cfg.metrics.tokenFile != null) {
-        GRADIENT_METRICS_TOKEN_FILE = "%d/gradient_metrics_token";
-      } // serverOptions.environment cfg // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
     };
 
     services = {
+      gradient = lib.mkIf localWorker {
+        state.teams.server = {
+          display_name = "Server";
+          new_projects.workers = true;
+        };
+
+        state.workers.local = {
+          display_name = "Local Worker";
+          worker_id = localIdentity;
+          token_file = localTokenFile;
+          team = "server";
+        };
+
+        worker = {
+          id = lib.mkDefault localIdentity;
+          peersFile = lib.mkDefault localPeersFile;
+          serverUrl = lib.mkDefault "ws://127.0.0.1:${toString cfg.port}/proto";
+        };
+      };
+
       nginx = lib.mkIf cfg.reverseProxy.nginx.enable {
         enable = true;
         virtualHosts."${cfg.domain}" = {
@@ -728,9 +724,9 @@ in {
               extraConfig = ''
                 proxy_buffer_size 256k;
                 proxy_buffers 4 256k;
-                proxy_connect_timeout 1h;
-                proxy_send_timeout 1h;
-                proxy_read_timeout 1h;
+                proxy_connect_timeout 1d;
+                proxy_send_timeout 1d;
+                proxy_read_timeout 1d;
               '';
             };
 

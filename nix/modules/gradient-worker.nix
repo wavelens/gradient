@@ -333,78 +333,68 @@ in {
         };
       };
 
-      services.nix-daemon.serviceConfig = {
-        Delegate = lib.mkIf cfg.build.metrics true;
-        OOMScoreAdjust = lib.mkIf (cfg.build.oomScoreAdjust != null) (
-          lib.mkDefault cfg.build.oomScoreAdjust
-        );
-      };
-
-      services.gradient-worker = {
-        wantedBy = [ "multi-user.target" ];
-        after = [ "network.target" ];
-        path = [
-          cfg.packages.git
-          cfg.packages.nix
-          cfg.packages.ssh
-        ];
-
-        serviceConfig = {
-          Type = "notify";
-          ExecStart = lib.getExe' cfg.packages.gradient "gradient-worker";
-          StateDirectory = "gradient-worker";
-          User = "gradient-worker";
-          Group = "gradient-worker";
-          PrivateTmp = true;
-          ProtectHome = true;
-          ProtectHostname = true;
-          ProtectKernelLogs = true;
-          ProtectKernelModules = true;
-          ProtectKernelTunables = true;
-          ProtectProc = "invisible";
-          ProtectSystem = "strict";
-          ReadWritePaths = lib.optionals (cfg.gcrootsDir != "") [ cfg.gcrootsDir ]
-            ++ lib.optional (cfg.log.traceDir != null) cfg.log.traceDir;
-          Restart = "on-failure";
-          RestartSec = 10;
-          KillMode = "mixed";
-          LimitNOFILE = 65535;
-          RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
-          RestrictNamespaces = true;
-          RestrictRealtime = true;
-          RestrictSUIDSGID = true;
-          WorkingDirectory = cfg.baseDir;
-          LoadCredential = lib.optionals (cfg.peersFile != null) [
-            "gradient_worker_peers:${cfg.peersFile}"
-          ] ++ lib.optionals (cfg.acceptedServerTokensFile != null) [
-            "gradient_worker_accepted_server_tokens:${cfg.acceptedServerTokensFile}"
-          ];
+      services = {
+        nix-daemon.serviceConfig = {
+          Delegate = lib.mkIf cfg.build.metrics true;
+          OOMScoreAdjust = lib.mkIf (cfg.build.oomScoreAdjust != null) (
+            lib.mkDefault cfg.build.oomScoreAdjust
+          );
         };
 
-        environment = {
-          NIX_REMOTE = "daemon";
-          XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
-          RUST_LOG = cfg.log.level.default;
-          GRADIENT_WORKER_NIX_BIN = lib.getExe' cfg.packages.nix "nix";
-          GRADIENT_WORKER_SSH_BIN = lib.getExe' cfg.packages.ssh "ssh";
-        } // lib.optionalAttrs (cfg.peersFile != null) {
-          GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
-        } // lib.optionalAttrs (cfg.acceptedServerTokensFile != null) {
-          GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE = "%d/gradient_worker_accepted_server_tokens";
-        } // workerOptions.environment cfg // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
+        gradient-worker = {
+          wantedBy = [ "multi-user.target" ];
+          after = [ "network.target" ];
+          path = [
+            cfg.packages.git
+            cfg.packages.nix
+            cfg.packages.ssh
+          ];
+
+          serviceConfig = {
+            Type = "notify";
+            ExecStart = lib.getExe' cfg.packages.gradient "gradient-worker";
+            StateDirectory = "gradient-worker";
+            User = "gradient-worker";
+            Group = "gradient-worker";
+            PrivateTmp = true;
+            ProtectHome = true;
+            ProtectHostname = true;
+            ProtectKernelLogs = true;
+            ProtectKernelModules = true;
+            ProtectKernelTunables = true;
+            ProtectProc = "invisible";
+            ProtectSystem = "strict";
+            ReadWritePaths = lib.optionals (cfg.gcrootsDir != "") [ cfg.gcrootsDir ]
+              ++ lib.optional (cfg.log.traceDir != null) cfg.log.traceDir;
+            Restart = "on-failure";
+            RestartSec = 10;
+            KillMode = "mixed";
+            LimitNOFILE = 65535;
+            RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
+            RestrictNamespaces = true;
+            RestrictRealtime = true;
+            RestrictSUIDSGID = true;
+            WorkingDirectory = cfg.baseDir;
+            LoadCredential = lib.optionals (cfg.peersFile != null) [
+              "gradient_worker_peers:${cfg.peersFile}"
+            ] ++ lib.optionals (cfg.acceptedServerTokensFile != null) [
+              "gradient_worker_accepted_server_tokens:${cfg.acceptedServerTokensFile}"
+            ];
+          };
+
+          environment = {
+            NIX_REMOTE = "daemon";
+            XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
+            RUST_LOG = cfg.log.level.default;
+            GRADIENT_WORKER_NIX_BIN = lib.getExe' cfg.packages.nix "nix";
+            GRADIENT_WORKER_SSH_BIN = lib.getExe' cfg.packages.ssh "ssh";
+          } // lib.optionalAttrs (cfg.peersFile != null) {
+            GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
+          } // lib.optionalAttrs (cfg.acceptedServerTokensFile != null) {
+            GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE = "%d/gradient_worker_accepted_server_tokens";
+          } // workerOptions.environment cfg // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
+        };
       };
-    };
-
-    nix.package = lib.mkIf cfg.build.metrics (lib.mkDefault cfg.packages.nix);
-
-    nix.settings = {
-      trusted-users = [ "gradient-worker" ];
-      use-cgroups = lib.mkIf cfg.build.metrics true;
-      experimental-features = [
-        "nix-command"
-        "flakes"
-        "ca-derivations"
-      ] ++ lib.optional cfg.build.metrics "cgroups";
     };
 
     services = {
@@ -426,6 +416,7 @@ in {
           };
         };
       };
+
       caddy = lib.mkIf cfg.reverseProxy.caddy.enable {
         enable = true;
         virtualHosts."${if cfg.useTls then "" else "http://"}${cfg.domain}" = {
@@ -436,6 +427,20 @@ in {
         };
       };
     };
+
+    nix = {
+      package = lib.mkIf cfg.build.metrics (lib.mkDefault cfg.packages.nix);
+      settings = {
+        trusted-users = [ "gradient-worker" ];
+        use-cgroups = lib.mkIf cfg.build.metrics true;
+        experimental-features = [
+          "nix-command"
+          "flakes"
+          "ca-derivations"
+        ] ++ lib.optional cfg.build.metrics "cgroups";
+      };
+    };
+
 
     users = {
       groups.gradient-worker = { };
