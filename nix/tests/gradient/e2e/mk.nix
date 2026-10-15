@@ -1601,7 +1601,9 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         print(f"{sibling} shares the victim's producer with no object; pushing it first")
         server.succeed(f"{CLI} cache upload main /nix/store/{sibling}")
 
-    print(f"retiring {dep_path}")
+    for node, unit in fleet_units():
+        node.succeed(f"systemctl stop {unit}.service")
+    print(f"retiring {dep_path} with the workers stopped, so nothing fetches it again mid-check")
     indexed_before = set(sql("SELECT hash FROM cached_path;").split())
     server.succeed(f"rm {dep_object}")
 
@@ -1651,6 +1653,9 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     poll(f"SELECT missing_runtime_deps FROM derivation_build db "
          f"JOIN derivation d ON d.id = db.derivation WHERE d.hash = '{drv_hash}';", "0",
          "the re-upload did not ripple hello's shared build back to complete")
+    for node, unit in fleet_units():
+        node.succeed(f"systemctl start {unit}.service")
+    wait_workers_ready()
 
     settled = sql(
         f"SELECT db.status::text || ' ' || db.fetchable::int::text FROM derivation_build db "
