@@ -423,6 +423,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 },
+                sea_orm::MockExecResult::default(),
             ])
             .append_query_results(std::iter::repeat_n(
                 vec![std::collections::BTreeMap::from([
@@ -434,9 +435,9 @@ mod tests {
                 ])],
                 2,
             ))
-            .append_query_results([
-                Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
-                Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
+            .append_query_results(vec![
+                Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new();
+                3
             ])
             .into_connection();
         let (ctx, _pool, mut probes) = crate::test_ctx::ctx_with_probes(db).await;

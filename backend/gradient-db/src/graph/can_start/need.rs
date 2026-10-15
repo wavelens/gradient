@@ -279,15 +279,20 @@ where
 }
 
 /// Order is load-bearing on both sides.
-/// A thaw must precede the promote, or the gate would pass over a `Skipped` row.
+/// The thaw and the adoption of jobs must precede the promote, which needs a builder and a job.
 /// The skip must follow the un-promote, or it would try to settle a row still `Queued`.
-pub(crate) async fn settle_need<C: ConnectionTrait>(
+pub(crate) async fn settle_need<C>(
     db: &C,
     moved: &NeedMoved,
-) -> Result<Vec<TransitionChange>, DbErr> {
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let mut changes = Vec::new();
     for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
         changes.extend(thaw_wanted(db, gained).await?);
+        let adopted = crate::graph::reachability::adopt_below_named(db, gained).await?;
+        crate::task_board::dep_counts::bump_graph_version(db, &adopted.evaluations()).await?;
         changes.extend(promote(db, gained).await?);
     }
     for lost in moved.lost.chunks(crate::IN_CHUNK_SIZE) {
@@ -433,10 +438,14 @@ mod tests {
         let off = DerivationId::now_v7();
         let empty = Vec::<BTreeMap<String, Value>>::new();
         let db = mock_db()
-            .append_exec_results([exec(0), exec(1)])
+            .append_exec_results([exec(0), exec(1), exec(0)])
             .append_query_results([vec![need_row(on, true), need_row(off, false)]])
             .append_query_results([vec![need_row(on, true), need_row(off, false)]])
-            .append_query_results([vec![transition_row(on, 10, 0)], vec![drv(on)]])
+            .append_query_results([
+                vec![transition_row(on, 10, 0)],
+                empty.clone(),
+                vec![drv(on)],
+            ])
             .append_query_results([empty, vec![transition_row(off, 0, 10)]])
             .into_connection();
 
@@ -462,11 +471,15 @@ mod tests {
             .iter()
             .position(|s| s.contains("db.status IN (5, 10) AND db.wanted"))
             .expect("what became wanted is thawed");
+        let adopt = log
+            .iter()
+            .position(|s| s.contains("INSERT INTO build_job"))
+            .expect("then given its jobs");
         let promote = log
             .iter()
             .position(|s| s.contains("queued_at = coalesce(db.queued_at"))
             .expect("and then promoted");
-        assert!(thaw < promote, "{log:?}");
+        assert!(thaw < adopt && adopt < promote, "{log:?}");
     }
 
     #[tokio::test]

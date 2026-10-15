@@ -91,7 +91,7 @@ A `settle_need` call must follow each call.
 
 | Side | Steps |
 |---|---|
-| Gained | `thaw_wanted` (`Skipped`/`Aborted` -> `Created`, `attempt = 0`), then `promote` |
+| Gained | `thaw_wanted` (`Skipped`/`Aborted` -> `Created`, `attempt = 0`), then `adopt_below_named`, then `promote` |
 | Lost | `unpromote_ungated`, then `skip_unwanted` (`Created`, not needed, no `entry_point` -> `Skipped`) |
 
 - `Skipped` is settled work. Queue conditions have no effect on a skipped build, and no evaluation will wait for one.
@@ -136,7 +136,8 @@ Five columns on `evaluation`, over the shared builds named by its `build_job` ro
 
 - A batch must name every walked derivation plus the direct inputs. The walk will stop descending at `walked AND unwalked_inputs = 0`. Only the evaluation that walked a cut-off subtree will name its interior.
 - Deleting that evaluation will cascade those names away. `reachability::adopt_pending_closures` can start the open-closure walk from every `build_job` of a live evaluation. The function must insert the missing `(evaluation, derivation)` rows (`ON CONFLICT DO NOTHING`).
-- Callers: the per-task GC, the [repair pass](repair-pass.md) and the consistency check. The GC can call through `settle_after_delete`, only when a cascaded name belonged to an open shared build. The repair pass can call `adopt_pending_closure` for one evaluation. The consistency check will call once `pending_orphan_frontier` can find an unnamed open shared build one edge below a named one.
+- `reachability::adopt_below_named` can name a build at the moment it gains the needs-build mark. Every live evaluation naming a wanted open parent will name the build and the open closure below it. A build below a cut-off subtree can then queue during the evaluation.
+- Further callers: the per-task GC, the [repair pass](repair-pass.md) and the consistency check. The GC can call through `settle_after_delete`, only when a cascaded name belonged to an open shared build. The repair pass can call `adopt_pending_closure` for one evaluation. The consistency check will call once `pending_orphan_frontier` can find an unnamed open shared build one edge below a named one.
 
 ## Walk Completeness
 

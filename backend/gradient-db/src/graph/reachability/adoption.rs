@@ -71,6 +71,32 @@ static ADOPT_LIVE: LazyLock<String> = LazyLock::new(|| {
 static ADOPT_EVAL: LazyLock<String> =
     LazyLock::new(|| adopt_sql(&named_open("bj.evaluation = $1")));
 
+static ADOPT_BELOW_NAMED: LazyLock<String> = LazyLock::new(|| {
+    adopt_sql(&format!(
+        "SELECT pj.evaluation, db.derivation, ({builder}) FROM derivation_build db \
+         JOIN derivation w ON w.id = db.derivation \
+         JOIN derivation_dependency e ON e.dependency = db.derivation \
+         JOIN derivation_build p ON p.derivation = e.derivation \
+         JOIN derivation pw ON pw.id = p.derivation \
+         JOIN build_job pj ON pj.derivation = p.derivation \
+         JOIN evaluation ev ON ev.id = pj.evaluation \
+         WHERE db.derivation = ANY($1::uuid[]) AND {open} AND p.wanted AND {parent_open} \
+           AND (({parent_builder}) OR e.kind IN (1, 2)) AND ev.status IN ({live})",
+        builder = builder_predicate("db", "w"),
+        open = open_predicate("db"),
+        parent_open = open_predicate("p"),
+        parent_builder = builder_predicate("p", "pw"),
+        live = crate::sql::status::eval_in(&EvaluationStatus::ACTIVE),
+    ))
+});
+
+crate::sql_lazy! {
+    ADOPT_BELOW_NAMED_QUERY = || ADOPT_BELOW_NAMED.as_str(),
+        params = [DerivationIds(64)],
+        tier = Walk,
+        flags = [Walk];
+}
+
 crate::sql_lazy! {
     ADOPT_LIVE_QUERY = || ADOPT_LIVE.as_str(),
         params = [],
@@ -162,6 +188,18 @@ where
         [Value::Uuid(Some(evaluation.into_inner()))],
     )
     .await
+}
+
+pub async fn adopt_below_named<C>(db: &C, derivations: &[DerivationId]) -> Result<Adopted, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    if derivations.is_empty() {
+        return Ok(Adopted::default());
+    }
+
+    let ids: Vec<uuid::Uuid> = derivations.iter().map(|d| d.into_inner()).collect();
+    adopt(db, &ADOPT_BELOW_NAMED_QUERY, [ids.into()]).await
 }
 
 async fn adopt<C, V>(db: &C, query: &crate::sql::Query, values: V) -> Result<Adopted, DbErr>

@@ -511,47 +511,26 @@ async fn probed_above_a_cut_off_subtree(e1: EvaluationId) -> Case {
     assert_eq!(above.status, BuildStatus::Created, "after 3: sb(A).status");
     assert_eq!(above.attempt, 0, "after 3: sb(A).attempt");
     assert!(above.wanted, "after 3: sb(A).wanted");
-    assert_eq!(
-        below.status,
-        BuildStatus::Created,
-        "after 3: sb(B).status, no job names B (weak spot 2)"
-    );
+    assert_eq!(below.status, BuildStatus::Queued, "after 3: sb(B).status");
     assert_eq!(below.attempt, 0, "after 3: sb(B).attempt");
     assert!(below.wanted, "after 3: sb(B).wanted");
     assert!(
-        case.job(e1, B).await.is_none(),
-        "after 3: still no build_job(E1,B)"
+        case.job(e1, B).await.is_some(),
+        "after 3: build_job(E1,B) exists"
     );
 
     case
 }
 
-// Consistency checks adopt B by themselves. Run step 4 on a second database.
 #[tokio::test]
-async fn v08_an_open_build_below_a_cut_off_subtree_is_adopted_at_stream_completion() {
+async fn v08_an_open_build_below_a_cut_off_subtree_gets_its_job_when_it_gains_need() {
     let e1 = EvaluationId::now_v7();
     let case = probed_above_a_cut_off_subtree(e1).await;
 
-    let adopted = case.drift().await.adopted;
-
-    assert_eq!(adopted, 1, "after 3: consistency_check.adopted");
-    case.finish().await;
-
-    let e1 = EvaluationId::now_v7();
-    let case = probed_above_a_cut_off_subtree(e1).await;
-    let version = case.gv(e1).await;
+    case.zero_drift("step 3").await;
 
     stream_completed(&case, e1).await;
 
-    assert!(
-        case.job(e1, B).await.is_some(),
-        "after 4: build_job(E1,B) exists"
-    );
-    assert_eq!(
-        case.gv(e1).await,
-        version + 2,
-        "after 4: gv(E1), the adoption and the move of B to Queued (X8)"
-    );
     assert_eq!(
         case.evaluation_status(e1).await,
         EvaluationStatus::Building,
