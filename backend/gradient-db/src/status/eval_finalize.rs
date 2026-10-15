@@ -244,7 +244,8 @@ mod tests {
         let db = mock_db()
             .append_query_results([counters(0, 0)])
             .append_query_results([flag("blocked", true)])
-            .append_exec_results([exec(1), exec(1)])
+            .append_exec_results([exec(1)])
+            .append_query_results([flag("drifted", true)])
             .into_connection();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;

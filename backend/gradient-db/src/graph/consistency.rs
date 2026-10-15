@@ -205,8 +205,15 @@ mod tests {
                 "id".to_owned(),
                 Value::from(uuid::Uuid::now_v7()),
             )])]])
+            .append_query_results([vec![
+                BTreeMap::from([(
+                    "drifted".to_owned(),
+                    Value::from(true)
+                )]);
+                2
+            ]])
             .append_query_results([n()])
-            .append_exec_results([exec(0), exec(2)])
+            .append_exec_results([exec(0)])
             .into_connection()
     }
 

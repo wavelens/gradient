@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use clap::Parser as _;
-use gradient_db::evaluations::counters::{fold_shared_build_deltas, recount_evaluations};
+use gradient_db::evaluations::counters::recount_evaluations;
 use gradient_db::graph::can_start::{lock_seed_shared_builds, seed_blocking_deps};
 use gradient_db::graph::consistency::{ConsistencyReport, graph_consistency_report};
 use gradient_db::{DbContext, IN_CHUNK_SIZE, WebDb, WorkerDb};
@@ -81,11 +81,6 @@ pub async fn settle_seed(ctx: &DbContext, db: &TestDatabase, declared: Vec<(Stri
 }
 
 pub async fn drift(ctx: &DbContext) -> ConsistencyReport {
-    let folded = fold_shared_build_deltas(&ctx.worker_db)
-        .await
-        .expect("the counter deltas fold");
-
-    assert!(folded, "the fold lock of the counter deltas is free");
     graph_consistency_report(ctx)
         .await
         .expect("the consistency check runs")

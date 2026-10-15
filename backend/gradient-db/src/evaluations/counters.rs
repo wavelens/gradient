@@ -87,7 +87,11 @@ crate::sql! {
     RECOUNT_EVAL_COUNTERS = "WITH locked AS (SELECT id FROM evaluation \
         WHERE id = ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE SKIP LOCKED), \
         gone AS (DELETE FROM evaluation_shared_build_delta d USING locked \
-        WHERE d.evaluation = locked.id RETURNING d.evaluation), \
+        WHERE d.evaluation = locked.id RETURNING \
+        d.evaluation, d.named, d.active, d.failed, d.queued, d.building), \
+        pending AS (SELECT evaluation, sum(named)::int AS named, sum(active)::int AS active, \
+              sum(failed)::int AS failed, sum(queued)::int AS queued, \
+              sum(building)::int AS building FROM gone GROUP BY evaluation), \
         c AS (SELECT e.id, count(bj.id)::int AS named, coalesce(sum(x.active), 0)::int AS active, \
               coalesce(sum(x.failed), 0)::int AS failed, coalesce(sum(x.queued), 0)::int AS queued, \
               coalesce(sum(x.building), 0)::int AS building \
@@ -97,9 +101,15 @@ crate::sql! {
               GROUP BY e.id) \
         UPDATE evaluation e SET named_shared_builds = c.named, active_shared_builds = c.active, \
         failed_shared_builds = c.failed, queued_shared_builds = c.queued, building_shared_builds = c.building \
-        FROM c WHERE e.id = c.id AND (e.named_shared_builds, e.active_shared_builds, e.failed_shared_builds, \
+        FROM c LEFT JOIN pending p ON p.evaluation = c.id \
+        WHERE e.id = c.id AND (e.named_shared_builds, e.active_shared_builds, e.failed_shared_builds, \
         e.queued_shared_builds, e.building_shared_builds) IS DISTINCT FROM \
-        (c.named, c.active, c.failed, c.queued, c.building)",
+        (c.named, c.active, c.failed, c.queued, c.building) \
+        RETURNING (old.named_shared_builds + coalesce(p.named, 0), \
+        old.active_shared_builds + coalesce(p.active, 0), old.failed_shared_builds + coalesce(p.failed, 0), \
+        old.queued_shared_builds + coalesce(p.queued, 0), \
+        old.building_shared_builds + coalesce(p.building, 0)) IS DISTINCT FROM \
+        (c.named, c.active, c.failed, c.queued, c.building) AS drifted",
         params = [EvaluationIds(64)],
         tier = Sweep;
 }
@@ -198,9 +208,11 @@ where
         txn.execute_raw(FOLD_LOCK_WAIT.bind([FOLD_LOCK.into()]))
             .await?;
         drift += txn
-            .execute_raw(RECOUNT_EVAL_COUNTERS.bind([uuids(chunk)]))
+            .query_all_raw(RECOUNT_EVAL_COUNTERS.bind([uuids(chunk)]))
             .await?
-            .rows_affected();
+            .iter()
+            .filter(|r| r.try_get::<bool>("", "drifted").unwrap_or(true))
+            .count() as u64;
         txn.commit().await?;
     }
 

@@ -1,6 +1,6 @@
 # Queueing and Counters
 
-The path of a shared build (`derivation_build`) from `Created` to `Queued`, and the counters telling an evaluation to keep waiting. All queue conditions read maintained columns. The event changing a fact must also move the column. The consistency check is the only backstop.
+A shared build (`derivation_build`) moves from `Created` to `Queued` once its queue conditions hold. Counters tell an evaluation to keep waiting. Every queue condition reads maintained columns, so the event that changes a fact must update the column as well. A consistency check acts as the only backstop against missed updates.
 
 ```mermaid
 flowchart LR
@@ -23,16 +23,16 @@ All on `derivation_build`, moved by transitions and never derived by a per-row w
 | `blocking_deps` | Direct dependencies (every edge in `derivation_dependency`) that are not `fetchable` | One-hop spread from the shared builds a `fetchable` change returned |
 | `wanted` | Shared build still wanted by some open entry point, unless its evaluation or the build was aborted there | `can_start::update_need` |
 
-- **Complete closure** (`graph_sql::shared_build_complete_predicate`): every output with a NAR in the cache, and `missing_runtime_deps = 0`. The `EXISTS` over `derivation_output` must keep a shared build without output rows from reading complete.
-- An upstream copy is never `fetchable`. A build needing a shared build available in an upstream cache must wait for its passthrough. Every build must pull its inputs from the Gradient cache.
-- A flag change must write the flag with a `RETURNING` of exactly the changed rows, and only those rows spread further. A spread from a state instead of a transition would drive a counter below zero. `= 0` can never hold again for such a counter.
-- The flag change and the spread share one transaction under `can_start::lock_shared_builds` (`derivation`-ordered `FOR NO KEY UPDATE`). The lock must return the `SharedBuildLock` proof that both functions require.
-- Complete closures are transitive and spread level by level. `blocking_deps` can move only one hop and then stop. Reaching zero will queue the waiting build and never make that build `fetchable`.
-- A transitive spread is one SQL function call (current bodies in `m20261001_000001_plain_concept_names.rs`). The function can count, lock in order and move every level internally. A chain of 163 levels will cost one round trip instead of three per level. The function bodies must match the module predicates, checked through unit tests in `graph/runtime_can_start.rs` and `graph/walk_completeness.rs`. A predicate change will require a migration.
+- **Complete closure** (`graph_sql::shared_build_complete_predicate`): a shared build counts as complete when every output with a NAR is present in the cache and `missing_runtime_deps = 0`. The `EXISTS` over `derivation_output` must stay readable for shared builds without output rows.
+- An upstream copy never counts as `fetchable`. A build that needs a shared build held in an upstream cache must wait for the passthrough, because every build must draw its inputs from the Gradient cache.
+- A flag change must write the flag with a `RETURNING` clause that reports exactly the changed rows, and only those rows may spread further. A spread driven by a state instead of a transition pushed a counter below zero, and `= 0` never held for that counter again.
+- The flag change and the spread ran in one transaction under `can_start::lock_shared_builds`, which took `derivation`-ordered `FOR NO KEY UPDATE` locks. The lock must return the `SharedBuildLock` proof required by both functions.
+- Complete closures propagate transitively, one level at a time. `blocking_deps` moved a single hop and then halted. Reaching zero queued the waiting build, and it never made that build `fetchable`.
+- A transitive spread ran as one SQL function call (current bodies in `m20261001_000001_plain_concept_names.rs`). The function can count, lock in order and advance every level on its own. A chain of 163 levels cost one round trip instead of three per level. Unit tests in `graph/runtime_can_start.rs` and `graph/walk_completeness.rs` verified that the function bodies match the module predicates. A predicate change demanded a migration.
 
 ## Queue Conditions
 
-`graph_sql::gates_predicate` is the one definition. `graph_sql::promotable_predicate` can add `status = Created` on top.
+`graph_sql::gates_predicate` act as the single source of truth for these conditions. `graph_sql::promotable_predicate` can layer `status = Created` on top.
 
 | Condition | Build | Passthrough (`cache_available`) |
 |---|---|---|
@@ -45,40 +45,40 @@ All on `derivation_build`, moved by transitions and never derived by a per-row w
 
 ### Queueing Events
 
-Each event must queue its touched shared builds through `can_start::promote`. The queue condition is embedded, and the candidate list is only a bound.
+Queue every touched shared build through `can_start::promote`. The call embeds the queue condition, and the candidate list acts only as a bound.
 
-- An imported batch: `seed_blocking_deps` then `promote` over the batch, plus whatever the needs-build update of the batch gained.
-- A dependency turning `fetchable`: `became_fetchable` can queue each build needing the dependency, once its counter reached zero.
-- A `.drv` NAR arriving: `gradient-graph/src/nar.rs` can queue the `.drv` owners.
+- An imported batch: run `seed_blocking_deps`, then `promote` over the batch and over whatever the needs-build update of the batch gained.
+- A dependency turned `fetchable`: `became_fetchable` can queue each build that need the dependency, once its counter reached zero.
+- A `.drv` NAR arrival: `gradient-graph/src/nar.rs` can queue the `.drv` owners.
 - Any newly needed build, through `update_and_settle_need` (see [Skipped and Thaw](#skipped-and-thaw)).
 - Stream completion and the graph-stuck heal: `can_start::promote_closure` over the evaluation's closure (see the [repair pass](repair-pass.md)).
 
 ## Queued Invariant
 
-- The assigner can read only the status and never re-derive the queue conditions. `Queued` therefore must mean the conditions held.
-- All writers of `Queued` embed `promotable_predicate` or settle their rows with `can_start::unpromote_ungated` in the same call.
-- `unpromote_ungated` can move only `Queued` rows without an open assignment. A `Building` shared build can finish undisturbed.
-- `lost_fetchability` must raise `blocking_deps` on the builds needing the changed ones. The same statement (`RIPPLE_UP`) will demote the `Queued` ones without an open assignment to `Created` status. The function must then update the needs-build marks from the changed shared builds.
-- `assignment_record::claim_assignment` can insert the assignment row only while the shared build is still `Queued` with the expected `cache_available` value. The claim will drop a regressed job instead of handing the job out.
-- `can_start::repair_can_start` is the consistency check's backstop for a lost move.
+- The assigner can read the status column alone. It cannot re-check the queue conditions. A `Queued` mark must therefore mean the conditions held at write time.
+- Every writer of `Queued` must either embed `promotable_predicate` or settle its rows with `can_start::unpromote_ungated` in the same call.
+- `unpromote_ungated` can move only `Queued` rows with no open assignment. A `Building` shared build can finish undisturbed.
+- `lost_fetchability` must raise `blocking_deps` on the builds that need the changed ones. The same statement (`RIPPLE_UP`) will move the `Queued` rows without an open assignment back to `Created`. After that, update the needs-build marks from the changed shared builds.
+- `assignment_record::claim_assignment` can insert an assignment row only while the shared build is still `Queued` with the expected `cache_available` value. The claim will drop a regressed job instead of handing it out.
+- `can_start::repair_can_start` act as the consistency check's backstop for a lost move.
 
 ## Needs Build
 
-A shared build is **open** (`graph_sql::open_predicate`) when not `fetchable` and not in `BuildStatus::TERMINAL_FAILURE` status. Builders, `Skipped`, `Aborted`, and a `Completed` shared build with a missing dependency in its closure are all open.
+A shared build is **open** (`graph_sql::open_predicate`) when `fetchable` is false and its status is not `BuildStatus::TERMINAL_FAILURE`. Builders, `Skipped`, `Aborted`, and `Completed` shared builds with a missing dependency in the closure all qualify as open.
 
-- `graph_sql::open_closure_cte_body` is the one walk behind the needs-build mark and naming. Seeds step over runtime dependencies. A **builder** (`builder_predicate`: walked, probed, not available in a cache, in `BUILDER_STATUSES`) can also step over build dependencies.
-- The walk can reach only shared builds that are open. A `fetchable` or failed shared build will end the walk.
-- The walk can reach a passthrough but never step through the passthrough on a build dependency. No job will ever build the input closure of a passthrough output.
-- The needs-build mark is a column. The mark must flow down from the entry points, while the can-start counters flow up from the leaves. A one-hop predicate cannot carry the downward direction.
-- `update_need` must walk the region below the given roots (roots included) in one statement. `WRITE_NEED` must then write the answer as a bound `unnest` array. Recursive CTEs carry no usable row estimate. A membership subquery would degrade to a sequential scan.
-- The write must return each changed row with its new value, as gained and lost sets for the caller.
+- `graph_sql::open_closure_cte_body` defines one walk behind both the needs-build mark and its naming. Seeds step over runtime dependencies. A **builder** (`builder_predicate`: walked, probed, absent from a cache, in `BUILDER_STATUSES`) can also step over build dependencies.
+- Only open shared builds are reachable. A `fetchable` or failed shared build ends the walk.
+- The walk can reach a passthrough but cannot step through it on a build dependency. No job ever builds the input closure of a passthrough output.
+- The needs-build mark lives in a column. The mark flows down from the entry points, while the can-start counters flow up from the leaves. A one-hop predicate cannot carry the downward direction.
+- `update_need` walks the region below the given roots (roots included) in one statement. `WRITE_NEED` then writes the answer as a bound `unnest` array. Recursive CTEs carry no usable row estimate, and a membership subquery degrades into a sequential scan.
+- The write returns each changed row with its new value, split into gained and lost sets for the caller.
 
 ### Callers of `update_need`
 
-A `settle_need` call must follow each call.
+Follow each call with a `settle_need` call.
 
-- **Status transitions:** the transition-effects emitter (`status/effects.rs`) for every transition crossing `BUILDER_STATUSES` in either direction.
-- **Unchanged status:** `update_and_settle_need`, for events moving the needs-build mark without a status change.
+- **Status transitions:** the transition-effects emitter (`status/effects.rs`) for every transition that moves into or out of `BUILDER_STATUSES`.
+- **Unchanged status:** `update_and_settle_need`, for events that move the needs-build mark without a status change.
     - Batch import (new builder, new entry point, adopted runtime dependencies, upstream hit, probe answer)
     - `demote_cached_output` and `lost_fetchability`
     - An exhausted substitution
@@ -87,34 +87,34 @@ A `settle_need` call must follow each call.
 
 ## Skipped and Thaw
 
-`can_start::settle_need` must apply a needs-build move in a fixed order.
+Apply each needs-build move in `can_start::settle_need` in a fixed order.
 
 | Side | Steps |
 |---|---|
 | Gained | `thaw_wanted` (`Skipped`/`Aborted` -> `Created`, `attempt = 0`), then `adopt_below_named`, then `promote` |
 | Lost | `unpromote_ungated`, then `skip_unwanted` (`Created`, not needed, no `entry_point` -> `Skipped`) |
 
-- `Skipped` is settled work. Queue conditions have no effect on a skipped build, and no evaluation will wait for one.
-- A thaw can lead to `Created`, never to `Queued`. The following `promote` call must read the queue conditions.
+- `Skipped` counts as settled work. Queue conditions cannot affect a skipped build, and no evaluation waits for one.
+- A thaw can end at `Created`, never at `Queued`. Read the queue conditions in the `promote` call after the thaw.
 - An `Aborted` shared build can thaw the same way. An abort is no verdict.
-- An entry point with `build_job.aborted` set wants nothing until a retry clears the mark.
-- Entry points of an `Aborted` evaluation want nothing. An aborted evaluation would otherwise keep its own builds wanted, and the next check would thaw them.
-- Entry points of a `Completed` or `Failed` evaluation still want the closure below them. A retired output of such an entry point will be built again.
-- `status::release_evaluation_need` updates the need below the entry points of an aborted evaluation, inside the abort transition. Every abort sends it: hard aborts after aborting the unshared builds, soft aborts and the stuck-evaluation recovery without touching builds.
-- `update_need` and `settle_need` are crate-private. Other crates call `update_and_settle_need`, and every needs-build move can skip and thaw inline. The consistency check's `settle_skipped` is the table-wide backstop, reporting `skipped_moves`.
-- Writers of `Created` call `can_start::settle_created` on the rows they wrote. Unwanted rows go to `Skipped`, startable rows to `Queued`. The retire, the batch writer, the thaws and the retries are such writers.
+- An entry point with `build_job.aborted` set needs nothing until a retry removes the mark.
+- Entry points of an `Aborted` evaluation need nothing. Otherwise the aborted evaluation keeps its own builds wanted, and the next check thaws them.
+- Entry points of a `Completed` or `Failed` evaluation still need the closure below them. The retire step builds a retired output under such an entry point again.
+- Call `status::release_evaluation_need` to update the need below the entry points of an aborted evaluation, inside the abort transition. Every abort sends it: hard aborts after aborting the unshared builds, soft aborts and the stuck-evaluation recovery without touching builds.
+- `update_need` and `settle_need` are crate-private. Other crates call `update_and_settle_need`, and every needs-build move can skip and thaw inline. The consistency check's `settle_skipped` acts as the table-wide backstop and reports `skipped_moves`.
+- Writers of `Created` call `can_start::settle_created` on the rows they wrote. Unwanted rows go to `Skipped`, startable rows to `Queued`. The retire step, the batch writer, the thaws and the retries count as such writers.
 
 ## Evaluation Verdict
 
-- `graph_sql::blocks_evaluation`: the status is in `NEED_BUILD_STATUSES` and the shared build is `wanted`, or the status is `Queued`/`Building` (the assigner will hand those out regardless).
-- A pending shared build wanted by nothing will never block. Nothing will ever queue such a build.
-- `Aborted` is not in `NEED_BUILD_STATUSES`. No evaluation can wait for an aborted shared build, and a later need can still thaw the build.
-- `check_evaluation_done` can write a verdict once no blocking shared build is left. The verdict is `Failed` when any named shared build is in `BuildStatus::REQUEUEABLE` (`Aborted` included) or an error message is present. The verdict is `Completed` otherwise.
-- Losing the needs-build mark will move no status. The emitter must finalize the evaluations naming the shared builds that lost the mark.
+- `graph_sql::blocks_evaluation` blocks an evaluation in two cases. Either the status sits in `NEED_BUILD_STATUSES` while the shared build is `wanted`, or the status is `Queued` or `Building` (the assigner hands those out regardless of need).
+- A pending shared build with no wanters can never block anything. No code path can queue such a build.
+- `Aborted` does not appear in `NEED_BUILD_STATUSES`. So no evaluation can wait for an aborted shared build, and a later need can still thaw it.
+- Once no blocking shared build remains, `check_evaluation_done` can write a verdict. Any named shared build in `BuildStatus::REQUEUEABLE` (`Aborted` included) or a present error message yields `Failed`. Everything else yields `Completed`.
+- A lost needs-build mark leaves every status unchanged. Finalize, in the emitter, the evaluations that name the shared builds which lost the mark.
 
 ## Evaluation Counters
 
-Five columns on `evaluation`, over the shared builds named by its `build_job` rows.
+The `evaluation` table holds five counter columns. They cover the shared builds named through its `build_job` rows.
 
 | Column | Counts |
 |---|---|
@@ -124,55 +124,60 @@ Five columns on `evaluation`, over the shared builds named by its `build_job` ro
 | `queued_shared_builds` | `Queued` |
 | `building_shared_builds` | `Building` |
 
-- **Triggers** (current bodies in `m20261001_000001_plain_concept_names.rs`): `evaluation_shared_build_moved` (per row, `AFTER UPDATE OF status, wanted`), `evaluation_shared_build_named` / `evaluation_shared_build_unnamed` (per statement on `build_job` insert/delete). The triggers cover raw SQL and ORM changes alike.
+- **Triggers** (current bodies in `m20261001_000001_plain_concept_names.rs`): `evaluation_shared_build_moved` fires per row on `AFTER UPDATE OF status, wanted`. `evaluation_shared_build_named` and `evaluation_shared_build_unnamed` fire per statement on `build_job` insert and delete. Raw SQL and ORM changes both pass through these triggers.
 - Triggers append signed rows to `evaluation_shared_build_delta`, for live evaluations only, and take no lock.
-- **Membership:** the SQL function `evaluation_shared_build_counts(status, wanted)` (current body in `m20261009_000000_build_job_aborted.rs`). Its body must match `graph/predicates.rs`, checked through a unit test in `evaluations/counters.rs`. A predicate change will require a migration.
-- **Fold:** `fold_shared_build_deltas` can start at the beginning of every waiting-state pass. Each fold is one `DELETE ... RETURNING` under advisory lock `640`, and an instance finding the lock taken will skip the fold. The fold will also skip every evaluation row held by another transaction (`SKIP LOCKED`), and those deltas wait for the next pass. The fold will never wait on an evaluation row and cannot deadlock with the graph writer.
-- **Read:** `eval_counters` must return folded columns plus unfolded deltas.
-- **Counters answer only "not yet":** a naming and a transition in flight together can miss each other. `reachability::eval_blocked` must confirm a zero. `recount_evaluations` can recount a contradicted value under the fold lock. The recount will skip an evaluation held by another transaction, like the fold. The next contradicting read will recount that evaluation.
-- The consistency check can recount every in-flight evaluation and report `eval_counter_drift` for drift.
+- **Membership:** the SQL function `evaluation_shared_build_counts(status, wanted)` (current body in `m20261009_000000_build_job_aborted.rs`). Keep its body in sync with `graph/predicates.rs` through a unit test in `evaluations/counters.rs`. A predicate change will require a migration.
+- **Fold:** `fold_shared_build_deltas` can run at the start of every waiting-state pass. One fold is a single `DELETE ... RETURNING` under advisory lock `640`. An instance that sees the lock taken can skip the fold. Rows held by another transaction (`SKIP LOCKED`) get skipped as well, and their deltas wait for the next pass. The fold never blocks on an evaluation row, so it cannot deadlock with the graph writer.
+- **Read:** `eval_counters` should return the folded columns plus the unfolded deltas.
+- **Counters answer only "not yet":** a naming and a transition in flight together can miss each other. Confirm a zero with `reachability::eval_blocked`. `recount_evaluations` can recount a contradicted value under the fold lock. The recount, like the fold, will skip an evaluation held by another transaction. The next contradicting read will recount that evaluation.
+- The consistency check can recount every in-flight evaluation. `eval_counter_drift` reports only the evaluations where folded columns plus pending deltas disagree with the recount.
 
 ## Naming and Adoption
 
-- A batch must name every walked derivation plus the direct inputs. The walk will stop descending at `walked AND unwalked_inputs = 0`. Only the evaluation that walked a cut-off subtree will name its interior.
-- Deleting that evaluation will cascade those names away. `reachability::adopt_pending_closures` can start the open-closure walk from every `build_job` of a live evaluation. The function must insert the missing `(evaluation, derivation)` rows (`ON CONFLICT DO NOTHING`).
-- `reachability::adopt_below_named` can name a build at the moment it gains the needs-build mark. Every live evaluation naming a wanted open parent will name the build and the open closure below it. A build below a cut-off subtree can then queue during the evaluation.
-- Further callers: the per-task GC, the [repair pass](repair-pass.md) and the consistency check. The GC can call through `settle_after_delete`, only when a cascaded name belonged to an open shared build. The repair pass can call `adopt_pending_closure` for one evaluation. The consistency check will call once `pending_orphan_frontier` can find an unnamed open shared build one edge below a named one.
+- Always name every walked derivation plus the direct inputs in a batch. Stop descending at `walked AND unwalked_inputs = 0`. Only the evaluation that walked a cut-off subtree names its interior.
+- Deleting that evaluation cascades those names away. Start the open-closure walk from every `build_job` of a live evaluation with `reachability::adopt_pending_closures`. Insert the missing `(evaluation, derivation)` rows with `ON CONFLICT DO NOTHING`.
+- Name a build with `reachability::adopt_below_named` at the moment it gains the needs-build mark. Every live evaluation naming a wanted open parent then names the build and the open closure below it. A build below a cut-off subtree can therefore queue during the evaluation.
+- Further callers: the per-task GC, the [repair pass](repair-pass.md) and the consistency check. The GC can call through `settle_after_delete`, but only when a cascaded name belonged to an open shared build. The repair pass can call `adopt_pending_closure` for one evaluation. The consistency check can call once `pending_orphan_frontier` detects an unnamed open shared build one edge below a named one.
 
 ## Walk Completeness
 
-- `derivation.walked`: the derivation's own record is present (outputs, every edge, input sources). The same transaction must insert unknown inputs as stubs. A stub is never queued or handed out.
-- `derivation.unwalked_inputs`: direct build inputs (`kind IN (0, 2)`) whose subtree is not recorded. Seeded at import, spread as inputs complete through the SQL function `ripple_unwalked_inputs`, recounted in the consistency check (`walk_drift`).
-- Events clearing `walked` are the missing-input self-heal and the demote path (`can_start::unwalk_derivations`). The orphan derivation GC will clear `walked` too, for derivations surviving a deleted dependency they need, followed by `unpromote_ungated` afterwards.
+- `derivation.walked`: the derivation carries its own walk record, covering outputs, all edges and the sources of every input. The inserting transaction must add unknown inputs as stubs in the same transaction. The queue never picks up a stub and workers never receive one.
+- `derivation.unwalked_inputs`: direct build inputs, matched by `kind IN (0, 2)`, with no recorded subtree. The import step seeds these rows. As inputs finish, the SQL function `ripple_unwalked_inputs` spreads updates. The consistency check (`walk_drift`) recounts the set.
+- Two events can clear `walked`: the missing-input self-heal and the demote path (`can_start::unwalk_derivations`). The orphan derivation GC also clears `walked` for derivations that survive a deleted dependency they require. `unpromote_ungated` runs afterwards.
 
 ## Dependency Failure
 
-- `cascade_dependency_failed` can mark all `Created`/`Queued`/`FailedTransient` derivations wanting a failed build as `DependencyFailed`. Fresh terminal-failure transitions trigger the mark.
-- `repair_dependency_failed` can repeat the walk within the closure of an evaluation, at stream completion and on the graph-stuck heal. The repeat can catch a shared build thawed after its dependency failed.
-- The repeat can also start from each shared build the evaluation aborted (`build_job.aborted`). Derivations wanting an aborted build end `DependencyFailed`.
-- Neither walk can enter a shared build available in a cache (`graph_sql::non_passthrough_predicate`).
+- A fresh terminal-failure transition lets `cascade_dependency_failed` mark every `Created`, `Queued` and `FailedTransient` derivation that wants the failed build as `DependencyFailed`.
+- `repair_dependency_failed` can repeat that walk inside the closure of an evaluation, at stream completion and during the graph-stuck heal. A shared build thawed after its dependency failed gets caught by this repeat.
+- The repeat can also take each shared build the evaluation aborted (`build_job.aborted`) as a starting point. Derivations wanting such a build end as `DependencyFailed`.
+- Both walks skip any shared build available in a cache (`graph_sql::non_passthrough_predicate`).
 
 ## Build Abort and Retry
 
-`POST /builds/{id}/abort` and `POST /builds/{id}/retry` act on a build of an evaluation, inside the graph writer (`status::evaluation_build`).
+Two endpoints, `POST /builds/{id}/abort` and `POST /builds/{id}/retry`, act on a build of an evaluation. Both run inside the graph writer (`status::evaluation_build`).
 
 | Action | Allowed Status | Effect |
 |---|---|---|
-| Abort | `Created`, `Queued`, `Building` | `build_job.aborted` set, shared build to `Aborted`, dependents in the closure to `DependencyFailed`, `AbortJob` to the worker |
-| Retry | `FailedPermanent`, `FailedTimeout`, `Aborted`, `DependencyFailed` | failed builds back to `Created` with their `build_job.aborted` cleared, dependents failed through them back to `Created` (`RETRY_BUILD_CLOSURE`), dependency-failure walk repeated, closure queued |
+| Abort | `Created`, `Queued`, `Building` | Set `build_job.aborted`, mark the shared build `Aborted`, mark dependents in the closure `DependencyFailed`, send `AbortJob` to the worker |
+| Retry | `FailedPermanent`, `FailedTimeout`, `Aborted`, `DependencyFailed` | Move failed builds back to `Created` and clear their `build_job.aborted`, move dependents failed through them back to `Created` (`RETRY_BUILD_CLOSURE`), repeat the dependency-failure walk, queue the closure |
 
-- Aborts need a running evaluation.
-- Aborts refuse a shared build that other live evaluations still name.
+Rules for aborts:
+
+- The evaluation need to run.
+- A shared build that other live evaluations still name can not be aborted.
+
+Rules for retries:
+
 - A retry of a `DependencyFailed` build can also retry each failed dependency below the build. The walk can only pass `DependencyFailed` dependencies.
-- A retry can reopen a `Failed` or `Aborted` evaluation past its evaluation phase. The evaluation moved back to `Building` (`REOPEN_EVALUATION`) and can finish again.
+- A retry can reopen a `Failed` or `Aborted` evaluation past its evaluation phase. The evaluation go back to `Building` (`REOPEN_EVALUATION`) and can finish again.
 - Newer or still active evaluations of the same task keep the evaluation closed.
-- Retries wait until the worker confirmed the earlier abort. Late abort reports can move a retried build back to `Aborted`.
+- Retries wait until the worker confirmed the earlier abort. A late abort report can move a retried build back to `Aborted`.
 - The `Eval` and `Unstick` thaws of the [repair pass](repair-pass.md) skip the aborted build and everything above the build in the closure.
 - Retry thaws skip the deterministic-failure block. The user asked for the rebuild.
 
 ## Consistency Check
 
-Recounts of `consistency::graph_consistency_report` follow dependency order.
+The `consistency::graph_consistency_report` gets built through a sequence of recounts. Each step depends on the previous one.
 
 | Step | Reports |
 |---|---|
