@@ -52,11 +52,15 @@ impl Color {
 #[derive(Clone, Copy)]
 pub struct Output {
     json: bool,
+    terminal: bool,
 }
 
 impl Output {
     pub fn new(json: bool) -> Self {
-        Self { json }
+        Self {
+            json,
+            terminal: io::stdout().is_terminal(),
+        }
     }
 
     pub fn is_json(&self) -> bool {
@@ -74,7 +78,7 @@ impl Output {
     }
 
     pub fn paint(&self, text: &str, color: Color) -> String {
-        if self.json || matches!(color, Color::Plain) || !io::stdout().is_terminal() {
+        if self.json || matches!(color, Color::Plain) || !self.terminal {
             return text.to_string();
         }
 
@@ -171,13 +175,19 @@ mod tests {
 
     #[test]
     fn a_piped_run_stays_plain() {
-        let out = Output::new(false);
+        let out = Output {
+            json: false,
+            terminal: false,
+        };
         assert_eq!(out.paint("build-a", Color::Green), "build-a");
     }
 
     #[test]
     fn json_output_is_never_painted() {
-        let out = Output::new(true);
+        let out = Output {
+            json: true,
+            terminal: true,
+        };
         assert_eq!(out.paint("build-a", Color::Red), "build-a");
     }
 }
