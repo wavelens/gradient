@@ -207,7 +207,7 @@ async fn b03_walking_a_stub_marks_it_walked_and_drops_the_unwalked_inputs_of_its
     assert_eq!(jobs, 2, "after 1: build jobs of E1");
     let known = case.known(&[A, B]).await;
     assert_eq!(known, [A, B], "after 1: known_derivations");
-    assert_eq!(case.gv(e1).await, gv + 1, "after 1: gv(E1)");
+    assert_eq!(case.gv(e1).await, gv, "after 1: gv(E1) unchanged");
     let counters = case.counters(e1).await;
     assert_eq!(counters, [2, 2, 0, 0, 0], "after 1: counters(E1)");
     case.zero_drift("step 1").await;
@@ -713,7 +713,7 @@ async fn b15_a_batch_writes_no_cache_available_on_a_second_producer_of_a_known_o
 }
 
 #[tokio::test]
-async fn b16_an_empty_batch_touches_only_graph_version() {
+async fn b16_an_empty_batch_changes_nothing() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(chain(e1)).await;
     let (rows, gv) = (case.rows().await, case.gv(e1).await);
