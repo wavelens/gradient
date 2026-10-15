@@ -10,10 +10,13 @@
 , installShellFiles
 , llvmPackages
 , gradient-nix
+, libgit2
 , openssl
 , pkg-config
 , stdenv
 , writeText
+, zlib
+, zstd
 , cargoFeatures ? [ ]
 }:
 let
@@ -66,6 +69,8 @@ let
 
     env = {
       CARGO_INCREMENTAL = "0";
+      LIBGIT2_NO_VENDOR = "1";
+      ZSTD_SYS_USE_PKG_CONFIG = "1";
     } // lib.optionalAttrs withEval {
       LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
     } // lib.optionalAttrs stdenv.hostPlatform.isLinux {
@@ -78,7 +83,10 @@ let
     ];
 
     buildInputs = [
+      libgit2
       openssl
+      zlib
+      zstd
     ] ++ lib.optionals (!stdenv.hostPlatform.isStatic) [
       git
       gradient-nix

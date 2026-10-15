@@ -11,11 +11,16 @@
 , installShellFiles
 , llvmPackages
 , gradient-nix
+, libgit2
+, libssh2
 , openssl
 , pkg-config
 , pkgs
 , postgresql_18
 , postgresqlTestHook
+, sqlite
+, xz
+, zlib
 , zstd
 }:
 let
@@ -66,6 +71,9 @@ let
       CARGO_INCREMENTAL = "0";
       LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
       BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";
+      LIBGIT2_NO_VENDOR = "1";
+      LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";
+      ZSTD_SYS_USE_PKG_CONFIG = "1";
     };
 
     cargoExtraArgs = "--locked --features gradient-daemon/mock";
@@ -78,7 +86,12 @@ let
     buildInputs = [
       git
       gradient-nix
+      libgit2
+      libssh2
       openssl
+      sqlite
+      xz
+      zlib
       zstd
     ];
   };
