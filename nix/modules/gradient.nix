@@ -688,10 +688,10 @@ in {
       nginx = lib.mkIf cfg.reverseProxy.nginx.enable {
         enable = true;
         virtualHosts."${cfg.domain}" = {
-          enableACME = cfg.useTls && cfg.reverseProxy.nginx.manageTls;
-          forceSSL = cfg.useTls && cfg.reverseProxy.nginx.manageTls;
+          enableACME = lib.mkDefault (cfg.useTls && cfg.reverseProxy.nginx.manageTls);
+          forceSSL = lib.mkDefault (cfg.useTls && cfg.reverseProxy.nginx.manageTls);
           http2 = true;
-          http3 = cfg.useQuic;
+          http3 = lib.mkDefault cfg.useQuic;
           locations = {
             "/" = lib.mkIf cfg.frontend.enable {
               root = "${cfg.packages.frontend}/share/gradient-frontend";

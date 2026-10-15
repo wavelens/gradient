@@ -411,8 +411,8 @@ in {
       nginx = lib.mkIf cfg.reverseProxy.nginx.enable {
         enable = true;
         virtualHosts."${cfg.domain}" = {
-          enableACME = cfg.useTls;
-          forceSSL = cfg.useTls;
+          enableACME = lib.mkDefault cfg.useTls;
+          forceSSL = lib.mkDefault cfg.useTls;
           locations."/proto" = {
             proxyPass = "http://${cfg.listenAddr}:${toString cfg.port}";
             proxyWebsockets = true;
