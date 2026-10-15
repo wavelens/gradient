@@ -1611,6 +1611,19 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     )
     poll(f"SELECT count(*) FROM cached_path WHERE hash = '{dep_hash}';", "0",
          "the zombie purge kept a row whose NAR is gone")
+    snapshot = sql(
+        f"SELECT p.status::text || ' ' || p.fetchable::int::text || ' ' || h.status::text || ' ' "
+        f"|| h.fetchable::int::text || ' ' || h.missing_runtime_deps::text || ' ' "
+        f"|| h.blocking_deps::text || ' ' || (SELECT count(*) FROM derivation_dependency e "
+        f"  LEFT JOIN derivation_build dep ON dep.derivation = e.dependency "
+        f"  WHERE e.derivation = h.derivation AND e.kind IN (0, 2) "
+        f"  AND (dep.derivation IS NULL OR NOT dep.fetchable))::text "
+        f"FROM derivation_build p JOIN derivation_output o ON o.derivation = p.derivation "
+        f"JOIN derivation_build h ON true JOIN derivation d ON d.id = h.derivation "
+        f"WHERE o.hash = '{dep_hash}' AND d.hash = '{drv_hash}' LIMIT 1;"
+    )
+    assert snapshot, f"no shared build produces the retired output {dep_hash}; the check would pass on nothing"
+    p_status, p_fetchable, h_status, h_fetchable, h_missing, h_blocking, h_recount = snapshot.split()
     purged = indexed_before - set(sql("SELECT hash FROM cached_path;").split())
     assert dep_hash in purged, f"the purge took {sorted(purged)}, not the victim {dep_hash}"
     bystanders = sorted(purged - set([dep_hash]))
@@ -1618,56 +1631,18 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         print(f"the purge also took {len(bystanders)} rows that were already zombies: {bystanders}")
 
     assert runtime_drift() == 0, "complete-closure counter disagrees with its recount after the retire"
-    producer = sql(
-        f"SELECT db.status::text || ' ' || db.fetchable::int::text FROM derivation_build db "
-        f"JOIN derivation_output o ON o.derivation = db.derivation "
-        f"WHERE o.hash = '{dep_hash}' LIMIT 1;"
-    )
-    assert producer, f"no shared build produces the retired output {dep_hash}; the check would pass on nothing"
-    p_status, p_fetchable = producer.split()
     assert p_fetchable == "0" and p_status not in ("3", "7"), (
         f"the retired output's producer must lose fetchability and its terminal-success "
-        f"status, has (status fetchable) = ({producer})"
+        f"status, has (status fetchable) = ({p_status} {p_fetchable})"
     )
-    hello_blocking, hello_recount = sql(
-        f"SELECT db.blocking_deps::text || ' ' || (SELECT count(*) FROM derivation_dependency e "
-        f"LEFT JOIN derivation_build dep ON dep.derivation = e.dependency "
-        f"WHERE e.derivation = db.derivation AND e.kind IN (0, 2) "
-        f"AND (dep.derivation IS NULL OR NOT dep.fetchable))::text "
-        f"FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
-        f"WHERE d.hash = '{drv_hash}';"
-    ).split()
-    assert hello_blocking == hello_recount, (
-        f"hello's blocking build inputs must match their recount, has {hello_blocking}, "
-        f"recount {hello_recount}")
-
-    hello_missing, hello_fetchable = shared_build_complete(drv_hash)
-    hello_edges = sql(
-        f"SELECT d2.hash || ' kind=' || e.kind || ' status=' || coalesce(dep.status::text, '-') "
-        f"|| ' fetchable=' || coalesce(dep.fetchable::int::text, '-') "
-        f"FROM derivation_dependency e JOIN derivation d ON d.id = e.derivation "
-        f"JOIN derivation d2 ON d2.id = e.dependency "
-        f"LEFT JOIN derivation_build dep ON dep.derivation = e.dependency "
-        f"WHERE d.hash = '{drv_hash}';"
-    )
-    dep_producers = sql(
-        f"SELECT d.hash FROM derivation_output o JOIN derivation d ON d.id = o.derivation "
-        f"WHERE o.hash = '{dep_hash}';"
-    )
-    assert int(hello_missing) >= 1, (
-        f"hello's shared build must count the retired reference as a missing runtime dep, "
-        f"has {hello_missing}; hello's edges: {hello_edges!r}; producers of {dep_hash}: {dep_producers!r}")
-    assert hello_fetchable == "0", "a shared build that is not complete must not be fetchable"
-
-    hello_build = sql(
-        f"SELECT db.status::text || ' ' || db.fetchable::int::text FROM derivation_build db "
-        f"JOIN derivation d ON d.id = db.derivation WHERE d.hash = '{drv_hash}';"
-    )
-    h_status, h_fetchable = hello_build.split()
+    assert h_blocking == h_recount, (
+        f"hello's blocking build inputs must match their recount, has {h_blocking}, recount {h_recount}")
+    assert int(h_missing) >= 1, (
+        f"hello's shared build must count the retired reference as a missing runtime dep, has {h_missing}")
     assert h_fetchable == "0" and h_status in ("3", "7"), (
-        f"a parent that only lost its complete closure must keep its terminal-success status, or "
-        f"the next evaluation rebuilds an output that never left the cache, has "
-        f"(status fetchable) = ({hello_build})")
+        f"a parent that only lost its complete closure must keep its terminal-success status and "
+        f"lose fetchability, or the next evaluation rebuilds an output that never left the cache, "
+        f"has (status fetchable) = ({h_status} {h_fetchable})")
     assert shared_build_drift() == 0, "shared build counters disagree with their recount after the retire"
 
     print(server.succeed(f"{CLI} cache upload main {dep_path}"))
