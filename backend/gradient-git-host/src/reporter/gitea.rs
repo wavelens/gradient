@@ -5,8 +5,8 @@
  */
 
 use super::{
-    CiReport, CiReporter, CiStatus, ContentReactionPayload, GitHostCommentPayload,
-    PullRequestSnapshot, ReactionKind, ReactionTarget, author_or_bot, validate_safe_outbound_url,
+    CiReport, CiReporter, CiStatus, ContentReactionPayload, PullRequestSnapshot, ReactionKind,
+    ReactionTarget, author_or_bot, validate_safe_outbound_url,
 };
 use crate::client::HostClient;
 use crate::pr::{BranchCommit, PrRef};
@@ -160,15 +160,19 @@ impl CiReporter for GiteaReporter {
         repo: &str,
         pr_number: u64,
         body: &str,
-    ) -> Result<()> {
-        self.client
-            .post(
-                &format!("/repos/{owner}/{repo}/issues/{pr_number}/comments"),
-                &GitHostCommentPayload { body },
-            )
-            .await?;
+    ) -> Result<Option<i64>> {
+        super::github::post_pr_comment(&self.client, owner, repo, pr_number, body).await
+    }
 
-        Ok(())
+    async fn edit_pr_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        _pr_number: u64,
+        comment_id: i64,
+        body: &str,
+    ) -> Result<bool> {
+        super::github::edit_pr_comment(&self.client, owner, repo, comment_id, body).await
     }
 
     async fn add_reaction(&self, target: &ReactionTarget, kind: ReactionKind) -> Result<()> {

@@ -10,12 +10,12 @@ use anyhow::{Context, Result, anyhow};
 use gradient_db::lookup::by_id;
 use gradient_types::{ECommit, EProject, ETask, MCommit, MEvaluation, MTask, ProjectId};
 
-pub(super) struct EvaluationRows {
+pub(crate) struct EvaluationRows {
     pub task: MTask,
     pub commit: MCommit,
 }
 
-pub(super) async fn load_evaluation_rows(
+pub(crate) async fn load_evaluation_rows(
     ctx: &CiContext,
     evaluation: &MEvaluation,
 ) -> Result<EvaluationRows> {
@@ -36,7 +36,7 @@ pub(super) async fn load_evaluation_rows(
     Ok(EvaluationRows { task, commit })
 }
 
-pub(super) async fn load_project_name(ctx: &CiContext, project: ProjectId) -> Option<String> {
+pub(crate) async fn load_project_name(ctx: &CiContext, project: ProjectId) -> Option<String> {
     by_id::<EProject, _>(&ctx.db.worker_db, project)
         .await
         .ok()

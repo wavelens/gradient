@@ -175,7 +175,7 @@ fn escape_slack(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn escape_html(s: &str) -> String {
+pub(crate) fn escape_html(s: &str) -> String {
     escape_slack(s).replace('"', "&quot;")
 }
 

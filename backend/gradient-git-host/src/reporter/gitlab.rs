@@ -5,8 +5,8 @@
  */
 
 use super::{
-    CiReport, CiReporter, CiStatus, GitHostCommentPayload, PullRequestSnapshot, ReactionKind,
-    ReactionTarget, author_or_bot, validate_safe_outbound_url,
+    CiReport, CiReporter, CiStatus, CreatedComment, GitHostCommentPayload, PullRequestSnapshot,
+    ReactionKind, ReactionTarget, author_or_bot, comment_exists, validate_safe_outbound_url,
 };
 use crate::client::HostClient;
 use crate::pr::gitlab::project_path;
@@ -159,15 +159,37 @@ impl CiReporter for GitlabReporter {
         repo: &str,
         pr_number: u64,
         body: &str,
-    ) -> Result<()> {
-        self.client
-            .post(
+    ) -> Result<Option<i64>> {
+        let created: CreatedComment = self
+            .client
+            .post_json(
                 &gitlab_comment_path(owner, repo, pr_number),
                 &GitHostCommentPayload { body },
             )
             .await?;
 
-        Ok(())
+        Ok(Some(created.id))
+    }
+
+    async fn edit_pr_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        comment_id: i64,
+        body: &str,
+    ) -> Result<bool> {
+        comment_exists(
+            self.client
+                .put(
+                    &format!(
+                        "{}/{comment_id}",
+                        gitlab_comment_path(owner, repo, pr_number)
+                    ),
+                    &GitHostCommentPayload { body },
+                )
+                .await,
+        )
     }
 
     async fn add_reaction(&self, target: &ReactionTarget, kind: ReactionKind) -> Result<()> {

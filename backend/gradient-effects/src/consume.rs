@@ -10,6 +10,7 @@
 
 use anyhow::{Context, Result, anyhow};
 use gradient_ci::actions::{active_actions_for_task, execute_action, matching_actions};
+use gradient_ci::pull_request_summary::update_pull_request_summary_on_terminal;
 use gradient_ci::reactions::react_to_source_comment_on_terminal;
 use gradient_db::deliveries::pending::{Outcome, PendingDelivery, PendingDeliveryKind, enqueue};
 use gradient_db::deliveries::trigger_fire::TriggerFire;
@@ -190,7 +191,9 @@ async fn react_on_terminal(ctx: &EffectsCtx, reported: &evaluation::Reported) {
         .await
     {
         Ok(Some(evaluation)) => {
-            react_to_source_comment_on_terminal(&ctx.ci(), task, &evaluation, status).await;
+            let ci = ctx.ci();
+            react_to_source_comment_on_terminal(&ci, task, &evaluation, status).await;
+            update_pull_request_summary_on_terminal(&ci, task, &evaluation, status).await;
         }
         Ok(None) => {}
         Err(e) => warn!(error = %e, "looking up the evaluation of a terminal reaction"),

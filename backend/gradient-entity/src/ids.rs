@@ -120,6 +120,7 @@ id_newtype!(ProjectId);
 id_newtype!(ProjectCacheId);
 id_newtype!(ProjectInvitationId);
 id_newtype!(ProjectUserId);
+id_newtype!(PullRequestSummaryId);
 id_newtype!(TaskId);
 id_newtype!(TaskActionId);
 id_newtype!(TaskActionDeliveryId);

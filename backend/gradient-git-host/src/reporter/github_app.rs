@@ -209,9 +209,21 @@ impl CiReporter for GithubAppReporter {
         repo: &str,
         pr_number: u64,
         body: &str,
-    ) -> Result<()> {
+    ) -> Result<Option<i64>> {
         let client = self.installation_client().await?;
         github::post_pr_comment(&client, owner, repo, pr_number, body).await
+    }
+
+    async fn edit_pr_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        _pr_number: u64,
+        comment_id: i64,
+        body: &str,
+    ) -> Result<bool> {
+        let client = self.installation_client().await?;
+        github::edit_pr_comment(&client, owner, repo, comment_id, body).await
     }
 
     async fn get_pull_request(

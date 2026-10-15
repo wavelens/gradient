@@ -42,6 +42,7 @@ pub mod memberships;
 pub mod metrics;
 pub mod pool;
 pub mod projects;
+pub mod pull_request_summaries;
 pub mod roles;
 pub mod rows;
 pub mod scheduling;

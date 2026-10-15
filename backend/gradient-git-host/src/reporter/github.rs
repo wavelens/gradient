@@ -5,8 +5,8 @@
  */
 
 use super::{
-    CiReport, CiReporter, CiStatus, ContentReactionPayload, GitHostCommentPayload,
-    PullRequestSnapshot, ReactionKind, ReactionTarget, validate_safe_outbound_url,
+    CiReport, CiReporter, CiStatus, ContentReactionPayload, CreatedComment, GitHostCommentPayload,
+    PullRequestSnapshot, ReactionKind, ReactionTarget, comment_exists, validate_safe_outbound_url,
 };
 use crate::client::{GITHUB_API_URL, HostClient};
 use crate::pr::{BranchCommit, PrRef};
@@ -171,15 +171,32 @@ pub(super) async fn post_pr_comment(
     repo: &str,
     pr_number: u64,
     body: &str,
-) -> Result<()> {
-    client
-        .post(
+) -> Result<Option<i64>> {
+    let created: CreatedComment = client
+        .post_json(
             &format!("/repos/{owner}/{repo}/issues/{pr_number}/comments"),
             &GitHostCommentPayload { body },
         )
         .await?;
 
-    Ok(())
+    Ok(Some(created.id))
+}
+
+pub(super) async fn edit_pr_comment(
+    client: &HostClient,
+    owner: &str,
+    repo: &str,
+    comment_id: i64,
+    body: &str,
+) -> Result<bool> {
+    comment_exists(
+        client
+            .patch(
+                &format!("/repos/{owner}/{repo}/issues/comments/{comment_id}"),
+                &GitHostCommentPayload { body },
+            )
+            .await,
+    )
 }
 
 pub(super) async fn get_pull_request(
@@ -233,8 +250,19 @@ impl CiReporter for GithubReporter {
         repo: &str,
         pr_number: u64,
         body: &str,
-    ) -> Result<()> {
+    ) -> Result<Option<i64>> {
         post_pr_comment(&self.client, owner, repo, pr_number, body).await
+    }
+
+    async fn edit_pr_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        _pr_number: u64,
+        comment_id: i64,
+        body: &str,
+    ) -> Result<bool> {
+        edit_pr_comment(&self.client, owner, repo, comment_id, body).await
     }
 
     async fn get_pull_request(

@@ -28,6 +28,10 @@ pub fn pull_request(number: u64) -> String {
     format!("pull/{number}")
 }
 
+pub fn pull_request_number(key: &str) -> Option<u64> {
+    key.strip_prefix("pull/")?.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -43,5 +47,12 @@ mod tests {
         ];
         let distinct: std::collections::HashSet<_> = keys.iter().collect();
         assert_eq!(distinct.len(), keys.len(), "{keys:?}");
+    }
+
+    #[test]
+    fn only_a_pull_request_key_names_a_pull_request() {
+        assert_eq!(pull_request_number(&pull_request(42)), Some(42));
+        assert_eq!(pull_request_number(&branch("pull/42")), None);
+        assert_eq!(pull_request_number(NO_BRANCH), None);
     }
 }
