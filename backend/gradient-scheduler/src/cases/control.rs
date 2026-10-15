@@ -81,7 +81,7 @@ impl SchedulerCase {
     }
 
     pub fn liveness_period(&self) -> Option<Duration> {
-        crate::loops::liveness_period(&self.state.config)
+        crate::loops::liveness_period(&self.ctx.config)
     }
 
     pub async fn sample_workers(&self) {
@@ -509,7 +509,7 @@ impl SchedulerCase {
     pub async fn graph_writer_up(&self) {
         let writer = self
             .graph
-            .spawn(self.state.db(), None, None)
+            .spawn(self.ctx.clone(), None, None)
             .await
             .expect("the graph writer starts again");
         *lock(&self.writer) = writer;

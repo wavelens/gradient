@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use gradient_core::ServerState;
+use gradient_db::DbContext;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation_build;
 use gradient_entity::ids::DispatchedJobId;
@@ -42,6 +42,7 @@ use gradient_pool::session_port::{SessionPort, SessionSignal};
 use gradient_test_support::state::TestState;
 use gradient_types::ids::ProjectId;
 use gradient_types::{BuildArgs, RuntimeConfig};
+use gradient_util::shutdown::Shutdown;
 use gradient_wire::types::GradientCapabilities;
 use ractor::ActorRef;
 use tempfile::NamedTempFile;
@@ -64,7 +65,9 @@ const SETTLE_POLL: Duration = Duration::from_millis(10);
 
 pub(crate) struct SchedulerCase {
     pub db: Arc<TestDatabase>,
-    pub state: Arc<ServerState>,
+    pub ctx: DbContext,
+    started_at: DateTime<Utc>,
+    shutdown: Shutdown,
     pub scheduler: Arc<Scheduler>,
     pub graph: Arc<Graph>,
     writer: Mutex<ActorRef<GraphMsg>>,
@@ -107,25 +110,25 @@ impl SchedulerCase {
         let (secret, _) = testing::secret_file();
         let secret = Arc::new(secret);
         let graph = Graph::new();
-        let state = server_state(&db, &graph, started_at, &secret, config);
+        let instance = instance(&db, &graph, started_at, &secret, config);
 
-        testing::settle_seed(&state.db(), &db, declared).await;
-        enter_queued_builds(&state, &db, None).await;
+        testing::settle_seed(&instance.ctx, &db, declared).await;
+        enter_queued_builds(&instance.ctx, &db, None).await;
 
-        let case = Self::spawn(Arc::new(db), state, graph, secret, Arc::default()).await;
-        testing::zero_drift(&case.state.db(), "the seed").await;
+        let case = Self::spawn(Arc::new(db), instance, graph, secret, Arc::default()).await;
+        testing::zero_drift(&case.ctx, "the seed").await;
         case
     }
 
     pub async fn second_instance(&self) -> SchedulerCase {
-        let config = RuntimeConfig::clone(&self.state.config);
+        let config = RuntimeConfig::clone(&self.ctx.config);
         let graph = Graph::new();
-        let state = server_state(&self.db, &graph, Utc::now(), &self.secret, move |c| {
+        let instance = instance(&self.db, &graph, Utc::now(), &self.secret, move |c| {
             *c = config;
         });
         Self::spawn(
             Arc::clone(&self.db),
-            state,
+            instance,
             graph,
             Arc::clone(&self.secret),
             Arc::clone(&self.connected_on_any_instance),
@@ -140,27 +143,33 @@ impl SchedulerCase {
 
     async fn spawn(
         db: Arc<TestDatabase>,
-        state: Arc<ServerState>,
+        instance: Instance,
         graph: Arc<Graph>,
         secret: Arc<NamedTempFile>,
         connected_on_any_instance: Arc<Mutex<HashSet<String>>>,
     ) -> Self {
+        let Instance {
+            ctx,
+            started_at,
+            shutdown,
+            scheduler,
+        } = instance;
         let writer = graph
-            .spawn(state.db(), None, None)
+            .spawn(ctx.clone(), None, None)
             .await
             .expect("the graph writer starts");
-        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
         let core = scheduler
             .spawn_core(None)
             .await
             .expect("the scheduler core starts");
         let observed = Mutex::new(Observed::of(&Rows::read(&db).await));
-        let probe =
-            crate::probe::UpstreamProbe::new(&state.db(), &graph, &scheduler.upstream_query);
+        let probe = crate::probe::UpstreamProbe::new(&ctx, &graph, &scheduler.upstream_query);
 
         Self {
             db,
-            state,
+            ctx,
+            started_at,
+            shutdown,
             scheduler,
             graph,
             writer: Mutex::new(writer),
@@ -177,7 +186,7 @@ impl SchedulerCase {
     pub async fn seed(&self, shape: Shape) {
         let declared = shape.declared_statuses();
         shape.insert_into(&self.db.connection()).await;
-        enter_queued_builds(&self.state, &self.db, Some(declared)).await;
+        enter_queued_builds(&self.ctx, &self.db, Some(declared)).await;
     }
 
     pub fn signals(&self, worker: &str) -> Vec<SessionSignal> {
@@ -198,7 +207,7 @@ impl SchedulerCase {
     }
 
     pub async fn settled(&self) {
-        let shutdown = &self.state.shutdown;
+        let shutdown = &self.shutdown;
         let drained = tokio::time::timeout(SETTLE_TIMEOUT, async {
             while shutdown.pending() > 0 {
                 tokio::time::sleep(SETTLE_POLL).await;
@@ -219,13 +228,13 @@ impl SchedulerCase {
 
     async fn check_rows(&self, after: &str) {
         self.settled().await;
-        testing::zero_drift(&self.state.db(), after).await;
+        testing::zero_drift(&self.ctx, after).await;
 
         let rows = Rows::read(&self.db).await;
         rows.assert_invariants(after);
         lock(&self.observed).advance(&rows, after);
         let connected = lock(&self.connected_workers).clone();
-        rows.s7_no_open_row_before_start(&connected, self.state.started_at.naive_utc(), after);
+        rows.s7_no_open_row_before_start(&connected, self.started_at.naive_utc(), after);
     }
 
     async fn check_core(&self, after: &str) {
@@ -258,26 +267,33 @@ impl SchedulerCase {
 
         let Self {
             db,
-            state,
+            ctx,
             scheduler,
             graph,
             probe,
             ..
         } = self;
-        drop((state, scheduler, graph, probe));
+        drop((ctx, scheduler, graph, probe));
         drop_database_if_last(db).await;
     }
 }
 
-fn server_state(
+struct Instance {
+    ctx: DbContext,
+    started_at: DateTime<Utc>,
+    shutdown: Shutdown,
+    scheduler: Arc<Scheduler>,
+}
+
+fn instance(
     db: &TestDatabase,
     graph: &Arc<Graph>,
     started_at: DateTime<Utc>,
     secret: &NamedTempFile,
     config: impl FnOnce(&mut RuntimeConfig) + 'static,
-) -> Arc<ServerState> {
+) -> Instance {
     let crypt_file = secret.path().to_string_lossy().into_owned();
-    TestState::new()
+    let state = TestState::new()
         .worker_db(db.connection())
         .web_db(db.connection())
         .cache_db(db.connection())
@@ -288,11 +304,18 @@ fn server_state(
         .graph(Arc::clone(graph))
         .started_at(started_at)
         .config(config)
-        .build()
+        .build();
+
+    Instance {
+        ctx: state.db(),
+        started_at: state.started_at,
+        shutdown: state.shutdown.clone(),
+        scheduler: Arc::new(Scheduler::new(state)),
+    }
 }
 
 async fn enter_queued_builds(
-    state: &ServerState,
+    ctx: &DbContext,
     db: &TestDatabase,
     declared: Option<Vec<(String, BuildStatus)>>,
 ) {
@@ -313,7 +336,7 @@ async fn enter_queued_builds(
         .filter(|build| build.status == BuildStatus::Queued)
         .map(|build| build.derivation)
         .filter(|derivation| only.as_ref().is_none_or(|ids| ids.contains(derivation)));
-    state.memory.db.startable_set.enter(queued);
+    ctx.memory.startable_set.enter(queued);
 }
 
 async fn drop_database_if_last(db: Arc<TestDatabase>) {
