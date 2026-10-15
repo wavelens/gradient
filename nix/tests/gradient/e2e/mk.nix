@@ -2087,6 +2087,8 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     sql(f"DELETE FROM build_job WHERE derivation IN ('{d1}', '{d2}');")
     assert sql(f"SELECT count(*) FROM build_job WHERE derivation IN ('{d1}', '{d2}');") == "0"
 
+    for node, unit in fleet_units():
+        node.succeed(f"systemctl stop {unit}.service")
     for h in outputs:
         server.succeed(f"rm -f {nar_object(h)}")
     server.succeed(
@@ -2105,6 +2107,9 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert sql(f"SELECT status::text FROM derivation_build WHERE derivation = '{d2}';") == "0", (
         "an interior with no name was queued before anything adopted it"
     )
+    for node, unit in fleet_units():
+        node.succeed(f"systemctl start {unit}.service")
+    wait_workers_ready()
 
     newest_task2 = (
         "SELECT e.id FROM evaluation e JOIN task t ON t.id = e.task "
