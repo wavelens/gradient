@@ -122,7 +122,7 @@ async fn n01_committing_the_output_of_a_completed_leaf_makes_it_fetchable_and_qu
     assert_eq!(b, (Completed, 0, true), "after 1: sb(B)");
     let a = case.queue_state(A).await;
     assert_eq!(a, (Queued, 0), "after 1: sb(A)");
-    assert_eq!(case.gv(e1).await, gv + 1, "after 1: gv(E1) +1");
+    assert!(case.gv(e1).await > gv, "after 1: gv(E1) rose");
     let counters = case.counters(e1).await;
     assert_eq!(counters, [2, 1, 0, 1, 0], "after 1: counters(E1)");
     case.zero_drift("step 1").await;

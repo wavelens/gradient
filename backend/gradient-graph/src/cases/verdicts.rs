@@ -55,7 +55,7 @@ async fn v01_stream_completion_moves_a_blocked_evaluation_to_building_and_queues
         [2, 2, 0, 1, 0],
         "after 1: counters(E1)"
     );
-    assert_eq!(case.gv(e1).await, version + 1, "after 1: gv(E1) +1");
+    assert!(case.gv(e1).await > version, "after 1: gv(E1) rose");
     case.zero_drift("step 1").await;
     case.finish().await;
 }

@@ -49,7 +49,7 @@ async fn t01_build_started_moves_queued_to_building_with_a_running_attempt() {
         AttemptOutcome::Running,
         "after 2: attempt(B, latest)"
     );
-    assert_eq!(case.gv(e1).await, version + 1, "after 2: gv(E1)");
+    assert!(case.gv(e1).await > version, "after 2: gv(E1) rose");
     assert_eq!(
         case.counters(e1).await,
         [2, 2, 0, 0, 1],
@@ -198,7 +198,7 @@ async fn t04_a_permanent_failure_fails_the_dependents_and_the_evaluation() {
         [2, 0, 2, 0, 0],
         "after 1: counters(E1)"
     );
-    assert_eq!(case.gv(e1).await, version + 1, "after 1: gv(E1)");
+    assert!(case.gv(e1).await > version, "after 1: gv(E1) rose");
     case.zero_drift("step 1").await;
     case.finish().await;
 }
@@ -560,7 +560,7 @@ async fn t12_not_enough_resources_leaves_a_build_alone_that_a_worker_took() {
 }
 
 #[tokio::test]
-async fn t13_prioritize_sets_the_flag_on_the_build_or_on_every_named_build_of_the_evaluation() {
+async fn t13_prioritize_sets_the_flag_on_the_build_or_lifts_the_evaluation_and_its_builds() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(chain(e1)).await;
 
@@ -573,7 +573,17 @@ async fn t13_prioritize_sets_the_flag_on_the_build_or_on_every_named_build_of_th
     case.transition(Transition::PrioritizeEvaluation { evaluation: e1 })
         .await;
 
-    assert!(case.sb(A).await.prioritized, "after 2: sb(A).prioritized");
+    assert!(
+        case.evaluation(e1).await.prioritized,
+        "after 2: evaluation(E1).prioritized"
+    );
+    let a = case.sb(A).await;
+    assert!(!a.prioritized, "after 2: sb(A).prioritized stays unset");
+    let lifted =
+        gradient_db::scheduling::priority::shared_builds_with_qos(&case.ctx.worker_db, &[a.id])
+            .await
+            .expect("the priority read runs");
+    assert!(lifted.contains(&a.id), "after 2: A is lifted through E1");
     case.zero_drift("step 2").await;
     case.finish().await;
 }

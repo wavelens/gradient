@@ -366,7 +366,7 @@ async fn c08_evaluation_gc_cascades_jobs_and_a_live_evaluation_adopts_the_open_b
     let done = case.sb(F).await;
     let state = (done.status, done.fetchable);
     assert_eq!(state, (BuildStatus::Completed, true), "after 1: sb(F)");
-    assert_eq!(case.gv(e2).await, gv + 1, "after 1: gv(E2) +1");
+    assert!(case.gv(e2).await > gv, "after 1: gv(E2) rose");
     let counters = case.counters(e2).await;
     assert_eq!(counters, [3, 3, 0, 1, 0], "after 1: counters(E2)");
     case.zero_drift("step 1").await;

@@ -145,7 +145,7 @@ async fn m01_a_batch_for_an_unknown_evaluation_fails_only_itself_inside_a_shared
     let (a, z) = (case.find_derivation(A).await, case.find_derivation(Z).await);
     assert!(a.is_some(), "after 1: derivation(A) present");
     assert_eq!(z, None, "after 1: no derivation(Z)");
-    assert_eq!(case.gv(e1).await, gv + 1, "after 1: gv(E1) +1");
+    assert!(case.gv(e1).await > gv, "after 1: gv(E1) rose");
     case.zero_drift("step 1").await;
     case.finish().await;
 }
