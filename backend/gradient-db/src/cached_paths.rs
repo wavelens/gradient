@@ -9,9 +9,10 @@ use gradient_types::*;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, QueryFilter,
-    Value,
+    QuerySelect, Value,
 };
 use serde::Serialize;
+use std::collections::HashMap;
 
 pub async fn add_missing_signatures<C: ConnectionTrait>(
     db: &C,
@@ -36,6 +37,28 @@ pub async fn by_hash<C: ConnectionTrait>(db: &C, hash: &str) -> Result<Option<MC
         .filter(CCachedPath::Hash.eq(hash))
         .one(db)
         .await
+}
+
+pub async fn stored_by_hash<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+) -> Result<HashMap<String, CachedPathId>, DbErr> {
+    let rows = crate::fetch_in_chunks(hashes, |chunk| async move {
+        ECachedPath::find()
+            .select_only()
+            .column(CCachedPath::Hash)
+            .column(CCachedPath::Id)
+            .filter(CCachedPath::Hash.is_in(chunk))
+            .filter(CCachedPath::FileHash.is_not_null())
+            .into_tuple::<(String, uuid::Uuid)>()
+            .all(db)
+            .await
+    })
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(hash, id)| (hash, CachedPathId::new(id)))
+        .collect())
 }
 
 pub async fn by_any_file_hash<C: ConnectionTrait>(

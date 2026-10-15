@@ -5,18 +5,8 @@
  */
 
 use gradient_types::*;
-use sea_orm::{ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
-
-pub async fn cached_of_derivations<C: ConnectionTrait>(
-    db: &C,
-    derivations: Vec<DerivationId>,
-) -> Result<Vec<MDerivationOutput>, DbErr> {
-    EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.is_in(derivations))
-        .filter(CDerivationOutput::CachedPath.is_not_null())
-        .all(db)
-        .await
-}
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use std::collections::HashSet;
 
 pub async fn of_derivation<C: ConnectionTrait>(
     db: &C,
@@ -41,16 +31,15 @@ pub async fn of_derivations<C: ConnectionTrait>(
     .await
 }
 
-pub async fn cached_by_hash<C: ConnectionTrait>(
+pub async fn cached_anywhere<C: ConnectionTrait>(
     db: &C,
-    hash: &str,
-) -> Result<Option<MDerivationOutput>, DbErr> {
-    EDerivationOutput::find()
-        .filter(
-            Condition::all()
-                .add(CDerivationOutput::IsCached.eq(true))
-                .add(CDerivationOutput::Hash.eq(hash)),
-        )
-        .one(db)
-        .await
+    outputs: &[MDerivationOutput],
+) -> Result<HashSet<DerivationOutputId>, DbErr> {
+    let hashes: Vec<String> = outputs.iter().map(|o| o.hash.clone()).collect();
+    let stored = crate::cached_paths::stored_by_hash(db, &hashes).await?;
+    Ok(outputs
+        .iter()
+        .filter(|o| o.external_url.is_some() || stored.contains_key(&o.hash))
+        .map(|o| o.id)
+        .collect())
 }

@@ -284,10 +284,8 @@ async fn c06_a_path_of_an_output_row_created_since_the_scan_stays() {
 
     gc_paths(&case, [N_OUT.to_owned()]).await;
 
-    let path = stored(&case, N_OUT).await;
-    assert!(path, "after 2: cached_path(N_OUT) present");
-    let output = case.output_of(N, "out").await;
-    assert!(output.is_cached, "after 2: output(N,out).is_cached");
+    let path = case.output_stored(N, "out").await;
+    assert!(path, "after 2: cached_path(output(N,out).hash) stored");
     case.zero_drift("step 2").await;
     case.finish().await;
 }

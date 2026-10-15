@@ -61,7 +61,6 @@ pub(crate) async fn repair_missing_inputs(
                 hash,
                 cached_path_present = d.cached_path_present,
                 fully_cached = d.fully_cached,
-                outputs_cached = d.outputs_cached,
                 outputs_total = d.outputs_total,
                 producer_statuses = ?d.producer_build_statuses,
                 "missing input: cache/build state at failure"

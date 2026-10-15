@@ -682,6 +682,10 @@ impl Case {
         self.db.output_of(path, name).await
     }
 
+    pub async fn output_stored(&self, path: &str, name: &str) -> bool {
+        self.db.output_stored(path, name).await
+    }
+
     pub async fn job(&self, evaluation: EvaluationId, path: &str) -> Option<build_job::Model> {
         self.db.job(evaluation, path).await
     }

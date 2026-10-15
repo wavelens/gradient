@@ -14,7 +14,6 @@ pub struct MissingInputDiagnosis {
     pub cached_path_present: bool,
     pub fully_cached: bool,
     pub outputs_total: usize,
-    pub outputs_cached: usize,
     pub producer_build_statuses: Vec<gradient_entity::build::BuildStatus>,
 }
 
@@ -29,7 +28,6 @@ pub async fn diagnose_missing_input<C: ConnectionTrait>(
 
     let cached_path = ECP::find().filter(CCP::Hash.eq(hash)).one(db).await?;
     let outputs = EDO::find().filter(CDO::Hash.eq(hash)).all(db).await?;
-    let outputs_cached = outputs.iter().filter(|o| o.is_cached).count();
     let producer_drvs: Vec<DerivationId> = outputs.iter().map(|o| o.derivation).collect();
 
     let producer_build_statuses = if producer_drvs.is_empty() {
@@ -48,7 +46,6 @@ pub async fn diagnose_missing_input<C: ConnectionTrait>(
         cached_path_present: cached_path.is_some(),
         fully_cached: cached_path.map(|c| c.is_fully_cached()).unwrap_or(false),
         outputs_total: outputs.len(),
-        outputs_cached,
         producer_build_statuses,
     })
 }
@@ -59,8 +56,6 @@ fn demoted_output(
     use sea_orm::{ActiveValue::Set, IntoActiveModel};
 
     let mut active = o.into_active_model();
-    active.is_cached = Set(false);
-    active.cached_path = Set(None);
     active.external_url = Set(None);
     active.nar_hash = Set(None);
     active.file_hash = Set(None);
@@ -294,9 +289,9 @@ mod tests {
         );
         assert_eq!(
             log.len(),
-            18,
+            17,
             "outputs, demote, path lock, shared build lock, trust clear, retire lock, \
-             producers of the hash, the complete closure they had, delete, is_cached, \
+             producers of the hash, the complete closure they had, delete, \
              shared build lock, mark, reset, owners, un-promote, and the raised, locked \
              update of what the producers now need: {log:?}"
         );
@@ -364,7 +359,6 @@ mod tests {
             id: DerivationOutputId::now_v7(),
             derivation: DerivationId::now_v7(),
             hash: hash.to_string(),
-            is_cached: true,
             ..Default::default()
         };
         let db = mock_db()
@@ -453,11 +447,6 @@ mod tests {
              update of what the producers now need: {log:?}"
         );
         assert!(
-            !log.iter()
-                .any(|s| s.contains("WHERE is_cached AND hash = ANY($1)")),
-            "nothing was deleted, so the retire's own clears never run: {log:?}"
-        );
-        assert!(
             log.iter()
                 .any(|s| s.contains("FROM derivation_output o WHERE o.hash = ANY($1)")),
             "the producers of the asked-for hash are still resolved: {log:?}"
@@ -477,8 +466,6 @@ mod tests {
         use sea_orm::ActiveValue::Set;
 
         let o = gradient_entity::derivation_output::Model {
-            is_cached: true,
-            cached_path: Some(gradient_types::ids::CachedPathId::now_v7()),
             external_url: Some("https://cache.example/x.narinfo".to_string()),
             nar_hash: Some("sha256:aaa".to_string()),
             file_hash: Some("sha256:bbb".to_string()),
@@ -487,8 +474,6 @@ mod tests {
         };
 
         let am = demoted_output(o);
-        assert_eq!(am.is_cached, Set(false));
-        assert_eq!(am.cached_path, Set(None));
         assert_eq!(
             am.external_url,
             Set(None),
@@ -509,10 +494,6 @@ mod tests {
         assert!(
             sql.contains(&format!("db.status IN ({terminal_success})")),
             "must mirror the gate's success states: {sql}"
-        );
-        assert!(
-            !sql.contains("o.is_cached"),
-            "must NOT gate on is_cached (it is false for the never-cached-output dead zone): {sql}"
         );
         assert!(
             sql.contains("o.external_url IS NULL"),

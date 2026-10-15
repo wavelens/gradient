@@ -74,6 +74,7 @@ async fn p01_a_hit_stores_the_narinfo_adds_runtime_edges_and_queues_the_passthro
     let gained = case.upstream_hits(&[(A_OUT, hit)]).await;
 
     let out = case.output_of(A, "out").await;
+    let stored = case.output_stored(A, "out").await;
     assert_eq!(
         (
             out.external_url.as_deref(),
@@ -81,10 +82,10 @@ async fn p01_a_hit_stores_the_narinfo_adds_runtime_edges_and_queues_the_passthro
             out.file_hash.as_deref(),
             out.file_size,
             out.nar_size,
-            out.is_cached
+            stored
         ),
         (Some("u"), Some("nh"), Some("fh"), Some(1), Some(2), false),
-        "after 1: output(A,out) url, nar_hash, file_hash, file_size, nar_size, is_cached"
+        "after 1: output(A,out) url, nar_hash, file_hash, file_size, nar_size, stored"
     );
 
     let references = format!("{A_OUT}-a {B_OUT}-b");

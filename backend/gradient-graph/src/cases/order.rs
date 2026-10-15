@@ -258,16 +258,8 @@ async fn o03_a_replay_of_every_mutating_operation_changes_nothing_the_second_tim
     assert_eq!(once.1, started.1, "3: gv unchanged by the first call");
     let twice = state(&case, e1).await;
     assert_eq!(twice, once, "3: every row equal, the signature bytes too");
-    assert_eq!(
-        (first.created, first.outputs_marked),
-        (true, 1),
-        "3: the first report"
-    );
-    assert_eq!(
-        (second.created, second.outputs_marked),
-        (false, 1),
-        "3: the second report"
-    );
+    assert!(first.created, "3: the first report");
+    assert!(!second.created, "3: the second report");
     case.zero_drift("pair 3").await;
 
     case.build_completed(A).await;

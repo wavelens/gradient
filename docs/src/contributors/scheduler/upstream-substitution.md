@@ -37,7 +37,7 @@ Two functions handle the round. `plan_probes` build the plan, `probe_round` appl
 
 1. Keep every wanted shared build without an answer (`wanted`, `probed = false`). Add dependencies that lack an answer and that no cache hold.
 2. Drop each shared build without `derivation_output` rows. These unwalked stubs remain unanswered until a later batch walk the stub and send it again.
-3. Skip outputs that any cache already hold, marked by `is_cached` or `external_url`.
+3. Skip outputs already stored in our cache (a `cached_path` row of the hash with a `file_hash`) or with an `external_url`.
 4. Group the remaining outputs by the evaluation that name the shared build (`build_job`). The project of that evaluation pick the upstream caches.
 5. `probe_outputs` (`gradient-scheduler/src/eval.rs`) must request the `<hash>.narinfo` for each output and flush `upstream_metric` afterwards.
 6. Send hits as a `GraphMsg::UpstreamHits` message. Then send all shared builds from step 2 in a `GraphMsg::UpstreamProbed` message, hit or miss, unless one of their outputs got [no answer](#no-answer).

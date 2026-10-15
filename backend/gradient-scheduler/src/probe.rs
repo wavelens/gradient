@@ -302,7 +302,10 @@ pub(crate) async fn plan_probes(
 
     let mut by_evaluation: HashMap<EvaluationId, HashMap<String, String>> = HashMap::new();
     let mut owners: HashMap<String, Vec<DerivationId>> = HashMap::new();
-    for o in outputs.iter().filter(|o| !o.is_cached_anywhere()) {
+    let cached = gradient_db::derivation_outputs::cached_anywhere(db, &outputs)
+        .await
+        .context("find the outputs some cache already holds")?;
+    for o in outputs.iter().filter(|o| !cached.contains(&o.id)) {
         let Some(evaluation) = evaluation_of.get(&o.derivation) else {
             continue;
         };

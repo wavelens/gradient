@@ -29,10 +29,6 @@ fn deriv_id() -> DerivationId {
     DerivationId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000003").unwrap())
 }
 
-fn drv_output_id() -> DerivationOutputId {
-    DerivationOutputId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000004").unwrap())
-}
-
 fn cached_path_id() -> CachedPathId {
     CachedPathId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000005").unwrap())
 }
@@ -48,13 +44,8 @@ fn test_date() -> chrono::NaiveDateTime {
         .unwrap()
 }
 
-/// The mock results are following the query order inside `get_nar_by_hash`.
-///   0. ECache::find (by name)
-///   1. EDerivationOutput::find (by hash)
-///   2. EDerivation::find_by_id
-///   3. EProjectCache::find (subscription check)
-///   4. ECachedPath::find (by hash)
-///   5. ECachedPathSignature::find
+/// The mock results are following the query order: cache by name, cached path by hash, its
+/// signature, references.
 pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
     let cache_row = gradient_entity::cache::Model {
         id: cache_id(),
@@ -66,19 +57,6 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         private_key: "test-priv-key".into(),
         public: true,
         created_by: UserId::new(project_id().into_inner()),
-        created_at: test_date(),
-        ..Default::default()
-    };
-
-    let drv_output_row = gradient_entity::derivation_output::Model {
-        id: drv_output_id(),
-        derivation: deriv_id(),
-        name: "out".into(),
-        hash: FIXTURE_PATH_HASH.into(),
-        package: "hello".into(),
-        nar_size: Some(67890),
-        is_cached: true,
-        cached_path: Some(cached_path_id()),
         created_at: test_date(),
         ..Default::default()
     };
@@ -109,7 +87,6 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
 
     let db = mock_db()
         .append_query_results([vec![cache_row]])
-        .append_query_results([vec![drv_output_row]])
         .append_query_results([vec![cached_path_row]])
         .append_query_results([vec![cached_path_sig_row]])
         .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])

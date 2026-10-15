@@ -268,13 +268,10 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
     );
     let derivations = case.db.rows::<derivation::Entity>().await.len();
     assert_eq!(derivations, 3, "after 12: every derivation is still there");
-    let b = (case.sb(B).await, case.output_of(B, "out").await);
-    assert!(
-        b.0.fetchable && b.1.is_cached,
-        "after 12: B keeps its rows: {b:?}"
-    );
-    let stored = case.find_cached_path(B_OUT).await;
-    assert!(stored.is_some(), "after 12: B keeps its cached path");
+    let b = case.sb(B).await;
+    assert!(b.fetchable, "after 12: B keeps its rows: {b:?}");
+    let stored = case.output_stored(B, "out").await;
+    assert!(stored, "after 12: B keeps its cached path");
     case.zero_drift("step 12").await;
     case.finish().await;
 }

@@ -487,8 +487,8 @@ async fn d07_a_completed_evaluation_still_wants_the_rebuild_of_its_entry_point_o
         (BuildStatus::Queued, true, false, false),
         "after 1: sb(A) is Queued, wanted true, fetchable false, cache_available false"
     );
-    let cached = case.output_of(A, "out").await.is_cached;
-    assert!(!cached, "after 1: output(A, out).is_cached");
+    let stored = case.output_stored(A, "out").await;
+    assert!(!stored, "after 1: cached_path(output(A,out).hash) stored");
     let b = case.sb(B).await;
     assert_eq!(
         (b.status, b.fetchable, b.wanted),

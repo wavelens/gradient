@@ -73,8 +73,8 @@ async fn t02_a_completed_build_is_fetchable_only_after_the_commit_and_the_parent
         "after 1: sb(B)"
     );
     assert!(
-        !case.output_of(B, "out").await.is_cached,
-        "after 1: output(B, out).is_cached"
+        !case.output_stored(B, "out").await,
+        "after 1: cached_path(output(B,out).hash) stored"
     );
     let a = case.sb(A).await;
     assert_eq!(
@@ -301,10 +301,6 @@ async fn t07_inputs_unavailable_with_the_object_gone_drops_the_path_and_resets_t
     assert!(
         case.find_cached_path(B_OUT).await.is_none(),
         "after 1: cached_path(B_OUT) gone"
-    );
-    assert!(
-        !case.output_of(B, "out").await.is_cached,
-        "after 1: output(B, out).is_cached"
     );
     let b = case.sb(B).await;
     assert_eq!(

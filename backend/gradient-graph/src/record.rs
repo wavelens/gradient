@@ -1097,12 +1097,15 @@ pub(crate) async fn apply_upstream_hits(
     })
     .await
     .context("load every output of the shared builds an upstream hit names")?;
+    let cached = gradient_db::derivation_outputs::cached_anywhere(db, &outputs)
+        .await
+        .context("find the outputs some cache already holds")?;
     let mut by_shared_build: HashMap<DerivationId, Vec<bool>> = HashMap::new();
     for o in &outputs {
         by_shared_build
             .entry(o.derivation)
             .or_default()
-            .push(hits.contains_key(&o.hash) || o.is_cached_anywhere());
+            .push(hits.contains_key(&o.hash) || cached.contains(&o.id));
     }
 
     let served: Vec<DerivationId> = touched
@@ -1192,8 +1195,11 @@ async fn persist_narinfo(
     rows: &[MDerivationOutput],
     hits: &HashMap<String, UpstreamHit>,
 ) -> Result<()> {
+    let cached = gradient_db::derivation_outputs::cached_anywhere(db, rows)
+        .await
+        .context("find the outputs some cache already holds")?;
     let mut learned: Vec<(DerivationId, Vec<String>)> = Vec::new();
-    for o in rows.iter().filter(|o| !o.is_cached_anywhere()) {
+    for o in rows.iter().filter(|o| !cached.contains(&o.id)) {
         let Some(hit) = hits.get(&o.hash) else {
             continue;
         };

@@ -125,19 +125,11 @@ pub(super) async fn get_nar_by_hash(
     cache: MCache,
     hash: String,
 ) -> Result<NixPathInfo, WebError> {
-    let build_output = gradient_db::derivation_outputs::cached_by_hash(db, &hash)
-        .await
-        .map_err(WebError::from)?;
-
-    let build_output = match build_output {
-        Some(o) => o,
-        None => return get_nar_by_cached_path(db, config, cache, hash).await,
-    };
-
     let cached_path_row = gradient_db::cached_paths::by_hash(db, &hash)
         .await
         .map_err(WebError::from)?
-        .or_not_found(Resource::CachedPath)?;
+        .filter(|row| row.is_fully_cached())
+        .or_not_found(Resource::Path)?;
 
     let cached_path_sig =
         gradient_db::cached_paths::signature_in_cache(db, cached_path_row.id, cache.id)
@@ -149,32 +141,14 @@ pub(super) async fn get_nar_by_hash(
         .signature
         .ok_or(CacheRefusal::SignaturePending)?;
 
-    let path = StorePath::from(build_output.clone()).full();
-
-    let nar_hash = cached_path_row
-        .nar_hash
-        .as_deref()
-        .map(normalize_nar_hash)
-        .ok_or(CacheRefusal::NotRecorded("NarHash"))?;
-    let nar_size = cached_path_row
-        .nar_size
-        .ok_or(CacheRefusal::NotRecorded("NarSize"))? as u64;
-    let references =
-        gradient_db::graph::runtime_closure::references_for_hash(db, &cached_path_row.hash).await?;
-    let deriver = cached_path_row.deriver.clone();
-    let ca = cached_path_row.ca.clone();
-
     let sig =
         gradient_sources::full_signature_token(&signature, &config.server.serve_url, &cache.name);
 
-    // `file_hash` and `file_size` are living on `cached_path`. The legacy mirror on
-    // `derivation_output` is not always populated.
     let file_hash = cached_path_row
         .file_hash
         .as_deref()
         .map(normalize_nar_hash)
         .ok_or(CacheRefusal::NotRecorded("FileHash"))?;
-    let file_hash_nix32 = strip_hash_algo(&file_hash).to_string();
     let file_size = u32::try_from(
         cached_path_row
             .file_size
@@ -182,61 +156,6 @@ pub(super) async fn get_nar_by_hash(
             .max(0),
     )
     .unwrap_or(u32::MAX);
-
-    Ok(NixPathInfo {
-        store_path: path,
-        url: format!("nar/{}.nar.zst", file_hash_nix32),
-        compression: "zstd".to_string(),
-        file_hash,
-        file_size,
-        nar_hash,
-        nar_size,
-        references,
-        deriver,
-        sig,
-        ca,
-    })
-}
-
-async fn get_nar_by_cached_path(
-    db: &WebDb,
-    config: &RuntimeConfig,
-    cache: MCache,
-    hash: String,
-) -> Result<NixPathInfo, WebError> {
-    let cached_path_row = gradient_db::cached_paths::by_hash(db, &hash)
-        .await
-        .map_err(WebError::from)?
-        .or_not_found(Resource::Path)?;
-
-    if !cached_path_row.is_fully_cached() {
-        return Err(WebError::not_found(Resource::Path));
-    }
-
-    let cached_path_sig =
-        gradient_db::cached_paths::signature_in_cache(db, cached_path_row.id, cache.id)
-            .await
-            .map_err(WebError::from)?
-            .or_not_found(Resource::Signature)?;
-
-    let signature = cached_path_sig
-        .signature
-        .ok_or(CacheRefusal::SignaturePending)?;
-
-    let sig =
-        gradient_sources::full_signature_token(&signature, &config.server.serve_url, &cache.name);
-
-    let file_hash = cached_path_row
-        .file_hash
-        .clone()
-        .ok_or(CacheRefusal::MissingFileField("hash"))?;
-    let file_size = u32::try_from(
-        cached_path_row
-            .file_size
-            .ok_or(CacheRefusal::MissingFileField("size"))?
-            .max(0),
-    )
-    .unwrap_or(u32::MAX);
     let nar_hash = cached_path_row
         .nar_hash
         .as_deref()
@@ -247,7 +166,7 @@ async fn get_nar_by_cached_path(
         .ok_or(CacheRefusal::NotRecorded("NarSize"))? as u64;
     let references =
         gradient_db::graph::runtime_closure::references_for_hash(db, &cached_path_row.hash).await?;
-    let file_hash_nix32 = strip_hash_algo(&normalize_nar_hash(&file_hash)).to_string();
+    let file_hash_nix32 = strip_hash_algo(&file_hash).to_string();
 
     Ok(NixPathInfo {
         store_path: cached_path_row.store_path(),

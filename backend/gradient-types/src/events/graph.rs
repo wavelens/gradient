@@ -22,7 +22,6 @@ firehose!(Recorded, "graph.recorded");
 pub struct NarCommitted {
     pub cached_path: CachedPathId,
     pub created: bool,
-    pub outputs_marked: u64,
 }
 firehose!(NarCommitted, names::GRAPH_NAR_COMMITTED);
 

@@ -330,16 +330,22 @@ async fn enqueue_backfill_signatures(db: &WebDb, project_id: ProjectId, cache_id
         return;
     }
 
-    let outputs = match gradient_db::derivation_outputs::cached_of_derivations(db, drv_ids).await {
+    let outputs = match gradient_db::derivation_outputs::of_derivations(db, &drv_ids).await {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(%project_id, error = %e, "backfill: failed to load derivation_outputs");
             return;
         }
     };
-
-    let cp_ids: std::collections::HashSet<CachedPathId> =
-        outputs.into_iter().filter_map(|o| o.cached_path).collect();
+    let hashes: Vec<String> = outputs.into_iter().map(|o| o.hash).collect();
+    let stored = match gradient_db::cached_paths::stored_by_hash(db, &hashes).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(%project_id, error = %e, "backfill: failed to load cached paths");
+            return;
+        }
+    };
+    let cp_ids: std::collections::HashSet<CachedPathId> = stored.into_values().collect();
 
     // The (cached_path, cache) uniqueness is doing the de-duplication. The whole backfill is one
     // batched insert instead of a check and an insert per path.

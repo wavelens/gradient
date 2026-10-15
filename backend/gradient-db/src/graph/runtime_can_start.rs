@@ -147,9 +147,6 @@ crate::sql! {
     DELETE_CACHED_PATHS = "DELETE FROM cached_path cp WHERE cp.hash = ANY($1) RETURNING cp.hash",
         params = [CachedPathHashes(64)];
 
-    SET_OUTPUTS_UNCACHED = "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
-        params = [CachedPathHashes(64)];
-
     RIPPLE_MISSING_RUNTIME_DEPS = "SELECT derivation FROM ripple_missing_runtime_deps($1::uuid[], $2::bool) AS r(derivation)",
         params = [DerivationIds(64), Bool(true)],
         tier = Bulk;
@@ -300,11 +297,6 @@ pub async fn retire_outputs(
         .iter()
         .filter_map(|r| r.try_get::<String>("", "hash").ok())
         .collect();
-
-    if !deleted.is_empty() {
-        txn.execute_raw(SET_OUTPUTS_UNCACHED.bind([deleted.clone().into()]))
-            .await?;
-    }
 
     let mut incomplete = was_complete.clone();
     incomplete.extend(ripple_shared_builds_incomplete(txn, was_complete).await?);

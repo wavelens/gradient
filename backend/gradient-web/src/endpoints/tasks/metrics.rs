@@ -332,7 +332,6 @@ mod tests {
         derivation: DerivationId,
         hash: &str,
         nar_size: Option<i64>,
-        cached: Option<CachedPathId>,
     ) -> derivation_output::Model {
         derivation_output::Model {
             id: DerivationOutputId::now_v7(),
@@ -341,8 +340,6 @@ mod tests {
             hash: hash.into(),
             package: "foo".into(),
             nar_size,
-            is_cached: cached.is_some(),
-            cached_path: cached,
             created_at: now(),
             ..Default::default()
         }
@@ -366,7 +363,7 @@ mod tests {
         let drv_id = DerivationId::now_v7();
         let cached_id = CachedPathId::now_v7();
         let db = mock_db()
-            .append_query_results([vec![drv_output(drv_id, "abc", None, Some(cached_id))]])
+            .append_query_results([vec![drv_output(drv_id, "abc", None)]])
             .append_query_results([vec![cached_row(cached_id, "abc", 1024)]])
             .into_connection();
 
@@ -381,8 +378,8 @@ mod tests {
         let cached_id = CachedPathId::now_v7();
         let db = mock_db()
             .append_query_results([vec![
-                drv_output(drv_built, "built", Some(2048), None),
-                drv_output(drv_sub, "subst", None, Some(cached_id)),
+                drv_output(drv_built, "built", Some(2048)),
+                drv_output(drv_sub, "subst", None),
             ]])
             .append_query_results([vec![cached_row(cached_id, "subst", 512)]])
             .into_connection();
@@ -397,7 +394,7 @@ mod tests {
     async fn sum_output_sizes_returns_none_when_nothing_known() {
         let drv_id = DerivationId::now_v7();
         let db = mock_db()
-            .append_query_results([vec![drv_output(drv_id, "unknown", None, None)]])
+            .append_query_results([vec![drv_output(drv_id, "unknown", None)]])
             .append_query_results([Vec::<cached_path::Model>::new()])
             .into_connection();
 

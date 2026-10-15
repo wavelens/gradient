@@ -48,7 +48,7 @@ Runtime dependencies live in `derivation_dependency` alongside build dependencie
 
 1. Lock the hashes `FOR NO KEY UPDATE` in a single hash-ordered statement, with the producers' advisory keys held exclusive.
 2. Read the producers with a complete closure (`complete_among`) before the delete can remove that endpoint.
-3. Remove the rows, with a cascade to `cached_path_signature`. Clear `is_cached` on the outputs.
+3. Remove the rows, with a cascade to `cached_path_signature`.
 4. Call `ripple_shared_builds_incomplete` from the shared builds that had a complete closure.
 5. Apply `lost_fetchability` over the producers and every build left incomplete. Reset only the producers of deleted paths to `Created`.
 

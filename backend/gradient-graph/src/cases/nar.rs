@@ -71,7 +71,7 @@ async fn end_state_of_the_runtime_chain(case: &Case, evaluation: EvaluationId) -
         let build = case.sb(path).await;
         let queue = (build.status, build.cache_available, build.probed);
         let closure = (build.fetchable, build.missing_runtime_deps);
-        let cached = case.output_of(path, "out").await.is_cached;
+        let cached = case.output_stored(path, "out").await;
         let pending = (build.blocking_deps, build.attempt);
         let columns = format!("{queue:?} {closure:?} {pending:?} {cached}");
         state.push(format!("{path}: {columns}"));
@@ -116,12 +116,7 @@ async fn n01_committing_the_output_of_a_completed_leaf_makes_it_fetchable_and_qu
     assert_eq!(path.references, references, "after 1: references");
     let signatures = case.signatures(B_OUT).await;
     assert!(signatures.is_empty(), "after 1: {signatures:?}");
-    let output = case.output_of(B, "out").await;
-    assert!(output.is_cached, "after 1: output(B,out).is_cached");
-    let linked = output.cached_path;
-    assert_eq!(linked, Some(path.id), "after 1: output(B,out) of B_OUT");
-    let report = (report.created, report.outputs_marked);
-    assert_eq!(report, (true, 1), "after 1: report");
+    assert!(report.created, "after 1: report.created");
     let b = case.sb(B).await;
     let b = (b.status, b.missing_runtime_deps, b.fetchable);
     assert_eq!(b, (Completed, 0, true), "after 1: sb(B)");
@@ -145,8 +140,8 @@ async fn n02_a_commit_before_completion_ends_in_the_state_of_a_commit_after_it()
     let b = case.sb(B).await;
     let b = (b.status, b.missing_runtime_deps, b.fetchable, b.wanted);
     assert_eq!(b, (Building, 0, false, true), "after 1: sb(B)");
-    let cached = case.output_of(B, "out").await.is_cached;
-    assert!(cached, "after 1: output(B,out).is_cached");
+    let stored = case.output_stored(B, "out").await;
+    assert!(stored, "after 1: cached_path(output(B,out).hash) stored");
     let a = case.queue_state(A).await;
     assert_eq!(a, (Created, 1), "after 1: sb(A)");
     let counters = case.counters(e1).await;
@@ -161,8 +156,11 @@ async fn n02_a_commit_before_completion_ends_in_the_state_of_a_commit_after_it()
     let outcome = case.latest_attempt(B).await.outcome;
     let built = AttemptOutcome::Built;
     assert_eq!(outcome, built, "after 2: attempt(B, latest).outcome");
-    let cached = case.output_of(B, "out").await.is_cached;
-    assert!(cached, "after 2: output(B,out).is_cached as in N01");
+    let stored = case.output_stored(B, "out").await;
+    assert!(
+        stored,
+        "after 2: cached_path(output(B,out).hash) stored as in N01"
+    );
     let a = case.queue_state(A).await;
     assert_eq!(a, (Queued, 0), "after 2: sb(A)");
     let counters = case.counters(e1).await;
@@ -184,8 +182,8 @@ async fn n03_with_two_outputs_the_producer_is_present_only_after_the_second_comm
     case.commit_nar(commit_of(B_OUT, "b", &[(B_OUT, "b")]))
         .await;
 
-    let cached = case.output_of(B, "out").await.is_cached;
-    assert!(cached, "after 1: output(B,out).is_cached");
+    let stored = case.output_stored(B, "out").await;
+    assert!(stored, "after 1: cached_path(output(B,out).hash) stored");
     assert!(!case.sb(B).await.fetchable, "after 1: sb(B).fetchable");
     let a = case.queue_state(A).await;
     assert_eq!(a, (Created, 1), "after 1: sb(A)");
@@ -453,14 +451,15 @@ async fn n09_a_single_path_backs_every_output_with_its_hash_and_both_producers_a
     )
     .await;
 
-    let report = case
-        .commit_nar(commit_of(F_OUT, "f1", &[(F_OUT, "f1")]))
+    case.commit_nar(commit_of(F_OUT, "f1", &[(F_OUT, "f1")]))
         .await;
 
-    assert_eq!(report.outputs_marked, 2, "after 1: report.outputs_marked");
     for path in [F1, F2] {
-        let cached = case.output_of(path, "out").await.is_cached;
-        assert!(cached, "after 1: output({path},out).is_cached");
+        let stored = case.output_stored(path, "out").await;
+        assert!(
+            stored,
+            "after 1: cached_path(output({path},out).hash) stored"
+        );
     }
 
     assert!(case.sb(F1).await.fetchable, "after 1: sb(F1).fetchable");
@@ -499,13 +498,12 @@ async fn n10_a_drv_commit_queues_its_owner_only_when_the_other_conditions_are_me
 
     let (a_drv, _) = A.split_once('-').expect("A is a drv path");
 
-    let report = case.commit_nar(drv_nar(A)).await;
+    case.commit_nar(drv_nar(A)).await;
 
     let stored = case.find_cached_path(a_drv).await;
     assert!(stored.is_some(), "after 1: cached_path(A.drv) exists");
     let a = case.queue_state(A).await;
     assert_eq!(a, (Created, 1), "after 1: sb(A)");
-    assert_eq!(report.outputs_marked, 0, "after 1: report.outputs_marked");
     assert_only_unstored_outputs(case.drift().await, 1, "step 1");
 
     case.commit_nar(commit_of(B_OUT, "b", &[(B_OUT, "b")]))
@@ -590,8 +588,7 @@ async fn n12_a_path_nobody_produces_is_stored_without_edges_and_marks_no_output(
     let report = case.commit_nar(nar(SOURCE, "source")).await;
 
     let stored = case.cached_path(SOURCE).await;
-    let report = (report.created, report.outputs_marked);
-    assert_eq!(report, (true, 0), "after 1: report");
+    assert!(report.created, "after 1: report.created");
     let mut after = case.rows().await;
     let paths = after.remove("cached_path").unwrap_or_default();
     assert_eq!(after, before, "after 1: CHAIN rows and edges unchanged");

@@ -225,13 +225,9 @@ async fn m04_a_batch_and_a_commit_queued_together_see_each_other_after_the_flush
         together(case.walk_result(walk), case.commit_nar_result(commit)).await;
 
     walked.expect("after 1: the batch is written");
-    let committed = committed.expect("after 1: the NAR is committed");
-    assert_eq!(
-        committed.outputs_marked, 1,
-        "after 1: report(commit).outputs_marked"
-    );
-    let output = case.output_of(A, "out").await;
-    assert!(output.is_cached, "after 1: output(A,out).is_cached");
+    committed.expect("after 1: the NAR is committed");
+    let stored = case.output_stored(A, "out").await;
+    assert!(stored, "after 1: cached_path(output(A,out).hash) stored");
     let a = case.sb(A).await;
     assert_eq!(
         (a.status, a.missing_runtime_deps, a.fetchable),

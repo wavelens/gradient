@@ -813,10 +813,6 @@ async fn r12_inputs_unavailable_removes_the_missing_input_and_retries_after_it_i
         case.cached_path(B_OUT).await.is_none(),
         "after 2: cached_path(B_OUT) == none"
     );
-    assert!(
-        !case.output_of(B, "out").await.is_cached,
-        "after 2: output(B, out).is_cached"
-    );
     let dependency = case.sb(B).await;
     assert_eq!(
         (dependency.status, dependency.fetchable),

@@ -88,8 +88,12 @@ async fn b01_a_first_batch_writes_its_graph_rows_and_leaves_the_unwanted_stub_sk
     assert_eq!(kind, Some(EdgeKind::Buildtime), "after 1: edge(A,B).kind");
     let output = case.output_of(A, "out").await;
     assert_eq!(output.hash, A_OUT, "after 1: output(A,out).hash");
-    let columns = (output.is_cached, output.external_url);
-    assert_eq!(columns, (false, None), "after 1: output(A,out)");
+    let stored = case.output_stored(A, "out").await;
+    assert_eq!(
+        (stored, output.external_url),
+        (false, None),
+        "after 1: output(A,out)"
+    );
     let created = SharedBuild {
         wanted: true,
         blocking_deps: 1,
@@ -489,11 +493,9 @@ async fn b09_a_derivation_with_a_stored_output_starts_substituted_and_fetchable(
     assert_eq!(inputs, 0, "after 1: derivation(A).unwalked_inputs");
     let counters = case.counters(e1).await;
     assert_eq!(counters, [2, 1, 0, 0, 0], "after 1: counters(E1)");
-    let output = case.output_of(B, "out").await;
-    let stored = case.cached_path(B_OUT).await.id;
-    let link = (output.is_cached, output.cached_path);
-    assert_eq!(link, (true, Some(stored)), "after 1: output(B,out)");
-    let asked = case.ids(&[A]).await;
+    let stored = case.output_stored(B, "out").await;
+    assert!(stored, "after 1: cached_path(output(B,out).hash) stored");
+    let asked = case.ids(&[A, B]).await;
     assert_eq!(as_set(&report.to_probe), asked, "after 1: report.to_probe");
     case.zero_drift("step 1").await;
 
@@ -527,8 +529,8 @@ async fn b10_a_derivation_without_a_stored_output_is_not_substituted() {
     };
 
     assert_eq!(shared_build(&case, B).await, skipped, "after 1: sb(B)");
-    let output = case.output_of(B, "out").await;
-    assert!(!output.is_cached, "after 1: output(B,out).is_cached");
+    let stored = case.output_stored(B, "out").await;
+    assert!(!stored, "after 1: cached_path(output(B,out).hash) stored");
     let blocking_deps = case.sb(A).await.blocking_deps;
     assert_eq!(blocking_deps, 1, "after 1: sb(A).blocking_deps");
     let counters = case.counters(e1).await;

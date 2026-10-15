@@ -3627,8 +3627,7 @@ paths:
         Removes this cache's signature row for the given store-path hash. The delete
         is ref-counted: when other caches still hold the same NAR, only this cache's
         signature is dropped. When this is the last cache holding the NAR, the
-        `cached_path` row is removed in the same transaction, any matching
-        `derivation_output.is_cached` rows are flipped to `false`, and the NAR
+        `cached_path` row is removed in the same transaction and the NAR
         blob is garbage-collected asynchronously after the response. Requires
         `writeStore`. Allowed on state-managed caches - NAR content is operational
         data, distinct from cache configuration.

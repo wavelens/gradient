@@ -140,7 +140,7 @@ A `dispatched_job` row records that a job went out. `claim_assignment` writes th
 
 A build that reports `InputsUnavailable` must call `self_heal::repair_missing_inputs` (`backend/gradient-graph/src/self_heal.rs`) once for every missing path. Four cases can apply:
 
-1. `demote_cached_output`: clear `is_cached` and `external_url`, clear `cache_available`, retire the `cached_path` row, and delete the NAR.
+1. `demote_cached_output`: clear `external_url`, clear `cache_available`, retire the `cached_path` row, and delete the NAR.
 2. Producerless path (`.drv`, source): the path can stay while its NAR exists. Call `demote_parents_of` to demote the rebuildable outputs that reference it.
 3. Unreachable producer: demote the outputs that reference the path and un-walk them. When no such output exists, call `demote_output_only_cached_deps` to demote the output-only-cached direct deps of the failing build.
 4. Terminal-failed producer: re-queue it on the spot with `requeue_failed_shared_builds`.

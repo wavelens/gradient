@@ -27,15 +27,15 @@ gradient_db::sql! {
     /// endpoint forever. The anti-join is keeping a healthy instance at one indexed probe.
     REPAIR_ORPHAN_CLAIMS = r#"
 WITH orphan AS (
-    SELECT cp.id
+    SELECT cp.id, cp.hash
     FROM cached_path cp
-    WHERE NOT EXISTS (
+    WHERE cp.file_hash IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)
     LIMIT $1
 ), claim AS (
     SELECT DISTINCT o.id AS cached_path, c.id AS cache
     FROM orphan o
-    JOIN derivation_output dout ON dout.cached_path = o.id
+    JOIN derivation_output dout ON dout.hash = o.hash
     JOIN build_job bj           ON bj.derivation = dout.derivation
     JOIN evaluation e           ON e.id = bj.evaluation
     JOIN task t                 ON t.id = e.task

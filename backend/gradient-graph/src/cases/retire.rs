@@ -46,7 +46,7 @@ async fn state_of_the_chain(case: &Case, evaluation: EvaluationId) -> Vec<String
         let build = case.sb(path).await;
         let queue = (build.status, build.cache_available, build.probed);
         let closure = (build.fetchable, build.missing_runtime_deps);
-        let cached = case.output_of(path, "out").await.is_cached;
+        let cached = case.output_stored(path, "out").await;
         let pending = (build.blocking_deps, build.attempt);
         let columns = format!("{queue:?} {closure:?} {pending:?} {cached}");
         state.push(format!("{path}: {columns}"));
@@ -86,8 +86,6 @@ async fn r01_retiring_an_output_resets_the_producer_and_the_recommit_restores_ev
         let signatures = case.db.rows::<cached_path_signature::Entity>().await;
         let none = signatures.is_empty();
         assert!(none, "{variant} after 1: {signatures:?}");
-        let cached = case.output_of(B, "out").await.is_cached;
-        assert!(!cached, "{variant} after 1: output(B,out).is_cached");
         let b = case.sb(B).await;
         let queue = (b.status, b.wanted, b.cache_available);
         assert_eq!(queue, (Queued, true, false), "{variant} after 1: sb(B)");
@@ -275,10 +273,8 @@ async fn r05_a_cache_claim_deletes_only_its_row_and_the_last_claim_retires_the_p
 
     let signature = case.signature(B_OUT, c1).await;
     assert_eq!(signature, None, "after 1: signature(B_OUT, C1)");
-    let stored = case.find_cached_path(B_OUT).await;
-    assert!(stored.is_some(), "after 1: cached_path(B_OUT) present");
-    let cached = case.output_of(B, "out").await.is_cached;
-    assert!(cached, "after 1: output(B,out).is_cached");
+    let stored = case.output_stored(B, "out").await;
+    assert!(stored, "after 1: cached_path(output(B,out).hash) stored");
     assert!(case.sb(B).await.fetchable, "after 1: sb(B).fetchable");
     assert!(report.others_remain, "after 1: report.others_remain");
     case.zero_drift("step 1").await;
@@ -506,8 +502,8 @@ async fn r09_a_retire_while_the_producer_is_building_leaves_its_attempt_alone() 
     let outcome = case.latest_attempt(B).await.outcome;
     let running = AttemptOutcome::Running;
     assert_eq!(outcome, running, "after 1: attempt(B, latest).outcome");
-    let cached = case.output_of(B, "out").await.is_cached;
-    assert!(!cached, "after 1: output(B,out).is_cached");
+    let stored = case.output_stored(B, "out").await;
+    assert!(!stored, "after 1: cached_path(output(B,out).hash) stored");
     let a = case.queue_state(A).await;
     assert_eq!(a, (Created, 1), "after 1: sb(A)");
     case.zero_drift("step 1").await;

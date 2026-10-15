@@ -156,6 +156,13 @@ impl TestDatabase {
             .unwrap_or_else(|| panic!("no output {name} of {path}"))
     }
 
+    pub async fn output_stored(&self, path: &str, name: &str) -> bool {
+        let hash = self.output_of(path, name).await.hash;
+        self.cached_path(&hash)
+            .await
+            .is_some_and(|stored| stored.file_hash.is_some())
+    }
+
     pub async fn cached_path(&self, hash: &str) -> Option<cached_path::Model> {
         cached_path::Entity::find()
             .filter(cached_path::Column::Hash.eq(hash))

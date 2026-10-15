@@ -284,9 +284,9 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "derivation_output",
-            "CREATE TABLE derivation_output (id TEXT, derivation TEXT, name TEXT, hash TEXT, package TEXT, ca TEXT, nar_size INTEGER, is_cached INTEGER, created_at TEXT, cached_path TEXT, external_url TEXT, nar_hash TEXT, file_size INTEGER, references_list TEXT, deriver TEXT, file_hash TEXT)",
+            "CREATE TABLE derivation_output (id TEXT, derivation TEXT, name TEXT, hash TEXT, package TEXT, ca TEXT, nar_size INTEGER, created_at TEXT, external_url TEXT, nar_hash TEXT, file_size INTEGER, references_list TEXT, deriver TEXT, file_hash TEXT)",
             concat!(
-                "SELECT o.id::text, o.derivation::text, o.name::text, o.hash::text, o.package::text, o.ca::text, o.nar_size::text, o.is_cached::int::text, o.created_at::text, o.cached_path::text, o.external_url::text, o.nar_hash::text, o.file_size::text, o.references_list::text, o.deriver::text, o.file_hash::text FROM derivation_output o WHERE o.derivation IN (",
+                "SELECT o.id::text, o.derivation::text, o.name::text, o.hash::text, o.package::text, o.ca::text, o.nar_size::text, o.created_at::text, o.external_url::text, o.nar_hash::text, o.file_size::text, o.references_list::text, o.deriver::text, o.file_hash::text FROM derivation_output o WHERE o.derivation IN (",
                 derivation_scope!(),
                 ")"
             ),
@@ -299,9 +299,7 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "package",
                 "ca",
                 "nar_size",
-                "is_cached",
                 "created_at",
-                "cached_path",
                 "external_url",
                 "nar_hash",
                 "file_size",

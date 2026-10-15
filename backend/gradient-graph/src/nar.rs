@@ -87,20 +87,11 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
         .await?
         .pop()
         .unwrap_or_default();
-    let outputs_marked = EDerivationOutput::update_many()
-        .col_expr(CDerivationOutput::IsCached, Expr::value(true))
-        .col_expr(CDerivationOutput::CachedPath, Expr::value(cached_path))
-        .filter(CDerivationOutput::Hash.eq(sp.hash()))
-        .exec(db)
-        .await
-        .context("mark derivation outputs cached")?
-        .rows_affected;
-    trace!(store_path = %c.store_path, outputs_marked, created, "cached path committed");
+    trace!(store_path = %c.store_path, created, "cached path committed");
 
     Ok(NarCommitted {
         cached_path,
         created,
-        outputs_marked,
         signed,
     })
 }
@@ -170,15 +161,12 @@ pub(crate) async fn commit_batch(
         .collect();
     let signed = sign_into_caches(ctx, &signing).await?;
 
-    let marked = mark_outputs_cached(db, &hashes).await?;
-    Ok(hashes
-        .iter()
-        .zip(upserted)
+    Ok(upserted
+        .into_iter()
         .zip(signed)
-        .map(|((hash, u), signed)| NarCommitted {
+        .map(|(u, signed)| NarCommitted {
             cached_path: u.cached_path,
             created: u.created,
-            outputs_marked: marked.get(hash).copied().unwrap_or(0),
             signed,
         })
         .collect())
@@ -279,27 +267,6 @@ async fn commit_runtime_dependencies(
     }
 
     Ok(())
-}
-
-async fn mark_outputs_cached(
-    db: &WorkerDb,
-    hashes: &[String],
-) -> anyhow::Result<std::collections::HashMap<String, u64>> {
-    let rows = EDerivationOutput::update_many()
-        .col_expr(CDerivationOutput::IsCached, Expr::value(true))
-        .col_expr(
-            CDerivationOutput::CachedPath,
-            Expr::cust("(SELECT cp.id FROM cached_path cp WHERE cp.hash = derivation_output.hash)"),
-        )
-        .filter(CDerivationOutput::Hash.is_in(hashes.to_vec()))
-        .exec_with_returning(db)
-        .await
-        .context("mark derivation outputs cached")?;
-    let mut marked = std::collections::HashMap::new();
-    for row in rows {
-        *marked.entry(row.hash).or_insert(0) += 1;
-    }
-    Ok(marked)
 }
 
 async fn advance_shared_builds(

@@ -15,8 +15,6 @@ pub(crate) enum CacheRefusal {
     SignaturePending,
     #[error("{0} not recorded")]
     NotRecorded(&'static str),
-    #[error("Missing file {0}")]
-    MissingFileField(&'static str),
     #[error("Cache is disabled")]
     CacheDisabled,
     #[error("Anonymous cache access is disabled.")]
@@ -79,8 +77,7 @@ impl Refusal for CacheRefusal {
             Self::ConnectionCapacityReached | Self::TooManyConnectionsFromIp => {
                 RefusalStatus::ServiceUnavailable
             }
-            Self::MissingFileField(_)
-            | Self::CacheDisabled
+            Self::CacheDisabled
             | Self::MissingHashQuery
             | Self::InvalidHashInUrl(_)
             | Self::NegativeMaxStorage

@@ -195,7 +195,6 @@ impl Graph {
             return Ok(NarCommitted {
                 cached_path: gradient_types::ids::CachedPathId::now_v7(),
                 created: true,
-                outputs_marked: 0,
                 signed: Vec::new(),
             });
         }
@@ -205,7 +204,6 @@ impl Graph {
         self.announce(|| graph::NarCommitted {
             cached_path: committed.cached_path,
             created: committed.created,
-            outputs_marked: committed.outputs_marked,
         });
         Ok(committed)
     }

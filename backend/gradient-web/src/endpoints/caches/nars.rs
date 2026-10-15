@@ -239,7 +239,7 @@ pub async fn available(
     operation_id = "deleteCacheNar",
     tag = "caches",
     summary = "Delete a NAR from this cache",
-    description = "Removes this cache's signature row for the given store-path hash. The delete\nis ref-counted: when other caches still hold the same NAR, only this cache's\nsignature is dropped. When this is the last cache holding the NAR, the\n`cached_path` row is removed in the same transaction, any matching\n`derivation_output.is_cached` rows are flipped to `false`, and the NAR\nblob is garbage-collected asynchronously after the response. Requires\n`writeStore`. Allowed on state-managed caches - NAR content is operational\ndata, distinct from cache configuration.",
+    description = "Removes this cache's signature row for the given store-path hash. The delete\nis ref-counted: when other caches still hold the same NAR, only this cache's\nsignature is dropped. When this is the last cache holding the NAR, the\n`cached_path` row is removed in the same transaction and the NAR\nblob is garbage-collected asynchronously after the response. Requires\n`writeStore`. Allowed on state-managed caches - NAR content is operational\ndata, distinct from cache configuration.",
     params(CachePath, ("hash" = String, Path)),
     responses((status = NO_CONTENT, description = "NAR removed from this cache"), WebError)
 )]

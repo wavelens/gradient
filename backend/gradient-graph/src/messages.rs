@@ -98,7 +98,6 @@ impl NarCommit {
 pub struct NarCommitted {
     pub cached_path: CachedPathId,
     pub created: bool,
-    pub outputs_marked: u64,
     pub signed: Vec<CacheId>,
 }
 

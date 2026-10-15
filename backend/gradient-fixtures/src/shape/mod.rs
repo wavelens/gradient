@@ -362,10 +362,7 @@ impl Shape {
             .unwrap_or_else(|| panic!("cached output of {path}: declare its output first"));
         let hash = self.outputs[output].hash.clone();
         let package = self.outputs[output].package.clone();
-        let stored = self.stored_path(&hash, &package);
-        self.outputs[output].is_cached = true;
-        self.outputs[output].cached_path = Some(self.cached_paths[stored].id);
-        self.cached_path = Some(stored);
+        self.cached_path = Some(self.stored_path(&hash, &package));
         self
     }
 
@@ -669,10 +666,10 @@ mod tests {
             db.edge(A, B).await.expect("the edge").kind,
             EdgeKind::Buildtime
         );
-        let output = db.output(B_OUT).await;
+        let stored = db.cached_path(B_OUT).await;
         assert!(
-            output.is_cached && output.cached_path.is_some(),
-            "{output:?}"
+            stored.as_ref().is_some_and(|p| p.file_hash.is_some()),
+            "{stored:?}"
         );
         let caches = db.rows::<cache::Entity>().await;
         assert!(matches!(caches.as_slice(), [c] if c.id == cache && c.private_key == "key"));

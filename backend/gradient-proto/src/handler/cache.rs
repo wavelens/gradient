@@ -21,32 +21,14 @@ use tracing::warn;
 
 use super::SessionHandles;
 
-/// A DB error must propagate as unknown cache state, never as absent. The worker would take a fully
-/// cached input as a terminal `InputsUnavailable` and fail the eval.
-async fn build_local_cache_map(
-    db: &CacheDb,
-    hashes: &[&str],
+fn stored_sizes(
     cached_paths: &[gradient_entity::cached_path::Model],
-) -> Result<HashMap<String, (Option<i64>, Option<i64>)>, DbErr> {
-    let derivation_outputs = EDerivationOutput::find()
-        .filter(
-            sea_orm::Condition::all()
-                .add(CDerivationOutput::IsCached.eq(true))
-                .add(CDerivationOutput::Hash.is_in(hashes.to_vec())),
-        )
-        .all(db)
-        .await?;
-
-    let sizes: HashMap<&str, (Option<i64>, Option<i64>)> = cached_paths
+) -> HashMap<String, (Option<i64>, Option<i64>)> {
+    cached_paths
         .iter()
         .filter(|cp| cp.is_fully_cached())
-        .map(|cp| (cp.hash.as_str(), (cp.file_size, cp.nar_size)))
-        .collect();
-
-    Ok(derivation_outputs
-        .into_iter()
-        .filter_map(|row| sizes.get(row.hash.as_str()).map(|sizes| (row.hash, *sizes)))
-        .collect())
+        .map(|cp| (cp.hash.clone(), (cp.file_size, cp.nar_size)))
+        .collect()
 }
 
 async fn load_cached_path_rows(
@@ -508,16 +490,7 @@ async fn query(
     let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
 
     let cached_path_rows = load_cached_path_rows(&handles.cache_db, &hashes).await?;
-    let mut cached_map =
-        build_local_cache_map(&handles.cache_db, &hashes, &cached_path_rows).await?;
-
-    for cp in &cached_path_rows {
-        if cp.is_fully_cached() {
-            cached_map
-                .entry(cp.hash.clone())
-                .or_insert((cp.file_size, cp.nar_size));
-        }
-    }
+    let cached_map = stored_sizes(&cached_path_rows);
 
     if matches!(mode, QueryMode::Push)
         && let Some(oid) = project_id
@@ -687,12 +660,7 @@ pub(super) async fn query_for_cache(
     let cached_path_rows = load_cached_path_rows(&handles.cache_db, &hashes)
         .await
         .unwrap_or_default();
-    let cached_map = build_local_cache_map(&handles.cache_db, &hashes, &cached_path_rows)
-        .await
-        .unwrap_or_else(|e| {
-            warn!(error = %e, "cache-serve local lookup failed; treating as miss");
-            HashMap::new()
-        });
+    let cached_map = stored_sizes(&cached_path_rows);
 
     let rows_by_hash: HashMap<&str, &gradient_entity::cached_path::Model> = cached_path_rows
         .iter()
