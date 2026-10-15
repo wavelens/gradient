@@ -5782,7 +5782,7 @@ paths:
           all-zero `after` SHA (a branch/tag deletion or a Git host "test" delivery)
           is accepted as a `200` no-op rather than rejected.
         - `check_run` - the "Approve and Run" action clears a fork-PR approval gate.
-        - `issue_comment` - `/gradient run` / `/gradient approve` maintainer commands.
+        - `issue_comment` - `/gradient run` / `/gradient approve` / `/gradient summary` maintainer commands.
         - `pull_request_review` - a maintainer's approving review clears a fork-PR approval gate.
         - `installation` / `installation_repositories` - stores or clears the GitHub App
           `installation_id` on the matching Gradient project.
