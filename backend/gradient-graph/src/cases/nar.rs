@@ -608,6 +608,67 @@ async fn n12_a_path_nobody_produces_is_stored_without_edges_and_marks_no_output(
 }
 
 #[tokio::test]
+async fn n13_a_dependency_landing_in_the_same_flush_as_its_referrer_counts_for_it_once() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start_with_unstored_outputs(
+        shape()
+            .evaluation(e1)
+            .derivation(X)
+            .walked()
+            .entry_point("pkg.x")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(X_OUT)
+            .depends_on(P)
+            .derivation(P)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(P_OUT)
+            .build_status(Completed)
+            .depends_on(D)
+            .depends_on(M)
+            .derivation(D)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(D_OUT)
+            .build_status(Completed)
+            .derivation(M)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(M_OUT)
+            .build_status(Completed),
+        3,
+    )
+    .await;
+
+    let referrer = commit_of(P_OUT, "p", &[(P_OUT, "p"), (D_OUT, "d"), (M_OUT, "m")]);
+    let dependency = commit_of(D_OUT, "d", &[(D_OUT, "d")]);
+    let (p, d) = tokio::join!(
+        case.commit_nar_result(referrer),
+        case.commit_nar_result(dependency)
+    );
+    p.expect("after 1: P_OUT is committed");
+    d.expect("after 1: D_OUT is committed");
+
+    let d = case.closure_state(D).await;
+    assert_eq!(d, (true, 0), "after 1: sb(D) fetchable, missing 0");
+    let p = case.closure_state(P).await;
+    assert_eq!(p, (false, 1), "after 1: sb(P) waits for M");
+    let x = case.queue_state(X).await;
+    assert_eq!(x, (Created, 1), "after 1: sb(X)");
+    assert_only_unstored_outputs(case.drift().await, 1, "step 1");
+    let end = case.finish_with_drift().await;
+    assert_only_unstored_outputs(end, 1, "the end");
+}
+
+#[tokio::test]
 async fn the_cached_path_row_is_read_under_a_row_lock() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(chain_done(e1)).await;
