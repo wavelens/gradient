@@ -51,6 +51,7 @@ pub struct WorkerProfile {
     pub cpu_core_score: u32,
     pub zone: Option<String>,
     pub endpoint: Option<String>,
+    pub build_cores: Option<u32>,
 }
 
 pub struct WorkerShared {
@@ -63,6 +64,7 @@ pub struct WorkerShared {
     pub cpu_core_score: u32,
     pub zone: Option<String>,
     pub endpoint: Option<String>,
+    pub build_cores: Option<u32>,
     pub cpu_usage_pct: Option<f32>,
     pub ram_free_mb: Option<u64>,
     pub disk_speed_mbps: Option<f32>,
@@ -130,6 +132,7 @@ impl WorkerShared {
             cpu_core_score: self.cpu_core_score,
             zone: self.zone.clone(),
             endpoint: self.endpoint.clone(),
+            build_cores: self.build_cores,
         }
     }
 
@@ -142,6 +145,7 @@ impl WorkerShared {
         self.cpu_core_score = profile.cpu_core_score;
         self.zone = profile.zone.filter(|z| !z.is_empty());
         self.endpoint = profile.endpoint.filter(|e| !e.is_empty());
+        self.build_cores = profile.build_cores;
     }
 }
 
@@ -192,6 +196,7 @@ impl TypedWorker<Active> {
                 cpu_core_score: 0,
                 zone: None,
                 endpoint: None,
+                build_cores: None,
                 cpu_usage_pct: None,
                 ram_free_mb: None,
                 disk_speed_mbps: None,

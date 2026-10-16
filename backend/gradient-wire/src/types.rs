@@ -108,6 +108,8 @@ pub struct BuildSpec {
     pub outputs: Vec<DerivationOutput>,
     pub timeout_secs: Option<u64>,
     pub max_silent_secs: Option<u64>,
+    #[proto(34, default)]
+    pub build_cores: Option<u32>,
 }
 
 #[derive(Proto, Debug, Clone, Copy, PartialEq, Eq)]

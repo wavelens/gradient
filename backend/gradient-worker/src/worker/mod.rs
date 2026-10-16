@@ -273,6 +273,7 @@ async fn perform_setup(
             cpu_core_score,
             zone: config.zone.clone().filter(|z| !z.is_empty()),
             endpoint: config.endpoint.clone().filter(|e| !e.is_empty()),
+            build_cores: config.build_cores().map(std::num::NonZeroU32::get),
         })
         .await?;
     }

@@ -156,6 +156,7 @@ impl<'a> InboundContext<'a> {
                 cpu_core_score,
                 zone,
                 endpoint,
+                build_cores,
             } => {
                 self.on_worker_capabilities(WorkerCapabilities {
                     architectures,
@@ -166,6 +167,7 @@ impl<'a> InboundContext<'a> {
                     cpu_core_score,
                     zone,
                     endpoint,
+                    build_cores,
                 })
                 .await;
                 true

@@ -638,6 +638,7 @@ mod tests {
                 .collect(),
             timeout_secs: None,
             max_silent_secs: None,
+            build_cores: None,
         }
     }
 
