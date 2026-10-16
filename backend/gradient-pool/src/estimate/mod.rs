@@ -83,22 +83,57 @@ impl BuildEstimate {
         reason = "rounded and positive"
     )]
     pub fn ram_mb(&self, cores: u32) -> Option<u64> {
-        let predicted = self.ram?.upper(cores);
+        let predicted = self.ram.map(|curve| curve.upper(cores));
         let floor = self
             .ram_floor
             .iter()
             .filter(|(at, _)| cores >= *at)
             .map(|(_, mb)| *mb as f64 * RAM_FLOOR_MARGIN)
-            .fold(0.0, f64::max);
-        Some(predicted.max(floor).round() as u64)
+            .reduce(f64::max);
+        let mb = match (predicted, floor) {
+            (Some(predicted), Some(floor)) => predicted.max(floor),
+            (predicted, floor) => predicted.or(floor)?,
+        };
+        Some(mb.round() as u64)
     }
 
     pub fn build_ms(&self, cores: u32) -> Option<f64> {
         self.build_time.map(|curve| curve.median(cores))
     }
 
+    pub fn learn(&mut self, fresh: BuildEstimate) {
+        let output_nar_bytes = self.output_nar_bytes.or(fresh.output_nar_bytes);
+        let mut ram_floor = fresh.ram_floor.clone();
+        ram_floor.extend(
+            self.ram_floor
+                .iter()
+                .filter(|f| !fresh.ram_floor.contains(f)),
+        );
+        *self = BuildEstimate {
+            output_nar_bytes,
+            ram_floor,
+            ..fresh
+        };
+    }
+
     pub fn raise_ram_to(&mut self, observed_mb: u64) {
         self.ram_floor.push((1, observed_mb));
-        self.ram.get_or_insert(LogCurve::flat(observed_mb as f64));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_out_of_memory_floor_holds_without_a_fitted_estimate() {
+        let killed = BuildEstimate {
+            ram_floor: vec![(16, 20_000)],
+            ..BuildEstimate::default()
+        };
+
+        assert_eq!(killed.ram_mb(16), Some(22_000));
+        assert_eq!(killed.ram_mb(64), Some(22_000));
+        assert_eq!(killed.ram_mb(8), None);
     }
 }

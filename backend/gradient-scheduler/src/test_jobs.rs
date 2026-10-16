@@ -81,6 +81,7 @@ pub(crate) fn build_job(
         prefer_local_build: false,
         is_fixed_output: false,
         estimate: Default::default(),
+        history_key: None,
         queued_at: gradient_types::now(),
         ready_at: gradient_types::now(),
         rescore_count: 0,

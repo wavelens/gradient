@@ -74,6 +74,7 @@ pub struct PendingBuildJob {
     pub prefer_local_build: bool,
     pub is_fixed_output: bool,
     pub estimate: BuildEstimate,
+    pub history_key: Option<gradient_pool::estimate::GroupKey>,
     pub queued_at: chrono::NaiveDateTime,
     pub ready_at: chrono::NaiveDateTime,
     pub rescore_count: u32,
@@ -1351,6 +1352,18 @@ impl JobTracker {
         }
     }
 
+    pub(crate) fn reestimate(&mut self, history: &crate::build_history::BuildHistory) {
+        for job in self.pending.values_mut() {
+            if let PendingJob::Build(build) = job
+                && let Some(key) = &build.history_key
+            {
+                build
+                    .estimate
+                    .learn(history.estimate(key, build.derivation));
+            }
+        }
+    }
+
     pub fn pending_job(&self, job_id: &str) -> Option<&PendingJob> {
         self.pending.get(job_id)
     }
@@ -1878,6 +1891,33 @@ mod tests {
     }
 
     #[test]
+    fn a_pending_build_follows_an_out_of_memory_kill_read_after_its_admission() {
+        let mut tracker = JobTracker::new();
+        let mut job = build_job(ProjectId::now_v7(), vec![]);
+        let PendingJob::Build(build) = &mut job else {
+            unreachable!()
+        };
+        let key = gradient_pool::estimate::GroupKey {
+            architecture: "x86_64-linux".into(),
+            pname: "torch".into(),
+            input_pnames: vec!["cmake".into()],
+        };
+        build.history_key = Some(key.clone());
+        let derivation = build.derivation;
+        tracker.add_pending("torch".into(), job);
+        let history = crate::build_history::BuildHistory::with_out_of_memory_kill(
+            key, derivation, 64, 100_000,
+        );
+
+        tracker.reestimate(&history);
+
+        let Some(PendingJob::Build(build)) = tracker.pending_job("torch") else {
+            unreachable!()
+        };
+        assert_eq!(build.estimate.max_cores, Some(43));
+    }
+
+    #[test]
     fn a_build_that_fits_with_fewer_cores_is_not_reported() {
         let mut tracker = JobTracker::new();
         let mut job = build_predicted(113_218);
@@ -1987,6 +2027,7 @@ mod tests {
             prefer_local_build: false,
             is_fixed_output: false,
             estimate: Default::default(),
+            history_key: None,
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,

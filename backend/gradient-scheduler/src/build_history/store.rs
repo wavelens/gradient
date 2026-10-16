@@ -14,6 +14,7 @@ use uuid::Uuid;
 pub(crate) struct LoadedSample {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
+    pub oom_killed: bool,
     pub sample: Sample,
 }
 
@@ -33,7 +34,7 @@ impl SampleStore {
                 continue;
             }
             self.newest = self.newest.max(Some(row.created_at));
-            if row.sample.lower_bound
+            if row.oom_killed
                 && let Some(cores) = row.sample.cores
             {
                 let fewest = self.oom_cores.entry(row.sample.derivation).or_insert(cores);
@@ -86,6 +87,7 @@ mod tests {
         LoadedSample {
             id,
             created_at: gradient_types::now(),
+            oom_killed: oom,
             sample: Sample {
                 derivation,
                 architecture: "x86_64-linux".into(),
@@ -120,5 +122,17 @@ mod tests {
         ]);
         assert_eq!(store.max_cores(derivation), Some(29));
         assert_eq!(store.max_cores(DerivationId::now_v7()), None);
+    }
+
+    #[test]
+    fn a_row_without_a_build_time_that_was_not_killed_caps_nothing() {
+        let mut store = SampleStore::default();
+        let derivation = DerivationId::now_v7();
+        let mut lost = row(Uuid::now_v7(), derivation, 64, false);
+        lost.sample.build_ms = None;
+        lost.sample.lower_bound = true;
+        store.add(vec![lost]);
+
+        assert_eq!(store.max_cores(derivation), None);
     }
 }

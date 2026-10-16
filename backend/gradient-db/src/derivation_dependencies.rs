@@ -33,7 +33,7 @@ pub async fn build_inputs_of<C: ConnectionTrait>(
 
 crate::sql! {
     BUILD_INPUT_PNAMES = r#"
-SELECT coalesce(d.pname, d.name) AS pname
+SELECT coalesce(d.pname, d.name) COLLATE "C" AS pname
 FROM derivation_dependency e JOIN derivation d ON d.id = e.dependency
 WHERE e.derivation = $1 AND e.kind IN (0, 2)
 GROUP BY 1 ORDER BY 1
@@ -54,4 +54,27 @@ pub async fn build_input_pnames<C: ConnectionTrait>(
         .iter()
         .filter_map(|r| r.try_get::<String>("", "pname").ok())
         .collect())
+}
+
+crate::sql! {
+    FEWEST_OUT_OF_MEMORY_CORES = r#"
+SELECT min(build_cores) AS cores
+FROM derivation_metric
+WHERE derivation = $1 AND oom_killed AND build_cores IS NOT NULL
+"#,
+        params = [DerivationId];
+}
+
+pub async fn fewest_out_of_memory_cores<C: ConnectionTrait>(
+    db: &C,
+    derivation: DerivationId,
+) -> Result<Option<u32>, DbErr> {
+    let row = db
+        .query_one_raw(
+            FEWEST_OUT_OF_MEMORY_CORES.bind([sea_orm::Value::Uuid(Some(derivation.into_inner()))]),
+        )
+        .await?;
+    Ok(row
+        .and_then(|r| r.try_get::<Option<i32>>("", "cores").ok().flatten())
+        .and_then(|c| u32::try_from(c).ok()))
 }
