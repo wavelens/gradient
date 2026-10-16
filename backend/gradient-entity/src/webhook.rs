@@ -9,7 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{CacheId, ProjectId, UserId, WebhookId};
+use crate::ids::{CacheId, ProjectId, TeamId, UserId, WebhookId};
 
 #[repr(i16)]
 #[derive(
@@ -37,6 +37,8 @@ pub enum WebhookScope {
     Cache = 1,
     #[sea_orm(num_value = 2)]
     Instance = 2,
+    #[sea_orm(num_value = 3)]
+    Team = 3,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
@@ -47,6 +49,7 @@ pub struct Model {
     pub scope: WebhookScope,
     pub project: Option<ProjectId>,
     pub cache: Option<CacheId>,
+    pub team: Option<TeamId>,
     pub name: String,
     pub url: String,
     pub secret: String,

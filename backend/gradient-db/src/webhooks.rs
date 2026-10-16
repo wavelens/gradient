@@ -16,6 +16,7 @@ pub struct Owner {
     pub scope: WebhookScope,
     pub project: Option<ProjectId>,
     pub cache: Option<CacheId>,
+    pub team: Option<TeamId>,
 }
 
 impl Owner {
@@ -29,6 +30,10 @@ impl Owner {
             .add(match self.cache {
                 Some(c) => CWebhook::Cache.eq(c),
                 None => CWebhook::Cache.is_null(),
+            })
+            .add(match self.team {
+                Some(t) => CWebhook::Team.eq(t),
+                None => CWebhook::Team.is_null(),
             })
     }
 }

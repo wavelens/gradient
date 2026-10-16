@@ -20,6 +20,7 @@ pub fn routes_to(hook: &MWebhook, owner: &EventOwner, name: &str, personal: bool
         _ if personal => false,
         WebhookScope::Project => hook.project.is_some() && hook.project == owner.project,
         WebhookScope::Cache => hook.cache.is_some() && hook.cache == owner.cache,
+        WebhookScope::Team => hook.team.is_some() && hook.team == owner.team,
     }
 }
 
@@ -33,6 +34,9 @@ pub async fn candidates<C: ConnectionTrait>(
     }
     if let Some(cache) = owner.cache {
         scope = scope.add(CWebhook::Cache.eq(cache));
+    }
+    if let Some(team) = owner.team {
+        scope = scope.add(CWebhook::Team.eq(team));
     }
     EWebhook::find()
         .filter(CWebhook::Active.eq(true))
@@ -114,6 +118,33 @@ mod tests {
             "cache.nar.upload",
             false
         ));
+    }
+
+    fn team_hook(team: TeamId) -> MWebhook {
+        MWebhook {
+            team: Some(team),
+            ..hook(WebhookScope::Team, None, None, &[])
+        }
+    }
+
+    #[test]
+    fn team_hook_receives_its_team_event() {
+        let a = TeamId::new(Uuid::from_u128(4));
+        assert!(routes_to(
+            &team_hook(a),
+            &EventOwner::team(a),
+            "worker.demand",
+            false
+        ));
+    }
+
+    #[test]
+    fn team_hook_ignores_other_team_and_project_events() {
+        let h = team_hook(TeamId::new(Uuid::from_u128(4)));
+        let other_team = EventOwner::team(TeamId::new(Uuid::from_u128(5)));
+        let project = EventOwner::project(ProjectId::new(Uuid::from_u128(1)));
+        assert!(!routes_to(&h, &other_team, "worker.demand", false));
+        assert!(!routes_to(&h, &project, "build.failed", false));
     }
 
     #[test]

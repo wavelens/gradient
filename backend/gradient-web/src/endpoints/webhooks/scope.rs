@@ -24,6 +24,7 @@ pub struct WebhookOwner {
     pub scope: WebhookScope,
     pub project: Option<ProjectId>,
     pub cache: Option<CacheId>,
+    pub team: Option<TeamId>,
     pub user: MUser,
     pub params: PathParams,
 }
@@ -41,6 +42,7 @@ impl WebhookOwner {
             project: self.project,
             task: None,
             cache: self.cache,
+            team: self.team,
         }
     }
 
@@ -55,6 +57,9 @@ impl WebhookOwner {
             (WebhookScope::Instance, Verb::Create) => Action::InstanceWebhookCreate,
             (WebhookScope::Instance, Verb::Update) => Action::InstanceWebhookUpdate,
             (WebhookScope::Instance, Verb::Delete) => Action::InstanceWebhookDelete,
+            (WebhookScope::Team, Verb::Create) => Action::TeamWebhookCreate,
+            (WebhookScope::Team, Verb::Update) => Action::TeamWebhookUpdate,
+            (WebhookScope::Team, Verb::Delete) => Action::TeamWebhookDelete,
         }
     }
 
@@ -69,6 +74,7 @@ impl From<&WebhookOwner> for gradient_db::webhooks::Owner {
             scope: owner.scope,
             project: owner.project,
             cache: owner.cache,
+            team: owner.team,
         }
     }
 }
@@ -108,6 +114,7 @@ impl FromRequestParts<Arc<ServerState>> for WebhookOwner {
                 scope: WebhookScope::Project,
                 project: Some(project.id),
                 cache: None,
+                team: None,
                 user,
                 params,
             });
@@ -128,6 +135,7 @@ impl FromRequestParts<Arc<ServerState>> for WebhookOwner {
                 scope: WebhookScope::Cache,
                 project: None,
                 cache: Some(cache.id),
+                team: None,
                 user,
                 params,
             });
@@ -137,6 +145,7 @@ impl FromRequestParts<Arc<ServerState>> for WebhookOwner {
             scope: WebhookScope::Instance,
             project: None,
             cache: None,
+            team: None,
             user,
             params,
         })

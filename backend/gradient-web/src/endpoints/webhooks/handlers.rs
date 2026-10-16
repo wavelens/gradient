@@ -143,6 +143,7 @@ pub async fn create_webhook(
             scope: owner.scope,
             project: owner.project,
             cache: owner.cache,
+            team: owner.team,
             name: body.name,
             url: body.url,
             secret: encrypted,

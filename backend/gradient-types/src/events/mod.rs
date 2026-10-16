@@ -25,7 +25,7 @@ pub use bus::{EVENT_BUS_CAPACITY, EventBus, EventRx};
 pub use envelope::Envelope;
 pub use filter::EventFilter;
 
-use crate::ids::{CacheId, ProjectId, TaskId};
+use crate::ids::{CacheId, ProjectId, TaskId, TeamId};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
@@ -34,6 +34,7 @@ pub struct EventOwner {
     pub project: Option<ProjectId>,
     pub task: Option<TaskId>,
     pub cache: Option<CacheId>,
+    pub team: Option<TeamId>,
 }
 
 impl EventOwner {
@@ -63,6 +64,13 @@ impl EventOwner {
     pub fn cache(cache: CacheId) -> Self {
         Self {
             cache: Some(cache),
+            ..Self::default()
+        }
+    }
+
+    pub fn team(team: TeamId) -> Self {
+        Self {
+            team: Some(team),
             ..Self::default()
         }
     }

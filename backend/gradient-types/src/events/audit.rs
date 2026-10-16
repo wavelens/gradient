@@ -120,6 +120,9 @@ actions! {
     TeamWorkerCreate => "team.worker.create",
     TeamWorkerUpdate => "team.worker.update",
     TeamWorkerDelete => "team.worker.delete",
+    TeamWebhookCreate => "team.webhook.create",
+    TeamWebhookUpdate => "team.webhook.update",
+    TeamWebhookDelete => "team.webhook.delete",
 }
 
 impl Action {
