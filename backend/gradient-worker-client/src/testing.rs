@@ -123,6 +123,7 @@ impl ProtoPeer {
                 cpu_core_score: 1,
                 zone: None,
                 endpoint: None,
+                build_cores: None,
             })
             .await?;
         }

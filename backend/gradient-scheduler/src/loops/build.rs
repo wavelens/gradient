@@ -548,6 +548,7 @@ impl BuildAssignMaps {
                     shared_build.max_silent_secs,
                     self.config.default_max_silent_secs,
                 ),
+                build_cores: None,
             }],
             requirement,
         };

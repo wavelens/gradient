@@ -41,6 +41,8 @@ pub enum ClientMessage {
         cpu_core_score: u32,
         zone: Option<String>,
         endpoint: Option<String>,
+        #[proto(34, default)]
+        build_cores: Option<u32>,
     },
 
     WorkerMetrics {

@@ -137,23 +137,22 @@ pub(super) fn build_metrics(
     usage: ResourceUsage,
     build_time_ms: u64,
     host: BuildHost,
+    cores: u32,
     running: &RunningBuild<'_>,
 ) -> BuildMetrics {
     observe_disk_speed(usage, build_time_ms);
     let cpu_count = crate::metrics::host_static().cpu_count;
     BuildMetrics {
         concurrent_builds: Some(running.others),
-        build_cores: Some(effective_cores(host.build_cores, cpu_count)),
+        build_cores: Some(cores),
         cpu_core_score: Some(host.cpu_core_score),
         ..metrics_from(usage, build_time_ms, cpu_count)
     }
 }
 
-fn effective_cores(build_cores: Option<NonZeroU32>, cpu_count: u32) -> u32 {
-    match build_cores {
-        Some(cores) => cores.get().min(cpu_count),
-        None => cpu_count,
-    }
+pub(super) fn build_cores_for(spec: Option<u32>, host: Option<NonZeroU32>, cpu_count: u32) -> u32 {
+    let host = host.map_or(cpu_count, |cores| cores.get().min(cpu_count));
+    spec.map_or(host, |cores| cores.min(host)).max(1)
 }
 
 fn observe_disk_speed(usage: ResourceUsage, build_time_ms: u64) {
@@ -284,10 +283,12 @@ mod tests {
     }
 
     #[test]
-    fn no_core_limit_is_every_core_and_a_larger_value_is_capped() {
-        assert_eq!(effective_cores(None, 16), 16);
-        assert_eq!(effective_cores(NonZeroU32::new(4), 16), 4);
-        assert_eq!(effective_cores(NonZeroU32::new(64), 16), 16);
+    fn the_cores_of_the_build_spec_win_over_the_host_but_never_exceed_it() {
+        assert_eq!(build_cores_for(Some(20), NonZeroU32::new(32), 64), 20);
+        assert_eq!(build_cores_for(Some(48), NonZeroU32::new(32), 64), 32);
+        assert_eq!(build_cores_for(None, NonZeroU32::new(64), 16), 16);
+        assert_eq!(build_cores_for(None, None, 64), 64);
+        assert_eq!(build_cores_for(Some(0), None, 8), 1);
     }
 
     #[test]

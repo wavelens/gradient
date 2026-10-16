@@ -28,7 +28,9 @@ use tracing::{debug, info, warn};
 use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
 
-use super::build_metrics::{BuildHost, RUNNING_BUILDS, ResourceUsage, build_metrics};
+use super::build_metrics::{
+    BuildHost, RUNNING_BUILDS, ResourceUsage, build_cores_for, build_metrics,
+};
 pub use super::failure::BuildError;
 use super::failure::classify_build_error;
 
@@ -307,6 +309,11 @@ pub async fn build_derivation(
         .await
         .map_err(BuildError::transient)?;
 
+    let cores = build_cores_for(
+        task.build_cores,
+        host.build_cores,
+        crate::metrics::host_static().cpu_count,
+    );
     let running = RUNNING_BUILDS.start(&updater.job_id, &task.drv_path);
     let realize = parsed.realize(
         store,
@@ -316,7 +323,7 @@ pub async fn build_derivation(
         task.max_silent_secs,
         abort,
         log_limits,
-        host.build_cores,
+        NonZeroU32::new(cores),
     );
 
     let started = std::time::Instant::now();
@@ -338,6 +345,7 @@ pub async fn build_derivation(
         usage,
         u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         host,
+        cores,
         &running,
     );
     drop(running);

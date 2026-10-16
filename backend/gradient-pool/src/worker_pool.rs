@@ -215,7 +215,7 @@ impl WorkerPool {
             let s = slot.shared();
             crate::score::WorkerMetricsView {
                 cpu_count: s.cpu_count,
-                build_cores: 0,
+                build_cores: s.build_cores.unwrap_or(0),
                 cpu_core_score: s.cpu_core_score,
                 ram_total_mb: s.ram_total_mb,
                 ram_free_mb: s.ram_free_mb,
@@ -585,6 +585,7 @@ mod tests {
                 cpu_core_score: 1200,
                 zone: Some("fra1".into()),
                 endpoint: Some("10.0.0.7:7000".into()),
+                build_cores: Some(6),
             },
         );
 
@@ -598,7 +599,7 @@ mod tests {
         assert_eq!(shared.zone.as_deref(), Some("fra1"));
         assert_eq!(shared.endpoint.as_deref(), Some("10.0.0.7:7000"));
         let view = pool.metrics_for("w1").unwrap();
-        assert_eq!(view.cpu_count, 8);
+        assert_eq!((view.cpu_count, view.build_cores), (8, 6));
         assert_eq!(view.ram_total_mb, 16384);
     }
 
