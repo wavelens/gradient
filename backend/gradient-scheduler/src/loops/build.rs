@@ -24,7 +24,9 @@ use tracing::{debug, error, warn};
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
+use crate::build_history::BuildHistory;
 use crate::jobs::PendingBuildJob;
+use gradient_pool::estimate::{BuildEstimate, GroupKey};
 use gradient_wire::types::{
     BuildJob, BuildRequirement, BuildSpec, BuildSpecKind, CacheInfo, DerivationOutput, RequiredPath,
 };
@@ -187,7 +189,7 @@ struct BuildAssignMaps {
     output_nar_sizes: HashMap<DerivationId, Option<u64>>,
     closure_sizes: HashMap<DerivationId, Option<i64>>,
     computed_sizes: HashMap<DerivationId, i64>,
-    histories: HashMap<DerivationId, gradient_pool::score::HistoryPrediction>,
+    estimates: HashMap<DerivationId, BuildEstimate>,
     driving_eval: HashMap<DerivationBuildId, EvaluationId>,
     prioritized_by_eval: HashSet<DerivationBuildId>,
     build_request_by_eval: HashSet<DerivationBuildId>,
@@ -214,7 +216,7 @@ impl BuildAssignMaps {
         db: &WorkerDb,
         config: &RuntimeConfig,
         shared_builds: &[MDerivationBuild],
-        uses_history: bool,
+        history: Option<&BuildHistory>,
         waited_imports: &[DerivationBuildId],
     ) -> anyhow::Result<Self> {
         // Every load below must propagate its error and abort the pass. Reading a failed query as
@@ -436,8 +438,14 @@ impl BuildAssignMaps {
                 .push(DerivationOutput { name: o.name, path });
         }
 
-        let (closure_sizes, histories, computed_sizes) =
-            load_sizes_and_histories(db, &derivations, uses_history).await;
+        let (closure_sizes, computed_sizes) =
+            load_closure_sizes(db, &derivations, history.is_some()).await;
+        let estimates = match history {
+            Some(history) => {
+                estimates_for(db, history, &derivations, &deps_by_drv, &dep_drv_ids).await?
+            }
+            None => HashMap::new(),
+        };
 
         Ok(Self {
             derivations,
@@ -451,7 +459,7 @@ impl BuildAssignMaps {
             output_nar_sizes,
             closure_sizes,
             computed_sizes,
-            histories,
+            estimates,
             driving_eval,
             prioritized_by_eval,
             build_request_by_eval,
@@ -464,12 +472,12 @@ impl BuildAssignMaps {
         eval.task.and_then(|pid| self.tasks.get(&pid).copied())
     }
 
-    fn history_of(&self, derivation: DerivationId) -> gradient_pool::score::HistoryPrediction {
-        let mut history = self.histories.get(&derivation).copied().unwrap_or_default();
+    fn estimate_of(&self, derivation: DerivationId) -> BuildEstimate {
+        let mut estimate = self.estimates.get(&derivation).cloned().unwrap_or_default();
         if let Some(Some(size)) = self.output_nar_sizes.get(&derivation) {
-            history.output_nar_size = Some(*size);
+            estimate.output_nar_bytes = Some(*size);
         }
-        history
+        estimate
     }
 
     fn required_features(&self, derivation_id: DerivationId) -> Vec<String> {
@@ -583,7 +591,7 @@ impl BuildAssignMaps {
                 .flatten(),
             prefer_local_build: derivation.prefer_local_build,
             is_fixed_output: derivation.is_fixed_output,
-            history: self.history_of(shared_build.derivation),
+            estimate: self.estimate_of(shared_build.derivation),
             queued_at: shared_build.updated_at,
             ready_at: now(),
             rescore_count: 0,
@@ -603,28 +611,17 @@ enum AssignOutcome {
     Skip(&'static str),
 }
 
-async fn load_sizes_and_histories(
+async fn load_closure_sizes(
     db: &WorkerDb,
     derivations: &HashMap<DerivationId, MDerivation>,
-    uses_history: bool,
+    compute_missing: bool,
 ) -> (
     HashMap<DerivationId, Option<i64>>,
-    HashMap<DerivationId, gradient_pool::score::HistoryPrediction>,
     HashMap<DerivationId, i64>,
 ) {
-    let mut closure_sizes: HashMap<DerivationId, Option<i64>> = HashMap::new();
-    let mut histories: HashMap<DerivationId, gradient_pool::score::HistoryPrediction> =
-        HashMap::new();
-    if !uses_history {
-        for (drv_id, drv) in derivations {
-            closure_sizes.insert(*drv_id, drv.closure_size);
-        }
-        return (closure_sizes, histories, HashMap::new());
-    }
-
     let need: Vec<DerivationId> = derivations
         .iter()
-        .filter(|(_, d)| d.closure_size.is_none())
+        .filter(|(_, d)| compute_missing && d.closure_size.is_none())
         .map(|(id, _)| *id)
         .collect();
     let computed = if need.is_empty() {
@@ -637,25 +634,46 @@ async fn load_sizes_and_histories(
                 HashMap::new()
             })
     };
-    let mut predictions: HashMap<(&str, &str), gradient_pool::score::HistoryPrediction> =
-        HashMap::new();
-    for (drv_id, drv) in derivations {
-        let size = drv.closure_size.or_else(|| computed.get(drv_id).copied());
-        closure_sizes.insert(*drv_id, size);
-        let pname = drv.history_name();
-        let key = (pname, drv.architecture.as_str());
-        let prediction = match predictions.get(&key) {
-            Some(p) => *p,
-            None => {
-                let p = crate::history::predict(db, pname, &drv.architecture).await;
-                predictions.insert(key, p);
-                p
-            }
-        };
-        histories.insert(*drv_id, prediction);
-    }
+    let closure_sizes = derivations
+        .iter()
+        .map(|(id, d)| (*id, d.closure_size.or_else(|| computed.get(id).copied())))
+        .collect();
 
-    (closure_sizes, histories, computed)
+    (closure_sizes, computed)
+}
+
+async fn estimates_for(
+    db: &WorkerDb,
+    history: &BuildHistory,
+    derivations: &HashMap<DerivationId, MDerivation>,
+    deps_by_drv: &HashMap<DerivationId, Vec<DerivationId>>,
+    dep_drv_ids: &[DerivationId],
+) -> anyhow::Result<HashMap<DerivationId, BuildEstimate>> {
+    if let Err(e) = history.refresh(db).await {
+        warn!(error = %e, "build history refresh failed; estimating from the samples read before");
+    }
+    let inputs = gradient_db::graph::reachability::derivations_by_id(db, dep_drv_ids).await?;
+
+    Ok(derivations
+        .iter()
+        .map(|(id, drv)| {
+            let mut input_pnames: Vec<String> = deps_by_drv
+                .get(id)
+                .into_iter()
+                .flatten()
+                .filter_map(|dep| inputs.get(dep))
+                .map(|dep| dep.history_name().to_owned())
+                .collect();
+            input_pnames.sort_unstable();
+            input_pnames.dedup();
+            let key = GroupKey {
+                architecture: drv.architecture.clone(),
+                pname: drv.history_name().to_owned(),
+                input_pnames,
+            };
+            (*id, history.estimate(&key, *id))
+        })
+        .collect())
 }
 
 fn lifted_by_live_eval(
@@ -754,7 +772,11 @@ async fn enqueue_startable_shared_builds(
         &scheduler.db.worker_db,
         &scheduler.db.config,
         &new_shared_builds,
-        scheduler.scoring.policy.uses_history(),
+        scheduler
+            .scoring
+            .policy
+            .uses_history()
+            .then_some(&*scheduler.scoring.build_history),
         &waited_imports,
     )
     .await?;

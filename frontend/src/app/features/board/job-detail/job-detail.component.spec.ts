@@ -70,14 +70,13 @@ const DETAIL: AssignedJobDetail = {
     closure_size: 2048,
     prefer_local_build: true,
     is_fixed_output: false,
-    history: {
-      peak_ram_mb: 777,
-      avg_cpu_time_ms: 1200,
-      build_time_ms: 4200,
-      avg_disk_bytes: 5000,
-      output_nar_size: null,
-      oom_rate: 0,
-      samples: 4,
+    estimate: {
+      own_samples: 4,
+      cores: 43,
+      ram_mb: 777,
+      build_ms: 4200,
+      output_nar_bytes: null,
+      top_features: [['input:cudatoolkit', 2.1], ['input:python3-wheel', -0.5]],
     },
     derivations: [{ build_id: 'b1', drv_path: '/nix/store/xxx-foo', pname: 'foo' }],
   },
@@ -271,6 +270,16 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     const el = setup().nativeElement as HTMLElement;
     const job = el.querySelector('section.ctx.job') as HTMLElement;
     expect(job.textContent).toContain('Architecture');
+  });
+
+  it('shows the chosen cores and the inputs that weigh most in the estimate', () => {
+    const el = setup().nativeElement as HTMLElement;
+    const text = el.textContent ?? '';
+    expect(text).toContain('Estimate');
+    expect(text).toContain('43');
+    expect(text).toContain('input:cudatoolkit');
+    expect(text).toContain('+2.10');
+    expect(text).toContain('-0.50');
   });
 
   it('hides the architecture for eval jobs', () => {

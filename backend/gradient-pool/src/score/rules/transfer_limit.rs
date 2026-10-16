@@ -28,8 +28,8 @@ fn holds_upload(job: &JobContext<'_>, instance: &InstanceContext) -> bool {
     slots_full(instance.uploads_in_flight, instance.upload_slots)
         && job
             .job
-            .history()
-            .output_nar_size
+            .estimate()
+            .output_nar_bytes
             .is_some_and(|bytes| bytes > SMALL_UPLOAD_BYTES)
 }
 
@@ -76,7 +76,8 @@ impl ScoreRule for TransferLimitRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::score::context::{HistoryPrediction, ScoredJob, Windowed};
+    use crate::estimate::BuildEstimate;
+    use crate::score::context::{ScoredJob, Windowed};
     use gradient_types::ids::ProjectId;
 
     fn build(output_nar_size: Option<u64>) -> ScoredJob<'static> {
@@ -88,10 +89,10 @@ mod tests {
             false,
             None,
             None,
-            HistoryPrediction {
-                output_nar_size,
-                ..Default::default()
-            },
+            Box::leak(Box::new(BuildEstimate {
+                output_nar_bytes: output_nar_size,
+                ..BuildEstimate::default()
+            })),
         )
     }
 

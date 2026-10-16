@@ -54,9 +54,9 @@ export interface WorkerContextView {
 
 export interface DerivationRef { build_id: string; drv_path: string; pname: string | null; }
 
-export interface JobHistoryView {
-  peak_ram_mb: number | null; avg_cpu_time_ms: number | null; build_time_ms: number | null;
-  avg_disk_bytes: number | null; output_nar_size: number | null; oom_rate: number; samples: number;
+export interface JobEstimateView {
+  own_samples: number; cores: number; ram_mb: number | null; build_ms: number | null;
+  output_nar_bytes: number | null; top_features: [string, number][];
 }
 
 export interface JobContextView {
@@ -75,7 +75,7 @@ export interface JobContextView {
   closure_size?: number | null;
   prefer_local_build?: boolean;
   is_fixed_output?: boolean;
-  history?: JobHistoryView;
+  estimate?: JobEstimateView;
   derivations?: DerivationRef[];
   fetch_flake?: boolean;
 }

@@ -6,9 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::score::context::{
-    HistoryPrediction, InstanceContext, SubstituteCost, WorkerMetricsView,
-};
+use crate::estimate::BuildEstimate;
+use crate::score::context::{InstanceContext, SubstituteCost, WorkerMetricsView};
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 use crate::score::weights;
 
@@ -39,24 +38,19 @@ pub struct TimeEstimate {
     pub download_secs: f64,
     pub path_secs: f64,
     pub build_secs: f64,
-    pub oom_retry_secs: f64,
     pub upload_secs: f64,
     pub eval_secs: f64,
     pub nar_bytes: f64,
     pub paths: f64,
     pub output_nar_bytes: f64,
-    pub oom_chance: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cores: Option<u32>,
     pub fallbacks: Vec<Fallback>,
 }
 
 impl TimeEstimate {
     pub fn total(&self) -> f64 {
-        self.download_secs
-            + self.path_secs
-            + self.build_secs
-            + self.oom_retry_secs
-            + self.upload_secs
-            + self.eval_secs
+        self.download_secs + self.path_secs + self.build_secs + self.upload_secs + self.eval_secs
     }
 }
 
@@ -139,8 +133,13 @@ fn missing_paths(
     .unwrap_or(0.0)
 }
 
-fn output_nar_bytes(history: &HistoryPrediction, fallbacks: &mut Vec<Fallback>) -> f64 {
-    known(history.output_nar_size, Fallback::OutputNarSize, fallbacks).unwrap_or(0) as f64
+fn output_nar_bytes(estimate: &BuildEstimate, fallbacks: &mut Vec<Fallback>) -> f64 {
+    known(
+        estimate.output_nar_bytes,
+        Fallback::OutputNarSize,
+        fallbacks,
+    )
+    .unwrap_or(0) as f64
 }
 
 fn download_secs(
@@ -209,23 +208,21 @@ fn core_ratio(built_on: Option<f64>, runs_on: Option<f64>) -> f64 {
 }
 
 fn run_secs(
-    history: &HistoryPrediction,
+    estimate: &BuildEstimate,
+    cores: u32,
     worker: Option<&WorkerMetricsView>,
     instance: &InstanceContext,
     fallback_ms: Option<f64>,
     fallbacks: &mut Vec<Fallback>,
 ) -> f64 {
     let fleet = instance.cpu_core_score_mean;
-    if history.from_fleet_mean {
-        fallbacks.push(Fallback::BuildHistory);
-    }
-    let (uncontended_ms, built_on) = match history.uncontended_build_time_ms {
-        Some(ms) => (
-            ms as f64,
-            known(history.build_core_score, Fallback::CoreScore, fallbacks)
-                .map(f64::from)
-                .or(fleet),
-        ),
+    let (reference_ms, built_on) = match estimate.build_ms(cores) {
+        Some(ms) => {
+            if estimate.own_samples == 0 {
+                fallbacks.push(Fallback::BuildHistory);
+            }
+            (ms, Some(weights::REFERENCE_CORE_SCORE))
+        }
         None => {
             fallbacks.push(Fallback::BuildHistory);
             match fallback_ms {
@@ -246,57 +243,35 @@ fn run_secs(
     .or(fleet);
     let running = worker.map_or(0, |m| m.running_builds);
 
-    uncontended_ms / 1000.0 * core_ratio(built_on, runs_on) * contention_factor(running)
-}
-
-fn build_secs(
-    history: &HistoryPrediction,
-    worker: Option<&WorkerMetricsView>,
-    instance: &InstanceContext,
-    fallbacks: &mut Vec<Fallback>,
-) -> f64 {
-    let median = instance.build_time_median_ms;
-    let window = median.w1h.or(median.w24h);
-    run_secs(history, worker, instance, window, fallbacks)
-}
-
-fn oom_chance(history: &HistoryPrediction, worker: Option<&WorkerMetricsView>) -> f64 {
-    let overshoot = match (
-        history.predicted_peak_ram_mb,
-        worker.and_then(|m| m.ram_available_mb()),
-    ) {
-        (Some(peak), Some(free)) if free > 0 && peak > free => {
-            ((peak - free) as f64 / free as f64).min(1.0)
-        }
-        _ => 0.0,
-    };
-
-    (f64::from(history.oom_rate) + overshoot).min(1.0)
+    reference_ms / 1000.0 * core_ratio(built_on, runs_on) * contention_factor(running)
 }
 
 fn eval_estimate(
-    history: &HistoryPrediction,
+    estimate: &BuildEstimate,
     worker: Option<&WorkerMetricsView>,
     instance: &InstanceContext,
     fallbacks: &mut Vec<Fallback>,
 ) -> TimeEstimate {
-    let eval_secs = run_secs(history, worker, instance, None, fallbacks);
-    let oom_chance = oom_chance(history, worker);
     TimeEstimate {
-        eval_secs,
-        oom_chance,
-        oom_retry_secs: oom_chance * eval_secs,
+        eval_secs: run_secs(
+            estimate,
+            weights::REFERENCE_CORES,
+            worker,
+            instance,
+            None,
+            fallbacks,
+        ),
         ..Default::default()
     }
 }
 
 fn upload_estimate(
-    history: &HistoryPrediction,
+    estimate: &BuildEstimate,
     worker: Option<&WorkerMetricsView>,
     instance: &InstanceContext,
     fallbacks: &mut Vec<Fallback>,
 ) -> TimeEstimate {
-    let output_nar_bytes = output_nar_bytes(history, fallbacks);
+    let output_nar_bytes = output_nar_bytes(estimate, fallbacks);
     TimeEstimate {
         upload_secs: upload_secs(output_nar_bytes, worker, instance, fallbacks),
         output_nar_bytes,
@@ -325,13 +300,13 @@ fn substitute_secs(
 }
 
 fn substitute_estimate(
-    history: &HistoryPrediction,
+    estimate: &BuildEstimate,
     outputs: u32,
     worker: Option<&WorkerMetricsView>,
     instance: &InstanceContext,
     fallbacks: &mut Vec<Fallback>,
 ) -> TimeEstimate {
-    let output_nar_bytes = output_nar_bytes(history, fallbacks);
+    let output_nar_bytes = output_nar_bytes(estimate, fallbacks);
     TimeEstimate {
         download_secs: substitute_secs(outputs, output_nar_bytes, worker, instance, fallbacks),
         upload_secs: upload_secs(output_nar_bytes, worker, instance, fallbacks),
@@ -347,22 +322,31 @@ fn build_estimate(
     instance: &InstanceContext,
     fallbacks: &mut Vec<Fallback>,
 ) -> TimeEstimate {
-    let history = job.build_history();
+    let estimate = job.build_estimate();
+    let cores = worker.map_or(weights::REFERENCE_CORES, |m| {
+        job.core_choice(m, instance.unmeasured_build_ram_mb()).cores
+    });
     let nar_bytes = missing_nar_bytes(job, instance, fallbacks);
     let paths = missing_paths(job, instance, fallbacks);
-    let build_secs = build_secs(&history, worker, instance, fallbacks);
-    let oom_chance = oom_chance(&history, worker);
-    let output_nar_bytes = output_nar_bytes(&history, fallbacks);
+    let median = instance.build_time_median_ms;
+    let build_secs = run_secs(
+        estimate,
+        cores,
+        worker,
+        instance,
+        median.w1h.or(median.w24h),
+        fallbacks,
+    );
+    let output_nar_bytes = output_nar_bytes(estimate, fallbacks);
     TimeEstimate {
         download_secs: download_secs(nar_bytes, worker, instance, fallbacks),
         path_secs: path_secs(paths, instance, fallbacks),
         build_secs,
-        oom_retry_secs: oom_chance * build_secs,
         upload_secs: upload_secs(output_nar_bytes, worker, instance, fallbacks),
         nar_bytes,
         paths,
         output_nar_bytes,
-        oom_chance,
+        cores: Some(cores),
         ..Default::default()
     }
 }
@@ -375,12 +359,12 @@ pub fn estimate(
     let metrics = worker.metrics.as_ref();
     let mut fallbacks = Vec::new();
     let mut estimate = if job.job.build().is_none() {
-        eval_estimate(&job.job.history(), metrics, instance, &mut fallbacks)
+        eval_estimate(job.job.estimate(), metrics, instance, &mut fallbacks)
     } else if job.outputs_present {
-        upload_estimate(&job.job.history(), metrics, instance, &mut fallbacks)
+        upload_estimate(job.job.estimate(), metrics, instance, &mut fallbacks)
     } else if let Some(outputs) = job.substitute_outputs {
         substitute_estimate(
-            &job.job.history(),
+            job.job.estimate(),
             outputs,
             metrics,
             instance,
@@ -433,6 +417,7 @@ impl ScoreRule for EstimatedTimeRule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::estimate::NO_ESTIMATE;
     use crate::score::context::{ScoredJob, Windowed};
     use gradient_types::ids::ProjectId;
 
@@ -473,14 +458,8 @@ mod tests {
         assert_eq!(transfer_secs(none), 0.0);
     }
 
-    fn built(ms: u64, core_score: Option<u32>) -> HistoryPrediction {
-        HistoryPrediction {
-            build_time_ms: Some(ms),
-            uncontended_build_time_ms: Some(ms),
-            build_core_score: core_score,
-            samples: 3,
-            ..Default::default()
-        }
+    fn built(ms: u64) -> BuildEstimate {
+        BuildEstimate::fixed(None, Some(ms), 3)
     }
 
     fn on(cpu_core_score: u32, running_builds: u32) -> WorkerMetricsView {
@@ -491,42 +470,45 @@ mod tests {
         }
     }
 
-    fn secs(
-        history: &HistoryPrediction,
-        worker: &WorkerMetricsView,
-        inst: &InstanceContext,
-    ) -> f64 {
-        build_secs(history, Some(worker), inst, &mut Vec::new())
+    fn secs(estimate: &BuildEstimate, worker: &WorkerMetricsView, inst: &InstanceContext) -> f64 {
+        let median = inst.build_time_median_ms;
+        run_secs(
+            estimate,
+            weights::REFERENCE_CORES,
+            Some(worker),
+            inst,
+            median.w1h.or(median.w24h),
+            &mut Vec::new(),
+        )
     }
 
     #[test]
     fn a_build_takes_longer_on_a_slower_core_and_beside_running_builds() {
-        let history = built(100_000, Some(3_000));
+        let estimate = built(100_000);
         let inst = InstanceContext::default();
 
-        assert_eq!(secs(&history, &on(3_000, 0), &inst), 100.0);
-        assert_eq!(secs(&history, &on(1_500, 0), &inst), 200.0);
-        assert!((secs(&history, &on(1_500, 5), &inst) - 240.0).abs() < 1e-9);
+        assert_eq!(secs(&estimate, &on(4_000, 0), &inst), 100.0);
+        assert_eq!(secs(&estimate, &on(2_000, 0), &inst), 200.0);
+        assert!((secs(&estimate, &on(2_000, 5), &inst) - 240.0).abs() < 1e-9);
     }
 
     #[test]
     fn the_core_score_ratio_is_bounded() {
-        let history = built(100_000, Some(3_000));
+        let estimate = built(100_000);
         let inst = InstanceContext::default();
 
-        assert_eq!(secs(&history, &on(1, 0), &inst), 200.0);
-        assert_eq!(secs(&history, &on(1_000_000, 0), &inst), 50.0);
+        assert_eq!(secs(&estimate, &on(1, 0), &inst), 200.0);
+        assert_eq!(secs(&estimate, &on(1_000_000, 0), &inst), 50.0);
     }
 
     #[test]
     fn an_unknown_core_score_is_the_fleet_mean() {
         let inst = InstanceContext {
-            cpu_core_score_mean: Some(3_000.0),
+            cpu_core_score_mean: Some(2_000.0),
             ..Default::default()
         };
 
-        assert_eq!(secs(&built(100_000, None), &on(1_500, 0), &inst), 200.0);
-        assert_eq!(secs(&built(100_000, Some(1_500)), &on(0, 0), &inst), 50.0);
+        assert_eq!(secs(&built(100_000), &on(0, 0), &inst), 200.0);
     }
 
     #[test]
@@ -543,22 +525,21 @@ mod tests {
             ..Default::default()
         };
 
+        assert_eq!(secs(&NO_ESTIMATE, &on(2_000, 0), &inst), 60.0);
         assert_eq!(
-            secs(&HistoryPrediction::default(), &on(2_000, 0), &inst),
-            60.0
-        );
-        assert_eq!(
-            build_secs(
-                &HistoryPrediction::default(),
+            run_secs(
+                &NO_ESTIMATE,
+                weights::REFERENCE_CORES,
                 None,
                 &InstanceContext::default(),
+                None,
                 &mut Vec::new()
             ),
             0.0
         );
     }
 
-    fn build_job(history: HistoryPrediction) -> ScoredJob<'static> {
+    fn build_job(estimate: BuildEstimate) -> ScoredJob<'static> {
         ScoredJob::new_build(
             "j",
             ProjectId::now_v7(),
@@ -567,7 +548,7 @@ mod tests {
             false,
             None,
             None,
-            history,
+            Box::leak(Box::new(estimate)),
         )
     }
 
@@ -594,7 +575,7 @@ mod tests {
 
     #[test]
     fn every_missing_path_costs_the_learned_overhead() {
-        let job = build_job(HistoryPrediction::default());
+        let job = build_job(BuildEstimate::default());
         let inst = InstanceContext {
             per_path_secs: Some(0.5),
             missing_paths: Windowed {
@@ -621,9 +602,9 @@ mod tests {
     fn the_score_is_the_capped_time_left_unspent() {
         let rule = EstimatedTimeRule::default();
         let inst = InstanceContext::default();
-        let short = build_job(built(100_000, None));
-        let endless = build_job(built(100_000_000, None));
-        let w = worker(on(1_000, 0));
+        let short = build_job(built(100_000));
+        let endless = build_job(built(100_000_000));
+        let w = worker(on(4_000, 0));
 
         assert_eq!(
             rule.score(&ctx(&short, Some(0), false), &w, &inst),
@@ -638,27 +619,32 @@ mod tests {
     }
 
     #[test]
-    fn a_build_that_may_run_out_of_memory_expects_to_lose_its_time_again() {
-        let history = HistoryPrediction {
-            predicted_peak_ram_mb: Some(3_000),
-            oom_rate: 0.25,
-            ..built(100_000, None)
-        };
-        let with_free = |ram_free_mb| WorkerMetricsView {
-            ram_free_mb: Some(ram_free_mb),
+    fn a_build_too_large_at_full_cores_is_scored_at_the_cores_it_gets() {
+        let mut heavy = BuildEstimate::fixed(Some(2_000), Some(600_000), 5);
+        if let (Some(ram), Some(time)) = (heavy.ram.as_mut(), heavy.build_time.as_mut()) {
+            ram.per_log_core = 1.0;
+            time.per_log_core = -1.0;
+        }
+        let job = build_job(heavy);
+        let w = worker(WorkerMetricsView {
+            cpu_count: 64,
+            cpu_core_score: 4_000,
+            ram_total_mb: 6_000,
+            ram_free_mb: Some(6_000),
             ..Default::default()
-        };
+        });
 
-        assert_eq!(oom_chance(&history, Some(&with_free(8_000))), 0.25);
-        assert_eq!(oom_chance(&history, Some(&with_free(2_000))), 0.75);
-        assert_eq!(oom_chance(&history, Some(&with_free(1_000))), 1.0);
+        let e = estimate(&ctx(&job, Some(0), false), &w, &InstanceContext::default());
+
+        assert_eq!(e.cores, Some(43));
+        assert!((e.build_secs - 600.0 * 16.0 / 43.0).abs() < 1e-6, "{e:?}");
     }
 
     #[test]
     fn a_worker_holding_the_outputs_only_uploads_them() {
-        let job = build_job(HistoryPrediction {
-            output_nar_size: Some(GIGABYTE_BYTES),
-            ..built(100_000, None)
+        let job = build_job(BuildEstimate {
+            output_nar_bytes: Some(GIGABYTE_BYTES),
+            ..built(100_000)
         });
         let w = worker(WorkerMetricsView {
             upload_speed_mbps: Some(400.0),
@@ -677,11 +663,10 @@ mod tests {
 
     #[test]
     fn the_estimate_records_download_build_and_upload_apart() {
-        let history = HistoryPrediction {
-            output_nar_size: Some(GIGABYTE_BYTES),
-            ..built(30_000, None)
-        };
-        let job = build_job(history);
+        let job = build_job(BuildEstimate {
+            output_nar_bytes: Some(GIGABYTE_BYTES),
+            ..built(30_000)
+        });
         let inst = InstanceContext {
             storage_read_mbps: Some(1_000_000.0),
             storage_write_mbps: Some(1_000_000.0),
@@ -703,9 +688,9 @@ mod tests {
     }
 
     fn substituting(output_nar_size: u64) -> ScoredJob<'static> {
-        build_job(HistoryPrediction {
-            output_nar_size: Some(output_nar_size),
-            ..built(766_000, None)
+        build_job(BuildEstimate {
+            output_nar_bytes: Some(output_nar_size),
+            ..built(766_000)
         })
     }
 
@@ -759,7 +744,7 @@ mod tests {
 
     #[test]
     fn the_estimate_names_each_input_it_had_to_guess() {
-        let job = build_job(HistoryPrediction::default());
+        let job = build_job(BuildEstimate::default());
         let c = JobContext {
             missing_count: None,
             ..ctx(&job, None, false)
@@ -793,9 +778,9 @@ mod tests {
 
     #[test]
     fn a_fully_measured_build_guesses_nothing() {
-        let job = build_job(HistoryPrediction {
-            output_nar_size: Some(1),
-            ..built(30_000, Some(2_000))
+        let job = build_job(BuildEstimate {
+            output_nar_bytes: Some(1),
+            ..built(30_000)
         });
         let c = JobContext {
             missing_count: Some(3),
@@ -820,17 +805,11 @@ mod tests {
 
     #[test]
     fn an_evaluation_timed_by_the_fleet_mean_says_so() {
-        let fleet = ScoredJob::new_eval(
-            "e",
-            ProjectId::now_v7(),
-            true,
-            HistoryPrediction {
-                from_fleet_mean: true,
-                ..built(100_000, None)
-            },
-        );
-        let own = ScoredJob::new_eval("e", ProjectId::now_v7(), true, built(100_000, None));
-        let w = worker(on(1_000, 0));
+        let fleet_mean = BuildEstimate::fixed(None, Some(100_000), 0);
+        let own_runs = built(100_000);
+        let fleet = ScoredJob::new_eval("e", ProjectId::now_v7(), true, &fleet_mean);
+        let own = ScoredJob::new_eval("e", ProjectId::now_v7(), true, &own_runs);
+        let w = worker(on(4_000, 0));
         let inst = InstanceContext::default();
 
         assert!(
@@ -848,7 +827,7 @@ mod tests {
     #[test]
     fn a_large_download_goes_to_the_faster_downloading_worker() {
         let rule = EstimatedTimeRule::default();
-        let job = build_job(HistoryPrediction::default());
+        let job = build_job(BuildEstimate::default());
         let c = ctx(&job, Some(4 * GIGABYTE_BYTES), false);
         let downloading = |download_speed_mbps| {
             worker(WorkerMetricsView {
@@ -867,9 +846,9 @@ mod tests {
     #[test]
     fn an_evaluation_is_estimated_by_its_run_time_alone() {
         let rule = EstimatedTimeRule::default();
-        let eval = ScoredJob::new_eval("e", ProjectId::now_v7(), true, built(100_000, None));
-        let unknown =
-            ScoredJob::new_eval("e", ProjectId::now_v7(), true, HistoryPrediction::default());
+        let runs = built(100_000);
+        let eval = ScoredJob::new_eval("e", ProjectId::now_v7(), true, &runs);
+        let unknown = ScoredJob::new_eval("e", ProjectId::now_v7(), true, &NO_ESTIMATE);
         let inst = InstanceContext {
             per_path_secs: Some(1.0),
             build_time_median_ms: Windowed {
@@ -878,7 +857,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let w = worker(on(1_000, 0));
+        let w = worker(on(4_000, 0));
 
         assert_eq!(
             rule.score(&ctx(&eval, Some(10), false), &w, &inst),

@@ -143,7 +143,7 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
             continue;
         };
 
-        let history = eval_history.for_job(task_id, &flake_job.steps);
+        let estimate = eval_history.for_job(task_id, &flake_job.steps);
 
         let pending = PendingEvalJob {
             evaluation_id: eval.id,
@@ -158,7 +158,7 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
             rescore_count: 0,
             prioritized: eval.prioritized,
             build_request: maps.build_request_tasks.contains(&task_id),
-            history,
+            estimate,
             walk_mode: eval.walk_mode,
         };
 

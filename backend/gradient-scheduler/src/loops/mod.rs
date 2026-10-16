@@ -24,9 +24,9 @@ mod build;
 mod eval;
 
 use background::{
-    AbandonedDispatchSweep, EvalCompletionWatchdog, GraphConsistency, GraphStuckReheal,
-    InstanceMetrics, RamShortageSweep, StrandedBuildSweep, TransientRetryRequeue, WorkerLiveness,
-    WorkerSample,
+    AbandonedDispatchSweep, BuildHistoryRefit, EvalCompletionWatchdog, GraphConsistency,
+    GraphStuckReheal, InstanceMetrics, RamShortageSweep, StrandedBuildSweep, TransientRetryRequeue,
+    WorkerLiveness, WorkerSample,
 };
 use eval::EvalDispatch;
 
@@ -48,6 +48,7 @@ pub(super) const STARTABLE_RESYNC: Duration = Duration::from_secs(60);
 pub(super) const ASSIGN_BUDGET: Duration = Duration::from_secs(120);
 const METRICS_BUDGET: Duration = Duration::from_secs(60);
 const CONSISTENCY_BUDGET: Duration = Duration::from_secs(600);
+const BUILD_HISTORY_REFIT_PERIOD: Duration = Duration::from_secs(300);
 const EVAL_WATCHDOG_TICK: Duration = Duration::from_secs(60);
 
 pub fn start_assign_loops(scheduler: Arc<Scheduler>) {
@@ -102,6 +103,9 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
         ChildSpec::pass(InstanceMetrics {
             scheduler: Arc::clone(scheduler),
             period: Duration::from_secs(metrics.instance_interval_secs.get()),
+        }),
+        ChildSpec::pass(BuildHistoryRefit {
+            scheduler: Arc::clone(scheduler),
         }),
         ChildSpec::pass(EvalCompletionWatchdog {
             scheduler: Arc::clone(scheduler),

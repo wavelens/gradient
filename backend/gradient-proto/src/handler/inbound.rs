@@ -1060,7 +1060,7 @@ pub(in crate::handler) mod fixture {
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,
-            history: Default::default(),
+            estimate: Default::default(),
             walk_mode: Default::default(),
             prioritized: false,
             build_request: false,

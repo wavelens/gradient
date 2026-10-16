@@ -7,12 +7,12 @@
 pub mod actor;
 mod assessment_memo;
 pub mod build;
+mod build_history;
 pub mod buildability;
 pub mod cluster;
 pub mod connection_failures;
 pub mod draining;
 pub mod eval;
-pub mod history;
 pub mod import_waits;
 pub mod instance;
 pub mod jobs;

@@ -184,7 +184,8 @@ pub fn policy_for(policy: gradient_types::ScoringPolicy) -> std::sync::Arc<dyn S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::score::context::{HistoryPrediction, ScoredJob};
+    use crate::estimate::{BuildEstimate, NO_ESTIMATE};
+    use crate::score::context::ScoredJob;
     use gradient_types::ids::ProjectId;
     use gradient_types::now;
 
@@ -197,7 +198,7 @@ mod tests {
             false,
             None,
             None,
-            HistoryPrediction::default(),
+            &NO_ESTIMATE,
         )
     }
 
@@ -282,6 +283,7 @@ mod tests {
         let policy = policy_for(gradient_types::ScoringPolicy::ResourceAware);
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];
+        let estimate = BuildEstimate::fixed(None, Some(20 * 60_000), 5);
         let j = ScoredJob::new_build(
             "j",
             ProjectId::now_v7(),
@@ -290,13 +292,7 @@ mod tests {
             false,
             None,
             None,
-            HistoryPrediction {
-                build_time_ms: Some(20 * 60_000),
-                uncontended_build_time_ms: Some(20 * 60_000),
-                build_core_score: Some(10_000),
-                samples: 5,
-                ..Default::default()
-            },
+            &estimate,
         );
         let on = |missing_count, missing_nar_size| JobContext {
             job: &j,
@@ -314,12 +310,12 @@ mod tests {
             }),
         };
         let inst = InstanceContext {
-            cpu_core_score_mean: Some(10_000.0),
+            cpu_core_score_mean: Some(4_000.0),
             ..Default::default()
         };
 
-        let warm_slow = policy.score(&on(0, 0), &with_cores(5_000), &inst);
-        let cold_fast = policy.score(&on(40, 4 << 30), &with_cores(15_000), &inst);
+        let warm_slow = policy.score(&on(0, 0), &with_cores(2_000), &inst);
+        let cold_fast = policy.score(&on(40, 4 << 30), &with_cores(6_000), &inst);
         assert!(
             cold_fast > warm_slow,
             "cold_fast={cold_fast} warm_slow={warm_slow}"
@@ -332,6 +328,7 @@ mod tests {
         let policy = policy_for(gradient_types::ScoringPolicy::ResourceAware);
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];
+        let estimate = BuildEstimate::fixed(Some(64_000), Some(30 * 60_000), 5);
         let j = ScoredJob::new_build(
             "j",
             ProjectId::now_v7(),
@@ -340,13 +337,7 @@ mod tests {
             false,
             None,
             None,
-            HistoryPrediction {
-                build_time_ms: Some(30 * 60_000),
-                uncontended_build_time_ms: Some(30 * 60_000),
-                predicted_peak_ram_mb: Some(64_000),
-                samples: 5,
-                ..Default::default()
-            },
+            &estimate,
         );
         let on = |outputs_present, missing_count, missing_nar_size| JobContext {
             job: &j,

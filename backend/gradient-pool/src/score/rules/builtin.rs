@@ -138,7 +138,8 @@ impl ScoreRule for RescoreWaitRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::score::context::{HistoryPrediction, ScoredJob};
+    use crate::estimate::NO_ESTIMATE;
+    use crate::score::context::ScoredJob;
     use gradient_types::ids::ProjectId;
 
     fn build_job(arch: &'static str) -> ScoredJob<'static> {
@@ -150,12 +151,12 @@ mod tests {
             false,
             None,
             None,
-            HistoryPrediction::default(),
+            &NO_ESTIMATE,
         )
     }
 
     fn eval_job(fetch_flake: bool) -> ScoredJob<'static> {
-        ScoredJob::new_eval("test", ProjectId::now_v7(), fetch_flake, Default::default())
+        ScoredJob::new_eval("test", ProjectId::now_v7(), fetch_flake, &NO_ESTIMATE)
     }
 
     fn worker<'a>(archs: &'a [String], fetch: bool) -> WorkerContext<'a> {

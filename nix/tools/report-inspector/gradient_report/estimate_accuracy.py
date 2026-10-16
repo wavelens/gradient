@@ -20,7 +20,7 @@ COMPLETED = 0
 ELEMENTS = ("download", "paths", "build", "substitute", "upload", "eval", "total")
 INPUTS = ("paths", "nar_bytes", "output_nar_bytes")
 SECS_FIELDS = (
-    "download_secs", "path_secs", "build_secs", "oom_retry_secs", "upload_secs", "eval_secs"
+    "download_secs", "path_secs", "build_secs", "upload_secs", "eval_secs"
 )
 FEEDS = {
     "missing_nar_size": ("download",),
@@ -70,7 +70,6 @@ class Job:
     inputs: dict[str, Pair]
     build: bool
     completed: bool
-    oom_chance: float
     oom_kills: int
 
 
@@ -120,7 +119,6 @@ def _load(conn: sqlite3.Connection) -> tuple[list[Job], int]:
                 inputs=_inputs(estimate, s, _substituted(s)) if build and completed else {},
                 build=build,
                 completed=completed,
-                oom_chance=estimate.get("oom_chance", 0.0),
                 oom_kills=_oom_kills(conn, r) if build else 0,
             )
         )
@@ -277,9 +275,8 @@ def _worst(jobs: list[Job], name: str) -> list[str]:
 
 def _out_of_memory(jobs: list[Job]) -> str:
     builds = [j for j in jobs if j.build]
-    expected = sum(j.oom_chance for j in builds)
     kills = sum(j.oom_kills for j in builds)
-    return f"out of memory: expected {expected:.2f} kills over {len(builds)} build jobs, {kills} recorded"
+    return f"out of memory: {kills} kills over {len(builds)} build jobs"
 
 
 def _fallbacks(jobs: list[Job]) -> list[str]:

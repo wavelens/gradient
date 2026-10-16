@@ -17,9 +17,9 @@ PREFETCH, BUILD, COMPRESS, SUBSTITUTE_FETCH, NAR_FETCH = 8, 10, 11, 14, 16
 
 def breakdown(**estimate) -> str:
     full = {
-        "download_secs": 0.0, "path_secs": 0.0, "build_secs": 0.0, "oom_retry_secs": 0.0,
+        "download_secs": 0.0, "path_secs": 0.0, "build_secs": 0.0,
         "upload_secs": 0.0, "eval_secs": 0.0, "nar_bytes": 0.0, "paths": 0.0,
-        "output_nar_bytes": 0.0, "oom_chance": 0.0, "fallbacks": [],
+        "output_nar_bytes": 0.0, "fallbacks": [],
     }
     full.update(estimate)
     return json.dumps({"rules": {}, "total": 0.0, "estimate": full})
@@ -48,15 +48,14 @@ def report(tmp_path):
     conn.execute("INSERT INTO worker_registration VALUES ('w1', 'builder-1')")
     jobs = [
         ("j1", 1, "w1", 0, breakdown(download_secs=10.0, path_secs=2.0, build_secs=30.0,
-            oom_retry_secs=15.0, upload_secs=5.0, nar_bytes=1000.0, paths=4.0,
-            output_nar_bytes=500.0, oom_chance=0.5), 80_000),
+            upload_secs=5.0, nar_bytes=1000.0, paths=4.0, output_nar_bytes=500.0), 80_000),
         ("j2", 1, "w2", 0, breakdown(download_secs=10.0, build_secs=100.0, nar_bytes=1000.0,
             fallbacks=["missing_nar_size"]), None),
         ("j3", 0, "w1", 0, breakdown(eval_secs=20.0), 30_000),
         ("j4", 1, "w1", 0, json.dumps({"rules": {}, "total": 0.0}), 1_000),
         ("j5", 1, "w1", 0, None, 1_000),
         ("j6", 1, "w1", 1, breakdown(build_secs=1.0), 1_000),
-        ("j7", 1, "w1", 1, breakdown(build_secs=40.0, oom_chance=1.0), 1_000),
+        ("j7", 1, "w1", 1, breakdown(build_secs=40.0), 1_000),
         ("j8", 1, "w1", 0, breakdown(build_secs=50.0), None),
         ("j9", 1, "w1", 0, breakdown(download_secs=8.0, nar_bytes=1000.0), None),
     ]
@@ -137,7 +136,7 @@ def test_recorded_inputs_are_compared(report):
 
 
 def test_out_of_memory_kills_count_the_failed_jobs_they_ended(report):
-    assert "out of memory: expected 1.50 kills over 6 build jobs, 2 recorded" in estimate_accuracy(report)
+    assert "out of memory: 2 kills over 6 build jobs" in estimate_accuracy(report)
 
 
 def test_a_substituted_job_is_kept_out_of_the_build_and_download_rows(report):

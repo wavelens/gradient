@@ -44,7 +44,7 @@ pub(crate) fn eval_job(peer: ProjectId) -> PendingEvalJob {
         rescore_count: 0,
         prioritized: false,
         build_request: false,
-        history: Default::default(),
+        estimate: Default::default(),
         walk_mode: Default::default(),
     }
 }
@@ -80,7 +80,7 @@ pub(crate) fn build_job(
         closure_size: None,
         prefer_local_build: false,
         is_fixed_output: false,
-        history: gradient_pool::score::HistoryPrediction::default(),
+        estimate: Default::default(),
         queued_at: gradient_types::now(),
         ready_at: gradient_types::now(),
         rescore_count: 0,

@@ -146,7 +146,7 @@ impl Scheduler {
                             let follow_id = crate::jobs::eval_job_key(j.evaluation_id);
                             let mut follow = j.cached_followup(path);
                             if let Some(task) = follow.task_id {
-                                follow.history = self
+                                follow.estimate = self
                                     .scoring
                                     .eval_history
                                     .load()

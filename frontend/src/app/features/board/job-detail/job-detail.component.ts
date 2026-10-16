@@ -194,17 +194,18 @@ interface RuleRow {
           </tbody>
         </gr-table>
 
-        @if (j.job_context.kind === 'Build' && j.job_context.history; as h) {
-          <h3>History</h3>
+        @if (j.job_context.kind === 'Build' && j.job_context.estimate; as e) {
+          <h3>Estimate</h3>
           <gr-table class="kv">
             <tbody>
-              <tr><td class="label">Peak RAM</td><td class="mono">{{ formatMegabytes(h.peak_ram_mb) }}</td></tr>
-              <tr><td class="label">Avg CPU time</td><td class="mono">{{ formatDuration(h.avg_cpu_time_ms) }}</td></tr>
-              <tr><td class="label">Build time</td><td class="mono">{{ formatDuration(h.build_time_ms) }}</td></tr>
-              <tr><td class="label">Avg disk usage</td><td class="mono">{{ formatBytes(h.avg_disk_bytes) }}</td></tr>
-              <tr><td class="label">Output size</td><td class="mono">{{ formatBytes(h.output_nar_size) }}</td></tr>
-              <tr><td class="label">OOM rate</td><td class="mono">{{ h.oom_rate | number: '1.0-3' }}</td></tr>
-              <tr><td class="label">Samples</td><td class="mono">{{ h.samples }}</td></tr>
+              <tr><td class="label">Cores</td><td class="mono">{{ e.cores }}</td></tr>
+              <tr><td class="label">Peak RAM</td><td class="mono">{{ formatMegabytes(e.ram_mb) }}</td></tr>
+              <tr><td class="label">Build time</td><td class="mono">{{ formatDuration(e.build_ms) }}</td></tr>
+              <tr><td class="label">Output size</td><td class="mono">{{ formatBytes(e.output_nar_bytes) }}</td></tr>
+              <tr><td class="label">Own builds</td><td class="mono">{{ e.own_samples }}</td></tr>
+              @for (f of e.top_features; track f[0]) {
+                <tr><td class="label">{{ f[0] }}</td><td class="mono">{{ f[1] >= 0 ? '+' : '' }}{{ f[1] | number: '1.2-2' }}</td></tr>
+              }
             </tbody>
           </gr-table>
         }

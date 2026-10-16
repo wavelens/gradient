@@ -162,7 +162,7 @@ impl Model {
             ram: curve(Target::Ram),
             build_time: curve(Target::BuildTime),
             output_nar_bytes: curve(Target::OutputNar)
-                .map(|c| c.median(REFERENCE_CORES as u32).round() as u64),
+                .map(|c| c.median(REFERENCE_CORES).round() as u64),
             own_samples: u32::try_from(own.iter().filter(|s| !s.lower_bound).count())
                 .unwrap_or(u32::MAX),
             ram_floor: own

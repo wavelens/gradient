@@ -315,8 +315,11 @@ impl Scheduler {
                 hold_secs,
             };
             let assignment = Assignment {
-                job: seat.job.clone().into_job(),
-                ram_need: seat.job.ram_need(false),
+                job: seat
+                    .job
+                    .clone()
+                    .into_job_with_cores(seat.record.choice.map(|c| c.cores)),
+                ram_need: seat.job.ram_need_with(seat.record.choice, false),
                 project_id: seat.job.project_id(),
                 assignment_record: seat.record,
                 pending: seat.job,

@@ -6,14 +6,15 @@
 
 use std::sync::LazyLock;
 
-use crate::score::context::{HistoryPrediction, InstanceContext, ScoredJob, WorkerMetricsView};
+use crate::estimate::{BuildEstimate, CoreChoice, NO_ESTIMATE, choose_cores};
+use crate::score::context::{InstanceContext, RamNeed, ScoredJob, WorkerMetricsView};
 
 static DEFAULT_JOB: LazyLock<ScoredJob<'static>> = LazyLock::new(|| {
     ScoredJob::new_eval(
         "",
         gradient_types::ids::ProjectId::nil(),
         false,
-        HistoryPrediction::default(),
+        &NO_ESTIMATE,
     )
 });
 
@@ -57,24 +58,24 @@ impl Default for JobContext<'_> {
     }
 }
 
-impl JobContext<'_> {
-    pub fn ram_need(&self) -> crate::score::RamNeed {
-        match self.job.build() {
-            Some(b) => crate::score::RamNeed::of_build(
-                b.history().predicted_peak_ram_mb,
-                self.outputs_present || self.substitute_outputs.is_some(),
-                b.is_fetch(),
-            ),
-            None => crate::score::RamNeed::Negligible,
+impl<'a> JobContext<'a> {
+    pub fn build_estimate(&self) -> &'a BuildEstimate {
+        if self.outputs_present {
+            &NO_ESTIMATE
+        } else {
+            self.job.estimate()
         }
     }
 
-    pub fn build_history(&self) -> HistoryPrediction {
-        if self.outputs_present {
-            HistoryPrediction::default()
-        } else {
-            self.job.history()
-        }
+    pub fn core_choice(&self, worker: &WorkerMetricsView, unmeasured_mb: u64) -> CoreChoice {
+        let Some(build) = self.job.build() else {
+            return choose_cores(worker, None, unmeasured_mb, |_| RamNeed::Negligible);
+        };
+        let estimate = self.build_estimate();
+        let substitution = self.outputs_present || self.substitute_outputs.is_some();
+        choose_cores(worker, estimate.max_cores, unmeasured_mb, |cores| {
+            RamNeed::of_build(estimate.ram_mb(cores), substitution, build.is_fetch())
+        })
     }
 }
 

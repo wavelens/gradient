@@ -186,6 +186,30 @@ impl Pass for InstanceMetrics {
     }
 }
 
+pub(crate) struct BuildHistoryRefit {
+    pub(crate) scheduler: Arc<Scheduler>,
+}
+
+impl Pass for BuildHistoryRefit {
+    const NAME: &'static str = "build-history-refit";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = super::CONSISTENCY_BUDGET;
+
+    fn period(&self) -> Duration {
+        super::BUILD_HISTORY_REFIT_PERIOD
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        let history = &self.scheduler.scoring.build_history;
+        history
+            .refresh(&self.scheduler.db.worker_db)
+            .await
+            .map_err(anyhow::Error::from)?;
+        history.refit(self.scheduler.db.config.server.retention_days);
+        Ok(())
+    }
+}
+
 async fn instance_metrics_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let c = scheduler.counts().await;
     let counts = crate::instance::InstanceCounts {
@@ -207,10 +231,15 @@ async fn instance_metrics_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
         gradient_types::now(),
     )
     .await;
+    let fleet_core_score = ctx.cpu_core_score_mean;
     scheduler.scoring.instance.store(Arc::new(ctx));
 
-    let eval_history =
-        crate::instance::compute_eval_history(&scheduler.db.worker_db, gradient_types::now()).await;
+    let eval_history = crate::instance::compute_eval_history(
+        &scheduler.db.worker_db,
+        gradient_types::now(),
+        fleet_core_score,
+    )
+    .await;
     scheduler.scoring.eval_history.store(Arc::new(eval_history));
     Ok(())
 }
