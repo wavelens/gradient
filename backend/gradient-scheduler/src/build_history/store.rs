@@ -20,12 +20,47 @@ pub(crate) struct LoadedSample {
 }
 
 #[derive(Default)]
+pub struct Changes {
+    everything: bool,
+    pnames: HashSet<(String, String)>,
+    derivations: HashSet<DerivationId>,
+}
+
+impl Changes {
+    pub fn everything() -> Self {
+        Self {
+            everything: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.everything && self.pnames.is_empty() && self.derivations.is_empty()
+    }
+
+    pub fn touches(&self, key: &GroupKey, derivation: DerivationId) -> bool {
+        self.everything
+            || self.derivations.contains(&derivation)
+            || self
+                .pnames
+                .contains(&(key.architecture.clone(), key.pname.clone()))
+    }
+
+    fn record(&mut self, sample: &Sample) {
+        self.pnames
+            .insert((sample.architecture.clone(), sample.pname.clone()));
+        self.derivations.insert(sample.derivation);
+    }
+}
+
+#[derive(Default)]
 pub(crate) struct SampleStore {
     seen: HashSet<Uuid>,
     rows: Vec<LoadedSample>,
     by_pname: HashMap<(String, String), Vec<usize>>,
     oom_cores: HashMap<DerivationId, u32>,
     pub newest: Option<NaiveDateTime>,
+    pub changes: Changes,
 }
 
 impl SampleStore {
@@ -34,6 +69,7 @@ impl SampleStore {
             if !self.seen.insert(row.id) {
                 continue;
             }
+            self.changes.record(&row.sample);
             self.newest = self.newest.max(Some(row.created_at));
             if row.oom_killed
                 && let Some(cores) = row.sample.cores

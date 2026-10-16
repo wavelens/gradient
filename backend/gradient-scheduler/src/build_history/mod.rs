@@ -7,14 +7,16 @@
 mod load;
 mod store;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use arc_swap::ArcSwap;
-use gradient_pool::estimate::{BuildEstimate, GroupKey, Model};
+use gradient_pool::estimate::{BuildEstimate, GroupKey, Model, Sample};
 use gradient_types::ids::DerivationId;
 use sea_orm::{ConnectionTrait, DbErr};
 
+pub use store::Changes;
 use store::SampleStore;
 
 #[derive(Default)]
@@ -53,6 +55,7 @@ impl BuildHistory {
         };
         self.model.store(Arc::new(Model::fit(&samples)));
         self.fitted.store(true, Ordering::Release);
+        self.store().changes = Changes::everything();
     }
 
     #[cfg(test)]
@@ -87,5 +90,54 @@ impl BuildHistory {
         let mut estimate = self.model.load().estimate(key, &store.own(key));
         estimate.max_cores = store.max_cores(derivation);
         estimate
+    }
+
+    pub fn take_changes(&self) -> Changes {
+        std::mem::take(&mut self.store().changes)
+    }
+
+    pub fn estimate_all<K>(
+        &self,
+        wanted: Vec<(K, GroupKey, DerivationId)>,
+    ) -> Vec<(K, BuildEstimate)> {
+        let mut own: HashMap<GroupKey, Vec<(f64, Sample)>> = HashMap::new();
+        let wanted: Vec<(K, GroupKey, Option<u32>)> = {
+            let store = self.store();
+            wanted
+                .into_iter()
+                .map(|(id, key, derivation)| {
+                    if !own.contains_key(&key) {
+                        let samples = store
+                            .own(&key)
+                            .into_iter()
+                            .map(|(overlap, sample)| (overlap, sample.clone()))
+                            .collect();
+                        own.insert(key.clone(), samples);
+                    }
+
+                    (id, key, store.max_cores(derivation))
+                })
+                .collect()
+        };
+
+        let model = self.model.load();
+        let by_key: HashMap<&GroupKey, BuildEstimate> = own
+            .iter()
+            .map(|(key, samples)| {
+                let samples: Vec<(f64, &Sample)> = samples.iter().map(|(o, s)| (*o, s)).collect();
+                (key, model.estimate(key, &samples))
+            })
+            .collect();
+
+        wanted
+            .into_iter()
+            .map(|(id, key, max_cores)| {
+                let estimate = BuildEstimate {
+                    max_cores,
+                    ..by_key[&key].clone()
+                };
+                (id, estimate)
+            })
+            .collect()
     }
 }

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use gradient_pool::score::{InstanceContext, ScoringPolicy};
 use gradient_types::ids::{
-    ClusterAttemptId, DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId,
+    ClusterAttemptId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId, ProjectId,
 };
 use gradient_wire::types::{
     BuildStage, CandidateScore, GradientCapabilities, JobCandidate, JobKind,
@@ -281,9 +281,12 @@ pub enum SchedulerMsg {
     LastingRamShortages {
         reply: RpcReplyPort<Vec<gradient_graph::RamShortage>>,
     },
-    Reestimate {
-        history: Arc<crate::build_history::BuildHistory>,
-        reply: RpcReplyPort<()>,
+    EstimatesToRefresh {
+        changes: crate::build_history::Changes,
+        reply: RpcReplyPort<Vec<(String, gradient_pool::estimate::GroupKey, DerivationId)>>,
+    },
+    LearnEstimates {
+        estimates: Vec<(String, gradient_pool::score::BuildEstimate)>,
     },
     LiftImports {
         checked: HashSet<DerivationBuildId>,
@@ -1069,9 +1072,11 @@ impl Actor for CoreActor {
             SchedulerMsg::LastingRamShortages { reply } => {
                 let _ = reply.send(core.lasting_ram_shortages(Instant::now()));
             }
-            SchedulerMsg::Reestimate { history, reply } => {
-                core.tracker.reestimate(&history);
-                let _ = reply.send(());
+            SchedulerMsg::EstimatesToRefresh { changes, reply } => {
+                let _ = reply.send(core.tracker.estimates_to_refresh(&changes));
+            }
+            SchedulerMsg::LearnEstimates { estimates } => {
+                core.tracker.learn_estimates(estimates);
             }
             SchedulerMsg::LiftImports {
                 checked,

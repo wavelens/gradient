@@ -70,9 +70,30 @@ async fn reestimate_pending(scheduler: &Scheduler) {
         warn!(error = %e, "build history refresh failed; pending estimates stay as they were");
         return;
     }
-    let _ = scheduler
-        .call(|reply| SchedulerMsg::Reestimate { history, reply })
-        .await;
+
+    let changes = history.take_changes();
+    if changes.is_empty() {
+        return;
+    }
+
+    let Ok(wanted) = scheduler
+        .call(|reply| SchedulerMsg::EstimatesToRefresh { changes, reply })
+        .await
+    else {
+        return;
+    };
+    if wanted.is_empty() {
+        return;
+    }
+
+    match tokio::task::spawn_blocking(move || history.estimate_all(wanted)).await {
+        Ok(estimates) => {
+            let _ = scheduler
+                .cast(SchedulerMsg::LearnEstimates { estimates })
+                .await;
+        }
+        Err(e) => warn!(error = %e, "estimating pending builds failed"),
+    }
 }
 
 pub(crate) enum BuildMsg {
