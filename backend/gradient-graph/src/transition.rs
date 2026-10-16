@@ -572,6 +572,7 @@ async fn build_failed(
     };
 
     let out_of_memory = policy::out_of_memory(kind, metrics.as_ref());
+    let oom_cores = metrics.as_ref().and_then(|m| m.build_cores);
     let kind = policy::retried_as(kind, out_of_memory);
     if let Some(metrics) = policy::history_sample(metrics, policy::BuildEnd::Failed) {
         record_metrics(ctx, &shared_build, shared_build.derivation, &metrics).await;
@@ -626,9 +627,20 @@ async fn build_failed(
         misses: substitute_misses(ctx, derivation_build, kind, shared_build.cache_available).await,
         threshold: i64::from(ctx.config.build.substitute_miss_escalation_threshold.get()),
     };
-    let outcome = match policy::decide_failure_outcome(kind, attempt, max_attempts, substitution) {
-        FailureOutcome::Retry if inputs_circuit_open => FailureOutcome::Permanent,
-        other => other,
+    let oom_outcome = out_of_memory
+        .then(|| policy::out_of_memory_outcome(oom_cores))
+        .flatten();
+    let outcome = match oom_outcome {
+        Some(outcome) => outcome,
+        None => match policy::decide_failure_outcome(kind, attempt, max_attempts, substitution) {
+            FailureOutcome::Retry if inputs_circuit_open => FailureOutcome::Permanent,
+            other => other,
+        },
+    };
+    let error = if oom_outcome == Some(FailureOutcome::Permanent) {
+        policy::OUT_OF_MEMORY_AT_ONE_CORE
+    } else {
+        error
     };
 
     if running_attempt.is_some()
@@ -645,6 +657,11 @@ async fn build_failed(
     }
 
     match outcome {
+        FailureOutcome::RetryWithFewerCores => {
+            update_derivation_build_status(ctx, shared_build, BuildStatus::FailedTransient).await?;
+            info!(%derivation_build, cores = ?oom_cores, "out of memory; retried with fewer cores");
+            return Ok(());
+        }
         FailureOutcome::Retry => {
             let mut active: ADerivationBuild = shared_build.clone().into_active_model();
             active.attempt = Set(attempt + 1);

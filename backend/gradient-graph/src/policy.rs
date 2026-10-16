@@ -18,6 +18,7 @@ pub(crate) struct Substitution {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FailureOutcome {
     Retry,
+    RetryWithFewerCores,
     Permanent,
     Timeout,
     Requeue,
@@ -109,6 +110,16 @@ pub(crate) fn out_of_memory(kind: BuildFailureKind, metrics: Option<&BuildMetric
         kind,
         BuildFailureKind::Permanent | BuildFailureKind::Transient
     ) && metrics.is_some_and(|m| m.oom_killed)
+}
+
+pub(crate) const OUT_OF_MEMORY_AT_ONE_CORE: &str = "ran out of memory with 1 core";
+
+pub(crate) const fn out_of_memory_outcome(cores: Option<u32>) -> Option<FailureOutcome> {
+    match cores {
+        Some(0 | 1) => Some(FailureOutcome::Permanent),
+        Some(_) => Some(FailureOutcome::RetryWithFewerCores),
+        None => None,
+    }
 }
 
 pub(crate) const fn retried_as(kind: BuildFailureKind, out_of_memory: bool) -> BuildFailureKind {
@@ -231,9 +242,10 @@ mod tests {
     use super::{
         BuildEnd, FailureOutcome, Substitution, attempt_outcome, attempt_reason,
         attempt_reason_for, decide_failure_outcome, failure_log_entry, history_sample,
-        inputs_unavailable_circuit_open, not_enough_resources_message, out_of_memory, retried_as,
-        retry_backoff_elapsed, retry_failed_eval, spends_substitute_budget,
-        terminal_success_outcome, terminal_success_status, truncate_failure_message,
+        inputs_unavailable_circuit_open, not_enough_resources_message, out_of_memory,
+        out_of_memory_outcome, retried_as, retry_backoff_elapsed, retry_failed_eval,
+        spends_substitute_budget, terminal_success_outcome, terminal_success_status,
+        truncate_failure_message,
     };
     use gradient_entity::build::BuildStatus;
     use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
@@ -364,6 +376,31 @@ mod tests {
                 "{kind:?} keeps its own verdict"
             );
         }
+    }
+
+    #[test]
+    fn an_out_of_memory_kill_with_more_than_one_core_retries_outside_the_budget() {
+        assert_eq!(
+            out_of_memory_outcome(Some(64)),
+            Some(FailureOutcome::RetryWithFewerCores)
+        );
+        assert_eq!(
+            out_of_memory_outcome(Some(2)),
+            Some(FailureOutcome::RetryWithFewerCores)
+        );
+    }
+
+    #[test]
+    fn an_out_of_memory_kill_at_one_core_is_final() {
+        assert_eq!(
+            out_of_memory_outcome(Some(1)),
+            Some(FailureOutcome::Permanent)
+        );
+    }
+
+    #[test]
+    fn an_out_of_memory_kill_without_a_core_count_keeps_the_attempt_budget() {
+        assert_eq!(out_of_memory_outcome(None), None);
     }
 
     #[test]
