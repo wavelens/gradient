@@ -56,7 +56,7 @@ export interface DerivationRef { build_id: string; drv_path: string; pname: stri
 
 export interface JobEstimateView {
   own_samples: number; cores: number; ram_mb: number | null; build_ms: number | null;
-  output_nar_bytes: number | null; top_features: [string, number][];
+  output_nar_bytes: number | null; similar_builds: [string, number][];
 }
 
 export interface JobContextView {

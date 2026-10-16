@@ -76,7 +76,7 @@ const DETAIL: AssignedJobDetail = {
       ram_mb: 777,
       build_ms: 4200,
       output_nar_bytes: null,
-      top_features: [['input:cudatoolkit', 2.1], ['input:python3-wheel', -0.5]],
+      similar_builds: [['python3.14-torchaudio', 0.75], ['magma', 0.4]],
     },
     derivations: [{ build_id: 'b1', drv_path: '/nix/store/xxx-foo', pname: 'foo' }],
   },
@@ -272,14 +272,14 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     expect(job.textContent).toContain('Architecture');
   });
 
-  it('shows the chosen cores and the inputs that weigh most in the estimate', () => {
+  it('shows the chosen cores and the builds the estimate is taken from', () => {
     const el = setup().nativeElement as HTMLElement;
     const text = el.textContent ?? '';
     expect(text).toContain('Estimate');
     expect(text).toContain('43');
-    expect(text).toContain('input:cudatoolkit');
-    expect(text).toContain('+2.10');
-    expect(text).toContain('-0.50');
+    expect(text).toContain('Like python3.14-torchaudio');
+    expect(text).toContain('75% same inputs');
+    expect(text).toContain('40% same inputs');
   });
 
   it('hides the architecture for eval jobs', () => {

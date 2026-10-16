@@ -10,9 +10,8 @@ use gradient_types::ids::DerivationId;
 
 use super::{BuildEstimate, LogCurve, log_cores};
 use crate::score::weights::{
-    BUILD_TIME_CORE_SLOPE_PRIOR, CORE_FEATURE_PENALTY, CORE_SLOPE_PENALTY, FEATURE_PENALTY,
-    FEW_SAMPLES_SPREAD, FIT_EPOCHS, MIN_SPREAD, OWN_SAMPLE_PRIOR_WEIGHT, RAM_CORE_SLOPE_PRIOR,
-    REFERENCE_CORES, TOP_FEATURES,
+    BUILD_TIME_CORE_SLOPE, FEW_SAMPLES_SPREAD, MIN_INPUT_OVERLAP, MIN_SPREAD,
+    OWN_SAMPLE_PRIOR_WEIGHT, RAM_CORE_SLOPE, REFERENCE_CORES, SIMILAR_BUILDS,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -25,11 +24,11 @@ enum Target {
 impl Target {
     const ALL: [Self; 3] = [Self::Ram, Self::BuildTime, Self::OutputNar];
 
-    const fn core_slope_prior(self) -> Option<f64> {
+    const fn core_slope(self) -> f64 {
         match self {
-            Self::Ram => Some(RAM_CORE_SLOPE_PRIOR),
-            Self::BuildTime => Some(BUILD_TIME_CORE_SLOPE_PRIOR),
-            Self::OutputNar => None,
+            Self::Ram => RAM_CORE_SLOPE,
+            Self::BuildTime => BUILD_TIME_CORE_SLOPE,
+            Self::OutputNar => 0.0,
         }
     }
 }
@@ -63,14 +62,6 @@ pub fn input_overlap(a: &[String], b: &[String]) -> f64 {
     a.intersection(&b).count() as f64 / union as f64
 }
 
-impl GroupKey {
-    fn features(&self) -> Vec<String> {
-        std::iter::once(format!("pname:{}", self.pname))
-            .chain(self.input_pnames.iter().map(|i| format!("input:{i}")))
-            .collect()
-    }
-}
-
 impl Sample {
     pub fn group(&self) -> GroupKey {
         GroupKey {
@@ -94,48 +85,114 @@ impl Sample {
         target == Target::Ram && self.lower_bound
     }
 
-    fn log_cores(&self, target: Target) -> f64 {
-        match (target.core_slope_prior(), self.cores) {
-            (Some(_), Some(cores)) => log_cores(cores),
-            _ => 0.0,
-        }
+    fn at_reference(&self, target: Target) -> Option<f64> {
+        let cores = self.cores.map_or(0.0, log_cores);
+        Some(self.value(target)? - target.core_slope() * cores)
     }
 }
 
+/// The newest measured build of every pname on one architecture, and the pnames per input.
 #[derive(Clone, Debug, Default)]
-struct LinearFit {
-    bias: f64,
-    core_slope: f64,
-    weights: HashMap<String, f64>,
-    core_weights: HashMap<String, f64>,
-    error: f64,
+struct Builds {
+    newest: HashMap<String, Sample>,
+    by_input: HashMap<String, Vec<String>>,
+    overall: HashMap<Target, LogCurve>,
 }
 
-impl LinearFit {
-    fn curve(&self, features: &[String]) -> LogCurve {
-        let sum =
-            |map: &HashMap<String, f64>| features.iter().filter_map(|f| map.get(f)).sum::<f64>();
-        LogCurve {
-            at_reference: self.bias + sum(&self.weights),
-            per_log_core: self.core_slope + sum(&self.core_weights),
-            spread: self.error,
+impl Builds {
+    fn new(samples: Vec<&Sample>) -> Self {
+        let mut newest = HashMap::new();
+        for sample in samples.into_iter().filter(|s| !s.lower_bound) {
+            newest.insert(sample.pname.clone(), sample.clone());
+        }
+        let mut by_input: HashMap<String, Vec<String>> = HashMap::new();
+        for sample in newest.values() {
+            for input in &sample.input_pnames {
+                by_input
+                    .entry(input.clone())
+                    .or_default()
+                    .push(sample.pname.clone());
+            }
+        }
+        let overall = Target::ALL
+            .into_iter()
+            .filter_map(|target| {
+                let mut values: Vec<f64> = newest
+                    .values()
+                    .filter_map(|s| s.at_reference(target))
+                    .collect();
+                Some((target, median_curve(&mut values, target)?))
+            })
+            .collect();
+        Self {
+            newest,
+            by_input,
+            overall,
         }
     }
 
-    fn top_features(&self, features: &[String]) -> Vec<(String, f64)> {
-        let mut weighed: Vec<(String, f64)> = features
-            .iter()
-            .filter_map(|f| self.weights.get(f).map(|w| (f.clone(), *w)))
+    fn similar(&self, key: &GroupKey) -> Vec<(f64, &Sample)> {
+        let mut shared: HashMap<&str, usize> = HashMap::new();
+        let inputs: HashSet<&String> = key.input_pnames.iter().collect();
+        for input in &inputs {
+            for pname in self.by_input.get(*input).into_iter().flatten() {
+                *shared.entry(pname).or_default() += 1;
+            }
+        }
+        let mut similar: Vec<(f64, &Sample)> = shared
+            .into_iter()
+            .map(|(pname, both)| {
+                let sample = &self.newest[pname];
+                let union = inputs.len() + sample.input_pnames.len() - both;
+                (both as f64 / union as f64, sample)
+            })
+            .filter(|(overlap, _)| *overlap >= MIN_INPUT_OVERLAP)
             .collect();
-        weighed.sort_by(|a, b| b.1.abs().total_cmp(&a.1.abs()));
-        weighed.truncate(TOP_FEATURES);
-        weighed
+        similar.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.pname.cmp(&b.1.pname)));
+        similar.truncate(SIMILAR_BUILDS);
+        similar
     }
+
+    fn curve(&self, similar: &[(f64, &Sample)], target: Target) -> Option<LogCurve> {
+        let points: Vec<(f64, f64)> = similar
+            .iter()
+            .filter_map(|(overlap, s)| Some((overlap * overlap, s.at_reference(target)?)))
+            .collect();
+        let total: f64 = points.iter().map(|(weight, _)| weight).sum();
+        if total <= 0.0 {
+            return self.overall.get(&target).copied();
+        }
+        let mean = points.iter().map(|(w, v)| w * v).sum::<f64>() / total;
+        let variance = points
+            .iter()
+            .map(|(w, v)| w * (v - mean).powi(2))
+            .sum::<f64>()
+            / total;
+        Some(LogCurve {
+            at_reference: mean,
+            per_log_core: target.core_slope(),
+            spread: variance.sqrt().max(FEW_SAMPLES_SPREAD),
+        })
+    }
+}
+
+fn median_curve(values: &mut [f64], target: Target) -> Option<LogCurve> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(f64::total_cmp);
+    let median = values[values.len() / 2];
+    let variance = values.iter().map(|v| (v - median).powi(2)).sum::<f64>() / values.len() as f64;
+    Some(LogCurve {
+        at_reference: median,
+        per_log_core: target.core_slope(),
+        spread: variance.sqrt().max(FEW_SAMPLES_SPREAD),
+    })
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Model {
-    fits: HashMap<(String, Target), LinearFit>,
+    architectures: HashMap<String, Builds>,
 }
 
 impl Model {
@@ -147,15 +204,12 @@ impl Model {
                 .or_default()
                 .push(sample);
         }
-        let mut fits = HashMap::new();
-        for (architecture, samples) in by_architecture {
-            for target in Target::ALL {
-                if let Some(fit) = Fitter::new(&samples, target).map(Fitter::fit) {
-                    fits.insert((architecture.to_owned(), target), fit);
-                }
-            }
+        Self {
+            architectures: by_architecture
+                .into_iter()
+                .map(|(architecture, samples)| (architecture.to_owned(), Builds::new(samples)))
+                .collect(),
         }
-        Self { fits }
     }
 
     #[expect(
@@ -164,9 +218,11 @@ impl Model {
         reason = "rounded and positive"
     )]
     pub fn estimate(&self, key: &GroupKey, own: &[(f64, &Sample)]) -> BuildEstimate {
-        let features = key.features();
-        let fit = |target: Target| self.fits.get(&(key.architecture.clone(), target));
-        let curve = |target: Target| Some(blend(fit(target)?.curve(&features), own, target));
+        let Some(builds) = self.architectures.get(&key.architecture) else {
+            return BuildEstimate::default();
+        };
+        let similar = builds.similar(key);
+        let curve = |target: Target| Some(blend(builds.curve(&similar, target)?, own, target));
         BuildEstimate {
             ram: curve(Target::Ram),
             build_time: curve(Target::BuildTime),
@@ -180,15 +236,16 @@ impl Model {
                 .filter_map(|(_, s)| Some((s.cores?, s.peak_ram_mb?)))
                 .collect(),
             max_cores: None,
-            top_features: fit(Target::Ram)
-                .map(|fit| fit.top_features(&features))
-                .unwrap_or_default(),
+            similar_builds: similar
+                .iter()
+                .map(|(overlap, s)| (s.pname.clone(), *overlap))
+                .collect(),
         }
     }
 }
 
-/// Own builds count at the cores they ran with. The core term only shapes the model part, so
-/// it fades as own builds add up.
+/// Own builds count at the cores they ran with. The core term only shapes the estimate from
+/// similar builds, so it fades as own builds add up.
 fn blend(model: LogCurve, own: &[(f64, &Sample)], target: Target) -> LogCurve {
     let measured: Vec<(f64, f64)> = own
         .iter()
@@ -215,204 +272,6 @@ fn blend(model: LogCurve, own: &[(f64, &Sample)], target: Target) -> LogCurve {
         at_reference: own_mean + model_share * (model.at_reference - own_mean),
         per_log_core: model_share * model.per_log_core,
         spread,
-    }
-}
-
-struct Row {
-    y: f64,
-    l: f64,
-    censored: bool,
-    features: Vec<usize>,
-}
-
-/// Ridge regression in log space, solved by coordinate descent. A censored row (a lower bound)
-/// only pulls the fit up, so it is active only while the prediction is below it.
-struct Fitter {
-    names: Vec<String>,
-    rows: Vec<Row>,
-    by_feature: Vec<Vec<usize>>,
-    prior: Option<f64>,
-    bias: f64,
-    slope: f64,
-    weights: Vec<f64>,
-    core_weights: Vec<f64>,
-    residual: Vec<f64>,
-    active: Vec<bool>,
-}
-
-impl Fitter {
-    fn new(samples: &[&Sample], target: Target) -> Option<Self> {
-        let mut names: Vec<String> = Vec::new();
-        let mut index: HashMap<String, usize> = HashMap::new();
-        let mut rows = Vec::new();
-        for sample in samples {
-            let Some(y) = sample.value(target) else {
-                continue;
-            };
-            let features = sample
-                .group()
-                .features()
-                .into_iter()
-                .map(|name| {
-                    *index.entry(name.clone()).or_insert_with(|| {
-                        names.push(name);
-                        names.len() - 1
-                    })
-                })
-                .collect();
-            rows.push(Row {
-                y,
-                l: sample.log_cores(target),
-                censored: sample.censored(target),
-                features,
-            });
-        }
-        let measured: Vec<f64> = rows.iter().filter(|r| !r.censored).map(|r| r.y).collect();
-        if measured.is_empty() {
-            return None;
-        }
-
-        let mut by_feature = vec![Vec::new(); names.len()];
-        for (i, row) in rows.iter().enumerate() {
-            for &f in &row.features {
-                by_feature[f].push(i);
-            }
-        }
-        let prior = target.core_slope_prior();
-        let bias = measured.iter().sum::<f64>() / measured.len() as f64;
-        let slope = prior.unwrap_or(0.0);
-        let residual = rows.iter().map(|r| r.y - bias - slope * r.l).collect();
-        Some(Self {
-            weights: vec![0.0; names.len()],
-            core_weights: vec![0.0; names.len()],
-            active: vec![true; rows.len()],
-            names,
-            rows,
-            by_feature,
-            prior,
-            bias,
-            slope,
-            residual,
-        })
-    }
-
-    fn fit(mut self) -> LinearFit {
-        for _ in 0..FIT_EPOCHS {
-            self.active = self
-                .rows
-                .iter()
-                .zip(&self.residual)
-                .map(|(row, e)| !row.censored || *e > 0.0)
-                .collect();
-            self.fit_bias();
-            self.fit_slope();
-            for feature in 0..self.names.len() {
-                self.fit_weight(feature);
-                self.fit_core_weight(feature);
-            }
-        }
-        self.finish()
-    }
-
-    fn active_rows(&self) -> impl Iterator<Item = usize> + '_ {
-        (0..self.rows.len()).filter(|&i| self.active[i])
-    }
-
-    fn shift(&mut self, rows: &[usize], by: impl Fn(&Row) -> f64) {
-        for &i in rows {
-            self.residual[i] -= by(&self.rows[i]);
-        }
-    }
-
-    fn fit_bias(&mut self) {
-        let (sum, count) = self
-            .active_rows()
-            .fold((0.0, 0.0), |(s, c), i| (s + self.residual[i], c + 1.0));
-        if count == 0.0 {
-            return;
-        }
-        let step = sum / count;
-        self.bias += step;
-        let all: Vec<usize> = (0..self.rows.len()).collect();
-        self.shift(&all, |_| step);
-    }
-
-    fn fit_slope(&mut self) {
-        let Some(prior) = self.prior else {
-            return;
-        };
-        let (num, den) = self.active_rows().fold((0.0, 0.0), |(n, d), i| {
-            let l = self.rows[i].l;
-            (n + l * (self.residual[i] + self.slope * l), d + l * l)
-        });
-        let next = (num + CORE_SLOPE_PENALTY * prior) / (den + CORE_SLOPE_PENALTY);
-        let step = next - self.slope;
-        let all: Vec<usize> = (0..self.rows.len()).collect();
-        self.shift(&all, |row| step * row.l);
-        self.slope = next;
-    }
-
-    fn fit_weight(&mut self, feature: usize) {
-        let members = std::mem::take(&mut self.by_feature[feature]);
-        let current = self.weights[feature];
-        let (num, den) = members
-            .iter()
-            .filter(|&&i| self.active[i])
-            .fold((0.0, 0.0), |(n, d), &i| {
-                (n + self.residual[i] + current, d + 1.0)
-            });
-        let next = num / (den + FEATURE_PENALTY);
-        self.shift(&members, |_| next - current);
-        self.weights[feature] = next;
-        self.by_feature[feature] = members;
-    }
-
-    fn fit_core_weight(&mut self, feature: usize) {
-        if self.prior.is_none() {
-            return;
-        }
-        let members = std::mem::take(&mut self.by_feature[feature]);
-        let current = self.core_weights[feature];
-        let (num, den) =
-            members
-                .iter()
-                .filter(|&&i| self.active[i])
-                .fold((0.0, 0.0), |(n, d), &i| {
-                    let l = self.rows[i].l;
-                    (n + l * (self.residual[i] + current * l), d + l * l)
-                });
-        let next = num / (den + CORE_FEATURE_PENALTY);
-        self.shift(&members, |row| (next - current) * row.l);
-        self.core_weights[feature] = next;
-        self.by_feature[feature] = members;
-    }
-
-    fn finish(self) -> LinearFit {
-        let squared: Vec<f64> = self
-            .rows
-            .iter()
-            .zip(&self.residual)
-            .filter(|(row, _)| !row.censored)
-            .map(|(_, e)| e * e)
-            .collect();
-        let error = (squared.iter().sum::<f64>() / squared.len() as f64)
-            .sqrt()
-            .max(MIN_SPREAD);
-        let named = |values: &[f64]| {
-            self.names
-                .iter()
-                .cloned()
-                .zip(values.iter().copied())
-                .filter(|(_, v)| *v != 0.0)
-                .collect()
-        };
-        LinearFit {
-            bias: self.bias,
-            core_slope: self.slope,
-            weights: named(&self.weights),
-            core_weights: named(&self.core_weights),
-            error,
-        }
     }
 }
 
@@ -468,6 +327,26 @@ mod tests {
         samples
     }
 
+    fn python_packages() -> Vec<Sample> {
+        vec![
+            sample(
+                "llama-index-llms-openai",
+                &["python3", "hatchling", "llama-index-core", "openai"],
+                16,
+                126,
+                7_000.0,
+            ),
+            sample(
+                "cuda-kernels",
+                &["cmake", "cudatoolkit", "ninja"],
+                16,
+                50_000,
+                900_000.0,
+            ),
+            sample("unit-file", &["bash"], 16, 5, 100.0),
+        ]
+    }
+
     #[test]
     fn a_shared_pname_with_other_inputs_gets_its_own_estimate() {
         let samples = torch_and_torch_bin();
@@ -489,18 +368,57 @@ mod tests {
     }
 
     #[test]
-    fn a_build_never_seen_is_estimated_from_its_inputs() {
-        let samples = torch_and_torch_bin();
+    fn a_build_never_seen_takes_the_builds_with_the_most_similar_inputs() {
+        let model = Model::fit(&python_packages());
+        let unseen = key(
+            "llama-index-embeddings-openai",
+            &[
+                "python3",
+                "hatchling",
+                "llama-index-core",
+                "openai",
+                "numpy",
+            ],
+        );
+
+        let estimate = model.estimate(&unseen, &[]);
+
+        let median = estimate.ram.unwrap().median(16);
+        assert!(median > 60.0 && median < 250.0, "{estimate:?}");
+        assert_eq!(estimate.similar_builds[0].0, "llama-index-llms-openai");
+        assert_eq!(estimate.own_samples, 0);
+    }
+
+    #[test]
+    fn a_build_without_similar_inputs_gets_the_median_of_all_builds() {
+        let model = Model::fit(&python_packages());
+
+        let estimate = model.estimate(&key("never-built", &["also-unknown"]), &[]);
+
+        let median = estimate.ram.unwrap().median(16);
+        assert!((median - 126.0).abs() < 1.0, "{estimate:?}");
+        assert!(estimate.similar_builds.is_empty());
+        assert!(estimate.build_ms(16).unwrap() > 0.0);
+    }
+
+    #[test]
+    fn an_out_of_memory_kill_is_no_similar_build() {
+        let mut samples = python_packages();
+        let mut killed = sample(
+            "llama-index-core",
+            &["python3", "hatchling", "openai"],
+            16,
+            90_000,
+            1.0,
+        );
+        killed.lower_bound = true;
+        killed.build_ms = None;
+        samples.push(killed);
         let model = Model::fit(&samples);
-        let bumped = key("torch", &["cmake", "cudatoolkit", "magma", "nccl"]);
-        let unknown = key("never-built", &["also-unknown"]);
 
-        let bumped = model.estimate(&bumped, &[]);
-        let unknown = model.estimate(&unknown, &[]);
+        let estimate = model.estimate(&key("other", &["python3", "hatchling", "openai"]), &[]);
 
-        assert_eq!(bumped.own_samples, 0);
-        assert!(bumped.ram_mb(64).unwrap() > 20_000, "{bumped:?}");
-        assert!(unknown.ram_mb(16).unwrap() > 0 && unknown.build_ms(16).unwrap() > 0.0);
+        assert!(estimate.ram_mb(16).unwrap() < 1_000, "{estimate:?}");
     }
 
     #[test]
@@ -554,20 +472,14 @@ mod tests {
     }
 
     #[test]
-    fn a_build_without_own_builds_follows_the_core_term_of_the_model() {
-        let mut samples = Vec::new();
-        for _ in 0..6 {
-            samples.push(sample("par", &["cc"], 8, 4_000, 20_000.0));
-            samples.push(sample("par", &["cc"], 32, 16_000, 6_000.0));
-        }
-        let model = Model::fit(&samples);
-        let estimate = model.estimate(&key("other", &["cc"]), &[]);
+    fn a_similar_build_counts_at_the_cores_it_ran_with() {
+        let model = Model::fit(&[sample("par", &["cc", "make"], 64, 16_000, 6_000.0)]);
 
-        assert!(
-            estimate.ram_mb(32).unwrap() > estimate.ram_mb(8).unwrap(),
-            "{estimate:?}"
-        );
-        assert!(estimate.build_ms(32).unwrap() < estimate.build_ms(8).unwrap());
+        let estimate = model.estimate(&key("other", &["cc", "make"]), &[]);
+
+        assert!(estimate.ram.unwrap().median(16) < 16_000.0, "{estimate:?}");
+        assert!(estimate.ram_mb(64).unwrap() > estimate.ram_mb(16).unwrap());
+        assert!(estimate.build_ms(64).unwrap() < estimate.build_ms(16).unwrap());
     }
 
     #[test]

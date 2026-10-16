@@ -54,7 +54,7 @@ pub struct BuildEstimate {
     pub own_samples: u32,
     pub ram_floor: Vec<(u32, u64)>,
     pub max_cores: Option<u32>,
-    pub top_features: Vec<(String, f64)>,
+    pub similar_builds: Vec<(String, f64)>,
 }
 
 pub static NO_ESTIMATE: BuildEstimate = BuildEstimate {
@@ -64,7 +64,7 @@ pub static NO_ESTIMATE: BuildEstimate = BuildEstimate {
     own_samples: 0,
     ram_floor: Vec::new(),
     max_cores: None,
-    top_features: Vec::new(),
+    similar_builds: Vec::new(),
 };
 
 impl BuildEstimate {

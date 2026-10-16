@@ -60,7 +60,7 @@ pub struct EstimateView {
     pub ram_mb: Option<u64>,
     pub build_ms: Option<u64>,
     pub output_nar_bytes: Option<u64>,
-    pub top_features: Vec<(String, f64)>,
+    pub similar_builds: Vec<(String, f64)>,
 }
 
 impl EstimateView {
@@ -77,7 +77,7 @@ impl EstimateView {
             ram_mb: estimate.ram_mb(cores),
             build_ms: estimate.build_ms(cores).map(|ms| ms.round() as u64),
             output_nar_bytes: estimate.output_nar_bytes,
-            top_features: estimate.top_features.clone(),
+            similar_builds: estimate.similar_builds.clone(),
         }
     }
 }

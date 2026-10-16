@@ -90,19 +90,21 @@ A released job drops out of these counts together with its slot.
 ```mermaid
 flowchart LR
   rows["derivation_metric rows"] --> store["sample store per instance"]
-  store --> fit["fit per architecture"]
+  store --> similar["similar builds per architecture"]
   store --> own["own past builds"]
-  fit --> estimate["BuildEstimate"]
+  similar --> estimate["BuildEstimate"]
   own --> estimate
 ```
 
 - **Samples:** build-assign passes read the rows added since the last read. Rows count once per id, also across instances.
 - **Lower bounds:** out-of-memory rows and rows without a build time set a lower bound for RAM only.
-- **Features:** the pname, each input pname, and each of those times `log(cores / 16)`.
+- **Similar builds:** the 10 pnames whose newest build shares the most input pnames, at least 30 %. The weight of each is the square of that overlap. Lower-bound rows stay out.
+- **No similar build:** the median over the newest build of every pname.
+- **Cores:** values move to 16 cores by `log(cores / 16)` times `+0.5` for RAM and `-0.5` for build time.
 - **Own builds:** the last 20 rows of the pname and architecture with at least 30 % input overlap, weighted by that overlap. torch and torch-bin share no inputs and stay apart.
 - **Targets:** peak RAM, build time at `REFERENCE_CORE_SCORE` without concurrent builds, and output NAR size, all in log space.
-- **Fit:** `BuildHistoryRefit` can refit a ridge regression every 300 s on each instance. The shared core term can start at `+0.5` for RAM and `-0.5` for build time.
-- **Blend:** the estimate is `(W * own + 0.1 * model) / (W + 0.1)`, with `W` the summed weight of the own samples. Own samples keep the core count of their run. Never-measured derivations still get the model's estimate.
+- **Refresh:** `BuildHistoryRefit` can rebuild the similar builds every 300 s on each instance.
+- **Blend:** the estimate is `(W * own + 0.1 * similar) / (W + 0.1)`, with `W` the summed weight of the own samples. Own samples keep the core count of their run. Never-measured derivations still get the estimate of their similar builds.
 - **RAM reserve:** `BuildEstimate::ram_mb(cores)` can give the 90th percentile at that core count. Core counts at or above an own out-of-memory kill keep at least 1.1 times its killed peak.
 - **No samples:** architectures without rows give no estimate. Their builds count as `RamNeed::Unmeasured`.
 
