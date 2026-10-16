@@ -12,7 +12,7 @@ mod scope;
 pub use responses::{ActionDeliveryItem, DeliveryDetail, DeliveryListItem, WebhookDeliveryItem};
 pub use scope::{Verb, WebhookOwner};
 
-use crate::api_spec::{CachePath, ProjectPath, operations_mut};
+use crate::api_spec::{CachePath, ProjectPath, TeamPath, operations_mut};
 use gradient_core::ServerState;
 use std::sync::Arc;
 use utoipa::IntoParams;
@@ -25,6 +25,7 @@ use utoipa_axum::routes;
 pub enum WebhookMount {
     Project,
     Cache,
+    Team,
     Instance,
 }
 
@@ -33,6 +34,7 @@ impl WebhookMount {
         match self {
             Self::Project => "project",
             Self::Cache => "cache",
+            Self::Team => "team",
             Self::Instance => "instance",
         }
     }
@@ -41,6 +43,7 @@ impl WebhookMount {
         match self {
             Self::Project => "`manageWebhooks` on the project",
             Self::Cache => "`manageCacheWebhooks` on the cache",
+            Self::Team => "Admin role in the team",
             Self::Instance => "superuser",
         }
     }
@@ -50,6 +53,7 @@ impl WebhookMount {
         match self {
             Self::Project => ProjectPath::into_params(path),
             Self::Cache => CachePath::into_params(path),
+            Self::Team => TeamPath::into_params(path),
             Self::Instance => Vec::new(),
         }
     }

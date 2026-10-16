@@ -40,12 +40,13 @@ Every `build.*` event with a per-evaluation `build_id` also includes `derivation
 
 ## Webhooks
 
-Manage webhooks under **Webhooks** in the project settings or on the cache page. Superusers manage instance webhooks under **Job Board -> System Health -> Instance Webhooks**. [Task actions](../guides/actions.md) receive the same envelope for single tasks.
+Manage webhooks under **Webhooks** in the project settings, on the cache page or in the team settings. Superusers manage instance webhooks under **Job Board -> System Health -> Instance Webhooks**. [Task actions](../guides/actions.md) receive the same envelope for single tasks.
 
 | Scope | API | Who may manage | Receives |
 |---|---|---|---|
 | Project | `/api/v1/projects/{project}/webhooks` | `manageWebhooks` | events of the project, its tasks and evaluations |
 | Cache | `/api/v1/caches/{cache}/webhooks` | `manageCacheWebhooks` | events of the cache |
+| Team | `/api/v1/teams/{team}/webhooks` | team Admin | team events (`team.worker.*`, `team.webhook.*`), never events of granting projects |
 | Instance | `/api/v1/admin/webhooks` | superuser | every durable event |
 
 - `events` is a list of globs (`build.*`, `task.star`). With an empty list, the webhook receives everything in scope.

@@ -54,6 +54,17 @@
         [appManagedDisable]="access()"></button>
     </div>
 
+    @if (team.role === 'admin' || isSuperuser()) {
+      <gr-settings-section title="More Settings" [card]="false">
+        <gr-row-list>
+          <gr-row icon="webhook" linkLabel="Webhooks" [link]="['/team', teamName, 'webhooks']">
+            Webhooks
+            <span slot="meta">Signed HTTP requests for this team's events</span>
+          </gr-row>
+        </gr-row-list>
+      </gr-settings-section>
+    }
+
     @if (access().canEdit) {
       <gr-settings-section title="Danger Zone" [danger]="true" [card]="false" maxWidth="none">
         <gr-row>

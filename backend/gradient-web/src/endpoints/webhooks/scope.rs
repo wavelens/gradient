@@ -5,7 +5,9 @@
  */
 
 use super::refusal::WebhookRefusal;
-use crate::access::{CacheAccess, Caller, ProjectAccess, load_cache, load_project};
+use crate::access::{
+    CacheAccess, Caller, ProjectAccess, TeamAccess, load_cache, load_project, load_team,
+};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, require_superuser};
 use crate::permissions::{CachePermission, Permission};
@@ -136,6 +138,26 @@ impl FromRequestParts<Arc<ServerState>> for WebhookOwner {
                 project: None,
                 cache: Some(cache.id),
                 team: None,
+                user,
+                params,
+            });
+        }
+        if params.contains("team") {
+            let (team, _) = load_team(
+                &db.web_db,
+                &user,
+                api_key.as_ref(),
+                params.param("team")?,
+                TeamAccess::Admin {
+                    reject_managed: false,
+                },
+            )
+            .await?;
+            return Ok(Self {
+                scope: WebhookScope::Team,
+                project: None,
+                cache: None,
+                team: Some(team.id),
                 user,
                 params,
             });

@@ -10364,6 +10364,357 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/teams/{team}/webhooks:
+    get:
+      tags:
+      - webhooks
+      summary: List team webhooks
+      description: Requires Admin role in the team.
+      operationId: listTeamWebhooks
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Webhooks
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WebhookResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    post:
+      tags:
+      - webhooks
+      summary: Create a team webhook
+      description: |-
+        Requires Admin role in the team. The response carries the signing `secret` once; it is
+        never returned again (use `rotate-secret` to replace it).
+      operationId: createTeamWebhook
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWebhookRequest'
+        required: true
+      responses:
+        '200':
+          description: Created webhook and its secret
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/CreateWebhookResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/teams/{team}/webhooks/{id}:
+    get:
+      tags:
+      - webhooks
+      summary: Read a team webhook
+      operationId: readTeamWebhook
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/WebhookId'
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Webhook
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/WebhookResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - webhooks
+      summary: Delete a team webhook
+      operationId: deleteTeamWebhook
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/WebhookId'
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/DeletedResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    patch:
+      tags:
+      - webhooks
+      summary: Update a team webhook
+      operationId: updateTeamWebhook
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/WebhookId'
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWebhookRequest'
+        required: true
+      responses:
+        '200':
+          description: Updated webhook
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/WebhookResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/teams/{team}/webhooks/{id}/deliveries:
+    get:
+      tags:
+      - webhooks
+      summary: List a team webhook's deliveries
+      operationId: listTeamWebhookDeliveries
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/WebhookId'
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Deliveries, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DeliveryListItem'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/teams/{team}/webhooks/{id}/deliveries/{delivery_id}:
+    get:
+      tags:
+      - webhooks
+      summary: Read one team webhook delivery with bodies
+      operationId: getTeamWebhookDelivery
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/WebhookId'
+      - name: delivery_id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/WebhookDeliveryId'
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/DeliveryDetail_WebhookDeliveryId'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/teams/{team}/webhooks/{id}/rotate-secret:
+    post:
+      tags:
+      - webhooks
+      summary: Replace a team webhook's signing secret
+      operationId: rotateTeamWebhookSecret
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/WebhookId'
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The new secret, shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/RotatedSecret'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/teams/{team}/webhooks/{id}/test:
+    post:
+      tags:
+      - webhooks
+      summary: Send a `webhook.ping` to a team webhook
+      description: Delivers immediately (no retry) and returns the recorded delivery.
+      operationId: testTeamWebhook
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/WebhookId'
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Recorded delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/DeliveryListItem_WebhookDeliveryId'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/teams/{team}/workers:
     get:
       tags:
@@ -19112,6 +19463,7 @@ components:
       - project
       - cache
       - instance
+      - team
     WorkerConnection:
       type: object
       required:

@@ -22,6 +22,7 @@ import {
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
+  RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
@@ -52,6 +53,7 @@ interface SettingsForm {
     MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
+    RowListComponent,
     SelectComponent,
     SettingsSectionComponent,
   ],

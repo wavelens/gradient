@@ -7,6 +7,7 @@
 export type WebhookScopeRef =
   | { kind: 'project'; name: string }
   | { kind: 'cache'; name: string }
+  | { kind: 'team'; name: string }
   | { kind: 'instance' };
 
 export function webhooksBase(scope: WebhookScopeRef): string {
@@ -15,6 +16,8 @@ export function webhooksBase(scope: WebhookScopeRef): string {
       return `projects/${scope.name}/webhooks`;
     case 'cache':
       return `caches/${scope.name}/webhooks`;
+    case 'team':
+      return `teams/${scope.name}/webhooks`;
     case 'instance':
       return 'admin/webhooks';
   }
