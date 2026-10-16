@@ -5,6 +5,7 @@
  */
 
 pub mod aggregate;
+pub mod estimate;
 pub mod peer_auth;
 pub mod score;
 pub mod session_port;
