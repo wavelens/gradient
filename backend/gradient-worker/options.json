@@ -144,6 +144,26 @@
   },
   {
     "group": "",
+    "field": "idle_timeout",
+    "flag": "idle-timeout",
+    "env": "GRADIENT_WORKER_IDLE_TIMEOUT",
+    "type": "Option<u64>",
+    "description": "Seconds without an assigned job after which the worker drains and exits. `null` keeps it\nrunning.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "",
+    "field": "max_lifetime",
+    "flag": "max-lifetime",
+    "env": "GRADIENT_WORKER_MAX_LIFETIME",
+    "type": "Option<u64>",
+    "description": "Seconds after start after which the worker drains, finishes its running jobs and exits.\n`null` keeps it running.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "",
     "field": "eval_subprocess",
     "flag": "eval-subprocess",
     "env": "GRADIENT_WORKER_EVAL_SUBPROCESS",
