@@ -487,8 +487,8 @@ mod tests {
         let estimate = built(100_000);
         let inst = InstanceContext::default();
 
-        assert_eq!(secs(&estimate, &on(4_000, 0), &inst), 100.0);
-        assert_eq!(secs(&estimate, &on(2_000, 0), &inst), 200.0);
+        assert!((secs(&estimate, &on(4_000, 0), &inst) - 100.0).abs() < 1e-9);
+        assert!((secs(&estimate, &on(2_000, 0), &inst) - 200.0).abs() < 1e-9);
         assert!((secs(&estimate, &on(2_000, 5), &inst) - 240.0).abs() < 1e-9);
     }
 
@@ -497,8 +497,8 @@ mod tests {
         let estimate = built(100_000);
         let inst = InstanceContext::default();
 
-        assert_eq!(secs(&estimate, &on(1, 0), &inst), 200.0);
-        assert_eq!(secs(&estimate, &on(1_000_000, 0), &inst), 50.0);
+        assert!((secs(&estimate, &on(1, 0), &inst) - 200.0).abs() < 1e-9);
+        assert!((secs(&estimate, &on(1_000_000, 0), &inst) - 50.0).abs() < 1e-9);
     }
 
     #[test]
@@ -508,7 +508,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(secs(&built(100_000), &on(0, 0), &inst), 200.0);
+        assert!((secs(&built(100_000), &on(0, 0), &inst) - 200.0).abs() < 1e-9);
     }
 
     #[test]
