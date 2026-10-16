@@ -72,6 +72,7 @@ fn main() -> Result<()> {
     }
 
     config.memory_guard()?;
+    config::process_start();
 
     // The crypto provider, before the first TLS handshake, for rustls 0.23 (#232).
     gradient_util::http::init_crypto_provider();
@@ -180,7 +181,7 @@ fn main() -> Result<()> {
             let (disconnected, outcome) = worker.run(stop.clone()).await;
 
             if stop.is_cancelled() {
-                info!("worker stopped; tearing down");
+                info!("worker stopped or reached an exit limit; tearing down");
                 drop(disconnected);
                 wait_for_inbound_sessions(&sessions).await;
                 executor_handle.shutdown().await;

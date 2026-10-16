@@ -7,7 +7,7 @@
 use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
 use gradient_wire::messages::{
@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-use crate::config::WorkerConfig;
+use crate::config::{ExitLimits, WorkerConfig};
 use crate::count::clamp_to_u32;
 use crate::executor::timeline::{JobTimeline, TimelineSnapshot};
 use crate::executor::{AbortSignal, JobExecutor};
@@ -56,6 +56,10 @@ pub(super) async fn run_message_loop(
 
     let mut stop_deadline = None;
 
+    let limits = state.config.exit_limits();
+    let started = crate::config::process_start();
+    let mut exit_check = tokio::time::interval(Duration::from_secs(1));
+
     info!("entering dispatch loop");
 
     loop {
@@ -80,6 +84,23 @@ pub(super) async fn run_message_loop(
                 if state.stopping && state.jobs.is_idle() {
                     info!("stopped: every aborted job has reported");
                     break;
+                }
+                if state.exiting && state.jobs.is_idle() {
+                    info!("exit limit reached and every job has finished; exiting");
+                    stop.cancel();
+                    break;
+                }
+            }
+
+            _ = exit_check.tick(), if limits.is_set() && !state.exiting => {
+                if exit_due(state.idle_since, started, Instant::now(), &limits) {
+                    info!(?limits, "exit limit reached; draining before exit");
+                    state.exiting = true;
+                    state.begin_drain().await?;
+                    if state.jobs.is_idle() {
+                        stop.cancel();
+                        break;
+                    }
                 }
             }
 
@@ -111,6 +132,23 @@ pub(super) async fn run_message_loop(
         draining: state.draining && !state.stopping,
         refused: state.refused,
     })
+}
+
+fn exit_due(
+    idle_since: Option<Instant>,
+    started: Instant,
+    now: Instant,
+    limits: &ExitLimits,
+) -> bool {
+    let elapsed = |since: Instant| now.saturating_duration_since(since);
+    let idle_over = limits
+        .idle_timeout
+        .zip(idle_since)
+        .is_some_and(|(timeout, since)| elapsed(since) >= timeout);
+    let lifetime_over = limits
+        .max_lifetime
+        .is_some_and(|lifetime| elapsed(started) >= lifetime);
+    idle_over || lifetime_over
 }
 
 async fn stop_budget_elapsed(deadline: Option<tokio::time::Instant>) {
@@ -229,6 +267,8 @@ pub(super) struct MessageLoopState {
     draining: bool,
     stopping: bool,
     refused: bool,
+    exiting: bool,
+    idle_since: Option<Instant>,
 }
 
 impl MessageLoopState {
@@ -277,6 +317,8 @@ impl MessageLoopState {
             draining: false,
             stopping: false,
             refused: false,
+            exiting: false,
+            idle_since: Some(Instant::now()),
         }
     }
 
@@ -464,6 +506,10 @@ impl MessageLoopState {
                 self.report_failure(job_id, assignment_id, &e, spans, elapsed_ms)
                     .await?;
             }
+        }
+
+        if self.jobs.is_idle() {
+            self.idle_since = Some(Instant::now());
         }
 
         if !self.draining {
@@ -710,6 +756,7 @@ impl MessageLoopState {
         cluster: Option<String>,
         credentials: CredentialStore,
     ) {
+        self.idle_since = None;
         let (assignment_id, abort_rx, timeline) =
             self.jobs
                 .register(job_id.clone(), kind, assignment_id, cluster);
@@ -989,6 +1036,71 @@ async fn until_aborted(
 mod tests {
     use super::*;
     use crate::executor::failure::JobAborted;
+
+    fn limits(idle: Option<u64>, lifetime: Option<u64>) -> ExitLimits {
+        ExitLimits {
+            idle_timeout: idle.map(Duration::from_secs),
+            max_lifetime: lifetime.map(Duration::from_secs),
+        }
+    }
+
+    #[test]
+    fn idle_past_timeout_exits() {
+        let started = Instant::now();
+        let now = started + Duration::from_secs(120);
+        assert!(exit_due(
+            Some(started),
+            started,
+            now,
+            &limits(Some(60), None)
+        ));
+    }
+
+    #[test]
+    fn busy_never_exits_on_idle() {
+        let started = Instant::now();
+        let now = started + Duration::from_secs(3600);
+        assert!(!exit_due(None, started, now, &limits(Some(60), None)));
+    }
+
+    #[test]
+    fn job_done_resets_idle() {
+        let started = Instant::now();
+        let job_done = started + Duration::from_secs(100);
+        let now = job_done + Duration::from_secs(30);
+        assert!(!exit_due(
+            Some(job_done),
+            started,
+            now,
+            &limits(Some(60), None)
+        ));
+        assert!(exit_due(
+            Some(job_done),
+            started,
+            job_done + Duration::from_secs(60),
+            &limits(Some(60), None)
+        ));
+    }
+
+    #[test]
+    fn lifetime_reached_exits_even_when_busy() {
+        let started = Instant::now();
+        let now = started + Duration::from_secs(600);
+        assert!(exit_due(None, started, now, &limits(None, Some(600))));
+        assert!(!exit_due(
+            None,
+            started,
+            now - Duration::from_secs(1),
+            &limits(None, Some(600))
+        ));
+    }
+
+    #[test]
+    fn none_limits_never_exit() {
+        let started = Instant::now();
+        let now = started + Duration::from_secs(1_000_000);
+        assert!(!exit_due(Some(started), started, now, &limits(None, None)));
+    }
 
     fn registry() -> (JobRegistry, mpsc::UnboundedReceiver<(String, Result<()>)>) {
         let (done_tx, done_rx) = mpsc::unbounded_channel();
