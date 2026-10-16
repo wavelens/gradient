@@ -170,10 +170,11 @@ pub async fn run_pass(
     match outcome {
         Ok(Ok(())) => health.with(name, |h| h.last_ok_at = Some(Instant::now())),
         Ok(Err(e)) => {
-            warn!(loop_name = name, elapsed_ms, error = %e, "pass failed");
+            let error = error_chain(&*e);
+            warn!(loop_name = name, elapsed_ms, %error, "pass failed");
             health.with(name, |h| {
                 h.pass_errors += 1;
-                h.last_error = Some(e.to_string());
+                h.last_error = Some(error);
             });
         }
         Err(_) => {
@@ -185,6 +186,13 @@ pub async fn run_pass(
         }
     }
     true
+}
+
+fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    std::iter::successors(Some(error), |e| e.source())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(": ")
 }
 
 async fn wait_for_turn(spec: &PeriodicSpec, cancel: &CancellationToken) -> bool {
@@ -511,6 +519,31 @@ mod tests {
     use super::*;
     use crate::shutdown::Shutdown;
     use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+
+    #[derive(Debug)]
+    struct Wrapped(&'static str, Option<Box<Wrapped>>);
+
+    impl std::fmt::Display for Wrapped {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+
+    impl std::error::Error for Wrapped {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.1.as_deref().map(|e| e as _)
+        }
+    }
+
+    #[test]
+    fn a_failed_pass_reports_the_cause_under_its_context() {
+        let error: PassError = Box::new(Wrapped(
+            "deep GC unit nars/ql",
+            Some(Box::new(Wrapped("listing failed", None))),
+        ));
+
+        assert_eq!(error_chain(&*error), "deep GC unit nars/ql: listing failed");
+    }
 
     struct Counting {
         calls: Arc<AtomicU32>,
