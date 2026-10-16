@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use gradient_types::ids::DerivationId;
 
 use super::{BuildEstimate, LogCurve, log_cores};
 use crate::score::weights::{
     BUILD_TIME_CORE_SLOPE_PRIOR, CORE_FEATURE_PENALTY, CORE_SLOPE_PENALTY, FEATURE_PENALTY,
-    FIT_EPOCHS, MIN_SPREAD, OWN_SAMPLE_PRIOR_WEIGHT, RAM_CORE_SLOPE_PRIOR, REFERENCE_CORES,
-    TOP_FEATURES,
+    FEW_SAMPLES_SPREAD, FIT_EPOCHS, MIN_SPREAD, OWN_SAMPLE_PRIOR_WEIGHT, RAM_CORE_SLOPE_PRIOR,
+    REFERENCE_CORES, TOP_FEATURES,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -52,6 +52,15 @@ pub struct GroupKey {
     pub architecture: String,
     pub pname: String,
     pub input_pnames: Vec<String>,
+}
+
+pub fn input_overlap(a: &[String], b: &[String]) -> f64 {
+    let (a, b): (HashSet<&String>, HashSet<&String>) = (a.iter().collect(), b.iter().collect());
+    let union = a.union(&b).count();
+    if union == 0 {
+        return 1.0;
+    }
+    a.intersection(&b).count() as f64 / union as f64
 }
 
 impl GroupKey {
@@ -154,7 +163,7 @@ impl Model {
         clippy::cast_sign_loss,
         reason = "rounded and positive"
     )]
-    pub fn estimate(&self, key: &GroupKey, own: &[&Sample]) -> BuildEstimate {
+    pub fn estimate(&self, key: &GroupKey, own: &[(f64, &Sample)]) -> BuildEstimate {
         let features = key.features();
         let fit = |target: Target| self.fits.get(&(key.architecture.clone(), target));
         let curve = |target: Target| Some(blend(fit(target)?.curve(&features), own, target));
@@ -163,12 +172,12 @@ impl Model {
             build_time: curve(Target::BuildTime),
             output_nar_bytes: curve(Target::OutputNar)
                 .map(|c| c.median(REFERENCE_CORES).round() as u64),
-            own_samples: u32::try_from(own.iter().filter(|s| !s.lower_bound).count())
+            own_samples: u32::try_from(own.iter().filter(|(_, s)| !s.lower_bound).count())
                 .unwrap_or(u32::MAX),
             ram_floor: own
                 .iter()
-                .filter(|s| s.lower_bound)
-                .filter_map(|s| Some((s.cores?, s.peak_ram_mb?)))
+                .filter(|(_, s)| s.lower_bound)
+                .filter_map(|(_, s)| Some((s.cores?, s.peak_ram_mb?)))
                 .collect(),
             max_cores: None,
             top_features: fit(Target::Ram)
@@ -178,27 +187,33 @@ impl Model {
     }
 }
 
-fn blend(model: LogCurve, own: &[&Sample], target: Target) -> LogCurve {
-    let adjusted: Vec<f64> = own
+/// Own builds count at the cores they ran with. The core term only shapes the model part, so
+/// it fades as own builds add up.
+fn blend(model: LogCurve, own: &[(f64, &Sample)], target: Target) -> LogCurve {
+    let measured: Vec<(f64, f64)> = own
         .iter()
-        .filter(|s| !s.censored(target))
-        .filter_map(|s| Some(s.value(target)? - model.per_log_core * s.log_cores(target)))
+        .filter(|(_, s)| !s.censored(target))
+        .filter_map(|(weight, s)| Some((*weight, s.value(target)?)))
         .collect();
-    if adjusted.is_empty() {
+    let total: f64 = measured.iter().map(|(weight, _)| weight).sum();
+    if total <= 0.0 {
         return model;
     }
-    let n = adjusted.len() as f64;
-    let own_mean = adjusted.iter().sum::<f64>() / n;
-    let spread = if adjusted.len() >= 3 {
-        let variance = adjusted.iter().map(|v| (v - own_mean).powi(2)).sum::<f64>() / n;
+    let own_mean = measured.iter().map(|(w, v)| w * v).sum::<f64>() / total;
+    let spread = if total >= 3.0 {
+        let variance = measured
+            .iter()
+            .map(|(w, v)| w * (v - own_mean).powi(2))
+            .sum::<f64>()
+            / total;
         variance.sqrt().max(MIN_SPREAD)
     } else {
-        model.spread
+        FEW_SAMPLES_SPREAD
     };
+    let model_share = OWN_SAMPLE_PRIOR_WEIGHT / (total + OWN_SAMPLE_PRIOR_WEIGHT);
     LogCurve {
-        at_reference: (n * own_mean + OWN_SAMPLE_PRIOR_WEIGHT * model.at_reference)
-            / (n + OWN_SAMPLE_PRIOR_WEIGHT),
-        per_log_core: model.per_log_core,
+        at_reference: own_mean + model_share * (model.at_reference - own_mean),
+        per_log_core: model_share * model.per_log_core,
         spread,
     }
 }
@@ -423,8 +438,12 @@ mod tests {
         sample(pname, inputs, 16, 1, 1.0).group()
     }
 
-    fn own<'a>(samples: &'a [Sample], key: &GroupKey) -> Vec<&'a Sample> {
-        samples.iter().filter(|s| &s.group() == key).collect()
+    fn own<'a>(samples: &'a [Sample], key: &GroupKey) -> Vec<(f64, &'a Sample)> {
+        samples
+            .iter()
+            .filter(|s| &s.group() == key)
+            .map(|s| (1.0, s))
+            .collect()
     }
 
     fn torch_and_torch_bin() -> Vec<Sample> {
@@ -518,18 +537,34 @@ mod tests {
     }
 
     #[test]
-    fn ram_follows_the_core_count_the_samples_show() {
+    fn own_builds_count_at_the_cores_they_ran_with() {
+        let mut samples = torch_and_torch_bin();
+        for _ in 0..3 {
+            samples.push(sample("flat", &["cc"], 16, 4_000, 20_000.0));
+        }
+        let model = Model::fit(&samples);
+        let flat = key("flat", &["cc"]);
+        let estimate = model.estimate(&flat, &own(&samples, &flat));
+
+        let (at_16, at_64) = (estimate.ram_mb(16).unwrap(), estimate.ram_mb(64).unwrap());
+        assert!(
+            at_64 * 10 < at_16 * 12,
+            "{at_16} at 16 cores, {at_64} at 64"
+        );
+    }
+
+    #[test]
+    fn a_build_without_own_builds_follows_the_core_term_of_the_model() {
         let mut samples = Vec::new();
         for _ in 0..6 {
             samples.push(sample("par", &["cc"], 8, 4_000, 20_000.0));
             samples.push(sample("par", &["cc"], 32, 16_000, 6_000.0));
         }
         let model = Model::fit(&samples);
-        let par = key("par", &["cc"]);
-        let estimate = model.estimate(&par, &own(&samples, &par));
+        let estimate = model.estimate(&key("other", &["cc"]), &[]);
 
         assert!(
-            estimate.ram_mb(32).unwrap() > 2 * estimate.ram_mb(8).unwrap(),
+            estimate.ram_mb(32).unwrap() > estimate.ram_mb(8).unwrap(),
             "{estimate:?}"
         );
         assert!(estimate.build_ms(32).unwrap() < estimate.build_ms(8).unwrap());
