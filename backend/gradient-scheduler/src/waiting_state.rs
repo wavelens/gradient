@@ -91,11 +91,7 @@ impl WaitingRefresh<'_> {
         }
 
         let tasks = EvalTasks::load(&self.db.worker_db, &evals).await?;
-        let worker_caps: Vec<(Vec<String>, Vec<String>)> = workers
-            .iter()
-            .map(|w| (w.architectures.clone(), w.system_features.clone()))
-            .collect();
-        let worker_caps = worker_caps.as_slice();
+        let mut caps_by_project: HashMap<Option<ProjectId>, Vec<WorkerCaps>> = HashMap::new();
         let now = gradient_types::now();
         let mut unbuildables = Vec::new();
         let ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
@@ -111,7 +107,12 @@ impl WaitingRefresh<'_> {
                 .waiting_reason
                 .as_ref()
                 .and_then(WaitingReason::from_json);
-            let project_workers = ProjectWorkerCounts::of(workers, tasks.project_of(&eval));
+            let project = tasks.project_of(&eval);
+            let project_workers = ProjectWorkerCounts::of(workers, project);
+            let worker_caps = caps_by_project
+                .entry(project)
+                .or_insert_with(|| project_worker_caps(workers, project))
+                .as_slice();
 
             if eval.status == EvaluationStatus::Waiting
                 && reason.as_ref().is_some_and(|r| {
@@ -628,6 +629,23 @@ fn pre_build_capability(kind: EvaluationKind, status: EvaluationStatus) -> Optio
     }
 }
 
+type WorkerCaps = (Vec<String>, Vec<String>);
+
+fn eligible_for(worker: &WorkerInfo, project: Option<ProjectId>) -> bool {
+    worker
+        .authorized_peers
+        .as_ref()
+        .is_none_or(|peers| project.is_some_and(|p| peers.contains(&p)))
+}
+
+fn project_worker_caps(workers: &[WorkerInfo], project: Option<ProjectId>) -> Vec<WorkerCaps> {
+    workers
+        .iter()
+        .filter(|w| eligible_for(w, project))
+        .map(|w| (w.architectures.clone(), w.system_features.clone()))
+        .collect()
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct ProjectWorkerCounts {
     eval: usize,
@@ -639,11 +657,7 @@ impl ProjectWorkerCounts {
     fn of(workers: &[WorkerInfo], project: Option<ProjectId>) -> Self {
         workers
             .iter()
-            .filter(|w| {
-                w.authorized_peers
-                    .as_ref()
-                    .is_none_or(|peers| project.is_some_and(|p| peers.contains(&p)))
-            })
+            .filter(|w| eligible_for(w, project))
             .fold(Self::default(), |counts, w| Self {
                 eval: counts.eval + usize::from(w.capabilities.eval),
                 fetch: counts.fetch + usize::from(w.capabilities.fetch),
@@ -791,6 +805,34 @@ mod tests {
             upload_speed_mbps: None,
             download_speed_mbps: None,
         }
+    }
+
+    fn capable_worker(
+        architectures: &[&str],
+        features: &[&str],
+        authorized_peers: Option<HashSet<ProjectId>>,
+    ) -> WorkerInfo {
+        WorkerInfo {
+            architectures: architectures.iter().map(|a| a.to_string()).collect(),
+            system_features: features.iter().map(|f| f.to_string()).collect(),
+            ..worker(true, authorized_peers)
+        }
+    }
+
+    #[test]
+    fn worker_restricted_to_other_project_gives_no_caps() {
+        let (own, other) = (ProjectId::now_v7(), ProjectId::now_v7());
+        let w = capable_worker(&["aarch64-darwin"], &[], Some(HashSet::from([other])));
+        assert!(project_worker_caps(&[w], Some(own)).is_empty());
+    }
+
+    #[test]
+    fn open_worker_gives_caps_to_every_project() {
+        let w = capable_worker(&["x86_64-linux"], &["kvm"], None);
+        assert_eq!(
+            project_worker_caps(&[w], Some(ProjectId::now_v7())),
+            vec![(vec!["x86_64-linux".to_string()], vec!["kvm".to_string()])]
+        );
     }
 
     #[test]
