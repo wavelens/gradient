@@ -33,7 +33,7 @@ pub async fn build_inputs_of<C: ConnectionTrait>(
 
 crate::sql! {
     BUILD_INPUT_PNAMES = r#"
-SELECT coalesce(d.pname, d.name) COLLATE "C" AS pname
+SELECT coalesce(nullif(d.pname, ''), regexp_replace(d.name, '-[0-9][^-]*$', '')) COLLATE "C" AS pname
 FROM derivation_dependency e JOIN derivation d ON d.id = e.dependency
 WHERE e.derivation = $1 AND e.kind IN (0, 2)
 GROUP BY 1 ORDER BY 1

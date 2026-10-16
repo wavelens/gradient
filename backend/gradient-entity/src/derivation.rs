@@ -43,11 +43,21 @@ impl Model {
     }
 
     pub fn history_name(&self) -> &str {
-        self.pname.as_deref().unwrap_or(&self.name)
+        match self.pname.as_deref() {
+            Some(pname) if !pname.is_empty() => pname,
+            _ => without_version(&self.name),
+        }
     }
 
     pub fn store_path(&self) -> String {
         self.as_store_path().full()
+    }
+}
+
+fn without_version(name: &str) -> &str {
+    match name.rsplit_once('-') {
+        Some((prefix, version)) if version.starts_with(|c: char| c.is_ascii_digit()) => prefix,
+        _ => name,
     }
 }
 
@@ -74,5 +84,20 @@ mod tests {
         };
         assert_eq!(named.history_name(), "hello");
         assert_eq!(unnamed.history_name(), "etc");
+    }
+
+    #[test]
+    fn history_name_drops_the_version_of_a_name_without_pname() {
+        let stub = |name: &str| Model {
+            name: name.into(),
+            pname: None,
+            ..Default::default()
+        };
+        assert_eq!(stub("acl-2.3.2").history_name(), "acl");
+        assert_eq!(
+            stub("python3.14-torch-2.9.0").history_name(),
+            "python3.14-torch"
+        );
+        assert_eq!(stub("bash-static").history_name(), "bash-static");
     }
 }
