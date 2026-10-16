@@ -30,3 +30,28 @@ pub async fn build_inputs_of<C: ConnectionTrait>(
         .all(db)
         .await
 }
+
+crate::sql! {
+    BUILD_INPUT_PNAMES = r#"
+SELECT coalesce(d.pname, d.name) AS pname
+FROM derivation_dependency e JOIN derivation d ON d.id = e.dependency
+WHERE e.derivation = $1 AND e.kind IN (0, 2)
+GROUP BY 1 ORDER BY 1
+"#,
+        params = [DerivationId];
+}
+
+pub async fn build_input_pnames<C: ConnectionTrait>(
+    db: &C,
+    derivation: DerivationId,
+) -> Result<Vec<String>, DbErr> {
+    let rows = db
+        .query_all_raw(
+            BUILD_INPUT_PNAMES.bind([sea_orm::Value::Uuid(Some(derivation.into_inner()))]),
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<String>("", "pname").ok())
+        .collect())
+}

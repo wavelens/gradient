@@ -34,6 +34,7 @@ pub fn redact_value(
         ("commit", "message") => r.text(&v),
         ("derivation", "name") | ("derivation", "pname") => r.package(&v),
         ("derivation_output", "package") | ("cached_path", "package") => r.package(&v),
+        ("derivation_metric", "input_pnames") => r.package_list(&v),
         ("derivation_output", "deriver") | ("cached_path", "deriver") => r.store_path(&v),
         ("derivation_output", "references_list") | ("cached_path", "references") => {
             r.store_path_list(&v)
@@ -379,9 +380,9 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "derivation_metric",
-            "CREATE TABLE derivation_metric (id TEXT, derivation TEXT, worker_id TEXT, build_time_ms INTEGER, peak_ram_mb INTEGER, oom_killed INTEGER, concurrent_builds INTEGER, cpu_core_score INTEGER, created_at TEXT)",
+            "CREATE TABLE derivation_metric (id TEXT, derivation TEXT, worker_id TEXT, build_time_ms INTEGER, peak_ram_mb INTEGER, oom_killed INTEGER, concurrent_builds INTEGER, cpu_core_score INTEGER, build_cores INTEGER, input_pnames TEXT, created_at TEXT)",
             concat!(
-                "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, (now() AT TIME ZONE 'UTC')) AS ended FROM evaluation WHERE id = $1) SELECT m.id::text, m.derivation::text, m.worker_id::text, m.build_time_ms::text, m.peak_ram_mb::text, m.oom_killed::int::text, m.concurrent_builds::text, m.cpu_core_score::text, m.created_at::text FROM derivation_metric m, w WHERE m.derivation IN (",
+                "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, (now() AT TIME ZONE 'UTC')) AS ended FROM evaluation WHERE id = $1) SELECT m.id::text, m.derivation::text, m.worker_id::text, m.build_time_ms::text, m.peak_ram_mb::text, m.oom_killed::int::text, m.concurrent_builds::text, m.cpu_core_score::text, m.build_cores::text, array_to_string(m.input_pnames, ','), m.created_at::text FROM derivation_metric m, w WHERE m.derivation IN (",
                 own_derivations!(),
                 ") AND m.created_at BETWEEN w.started AND w.ended"
             ),
@@ -395,6 +396,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "oom_killed",
                 "concurrent_builds",
                 "cpu_core_score",
+                "build_cores",
+                "input_pnames",
                 "created_at"
             ]
         ),
