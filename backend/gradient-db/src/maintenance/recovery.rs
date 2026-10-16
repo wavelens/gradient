@@ -24,6 +24,7 @@ pub struct RecoveryReport {
     pub clusters_requeued: u64,
     pub clusters_aborted: u64,
     pub clusters_failed: u64,
+    pub connections_closed: u64,
 }
 
 fn requeue_mid_flight_sql() -> String {
@@ -91,6 +92,16 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     report.clusters_requeued = clusters.clusters_requeued;
     report.clusters_aborted = clusters.clusters_aborted;
     report.clusters_failed = clusters.clusters_failed;
+
+    report.connections_closed = gradient_entity::worker_connection::Entity::update_many()
+        .col_expr(
+            gradient_entity::worker_connection::Column::DisconnectedAt,
+            Expr::value(now),
+        )
+        .filter(gradient_entity::worker_connection::Column::DisconnectedAt.is_null())
+        .exec(conn)
+        .await?
+        .rows_affected;
 
     Ok(report)
 }
@@ -218,6 +229,10 @@ mod tests {
                 rows_affected: n,
             }))
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
             .into_connection();
 
         let report = recover_interrupted_work(&db).await.unwrap();
@@ -260,6 +275,10 @@ mod tests {
                 rows_affected: n,
             }))
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
             .into_connection();
 
         recover_interrupted_work(&db).await.unwrap();
@@ -293,6 +312,10 @@ mod tests {
             .append_query_results([Vec::<MEval>::new()])
             .append_exec_results([none.clone(), none.clone(), none.clone(), none.clone(), none])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
             .into_connection();
 
         recover_interrupted_work(&db).await.unwrap();
@@ -332,6 +355,10 @@ mod tests {
                 rows_affected: n,
             }))
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
             .into_connection();
 
         let report = recover_interrupted_work(&db).await.unwrap();
