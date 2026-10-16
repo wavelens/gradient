@@ -43,3 +43,17 @@ pub const FAIR_SHARE_WEIGHT: f64 = 500.0;
 pub const QOS_PRIORITIZED: f64 = 5000.0;
 pub const QOS_BUILD_REQUEST: f64 = 1000.0;
 pub const QOS_IFD: f64 = 1000.0;
+
+pub const REFERENCE_CORES: f64 = 16.0;
+pub const REFERENCE_CORE_SCORE: f64 = 4000.0;
+pub const RAM_UPPER_Z: f64 = 1.28;
+pub const OWN_SAMPLE_PRIOR_WEIGHT: f64 = 2.0;
+pub const MIN_SPREAD: f64 = 0.05;
+pub const RAM_CORE_SLOPE_PRIOR: f64 = 0.5;
+pub const BUILD_TIME_CORE_SLOPE_PRIOR: f64 = -0.5;
+pub const FEATURE_PENALTY: f64 = 1.0;
+pub const CORE_FEATURE_PENALTY: f64 = 20.0;
+pub const CORE_SLOPE_PENALTY: f64 = 50.0;
+pub const FIT_EPOCHS: usize = 25;
+pub const RAM_FLOOR_MARGIN: f64 = 1.1;
+pub const TOP_FEATURES: usize = 5;
