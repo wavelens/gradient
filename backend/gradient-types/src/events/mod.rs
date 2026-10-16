@@ -20,6 +20,7 @@ pub mod names;
 pub mod proto;
 pub mod webhook;
 pub mod worker;
+pub mod worker_demand;
 
 pub use bus::{EVENT_BUS_CAPACITY, EventBus, EventRx};
 pub use envelope::Envelope;
@@ -184,6 +185,7 @@ events! {
     WorkerDisconnected(worker::Disconnected),
     WorkerJobDispatched(worker::JobDispatched),
     WorkerQueueDepth(worker::QueueDepth),
+    WorkerDemand(worker_demand::WorkerDemand),
     Proto(proto::Message),
     CacheChanged(cache::Changed),
     CacheNarFetched(cache::NarFetched),

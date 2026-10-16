@@ -17,6 +17,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_graph::Graph;
 use gradient_pool::WorkerInfo;
+use gradient_types::events::worker_demand::WorkerDemand;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, Value};
 use tracing::{error, info, warn};
@@ -189,6 +190,12 @@ impl WaitingRefresh<'_> {
                 );
             }
 
+            if let (Some(project), Some(gap)) =
+                (project, opened_gap(reason.as_ref(), new_reason.as_ref()))
+            {
+                self.announce_worker_gap(eval.id, project, gap).await;
+            }
+
             persist_waiting_reason(
                 &self.db.worker_db,
                 eval.id,
@@ -204,6 +211,53 @@ impl WaitingRefresh<'_> {
 
         Ok(unbuildables)
     }
+
+    async fn announce_worker_gap(
+        &self,
+        evaluation: EvaluationId,
+        project: ProjectId,
+        reason: &WaitingReason,
+    ) {
+        let teams =
+            match gradient_db::teams::workers::teams_granting_workers(&self.db.worker_db, project)
+                .await
+            {
+                Ok(teams) => teams,
+                Err(e) => {
+                    warn!(error = %e, %evaluation, "failed to read teams granting workers");
+                    return;
+                }
+            };
+        for event in worker_demand_events(reason, evaluation, project, &teams) {
+            self.db.record(event).await;
+        }
+    }
+}
+
+fn opened_gap<'a>(
+    current: Option<&WaitingReason>,
+    new: Option<&'a WaitingReason>,
+) -> Option<&'a WaitingReason> {
+    let new = new?;
+    let gap = new.worker_gap()?;
+    (current.and_then(WaitingReason::worker_gap) != Some(gap)).then_some(new)
+}
+
+fn worker_demand_events(
+    reason: &WaitingReason,
+    evaluation: EvaluationId,
+    project: ProjectId,
+    teams: &[TeamId],
+) -> Vec<WorkerDemand> {
+    teams
+        .iter()
+        .map(|&team| WorkerDemand {
+            team,
+            project,
+            evaluation,
+            reason: reason.clone(),
+        })
+        .collect()
 }
 
 #[derive(Default)]
@@ -817,6 +871,42 @@ mod tests {
             system_features: features.iter().map(|f| f.to_string()).collect(),
             ..worker(true, authorized_peers)
         }
+    }
+
+    fn x86_gap(connected_workers: u32) -> WaitingReason {
+        WaitingReason::workers(
+            vec![UnmetRequirement {
+                architecture: "x86_64-linux".into(),
+                required_features: vec!["kvm".into()],
+                build_count: connected_workers + 1,
+            }],
+            connected_workers,
+            vec![],
+        )
+    }
+
+    #[test]
+    fn reason_change_records_one_event_per_granting_team() {
+        let new = x86_gap(0);
+        let gap =
+            opened_gap(Some(&WaitingReason::Draining), Some(&new)).expect("a new worker gap opens");
+        let teams = [TeamId::now_v7(), TeamId::now_v7()];
+        let events = worker_demand_events(gap, EvaluationId::now_v7(), ProjectId::now_v7(), &teams);
+        assert_eq!(
+            events.iter().map(|e| e.team).collect::<Vec<_>>(),
+            teams.to_vec()
+        );
+        assert_ne!(
+            gradient_types::events::EventKind::key(&events[0]),
+            gradient_types::events::EventKind::key(&events[1])
+        );
+    }
+
+    #[test]
+    fn unchanged_reason_records_nothing() {
+        assert!(opened_gap(Some(&x86_gap(1)), Some(&x86_gap(3))).is_none());
+        assert!(opened_gap(None, None).is_none());
+        assert!(opened_gap(None, Some(&WaitingReason::graph_stuck(2))).is_none());
     }
 
     #[test]

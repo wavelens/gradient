@@ -10786,6 +10786,43 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/teams/{team}/workers/demand:
+    get:
+      tags:
+      - teams
+      summary: Read missing worker capabilities
+      description: 'Needs Admin in the team. Sums the waiting evaluations of projects granting the team its workers that no connected worker eligible for the project can take: builds per system and features, plus fetch and evaluation gaps. `projects` takes comma-separated project names or IDs and limits the sum to those granting projects.'
+      operationId: getTeamWorkerDemand
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: projects
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/TeamDemand'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/teams/{team}/workers/{worker_id}:
     delete:
       tags:
@@ -18631,6 +18668,25 @@ components:
           type:
           - string
           - 'null'
+    TeamDemand:
+      type: object
+      required:
+      - builds
+      - fetch
+      - eval
+      properties:
+        builds:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnmetRequirement'
+        fetch:
+          type: integer
+          format: int32
+          minimum: 0
+        eval:
+          type: integer
+          format: int32
+          minimum: 0
     TeamEvaluation:
       type: object
       required:

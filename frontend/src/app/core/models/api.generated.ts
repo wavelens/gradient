@@ -2110,6 +2110,12 @@ export interface TeamCacheGrant {
   role?: string | null;
 }
 
+export interface TeamDemand {
+  builds: UnmetRequirement[];
+  fetch: number;
+  eval: number;
+}
+
 export interface TeamEvaluation {
   id: EvaluationId;
   project: string;
