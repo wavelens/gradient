@@ -203,8 +203,8 @@ interface RuleRow {
               <tr><td class="label">Build time</td><td class="mono">{{ formatDuration(e.build_ms) }}</td></tr>
               <tr><td class="label">Output size</td><td class="mono">{{ formatBytes(e.output_nar_bytes) }}</td></tr>
               <tr><td class="label">Own builds</td><td class="mono">{{ e.own_samples }}</td></tr>
-              @for (f of e.top_features; track f[0]) {
-                <tr><td class="label">{{ f[0] }}</td><td class="mono">{{ f[1] >= 0 ? '+' : '' }}{{ f[1] | number: '1.2-2' }}</td></tr>
+              @for (b of e.similar_builds; track b[0]) {
+                <tr><td class="label">Like {{ b[0] }}</td><td class="mono">{{ b[1] | percent }} same inputs</td></tr>
               }
             </tbody>
           </gr-table>
