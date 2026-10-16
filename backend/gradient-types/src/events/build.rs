@@ -94,7 +94,7 @@ impl EventKind for Reported {
         EventOwner {
             project: self.project,
             task: self.task,
-            cache: None,
+            ..EventOwner::default()
         }
     }
 

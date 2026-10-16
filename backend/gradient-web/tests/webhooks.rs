@@ -35,6 +35,7 @@ fn webhook_row() -> webhook::Model {
         scope: WebhookScope::Project,
         project: Some(project_id()),
         cache: None,
+        team: None,
         name: "ci".into(),
         url: "https://example.com/hook".into(),
         secret: "ENCRYPTED".into(),
