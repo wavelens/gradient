@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod cores;
 pub mod model;
 
+pub use cores::{CoreChoice, choose_cores, core_steps, fewer_cores};
 pub use model::{GroupKey, Model, Sample};
 
 use crate::score::weights::{RAM_FLOOR_MARGIN, RAM_UPPER_Z, REFERENCE_CORES};

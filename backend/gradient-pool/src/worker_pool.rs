@@ -215,6 +215,7 @@ impl WorkerPool {
             let s = slot.shared();
             crate::score::WorkerMetricsView {
                 cpu_count: s.cpu_count,
+                build_cores: 0,
                 cpu_core_score: s.cpu_core_score,
                 ram_total_mb: s.ram_total_mb,
                 ram_free_mb: s.ram_free_mb,
