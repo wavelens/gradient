@@ -8,8 +8,8 @@ use super::refusal::TeamRefusal;
 use crate::api_spec::TeamPath;
 use crate::audit::Audit;
 use crate::endpoints::projects::workers::{
-    PatchWorkerRequest, RegisterWorkerRequest, WorkerConnection, encrypt_for_dialing, live_workers,
-    patch_edits_managed_fields, worker_connection,
+    PatchWorkerRequest, RegisterWorkerRequest, WorkerConnection, WorkerLiveInfo,
+    encrypt_for_dialing, live_workers, patch_edits_managed_fields, worker_connection,
 };
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -21,13 +21,14 @@ use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
+use gradient_pool::WorkerInfo;
 use gradient_scheduler::Scheduler;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -46,10 +47,16 @@ pub struct TeamWorkerEntry {
     pub enable_build: bool,
     #[serde(flatten)]
     pub connection: WorkerConnection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live: Option<WorkerLiveInfo>,
 }
 
 impl TeamWorkerEntry {
-    fn new(worker: MTeamWorker, connection: WorkerConnection) -> Self {
+    fn new(
+        worker: MTeamWorker,
+        connection: WorkerConnection,
+        live: Option<WorkerLiveInfo>,
+    ) -> Self {
         Self {
             worker_id: worker.worker_id,
             display_name: worker.display_name,
@@ -62,8 +69,13 @@ impl TeamWorkerEntry {
             enable_eval: worker.enable_eval,
             enable_build: worker.enable_build,
             connection,
+            live,
         }
     }
+}
+
+fn team_worker_live(live: &HashMap<String, WorkerInfo>, worker_id: &str) -> Option<WorkerLiveInfo> {
+    live.get(worker_id).map(WorkerLiveInfo::from)
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -135,7 +147,8 @@ pub async fn get_team_workers(
     let mut entries = Vec::with_capacity(rows.len());
     for worker in rows {
         let connection = worker_connection(&live_workers, failures, &worker.worker_id);
-        entries.push(TeamWorkerEntry::new(worker, connection));
+        let live = team_worker_live(&live_workers, &worker.worker_id);
+        entries.push(TeamWorkerEntry::new(worker, connection, live));
     }
 
     Ok(ok_json(entries))
@@ -325,4 +338,46 @@ pub async fn delete_team_worker(
         .await;
 
     Ok(ok_json(format!("worker '{}' unregistered", worker_id)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn connected(id: &str) -> WorkerInfo {
+        WorkerInfo {
+            id: id.into(),
+            capabilities: Default::default(),
+            architectures: vec!["x86_64-linux".into()],
+            system_features: vec!["kvm".into()],
+            max_concurrent_builds: 4,
+            assigned_job_count: 0,
+            assigned_build_count: 0,
+            draining: false,
+            authorized_peers: None,
+            cpu_usage_pct: None,
+            ram_free_mb: None,
+            ram_total_mb: 16384,
+            disk_speed_mbps: None,
+            upload_speed_mbps: None,
+            download_speed_mbps: None,
+        }
+    }
+
+    #[test]
+    fn connected_team_worker_lists_live_capabilities() {
+        let live = live_workers(vec![connected("w1")]);
+        let info = team_worker_live(&live, "w1").expect("connected worker has live details");
+        let json = serde_json::to_value(&info).expect("serializes");
+        assert_eq!(json["architectures"], serde_json::json!(["x86_64-linux"]));
+        assert_eq!(json["system_features"], serde_json::json!(["kvm"]));
+        assert_eq!(json["max_concurrent_builds"], 4);
+        assert_eq!(json["ram_total_mb"], 16384);
+    }
+
+    #[test]
+    fn disconnected_team_worker_has_no_live() {
+        let live = live_workers(vec![connected("w1")]);
+        assert!(team_worker_live(&live, "w2").is_none());
+    }
 }

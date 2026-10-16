@@ -169,6 +169,8 @@ pub struct WorkerLiveInfo {
     pub max_concurrent_builds: u32,
     pub assigned_job_count: usize,
     pub draining: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ram_total_mb: Option<u64>,
 }
 
 impl From<&WorkerInfo> for WorkerLiveInfo {
@@ -180,6 +182,7 @@ impl From<&WorkerInfo> for WorkerLiveInfo {
             max_concurrent_builds: w.max_concurrent_builds,
             assigned_job_count: w.assigned_job_count,
             draining: w.draining,
+            ram_total_mb: (w.ram_total_mb > 0).then_some(w.ram_total_mb),
         }
     }
 }
