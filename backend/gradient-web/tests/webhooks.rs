@@ -9,11 +9,12 @@
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
 )]
 
+use gradient_entity::team_user::TeamRole;
 use gradient_entity::webhook::WebhookScope;
 use gradient_entity::{ids::*, role, webhook};
-use gradient_fixtures::ids::{project_id, user_id};
-use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{project, project_member};
+use gradient_fixtures::ids::{project_id, team_id, user_id};
+use gradient_fixtures::mock::{all_statements, mock_db};
+use gradient_fixtures::rows::{project, project_member, team, team_member};
 use gradient_fixtures::test_date;
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{bearer, make_test_server};
@@ -24,6 +25,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 const PROJECT_URL: &str = "/api/v1/projects/test-project/webhooks";
+const TEAM_URL: &str = "/api/v1/teams/platform/webhooks";
 
 fn webhook_id() -> WebhookId {
     WebhookId::new(Uuid::from_u128(0xb1))
@@ -46,6 +48,22 @@ fn webhook_row() -> webhook::Model {
         updated_at: test_date(),
         last_fired_at: None,
     }
+}
+
+fn team_webhook_row() -> webhook::Model {
+    webhook::Model {
+        scope: WebhookScope::Team,
+        project: None,
+        team: Some(team_id()),
+        events: json!(["worker.demand"]),
+        ..webhook_row()
+    }
+}
+
+fn as_team(session_id: SessionId, role: TeamRole) -> MockDatabase {
+    with_auth(mock_db(), session_id)
+        .append_query_results([vec![team()]])
+        .append_query_results([vec![team_member(role)]])
 }
 
 fn role_row(id: RoleId, permission: i64) -> role::Model {
@@ -180,4 +198,69 @@ async fn instance_webhooks_require_a_superuser() {
         .await;
 
     res.assert_status(axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn team_admin_creates_webhook_and_gets_secret_once() {
+    let session_id = SessionId::now_v7();
+    let db = as_team(session_id, TeamRole::Admin)
+        .append_query_results([Vec::<webhook::Model>::new()])
+        .append_query_results([vec![team_webhook_row()]]);
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.secrets.crypt_file = temp_crypt_secret_file())
+        .server();
+
+    let res = server
+        .post(TEAM_URL)
+        .add_header("authorization", bearer(session_id))
+        .json(&json!({ "name": "ci", "url": "https://example.com/hook", "events": ["worker.demand"] }))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert!(
+        body["message"]["secret"]
+            .as_str()
+            .unwrap()
+            .starts_with("whs_")
+    );
+    assert_eq!(body["message"]["webhook"]["scope"], "team");
+}
+
+#[tokio::test]
+async fn team_member_cannot_create_webhook() {
+    let session_id = SessionId::now_v7();
+    let server = make_test_server(as_team(session_id, TeamRole::Member).into_connection());
+
+    let res = server
+        .post(TEAM_URL)
+        .add_header("authorization", bearer(session_id))
+        .json(&json!({ "name": "ci", "url": "https://example.com/hook", "events": [] }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn team_webhook_list_hides_other_team() {
+    let session_id = SessionId::now_v7();
+    let db = as_team(session_id, TeamRole::Admin)
+        .append_query_results([vec![team_webhook_row()]])
+        .into_connection();
+    let server = make_test_server(db.clone());
+
+    let res = server
+        .get(TEAM_URL)
+        .add_header("authorization", bearer(session_id))
+        .await;
+
+    res.assert_status_ok();
+    drop(server);
+    let list = all_statements(db.into_transaction_log())
+        .into_iter()
+        .find(|s| s.sql.contains("FROM \"webhook\""))
+        .unwrap();
+    assert!(list.sql.contains("\"webhook\".\"team\" = $"));
+    assert!(format!("{:?}", list.values).contains(&team_id().to_string()));
 }

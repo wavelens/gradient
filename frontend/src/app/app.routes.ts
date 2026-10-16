@@ -472,6 +472,13 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/teams/team-workers/team-workers.component').then((m) => m.TeamWorkersComponent),
       },
+      {
+        path: 'team/:team/webhooks',
+        title: 'Team Webhooks',
+        data: { webhookScope: 'team' },
+        loadComponent: () =>
+          import('./features/webhooks/webhooks.component').then((m) => m.WebhooksComponent),
+      },
 
       // Integrations
       {

@@ -94,6 +94,10 @@ export class WebhooksComponent implements OnInit {
         this.scope = { kind: 'cache', name: paramMap.get('cache') ?? '' };
         this.title = 'Cache Webhooks';
         break;
+      case 'team':
+        this.scope = { kind: 'team', name: paramMap.get('team') ?? '' };
+        this.title = 'Team Webhooks';
+        break;
       default:
         this.scope = { kind: 'instance' };
         this.title = 'Instance Webhooks';
@@ -108,6 +112,8 @@ export class WebhooksComponent implements OnInit {
         return this.crumbs.projectSettings(this.scope.name, page);
       case 'cache':
         return this.crumbs.cacheSettings(this.scope.name, page);
+      case 'team':
+        return this.crumbs.team(this.scope.name, { label: 'Settings', link: ['/team', this.scope.name, 'settings'] }, page);
       case 'instance':
         return [{ label: 'Job Board', link: ['/board', 'health'] }, page];
     }

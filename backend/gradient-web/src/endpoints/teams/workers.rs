@@ -209,7 +209,7 @@ pub async fn post_team_worker(
     audit
         .write(
             Action::TeamWorkerCreate,
-            EventOwner::default(),
+            EventOwner::team(team.id),
             serde_json::json!({ "team_id": team.id.to_string(), "worker_id": worker_id }),
         )
         .await;
@@ -279,7 +279,7 @@ pub async fn patch_team_worker(
     audit
         .write(
             Action::TeamWorkerUpdate,
-            EventOwner::default(),
+            EventOwner::team(team.id),
             serde_json::json!({ "team_id": team.id.to_string(), "worker_id": worker_id }),
         )
         .await;
@@ -319,7 +319,7 @@ pub async fn delete_team_worker(
     audit
         .write(
             Action::TeamWorkerDelete,
-            EventOwner::default(),
+            EventOwner::team(team.id),
             serde_json::json!({ "team_id": team.id.to_string(), "worker_id": worker_id }),
         )
         .await;

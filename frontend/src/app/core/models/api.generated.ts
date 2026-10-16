@@ -2405,7 +2405,7 @@ export interface WebhookResponse {
   updated_at: string;
 }
 
-export type WebhookScope = "project" | "cache" | "instance";
+export type WebhookScope = "project" | "cache" | "instance" | "team";
 
 export interface WorkerConnection {
   connected: boolean;

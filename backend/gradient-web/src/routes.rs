@@ -294,6 +294,10 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     "/caches/{cache}/webhooks",
                     webhooks::router(WebhookMount::Cache),
                 )
+                .nest(
+                    "/teams/{team}/webhooks",
+                    webhooks::router(WebhookMount::Team),
+                )
                 .nest("/admin", admin::admin_router()),
         ),
         BEARER,
