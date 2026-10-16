@@ -31,9 +31,11 @@ gradient build .#hello
 
 The build output lands in a `result` symlink. The symlink points into the local store, populated from the project cache. Pass `--no-link` to skip the link creation.
 
+Multiple entry points produce `result-1`, `result-2` and more links, matching `nix build` behavior. A failed evaluation or build exits with code `1`, even with `--no-link`.
+
 The local Nix daemon trusts fetched paths only if the cache public key sits in `trusted-public-keys`. Setup steps live in [Share a Cache](share-a-cache.md). Users in `trusted-users` need no key.
 
-The [static binary](../reference/cli.md#install) has no Nix support. This binary downloads build products into a `result/` folder instead.
+[Static binaries](../reference/cli.md#install) come without Nix support. These binaries download build products into `result/`, `result-1/` and further folders instead.
 
 ## Override Inputs
 

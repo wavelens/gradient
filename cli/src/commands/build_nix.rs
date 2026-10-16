@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::commands::build::{BuildParams, TrackedFile, select_primary_entry_point};
+use crate::commands::build::{BuildParams, TrackedFile, result_link_name};
 use crate::config::{ConfigKey, load_config};
 use crate::input::server_base;
 use crate::output::{ExitKind, Output, to_exit_kind};
@@ -152,47 +152,48 @@ fn upload_error_message(
     }
 }
 
-pub async fn link_result(
+pub async fn link_results(
     client: &connector::Client,
     started: &DispatchResponse,
     tree: &ArtefactTree,
-    target: Option<&str>,
     out: Output,
 ) {
-    let Some(primary) = select_primary_entry_point(tree, target) else {
+    let paths: Vec<String> = tree
+        .entry_points
+        .iter()
+        .filter_map(|ep| {
+            ep.outputs
+                .iter()
+                .find(|o| o.name == "out")
+                .or_else(|| ep.outputs.first())
+        })
+        .map(|o| o.full_store_path())
+        .collect();
+
+    if paths.is_empty() {
         out.human("No outputs to link.");
         return;
-    };
-
-    let Some(out_path) = primary
-        .outputs
-        .iter()
-        .find(|o| o.name == "out")
-        .or_else(|| primary.outputs.first())
-    else {
-        return;
-    };
-    let realise_path = out_path.full_store_path();
+    }
 
     if let Some(cache) = cache_source(client, started, out).await
-        && let Err(stderr) = copy_from_cache(&cache, &realise_path).await
+        && let Err(stderr) = copy_from_cache(&cache, &paths).await
     {
         out.err(
             ExitKind::Api,
-            untrusted_copy_message(&realise_path, &stderr, cache.public_key.as_deref()),
+            untrusted_copy_message(&paths, &stderr, cache.public_key.as_deref()),
         );
     }
 
+    for (index, path) in paths.iter().enumerate() {
+        add_result_link(path, &result_link_name(index), out).await;
+    }
+}
+
+async fn add_result_link(realise_path: &str, link: &str, out: Output) {
     let mut cmd = tokio::process::Command::new("nix-store");
-    cmd.args([
-        "--realise",
-        &realise_path,
-        "--add-root",
-        "result",
-        "--indirect",
-    ]);
+    cmd.args(["--realise", realise_path, "--add-root", link, "--indirect"]);
     match cmd.output().await {
-        Ok(o) if o.status.success() => out.human(format!("result -> {realise_path}")),
+        Ok(o) if o.status.success() => out.human(format!("{link} -> {realise_path}")),
         Ok(o) => out.err(
             ExitKind::Api,
             format!(
@@ -231,7 +232,7 @@ async fn cache_source(
 
 /// The Nix client is downloading the closure itself. A daemon is ignoring the substituters and the
 /// netrc of a user it is not trusting, but it is accepting paths signed by a key it trusts.
-async fn copy_from_cache(cache: &CacheSource, path: &str) -> Result<(), String> {
+async fn copy_from_cache(cache: &CacheSource, paths: &[String]) -> Result<(), String> {
     let mut cmd = tokio::process::Command::new("nix");
     cmd.args([
         "--extra-experimental-features",
@@ -239,8 +240,8 @@ async fn copy_from_cache(cache: &CacheSource, path: &str) -> Result<(), String> 
         "copy",
         "--from",
         &cache.url,
-        path,
     ]);
+    cmd.args(paths);
     if let Some(netrc) = &cache.netrc {
         cmd.args(["--option", "netrc-file"]).arg(netrc.path());
     }
@@ -252,7 +253,8 @@ async fn copy_from_cache(cache: &CacheSource, path: &str) -> Result<(), String> 
     }
 }
 
-fn untrusted_copy_message(path: &str, stderr: &str, public_key: Option<&str>) -> String {
+fn untrusted_copy_message(paths: &[String], stderr: &str, public_key: Option<&str>) -> String {
+    let path = paths.join(", ");
     match public_key {
         Some(key) if stderr.contains("lacks a signature by a trusted key") => format!(
             "Could not copy {path} from the gradient cache: the local Nix daemon does not trust \
@@ -290,7 +292,8 @@ mod tests {
     #[test]
     fn an_untrusted_signature_names_the_key_to_trust() {
         let stderr = "error: cannot add path '/nix/store/x-ollama' because it lacks a signature by a trusted key";
-        let message = untrusted_copy_message("/nix/store/x-ollama", stderr, Some("cache:abc="));
+        let message =
+            untrusted_copy_message(&["/nix/store/x-ollama".into()], stderr, Some("cache:abc="));
         assert!(message.contains("`cache:abc=`"), "{message}");
         assert!(message.contains("trusted-public-keys"), "{message}");
     }
