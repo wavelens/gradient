@@ -10,6 +10,7 @@ mod case_layer;
 mod claims;
 mod clusters;
 mod control;
+mod estimates;
 mod eval_queue;
 mod imports;
 mod invariants;

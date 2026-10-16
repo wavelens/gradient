@@ -368,6 +368,15 @@ impl SchedulerCase {
         .await
     }
 
+    pub async fn refit_build_history(&self) {
+        let history = &self.scheduler.scoring.build_history;
+        history
+            .refresh(&self.scheduler.db.worker_db)
+            .await
+            .expect("the build history reads the metric rows");
+        history.refit(0);
+    }
+
     pub async fn eval_history(&self, now: NaiveDateTime) -> EvalHistory {
         crate::instance::compute_eval_history(&self.scheduler.db.worker_db, now, None).await
     }
