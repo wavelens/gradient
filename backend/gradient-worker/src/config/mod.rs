@@ -9,29 +9,10 @@ mod options;
 pub use options::*;
 
 use std::num::{NonZeroU32, NonZeroUsize};
-use std::sync::LazyLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gradient_eval::pool::MemoryGuard;
 use gradient_wire::types::GradientCapabilities;
-
-static PROCESS_START: LazyLock<Instant> = LazyLock::new(Instant::now);
-
-pub fn process_start() -> Instant {
-    *PROCESS_START
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ExitLimits {
-    pub idle_timeout: Option<Duration>,
-    pub max_lifetime: Option<Duration>,
-}
-
-impl ExitLimits {
-    pub fn is_set(&self) -> bool {
-        self.idle_timeout.is_some() || self.max_lifetime.is_some()
-    }
-}
 
 pub fn host_system() -> String {
     let arch = std::env::consts::ARCH;
@@ -138,8 +119,8 @@ impl WorkerConfig {
             .map_or_else(crate::metrics::cpu_core_score, NonZeroU32::get)
     }
 
-    pub fn exit_limits(&self) -> ExitLimits {
-        ExitLimits {
+    pub fn exit_limits(&self) -> crate::exit_clock::ExitLimits {
+        crate::exit_clock::ExitLimits {
             idle_timeout: self.idle_timeout.map(Duration::from_secs),
             max_lifetime: self.max_lifetime.map(Duration::from_secs),
         }

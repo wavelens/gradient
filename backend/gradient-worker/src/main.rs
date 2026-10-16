@@ -9,6 +9,7 @@ mod connection_state;
 mod count;
 mod error;
 mod executor;
+mod exit_clock;
 mod listener;
 mod metrics;
 mod nix;
@@ -72,7 +73,7 @@ fn main() -> Result<()> {
     }
 
     config.memory_guard()?;
-    config::process_start();
+    exit_clock::clock();
 
     // The crypto provider, before the first TLS handshake, for rustls 0.23 (#232).
     gradient_util::http::init_crypto_provider();
@@ -148,9 +149,11 @@ fn main() -> Result<()> {
 
         sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
         let mut backoff = INITIAL_BACKOFF;
+        let limits = config.exit_limits();
 
         let initial = tokio::select! {
             _ = stop.cancelled() => None,
+            () = exit_deadline(limits) => None,
             w = async {
                 loop {
                     match Worker::connect(config.clone()).await {
@@ -169,7 +172,7 @@ fn main() -> Result<()> {
             } => Some(w),
         };
         let Some(mut worker) = initial else {
-            info!("shutdown requested during initial connect");
+            info!("shutdown requested or exit limit reached during initial connect");
             wait_for_inbound_sessions(&sessions).await;
             return Ok(());
         };
@@ -213,6 +216,7 @@ fn main() -> Result<()> {
 
             let reconnected = tokio::select! {
                 _ = stop.cancelled() => None,
+                () = exit_deadline(limits) => None,
                 conn = retry_reconnect(
                     async || disconnected.reconnect().await,
                     |delay| tokio::time::sleep(delay),
@@ -228,7 +232,7 @@ fn main() -> Result<()> {
                         backoff_after_session(backoff, session_end, INITIAL_BACKOFF, MAX_BACKOFF);
                 }
                 None => {
-                    info!("shutdown requested during reconnect");
+                    info!("shutdown requested or exit limit reached during reconnect");
                     wait_for_inbound_sessions(&sessions).await;
                     executor_handle.shutdown().await;
                     return Ok(());
@@ -248,6 +252,13 @@ fn install_signal_handler(stop: CancellationToken) {
         info!("stop requested; aborting running jobs so the server queues them again");
         stop.cancel();
     });
+}
+
+async fn exit_deadline(limits: exit_clock::ExitLimits) {
+    match exit_clock::clock().deadline(&limits) {
+        Some(deadline) => tokio::time::sleep_until(deadline.into()).await,
+        None => std::future::pending().await,
+    }
 }
 
 async fn wait_for_inbound_sessions(sessions: &TaskTracker) {
