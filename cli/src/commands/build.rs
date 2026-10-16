@@ -10,9 +10,9 @@ use crate::input::client_from_config;
 use crate::output::{ExitKind, Output};
 use crate::tui::watch::eval_is_terminal;
 use connector::ConnectorError;
-use connector::api::{
-    ArtefactTree, DispatchResponse, EntryPointArtefacts, EvaluationResponse, EvaluationStatus,
-};
+#[cfg(not(feature = "nix"))]
+use connector::api::ArtefactTree;
+use connector::api::{DispatchResponse, EvaluationResponse, EvaluationStatus};
 #[cfg(not(feature = "nix"))]
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -139,51 +139,44 @@ pub async fn handle_build(
 
     crate::commands::logstream::stream_eval_logs(&client, &evaluation, out).await;
 
+    let eval = wait_for_terminal(&client, &evaluation, out).await;
+    if let Some(failure) = failure_message(eval.status, eval.error.as_deref()) {
+        out.err(ExitKind::Api, failure);
+    }
+
     if no_link {
         return;
     }
 
-    let eval = wait_for_terminal(&client, &evaluation, out).await;
-    let status = eval.as_ref().map(|e| e.status);
-    if status != Some(EvaluationStatus::Completed) {
-        if !quiet {
-            if let Some(err) = eval
-                .as_ref()
-                .and_then(|e| e.error.as_deref())
-                .filter(|s| !s.is_empty())
-            {
-                out.human(format!("Evaluation error: {err}"));
-            }
-
-            out.human(format!(
-                "Build did not complete (status: {}); skipping result.",
-                status.map(|s| s.to_string()).unwrap_or_default()
-            ));
-        }
-        return;
-    }
-
-    let tree = match client.evals().artefacts(&evaluation).await {
-        Ok(t) => t,
-        Err(e) => {
-            if !quiet {
-                out.progress(format!("Could not fetch artefacts: {}", e));
-            }
-            return;
-        }
-    };
+    let tree = client
+        .evals()
+        .artefacts(&evaluation)
+        .await
+        .unwrap_or_else(|e| out.err(ExitKind::Api, format!("Could not fetch artefacts: {e}")));
 
     #[cfg(feature = "nix")]
-    crate::commands::build_nix::link_result(
-        &client,
-        &started,
-        &tree,
-        params.target.as_deref(),
-        out,
-    )
-    .await;
+    crate::commands::build_nix::link_results(&client, &started, &tree, out).await;
     #[cfg(not(feature = "nix"))]
-    download_result_dir(&client, &tree, params.target.as_deref(), out).await;
+    download_result_dirs(&client, &tree, out).await;
+}
+
+fn failure_message(status: EvaluationStatus, error: Option<&str>) -> Option<String> {
+    if status == EvaluationStatus::Completed {
+        return None;
+    }
+
+    let status = format!("Build did not complete (status: {status}).");
+    Some(match error.filter(|s| !s.is_empty()) {
+        Some(error) => format!("Evaluation error: {error}\n{status}"),
+        None => status,
+    })
+}
+
+pub(crate) fn result_link_name(index: usize) -> String {
+    match index {
+        0 => "result".to_owned(),
+        n => format!("result-{n}"),
+    }
 }
 
 async fn upload_and_start(
@@ -345,18 +338,12 @@ async fn wait_for_terminal(
     client: &connector::Client,
     eval_id: &str,
     out: Output,
-) -> Option<EvaluationResponse> {
+) -> EvaluationResponse {
     loop {
         match client.evals().get(eval_id).await {
-            Ok(e) => {
-                if eval_is_terminal(e.status) {
-                    return Some(e);
-                }
-            }
-            Err(e) => {
-                out.progress(format!("Status poll failed: {}", e));
-                return None;
-            }
+            Ok(e) if eval_is_terminal(e.status) => return e,
+            Ok(_) => {}
+            Err(e) => out.err(ExitKind::Api, format!("Status poll failed: {e}")),
         }
 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -424,37 +411,28 @@ pub(crate) fn parse_overrides(raw: &[String]) -> Result<Vec<(String, String)>, S
     Ok(out)
 }
 
-pub(crate) fn select_primary_entry_point<'a>(
-    tree: &'a ArtefactTree,
-    target: Option<&str>,
-) -> Option<&'a EntryPointArtefacts> {
-    if let Some(t) = target.filter(|t| !t.contains('*'))
-        && let Some(ep) = tree
-            .entry_points
-            .iter()
-            .find(|e| e.attr == t || e.attr.ends_with(t))
-    {
-        return Some(ep);
+#[cfg(not(feature = "nix"))]
+async fn download_result_dirs(client: &connector::Client, tree: &ArtefactTree, out: Output) {
+    if tree.entry_points.is_empty() {
+        out.human("No outputs to download.");
+        return;
     }
 
-    tree.entry_points.first()
+    for (index, ep) in tree.entry_points.iter().enumerate() {
+        download_result_dir(client, ep, &result_link_name(index), out).await;
+    }
 }
 
 #[cfg(not(feature = "nix"))]
 async fn download_result_dir(
     client: &connector::Client,
-    tree: &ArtefactTree,
-    target: Option<&str>,
+    ep: &connector::api::EntryPointArtefacts,
+    dir_name: &str,
     out: Output,
 ) {
     use crate::commands::download::{product_filename, safe_relative_name};
 
-    let Some(ep) = select_primary_entry_point(tree, target) else {
-        out.human("No outputs to download.");
-        return;
-    };
-
-    let dir = PathBuf::from("result");
+    let dir = PathBuf::from(dir_name);
     let mut wrote = 0usize;
     for output in &ep.outputs {
         for product in &output.products {
@@ -483,9 +461,15 @@ async fn download_result_dir(
     }
 
     if wrote == 0 {
-        out.human("No build products to place in result/.");
+        out.human(format!(
+            "No build products of {} to place in {dir_name}/.",
+            ep.attr
+        ));
     } else {
-        out.human(format!("Wrote {} product(s) to result/", wrote));
+        out.human(format!(
+            "Wrote {wrote} product(s) of {} to {dir_name}/",
+            ep.attr
+        ));
     }
 }
 
@@ -513,7 +497,29 @@ fn hash_file(path: &Path) -> std::io::Result<(String, i64)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_installable, normalize_target};
+    use super::{failure_message, normalize_installable, normalize_target, result_link_name};
+    use connector::api::EvaluationStatus;
+
+    #[test]
+    fn only_a_completed_evaluation_succeeds() {
+        assert_eq!(failure_message(EvaluationStatus::Completed, None), None);
+        for status in [EvaluationStatus::Failed, EvaluationStatus::Aborted] {
+            assert!(failure_message(status, None).is_some(), "{status}");
+        }
+    }
+
+    #[test]
+    fn failure_message_carries_the_evaluation_error() {
+        let message = failure_message(EvaluationStatus::Failed, Some("attr missing")).unwrap();
+        assert!(message.contains("attr missing"), "{message}");
+        assert!(message.contains("Failed"), "{message}");
+    }
+
+    #[test]
+    fn result_links_follow_nix_build_numbering() {
+        let names: Vec<_> = (0..3).map(result_link_name).collect();
+        assert_eq!(names, ["result", "result-1", "result-2"]);
+    }
 
     #[test]
     fn parse_overrides_accepts_remote_refs() {
