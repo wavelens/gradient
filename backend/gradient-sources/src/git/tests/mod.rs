@@ -73,7 +73,7 @@ fn a_missing_branch_is_an_error() {
     let refs = [advertised("HEAD", 2, Some("refs/heads/main"))];
     assert!(matches!(
         branch_head(&refs, Some("feature")),
-        Err(SourceError::GitHashExtraction)
+        Err(SourceError::BranchNotFound { branch }) if branch == "feature"
     ));
 }
 
@@ -201,7 +201,7 @@ fn read_head_from_pktlines_empty_repo_returns_error() {
     buf.extend_from_slice(FLUSH);
 
     let err = default_head(&mut buf.as_slice()).unwrap_err();
-    assert!(matches!(err, SourceError::GitHashExtraction));
+    assert!(matches!(err, SourceError::EmptyRemote));
 }
 
 /// git-daemon is keeping the connection open after the ref advertisement. `read_to_end` was
