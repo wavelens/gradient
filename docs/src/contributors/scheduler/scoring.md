@@ -77,7 +77,7 @@ A released job drops out of these counts together with its slot.
 | Value | Source |
 |---|---|
 | Closure size | `derivation.closure_size`, or one batched `transitive_closure_sizes` walk as fallback. The graph writer can persist computed sizes |
-| Build estimate | `BuildHistory::estimate` per pname, sorted input pnames and architecture. Section [Build Estimates](#build-estimates) has the details |
+| Build estimate | `BuildHistory::estimate` per pname, input pnames and architecture. Section [Build Estimates](#build-estimates) has the details |
 | Output size | The model's output NAR size. Once all of the job's own outputs have a `nar_size`, their sum replaces the estimate |
 | Evaluation estimate | `compute_eval_history`: per-task p95 of `evaluation_metric.peak_rss_mb` over 24 h and the mean run time of the task |
 
@@ -98,10 +98,11 @@ flowchart LR
 
 - **Samples:** build-assign passes read the rows added since the last read. Rows count once per id, also across instances.
 - **Lower bounds:** out-of-memory rows and rows without a build time set a lower bound for RAM only.
-- **Features:** the pname, each input pname, and each of those times `log(cores / 16)`. Separate estimates go to two derivations with one pname and other inputs.
+- **Features:** the pname, each input pname, and each of those times `log(cores / 16)`.
+- **Own builds:** the last 20 rows of the pname and architecture with at least 30 % input overlap, weighted by that overlap. torch and torch-bin share no inputs and stay apart.
 - **Targets:** peak RAM, build time at `REFERENCE_CORE_SCORE` without concurrent builds, and output NAR size, all in log space.
 - **Fit:** `BuildHistoryRefit` can refit a ridge regression every 300 s on each instance. The shared core term can start at `+0.5` for RAM and `-0.5` for build time.
-- **Blend:** `n` own past samples give the estimate `(n * own + 2 * model) / (n + 2)`. Never-measured derivations still get the model's estimate.
+- **Blend:** the estimate is `(W * own + 0.1 * model) / (W + 0.1)`, with `W` the summed weight of the own samples. Own samples keep the core count of their run. Never-measured derivations still get the model's estimate.
 - **RAM reserve:** `BuildEstimate::ram_mb(cores)` can give the 90th percentile at that core count. Core counts at or above an own out-of-memory kill keep at least 1.1 times its killed peak.
 - **No samples:** architectures without rows give no estimate. Their builds count as `RamNeed::Unmeasured`.
 
@@ -113,11 +114,12 @@ flowchart LR
 |---|---|
 | Some step fits `ram_available_mb` now | The largest such step |
 | No step fits now, some fits once RAM is released | The largest such step, and the build waits for the worker |
-| No step fits | 1 core, penalized |
+| No step fits | RAM proportional to cores picks the step. Kills take the steps down from there |
+| Not even 1 proportional core fits | 1 core, penalized |
 
 - `EstimatedTimeRule` can score the build time at the chosen cores.
 - The assignment can carry the chosen cores in `BuildSpec.build_cores`. The worker can build with the smaller of that value and its own `max_cores`.
-- `ram_shortage` can test every worker at 1 core. Only a build too large at 1 core can reach `fail_build_no_worker_fits`.
+- `ram_shortage` can use the same choice per worker. Only a build too large at 1 proportional core can reach `fail_build_no_worker_fits`.
 - The next attempt after an out-of-memory kill can get at most `next(c)` cores. Here `c` is the fewest cores among its kills.
 
 ## Instance Windows
