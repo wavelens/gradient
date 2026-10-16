@@ -99,8 +99,10 @@ pub enum SourceError {
     InsufficientCommitInfo,
     #[error("URL parsing failed")]
     UrlParsing,
-    #[error("Unable to extract hash from Git URL")]
-    GitHashExtraction,
+    #[error("branch {branch} does not exist on the remote")]
+    BranchNotFound { branch: String },
+    #[error("the remote has no branches")]
+    EmptyRemote,
     #[error("Project not found with ID: {id}")]
     ProjectNotFound { id: gradient_types::ids::ProjectId },
 }

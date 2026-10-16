@@ -87,10 +87,13 @@ pub(in crate::git) fn branch_head(
     branch: Option<&str>,
 ) -> Result<BranchHead, SourceError> {
     match branch {
-        Some(name) => tip_of(refs, branch_key::branch(name)),
-        None => default_branch_head(refs),
+        Some(name) => {
+            tip_of(refs, branch_key::branch(name)).ok_or_else(|| SourceError::BranchNotFound {
+                branch: name.to_owned(),
+            })
+        }
+        None => default_branch_head(refs).ok_or(SourceError::EmptyRemote),
     }
-    .ok_or(SourceError::GitHashExtraction)
 }
 
 fn tip_of(refs: &[AdvertisedRef], name: String) -> Option<BranchHead> {
