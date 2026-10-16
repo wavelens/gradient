@@ -25,6 +25,8 @@ pub struct CoreChoice {
     pub fit: RamFit,
 }
 
+/// A build fitting no step by its estimate gets the benefit of the doubt: RAM proportional to
+/// cores picks where it starts, and out-of-memory kills take the steps down from there.
 pub fn choose_cores(
     worker: &WorkerMetricsView,
     max_cores: Option<u32>,
@@ -32,9 +34,28 @@ pub fn choose_cores(
     need_at: impl Fn(u32) -> RamNeed,
 ) -> CoreChoice {
     let full = max_cores.map_or(worker.full_cores(), |cap| cap.min(worker.full_cores()));
-    let choices: Vec<CoreChoice> = core_steps(full)
-        .into_iter()
-        .map(|cores| {
+    let steps = core_steps(full);
+    let estimated = largest_fitting(worker, &steps, unmeasured_mb, &need_at);
+    if estimated.fit != RamFit::DoesNotFit {
+        return estimated;
+    }
+    let RamNeed::Predicted(at_full) = need_at(full) else {
+        return estimated;
+    };
+    largest_fitting(worker, &steps, unmeasured_mb, |cores| {
+        RamNeed::Predicted((at_full * u64::from(cores)).div_ceil(u64::from(full)))
+    })
+}
+
+fn largest_fitting(
+    worker: &WorkerMetricsView,
+    steps: &[u32],
+    unmeasured_mb: u64,
+    need_at: impl Fn(u32) -> RamNeed,
+) -> CoreChoice {
+    let choices: Vec<CoreChoice> = steps
+        .iter()
+        .map(|&cores| {
             let need = need_at(cores);
             CoreChoice {
                 cores,
@@ -102,13 +123,21 @@ mod tests {
     }
 
     #[test]
-    fn a_build_too_large_at_one_core_does_not_fit() {
-        let choice = choose_cores(&worker(64_000, 64_000, 0), None, 0, |_| {
-            RamNeed::Predicted(70_000)
+    fn a_build_too_large_at_every_step_assumes_ram_proportional_to_cores() {
+        let choice = choose_cores(&worker(60_000, 60_000, 0), None, 0, |_| {
+            RamNeed::Predicted(100_000)
+        });
+        assert_eq!((choice.cores, choice.fit), (29, RamFit::Fits));
+        assert_eq!(choice.need, RamNeed::Predicted(45_313));
+    }
+
+    #[test]
+    fn a_build_too_large_even_at_one_proportional_core_does_not_fit() {
+        let choice = choose_cores(&worker(1_000, 1_000, 0), None, 0, |_| {
+            RamNeed::Predicted(128_000)
         });
         assert_eq!((choice.cores, choice.fit), (1, RamFit::DoesNotFit));
     }
-
     #[test]
     fn the_cap_after_an_out_of_memory_kill_bounds_the_steps() {
         let choice = choose_cores(&worker(128_000, 128_000, 0), Some(29), 0, linear(10));

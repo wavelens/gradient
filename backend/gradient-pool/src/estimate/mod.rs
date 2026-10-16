@@ -8,7 +8,7 @@ pub mod cores;
 pub mod model;
 
 pub use cores::{CoreChoice, choose_cores, core_steps, fewer_cores};
-pub use model::{GroupKey, Model, Sample};
+pub use model::{GroupKey, Model, Sample, input_overlap};
 
 use crate::score::weights::{RAM_FLOOR_MARGIN, RAM_UPPER_Z, REFERENCE_CORES};
 use serde::Serialize;

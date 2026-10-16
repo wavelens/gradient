@@ -7,7 +7,8 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::NaiveDateTime;
-use gradient_pool::estimate::{GroupKey, Sample, fewer_cores};
+use gradient_pool::estimate::{GroupKey, Sample, fewer_cores, input_overlap};
+use gradient_pool::score::weights::{MIN_INPUT_OVERLAP, OWN_SAMPLE_WINDOW};
 use gradient_types::ids::DerivationId;
 use uuid::Uuid;
 
@@ -22,7 +23,7 @@ pub(crate) struct LoadedSample {
 pub(crate) struct SampleStore {
     seen: HashSet<Uuid>,
     rows: Vec<LoadedSample>,
-    groups: HashMap<GroupKey, Vec<usize>>,
+    by_pname: HashMap<(String, String), Vec<usize>>,
     oom_cores: HashMap<DerivationId, u32>,
     pub newest: Option<NaiveDateTime>,
 }
@@ -40,8 +41,8 @@ impl SampleStore {
                 let fewest = self.oom_cores.entry(row.sample.derivation).or_insert(cores);
                 *fewest = (*fewest).min(cores);
             }
-            self.groups
-                .entry(row.sample.group())
+            self.by_pname
+                .entry((row.sample.architecture.clone(), row.sample.pname.clone()))
                 .or_default()
                 .push(self.rows.len());
             self.rows.push(row);
@@ -52,12 +53,24 @@ impl SampleStore {
         self.rows.iter().map(|r| r.sample.clone()).collect()
     }
 
-    pub fn own(&self, key: &GroupKey) -> Vec<&Sample> {
-        self.groups
-            .get(key)
-            .into_iter()
-            .flatten()
+    pub fn own(&self, key: &GroupKey) -> Vec<(f64, &Sample)> {
+        let Some(rows) = self
+            .by_pname
+            .get(&(key.architecture.clone(), key.pname.clone()))
+        else {
+            return Vec::new();
+        };
+        rows.iter()
+            .rev()
+            .take(OWN_SAMPLE_WINDOW)
             .map(|&i| &self.rows[i].sample)
+            .map(|sample| {
+                (
+                    input_overlap(&key.input_pnames, &sample.input_pnames),
+                    sample,
+                )
+            })
+            .filter(|(overlap, _)| *overlap >= MIN_INPUT_OVERLAP)
             .collect()
     }
 
@@ -134,5 +147,37 @@ mod tests {
         store.add(vec![lost]);
 
         assert_eq!(store.max_cores(derivation), None);
+    }
+
+    fn with_inputs(inputs: &[&str]) -> LoadedSample {
+        let mut sample = row(Uuid::now_v7(), DerivationId::now_v7(), 16, false);
+        sample.sample.input_pnames = inputs.iter().map(|i| (*i).to_owned()).collect();
+        sample
+    }
+
+    fn key(inputs: &[&str]) -> GroupKey {
+        with_inputs(inputs).sample.group()
+    }
+
+    #[test]
+    fn a_build_with_other_inputs_under_the_same_pname_is_not_an_own_build() {
+        let mut store = SampleStore::default();
+        store.add(vec![with_inputs(&["cmake", "cudatoolkit"])]);
+
+        assert!(
+            store
+                .own(&key(&["autoPatchelfHook", "python3-wheel"]))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn an_own_build_counts_by_the_share_of_inputs_both_have() {
+        let mut store = SampleStore::default();
+        store.add(vec![with_inputs(&["a", "b", "c", "d"])]);
+
+        let own = store.own(&key(&["a", "b", "c", "e"]));
+        assert_eq!(own.len(), 1);
+        assert!((own[0].0 - 0.6).abs() < 1e-9, "{}", own[0].0);
     }
 }

@@ -423,27 +423,33 @@ fn ram_shortage(job: &PendingJob, workers: &[BuildWorker]) -> Option<RamShortage
     let PendingJob::Build(build) = job else {
         return None;
     };
-    let need @ RamNeed::Predicted(_) = job.ram_need_at(1, false) else {
+    let RamNeed::Predicted(_) = job.ram_need_at(1, false) else {
         return None;
     };
 
-    let needed_mb = need.reserved_mb(0);
+    let mut needed_mb = None;
     let mut largest_available_mb = None;
     for worker in workers
         .iter()
         .filter(|w| visible_to(job, w.authorized.as_ref(), Some(&w.caps)))
     {
         let metrics = worker.caps.metrics?;
-        if metrics.ram_fit(needed_mb) != RamFit::DoesNotFit {
+        let choice =
+            gradient_pool::estimate::choose_cores(&metrics, build.estimate.max_cores, 0, |cores| {
+                job.ram_need_at(cores, false)
+            });
+        if choice.fit != RamFit::DoesNotFit {
             return None;
         }
+        let need = choice.need.reserved_mb(0);
+        needed_mb = Some(needed_mb.map_or(need, |least: u64| least.min(need)));
         largest_available_mb = largest_available_mb.max(metrics.ram_available_mb());
     }
 
     Some(RamShortage {
         shared_build: build.derivation_build,
         evaluation: build.evaluation_id,
-        needed_mb,
+        needed_mb: needed_mb?,
         largest_available_mb: largest_available_mb?,
     })
 }
