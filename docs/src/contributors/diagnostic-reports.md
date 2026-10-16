@@ -192,7 +192,7 @@ vendor-registry: Queued, waiting on walked, blocking_deps = 1
 
 ## Schema Versions
 
-- The inspector reads one schema only. Version 20 works; all others get rejected with an error that names both the expected and the actual version.
+- The inspector can read one schema only, version 21. The inspector can reject any other version with an error naming the expected and the actual version.
 - A schema bump requires two changes in lockstep: `SCHEMA_VERSION` in `backend/gradient-report/src/schema.rs` and `SUPPORTED_SCHEMA` in `nix/tools/report-inspector/gradient_report/db.py`.
 - While these two values differ, the inspector package cannot be evaluated.
 - Schema versions move independently of releases. Version 1.3.0 contained the jump from 12 to 16.
@@ -200,3 +200,4 @@ vendor-registry: Queued, waiting on walked, blocking_deps = 1
 - A `nix develop` shell opened before a schema bump keeps the old inspector. Re-enter the shell to pick up the new one.
 - Reports older than schema 19 lack the `team_worker` table.
 - Reports older than schema 20 lack the `derivation_metric` table, `worker_elapsed_ms` and estimates.
+- Reports older than schema 21 lack `build_cores` and `input_pnames` in `derivation_metric`.

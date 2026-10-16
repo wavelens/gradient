@@ -146,8 +146,11 @@ Each build job contains a single `BuildSpec` and maps to one shared build (a `de
 - **Eval Job Outage:** Eval jobs failing `Transient` re-queue the evaluation, up to `build.maxAttempts` (3) attempts. Abandoned dispatches stay out of this count.
     - Typical causes are a dropped server connection, or an object PUT or `CacheQuery` without an answer.
 - **Out of Memory:** Builds killed by the kernel for memory count as `Transient`, whatever kind the worker sent. The attempts close with the reason `Oom`.
+    - Out-of-memory builds with more than 1 core in `BuildMetrics.build_cores` go back to `FailedTransient` without using up `build.maxAttempts`. The next attempt can get a third fewer cores.
+    - A kill at 1 core can end the build as `FailedPermanent` with the message `ran out of memory with 1 core`.
+    - Out-of-memory builds from workers without a core count use up attempts like other `Transient` failures.
 - **Not Enough Resources:** A queued build can turn `FailedPermanent` after 5 minutes without a worker able to hold the build. Such attempts close with the reason `NotEnoughResources` and without a dispatched job.
-    - The predicted peak memory of such builds, plus 10 %, is above the free memory of every connected worker able to build them.
+    - The predicted peak memory of such builds at 1 core is above the free memory of every connected worker able to build them.
     - Workers with memory reserved for running jobs are large enough while the total memory can take the build.
     - Unmeasured builds and workers without a sample stay out of this check.
 - Evaluations end `Completed`, or `Failed` with a build in `Failed`, `Aborted` or `DependencyFailed`, or with an error message present.
