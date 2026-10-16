@@ -42,17 +42,17 @@ flowchart LR
 - `ifd` marks a build of an imported derivation and its unfinished dependencies while evaluations wait on the import. `import_lifted_shared_builds` can walk that set from the builds of the open import requests.
 - Every 5 s assignment timer tick (`BumpRescore`) adds one to `rescore_count`. Reactive kicks leave the count unchanged.
 - Pass `now` in as a caller. Rules never read the wall clock.
-- With `outputs_present` set, `JobContext::build_history` returns an empty prediction. A worker holding every output has nothing to build.
+- `JobContext::build_estimate` can only give an empty estimate, for a job with `outputs_present`. A worker holding every output has nothing to build.
 - `ram_reserved_mb` sums over the jobs assigned to the worker. Per job, count the larger of `RamNeed::reserved_mb` and its observed peak.
 - `WorkerMetrics::build_peak_ram_mb` holds the `memory.peak` of each running build, read from the cgroup `nix-build@<derivation hash>-<build user>`. A worker without `worker.build.cgroup` reports `None`.
 - `ram_reserved_unused_mb` sums reserved minus observed memory per job, on a worker reporting build memory. A build absent from the report has not started and counts as 0.
-- `SchedulerCore::unregister` raises the prediction of a lost build to its observed peak, and the graph writer stores that peak as a `derivation_metric` row.
+- `SchedulerCore::unregister` can raise the estimate of a lost build to its observed peak. The graph writer can store that peak as a `derivation_metric` row.
     - `Predicted` is the predicted peak RAM of a build.
     - `Unmeasured` is a build without a prediction, held at `InstanceContext::unmeasured_build_ram_mb`. That value is the 24 h mean of `peak_ram_mb`, or the 1 h mean.
     - `Negligible` is a substitution, a fetch without a prediction or an evaluation. An evaluation can hold the worker while it waits on a build of an imported derivation.
 - `WorkerMetricsView::ram_available_mb` takes the lower of `ram_free_mb - ram_reserved_unused_mb` and `ram_total_mb - ram_reserved_mb`, then subtracts `ram_reserved_for_waiting_build_mb`. The measured value alone lags behind a burst of assignments.
 - `ResourceSaturationRule` can veto a build that fits `ram_total_mb` but not `ram_available_mb`, while `WorkerMetricsView::will_release_ram` is true.
-- `JobTracker` can keep `RamNeed::needed_to_start_mb` of a held build free on a worker, as `ram_reserved_for_waiting_build_mb`.
+- `JobTracker` can keep the reserved RAM of a held build free on a worker, as `ram_reserved_for_waiting_build_mb`.
     - Prioritized builds qualify at once. Other builds qualify `HELD_BUILD_RESERVES_RAM_AFTER_SECS` (60 s) after `ready_at`.
     - Each worker can wait for a single build, and each build on a single worker. Prioritized builds go first, then the oldest `ready_at`.
     - Scoring of the waiting build excludes its own kept memory, so the build wins the round as soon as it fits.
@@ -70,24 +70,55 @@ A build job passes through `Prefetch`, `Build` and `Upload`. On each entry into 
 
 A released job drops out of these counts together with its slot.
 
-## History and Closure Size
+## Build Estimates and Closure Size
 
-`ScoredJob` can hold owned values only. Scoring by itself computes nothing. `load_sizes_and_histories` in `loops/build.rs` can materialize both values on the pending job, but only when `policy.uses_history()` is true.
+`ScoredJob` can borrow values only. Scoring alone can compute nothing. `BuildAssignMaps::load` in `loops/build.rs` can only attach both values to the pending job, when `policy.uses_history()` is true.
 
 | Value | Source |
 |---|---|
 | Closure size | `derivation.closure_size`, or one batched `transitive_closure_sizes` walk as fallback. The graph writer can persist computed sizes |
-| Build history | `history::predict`: the latest 20 `derivation_metric` rows with the same `history_name` (`pname`, else `name`) and architecture, within [`retentionDays`](../../reference/configuration.md#general). One query per distinct pair |
-| Output size | `derivation_output.nar_size` of the derivations behind those rows, summed per derivation. One more query per pair with history. Once all of the job's own outputs have a `nar_size`, they replace the mean |
-| Evaluation history | `compute_eval_history`: per-task p95 of `evaluation_metric.peak_rss_mb` over 24 h |
+| Build estimate | `BuildHistory::estimate` per pname, sorted input pnames and architecture. Section [Build Estimates](#build-estimates) has the details |
+| Output size | The model's output NAR size. Once all of the job's own outputs have a `nar_size`, their sum replaces the estimate |
+| Evaluation estimate | `compute_eval_history`: per-task p95 of `evaluation_metric.peak_rss_mb` over 24 h and the mean run time of the task |
 
-- Only real builds can write a `derivation_metric` row. A substituted output writes none.
-- A failed build can write a row only after an out-of-memory kill.
+- Only real builds can write a `derivation_metric` row. Substituted outputs write none.
+- Failed builds can only write a row, after an out-of-memory kill.
+- Each row records `concurrent_builds`, `build_cores`, `cpu_core_score` and the `input_pnames` of the direct build inputs.
 
-`HistoryPrediction` must carry the p95 peak RAM, mean CPU time, mean build time, mean disk bytes, mean output NAR size, OOM rate and a `samples` count. The mean build time without contention and the mean CPU score of the building workers belong in it as well. A value remains `None` when no build in the window measured it. Rules add nothing for a `None` value. Evaluations contribute the mean run time of their task in the build time fields.
+### Build Estimates
 
-- Each `derivation_metric` row records `concurrent_builds`, `build_cores` and `cpu_core_score` from the worker's `BuildMetrics`.
-- `contention_factor` can convert each row into a build time without contention by dividing by `1 + 0.04 * concurrent_builds`.
+```mermaid
+flowchart LR
+  rows["derivation_metric rows"] --> store["sample store per instance"]
+  store --> fit["fit per architecture"]
+  store --> own["own past builds"]
+  fit --> estimate["BuildEstimate"]
+  own --> estimate
+```
+
+- **Samples:** build-assign passes read the rows added since the last read. Rows count once per id, also across instances.
+- **Lower bounds:** out-of-memory rows and rows without a build time set a lower bound for RAM only.
+- **Features:** the pname, each input pname, and each of those times `log(cores / 16)`. Separate estimates go to two derivations with one pname and other inputs.
+- **Targets:** peak RAM, build time at `REFERENCE_CORE_SCORE` without concurrent builds, and output NAR size, all in log space.
+- **Fit:** `BuildHistoryRefit` can refit a ridge regression every 300 s on each instance. The shared core term can start at `+0.5` for RAM and `-0.5` for build time.
+- **Blend:** `n` own past samples give the estimate `(n * own + 2 * model) / (n + 2)`. Never-measured derivations still get the model's estimate.
+- **RAM reserve:** `BuildEstimate::ram_mb(cores)` can give the 90th percentile at that core count. Core counts at or above an own out-of-memory kill keep at least 1.1 times its killed peak.
+- **No samples:** architectures without rows give no estimate. Their builds count as `RamNeed::Unmeasured`.
+
+### Core Choice
+
+`choose_cores` can pick the core count per candidate worker. The steps start at the worker's `build_cores`, else its CPU count, and each step is `min(c - 1, ceil(2c / 3))` down to 1.
+
+| Fit of a step | Result |
+|---|---|
+| Some step fits `ram_available_mb` now | The largest such step |
+| No step fits now, some fits once RAM is released | The largest such step, and the build waits for the worker |
+| No step fits | 1 core, penalized |
+
+- `EstimatedTimeRule` can score the build time at the chosen cores.
+- The assignment can carry the chosen cores in `BuildSpec.build_cores`. The worker can build with the smaller of that value and its own `max_cores`.
+- `ram_shortage` can test every worker at 1 core. Only a build too large at 1 core can reach `fail_build_no_worker_fits`.
+- The next attempt after an out-of-memory kill can get at most `next(c)` cores. Here `c` is the fewest cores among its kills.
 
 ## Instance Windows
 

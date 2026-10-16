@@ -34,7 +34,7 @@ The **Prioritize** entry in the task or evaluation menu set the `QosRule` flag o
 
 ## Rules in `resource-aware` Only
 
-The saturation check can use live worker load and the predicted peak memory. The prediction needs earlier builds of the same package.
+The saturation check can use live worker load and the predicted peak memory. The prediction can learn from earlier builds of the same package and from builds with the same inputs.
 
 | Rule | Kind | Effect |
 |---|---|---|
@@ -43,10 +43,12 @@ The saturation check can use live worker load and the predicted peak memory. The
 
 - To compute the free memory of a worker, take the measured value and subtract the memory reserved by jobs already assigned to that worker.
 - Every assigned job can reserve its predicted peak memory for the whole duration of the job.
+- A build too large for a worker at full cores can start there with fewer cores. The steps take a third of the cores off each time, down to 1 core.
+- After an out-of-memory kill, the next attempt can get a third fewer cores than the attempt killed.
 - Workers with `worker.build.cgroup` report the peak memory of each running build every 10 seconds. When a build go above its prediction, it will reserve the reported peak instead.
 - On such a worker, reserved memory that no build has touched yet also count against the measured free memory.
 - If a build get lost together with its worker, the last reported peak remain in the history as a sample.
-- A build without history can reserve the mean peak memory of the instance's builds over the last 24 hours.
+- A build on an architecture without any history can reserve the mean peak memory of the instance's builds over the last 24 hours.
 - Substitutions, fetches and evaluations make no reservations.
 - A build that demand more than the free memory get a veto and wait until the memory reserved by the assigned jobs on that worker become available.
 - A build that demand more than the worker's total memory, or that come up short on a worker with no reservations, take the penalty alone.
@@ -61,8 +63,7 @@ The saturation check can use live worker load and the predicted peak memory. The
 |---|---|
 | Download | Missing NAR size divided by the slower of the worker's download speed and its share of the storage read throughput |
 | Paths | Missing paths times the per-path time of recent prefetches |
-| Build | Build time of earlier builds of the package, scaled by their CPU score over the worker's, plus 4% per build already running there |
-| Out of memory | Build time again, weighted by the chance of an out-of-memory kill |
+| Build | Predicted build time at the chosen core count, scaled by the CPU score of the worker, plus 4% per build already running there |
 | Upload | Output size divided by the slower of the worker's upload speed and its share of the storage write throughput |
 
 - A worker that already has every output only performs the upload.
@@ -71,11 +72,10 @@ The saturation check can use live worker load and the predicted peak memory. The
 - The job's own outputs can supply the output size once all of them have a size. An upstream narinfo can supply it before any build, and otherwise earlier builds of the package can.
 - An evaluation can take the mean fetch time and mean evaluation time of its task over the last 7 days. A job only counts the parts it actually performs, so downloads and paths drop out.
 - With no recorded runs of a part for a task, the mean across all tasks fill in.
-- The out-of-memory probability is the package's kill rate plus the fraction of predicted peak memory above free memory, capped at 1.
 - The storage share split the best total throughput of the last hour across the transfers in flight plus this one.
 - Storage throughput default to 150 MB/s for reads and 140 MB/s for writes until the first measurement.
 - A least-squares fit of prefetch time over its megabytes and paths in the last 24 hours can yield the per-path time. With fewer than 100 prefetches, each path cost 0.18 s.
-- A package without build history can use the instance's median build time. Most builds finish in under a second, and a few long builds pull the mean far above a typical build.
+- An architecture without build history can use the instance's median build time. Most builds finish in under a second, and a few long builds pull the mean far above a typical build.
 - Clamp the CPU score ratio between 0.5 and 2.
 - Workers measure upload, download and disk speed from their own NAR transfers, substitutions and builds. Transfers under 1 MiB drop out of these measurements.
 
