@@ -83,6 +83,14 @@ impl Profile {
         self.hardware(|h| h.ram_total_mb = ram_total_mb)
     }
 
+    pub fn cpus(self, cpu_count: u32) -> Self {
+        self.hardware(|h| h.cpu_count = cpu_count)
+    }
+
+    pub fn core_limit(self, build_cores: u32) -> Self {
+        self.hardware(|h| h.build_cores = Some(build_cores))
+    }
+
     pub fn without_profile(mut self) -> Self {
         self.hardware = None;
         self
