@@ -161,10 +161,23 @@ impl Scheduler {
     }
 
     async fn record_worker_connection(&self, worker_id: &str, capabilities: serde_json::Value) {
+        use gradient_entity::worker_connection::{Column, Entity};
+
+        let now = gradient_types::now();
+        if let Err(e) = Entity::update_many()
+            .col_expr(Column::DisconnectedAt, sea_orm::sea_query::Expr::value(now))
+            .filter(Column::WorkerId.eq(worker_id))
+            .filter(Column::DisconnectedAt.is_null())
+            .exec(&self.db.worker_db)
+            .await
+        {
+            warn!(error = %e, %worker_id, "failed to close earlier worker_connection rows");
+        }
+
         let conn = gradient_entity::worker_connection::Model {
             id: gradient_entity::ids::WorkerConnectionId::now_v7(),
             worker_id: worker_id.to_string(),
-            connected_at: gradient_types::now(),
+            connected_at: now,
             capabilities,
             ..Default::default()
         }
