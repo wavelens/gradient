@@ -7,6 +7,7 @@
 //! The seed cannot read the transition off the row it is writing.
 //! The commit making an output present wrote `cached_path` one statement earlier.
 //! `freshly_present` is the caller's endpoint for that transition.
+//! A freshly present dependency still counts as missing for a referrer in the same seed, since its own ripple subtracts it.
 //! A re-push of an already backed path must not count as fresh.
 
 use std::collections::BTreeMap;
@@ -21,14 +22,15 @@ use crate::sql::StatusWrite;
 
 fn seed_sql() -> String {
     format!(
-        "UPDATE derivation_build db SET missing_runtime_deps = x.n \
+        "WITH s(derivation, fresh) AS (SELECT * FROM unnest($1::uuid[], $2::bool[])) \
+         UPDATE derivation_build db SET missing_runtime_deps = x.n \
          FROM (SELECT b.id, ({was_complete} AND NOT s.fresh) AS was_complete, \
                       (SELECT count(*) FROM derivation_dependency e \
                          JOIN derivation_build dep ON dep.derivation = e.dependency \
+                         LEFT JOIN s landed ON landed.derivation = e.dependency AND landed.fresh \
                         WHERE e.derivation = b.derivation AND e.kind IN (1, 2) \
-                          AND NOT {dep_complete})::int AS n \
-               FROM unnest($1::uuid[], $2::bool[]) AS s(derivation, fresh) \
-               JOIN derivation_build b ON b.derivation = s.derivation) x \
+                          AND NOT ({dep_complete} AND landed.derivation IS NULL))::int AS n \
+               FROM s JOIN derivation_build b ON b.derivation = s.derivation) x \
          WHERE db.id = x.id \
          RETURNING db.derivation, x.was_complete, {complete} AS complete",
         was_complete = shared_build_complete_predicate("b"),
