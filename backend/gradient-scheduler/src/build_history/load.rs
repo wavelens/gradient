@@ -64,6 +64,7 @@ impl SampleRow {
         LoadedSample {
             id: self.id,
             created_at: self.created_at,
+            oom_killed: self.oom_killed,
             sample: Sample {
                 derivation: DerivationId::new(self.derivation),
                 architecture: self.architecture,

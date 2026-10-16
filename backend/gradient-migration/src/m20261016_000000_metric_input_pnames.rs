@@ -10,7 +10,8 @@ use sea_orm_migration::sea_orm::ConnectionTrait;
 const UP: &str = r#"
 ALTER TABLE public.derivation_metric ADD COLUMN input_pnames text[];
 UPDATE public.derivation_metric m SET input_pnames = (
-    SELECT coalesce(array_agg(DISTINCT coalesce(d.pname, d.name) ORDER BY coalesce(d.pname, d.name)), '{}')
+    SELECT coalesce(array_agg(DISTINCT coalesce(d.pname, d.name) COLLATE "C"
+                              ORDER BY coalesce(d.pname, d.name) COLLATE "C"), '{}')
     FROM public.derivation_dependency e JOIN public.derivation d ON d.id = e.dependency
     WHERE e.derivation = m.derivation AND e.kind IN (0, 2));
 DROP INDEX public."idx-derivation_metric-pname-architecture-created_at";

@@ -573,6 +573,15 @@ async fn build_failed(
 
     let out_of_memory = policy::out_of_memory(kind, metrics.as_ref());
     let oom_cores = metrics.as_ref().and_then(|m| m.build_cores);
+    let fewest_before = if out_of_memory {
+        gradient_db::derivation_dependencies::fewest_out_of_memory_cores(
+            &ctx.worker_db,
+            shared_build.derivation,
+        )
+        .await?
+    } else {
+        None
+    };
     let kind = policy::retried_as(kind, out_of_memory);
     if let Some(metrics) = policy::history_sample(metrics, policy::BuildEnd::Failed) {
         record_metrics(ctx, &shared_build, shared_build.derivation, &metrics).await;
@@ -628,7 +637,7 @@ async fn build_failed(
         threshold: i64::from(ctx.config.build.substitute_miss_escalation_threshold.get()),
     };
     let oom_outcome = out_of_memory
-        .then(|| policy::out_of_memory_outcome(oom_cores))
+        .then(|| policy::out_of_memory_outcome(oom_cores, fewest_before))
         .flatten();
     let outcome = match oom_outcome {
         Some(outcome) => outcome,

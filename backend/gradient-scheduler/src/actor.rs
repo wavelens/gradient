@@ -281,6 +281,10 @@ pub enum SchedulerMsg {
     LastingRamShortages {
         reply: RpcReplyPort<Vec<gradient_graph::RamShortage>>,
     },
+    Reestimate {
+        history: Arc<crate::build_history::BuildHistory>,
+        reply: RpcReplyPort<()>,
+    },
     LiftImports {
         checked: HashSet<DerivationBuildId>,
         lifted: HashSet<DerivationBuildId>,
@@ -1064,6 +1068,10 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::LastingRamShortages { reply } => {
                 let _ = reply.send(core.lasting_ram_shortages(Instant::now()));
+            }
+            SchedulerMsg::Reestimate { history, reply } => {
+                core.tracker.reestimate(&history);
+                let _ = reply.send(());
             }
             SchedulerMsg::LiftImports {
                 checked,

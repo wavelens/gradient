@@ -209,6 +209,7 @@ mod tests {
             prefer_local_build: true,
             is_fixed_output: false,
             estimate: BuildEstimate::fixed(Some(900), None, 7),
+            history_key: None,
             queued_at: now,
             ready_at: now,
             rescore_count: 0,

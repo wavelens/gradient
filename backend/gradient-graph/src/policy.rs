@@ -114,11 +114,17 @@ pub(crate) fn out_of_memory(kind: BuildFailureKind, metrics: Option<&BuildMetric
 
 pub(crate) const OUT_OF_MEMORY_AT_ONE_CORE: &str = "ran out of memory with 1 core";
 
-pub(crate) const fn out_of_memory_outcome(cores: Option<u32>) -> Option<FailureOutcome> {
-    match cores {
-        Some(0 | 1) => Some(FailureOutcome::Permanent),
-        Some(_) => Some(FailureOutcome::RetryWithFewerCores),
-        None => None,
+/// A free retry needs fewer cores than every earlier kill. A worker ignoring the sent cores
+/// would otherwise retry at the same count without end.
+pub(crate) const fn out_of_memory_outcome(
+    cores: Option<u32>,
+    fewest_before: Option<u32>,
+) -> Option<FailureOutcome> {
+    match (cores, fewest_before) {
+        (Some(0 | 1), _) => Some(FailureOutcome::Permanent),
+        (Some(cores), Some(fewest)) if cores >= fewest => None,
+        (Some(_), _) => Some(FailureOutcome::RetryWithFewerCores),
+        (None, _) => None,
     }
 }
 
@@ -379,13 +385,13 @@ mod tests {
     }
 
     #[test]
-    fn an_out_of_memory_kill_with_more_than_one_core_retries_outside_the_budget() {
+    fn an_out_of_memory_kill_with_fewer_cores_than_before_retries_outside_the_budget() {
         assert_eq!(
-            out_of_memory_outcome(Some(64)),
+            out_of_memory_outcome(Some(64), None),
             Some(FailureOutcome::RetryWithFewerCores)
         );
         assert_eq!(
-            out_of_memory_outcome(Some(2)),
+            out_of_memory_outcome(Some(2), Some(3)),
             Some(FailureOutcome::RetryWithFewerCores)
         );
     }
@@ -393,14 +399,20 @@ mod tests {
     #[test]
     fn an_out_of_memory_kill_at_one_core_is_final() {
         assert_eq!(
-            out_of_memory_outcome(Some(1)),
+            out_of_memory_outcome(Some(1), Some(2)),
             Some(FailureOutcome::Permanent)
         );
     }
 
     #[test]
     fn an_out_of_memory_kill_without_a_core_count_keeps_the_attempt_budget() {
-        assert_eq!(out_of_memory_outcome(None), None);
+        assert_eq!(out_of_memory_outcome(None, Some(64)), None);
+    }
+
+    #[test]
+    fn a_kill_at_no_fewer_cores_than_before_keeps_the_attempt_budget() {
+        assert_eq!(out_of_memory_outcome(Some(64), Some(64)), None);
+        assert_eq!(out_of_memory_outcome(Some(64), Some(43)), None);
     }
 
     #[test]

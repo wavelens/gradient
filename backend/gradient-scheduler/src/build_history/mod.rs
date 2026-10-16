@@ -7,6 +7,7 @@
 mod load;
 mod store;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use arc_swap::ArcSwap;
@@ -17,9 +18,10 @@ use sea_orm::{ConnectionTrait, DbErr};
 use store::SampleStore;
 
 #[derive(Default)]
-pub(crate) struct BuildHistory {
+pub struct BuildHistory {
     store: Mutex<SampleStore>,
     model: ArcSwap<Model>,
+    fitted: AtomicBool,
 }
 
 impl BuildHistory {
@@ -33,6 +35,9 @@ impl BuildHistory {
         let newest = self.store().newest;
         let loaded = load::load_since(db, newest).await?;
         self.store().add(loaded);
+        if !self.fitted.load(Ordering::Acquire) {
+            self.refit(0);
+        }
         Ok(())
     }
 
@@ -47,6 +52,34 @@ impl BuildHistory {
             store.samples()
         };
         self.model.store(Arc::new(Model::fit(&samples)));
+        self.fitted.store(true, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    pub fn with_out_of_memory_kill(
+        key: GroupKey,
+        derivation: DerivationId,
+        cores: u32,
+        peak_ram_mb: u64,
+    ) -> Self {
+        let history = Self::default();
+        history.store().add(vec![store::LoadedSample {
+            id: uuid::Uuid::now_v7(),
+            created_at: gradient_types::now(),
+            oom_killed: true,
+            sample: gradient_pool::estimate::Sample {
+                derivation,
+                architecture: key.architecture,
+                pname: key.pname,
+                input_pnames: key.input_pnames,
+                cores: Some(cores),
+                peak_ram_mb: Some(peak_ram_mb),
+                build_ms: None,
+                output_nar_bytes: None,
+                lower_bound: true,
+            },
+        }]);
+        history
     }
 
     pub fn estimate(&self, key: &GroupKey, derivation: DerivationId) -> BuildEstimate {

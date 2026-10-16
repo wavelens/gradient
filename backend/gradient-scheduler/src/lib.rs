@@ -7,7 +7,7 @@
 pub mod actor;
 mod assessment_memo;
 pub mod build;
-mod build_history;
+pub mod build_history;
 pub mod buildability;
 pub mod cluster;
 pub mod connection_failures;

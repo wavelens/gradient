@@ -48,6 +48,9 @@ pub(crate) async fn build_assign_pass(scheduler: &Scheduler, timer_tick: bool, r
     if resync && let Err(e) = resync_startable_set(scheduler).await {
         error!(error = %e, "startable-set resync error");
     }
+    if scheduler.scoring.policy.uses_history() {
+        reestimate_pending(scheduler).await;
+    }
     if let Err(e) = scheduler.refresh_waiting_state().await {
         error!(error = %e, "refresh_waiting_state in dispatch loop failed");
     }
@@ -59,6 +62,17 @@ pub(crate) async fn build_assign_pass(scheduler: &Scheduler, timer_tick: bool, r
     }
 
     let _ = scheduler.cast(SchedulerMsg::ReOffer).await;
+}
+
+async fn reestimate_pending(scheduler: &Scheduler) {
+    let history = Arc::clone(&scheduler.scoring.build_history);
+    if let Err(e) = history.refresh(&scheduler.db.worker_db).await {
+        warn!(error = %e, "build history refresh failed; pending estimates stay as they were");
+        return;
+    }
+    let _ = scheduler
+        .call(|reply| SchedulerMsg::Reestimate { history, reply })
+        .await;
 }
 
 pub(crate) enum BuildMsg {
@@ -189,7 +203,7 @@ struct BuildAssignMaps {
     output_nar_sizes: HashMap<DerivationId, Option<u64>>,
     closure_sizes: HashMap<DerivationId, Option<i64>>,
     computed_sizes: HashMap<DerivationId, i64>,
-    estimates: HashMap<DerivationId, BuildEstimate>,
+    estimates: HashMap<DerivationId, (GroupKey, BuildEstimate)>,
     driving_eval: HashMap<DerivationBuildId, EvaluationId>,
     prioritized_by_eval: HashSet<DerivationBuildId>,
     build_request_by_eval: HashSet<DerivationBuildId>,
@@ -473,7 +487,11 @@ impl BuildAssignMaps {
     }
 
     fn estimate_of(&self, derivation: DerivationId) -> BuildEstimate {
-        let mut estimate = self.estimates.get(&derivation).cloned().unwrap_or_default();
+        let mut estimate = self
+            .estimates
+            .get(&derivation)
+            .map(|(_, estimate)| estimate.clone())
+            .unwrap_or_default();
         if let Some(Some(size)) = self.output_nar_sizes.get(&derivation) {
             estimate.output_nar_bytes = Some(*size);
         }
@@ -592,6 +610,10 @@ impl BuildAssignMaps {
             prefer_local_build: derivation.prefer_local_build,
             is_fixed_output: derivation.is_fixed_output,
             estimate: self.estimate_of(shared_build.derivation),
+            history_key: self
+                .estimates
+                .get(&shared_build.derivation)
+                .map(|(key, _)| key.clone()),
             queued_at: shared_build.updated_at,
             ready_at: now(),
             rescore_count: 0,
@@ -648,7 +670,7 @@ async fn estimates_for(
     derivations: &HashMap<DerivationId, MDerivation>,
     deps_by_drv: &HashMap<DerivationId, Vec<DerivationId>>,
     dep_drv_ids: &[DerivationId],
-) -> anyhow::Result<HashMap<DerivationId, BuildEstimate>> {
+) -> anyhow::Result<HashMap<DerivationId, (GroupKey, BuildEstimate)>> {
     if let Err(e) = history.refresh(db).await {
         warn!(error = %e, "build history refresh failed; estimating from the samples read before");
     }
@@ -671,7 +693,8 @@ async fn estimates_for(
                 pname: drv.history_name().to_owned(),
                 input_pnames,
             };
-            (*id, history.estimate(&key, *id))
+            let estimate = history.estimate(&key, *id);
+            (*id, (key, estimate))
         })
         .collect())
 }
