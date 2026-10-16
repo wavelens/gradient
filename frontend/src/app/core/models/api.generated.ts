@@ -2206,6 +2206,7 @@ export type TeamWorkerEntry = WorkerConnection & {
   enable_fetch: boolean;
   enable_eval: boolean;
   enable_build: boolean;
+  live?: WorkerLiveInfo | null;
 };
 
 export type Tier = "starred_active" | "active" | "starred" | "team" | "member";
@@ -2441,6 +2442,7 @@ export interface WorkerLiveInfo {
   max_concurrent_builds: number;
   assigned_job_count: number;
   draining: boolean;
+  ram_total_mb?: number | null;
 }
 
 export interface WorkerLoad {

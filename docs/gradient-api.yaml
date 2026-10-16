@@ -18928,6 +18928,10 @@ components:
             type: boolean
           enable_build:
             type: boolean
+          live:
+            oneOf:
+            - $ref: '#/components/schemas/WorkerLiveInfo'
+            - type: 'null'
     Tier:
       type: string
       enum:
@@ -19612,6 +19616,12 @@ components:
           minimum: 0
         draining:
           type: boolean
+        ram_total_mb:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
     WorkerLoad:
       type: object
       required:
