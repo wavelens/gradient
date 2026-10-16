@@ -91,6 +91,7 @@ pub struct HistoryPrediction {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WorkerMetricsView {
     pub cpu_count: u32,
+    pub build_cores: u32,
     pub cpu_core_score: u32,
     pub ram_total_mb: u64,
     pub ram_free_mb: Option<u64>,
@@ -149,6 +150,14 @@ pub enum RamFit {
 }
 
 impl WorkerMetricsView {
+    pub fn full_cores(&self) -> u32 {
+        match self.build_cores {
+            0 => self.cpu_count.max(1),
+            cores if self.cpu_count > 0 => cores.min(self.cpu_count),
+            cores => cores,
+        }
+    }
+
     pub fn ram_fit(&self, needed_mb: u64) -> RamFit {
         if needed_mb == 0 || self.ram_available_mb().is_none_or(|free| needed_mb <= free) {
             RamFit::Fits
