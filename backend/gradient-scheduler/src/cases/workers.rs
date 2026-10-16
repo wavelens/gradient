@@ -84,6 +84,17 @@ async fn w01_connect_and_disconnect_open_and_close_connection_rows() {
     assert_eq!(case.totals().await.workers, 1, "after 4: counts().workers");
     case.check("step 4").await;
 
+    case.connect(W1, w_all(), &[]).await;
+    let rows = case.connections(W1).await;
+    assert!(
+        matches!(rows.as_slice(), [first, second, third]
+            if first.disconnected_at.is_some()
+                && second.disconnected_at.is_some()
+                && third.disconnected_at.is_none()),
+        "after 5: a registration without a disconnect closes the earlier row, got {rows:?}"
+    );
+    case.check("step 5").await;
+
     case.finish().await;
 }
 
