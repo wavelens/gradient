@@ -4,6 +4,7 @@ backend/test-store
 
 /proxy/
 /gradjoeng/
+/gradient-hypervisor/
 
 # ---> Python
 # Byte-compiled / optimized / DLL files
