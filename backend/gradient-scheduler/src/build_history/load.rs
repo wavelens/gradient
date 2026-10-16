@@ -50,12 +50,17 @@ pub(crate) async fn load_since(
     db: &impl ConnectionTrait,
     newest: Option<NaiveDateTime>,
 ) -> Result<Vec<LoadedSample>, DbErr> {
-    let since = newest.map_or(NaiveDateTime::MIN, |t| t - REFRESH_OVERLAP);
-    let rows = SampleRow::find_by_statement(BUILD_SAMPLES_SINCE.bind([since.into()]))
+    let rows = SampleRow::find_by_statement(BUILD_SAMPLES_SINCE.bind([read_since(newest).into()]))
         .all(db)
         .await?;
 
     Ok(rows.into_iter().map(SampleRow::into_loaded).collect())
+}
+
+fn read_since(newest: Option<NaiveDateTime>) -> NaiveDateTime {
+    newest.map_or(chrono::DateTime::UNIX_EPOCH.naive_utc(), |t| {
+        t - REFRESH_OVERLAP
+    })
 }
 
 impl SampleRow {
@@ -98,6 +103,13 @@ fn normalized_build_ms(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_first_read_starts_inside_the_range_of_a_postgres_timestamp() {
+        assert_eq!(read_since(None), chrono::DateTime::UNIX_EPOCH.naive_utc());
+        let newest = gradient_types::now();
+        assert_eq!(read_since(Some(newest)), newest - REFRESH_OVERLAP);
+    }
 
     #[test]
     fn a_build_time_is_moved_to_the_reference_core_score_without_the_builds_beside_it() {

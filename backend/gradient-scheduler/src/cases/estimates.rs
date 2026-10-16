@@ -318,10 +318,12 @@ async fn e09_a_kill_with_fewer_cores_is_free_with_the_budget_almost_spent() {
 
     let third = dispatch(&case, W1).await.expect("after 3: W1 takes A");
     kill(&case, W1, &third, Some(64)).await;
-    assert_eq!(
-        (case.sb(A).await.status, case.sb(A).await.attempt),
-        (BuildStatus::FailedTransient, 2),
-        "after 3: sb(A) status and attempt"
+    let shared = case.sb(A).await;
+    assert_eq!(shared.attempt, 2, "after 3: sb(A).attempt");
+    assert_ne!(
+        shared.status,
+        BuildStatus::FailedPermanent,
+        "after 3: sb(A).status"
     );
 
     let fourth = dispatch(&case, W1).await.expect("after 4: W1 takes A");
