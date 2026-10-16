@@ -97,6 +97,29 @@ impl WaitingReason {
             pending_shared_builds,
         }
     }
+
+    pub fn worker_gap(&self) -> Option<String> {
+        match self {
+            Self::Workers { unmet, .. } if !unmet.is_empty() => {
+                let mut gaps: Vec<String> = unmet
+                    .iter()
+                    .map(|u| {
+                        let mut features = u.required_features.clone();
+                        features.sort();
+                        format!("{}[{}]", u.architecture, features.join(","))
+                    })
+                    .collect();
+                gaps.sort();
+                gaps.dedup();
+                Some(gaps.join(";"))
+            }
+            Self::EvalWorkers { capability, .. } => Some(match capability {
+                EvalCapability::Fetch => "fetch".to_owned(),
+                EvalCapability::Eval => "eval".to_owned(),
+            }),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -112,5 +135,33 @@ mod tests {
         };
         let decoded = WaitingReason::from_json(&reason.to_json()).expect("row decodes");
         assert_eq!(decoded, reason);
+    }
+
+    #[test]
+    fn worker_gap_ignores_counts_and_order() {
+        let unmet = |arch: &str, features: &[&str], build_count| UnmetRequirement {
+            architecture: arch.to_owned(),
+            required_features: features.iter().map(|f| f.to_string()).collect(),
+            build_count,
+        };
+        let a = WaitingReason::workers(
+            vec![
+                unmet("x86_64-linux", &["kvm", "big"], 1),
+                unmet("aarch64-linux", &[], 2),
+            ],
+            1,
+            vec![],
+        );
+        let b = WaitingReason::workers(
+            vec![
+                unmet("aarch64-linux", &[], 7),
+                unmet("x86_64-linux", &["big", "kvm"], 3),
+            ],
+            4,
+            vec![],
+        );
+        assert_eq!(a.worker_gap(), b.worker_gap());
+        assert_eq!(WaitingReason::workers(vec![], 1, vec![]).worker_gap(), None);
+        assert_eq!(WaitingReason::Draining.worker_gap(), None);
     }
 }

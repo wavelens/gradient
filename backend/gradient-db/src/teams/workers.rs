@@ -44,18 +44,25 @@ pub async fn projects_granted_with_workers<C: ConnectionTrait>(
         .collect())
 }
 
-pub async fn team_workers_for_project<C: ConnectionTrait>(
+pub async fn teams_granting_workers<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
-) -> Result<Vec<(String, MTeamWorker)>, DbErr> {
-    let teams: Vec<TeamId> = ETeamProject::find()
+) -> Result<Vec<TeamId>, DbErr> {
+    Ok(ETeamProject::find()
         .filter(CTeamProject::Project.eq(project))
         .filter(CTeamProject::IncludesWorkers.eq(true))
         .all(db)
         .await?
         .into_iter()
         .map(|grant| grant.team)
-        .collect();
+        .collect())
+}
+
+pub async fn team_workers_for_project<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+) -> Result<Vec<(String, MTeamWorker)>, DbErr> {
+    let teams = teams_granting_workers(db, project).await?;
     if teams.is_empty() {
         return Ok(Vec::new());
     }

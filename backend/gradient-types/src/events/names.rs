@@ -35,6 +35,7 @@ pub const WORKER_CONNECTED: &str = "worker.connected";
 pub const WORKER_DISCONNECTED: &str = "worker.disconnected";
 pub const WORKER_JOB_DISPATCHED: &str = "worker.job_dispatched";
 pub const WORKER_QUEUE_DEPTH: &str = "worker.queue_depth";
+pub const WORKER_DEMAND: &str = "worker.demand";
 
 pub const GRAPH_NAR_COMMITTED: &str = "graph.nar_committed";
 pub const GRAPH_TRANSITIONED: &str = "graph.transitioned";

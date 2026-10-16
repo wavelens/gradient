@@ -105,6 +105,7 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     teams::workers::get_team_workers,
                     teams::workers::post_team_worker
                 ))
+                .routes(routes!(teams::demand::get_team_worker_demand))
                 .routes(routes!(
                     teams::workers::patch_team_worker,
                     teams::workers::delete_team_worker
