@@ -18,8 +18,7 @@ use gradient_graph::{
     Demotion, NarCommit, NarCommitted, RequeueScope, SignTargets, Transition, TransitionReport,
     UpstreamHit,
 };
-use gradient_pool::score::{HistoryPrediction, InstanceContext};
-use gradient_util::supervision::Pass;
+use gradient_pool::score::InstanceContext;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
     QuerySelect,
@@ -350,10 +349,6 @@ impl SchedulerCase {
         ids
     }
 
-    pub async fn predict(&self, history_name: &str, architecture: &str) -> HistoryPrediction {
-        crate::history::predict(&self.scheduler.db.worker_db, history_name, architecture).await
-    }
-
     pub async fn instance_context(&self, now: NaiveDateTime) -> InstanceContext {
         crate::instance::compute_instance_context(
             &self.scheduler.db.worker_db,
@@ -374,14 +369,7 @@ impl SchedulerCase {
     }
 
     pub async fn eval_history(&self, now: NaiveDateTime) -> EvalHistory {
-        crate::instance::compute_eval_history(&self.scheduler.db.worker_db, now).await
-    }
-
-    pub async fn retention(&self) {
-        gradient_db::maintenance::retention::Retention::new(self.scheduler.db.clone())
-            .run()
-            .await
-            .expect("the retention pass runs");
+        crate::instance::compute_eval_history(&self.scheduler.db.worker_db, now, None).await
     }
 
     pub async fn commit_nar(&self, commit: NarCommit) -> NarCommitted {

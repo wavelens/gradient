@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::estimate::BuildEstimate;
+
 /// `None` is marking a window without samples. A measured zero is honored instead of being replaced
 /// by a rule's fallback constant.
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -74,20 +76,6 @@ pub struct InstanceContext {
     pub substitute_cost: Option<SubstituteCost>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct HistoryPrediction {
-    pub predicted_peak_ram_mb: Option<u64>,
-    pub avg_cpu_time_ms: Option<u64>,
-    pub build_time_ms: Option<u64>,
-    pub uncontended_build_time_ms: Option<u64>,
-    pub build_core_score: Option<u32>,
-    pub avg_disk_bytes: Option<u64>,
-    pub output_nar_size: Option<u64>,
-    pub oom_rate: f32,
-    pub samples: u32,
-    pub from_fleet_mean: bool,
-}
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WorkerMetricsView {
     pub cpu_count: u32,
@@ -130,15 +118,6 @@ impl RamNeed {
             Self::Predicted(peak) => peak,
             Self::Unmeasured => unmeasured_build_ram_mb,
         }
-    }
-
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "whole number from rounding"
-    )]
-    pub fn needed_to_start_mb(self, unmeasured_build_ram_mb: u64) -> u64 {
-        let reserved = self.reserved_mb(unmeasured_build_ram_mb) as f64;
-        (reserved * crate::score::weights::RAM_FIT_HEADROOM).round() as u64
     }
 }
 
@@ -199,60 +178,10 @@ pub struct DerivationRef {
     pub pname: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct BuildContext {
-    pub architecture: String,
-    pub dependency_count: u32,
-    pub prefer_local_build: bool,
-    pub is_fixed_output: bool,
-    pub pname: Option<String>,
-    pub closure_size: Option<i64>,
-    pub history: HistoryPrediction,
-    pub derivations: Vec<DerivationRef>,
-}
-
-impl BuildContext {
-    pub fn aggregate(items: &[BuildContext]) -> BuildContext {
-        if items.len() == 1 {
-            return items[0].clone();
-        }
-        let first = &items[0];
-        let mut out = first.clone();
-        out.dependency_count = items.iter().map(|i| i.dependency_count).sum();
-        out.closure_size = Some(items.iter().filter_map(|i| i.closure_size).sum());
-        out.prefer_local_build = items.iter().any(|i| i.prefer_local_build);
-        out.is_fixed_output = items.iter().any(|i| i.is_fixed_output);
-        out.pname = if items.iter().all(|i| i.pname == first.pname) {
-            first.pname.clone()
-        } else {
-            None
-        };
-        let known = |value: fn(&HistoryPrediction) -> Option<u64>| {
-            items.iter().filter_map(move |i| value(&i.history))
-        };
-        out.history.predicted_peak_ram_mb = known(|h| h.predicted_peak_ram_mb).max();
-        out.history.oom_rate = items.iter().map(|i| i.history.oom_rate).fold(0.0, f32::max);
-        out.history.avg_cpu_time_ms = known(|h| h.avg_cpu_time_ms).reduce(u64::saturating_add);
-        out.history.build_time_ms = known(|h| h.build_time_ms).max();
-        let longest = items
-            .iter()
-            .filter(|i| i.history.uncontended_build_time_ms.is_some())
-            .max_by_key(|i| i.history.uncontended_build_time_ms);
-        out.history.uncontended_build_time_ms =
-            longest.and_then(|i| i.history.uncontended_build_time_ms);
-        out.history.build_core_score = longest.and_then(|i| i.history.build_core_score);
-        out.history.avg_disk_bytes = known(|h| h.avg_disk_bytes).reduce(u64::saturating_add);
-        out.history.output_nar_size = known(|h| h.output_nar_size).reduce(u64::saturating_add);
-        out.history.samples = items.iter().map(|i| i.history.samples).min().unwrap_or(0);
-        out.derivations = items.iter().flat_map(|i| i.derivations.clone()).collect();
-        out
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct EvalContext {
+pub struct EvalContext<'a> {
     pub fetch_flake: bool,
-    pub history: HistoryPrediction,
+    pub estimate: &'a BuildEstimate,
 }
 
 pub struct ScoredBuild<'a> {
@@ -261,10 +190,10 @@ pub struct ScoredBuild<'a> {
     pub is_fixed_output: bool,
     pub pname: Option<&'a str>,
     closure_size: Option<i64>,
-    history: HistoryPrediction,
+    estimate: &'a BuildEstimate,
 }
 
-impl ScoredBuild<'_> {
+impl<'a> ScoredBuild<'a> {
     pub fn is_fetch(&self) -> bool {
         self.is_fixed_output || self.architecture == gradient_types::BUILTIN_ARCH
     }
@@ -273,13 +202,13 @@ impl ScoredBuild<'_> {
         self.closure_size
     }
 
-    pub fn history(&self) -> HistoryPrediction {
-        self.history
+    pub fn estimate(&self) -> &'a BuildEstimate {
+        self.estimate
     }
 }
 
 pub enum JobKindContext<'a> {
-    Eval(EvalContext),
+    Eval(EvalContext<'a>),
     Build(ScoredBuild<'a>),
 }
 
@@ -294,14 +223,14 @@ impl<'a> ScoredJob<'a> {
         job_id: &'a str,
         project_id: gradient_types::ids::ProjectId,
         fetch_flake: bool,
-        history: HistoryPrediction,
+        estimate: &'a BuildEstimate,
     ) -> Self {
         Self {
             job_id,
             project_id,
             kind: JobKindContext::Eval(EvalContext {
                 fetch_flake,
-                history,
+                estimate,
             }),
         }
     }
@@ -318,7 +247,7 @@ impl<'a> ScoredJob<'a> {
         is_fixed_output: bool,
         pname: Option<&'a str>,
         closure_size: Option<i64>,
-        history: HistoryPrediction,
+        estimate: &'a BuildEstimate,
     ) -> Self {
         Self {
             job_id,
@@ -329,7 +258,7 @@ impl<'a> ScoredJob<'a> {
                 is_fixed_output,
                 pname,
                 closure_size,
-                history,
+                estimate,
             }),
         }
     }
@@ -338,17 +267,17 @@ impl<'a> ScoredJob<'a> {
         &self.kind
     }
 
-    pub fn build(&self) -> Option<&ScoredBuild<'_>> {
+    pub fn build(&self) -> Option<&ScoredBuild<'a>> {
         match &self.kind {
             JobKindContext::Build(b) => Some(b),
             _ => None,
         }
     }
 
-    pub fn history(&self) -> HistoryPrediction {
+    pub fn estimate(&self) -> &'a BuildEstimate {
         match &self.kind {
-            JobKindContext::Eval(e) => e.history,
-            JobKindContext::Build(b) => b.history(),
+            JobKindContext::Eval(e) => e.estimate,
+            JobKindContext::Build(b) => b.estimate(),
         }
     }
 }
@@ -393,50 +322,5 @@ mod tests {
             0.0
         );
         assert_eq!(Windowed::default().w24h_or(9.0), 9.0);
-    }
-
-    #[test]
-    fn aggregate_len1_is_identity_and_multi_reduces() {
-        let a = BuildContext {
-            architecture: "x86_64-linux".into(),
-            dependency_count: 2,
-            prefer_local_build: false,
-            is_fixed_output: false,
-            pname: Some("curl".into()),
-            closure_size: Some(100),
-            history: HistoryPrediction {
-                predicted_peak_ram_mb: Some(500),
-                avg_cpu_time_ms: Some(1000),
-                build_time_ms: None,
-                uncontended_build_time_ms: None,
-                build_core_score: None,
-                avg_disk_bytes: Some(10),
-                output_nar_size: Some(7),
-                oom_rate: 0.1,
-                samples: 5,
-                from_fleet_mean: false,
-            },
-            derivations: vec![],
-        };
-        assert_eq!(BuildContext::aggregate(std::slice::from_ref(&a)), a);
-
-        let mut b = a.clone();
-        b.history.predicted_peak_ram_mb = Some(900);
-        b.history.avg_cpu_time_ms = Some(4000);
-        b.history.avg_disk_bytes = None;
-        b.history.output_nar_size = Some(3);
-        b.history.samples = 2;
-        b.pname = Some("git".into());
-        b.prefer_local_build = true;
-        let agg = BuildContext::aggregate(&[a.clone(), b]);
-        assert_eq!(agg.history.predicted_peak_ram_mb, Some(900));
-        assert_eq!(agg.history.avg_cpu_time_ms, Some(5000));
-        assert_eq!(agg.history.avg_disk_bytes, Some(10));
-        assert_eq!(agg.history.output_nar_size, Some(10));
-        assert_eq!(agg.history.build_time_ms, None);
-        assert_eq!(agg.history.samples, 2);
-        assert_eq!(agg.dependency_count, 4);
-        assert!(agg.prefer_local_build);
-        assert_eq!(agg.pname, None);
     }
 }

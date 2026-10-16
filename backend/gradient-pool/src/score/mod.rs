@@ -11,10 +11,11 @@ pub mod rule;
 pub mod rules;
 pub mod weights;
 
+pub use crate::estimate::{BuildEstimate, CoreChoice};
 pub use breakdown::ScoreBreakdown;
 pub use context::{
-    BuildContext, DerivationRef, EvalContext, HistoryPrediction, InstanceContext, JobKindContext,
-    RamFit, RamNeed, ScoredBuild, ScoredJob, SubstituteCost, Windowed, WorkerMetricsView,
+    DerivationRef, EvalContext, InstanceContext, JobKindContext, RamFit, RamNeed, ScoredBuild,
+    ScoredJob, SubstituteCost, Windowed, WorkerMetricsView,
 };
 pub use policy::{RulePolicy, ScoringPolicy, policy_for, rule_catalog};
 pub use rule::{JobContext, ScoreRule, WorkerContext};

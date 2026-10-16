@@ -611,7 +611,8 @@ impl SchedulerCore {
             .collect();
         self.tracker.activate_members(attempt, active);
         for s in &seats {
-            self.occupy(&s.worker, &s.key, s.job.job_kind(), s.job.ram_need(false));
+            let need = s.job.ram_need_with(s.record.choice, false);
+            self.occupy(&s.worker, &s.key, s.job.job_kind(), need);
         }
 
         Some(crate::cluster::Committing { cluster, seats })
@@ -736,7 +737,7 @@ impl Actor for CoreActor {
                         &reg.worker,
                         &reattached.job_id,
                         reattached.job.job_kind(),
-                        reattached.job.ram_need(false),
+                        reattached.job.ram_need_with(None, false),
                     );
                     core.tracker.restore_active(&reg.worker, reattached);
                 }
@@ -1164,7 +1165,8 @@ mod tests {
     ) -> String {
         let shared_build = DerivationBuildId::now_v7();
         let mut job = build_job(EvaluationId::now_v7(), ProjectId::now_v7(), shared_build);
-        job.history.predicted_peak_ram_mb = Some(predicted_peak_ram_mb);
+        job.estimate =
+            gradient_pool::score::BuildEstimate::fixed(Some(predicted_peak_ram_mb), None, 1);
         job.rescore_count = gradient_pool::score::weights::RESCORE_MAX_ROUNDS;
         adjust(&mut job);
         let job_id = crate::jobs::build_job_key(shared_build);
@@ -1288,7 +1290,7 @@ mod tests {
     #[test]
     fn a_build_above_the_free_ram_of_an_idle_fleet_is_short_once_the_grace_passed() {
         let mut core = core_with_a_128_gb_worker();
-        let large = pending_heavy_build(&mut core, 113_218);
+        let large = pending_heavy_build(&mut core, 120_000);
         let start = Instant::now();
         let grace = crate::ram_shortage::RAM_SHORTAGE_GRACE;
 
@@ -1303,7 +1305,7 @@ mod tests {
     #[test]
     fn a_large_build_is_not_short_while_the_worker_holds_ram_it_will_release() {
         let mut core = core_with_a_128_gb_worker();
-        pending_heavy_build(&mut core, 113_218);
+        pending_heavy_build(&mut core, 120_000);
         let small = pending_heavy_build(&mut core, 10_000);
         assert_eq!(assigned_build(&mut core, "w1"), Some(small));
         let start = Instant::now();
@@ -1326,9 +1328,12 @@ mod tests {
 
         assert_eq!(gone.observed_peak_ram_mb.get(&build), Some(&70_000));
         let requeued = core.tracker.pending_job(&build).expect("requeued");
-        assert_eq!(
-            requeued.ram_need(false),
-            gradient_pool::score::RamNeed::Predicted(70_000)
+        assert!(
+            matches!(
+                requeued.ram_need_at(1, false),
+                gradient_pool::score::RamNeed::Predicted(mb) if mb >= 70_000
+            ),
+            "the requeued build reserves at least its observed peak"
         );
     }
 

@@ -14,7 +14,7 @@ use crate::score::weights::{RAM_FLOOR_MARGIN, RAM_UPPER_Z, REFERENCE_CORES};
 use serde::Serialize;
 
 pub fn log_cores(cores: u32) -> f64 {
-    (f64::from(cores.max(1)) / REFERENCE_CORES).ln()
+    (f64::from(cores.max(1)) / f64::from(REFERENCE_CORES)).ln()
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
@@ -56,6 +56,16 @@ pub struct BuildEstimate {
     pub max_cores: Option<u32>,
     pub top_features: Vec<(String, f64)>,
 }
+
+pub static NO_ESTIMATE: BuildEstimate = BuildEstimate {
+    ram: None,
+    build_time: None,
+    output_nar_bytes: None,
+    own_samples: 0,
+    ram_floor: Vec::new(),
+    max_cores: None,
+    top_features: Vec::new(),
+};
 
 impl BuildEstimate {
     pub fn fixed(ram_mb: Option<u64>, build_ms: Option<u64>, own_samples: u32) -> Self {

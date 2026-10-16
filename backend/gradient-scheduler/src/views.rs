@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_pool::score::{DerivationRef, HistoryPrediction, JobContext, WorkerContext};
+use gradient_pool::score::weights::REFERENCE_CORES;
+use gradient_pool::score::{BuildEstimate, CoreChoice, DerivationRef, JobContext, WorkerContext};
 use gradient_wire::types::{FlakeStep, GradientCapabilities};
 use serde::Serialize;
 
@@ -53,30 +54,30 @@ impl WorkerContextView {
 }
 
 #[derive(Serialize)]
-pub struct HistoryView {
-    pub peak_ram_mb: Option<u64>,
-    pub avg_cpu_time_ms: Option<u64>,
-    pub build_time_ms: Option<u64>,
-    pub uncontended_build_time_ms: Option<u64>,
-    pub build_core_score: Option<u32>,
-    pub avg_disk_bytes: Option<u64>,
-    pub output_nar_size: Option<u64>,
-    pub oom_rate: f32,
-    pub samples: u32,
+pub struct EstimateView {
+    pub own_samples: u32,
+    pub cores: u32,
+    pub ram_mb: Option<u64>,
+    pub build_ms: Option<u64>,
+    pub output_nar_bytes: Option<u64>,
+    pub top_features: Vec<(String, f64)>,
 }
 
-impl From<&HistoryPrediction> for HistoryView {
-    fn from(h: &HistoryPrediction) -> Self {
+impl EstimateView {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "rounded and positive"
+    )]
+    fn new(estimate: &BuildEstimate, choice: Option<CoreChoice>) -> Self {
+        let cores = choice.map_or(REFERENCE_CORES, |c| c.cores);
         Self {
-            peak_ram_mb: h.predicted_peak_ram_mb,
-            avg_cpu_time_ms: h.avg_cpu_time_ms,
-            build_time_ms: h.build_time_ms,
-            uncontended_build_time_ms: h.uncontended_build_time_ms,
-            build_core_score: h.build_core_score,
-            avg_disk_bytes: h.avg_disk_bytes,
-            output_nar_size: h.output_nar_size,
-            oom_rate: h.oom_rate,
-            samples: h.samples,
+            own_samples: estimate.own_samples,
+            cores,
+            ram_mb: estimate.ram_mb(cores),
+            build_ms: estimate.build_ms(cores).map(|ms| ms.round() as u64),
+            output_nar_bytes: estimate.output_nar_bytes,
+            top_features: estimate.top_features.clone(),
         }
     }
 }
@@ -108,7 +109,7 @@ pub struct JobContextView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_fixed_output: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub history: Option<HistoryView>,
+    pub estimate: Option<EstimateView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub derivations: Option<Vec<DerivationRef>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -116,7 +117,7 @@ pub struct JobContextView {
 }
 
 impl JobContextView {
-    pub fn new(ctx: &JobContext<'_>, job: &PendingJob) -> Self {
+    pub fn new(ctx: &JobContext<'_>, job: &PendingJob, choice: Option<CoreChoice>) -> Self {
         let common = |kind, architecture| Self {
             kind,
             architecture,
@@ -136,7 +137,7 @@ impl JobContextView {
             closure_size: None,
             prefer_local_build: None,
             is_fixed_output: None,
-            history: None,
+            estimate: None,
             derivations: None,
             fetch_flake: None,
         };
@@ -148,7 +149,7 @@ impl JobContextView {
                 closure_size: b.closure_size,
                 prefer_local_build: Some(b.prefer_local_build),
                 is_fixed_output: Some(b.is_fixed_output),
-                history: Some((&b.history).into()),
+                estimate: Some(EstimateView::new(&b.estimate, choice)),
                 derivations: Some(
                     b.job
                         .builds
@@ -207,10 +208,7 @@ mod tests {
             closure_size: Some(42),
             prefer_local_build: true,
             is_fixed_output: false,
-            history: HistoryPrediction {
-                samples: 7,
-                ..Default::default()
-            },
+            estimate: BuildEstimate::fixed(Some(900), None, 7),
             queued_at: now,
             ready_at: now,
             rescore_count: 0,
@@ -223,9 +221,14 @@ mod tests {
     }
 
     #[test]
-    fn build_job_context_view_carries_derivations_and_history() {
+    fn build_job_context_view_carries_derivations_and_the_estimate() {
         let job = build_pending();
-        let scored = ScoredJob::new_eval("build:x", job.project_id(), false, Default::default());
+        let scored = ScoredJob::new_eval(
+            "build:x",
+            job.project_id(),
+            false,
+            &gradient_pool::estimate::NO_ESTIMATE,
+        );
         let now = gradient_types::now();
         let ctx = JobContext {
             job: &scored,
@@ -243,14 +246,14 @@ mod tests {
             rescore_count: 0,
             now,
         };
-        let view = JobContextView::new(&ctx, &job);
+        let view = JobContextView::new(&ctx, &job, None);
         assert_eq!(view.kind, "Build");
         assert_eq!(view.pname.as_deref(), Some("curl"));
         let derivations = view.derivations.expect("build derivations");
         assert_eq!(derivations.len(), 1);
         assert_eq!(derivations[0].build_id, "b1");
         assert_eq!(derivations[0].drv_path, "aaa-curl.drv");
-        let history = view.history.expect("build history");
-        assert_eq!(history.samples, 7);
+        let estimate = view.estimate.expect("build estimate");
+        assert_eq!((estimate.own_samples, estimate.ram_mb), (7, Some(900)));
     }
 }

@@ -10,6 +10,7 @@ use arc_swap::ArcSwap;
 use gradient_pool::score::{InstanceContext, ScoringPolicy};
 
 use crate::assessment_memo::AssessmentMemo;
+use crate::build_history::BuildHistory;
 use crate::instance::EvalHistory;
 
 #[derive(Clone)]
@@ -18,6 +19,7 @@ pub(crate) struct Scoring {
     pub(crate) instance: Arc<ArcSwap<InstanceContext>>,
     pub(crate) eval_history: Arc<ArcSwap<EvalHistory>>,
     pub(crate) assessments: Arc<std::sync::Mutex<AssessmentMemo>>,
+    pub(crate) build_history: Arc<BuildHistory>,
 }
 
 impl Scoring {
@@ -27,6 +29,7 @@ impl Scoring {
             instance: Arc::new(ArcSwap::from_pointee(InstanceContext::default())),
             eval_history: Arc::new(ArcSwap::from_pointee(EvalHistory::default())),
             assessments: Arc::default(),
+            build_history: Arc::default(),
         }
     }
 }

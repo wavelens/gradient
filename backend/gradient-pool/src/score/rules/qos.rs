@@ -49,7 +49,8 @@ impl ScoreRule for QosRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::score::context::{HistoryPrediction, ScoredJob};
+    use crate::estimate::NO_ESTIMATE;
+    use crate::score::context::ScoredJob;
     use crate::score::rules::builtin::WaitTimeRule;
     use gradient_types::ids::ProjectId;
     use gradient_types::now;
@@ -63,7 +64,7 @@ mod tests {
             false,
             None,
             None,
-            HistoryPrediction::default(),
+            &NO_ESTIMATE,
         )
     }
 

@@ -23,7 +23,10 @@ use crate::cluster::{ClusterBook, PendingCluster};
 use crate::count::clamp_to_u32;
 use gradient_graph::RamShortage;
 use gradient_pool::WorkerCaps;
-use gradient_pool::score::{JobContext, RamFit, RamNeed, ScoredJob, ScoringPolicy, WorkerContext};
+use gradient_pool::score::weights::REFERENCE_CORES;
+use gradient_pool::score::{
+    BuildEstimate, CoreChoice, JobContext, RamFit, RamNeed, ScoredJob, ScoringPolicy, WorkerContext,
+};
 
 #[derive(Debug, Clone)]
 pub struct PendingEvalJob {
@@ -37,7 +40,7 @@ pub struct PendingEvalJob {
     pub queued_at: chrono::NaiveDateTime,
     pub ready_at: chrono::NaiveDateTime,
     pub rescore_count: u32,
-    pub history: gradient_pool::score::HistoryPrediction,
+    pub estimate: BuildEstimate,
     pub walk_mode: WalkMode,
     pub prioritized: bool,
     pub build_request: bool,
@@ -70,7 +73,7 @@ pub struct PendingBuildJob {
     pub closure_size: Option<i64>,
     pub prefer_local_build: bool,
     pub is_fixed_output: bool,
-    pub history: gradient_pool::score::HistoryPrediction,
+    pub estimate: BuildEstimate,
     pub queued_at: chrono::NaiveDateTime,
     pub ready_at: chrono::NaiveDateTime,
     pub rescore_count: u32,
@@ -167,6 +170,19 @@ impl PendingJob {
         }
     }
 
+    pub(crate) fn into_job_with_cores(self, cores: Option<u32>) -> Job {
+        match self.into_job() {
+            Job::Build(mut build) => {
+                build
+                    .builds
+                    .iter_mut()
+                    .for_each(|spec| spec.build_cores = cores);
+                Job::Build(build)
+            }
+            other => other,
+        }
+    }
+
     pub fn evaluation_id(&self) -> EvaluationId {
         match self {
             PendingJob::Eval(j) => j.evaluation_id,
@@ -250,11 +266,17 @@ impl PendingJob {
 
     /// Evaluations reserve nothing. They can wait on a build of an imported derivation while
     /// holding the worker, and a reservation would hold that build off the worker for good.
-    pub fn ram_need(&self, outputs_present: bool) -> gradient_pool::score::RamNeed {
-        use gradient_pool::score::RamNeed;
+    pub fn ram_need_with(&self, choice: Option<CoreChoice>, outputs_present: bool) -> RamNeed {
+        choice.map_or_else(
+            || self.ram_need_at(REFERENCE_CORES, outputs_present),
+            |c| c.need,
+        )
+    }
+
+    pub fn ram_need_at(&self, cores: u32, outputs_present: bool) -> RamNeed {
         match self {
             PendingJob::Build(j) => RamNeed::of_build(
-                j.history.predicted_peak_ram_mb,
+                j.estimate.ram_mb(cores),
                 j.substitute || outputs_present,
                 j.is_fixed_output || j.job.requirement.architecture == gradient_types::BUILTIN_ARCH,
             ),
@@ -318,6 +340,7 @@ pub struct AssignmentRecord {
     pub job_context: serde_json::Value,
     pub instance_context: serde_json::Value,
     pub substitute: bool,
+    pub choice: Option<CoreChoice>,
 }
 
 /// An upstream probe landing in between can turn a build into a passthrough. A stale build would
@@ -340,6 +363,7 @@ struct ScoredCandidate {
     total: f64,
     vetoed: bool,
     held_for_ram: bool,
+    choice: Option<CoreChoice>,
     score_breakdown: serde_json::Value,
     job_context: serde_json::Value,
 }
@@ -398,11 +422,11 @@ fn ram_shortage(job: &PendingJob, workers: &[BuildWorker]) -> Option<RamShortage
     let PendingJob::Build(build) = job else {
         return None;
     };
-    let need @ RamNeed::Predicted(_) = job.ram_need(false) else {
+    let need @ RamNeed::Predicted(_) = job.ram_need_at(1, false) else {
         return None;
     };
 
-    let needed_mb = need.needed_to_start_mb(0);
+    let needed_mb = need.reserved_mb(0);
     let mut largest_available_mb = None;
     for worker in workers
         .iter()
@@ -468,6 +492,7 @@ fn assignment_record_for(
         job_context: sc.job_context.clone(),
         instance_context,
         substitute: matches!(job, PendingJob::Build(b) if b.substitute),
+        choice: sc.choice,
     }
 }
 
@@ -899,14 +924,14 @@ impl JobTracker {
         let longest_held = scored
             .iter()
             .filter(|(id, sc)| sc.held_for_ram && !elsewhere.contains(id.as_str()))
-            .filter_map(|(id, _)| Some((id, self.pending.get(id)?)))
-            .filter(|(_, job)| reserves_ram_while_held(job, now))
-            .min_by_key(|(id, job)| (!job.prioritized(), job.ready_at(), *id))
-            .map(|(id, job)| WaitingBuild {
+            .filter_map(|(id, sc)| Some((id, sc, self.pending.get(id)?)))
+            .filter(|(_, _, job)| reserves_ram_while_held(job, now))
+            .min_by_key(|(id, _, job)| (!job.prioritized(), job.ready_at(), *id))
+            .map(|(id, sc, job)| WaitingBuild {
                 job_id: id.clone(),
                 ram_mb: job
-                    .ram_need(false)
-                    .needed_to_start_mb(instance.unmeasured_build_ram_mb()),
+                    .ram_need_with(sc.choice, false)
+                    .reserved_mb(instance.unmeasured_build_ram_mb()),
             });
         if let Some(waiting) = longest_held {
             self.waiting_builds.insert(worker_id.to_owned(), waiting);
@@ -979,7 +1004,7 @@ impl JobTracker {
                 id,
                 job.project_id(),
                 e.job.steps.contains(&FlakeStep::FetchFlake),
-                e.history,
+                &e.estimate,
             ),
             PendingJob::Build(b) => ScoredJob::new_build(
                 id,
@@ -989,7 +1014,7 @@ impl JobTracker {
                 b.is_fixed_output,
                 b.pname.as_deref(),
                 b.closure_size,
-                b.history,
+                &b.estimate,
             ),
         };
         let ctx = JobContext {
@@ -1009,13 +1034,19 @@ impl JobTracker {
             now,
         };
         let breakdown = policy.score_detailed(&ctx, worker_ctx, instance);
+        let choice = worker_ctx
+            .metrics
+            .as_ref()
+            .filter(|_| matches!(job, PendingJob::Build(_)))
+            .map(|m| ctx.core_choice(m, instance.unmeasured_build_ram_mb()));
         ScoredCandidate {
             total: breakdown.total,
+            choice,
             vetoed: !breakdown.vetoes.is_empty(),
             held_for_ram: breakdown.vetoes
                 == [gradient_pool::score::rules::ResourceSaturationRule::NAME],
             score_breakdown: serde_json::to_value(&breakdown).unwrap_or(serde_json::Value::Null),
-            job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job))
+            job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job, choice))
                 .unwrap_or(serde_json::Value::Null),
         }
     }
@@ -1069,8 +1100,8 @@ impl JobTracker {
         if policy.uses_project_work_share() {
             for ActiveJob { job, .. } in self.active.values() {
                 if let PendingJob::Build(b) = job {
-                    let w = match b.history.build_time_ms.filter(|ms| *ms > 0) {
-                        Some(ms) => ms as f64,
+                    let w = match b.estimate.build_ms(REFERENCE_CORES).filter(|ms| *ms > 0.0) {
+                        Some(ms) => ms,
                         None => {
                             (if b.prefer_local_build { 0.5 } else { 1.0 })
                                 * instance.build_time_ms.w1h.unwrap_or(0.0)
@@ -1148,8 +1179,10 @@ impl JobTracker {
 
         let assignment_id = record.assignment_id;
         let assignment = Assignment {
-            job: job.clone().into_job(),
-            ram_need: job.ram_need(outputs_present),
+            job: job
+                .clone()
+                .into_job_with_cores(record.choice.map(|c| c.cores)),
+            ram_need: job.ram_need_with(record.choice, outputs_present),
             project_id: job.project_id(),
             assignment_record: record,
             pending: job.clone(),
@@ -1341,8 +1374,7 @@ impl JobTracker {
                 ..
             }) = self.active.get_mut(job_id)
             {
-                let predicted = &mut build.history.predicted_peak_ram_mb;
-                *predicted = Some(predicted.unwrap_or(0).max(*observed));
+                build.estimate.raise_ram_to(*observed);
             }
         }
     }
@@ -1720,7 +1752,7 @@ mod tests {
             rescore_count: 0,
             prioritized: false,
             build_request: false,
-            history: Default::default(),
+            estimate: Default::default(),
             walk_mode: Default::default(),
         })
     }
@@ -1753,7 +1785,7 @@ mod tests {
             rescore_count: 0,
             prioritized: false,
             build_request: false,
-            history: Default::default(),
+            estimate: Default::default(),
             walk_mode: Default::default(),
         })
     }
@@ -1797,7 +1829,7 @@ mod tests {
     fn build_predicted(peak_ram_mb: u64) -> PendingJob {
         let mut job = build_job(ProjectId::now_v7(), vec![]);
         if let PendingJob::Build(build) = &mut job {
-            build.history.predicted_peak_ram_mb = Some(peak_ram_mb);
+            build.estimate = gradient_pool::score::BuildEstimate::fixed(Some(peak_ram_mb), None, 1);
         }
         job
     }
@@ -1839,9 +1871,28 @@ mod tests {
             vec![RamShortage {
                 shared_build,
                 evaluation,
-                needed_mb: 124_540,
+                needed_mb: 113_218,
                 largest_available_mb: 102_754,
             }]
+        );
+    }
+
+    #[test]
+    fn a_build_that_fits_with_fewer_cores_is_not_reported() {
+        let mut tracker = JobTracker::new();
+        let mut job = build_predicted(113_218);
+        if let PendingJob::Build(build) = &mut job
+            && let Some(ram) = build.estimate.ram.as_mut()
+        {
+            ram.per_log_core = 1.0;
+        }
+        tracker.add_pending("large".into(), job);
+
+        assert!(
+            tracker
+                .builds_no_worker_fits(&[build_worker(30_720, 30_720, 0)])
+                .is_empty(),
+            "at one core the build needs a sixteenth of its reference RAM"
         );
     }
 
@@ -1887,6 +1938,7 @@ mod tests {
             total: 1.0,
             vetoed: false,
             held_for_ram: false,
+            choice: None,
             score_breakdown: serde_json::json!({}),
             job_context: serde_json::json!({}),
         };
@@ -1934,7 +1986,7 @@ mod tests {
             closure_size: None,
             prefer_local_build: false,
             is_fixed_output: false,
-            history: gradient_pool::score::HistoryPrediction::default(),
+            estimate: Default::default(),
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,

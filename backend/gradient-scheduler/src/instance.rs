@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use gradient_pool::score::BuildEstimate;
 use gradient_types::ids::TaskId;
 use gradient_wire::types::FlakeStep;
 use sea_orm::{ConnectionTrait, FromQueryResult};
@@ -546,20 +547,23 @@ struct EvalDurations {
     evaluate_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct EvalRam {
+    p95_mb: u64,
+    samples: u32,
+}
+
 #[derive(Debug, Default)]
 pub struct EvalHistory {
-    tasks: HashMap<TaskId, gradient_pool::score::HistoryPrediction>,
+    tasks: HashMap<TaskId, EvalRam>,
     durations: HashMap<TaskId, EvalDurations>,
     fleet: EvalDurations,
+    fleet_core_score: Option<f64>,
 }
 
 impl EvalHistory {
-    pub fn for_job(
-        &self,
-        task: TaskId,
-        steps: &[FlakeStep],
-    ) -> gradient_pool::score::HistoryPrediction {
-        let mut history = self.tasks.get(&task).copied().unwrap_or_default();
+    pub fn for_job(&self, task: TaskId, steps: &[FlakeStep]) -> BuildEstimate {
+        let ram = self.tasks.get(&task).copied();
         let own = self.durations.get(&task).copied().unwrap_or_default();
         let mut from_fleet_mean = false;
         let mut part = |runs: bool, own: Option<u64>, fleet: Option<u64>| {
@@ -583,10 +587,28 @@ impl EvalHistory {
         );
 
         let expected_ms = fetch_ms.zip(evaluate_ms).map(|(f, e)| f + e);
-        history.uncontended_build_time_ms = expected_ms;
-        history.build_time_ms = expected_ms.filter(|_| !from_fleet_mean);
-        history.from_fleet_mean = from_fleet_mean && expected_ms.is_some();
-        history
+        let own_samples = if from_fleet_mean {
+            0
+        } else {
+            ram.map_or(1, |r| r.samples.max(1))
+        };
+        BuildEstimate::fixed(
+            ram.map(|r| r.p95_mb),
+            expected_ms.map(|ms| self.at_reference_core_score(ms)),
+            own_samples,
+        )
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "rounded and positive"
+    )]
+    fn at_reference_core_score(&self, ms: u64) -> u64 {
+        let measured_on = self.fleet_core_score.filter(|s| *s > 0.0);
+        measured_on.map_or(ms, |score| {
+            (ms as f64 * score / gradient_pool::score::weights::REFERENCE_CORE_SCORE).round() as u64
+        })
     }
 
     fn from_rows(ram: Vec<EvalHistoryRow>, rows: Vec<EvalDurationRow>) -> Self {
@@ -599,10 +621,9 @@ impl EvalHistory {
             .map(|r| {
                 (
                     r.task,
-                    gradient_pool::score::HistoryPrediction {
-                        predicted_peak_ram_mb: Some(r.p95_ram.max(0.0).trunc() as u64),
+                    EvalRam {
+                        p95_mb: r.p95_ram.max(0.0).trunc() as u64,
                         samples: u32::try_from(r.samples.max(0)).unwrap_or(u32::MAX),
-                        ..Default::default()
                     },
                 )
             })
@@ -647,6 +668,7 @@ impl EvalHistory {
             tasks,
             durations,
             fleet,
+            fleet_core_score: None,
         }
     }
 }
@@ -654,6 +676,7 @@ impl EvalHistory {
 pub async fn compute_eval_history(
     db: &impl ConnectionTrait,
     now: chrono::NaiveDateTime,
+    fleet_core_score: Option<f64>,
 ) -> EvalHistory {
     use gradient_entity::dispatched_job::{DispatchedJobKind, DispatchedJobOutcome};
     use gradient_wire::types::JobPhase;
@@ -682,7 +705,10 @@ pub async fn compute_eval_history(
         Vec::new()
     });
 
-    EvalHistory::from_rows(ram, durations)
+    EvalHistory {
+        fleet_core_score,
+        ..EvalHistory::from_rows(ram, durations)
+    }
 }
 
 #[cfg(test)]
@@ -763,8 +789,20 @@ mod tests {
         }
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "rounded and positive"
+    )]
     fn expected_ms(history: &EvalHistory, task: TaskId, steps: &[FlakeStep]) -> Option<u64> {
-        history.for_job(task, steps).uncontended_build_time_ms
+        history
+            .for_job(task, steps)
+            .build_ms(gradient_pool::score::weights::REFERENCE_CORES)
+            .map(|ms| ms.round() as u64)
+    }
+
+    fn from_fleet_mean(history: &EvalHistory, task: TaskId, steps: &[FlakeStep]) -> bool {
+        history.for_job(task, steps).own_samples == 0
     }
 
     #[test]
@@ -778,7 +816,7 @@ mod tests {
         assert_eq!(expected_ms(&history, task, FETCH), Some(20_000));
         assert_eq!(expected_ms(&history, task, EVALUATE), Some(300_000));
         assert_eq!(expected_ms(&history, task, BOTH), Some(320_000));
-        assert!(!history.for_job(task, BOTH).from_fleet_mean);
+        assert!(!from_fleet_mean(&history, task, BOTH));
     }
 
     #[test]
@@ -796,8 +834,8 @@ mod tests {
         assert_eq!(expected_ms(&history, unseen, FETCH), Some(26_666));
         assert_eq!(expected_ms(&history, unseen, EVALUATE), Some(200_000));
         assert_eq!(expected_ms(&history, fetched_only, BOTH), Some(240_000));
-        assert!(history.for_job(fetched_only, BOTH).from_fleet_mean);
-        assert!(!history.for_job(fetched_only, FETCH).from_fleet_mean);
+        assert!(from_fleet_mean(&history, fetched_only, BOTH));
+        assert!(!from_fleet_mean(&history, fetched_only, FETCH));
     }
 
     #[test]
@@ -808,5 +846,16 @@ mod tests {
 
         assert_eq!(expected_ms(&history, task, BOTH), None);
         assert_eq!(expected_ms(&history, task, FETCH), Some(5_000));
+    }
+
+    #[test]
+    fn an_evaluation_measured_on_the_fleet_is_moved_to_the_reference_core_score() {
+        let task = TaskId::now_v7();
+        let history = EvalHistory {
+            fleet_core_score: Some(2_000.0),
+            ..EvalHistory::from_rows(Vec::new(), vec![durations(task, Some(20_000.0), None)])
+        };
+
+        assert_eq!(expected_ms(&history, task, FETCH), Some(10_000));
     }
 }

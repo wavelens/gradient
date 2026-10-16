@@ -13,184 +13,17 @@ use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{DispatchedJobId, EvaluationId};
 use gradient_fixtures::shape::shape;
-use gradient_pool::score::{HistoryPrediction, ScoreBreakdown, Windowed};
+use gradient_pool::score::weights::REFERENCE_CORES;
+use gradient_pool::score::{ScoreBreakdown, Windowed};
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, FlakeStep, JobKind, JobPhase};
 
 use super::{
-    A, A_OUT, ARM, B, CaseShapes, SchedulerCase, SlotKind, X86, ago, failure, is_recent, span,
-    w_all,
+    A, A_OUT, B, CaseShapes, SchedulerCase, SlotKind, ago, failure, is_recent, span, w_all,
 };
 
 const W1: &str = "w1";
 const W2: &str = "w2";
 const DAY: i64 = 86_400;
-
-const F: &str = "ffffffffffffffffffffffffffffffff-foo-1.0.drv";
-const G: &str = "gggggggggggggggggggggggggggggggg-foo-1.1.drv";
-const F_OUT: &str = "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0";
-const F_DEV: &str = "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1";
-const G_OUT: &str = "g0g0g0g0g0g0g0g0g0g0g0g0g0g0g0g0";
-const G_DEV: &str = "g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1";
-
-#[tokio::test]
-async fn m01_predict_takes_the_newest_20_rows_of_the_name_and_architecture() {
-    let mut seed = shape().one(EvaluationId::now_v7(), A, A_OUT);
-    for i in 1..=25 {
-        seed = seed.derivation_metric(move |m| {
-            m.pname = Some("hello".into());
-            m.peak_ram_mb = Some(100 + i);
-            m.build_time_ms = Some(1000);
-            m.created_at = ago(60 * i);
-        });
-    }
-    for (pname, architecture) in [
-        ("hello", ARM),
-        ("hello", ARM),
-        ("hello", ARM),
-        ("other", X86),
-        ("other", X86),
-    ] {
-        seed = seed.derivation_metric(move |m| {
-            m.pname = Some(pname.into());
-            m.architecture = architecture.into();
-            m.peak_ram_mb = Some(9999);
-            m.created_at = ago(30);
-        });
-    }
-    let case = SchedulerCase::start(seed).await;
-
-    let prediction = case.predict("hello", X86).await;
-    assert_eq!(
-        (
-            prediction.samples,
-            prediction.predicted_peak_ram_mb,
-            prediction.build_time_ms,
-        ),
-        (20, Some(119), Some(1000)),
-        "after 1: samples, peak_ram_p95, build_time_mean"
-    );
-
-    case.finish().await;
-}
-
-#[tokio::test]
-async fn m02_rows_older_than_the_retention_are_outside_the_window() {
-    let mut seed = shape().one(EvaluationId::now_v7(), A, A_OUT);
-    for (peak, age) in [(100, DAY), (9000, 91 * DAY)] {
-        for _ in 0..5 {
-            seed = seed.derivation_metric(move |m| {
-                m.pname = Some("hello".into());
-                m.peak_ram_mb = Some(peak);
-                m.created_at = ago(age);
-            });
-        }
-    }
-    let case = SchedulerCase::start(seed).await;
-    case.retention().await;
-
-    let prediction = case.predict("hello", X86).await;
-    assert_eq!(
-        (prediction.samples, prediction.predicted_peak_ram_mb),
-        (5, Some(100)),
-        "after 1: samples, peak_ram_p95"
-    );
-
-    case.finish().await;
-}
-
-#[tokio::test]
-async fn m03_only_old_rows_give_no_prediction() {
-    let mut seed = shape().one(EvaluationId::now_v7(), A, A_OUT);
-    for _ in 0..3 {
-        seed = seed.derivation_metric(|m| {
-            m.pname = Some("hello".into());
-            m.peak_ram_mb = Some(100);
-            m.build_time_ms = Some(1000);
-            m.created_at = ago(100 * DAY);
-        });
-    }
-    let case = SchedulerCase::start(seed).await;
-    case.retention().await;
-
-    assert_eq!(
-        case.predict("hello", X86).await,
-        HistoryPrediction::default(),
-        "after 1: samples 0, every value None"
-    );
-
-    case.finish().await;
-}
-
-#[tokio::test]
-async fn m04_a_derivation_without_pname_matches_by_name_and_sums_its_output_sizes() {
-    let case = SchedulerCase::start(
-        shape()
-            .one(EvaluationId::now_v7(), F, F_OUT)
-            .named_output(F_DEV, "dev")
-            .output_option(F_OUT, |o| o.nar_size = Some(10))
-            .output_option(F_DEV, |o| o.nar_size = Some(20))
-            .derivation_metric(|m| m.created_at = ago(60))
-            .startable(G, G_OUT)
-            .named_output(G_DEV, "dev")
-            .output_option(G_OUT, |o| o.nar_size = Some(30))
-            .derivation_metric(|m| m.created_at = ago(60)),
-    )
-    .await;
-
-    let foo_1_0 = case.predict("foo-1.0", X86).await;
-    assert_eq!(
-        (foo_1_0.samples, foo_1_0.output_nar_size),
-        (1, Some(30)),
-        "after 1: samples, output_nar_size_mean"
-    );
-
-    let foo_1_1 = case.predict("foo-1.1", X86).await;
-    assert_eq!(
-        (foo_1_1.samples, foo_1_1.output_nar_size),
-        (1, Some(30)),
-        "after 2: samples, output_nar_size_mean"
-    );
-
-    case.finish().await;
-}
-
-#[tokio::test]
-async fn m05_p95_oom_rate_contention_and_a_measured_zero() {
-    let mut seed = shape().one(EvaluationId::now_v7(), A, A_OUT);
-    for i in 1..=20 {
-        let (build_time_ms, concurrent_builds) = if i <= 10 { (1000, 0) } else { (2000, 25) };
-        seed = seed.derivation_metric(move |m| {
-            m.pname = Some("p".into());
-            m.peak_ram_mb = Some(i);
-            m.oom_killed = i <= 2;
-            m.build_time_ms = Some(build_time_ms);
-            m.concurrent_builds = Some(concurrent_builds);
-            m.cpu_time_ms = Some(0);
-            m.created_at = ago(60 * i);
-        });
-    }
-    let case = SchedulerCase::start(seed).await;
-
-    let prediction = case.predict("p", X86).await;
-    assert!(
-        (prediction.oom_rate - 0.1).abs() < 1e-6,
-        "after 1: oom_rate == 0.1, got {}",
-        prediction.oom_rate
-    );
-    assert_eq!(
-        (
-            prediction.predicted_peak_ram_mb,
-            prediction.build_time_ms,
-            prediction.uncontended_build_time_ms,
-            prediction.avg_disk_bytes,
-            prediction.avg_cpu_time_ms,
-        ),
-        (Some(19), Some(1500), Some(1000), None, Some(0)),
-        "after 1: peak_ram_p95, build_time_mean, build_time_uncontended_mean, disk_bytes_mean, avg_cpu_time_ms"
-    );
-
-    case.finish().await;
-}
 
 #[tokio::test]
 async fn m06_instance_windows_take_rows_at_the_boundary_and_wait_from_ready_at() {
@@ -318,18 +151,22 @@ async fn m07_eval_history_takes_the_p95_rss_per_task_and_the_fleet_fetch_mean() 
     let steps = [FlakeStep::FetchFlake];
     let own = history.for_job(t1, &steps);
     assert_eq!(
-        (own.predicted_peak_ram_mb, own.build_time_ms),
-        (Some(119), Some(1000)),
+        (
+            own.ram_mb(REFERENCE_CORES),
+            own.build_ms(REFERENCE_CORES).map(f64::round),
+            own.own_samples > 0,
+        ),
+        (Some(119), Some(1000.0), true),
         "after 1: result[T1].peak_rss_p95, fetch_mean"
     );
     let other = history.for_job(t2, &steps);
     assert_eq!(
         (
-            other.predicted_peak_ram_mb,
-            other.uncontended_build_time_ms,
-            other.from_fleet_mean,
+            other.ram_mb(REFERENCE_CORES),
+            other.build_ms(REFERENCE_CORES).map(f64::round),
+            other.own_samples,
         ),
-        (None, Some(1000), true),
+        (None, Some(1000.0), 0),
         "after 1: result[T2].peak_rss_p95, fetch_mean of every run"
     );
 
@@ -523,6 +360,7 @@ async fn m11_outputs_present_on_the_worker_lift_the_predicted_resource_penalty()
     for i in 1..=20 {
         seed = seed.derivation_metric(move |m| {
             m.peak_ram_mb = Some(60_000);
+            m.build_time_ms = Some(60_000);
             m.created_at = ago(60 * i);
         });
     }

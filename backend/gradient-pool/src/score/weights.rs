@@ -35,7 +35,6 @@ pub const RESOURCE_SATURATION_PENALTY: f64 =
 pub const CPU_SATURATED_PCT: f32 = 80.0;
 pub const CPU_SATURATED_PCT_BUILTIN: f32 = 90.0;
 pub const RAM_SATURATED_FREE_FRAC: f64 = 0.10;
-pub const RAM_FIT_HEADROOM: f64 = 1.1;
 pub const HELD_BUILD_RESERVES_RAM_AFTER_SECS: i64 = 60;
 
 pub const FAIR_SHARE_WEIGHT: f64 = 500.0;
@@ -44,7 +43,7 @@ pub const QOS_PRIORITIZED: f64 = 5000.0;
 pub const QOS_BUILD_REQUEST: f64 = 1000.0;
 pub const QOS_IFD: f64 = 1000.0;
 
-pub const REFERENCE_CORES: f64 = 16.0;
+pub const REFERENCE_CORES: u32 = 16;
 pub const REFERENCE_CORE_SCORE: f64 = 4000.0;
 pub const RAM_UPPER_Z: f64 = 1.28;
 pub const OWN_SAMPLE_PRIOR_WEIGHT: f64 = 2.0;
