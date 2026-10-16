@@ -91,7 +91,7 @@ where
         .serve_connection(read, write, handler)
         .await;
     if let Err(error) = served {
-        tracing::debug!(conn = conn.id, %error, "connection ended with error");
+        tracing::warn!(conn = conn.id, %error, "connection ended with error");
     }
 }
 
