@@ -6,13 +6,17 @@ import json
 import shlex
 
 
-def api(machine, base, method, path, token=None, body=None):
+def request(machine, base, method, path, token=None, body=None):
     cmd = f"curl -sS -X {method} {shlex.quote(f'{base}/api/v1/{path}')}"
     if token:
         cmd += f" -H 'Authorization: Bearer {token}'"
     if body is not None:
         cmd += f" -H 'Content-Type: application/json' -d {shlex.quote(json.dumps(body))}"
-    reply = json.loads(machine.succeed(cmd))
+    return json.loads(machine.succeed(cmd))
+
+
+def api(machine, base, method, path, token=None, body=None):
+    reply = request(machine, base, method, path, token, body)
     assert reply.get("error") is False, f"{method} {path}: {reply.get('message')}"
     return reply.get("message")
 
@@ -40,7 +44,11 @@ def create_personal_project(machine, base, token, repo):
     api(machine, base, "PUT", "tasks/personal", token,
         {"name": "packages", "display_name": "Packages", "description": "standalone",
          "repository": repo, "wildcard": "packages.*.*"})
-    return api(machine, base, "POST", "tasks/personal/packages/evaluate", token)
+    started = request(machine, base, "POST", "tasks/personal/packages/evaluate", token)
+    if started.get("error") is False:
+        return started["message"]
+    assert started.get("message") == "Evaluation already in progress", started
+    return api(machine, base, "GET", "tasks/personal/packages/evaluations?limit=1", token)[0]["id"]
 
 
 def wait_for_green_evaluation(machine, base, token, eval_id, timeout=900):
