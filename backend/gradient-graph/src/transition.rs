@@ -1057,6 +1057,11 @@ async fn record_metrics(
         concurrent_builds: metrics.concurrent_builds.map(|v| v as i32),
         build_cores: metrics.build_cores.map(|v| v as i32),
         cpu_core_score: metrics.cpu_core_score.map(|v| v as i32),
+        input_pnames: Some(
+            gradient_db::derivation_dependencies::build_input_pnames(&ctx.worker_db, derivation_id)
+                .await
+                .unwrap_or_default(),
+        ),
         worker_id: gradient_db::scheduling::build_attempt::latest_attempt_worker(
             &ctx.worker_db,
             shared_build.id,

@@ -38,7 +38,7 @@ mod tests {
     }
 
     fn write_seeded_report(conn: &rusqlite::Connection, redactor: &Redactor) {
-        let seeds: [(&str, Vec<(&str, &str)>); 4] = [
+        let seeds: [(&str, Vec<(&str, &str)>); 5] = [
             (
                 "evaluation",
                 vec![
@@ -64,6 +64,10 @@ mod tests {
             (
                 "cached_path",
                 vec![("package", PKG), ("deriver", STORE_PATH)],
+            ),
+            (
+                "derivation_metric",
+                vec![("input_pnames", "clap_complete,libgit2")],
             ),
         ];
 
@@ -138,6 +142,7 @@ mod tests {
             "supersandro",
             "nixos-config",
             "clap_complete",
+            "libgit2",
         ] {
             assert_eq!(
                 count_occurrences(&conn, needle),

@@ -121,6 +121,13 @@ impl Redactor {
         self.token(value, "pkg")
     }
 
+    pub fn package_list(&self, list: &str) -> String {
+        list.split(',')
+            .map(|p| self.package(p))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
     pub fn store_path(&self, path: &str) -> String {
         if !self.opts.anonymize_packages || path.is_empty() {
             return path.to_owned();

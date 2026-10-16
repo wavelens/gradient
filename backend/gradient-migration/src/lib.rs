@@ -17,6 +17,7 @@ mod m20261014_000001_auto_concurrency;
 mod m20261015_000000_evaluation_metric_per_evaluation;
 mod m20261015_000001_output_cache_by_hash;
 mod m20261015_000002_pull_request_summary;
+mod m20261016_000000_metric_input_pnames;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -51,6 +52,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261015_000000_evaluation_metric_per_evaluation::Migration),
             Box::new(m20261015_000001_output_cache_by_hash::Migration),
             Box::new(m20261015_000002_pull_request_summary::Migration),
+            Box::new(m20261016_000000_metric_input_pnames::Migration),
         ]
     }
 }

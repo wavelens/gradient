@@ -29,6 +29,7 @@ pub struct Model {
     pub concurrent_builds: Option<i32>,
     pub build_cores: Option<i32>,
     pub cpu_core_score: Option<i32>,
+    pub input_pnames: Option<Vec<String>>,
     pub worker_id: String,
     pub created_at: NaiveDateTime,
 }
