@@ -1358,14 +1358,27 @@ impl JobTracker {
         }
     }
 
-    pub(crate) fn reestimate(&mut self, history: &crate::build_history::BuildHistory) {
-        for job in self.pending.values_mut() {
-            if let PendingJob::Build(build) = job
-                && let Some(key) = &build.history_key
-            {
-                build
-                    .estimate
-                    .learn(history.estimate(key, build.derivation));
+    pub(crate) fn estimates_to_refresh(
+        &self,
+        changes: &crate::build_history::Changes,
+    ) -> Vec<(String, gradient_pool::estimate::GroupKey, DerivationId)> {
+        self.pending
+            .iter()
+            .filter_map(|(job_id, job)| match job {
+                PendingJob::Build(build) => build
+                    .history_key
+                    .as_ref()
+                    .filter(|key| changes.touches(key, build.derivation))
+                    .map(|key| (job_id.clone(), key.clone(), build.derivation)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub(crate) fn learn_estimates(&mut self, estimates: Vec<(String, BuildEstimate)>) {
+        for (job_id, estimate) in estimates {
+            if let Some(PendingJob::Build(build)) = self.pending.get_mut(&job_id) {
+                build.estimate.learn(estimate);
             }
         }
     }
@@ -1896,31 +1909,84 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_pending_build_follows_an_out_of_memory_kill_read_after_its_admission() {
-        let mut tracker = JobTracker::new();
+    fn keyed_build(tracker: &mut JobTracker, job_id: &str, pname: &str) -> DerivationId {
         let mut job = build_job(ProjectId::now_v7(), vec![]);
         let PendingJob::Build(build) = &mut job else {
             unreachable!()
         };
-        let key = gradient_pool::estimate::GroupKey {
+        build.history_key = Some(gradient_pool::estimate::GroupKey {
             architecture: "x86_64-linux".into(),
-            pname: "torch".into(),
+            pname: pname.into(),
             input_pnames: vec!["cmake".into()],
-        };
-        build.history_key = Some(key.clone());
+        });
         let derivation = build.derivation;
-        tracker.add_pending("torch".into(), job);
-        let history = crate::build_history::BuildHistory::with_out_of_memory_kill(
-            key, derivation, 64, 100_000,
-        );
+        tracker.add_pending(job_id.into(), job);
+        derivation
+    }
 
-        tracker.reestimate(&history);
+    fn refresh_estimates(tracker: &mut JobTracker, history: &crate::build_history::BuildHistory) {
+        let wanted = tracker.estimates_to_refresh(&history.take_changes());
+        tracker.learn_estimates(history.estimate_all(wanted));
+    }
 
-        let Some(PendingJob::Build(build)) = tracker.pending_job("torch") else {
+    fn max_cores_of(tracker: &JobTracker, job_id: &str) -> Option<u32> {
+        let Some(PendingJob::Build(build)) = tracker.pending_job(job_id) else {
             unreachable!()
         };
-        assert_eq!(build.estimate.max_cores, Some(43));
+        build.estimate.max_cores
+    }
+
+    #[test]
+    fn a_pending_build_follows_an_out_of_memory_kill_read_after_its_admission() {
+        let mut tracker = JobTracker::new();
+        let killed = keyed_build(&mut tracker, "torch", "torch");
+        keyed_build(&mut tracker, "torch-again", "torch");
+        let history = crate::build_history::BuildHistory::with_out_of_memory_kill(
+            gradient_pool::estimate::GroupKey {
+                architecture: "x86_64-linux".into(),
+                pname: "torch".into(),
+                input_pnames: vec!["cmake".into()],
+            },
+            killed,
+            64,
+            100_000,
+        );
+
+        refresh_estimates(&mut tracker, &history);
+
+        assert_eq!(max_cores_of(&tracker, "torch"), Some(43));
+        assert_eq!(max_cores_of(&tracker, "torch-again"), None);
+    }
+
+    #[test]
+    fn only_builds_of_a_package_with_new_samples_are_estimated_again() {
+        let mut tracker = JobTracker::new();
+        let killed = keyed_build(&mut tracker, "torch", "torch");
+        keyed_build(&mut tracker, "hello", "hello");
+        let history = crate::build_history::BuildHistory::with_out_of_memory_kill(
+            gradient_pool::estimate::GroupKey {
+                architecture: "x86_64-linux".into(),
+                pname: "torch".into(),
+                input_pnames: vec!["cmake".into()],
+            },
+            killed,
+            64,
+            100_000,
+        );
+
+        let wanted: Vec<String> = tracker
+            .estimates_to_refresh(&history.take_changes())
+            .into_iter()
+            .map(|(job_id, ..)| job_id)
+            .collect();
+        assert_eq!(wanted, vec!["torch".to_owned()]);
+        assert!(history.take_changes().is_empty());
+
+        history.refit(0);
+        assert_eq!(
+            tracker.estimates_to_refresh(&history.take_changes()).len(),
+            2
+        );
     }
 
     #[test]

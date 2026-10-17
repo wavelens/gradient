@@ -392,7 +392,8 @@ pub async fn serve_web(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> st
                 || r.builds_requeued > 0
                 || r.builds_unpromoted > 0
                 || r.evals_requeued > 0
-                || r.cluster_attempts_closed > 0 =>
+                || r.cluster_attempts_closed > 0
+                || r.connections_closed > 0 =>
         {
             tracing::warn!(
                 dispatches_closed = r.assignments_closed,
@@ -404,6 +405,7 @@ pub async fn serve_web(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> st
                 clusters_requeued = r.clusters_requeued,
                 clusters_aborted = r.clusters_aborted,
                 clusters_failed = r.clusters_failed,
+                connections_closed = r.connections_closed,
                 "recovered interrupted work from previous process"
             )
         }

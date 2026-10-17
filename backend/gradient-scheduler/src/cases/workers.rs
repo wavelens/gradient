@@ -84,6 +84,14 @@ async fn w01_connect_and_disconnect_open_and_close_connection_rows() {
     assert_eq!(case.totals().await.workers, 1, "after 4: counts().workers");
     case.check("step 4").await;
 
+    case.startup_recovery().await;
+    let rows = case.connections(W1).await;
+    assert!(
+        rows.iter().all(|row| row.disconnected_at.is_some()),
+        "after 5: the startup recovery closes the rows of the previous process, got {rows:?}"
+    );
+    case.check("step 5").await;
+
     case.finish().await;
 }
 
