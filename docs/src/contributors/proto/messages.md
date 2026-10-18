@@ -72,7 +72,7 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `ImportRequest` | Builds the given derivations now, because the evaluation needs them | `job_id`, `request_id`, `drv_paths` |
 | `InputRequest` | Asks for an input missing from the store and the cache, because the evaluation needs the input | `job_id`, `request_id`, `request` |
 | `InputFetchProgress` | Reports download bytes of a `FetchInput` | `fetch_id`, `bytes_done`, `bytes_total` |
-| `InputFetched` | Reply to `FetchInput` after the push: the fetch answer or the download error | `fetch_id`, `outcome` |
+| `InputFetched` | Reply to `FetchInput` after the push: the fetch answer or the download error. `Unplaced` answers return the fetch to the server for another worker | `fetch_id`, `outcome` |
 
 ## Cache Query Modes
 

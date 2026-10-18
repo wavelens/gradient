@@ -402,6 +402,84 @@ async fn i10_a_running_fetch_takes_a_build_slot() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn i11_an_unplaced_fetch_goes_to_another_worker() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().evalq(e1)).await;
+    evaluating(&case, W1, e1).await;
+    case.connect(W2, w_fetch(), &[]).await;
+    case.connect(W3, w_fetch(), &[]).await;
+    case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
+        .await;
+    let first = single_fetch(&case, &[W1, W2, W3]);
+    assert_eq!(
+        first.worker, W2,
+        "after 1: the lower worker id wins the tie"
+    );
+    case.check("step 1").await;
+
+    case.input_fetched(W2, &first.fetch_id, unplaced()).await;
+    let second = single_fetch(&case, &[W1, W2, W3]);
+    assert_eq!(second.worker, W3, "after 2: the fetch moves to W3");
+    assert_ne!(second.fetch_id, first.fetch_id, "after 2: a new fetch id");
+    case.check("step 2").await;
+
+    case.input_fetched(W3, &second.fetch_id, fetched()).await;
+    assert_eq!(
+        without_offers(case.signals(W1)),
+        vec![result(e1, "r1", fetched())],
+        "after 3: the evaluation gets the result of W3"
+    );
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn i12_an_unplaced_fetch_waits_when_no_other_worker_qualifies() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().evalq(e1)).await;
+    evaluating(&case, W1, e1).await;
+    case.connect(W2, w_fetch(), &[]).await;
+    case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
+        .await;
+    let first = single_fetch(&case, &[W1, W2]);
+    case.check("step 1").await;
+
+    case.input_fetched(W2, &first.fetch_id, unplaced()).await;
+    case.build_assign_pass(false, false).await;
+    assert_eq!(
+        fetches_of(&case, &[W1, W2]),
+        vec![],
+        "after 2: W2 is not asked again"
+    );
+    assert_eq!(case.input_waits(), 1, "after 2: the request still waits");
+    let reason = case.evaluation(e1).await.waiting_reason;
+    assert_eq!(
+        reason.as_ref().and_then(WaitingReason::from_json),
+        Some(WaitingReason::eval_workers(EvalCapability::Network, 2)),
+        "after 2: the evaluation waits for network"
+    );
+    case.check("step 2").await;
+
+    case.connect(W3, w_fetch(), &[]).await;
+    case.build_assign_pass(false, false).await;
+    assert_eq!(
+        single_fetch(&case, &[W1, W2, W3]).worker,
+        W3,
+        "after 3: W3 takes the fetch"
+    );
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+fn unplaced() -> InputOutcome {
+    InputOutcome::Unplaced {
+        message: "no worker behind the shared worker can fetch the input".into(),
+    }
+}
+
 async fn building_on_w2(case: &SchedulerCase) -> (String, gradient_entity::ids::DispatchedJobId) {
     let a = case.key(A).await;
     case.admit_startable_moves().await;

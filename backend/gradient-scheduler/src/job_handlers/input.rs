@@ -65,6 +65,13 @@ impl Scheduler {
         outcome: InputOutcome,
     ) {
         self.release_input_fetch(worker_id, fetch_id).await;
+        if let InputOutcome::Unplaced { message } = &outcome {
+            if self.input_waits.unplace(worker_id, fetch_id) {
+                debug!(%worker_id, %fetch_id, %message, "input fetch unplaced; trying another worker");
+                self.dispatch_input_fetches().await;
+            }
+            return;
+        }
         let waiters = self.input_waits.take_fetched(worker_id, fetch_id);
         if waiters.is_empty() {
             debug!(%worker_id, %fetch_id, "input fetch answered without waiters; dropped");
@@ -247,6 +254,7 @@ fn fetch_workers(
     let mut eligible: Vec<&WorkerInfo> = workers
         .iter()
         .filter(|w| !w.draining)
+        .filter(|w| !fetch.excluded.contains(&w.id))
         .filter(|w| w.assigned_build_count < w.max_concurrent_builds as usize)
         .filter(|w| {
             w.authorized_peers
