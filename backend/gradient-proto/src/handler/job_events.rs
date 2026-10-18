@@ -15,7 +15,7 @@ use gradient_graph::writer::RECORD_ROW_BUDGET;
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_types::ids::{DispatchedJobId, EvaluationId};
 use gradient_util::shutdown::Shutdown;
-use gradient_wire::types::{BuildFailureKind, BuildMetrics};
+use gradient_wire::types::{BuildFailureKind, BuildMetrics, InputOutcome};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{Instrument as _, debug, debug_span, error, info, warn};
@@ -52,6 +52,15 @@ pub(super) enum JobEvent {
         request_id: String,
         drv_paths: Vec<String>,
     },
+    InputRequest {
+        job_id: String,
+        request_id: String,
+        request: String,
+    },
+    InputFetched {
+        fetch_id: String,
+        outcome: InputOutcome,
+    },
 }
 
 impl JobEvent {
@@ -60,7 +69,11 @@ impl JobEvent {
             JobEvent::Update { job_id, .. }
             | JobEvent::Completed { job_id, .. }
             | JobEvent::Failed { job_id, .. }
-            | JobEvent::ImportRequest { job_id, .. } => job_id,
+            | JobEvent::ImportRequest { job_id, .. }
+            | JobEvent::InputRequest { job_id, .. }
+            | JobEvent::InputFetched {
+                fetch_id: job_id, ..
+            } => job_id,
         }
     }
 
@@ -74,6 +87,8 @@ impl JobEvent {
             JobEvent::Completed { .. } => "completed",
             JobEvent::Failed { .. } => "failed",
             JobEvent::ImportRequest { .. } => "import_request",
+            JobEvent::InputRequest { .. } => "input_request",
+            JobEvent::InputFetched { .. } => "input_fetched",
         }
     }
 
@@ -242,6 +257,25 @@ impl ApplyJobEvent for SchedulerJobEvents {
             } => {
                 self.import_request(job_id, evaluation, request_id, drv_paths)
                     .await
+            }
+            JobEvent::InputRequest {
+                job_id,
+                request_id,
+                request,
+            } => {
+                let peer_id = self.peer_id.as_str();
+                if let Err(e) = self
+                    .scheduler
+                    .handle_input_request(peer_id, &job_id, request_id, request)
+                    .await
+                {
+                    error!(%peer_id, %job_id, error = %e, "handle_input_request failed");
+                }
+            }
+            JobEvent::InputFetched { fetch_id, outcome } => {
+                self.scheduler
+                    .handle_input_fetched(&self.peer_id, &fetch_id, outcome)
+                    .await;
             }
         }
     }

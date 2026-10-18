@@ -51,6 +51,9 @@ pub(crate) async fn build_assign_pass(scheduler: &Scheduler, timer_tick: bool, r
     if scheduler.scoring.policy.uses_history() {
         reestimate_pending(scheduler).await;
     }
+    if let Err(e) = scheduler.settle_input_waits().await {
+        error!(error = %e, "settling input waits in dispatch loop failed");
+    }
     if let Err(e) = scheduler.refresh_waiting_state().await {
         error!(error = %e, "refresh_waiting_state in dispatch loop failed");
     }

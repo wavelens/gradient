@@ -349,6 +349,10 @@ impl SchedulerCase {
         }
     }
 
+    pub fn input_waits(&self) -> usize {
+        self.scheduler.input_waits.waiting_requests()
+    }
+
     pub fn import_waits(&self) -> usize {
         self.scheduler.import_waits.waiting_requests()
     }

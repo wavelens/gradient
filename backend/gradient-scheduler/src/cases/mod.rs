@@ -13,6 +13,7 @@ mod control;
 mod estimates;
 mod eval_queue;
 mod imports;
+mod inputs;
 mod invariants;
 mod outside;
 mod probe;

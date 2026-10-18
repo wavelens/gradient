@@ -61,6 +61,10 @@ impl WorkerCaps {
 
     pub fn can_fetch(&self, source: &FlakeSource) -> bool {
         let needs_secrets = matches!(source, FlakeSource::Repository { url, .. } if check_repository_url_is_ssh(url));
+        self.can_fetch_input(needs_secrets)
+    }
+
+    pub fn can_fetch_input(&self, needs_secrets: bool) -> bool {
         self.capabilities.network && (!needs_secrets || self.capabilities.secrets)
     }
 }

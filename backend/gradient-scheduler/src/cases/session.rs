@@ -12,7 +12,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{DispatchedJobId, EvaluationId, ProjectId};
 use gradient_wire::types::{
     BuildFailureKind, BuildMetrics, BuildOutput, BumpedInputWire, CandidateScore,
-    DiscoveredDerivation, EvalMessageLevel, EvalStatsReport, JobKind, JobPhaseSpan,
+    DiscoveredDerivation, EvalMessageLevel, EvalStatsReport, InputOutcome, JobKind, JobPhaseSpan,
 };
 
 use super::aliases;
@@ -524,6 +524,34 @@ impl SchedulerCase {
                 request_id.to_owned(),
                 paths.to_vec(),
             )
+            .await;
+    }
+
+    pub async fn input_request(&self, worker: &str, key: &str, request_id: &str, request: &str) {
+        if !self.owns_remembered(worker, key).await {
+            return;
+        }
+        let _ = self
+            .scheduler
+            .handle_input_request(worker, key, request_id.to_owned(), request.to_owned())
+            .await;
+    }
+
+    pub async fn input_fetched(&self, worker: &str, fetch_id: &str, outcome: InputOutcome) {
+        self.scheduler
+            .handle_input_fetched(worker, fetch_id, outcome)
+            .await;
+    }
+
+    pub async fn input_fetch_progress(
+        &self,
+        worker: &str,
+        fetch_id: &str,
+        bytes_done: u64,
+        bytes_total: Option<u64>,
+    ) {
+        self.scheduler
+            .handle_input_fetch_progress(worker, fetch_id, bytes_done, bytes_total)
             .await;
     }
 

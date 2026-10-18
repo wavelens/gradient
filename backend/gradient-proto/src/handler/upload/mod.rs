@@ -65,7 +65,7 @@ impl InboundContext<'_> {
                 )
                 .await;
         };
-        if !self.active.contains(&job_id) {
+        if !self.active.contains(&job_id) && self.active.fetch_project(&job_id).is_none() {
             return self
                 .settle(
                     request_id,
@@ -315,7 +315,11 @@ impl InboundContext<'_> {
             let db = self.handles.db.worker_db.clone();
             let peer_id = self.peer_id.to_owned();
             let job_id = granted.job_id.clone();
+            let fetch_project = self.active.fetch_project(&job_id);
             Box::pin(async move {
+                if fetch_project.is_some() {
+                    return fetch_project;
+                }
                 match scheduler.project_for_job(&job_id).await {
                     Some(id) => Some(id),
                     None => super::nar::project_for_dispatched_job(&db, &peer_id, &job_id).await,

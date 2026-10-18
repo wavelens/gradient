@@ -314,6 +314,7 @@ impl Scheduler {
                 warn!(error = %e, %worker_id, key = %lost.key, "settling a lost cluster member failed");
             }
         }
+        self.reassign_input_fetches_of(worker_id).await;
         self.db.events.publish(worker::Disconnected {
             worker_id: worker_id.to_owned(),
         });
@@ -328,7 +329,7 @@ impl Scheduler {
             graph: &self.graph,
             memo: &self.scoring.assessments,
         }
-        .run(&workers, draining)
+        .run(&workers, &self.input_waiting_evaluations(), draining)
         .await?;
         for unbuildable in unbuildables {
             self.abort_unbuildable_evaluation(unbuildable).await;

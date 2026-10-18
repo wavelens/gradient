@@ -6,6 +6,7 @@
 
 pub mod aggregate;
 pub mod estimate;
+pub mod input_request;
 pub mod peer_auth;
 pub mod score;
 pub mod session_port;
@@ -14,6 +15,7 @@ pub mod worker_pool;
 pub mod worker_state;
 
 pub use self::aggregate::{Aggregate, aggregate};
+pub use self::input_request::InputRequest;
 pub use self::peer_auth::PeerAuth;
 pub use self::worker_caps::{WorkerCaps, build_needs_network};
 pub use self::worker_pool::{WorkerInfo, WorkerPool, WorkerSlot};

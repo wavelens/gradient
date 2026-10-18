@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_wire::types::{ClusterAddress, ClusterPeer, ImportOutcome};
+use gradient_types::ids::ProjectId;
+use gradient_wire::types::{ClusterAddress, ClusterPeer, ImportOutcome, InputOutcome};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionSignal {
@@ -39,6 +40,22 @@ pub enum SessionSignal {
         job_id: String,
         request_id: String,
         outcome: ImportOutcome,
+    },
+    InputResult {
+        job_id: String,
+        request_id: String,
+        outcome: InputOutcome,
+    },
+    InputProgress {
+        job_id: String,
+        request_id: String,
+        bytes_done: u64,
+        bytes_total: Option<u64>,
+    },
+    FetchInput {
+        fetch_id: String,
+        project: ProjectId,
+        request: String,
     },
 }
 

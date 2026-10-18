@@ -58,6 +58,7 @@ impl Scheduler {
 
     pub async fn stop_aborted_evaluation(&self, evaluation: EvaluationId, hard_abort: bool) {
         self.drop_import_waits(evaluation).await;
+        self.drop_input_waits(evaluation);
         let shared_builds = self
             .abort_evaluation_shared_builds(evaluation, hard_abort)
             .await;
@@ -208,6 +209,7 @@ impl Scheduler {
         aborted_shared_builds: Vec<DerivationBuildId>,
     ) -> Vec<(String, String)> {
         self.drop_import_waits(evaluation_id).await;
+        self.drop_input_waits(evaluation_id);
         self.call(|reply| SchedulerMsg::AbortEvaluation {
             evaluation_id,
             aborted_shared_builds,
