@@ -1,0 +1,314 @@
+From c46e4d6dfc4f07003799c7e87ea09b1e6e4f0c28 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sun, 18 Oct 2026 14:56:12 +0200
+Subject: [PATCH] libexpr: feat: let the embedder fetch
+
+---
+ src/libexpr-c/nix_api_expr.cc                 | 20 +++++
+ src/libexpr-c/nix_api_expr.h                  | 34 ++++++++
+ src/libexpr/primops/fetchTree.cc              | 47 +++++++++--
+ src/libfetchers/fetchers.cc                   | 77 +++++++++++++++----
+ .../include/nix/fetchers/fetch-settings.hh    |  8 ++
+ 5 files changed, 164 insertions(+), 22 deletions(-)
+
+diff --git a/src/libexpr-c/nix_api_expr.cc b/src/libexpr-c/nix_api_expr.cc
+index 612cc3c84..fc4fe73e4 100644
+--- a/src/libexpr-c/nix_api_expr.cc
++++ b/src/libexpr-c/nix_api_expr.cc
+@@ -221,6 +221,26 @@ nix_err nix_eval_state_builder_set_realise_hook(
+     NIXC_CATCH_ERRS
+ }
+ 
++nix_err nix_eval_state_builder_set_fetch_hook(
++    nix_c_context * context, nix_eval_state_builder * builder, nix_fetch_hook hook, void * user_data)
++{
++    if (context)
++        context->last_err_code = NIX_OK;
++    try {
++        builder->fetchSettings.fetchHook = [hook, user_data](const std::string & request) {
++            std::string response;
++            auto setResponse = [](const char * start, unsigned int n, void * data) {
++                static_cast<std::string *>(data)->assign(start, n);
++            };
++            nix_c_context hookContext;
++            if (hook(user_data, &hookContext, request.c_str(), setResponse, &response) != NIX_OK)
++                throw nix::Error("%s", hookContext.last_err.value_or("fetch hook failed"));
++            return response;
++        };
++    }
++    NIXC_CATCH_ERRS
++}
++
+ EvalState * nix_eval_state_build(nix_c_context * context, nix_eval_state_builder * builder)
+ {
+     if (context)
+diff --git a/src/libexpr-c/nix_api_expr.h b/src/libexpr-c/nix_api_expr.h
+index 1578539ea..04a829c8c 100644
+--- a/src/libexpr-c/nix_api_expr.h
++++ b/src/libexpr-c/nix_api_expr.h
+@@ -274,6 +274,40 @@ typedef nix_err (*nix_realise_hook)(
+ nix_err nix_eval_state_builder_set_realise_hook(
+     nix_c_context * context, nix_eval_state_builder * builder, nix_realise_hook hook, void * user_data);
+ 
++/**
++ * @brief Callback that fetches an input missing from the store
++ * @ingroup libexpr_init
++ *
++ * @param[in] user_data The pointer passed to nix_eval_state_builder_set_fetch_hook().
++ * @param[out] context Stores the error message when the fetch fails.
++ * @param[in] request_json `{"builtin": "fetchTree" | "fetchTarball" | "fetchurl", "args": {...}, "storePath"?: "..."}`.
++ * @param[in] callback Called with the response `{"storePath": "...", "attrs"?: {...}}`.
++ * @param[in] callback_user_data Passed to the callback unchanged.
++ * @return NIX_OK once the response's store path is valid in the store, an error code otherwise.
++ */
++typedef nix_err (*nix_fetch_hook)(
++    void * user_data,
++    nix_c_context * context,
++    const char * request_json,
++    nix_get_string_callback callback,
++    void * callback_user_data);
++
++/**
++ * @brief Let the embedder fetch inputs that are not in the store
++ * @ingroup libexpr_init
++ *
++ * The hook replaces the built-in fetchers for every input except `path`, and the download of
++ * `fetchurl` and `fetchTarball`. user_data must stay valid as long as the state built from this builder.
++ *
++ * @param[out] context Optional, stores error information
++ * @param[in] builder The builder to modify.
++ * @param[in] hook The callback that fetches the input.
++ * @param[in] user_data Passed to the hook unchanged.
++ * @return NIX_OK if successful, an error code otherwise.
++ */
++nix_err nix_eval_state_builder_set_fetch_hook(
++    nix_c_context * context, nix_eval_state_builder * builder, nix_fetch_hook hook, void * user_data);
++
+ /**
+  * @brief Create a new Nix language evaluator state
+  * @ingroup libexpr_init
+diff --git a/src/libexpr/primops/fetchTree.cc b/src/libexpr/primops/fetchTree.cc
+index 0e092927b..90f59640d 100644
+--- a/src/libexpr/primops/fetchTree.cc
++++ b/src/libexpr/primops/fetchTree.cc
+@@ -6,6 +6,7 @@
+ #include "nix/expr/fetch-tree.hh"
+ #include "nix/store/store-api.hh"
+ #include "nix/fetchers/fetchers.hh"
++#include "nix/fetchers/fetch-settings.hh"
+ #include "nix/store/filetransfer.hh"
+ #include "nix/fetchers/registry.hh"
+ #include "nix/fetchers/tarball.hh"
+@@ -13,6 +14,7 @@
+ #include "nix/expr/value-to-json.hh"
+ #include "nix/fetchers/fetch-to-store.hh"
+ #include "nix/fetchers/input-cache.hh"
++#include "nix/util/json-utils.hh"
+ 
+ #include <nlohmann/json.hpp>
+ 
+@@ -471,6 +473,35 @@ static RegisterPrimOp primop_fetchFinalTree({
+     .internal = true,
+ });
+ 
++static StorePath fetchThroughHook(
++    EvalState & state,
++    const std::string & who,
++    const std::string & url,
++    const std::string & name,
++    const std::optional<Hash> & expectedHash,
++    const std::optional<StorePath> & expectedPath)
++{
++    auto args = nlohmann::json{{"url", url}, {"name", name}};
++    if (expectedHash)
++        args["sha256"] = expectedHash->to_string(HashFormat::SRI, true);
++    auto request = nlohmann::json{{"builtin", who}, {"args", args}};
++    if (expectedPath)
++        request["storePath"] = state.store->printStorePath(*expectedPath);
++
++    auto response = nlohmann::json::parse(state.fetchSettings.fetchHook(request.dump()));
++    auto storePath = state.store->parseStorePath(getString(valueAt(getObject(response), "storePath")));
++    if (expectedPath && storePath != *expectedPath)
++        throw Error(
++            "the fetch hook returned '%s' for '%s', expected '%s'",
++            state.store->printStorePath(storePath),
++            url,
++            state.store->printStorePath(*expectedPath));
++    if (!state.store->isValidPath(storePath))
++        throw Error(
++            "the fetch hook returned '%s', which is not valid in the store", state.store->printStorePath(storePath));
++    return storePath;
++}
++
+ static void fetch(
+     EvalState & state,
+     const PosIdx pos,
+@@ -552,8 +583,9 @@ static void fetch(
+             .debugThrow();
+ 
+     // early exit if pinned and already in the store
++    std::optional<StorePath> expectedPath;
+     if (expectedHash && expectedHash->algo == HashAlgorithm::SHA256) {
+-        auto expectedPath = state.store->makeFixedOutputPath(
++        expectedPath = state.store->makeFixedOutputPath(
+             name,
+             FixedOutputInfo{
+                 .method = unpack ? FileIngestionMethod::NixArchive : FileIngestionMethod::Flat,
+@@ -562,19 +594,24 @@ static void fetch(
+ 
+         // Try to get the path from the local store or substituters
+         try {
+-            state.store->ensurePath(expectedPath);
+-            debug("using substituted/cached path '%s' for '%s'", state.store->printStorePath(expectedPath), *url);
+-            state.allowAndSetStorePathString(expectedPath, v);
++            state.store->ensurePath(*expectedPath);
++            debug("using substituted/cached path '%s' for '%s'", state.store->printStorePath(*expectedPath), *url);
++            state.allowAndSetStorePathString(*expectedPath, v);
+             return;
+         } catch (Error & e) {
+             debug(
+                 "substitution of '%s' failed, will try to download: %s",
+-                state.store->printStorePath(expectedPath),
++                state.store->printStorePath(*expectedPath),
+                 e.what());
+             // Fall through to download
+         }
+     }
+ 
++    if (state.fetchSettings.fetchHook) {
++        state.allowAndSetStorePathString(fetchThroughHook(state, who, *url, name, expectedHash, expectedPath), v);
++        return;
++    }
++
+     if (unpack) {
+         auto attrs = fetchers::Attrs{
+             {"type", "tarball"},
+diff --git a/src/libfetchers/fetchers.cc b/src/libfetchers/fetchers.cc
+index 6d7266e09..977eaa3cf 100644
+--- a/src/libfetchers/fetchers.cc
++++ b/src/libfetchers/fetchers.cc
+@@ -297,6 +297,62 @@ std::pair<ref<SourceAccessor>, Input> Input::getAccessor(const Settings & settin
+     }
+ }
+ 
++static ref<SourceAccessor>
++storeObjectAccessor(const Settings & settings, Store & store, const Input & input, const StorePath & storePath)
++{
++    auto accessor = store.requireStoreObjectAccessor(storePath);
++
++    accessor->fingerprint = input.getFingerprint(store);
++
++    // Store a cache entry for the tree so later fetches
++    // can reuse the existing nar instead of copying the unpacked
++    // input back into the store on every evaluation.
++    if (accessor->fingerprint) {
++        settings.getCache()->upsert(
++            makeSourcePathToHashCacheKey(
++                *accessor->fingerprint, ContentAddressMethod::Raw::NixArchive, CanonPath::root),
++            {{"hash", store.queryPathInfo(storePath)->narHash.to_string(HashFormat::SRI, true)}});
++    }
++
++    accessor->setPathDisplay("«" + input.to_string() + "»");
++
++    return accessor;
++}
++
++static std::pair<ref<SourceAccessor>, Input>
++fetchThroughHook(const Settings & settings, Store & store, const Input & input)
++{
++    auto args = input.toAttrs();
++    args.erase("__final");
++    auto request = nlohmann::json{{"builtin", "fetchTree"}, {"args", attrsToJSON(args)}};
++    std::optional<StorePath> expectedPath;
++    if (input.getNarHash()) {
++        expectedPath = input.computeStorePath(store);
++        request["storePath"] = store.printStorePath(*expectedPath);
++    }
++
++    auto response = nlohmann::json::parse(settings.fetchHook(request.dump()));
++    auto storePath = store.parseStorePath(getString(valueAt(getObject(response), "storePath")));
++    if (expectedPath && storePath != *expectedPath)
++        throw Error(
++            "the fetch hook returned '%s' for input '%s', expected '%s'",
++            store.printStorePath(storePath),
++            input.to_string(),
++            store.printStorePath(*expectedPath));
++    store.addTempRoot(storePath);
++    if (!store.isValidPath(storePath))
++        throw Error("the fetch hook returned '%s', which is not valid in the store", store.printStorePath(storePath));
++
++    auto result = input;
++    if (auto attrs = optionalValueAt(getObject(response), "attrs")) {
++        result = Input::fromAttrs(settings, jsonToAttrs(*attrs));
++        if (input.isFinal())
++            result.attrs.insert_or_assign("__final", Explicit<bool>(true));
++    }
++
++    return {storeObjectAccessor(settings, store, result, storePath), std::move(result)};
++}
++
+ std::pair<ref<SourceAccessor>, Input> Input::getAccessorUnchecked(const Settings & settings, Store & store) const
+ {
+     // FIXME: cache the accessor
+@@ -325,28 +381,15 @@ std::pair<ref<SourceAccessor>, Input> Input::getAccessorUnchecked(const Settings
+ 
+             debug("using substituted/cached input '%s' in '%s'", to_string(), store.printStorePath(storePath));
+ 
+-            auto accessor = store.requireStoreObjectAccessor(storePath);
+-
+-            accessor->fingerprint = getFingerprint(store);
+-
+-            // Store a cache entry for the substituted tree so later fetches
+-            // can reuse the existing nar instead of copying the unpacked
+-            // input back into the store on every evaluation.
+-            if (accessor->fingerprint) {
+-                settings.getCache()->upsert(
+-                    makeSourcePathToHashCacheKey(
+-                        *accessor->fingerprint, ContentAddressMethod::Raw::NixArchive, CanonPath::root),
+-                    {{"hash", store.queryPathInfo(storePath)->narHash.to_string(HashFormat::SRI, true)}});
+-            }
+-
+-            accessor->setPathDisplay("«" + to_string() + "»");
+-
+-            return {accessor, *this};
++            return {storeObjectAccessor(settings, store, *this, storePath), *this};
+         } catch (Error & e) {
+             debug("substitution of input '%s' failed: %s", to_string(), e.what());
+         }
+     }
+ 
++    if (settings.fetchHook && scheme->schemeName() != "path")
++        return fetchThroughHook(settings, store, *this);
++
+     /* Acquire a path lock on this input. Note that fetching the same input in parallel is supposed to be safe (it's up
+      * to the fetchers to guarantee this), so this is merely intended to avoid work duplication. Note that we don't need
+      * this when substituting the input. */
+diff --git a/src/libfetchers/include/nix/fetchers/fetch-settings.hh b/src/libfetchers/include/nix/fetchers/fetch-settings.hh
+index bb9a67d06..8d64c6ef0 100644
+--- a/src/libfetchers/include/nix/fetchers/fetch-settings.hh
++++ b/src/libfetchers/include/nix/fetchers/fetch-settings.hh
+@@ -6,6 +6,7 @@
+ #include "nix/util/ref.hh"
+ #include "nix/util/sync.hh"
+ 
++#include <functional>
+ #include <map>
+ #include <limits>
+ 
+@@ -161,6 +162,13 @@ struct Settings : public Config
+ 
+     const ref<SrcToStore> srcToStore = createSrcToStore();
+ 
++    /**
++     * Fetches an input that is not in the store instead of the built-in
++     * fetchers. Takes and returns a JSON request and response; on return
++     * the response's `storePath` is valid. Throws `Error` on failure.
++     */
++    std::function<std::string(const std::string & requestJson)> fetchHook;
++
+ 
+ private:
+     void anchor() override;
+-- 
+2.55.0
+
