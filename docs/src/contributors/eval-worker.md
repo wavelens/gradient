@@ -14,7 +14,8 @@ flowchart LR
 ## Subprocess IPC
 
 - **Frames:** each frame start with a `u32` little-endian length prefix, followed by an rkyv payload (`gradient-eval/src/ipc.rs`).
-- **Version byte:** before the first frame, subprocesses write `EVAL_IPC_VERSION` (currently 10). A binary swapped mid-evaluation then fail the handshake instead of sending undecodable frames.
+- **Version byte:** before the first frame, subprocesses write `EVAL_IPC_VERSION` (currently 12). A binary swapped mid-evaluation then fail the handshake instead of sending undecodable frames.
+- **Fetch byte:** parents reply with one byte. Subprocesses given `1` ask the parent for [missing inputs](#missing-inputs). Subprocesses given `0` let Nix download them.
 - **Responses:** each request pair with one response. `Stats` ticks and [build requests](#import-from-derivation) can arrive before that response. `List` responses carry the derivation path of every attribute found, resolved in the subprocess that forced the attribute.
 - **Shards:** `Plan` can split each include at its first wildcard.
     - With more segments after the wildcard, each child receive a sub-pattern (`packages.**.hello` -> `packages.x86_64-linux.hello`).
@@ -41,7 +42,7 @@ An import from a derivation (IFD) requires a build in the middle of an evaluatio
 - A different request during the wait counts as a protocol error. Subprocesses then stop reading and exit.
 - Nix can raise the `error` of `BuildDone` as the error of the import. Later attributes with the same import receive the same error.
 
-### Import Builder (`gradient-worker/src/executor/import.rs`)
+### Import Builder (`gradient-worker/src/executor/dependencies.rs`)
 
 1. Record the closure, with the imported derivation as the entry point `other.<system>.<name>` and `ifd` set. Repeated names within a job end with `-<first 8 hash characters>`.
 2. Send [`ImportRequest`](proto/messages.md) and wait for `ImportResult`.
@@ -50,6 +51,25 @@ An import from a derivation (IFD) requires a build in the middle of an evaluatio
 
 - Requests for the same `.drv` from different subprocesses share the wait and the answer.
 - Fingerprint, checkpoint, input fetch and the `--eval-driver` harness refuse imports with `import from derivation is not available during <call>`.
+
+## Missing Inputs
+
+Evaluation subprocesses of the worker never download an input. The patched Nix of Gradient hands every missing non-`path` input to a fetch hook instead.
+
+| Frame | Direction | Content |
+|---|---|---|
+| `NeedsInput` | subprocess -> parent | `request`: JSON with `builtin` (`fetchTree`, `fetchTarball` or `fetchurl`), `args` and the expected `storePath` where known |
+| `InputDone` | parent -> subprocess | `response`: JSON with `storePath` and, for `fetchTree`, the locked `attrs`. Or `error` |
+
+Workers answer from the first source holding the input.
+
+1. The Gradient cache, for a request with a known `storePath`.
+2. An [`InputRequest`](proto/messages.md) to the server, followed by a pull of the fetched path.
+
+- The server can hand the download to a worker with `network`, plus `secrets` for an SSH URL. That worker can start one subprocess with fetch byte `0`, outside the eval pool. Downloads hold one build slot of that worker until `InputFetched`.
+- Requests of one job for the same input share the wait and the answer. Failed inputs keep their error for the rest of the evaluation.
+- The fetch step can request every locked input of `flake.lock` up front. Failures there remain warnings. The evaluation can retry such an input through the hook.
+- `gradient eval` and the `--eval-driver` harness use fetch byte `0`.
 
 ## Parent Side
 
@@ -61,9 +81,9 @@ The pool code sits in `gradient-eval/src/pool/`. Both `gradient eval` and the wo
 | `workers.rs` | Checkout and return with test-on-borrow |
 | `memory.rs` | The memory guard, its victim choice and its reaper |
 | `fan_out.rs` | Shard batching and crash isolation |
-| `mod.rs` | The `EvalPool` facade: plan, list, fingerprint, checkpoint, input fetch |
+| `mod.rs` | The `EvalPool` facade: plan, list, fingerprint, checkpoint |
 | `live_thunks.rs` | Live thunk counters |
-| `import.rs` | The import-from-derivation seam, with `RefuseImports` as the refusal |
+| `dependencies.rs` | The seam for imports and missing inputs, with `RefuseDependencies` as the refusal |
 | `download.rs` | The `@nix` log parser and the download progress seam |
 | `driver.rs` | The hidden `--eval-driver <file>` harness: JSONL requests through the real transport, JSON responses out. The NixOS VM test can drive both sides of the wire through the harness from Python |
 
@@ -72,7 +92,6 @@ The worker adapter sits in `gradient-worker/src/worker_pool/`.
 | File | Role |
 |---|---|
 | `resolver.rs` | `WorkerPoolResolver`, the `gradient_sources::DerivationResolver` over `EvalPool` |
-| `input_fetch.rs` | The download board, as a `DownloadSink` on `InputBoard` |
 | `eval_stats.rs` | Per-attribute evaluation statistics |
 
 ## Memory Safety
