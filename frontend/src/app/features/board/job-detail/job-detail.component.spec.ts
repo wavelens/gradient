@@ -45,7 +45,7 @@ const DETAIL: AssignedJobDetail = {
   worker_context: {
     architectures: ['x86_64-linux'],
     system_features: ['kvm'],
-    capabilities: { core: true, federate: false, fetch: true, eval: false, build: true, cache: true },
+    capabilities: { core: true, federate: false, network: true, secrets: false, exec: false, eval: false, build: true, cache: true },
     cpu_count: 8,
     cpu_core_score: 1.5,
     ram_total_mb: 32000,
@@ -204,7 +204,7 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     const caps = Array.from(el.querySelectorAll('.ctx.worker tr')).find((r) =>
       r.textContent?.includes('Capabilities'),
     ) as HTMLElement;
-    expect(caps.textContent).toContain('fetch');
+    expect(caps.textContent).toContain('network');
     expect(caps.textContent).toContain('build');
     expect(caps.textContent).not.toContain('core');
     expect(caps.textContent).not.toContain('cache');

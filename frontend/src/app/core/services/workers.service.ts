@@ -43,7 +43,9 @@ export class WorkersService {
       display_name: displayName,
       url: url || undefined,
       token: token || undefined,
-      enable_fetch: caps?.enable_fetch ?? true,
+      enable_network: caps?.enable_network ?? true,
+      enable_secrets: caps?.enable_secrets ?? true,
+      enable_exec: caps?.enable_exec ?? false,
       enable_eval: caps?.enable_eval ?? true,
       enable_build: caps?.enable_build ?? true,
     });

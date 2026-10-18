@@ -184,7 +184,9 @@ Each worker registration has the following options.
 | `display_name` | string | attribute name | Name shown for the worker in the UI. |
 | `enable_build` | bool | `true` | Grant of the worker's `build` capability by the server. |
 | `enable_eval` | bool | `true` | Grant of the worker's `eval` capability by the server. |
-| `enable_fetch` | bool | `true` | Grant of the worker's `fetch` capability by the server. |
+| `enable_exec` | bool | `false` | Grant of the worker's `exec` capability by the server. |
+| `enable_network` | bool | `true` | Grant of the worker's `network` capability by the server. |
+| `enable_secrets` | bool | `true` | Grant of the worker's `secrets` capability by the server. |
 | `enabled` | bool | `true` | Activation state of the worker. UI changes persist only until the next server start. |
 | `projects` | list of string | `[ ]` | Projects under which the worker registered, one registration per project. An empty list marks a team worker. |
 | `team` | null or string | `null` | Owning team. A team worker can build for every project that grants the team's workers. Cannot be combined with `projects`. |

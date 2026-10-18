@@ -18,6 +18,7 @@ import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import {
   AccessState,
+  ALL_ALLOWED,
   AllowedCapabilities,
   changedCapabilities,
   gradientCiEntry,
@@ -55,8 +56,6 @@ import {
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, canOpenTeam } from '@shared/access';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
-
-const ALL_ALLOWED: AllowedCapabilities = { enable_fetch: true, enable_eval: true, enable_build: true };
 
 @Component({
   selector: 'app-workers',
@@ -115,7 +114,9 @@ export class WorkersComponent implements OnInit {
 
   readonly capLabels: { key: keyof GradientCapabilities; label: string }[] = [
     { key: 'federate', label: 'federate' },
-    { key: 'fetch',    label: 'fetch' },
+    { key: 'network',  label: 'network' },
+    { key: 'secrets',  label: 'secrets' },
+    { key: 'exec',     label: 'exec' },
     { key: 'eval',     label: 'eval' },
     { key: 'build',    label: 'build' },
   ];

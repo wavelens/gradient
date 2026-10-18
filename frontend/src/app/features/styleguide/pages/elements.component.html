@@ -143,7 +143,7 @@
 
 <h2>Allowed capabilities</h2>
 <p>What a worker may run. The editable variant is the toggle group of worker dialogs.</p>
-<gr-allowed-capabilities [value]="{ enable_fetch: false, enable_eval: true, enable_build: true }" />
+<gr-allowed-capabilities [value]="{ enable_network: true, enable_secrets: false, enable_exec: false, enable_eval: true, enable_build: true }" />
 <gr-allowed-capabilities editable [(value)]="allowed" />
 
 <h2>Permission picker</h2>

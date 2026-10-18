@@ -1831,7 +1831,7 @@ paths:
       tags:
       - board
       summary: Fleet load by capability, architecture, and feature
-      description: 'Real per-dimension fleet load: for each capability (eval/fetch/build), architecture, and system feature, the in-flight job count against the summed slot capacity of the workers that can serve it. Answers whether the fleet is eval-, build-, or architecture-bound rather than showing one blended busy %. Scoped to the caller''s projects (superusers see the whole fleet). Each bucket carries `{ key, in_flight, capacity, workers }`; busy % = in_flight / capacity.'
+      description: 'Real per-dimension fleet load: for each capability (eval/network/build), architecture, and system feature, the in-flight job count against the summed slot capacity of the workers that can serve it. Answers whether the fleet is eval-, build-, or architecture-bound rather than showing one blended busy %. Scoped to the caller''s projects (superusers see the whole fleet). Each bucket carries `{ key, in_flight, capacity, workers }`; busy % = in_flight / capacity.'
       operationId: getBoardWorkerLoad
       responses:
         '200':
@@ -13168,7 +13168,7 @@ components:
       - connected
       - draining
       - eval
-      - fetch
+      - network
       - build
       properties:
         bucket_start:
@@ -13182,7 +13182,7 @@ components:
         eval:
           type: integer
           format: int64
-        fetch:
+        network:
           type: integer
           format: int64
         build:
@@ -13391,7 +13391,7 @@ components:
       - assigned_jobs
       - max_concurrent_builds
       - eval
-      - fetch
+      - network
       - build
       - architectures
       properties:
@@ -13417,7 +13417,7 @@ components:
           format: int64
         eval:
           type: boolean
-        fetch:
+        network:
           type: boolean
         build:
           type: boolean
@@ -14973,7 +14973,8 @@ components:
     EvalCapability:
       type: string
       enum:
-      - fetch
+      - network
+      - secrets
       - eval
     EvaluateRequest:
       type: object
@@ -15607,22 +15608,28 @@ components:
       required:
       - core
       - federate
-      - fetch
       - eval
       - build
       - cache
+      - network
+      - secrets
+      - exec
       properties:
         core:
           type: boolean
         federate:
-          type: boolean
-        fetch:
           type: boolean
         eval:
           type: boolean
         build:
           type: boolean
         cache:
+          type: boolean
+        network:
+          type: boolean
+        secrets:
+          type: boolean
+        exec:
           type: boolean
     GrantCacheRequest:
       type: object
@@ -17352,7 +17359,15 @@ components:
           type:
           - string
           - 'null'
-        enable_fetch:
+        enable_network:
+          type:
+          - boolean
+          - 'null'
+        enable_secrets:
+          type:
+          - boolean
+          - 'null'
+        enable_exec:
           type:
           - boolean
           - 'null'
@@ -17647,7 +17662,9 @@ components:
         - display_name
         - registered_at
         - active
-        - enable_fetch
+        - enable_network
+        - enable_secrets
+        - enable_exec
         - enable_eval
         - enable_build
         - gradient_ci
@@ -17669,7 +17686,11 @@ components:
             oneOf:
             - $ref: '#/components/schemas/UserId'
             - type: 'null'
-          enable_fetch:
+          enable_network:
+            type: boolean
+          enable_secrets:
+            type: boolean
+          enable_exec:
             type: boolean
           enable_eval:
             type: boolean
@@ -17825,7 +17846,11 @@ components:
           type:
           - string
           - 'null'
-        enable_fetch:
+        enable_network:
+          type: boolean
+        enable_secrets:
+          type: boolean
+        enable_exec:
           type: boolean
         enable_eval:
           type: boolean
@@ -18672,14 +18697,19 @@ components:
       type: object
       required:
       - builds
-      - fetch
+      - network
+      - secrets
       - eval
       properties:
         builds:
           type: array
           items:
             $ref: '#/components/schemas/UnmetRequirement'
-        fetch:
+        network:
+          type: integer
+          format: int32
+          minimum: 0
+        secrets:
           type: integer
           format: int32
           minimum: 0
@@ -18901,7 +18931,9 @@ components:
         - active
         - managed
         - gradient_ci
-        - enable_fetch
+        - enable_network
+        - enable_secrets
+        - enable_exec
         - enable_eval
         - enable_build
         properties:
@@ -18922,7 +18954,11 @@ components:
             - 'null'
           gradient_ci:
             type: boolean
-          enable_fetch:
+          enable_network:
+            type: boolean
+          enable_secrets:
+            type: boolean
+          enable_exec:
             type: boolean
           enable_eval:
             type: boolean
@@ -19397,7 +19433,7 @@ components:
       - type: object
         description: |-
           `connected_workers` is the whole connected pool. It can be above zero while only
-          build-only workers are online and an eval or fetch worker is missing.
+          build-only workers are online and an eval or network worker is missing.
         required:
         - capability
         - connected_workers

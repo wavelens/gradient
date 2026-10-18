@@ -308,13 +308,22 @@ describe('EvaluationLogComponent', () => {
   });
 
   // #381: pre-build evals park with an eval_workers reason naming the missing
-  // capability (fetch while Fetching, eval while Evaluating).
+  // capability (network or secrets while Fetching, eval while Evaluating).
   describe('eval_workers waiting reason', () => {
-    it('titles and explains a missing fetch worker', () => {
+    it('titles and explains a missing network worker', () => {
       const { cmp } = setup();
-      const reason = { kind: 'eval_workers', capability: 'fetch', connected_workers: 0 } as const;
-      expect(cmp.waitingTitle(reason)).toBe('Waiting for a Fetch Worker');
-      expect(cmp.formatWaitingReason(reason)).toContain('fetch the flake sources');
+      const reason = { kind: 'eval_workers', capability: 'network', connected_workers: 0 } as const;
+      expect(cmp.waitingTitle(reason)).toBe('Waiting for a Network Worker');
+      expect(cmp.formatWaitingReason(reason)).toBe('No workers are connected to fetch the flake sources.');
+    });
+
+    it('titles and explains a missing worker with secrets', () => {
+      const { cmp } = setup();
+      const reason = { kind: 'eval_workers', capability: 'secrets', connected_workers: 1 } as const;
+      expect(cmp.waitingTitle(reason)).toBe('Waiting for a Worker with Secrets');
+      expect(cmp.formatWaitingReason(reason)).toBe(
+        '1 worker is connected, but none can fetch the flake sources with the project SSH key.',
+      );
     });
 
     it('titles and explains a missing eval worker with connected count', () => {

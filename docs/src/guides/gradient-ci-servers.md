@@ -51,12 +51,12 @@ Connection tokens start with `gci1_`.
 
 ## Allowed Capabilities
 
-A new connection grants `eval` and `build`. The entry shows both as **Allowed**. Fetching of sources stays the job of the project's own workers.
+A new connection grants `network`, `eval` and `build`. All three appear as **Allowed** on the entry. Only the project's own workers get the project SSH key.
 
 | Workers of the project | Allowed on Gradient.CI Servers |
 |---|---|
-| An own worker allowed to fetch | `eval`, `build` (default) |
-| Gradient.CI Servers only | `fetch`, `eval`, `build` |
+| An own worker with `secrets`, or a public repository | `network`, `eval`, `build` (default) |
+| Gradient.CI Servers only, repository behind an SSH URL | `network`, `secrets`, `eval`, `build` |
 
 - **Edit** on the entry changes the allowed [capabilities](../concepts/workers.md#capabilities).
 - **Deactivate** pauses the connection without a deletion.

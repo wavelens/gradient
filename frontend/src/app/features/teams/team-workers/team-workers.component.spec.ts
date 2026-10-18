@@ -25,7 +25,9 @@ const connection: TeamWorkerEntry = {
   active: true,
   managed: false,
   gradient_ci: true,
-  enable_fetch: false,
+  enable_network: true,
+  enable_secrets: false,
+  enable_exec: false,
   enable_eval: true,
   enable_build: true,
   connected: true,
@@ -73,11 +75,11 @@ describe('TeamWorkersComponent', () => {
     fixture.detectChanges();
     const dialog = document.querySelector('.gr-dialog')!;
     Array.from(dialog.querySelectorAll('gr-allowed-capabilities button'))
-      .find((b) => b.textContent?.includes('fetch'))!
+      .find((b) => b.textContent?.includes('secrets'))!
       .dispatchEvent(new Event('click'));
     button(dialog, 'Save')!.click();
 
-    expect(updateWorker).toHaveBeenCalledWith('platform', 'g1', { enable_fetch: true });
+    expect(updateWorker).toHaveBeenCalledWith('platform', 'g1', { enable_secrets: true });
   });
 
   it('links a Gradient.CI connection to its site', () => {

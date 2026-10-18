@@ -45,7 +45,9 @@ export class AllowedCapabilitiesComponent {
   editable = input(false, { transform: booleanAttribute });
 
   readonly capabilities: { key: keyof AllowedCapabilities; label: string }[] = [
-    { key: 'enable_fetch', label: 'fetch' },
+    { key: 'enable_network', label: 'network' },
+    { key: 'enable_secrets', label: 'secrets' },
+    { key: 'enable_exec', label: 'exec' },
     { key: 'enable_eval', label: 'eval' },
     { key: 'enable_build', label: 'build' },
   ];
