@@ -8,9 +8,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use gradient_derivation::{Derivation, parse_drv};
 use gradient_eval::ipc::ResolvedItem;
-use gradient_eval::pool::{
-    CallStats, EvalPool, EvalPoolConfig, EvalWorker, LiveThunks, MemoryGuard,
-};
+use gradient_eval::pool::{CallStats, EvalPool, EvalPoolConfig, LiveThunks, MemoryGuard};
 use gradient_sources::{
     AttrError, DerivationResolver, EvalDependencies, FlakeDiscovery, FoundDerivations,
     ResolvedDerivation,
@@ -20,7 +18,6 @@ use gradient_util::sync::Mutex;
 use std::sync::Arc;
 
 use super::eval_stats::{EvalStatsAccumulator, EvalStatsTotals};
-use super::input_fetch::{DownloadTarget, InputFetcher};
 
 #[derive(Debug)]
 pub struct WorkerPoolResolver {
@@ -75,7 +72,7 @@ impl WorkerPoolResolver {
             cache_dir: eval_cache_dir,
             trace_dir,
             metrics: eval_metrics,
-            fetch_through_parent: false,
+            fetch_through_parent: true,
         };
         Self {
             pool: EvalPool::new(config.clone()),
@@ -129,31 +126,6 @@ impl WorkerPoolResolver {
                 stats.observe(&call.entry_point, delta, call.rss);
             }
         }
-    }
-}
-
-#[async_trait]
-impl InputFetcher for WorkerPoolResolver {
-    async fn fetch_input(
-        &self,
-        locked: String,
-        git_ssh_command: Option<String>,
-        target: DownloadTarget,
-    ) -> Result<String> {
-        let args: serde_json::Value =
-            serde_json::from_str(&locked).context("parse locked input attributes")?;
-        let request = serde_json::json!({ "builtin": "fetchTree", "args": args }).to_string();
-        let mut worker = EvalWorker::spawn_for_fetch(&self.config).await?;
-        let fetched = worker
-            .fetch(request, git_ssh_command, Arc::new(target))
-            .await;
-        worker.shutdown().await;
-        let response: serde_json::Value =
-            serde_json::from_str(&fetched?).context("parse fetch response")?;
-        response["storePath"]
-            .as_str()
-            .map(str::to_owned)
-            .context("fetch response without a store path")
     }
 }
 

@@ -177,19 +177,6 @@
   },
   {
     "group": "",
-    "field": "eval_fetch_through_parent",
-    "flag": "eval-fetch-through-parent",
-    "env": "GRADIENT_WORKER_EVAL_FETCH_THROUGH_PARENT",
-    "type": "bool",
-    "description": "Let the eval subprocess ask its parent for missing inputs (internal - do not set manually).",
-    "default": null,
-    "values": [
-      "true",
-      "false"
-    ]
-  },
-  {
-    "group": "",
     "field": "eval_driver",
     "flag": "eval-driver",
     "env": "GRADIENT_WORKER_EVAL_DRIVER",

@@ -19,7 +19,6 @@ use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
 use tracing::{info, warn};
 
-use super::fetch::ssh_key_env;
 use crate::proto::job::JobUpdater;
 
 #[derive(Debug, Clone)]
@@ -139,6 +138,30 @@ fn checked_store_path(request: &str, response: &str) -> Result<String> {
         anyhow::bail!("the input was fetched as {fetched}, expected {expected}");
     }
     Ok(fetched.to_owned())
+}
+
+async fn ssh_key_env(
+    ssh_key: Option<&str>,
+    binpath_ssh: &str,
+) -> Result<Option<(tempfile::NamedTempFile, String)>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Some(key) = ssh_key else {
+        return Ok(None);
+    };
+    let kf = tempfile::NamedTempFile::with_suffix(".key").context("create SSH key temp file")?;
+    tokio::fs::set_permissions(kf.path(), std::fs::Permissions::from_mode(0o600))
+        .await
+        .context("chmod SSH key file")?;
+    tokio::fs::write(kf.path(), key.as_bytes())
+        .await
+        .context("write SSH key file")?;
+    let ssh_command = format!(
+        "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
+        binpath_ssh,
+        kf.path().display()
+    );
+    Ok(Some((kf, ssh_command)))
 }
 
 type Totals = (u64, Option<u64>);

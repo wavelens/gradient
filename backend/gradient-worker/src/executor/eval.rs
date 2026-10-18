@@ -9,7 +9,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Instant;
 
-use super::import::EvalImportBuilder;
+use super::dependencies::EvalDependencySource;
 use super::progress_report::{ChangeReporter, thunk_progress};
 use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
@@ -928,7 +928,7 @@ async fn discover(
     let eval_overrides = eval_input_overrides(job, local_flake_path);
     debug!(repo = %repo, "listing flake derivations");
 
-    let imports = EvalImportBuilder::new(reporter, drv_reader, abort.clone());
+    let imports = EvalDependencySource::new(reporter, drv_reader, abort.clone());
     let send = move |resolved: Vec<ResolvedDerivation>| {
         for derivation in resolved {
             let _ = found.send(derivation);

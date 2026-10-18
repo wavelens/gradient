@@ -86,10 +86,13 @@ impl<R: Read, W: Write> ParentPipe<R, W> {
     }
 }
 
-pub fn run_eval_worker(collect_stats: bool, fetch_through_parent: bool) -> std::io::Result<()> {
+pub fn run_eval_worker(collect_stats: bool) -> std::io::Result<()> {
     let mut stdout = std::io::stdout();
     stdout.write_all(&[EVAL_IPC_VERSION])?;
     stdout.flush()?;
+    let mut fetch_through_parent = [0u8; 1];
+    std::io::stdin().read_exact(&mut fetch_through_parent)?;
+    let fetch_through_parent = fetch_through_parent[0] == 1;
 
     let pipe = Arc::new(ParentPipe::new(
         std::io::stdin(),

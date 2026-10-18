@@ -8,17 +8,17 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use gradient_util::sync::Mutex;
 use gradient_wire::messages::{FlakeJob, FlakeSource};
-use gradient_wire::traits::{EvalProgressSink, JobReporter, WorkerStore};
-use gradient_wire::types::{EvalProgress, InputFetchState};
-use tempfile::NamedTempFile;
+use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter, WorkerStore};
+use gradient_wire::types::{EvalProgress, InputFetch, InputFetchState};
 use tracing::{debug, info};
 
 use super::AbortSignal;
+use super::dependencies::InputSource;
 use super::progress_report::ChangeReporter;
 use crate::error::WorkerError;
 use crate::proto::credentials::CredentialStore;
-use crate::worker_pool::{DownloadTarget, InputBoard, InputFetcher};
 
 pub struct FetchOutcome {
     pub source_path: String,
@@ -39,8 +39,6 @@ pub async fn fetch_repository(
     updater: &mut dyn JobReporter,
     credentials: &CredentialStore,
     store: &dyn WorkerStore,
-    fetcher: &dyn InputFetcher,
-    binpath_ssh: &str,
     mut abort: AbortSignal,
 ) -> Result<FetchOutcome> {
     if abort.is_aborted() {
@@ -128,11 +126,11 @@ pub async fn fetch_repository(
         .as_ref()
         .map(|lock| locked_inputs(lock, &overridden))
         .unwrap_or_default();
-    let key_env = ssh_key_env(ssh_key.as_deref(), binpath_ssh).await?;
-    let git_ssh_command = key_env.as_ref().map(|(_, command)| command.clone());
-    pull_from_cache(updater, store, &inputs, &mut abort).await?;
     let sink = updater.eval_progress_sink();
-    let fetched = fetch_inputs(inputs, store, fetcher, &*sink, git_ssh_command, &mut abort).await?;
+    let fetched = {
+        let source = InputSource::new(&*updater);
+        fetch_inputs(inputs, store, &source, &*sink, &mut abort).await?
+    };
     for msg in &fetched.warnings {
         updater
             .send_eval_message(
@@ -156,9 +154,8 @@ pub async fn fetch_repository(
 #[derive(Debug, Clone)]
 struct LockedInput {
     name: String,
-    domain: String,
     store_path: String,
-    locked: String,
+    request: String,
 }
 
 async fn read_lock(flake_root: &str) -> Result<Option<serde_json::Value>> {
@@ -207,9 +204,13 @@ fn locked_inputs(lock: &serde_json::Value, overridden: &HashSet<String>) -> Vec<
         };
         inputs.push(LockedInput {
             name: root_names.get(key).copied().unwrap_or(key).to_owned(),
-            domain: input_domain(locked),
+            request: serde_json::json!({
+                "builtin": "fetchTree",
+                "args": fetcher_attrs(locked),
+                "storePath": store_path,
+            })
+            .to_string(),
             store_path,
-            locked: fetcher_attrs(locked).to_string(),
         });
     }
     inputs.sort_by(|a, b| a.name.cmp(&b.name));
@@ -236,75 +237,76 @@ fn source_store_path(nar_hash: &str) -> Option<String> {
     Some(store_dir.display(&path).to_string())
 }
 
-fn input_domain(locked: &serde_json::Value) -> String {
-    let default_host = match locked["type"].as_str() {
-        Some("github") => Some("github.com"),
-        Some("gitlab") => Some("gitlab.com"),
-        Some("sourcehut") => Some("git.sr.ht"),
-        _ => None,
-    };
-    let host = match default_host {
-        Some(default) => locked["host"].as_str().unwrap_or(default),
-        None => locked["url"].as_str().map(url_host).unwrap_or_default(),
-    };
-    second_level(host)
+#[derive(Debug)]
+struct InputRow {
+    name: String,
+    state: InputFetchState,
+    downloaded_bytes: u64,
+    expected_bytes: Option<u64>,
 }
 
-fn url_host(url: &str) -> &str {
-    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let authority = rest.split('/').next().unwrap_or_default();
-    let host = authority
-        .rsplit_once('@')
-        .map_or(authority, |(_, host)| host);
-    host.split(':').next().unwrap_or_default()
+#[derive(Debug)]
+struct InputBoard {
+    rows: Mutex<Vec<InputRow>>,
 }
 
-fn second_level(host: &str) -> String {
-    if host.parse::<std::net::IpAddr>().is_ok() {
-        return host.to_owned();
+impl InputBoard {
+    fn new(rows: Vec<(String, InputFetchState)>) -> Arc<Self> {
+        let rows = rows
+            .into_iter()
+            .map(|(name, state)| InputRow {
+                name,
+                state,
+                downloaded_bytes: 0,
+                expected_bytes: None,
+            })
+            .collect();
+        Arc::new(Self {
+            rows: Mutex::new(rows),
+        })
     }
-    let labels: Vec<&str> = host.rsplitn(3, '.').collect();
-    match labels.as_slice() {
-        [tld, sld, ..] => format!("{sld}.{tld}"),
-        _ => host.to_owned(),
+
+    fn set_state(&self, index: usize, state: InputFetchState) {
+        self.rows.lock()[index].state = state;
+    }
+
+    fn transfer(&self, index: usize, bytes_done: u64, bytes_total: Option<u64>) {
+        let row = &mut self.rows.lock()[index];
+        row.downloaded_bytes = bytes_done;
+        row.expected_bytes = bytes_total;
+    }
+
+    fn snapshot(&self) -> Vec<InputFetch> {
+        self.rows
+            .lock()
+            .iter()
+            .map(|row| InputFetch {
+                name: row.name.clone(),
+                state: row.state,
+                downloaded_bytes: row.downloaded_bytes,
+                expected_bytes: row.expected_bytes.unwrap_or_default(),
+            })
+            .collect()
     }
 }
 
-#[tracing::instrument(level = "debug", skip_all, fields(inputs = inputs.len()))]
-async fn pull_from_cache(
-    updater: &mut dyn JobReporter,
-    store: &dyn WorkerStore,
-    inputs: &[LockedInput],
-    abort: &mut AbortSignal,
-) -> Result<()> {
-    let mut paths: Vec<String> = inputs.iter().map(|i| i.store_path.clone()).collect();
-    paths.sort();
-    paths.dedup();
-    let missing = missing_paths(store, &paths).await?;
-    if missing.is_empty() {
-        return Ok(());
+struct BoardRow {
+    board: Arc<InputBoard>,
+    index: usize,
+}
+
+impl InputProgressSink for BoardRow {
+    fn transfer(&self, bytes_done: u64, bytes_total: Option<u64>) {
+        self.board.transfer(self.index, bytes_done, bytes_total);
     }
-    let pulled = tokio::select! {
-        biased;
-        () = abort.aborted() => anyhow::bail!(WorkerError::FlakeInputFetchAborted),
-        pulled = updater.pull_paths(missing) => pulled,
-    };
-    if let Err(e) = pulled {
-        debug!(
-            error = format!("{e:#}"),
-            "flake inputs not pulled from the cache, fetching them from their origin"
-        );
-    }
-    Ok(())
 }
 
 #[tracing::instrument(level = "debug", skip_all, fields(inputs = inputs.len()))]
 async fn fetch_inputs(
     inputs: Vec<LockedInput>,
     store: &dyn WorkerStore,
-    fetcher: &dyn InputFetcher,
+    source: &InputSource<'_>,
     sink: &dyn EvalProgressSink,
-    git_ssh_command: Option<String>,
     abort: &mut AbortSignal,
 ) -> Result<FetchedInputs> {
     let paths: Vec<String> = inputs.iter().map(|i| i.store_path.clone()).collect();
@@ -323,46 +325,29 @@ async fn fetch_inputs(
             .collect(),
     );
 
-    let mut by_domain: HashMap<&str, Vec<usize>> = HashMap::new();
-    for (index, input) in inputs
-        .iter()
-        .enumerate()
-        .filter(|(_, i)| missing.contains(&i.store_path))
-    {
-        by_domain
-            .entry(input.domain.as_str())
-            .or_default()
-            .push(index);
-    }
-    let fetch_domain = |indexes: Vec<usize>| {
-        let (board, inputs, git_ssh_command) = (&board, &inputs, &git_ssh_command);
+    let fetch_one = |index: usize| {
+        let (board, inputs) = (&board, &inputs);
         async move {
-            let mut done = Vec::new();
-            for index in indexes {
-                board.set_state(index, InputFetchState::Fetching);
-                let target = DownloadTarget {
-                    board: Arc::clone(board),
-                    index,
-                };
-                let fetched = fetcher
-                    .fetch_input(
-                        inputs[index].locked.clone(),
-                        git_ssh_command.clone(),
-                        target,
-                    )
-                    .await;
-                let state = if fetched.is_ok() {
-                    InputFetchState::Done
-                } else {
-                    InputFetchState::Failed
-                };
-                board.set_state(index, state);
-                done.push((index, fetched));
-            }
-            done
+            board.set_state(index, InputFetchState::Fetching);
+            let progress = Arc::new(BoardRow {
+                board: Arc::clone(board),
+                index,
+            });
+            let fetched = source.fetch(inputs[index].request.clone(), progress).await;
+            let state = if fetched.is_ok() {
+                InputFetchState::Done
+            } else {
+                InputFetchState::Failed
+            };
+            board.set_state(index, state);
+            (index, fetched)
         }
     };
-    let fetches = futures::future::join_all(by_domain.into_values().map(fetch_domain));
+    let fetches = futures::future::join_all(
+        (0..inputs.len())
+            .filter(|&i| missing.contains(&inputs[i].store_path))
+            .map(fetch_one),
+    );
 
     let snapshot = || {
         (!missing.is_empty()).then(|| EvalProgress::Fetching {
@@ -380,13 +365,13 @@ async fn fetch_inputs(
 
     let mut all: Vec<String> = paths.into_iter().filter(|p| !missing.contains(p)).collect();
     let mut warnings = Vec::new();
-    for (index, result) in fetched.into_iter().flatten() {
+    for (index, result) in fetched {
         match result {
-            Ok(path) => all.push(path),
-            Err(e) => warnings.push(format!(
+            Ok(_) => all.push(inputs[index].store_path.clone()),
+            Err(message) => warnings.push(format!(
                 "skipping flake input '{}': {}",
                 inputs[index].name,
-                format!("{e:#}").trim()
+                message.trim()
             )),
         }
     }
@@ -473,30 +458,6 @@ async fn run_input_update(
         .collect();
 
     updater.report_input_update(candidate, bumped).await
-}
-
-pub(super) async fn ssh_key_env(
-    ssh_key: Option<&str>,
-    binpath_ssh: &str,
-) -> Result<Option<(NamedTempFile, String)>> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let Some(key) = ssh_key else {
-        return Ok(None);
-    };
-    let kf = NamedTempFile::with_suffix(".key").context("create SSH key temp file")?;
-    tokio::fs::set_permissions(kf.path(), std::fs::Permissions::from_mode(0o600))
-        .await
-        .context("chmod SSH key file")?;
-    tokio::fs::write(kf.path(), key.as_bytes())
-        .await
-        .context("write SSH key file")?;
-    let ssh_command = format!(
-        "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
-        binpath_ssh,
-        kf.path().display()
-    );
-    Ok(Some((kf, ssh_command)))
 }
 
 async fn require_present(store: &dyn WorkerStore, paths: &[String]) -> Result<()> {
@@ -665,8 +626,6 @@ mod tests {
             &mut reporter,
             &credentials,
             &FakeWorkerStore::new(),
-            &FakeFetcher::new(""),
-            "ssh",
             no_abort(),
         )
         .await;
@@ -695,8 +654,6 @@ mod tests {
             &mut reporter,
             &credentials,
             &FakeWorkerStore::new(),
-            &FakeFetcher::new(""),
-            "ssh",
             no_abort(),
         )
         .await;
@@ -774,17 +731,9 @@ mod tests {
         let mut reporter = RecordingJobReporter::new();
         let store = FakeWorkerStore::new();
 
-        let outcome = fetch_repository(
-            &job,
-            &mut reporter,
-            &credentials,
-            &store,
-            &FakeFetcher::new(""),
-            "ssh",
-            no_abort(),
-        )
-        .await
-        .unwrap();
+        let outcome = fetch_repository(&job, &mut reporter, &credentials, &store, no_abort())
+            .await
+            .unwrap();
 
         assert!(outcome.source_path.starts_with("/nix/store/"));
         assert!(outcome.source_path.ends_with("-source"));
@@ -961,10 +910,7 @@ mod tests {
         assert!(warnings[0].contains("missing"));
     }
 
-    use crate::worker_pool::{DownloadTarget, InputFetcher};
-    use gradient_util::sync::Mutex;
-    use gradient_wire::types::{EvalProgress, InputFetchState};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use gradient_wire::types::InputOutcome;
 
     fn lock_with(nodes: serde_json::Value) -> serde_json::Value {
         serde_json::json!({ "root": "root", "version": 7, "nodes": nodes })
@@ -993,18 +939,8 @@ mod tests {
         }));
         let overridden = ["home".to_owned()].into_iter().collect();
         let inputs = locked_inputs(&lock, &overridden);
-        let names: Vec<_> = inputs
-            .iter()
-            .map(|i| (i.name.as_str(), i.domain.as_str()))
-            .collect();
-        assert_eq!(
-            names,
-            vec![
-                ("nixpkgs", "github.com"),
-                ("systems", "github.com"),
-                ("utils", "github.com")
-            ]
-        );
+        let names: Vec<_> = inputs.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, vec!["nixpkgs", "systems", "utils"]);
         assert!(
             inputs
                 .iter()
@@ -1021,264 +957,163 @@ mod tests {
                 "rev": "r", "dir": "lib", "narHash": nar_hash('A') } },
         }));
         let inputs = locked_inputs(&lock, &HashSet::new());
-        let locked: serde_json::Value = serde_json::from_str(&inputs[0].locked).unwrap();
+        let request: serde_json::Value = serde_json::from_str(&inputs[0].request).unwrap();
         assert_eq!(
-            locked,
-            serde_json::json!({ "type": "github", "owner": "NixOS", "repo": "nixpkgs",
-                "rev": "r", "narHash": nar_hash('A') })
+            request,
+            serde_json::json!({ "builtin": "fetchTree", "storePath": inputs[0].store_path,
+                "args": { "type": "github", "owner": "NixOS", "repo": "nixpkgs",
+                "rev": "r", "narHash": nar_hash('A') } })
         );
     }
 
-    #[test]
-    fn domains_reduce_to_the_second_level() {
-        let d = |v: serde_json::Value| input_domain(&v);
-        assert_eq!(d(serde_json::json!({"type":"github"})), "github.com");
-        assert_eq!(
-            d(serde_json::json!({"type":"github","host":"git.corp.example.org"})),
-            "example.org"
-        );
-        assert_eq!(d(serde_json::json!({"type":"sourcehut"})), "sr.ht");
-        assert_eq!(
-            d(serde_json::json!({"type":"git","url":"ssh://git@gitlab.com/a/b"})),
-            "gitlab.com"
-        );
-        assert_eq!(
-            d(serde_json::json!({"type":"tarball","url":"https://releases.nixos.org/x.tar.xz"})),
-            "nixos.org"
-        );
-        assert_eq!(d(serde_json::json!({"type":"path","path":"/x"})), "");
-    }
-
-    struct FakeFetcher {
-        in_flight: Mutex<HashMap<String, usize>>,
-        overlapped: AtomicBool,
-        fail: &'static str,
-    }
-
-    impl FakeFetcher {
-        fn new(fail: &'static str) -> Self {
-            Self {
-                in_flight: Mutex::default(),
-                overlapped: AtomicBool::default(),
-                fail,
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl InputFetcher for FakeFetcher {
-        async fn fetch_input(
-            &self,
-            locked: String,
-            _: Option<String>,
-            target: DownloadTarget,
-        ) -> anyhow::Result<String> {
-            let v: serde_json::Value = serde_json::from_str(&locked)?;
-            let domain = input_domain(&v);
-            {
-                let mut in_flight = self.in_flight.lock();
-                let n = in_flight.entry(domain.clone()).or_default();
-                *n += 1;
-                assert_eq!(*n, 1, "two downloads in flight for {domain}");
-                if in_flight.values().filter(|n| **n > 0).count() > 1 {
-                    self.overlapped.store(true, Ordering::SeqCst);
-                }
-            }
-            target.board.transfer(target.index, 1, 10, 0);
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            *self.in_flight.lock().get_mut(&domain).unwrap() -= 1;
-            if v["repo"] == self.fail {
-                anyhow::bail!("404");
-            }
-            Ok(format!("/nix/store/{}-source", v["repo"].as_str().unwrap()))
-        }
-    }
-
-    fn input(name: &str, domain: &str, repo: &str) -> LockedInput {
+    fn input(name: &str, repo: &str) -> LockedInput {
+        let store_path = format!("/nix/store/{repo}-source");
         LockedInput {
             name: name.into(),
-            domain: domain.into(),
-            store_path: format!("/nix/store/{repo}-source"),
-            locked: serde_json::json!({ "type": "github", "host": domain, "repo": repo })
-                .to_string(),
+            request: serde_json::json!({ "builtin": "fetchTree",
+                "args": { "type": "github", "repo": repo }, "storePath": store_path })
+            .to_string(),
+            store_path,
         }
+    }
+
+    fn fetched(repo: &str) -> InputOutcome {
+        InputOutcome::Fetched {
+            response: format!(r#"{{"storePath":"/nix/store/{repo}-source"}}"#),
+        }
+    }
+
+    async fn fetch_with(
+        reporter: &RecordingJobReporter,
+        store: &FakeWorkerStore,
+        inputs: Vec<LockedInput>,
+        abort: &mut AbortSignal,
+    ) -> Result<FetchedInputs> {
+        let source = InputSource::new(reporter);
+        fetch_inputs(
+            inputs,
+            store,
+            &source,
+            &*reporter.eval_progress_sink(),
+            abort,
+        )
+        .await
+    }
+
+    fn rows(progress: Option<EvalProgress>) -> Vec<(String, InputFetchState, u64, u64)> {
+        let Some(EvalProgress::Fetching { inputs }) = progress else {
+            panic!("no fetch snapshot");
+        };
+        inputs
+            .into_iter()
+            .map(|i| (i.name, i.state, i.downloaded_bytes, i.expected_bytes))
+            .collect()
     }
 
     #[tokio::test]
-    async fn domains_overlap_while_each_domain_stays_serial_and_a_failure_is_a_warning() {
-        let fetcher = FakeFetcher::new("bad");
-        let reporter = RecordingJobReporter::new();
-        let store = FakeWorkerStore::default();
-        let inputs = vec![
-            input("a", "github.com", "a"),
-            input("b", "github.com", "bad"),
-            input("c", "gitlab.com", "c"),
-        ];
-        let FetchedInputs {
-            paths, warnings, ..
-        } = fetch_inputs(
-            inputs,
-            &store,
-            &fetcher,
-            &*reporter.eval_progress_sink(),
-            None,
+    async fn locked_inputs_are_requested_up_front_and_failures_become_warnings() {
+        let reporter = RecordingJobReporter::new()
+            .with_input_outcome("/nix/store/a-source", fetched("a"))
+            .with_input_outcome(
+                "/nix/store/bad-source",
+                InputOutcome::Failed {
+                    message: "404 ".into(),
+                },
+            );
+        let fetched = fetch_with(
+            &reporter,
+            &FakeWorkerStore::default(),
+            vec![input("a", "a"), input("b", "bad")],
             &mut no_abort(),
         )
         .await
         .unwrap();
-        assert!(fetcher.overlapped.load(Ordering::SeqCst));
-        assert_eq!(paths.len(), 2);
-        assert_eq!(warnings, vec!["skipping flake input 'b': 404".to_owned()]);
-        let Some(ReportedEvent::EvalProgress(EvalProgress::Fetching { inputs })) =
-            reporter.events().last().cloned()
-        else {
-            panic!("no final fetch snapshot");
-        };
-        let states: Vec<_> = inputs
-            .iter()
-            .map(|i| (i.name.as_str(), i.state, i.downloaded_bytes))
+
+        assert_eq!(fetched.paths, vec!["/nix/store/a-source".to_owned()]);
+        assert_eq!(
+            fetched.warnings,
+            vec!["skipping flake input 'b': 404".to_owned()]
+        );
+        assert_eq!(reporter.input_requests().len(), 2);
+        let states: Vec<_> = rows(fetched.progress)
+            .into_iter()
+            .map(|(name, state, ..)| (name, state))
             .collect();
         assert_eq!(
             states,
             vec![
-                ("a", InputFetchState::Done, 10),
-                ("b", InputFetchState::Failed, 10),
-                ("c", InputFetchState::Done, 10),
+                ("a".to_owned(), InputFetchState::Done),
+                ("b".to_owned(), InputFetchState::Failed)
             ]
         );
     }
 
     #[tokio::test]
-    async fn inputs_sharing_a_source_return_it_once() {
-        let fetcher = FakeFetcher::new("");
+    async fn an_input_in_the_store_is_answered_without_the_server() {
         let reporter = RecordingJobReporter::new();
-        let FetchedInputs { paths, .. } = fetch_inputs(
-            vec![
-                input("systems", "github.com", "systems"),
-                input("systems_2", "github.com", "systems"),
-            ],
-            &FakeWorkerStore::default(),
-            &fetcher,
-            &*reporter.eval_progress_sink(),
-            None,
-            &mut no_abort(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(paths, vec!["/nix/store/systems-source".to_owned()]);
+        let store = FakeWorkerStore::new().with_present_path("/nix/store/a-source");
+        let fetched = fetch_with(&reporter, &store, vec![input("a", "a")], &mut no_abort())
+            .await
+            .unwrap();
+
+        assert_eq!(fetched.paths, vec!["/nix/store/a-source".to_owned()]);
+        assert!(reporter.events().is_empty(), "{:?}", reporter.events());
     }
 
     #[tokio::test]
-    async fn only_inputs_missing_from_the_store_are_pulled_from_the_cache_once() {
-        let mut reporter = RecordingJobReporter::new();
+    async fn server_progress_moves_the_input_board() {
+        let reporter = RecordingJobReporter::new()
+            .with_input_outcome("/nix/store/b-source", fetched("b"))
+            .with_input_progress(40, Some(90));
         let store = FakeWorkerStore::new().with_present_path("/nix/store/a-source");
-        pull_from_cache(
-            &mut reporter,
+        let fetched = fetch_with(
+            &reporter,
             &store,
-            &[
-                input("a", "github.com", "a"),
-                input("b", "github.com", "b"),
-                input("b_2", "github.com", "b"),
-            ],
+            vec![input("a", "a"), input("b", "b")],
             &mut no_abort(),
         )
         .await
         .unwrap();
-        let pulled: Vec<_> = reporter
-            .events()
-            .into_iter()
-            .filter_map(|e| match e {
-                ReportedEvent::PathsPulled { paths } => Some(paths),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(pulled, vec![vec!["/nix/store/b-source".to_owned()]]);
-    }
 
-    #[tokio::test]
-    async fn present_inputs_send_no_progress() {
-        let fetcher = FakeFetcher::new("");
-        let reporter = RecordingJobReporter::new();
-        let store = FakeWorkerStore::new().with_present_path("/nix/store/a-source");
-        let FetchedInputs { paths, .. } = fetch_inputs(
-            vec![input("a", "github.com", "a")],
-            &store,
-            &fetcher,
-            &*reporter.eval_progress_sink(),
-            None,
-            &mut no_abort(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(paths, vec!["/nix/store/a-source".to_owned()]);
-        assert!(reporter.events().is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_present_input_is_a_done_row_next_to_a_missing_one() {
-        let fetcher = FakeFetcher::new("");
-        let reporter = RecordingJobReporter::new();
-        let store = FakeWorkerStore::new().with_present_path("/nix/store/a-source");
-        let fetched = fetch_inputs(
-            vec![input("a", "github.com", "a"), input("b", "github.com", "b")],
-            &store,
-            &fetcher,
-            &*reporter.eval_progress_sink(),
-            None,
-            &mut no_abort(),
-        )
-        .await
-        .unwrap();
-        let Some(EvalProgress::Fetching { inputs }) = fetched.progress else {
-            panic!("no final fetch snapshot");
-        };
-        let rows: Vec<_> = inputs
-            .iter()
-            .map(|i| (i.name.as_str(), i.state, i.downloaded_bytes))
-            .collect();
         assert_eq!(
-            rows,
+            rows(fetched.progress),
             vec![
-                ("a", InputFetchState::Done, 0),
-                ("b", InputFetchState::Done, 10),
+                ("a".to_owned(), InputFetchState::Done, 0, 0),
+                ("b".to_owned(), InputFetchState::Done, 40, 90),
             ]
         );
         let Some(ReportedEvent::EvalProgress(sent)) = reporter.events().last().cloned() else {
             panic!("the final snapshot was not sent");
         };
-        assert_eq!(sent, EvalProgress::Fetching { inputs });
+        assert!(matches!(sent, EvalProgress::Fetching { .. }));
     }
 
     #[tokio::test]
-    async fn no_rows_sends_no_progress() {
-        let fetcher = FakeFetcher::new("");
-        let reporter = RecordingJobReporter::new();
-        let FetchedInputs { paths, .. } = fetch_inputs(
-            vec![],
+    async fn inputs_sharing_a_source_are_requested_once() {
+        let reporter = RecordingJobReporter::new()
+            .with_input_outcome("/nix/store/systems-source", fetched("systems"));
+        let fetched = fetch_with(
+            &reporter,
             &FakeWorkerStore::default(),
-            &fetcher,
-            &*reporter.eval_progress_sink(),
-            None,
+            vec![input("systems", "systems"), input("systems_2", "systems")],
             &mut no_abort(),
         )
         .await
         .unwrap();
-        assert!(paths.is_empty());
-        assert!(reporter.events().is_empty());
+
+        assert_eq!(fetched.paths, vec!["/nix/store/systems-source".to_owned()]);
+        assert_eq!(reporter.input_requests().len(), 1);
     }
 
     #[tokio::test]
     async fn an_abort_stops_the_fetch() {
-        let fetcher = FakeFetcher::new("");
         let reporter = RecordingJobReporter::new();
         let (tx, mut rx) = AbortSignal::channel();
         tx.send(true).unwrap();
-        let err = fetch_inputs(
-            vec![input("a", "github.com", "a")],
+        let err = fetch_with(
+            &reporter,
             &FakeWorkerStore::default(),
-            &fetcher,
-            &*reporter.eval_progress_sink(),
-            None,
+            vec![input("a", "a")],
             &mut rx,
         )
         .await
