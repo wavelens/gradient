@@ -26,7 +26,7 @@ use tracing::{error, info, warn};
 const DRV_RECOVERY_GRACE_SECS: i64 = 120;
 
 use crate::assessment_memo::AssessmentMemo;
-use crate::buildability::{BuildWorkerCaps, BuildabilityChecker};
+use crate::buildability::{BuildWorkerCaps, BuildabilityChecker, build_worker_caps};
 use crate::unbuildable::{Unbuildable, unbuildable};
 use gradient_db::evaluations::counters::EvalCounters;
 
@@ -701,13 +701,7 @@ fn project_worker_caps(workers: &[WorkerInfo], project: Option<ProjectId>) -> Ve
     workers
         .iter()
         .filter(|w| eligible_for(w, project))
-        .map(|w| {
-            (
-                w.architectures.clone(),
-                w.system_features.clone(),
-                w.capabilities.network,
-            )
-        })
+        .filter_map(build_worker_caps)
         .collect()
 }
 
@@ -884,10 +878,12 @@ mod tests {
         features: &[&str],
         authorized_peers: Option<HashSet<ProjectId>>,
     ) -> WorkerInfo {
+        let mut base = worker(true, authorized_peers);
+        base.capabilities.build = true;
         WorkerInfo {
             architectures: architectures.iter().map(|a| a.to_string()).collect(),
             system_features: features.iter().map(|f| f.to_string()).collect(),
-            ..worker(true, authorized_peers)
+            ..base
         }
     }
 
@@ -932,6 +928,13 @@ mod tests {
         let (own, other) = (ProjectId::now_v7(), ProjectId::now_v7());
         let w = capable_worker(&["aarch64-darwin"], &[], Some(HashSet::from([other])));
         assert!(project_worker_caps(&[w], Some(own)).is_empty());
+    }
+
+    #[test]
+    fn worker_without_build_gives_no_caps() {
+        let mut w = capable_worker(&["x86_64-linux"], &[], None);
+        w.capabilities.build = false;
+        assert!(project_worker_caps(&[w], Some(ProjectId::now_v7())).is_empty());
     }
 
     #[test]

@@ -21,6 +21,16 @@ use gradient_wire::types::BuildSpecKind;
 
 pub(crate) type BuildWorkerCaps = (Vec<String>, Vec<String>, bool);
 
+pub(crate) fn build_worker_caps(worker: &gradient_pool::WorkerInfo) -> Option<BuildWorkerCaps> {
+    worker.capabilities.build.then(|| {
+        (
+            worker.architectures.clone(),
+            worker.system_features.clone(),
+            worker.capabilities.network,
+        )
+    })
+}
+
 pub(crate) struct BuildabilityChecker {
     drv_by_id: HashMap<DerivationId, MDerivation>,
     features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
