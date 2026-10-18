@@ -26,7 +26,7 @@ use tracing::{error, info, warn};
 const DRV_RECOVERY_GRACE_SECS: i64 = 120;
 
 use crate::assessment_memo::AssessmentMemo;
-use crate::buildability::{BuildWorkerCaps, BuildabilityChecker, build_worker_caps};
+use crate::buildability::{BuildWorkerCaps, BuildabilityChecker};
 use crate::unbuildable::{Unbuildable, unbuildable};
 use gradient_db::evaluations::counters::EvalCounters;
 
@@ -701,7 +701,7 @@ fn project_worker_caps(workers: &[WorkerInfo], project: Option<ProjectId>) -> Ve
     workers
         .iter()
         .filter(|w| eligible_for(w, project))
-        .filter_map(build_worker_caps)
+        .map(BuildWorkerCaps::from)
         .collect()
 }
 
@@ -931,22 +931,16 @@ mod tests {
     }
 
     #[test]
-    fn worker_without_build_gives_no_caps() {
-        let mut w = capable_worker(&["x86_64-linux"], &[], None);
-        w.capabilities.build = false;
-        assert!(project_worker_caps(&[w], Some(ProjectId::now_v7())).is_empty());
-    }
-
-    #[test]
     fn open_worker_gives_caps_to_every_project() {
         let w = capable_worker(&["x86_64-linux"], &["kvm"], None);
         assert_eq!(
             project_worker_caps(&[w], Some(ProjectId::now_v7())),
-            vec![(
-                vec!["x86_64-linux".to_string()],
-                vec!["kvm".to_string()],
-                true
-            )]
+            vec![BuildWorkerCaps {
+                architectures: vec!["x86_64-linux".to_string()],
+                features: vec!["kvm".to_string()],
+                network: true,
+                build: true,
+            }]
         );
     }
 
