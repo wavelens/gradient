@@ -15,7 +15,7 @@ flowchart LR
 | Status | Meaning |
 |---|---|
 | Queued | The evaluation awaits an evaluating worker |
-| Fetching | A worker clones the repository and its flake inputs |
+| Fetching | A worker clones the repository and gathers its flake inputs from the store, the cache or a download by a worker with `network` |
 | Evaluating | A worker walks the flake and reports derivations in batches |
 | Building | All derivations are known. Builds are running |
 | Waiting | No connected worker can make progress, e.g. no worker with the needed system or features. The evaluation resumes on its own. Builds needing a system or features absent from every connected worker abort the evaluation after 5 minutes with a warning. A task can opt into waiting for workers instead |

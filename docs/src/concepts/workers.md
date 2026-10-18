@@ -13,7 +13,7 @@ Workers declare their capabilities at the handshake. Capabilities cover the jobs
 
 | Capability | Default | Meaning |
 |---|---|---|
-| `network` | on | Internet access. Needed to clone the repository, fetch flake inputs, substitute from upstream caches and run fixed-output builds |
+| `network` | on | Internet access. Needed to clone the repository, download missing inputs, substitute from upstream caches and run fixed-output builds |
 | `secrets` | on | The server may send the project SSH key. Needed to clone a repository behind an SSH URL |
 | `exec` | off | Declared and stored. No job checks it yet |
 | `eval` | on | Walk the flake and report derivations |
@@ -21,6 +21,7 @@ Workers declare their capabilities at the handshake. Capabilities cover the jobs
 
 - Public repositories need a worker with `network` for the fetch step.
 - Workers without `secrets` never get an SSH key.
+- An evaluating worker never downloads an input itself. The server can hand each missing input to a worker with `network`, plus `secrets` for an SSH URL. The evaluation can then pull the input from the cache.
 - A project or team registration can withhold each capability through `enable_network`, `enable_secrets`, `enable_exec`, `enable_eval` and `enable_build`.
 
 A single machine can hold every capability. A machine with a lot of memory can evaluate while smaller machines build.

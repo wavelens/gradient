@@ -1,0 +1,23 @@
+{
+  "nodes": {
+    "extra": {
+      "flake": false,
+      "locked": {
+        "narHash": "[hash]",
+        "type": "tarball",
+        "url": "http://server/upstream/input.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "http://server/upstream/input.tar.gz"
+      }
+    },
+    "root": {
+      "inputs": {
+        "extra": "extra"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

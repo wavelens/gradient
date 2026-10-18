@@ -277,6 +277,8 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "L+ /var/lib/git/flake-busywrap.nix 0755 git git - ${./flake_repository_busywrap.nix}"
         "L+ /var/lib/git/flake-spin.nix 0755 git git - ${./flake_repository_spin.nix}"
         "L+ /var/lib/git/flake-slow.nix 0755 git git - ${./flake_repository_slow.nix}"
+        "L+ /var/lib/git/flake-input.nix 0755 git git - ${./flake_repository_input.nix}"
+        "L+ /var/lib/git/flake-input.lock 0755 git git - ${./flake_repository_input.lock}"
       ];
     };
 
@@ -2441,6 +2443,61 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert "lockguard unguarded: recount wrote 1" in out, (
         f"the unguarded arm did not drift, so the keys are not what the others prove:\n{out}"
     )
+
+    if requires("Phase 10n", "distinct-upstream-workers"):
+        banner("Phase 10n: an input in no cache arrives through the worker with network")
+
+        def restart_with_caps(node, caps):
+            since = node.succeed("date +%s").strip()
+            dropin = "/run/systemd/system/gradient-worker.service.d"
+            if caps:
+                lines = "".join(f"Environment=GRADIENT_WORKER_CAPABILITIES_{k}={v}\n" for k, v in caps.items())
+                node.succeed(f"mkdir -p {dropin} && cat > {dropin}/caps.conf <<'CAPS'\n[Service]\n{lines}CAPS")
+            else:
+                node.succeed(f"rm -f {dropin}/caps.conf")
+            node.succeed("systemctl daemon-reload && systemctl restart gradient-worker.service")
+            node.wait_until_succeeds(
+                f"journalctl -u gradient-worker --no-pager --since=@{since} | grep -q 'handshake successful'",
+                timeout=180,
+            )
+
+        server.succeed(
+            "mkdir -p /srv/upstream/input-src && printf fetched > /srv/upstream/input-src/value"
+            " && tar -czf /srv/upstream/input.tar.gz -C /srv/upstream input-src"
+        )
+        input_hash = server.succeed(
+            f"{NIX} --extra-experimental-features nix-command hash path --sri /srv/upstream/input-src"
+        ).strip()
+        input_base32 = server.succeed(
+            f"{NIX} --extra-experimental-features nix-command hash convert --to nix32 {input_hash}"
+        ).strip()
+        input_path = server.succeed(
+            f"{NIX}-store --print-fixed-path --recursive sha256 {input_base32} source"
+        ).strip()
+        input_narinfo = input_path.removeprefix("/nix/store/").split("-", 1)[0] + ".narinfo"
+        server.fail(f"{CURL} -sf {CACHE}/{input_narinfo}")
+
+        fetch_since = builder2.succeed("date +%s").strip()
+        restart_with_caps(builder, {"EVAL": "false"})
+        restart_with_caps(builder2, {"NETWORK": "false", "SECRETS": "false"})
+
+        known = sql("SELECT string_agg(id::text, ',') FROM evaluation;")
+        input_evals = f"FROM evaluation WHERE NOT (id = ANY(string_to_array('{known}', ',')::uuid[]))"
+        server.succeed("cp /var/lib/git/flake-input.nix /var/lib/git/test/flake.nix")
+        server.succeed("cp /var/lib/git/flake-input.lock /var/lib/git/test/flake.lock")
+        server.succeed(f"sed -i 's#\\[hash\\]#{input_hash}#g' /var/lib/git/test/flake.lock")
+        server.succeed(f"{GIT} -C /var/lib/git/test commit -am 'input'")
+        server.succeed("chown git:git -R /var/lib/git/test")
+
+        poll(f"SELECT count(*) {input_evals};", "2", "both tasks did not pick up the input commit")
+        poll(f"SELECT string_agg(DISTINCT status::text, ',') {input_evals};", "5",
+             "the evaluations of the input flake did not complete", timeout=600)
+        server.succeed(f"{CURL} -sf {CACHE}/{input_narinfo}")
+        builder.succeed(f"journalctl -u gradient-worker --no-pager --since=@{fetch_since} | grep -q 'fetching an input'")
+        builder2.fail(f"journalctl -u gradient-worker --no-pager --since=@{fetch_since} | grep -q 'fetching an input'")
+
+        restart_with_caps(builder, {})
+        restart_with_caps(builder2, {})
 
     banner("Phase 11: every supervised loop is running; SIGTERM stops the server")
     health = json.loads(api_get(token, "board/health"))["message"]
