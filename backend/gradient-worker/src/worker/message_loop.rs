@@ -1402,9 +1402,17 @@ mod tests {
     }
 
     #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test stands in for the server by hand"
+    )]
     async fn a_running_input_fetch_occupies_a_build_slot() {
         let server = gradient_test_support::prelude::MockProtoServer::bind().await;
         let url = server.url().to_owned();
+        let _accepted = tokio::spawn(async move {
+            let _sc = server.accept().await;
+            std::future::pending::<()>().await
+        });
         let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
