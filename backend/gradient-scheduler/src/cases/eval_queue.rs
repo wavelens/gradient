@@ -30,6 +30,7 @@ const SSH_REPOSITORY: &str = "git+ssh://git@example.invalid/repo.git";
 
 const W1: &str = "w1";
 const W2: &str = "w2";
+const W3: &str = "w3";
 
 #[tokio::test]
 async fn q01_a_queued_evaluation_becomes_one_pending_job_with_wildcards_and_overrides() {
@@ -893,6 +894,7 @@ async fn q18_a_fetch_step_of_an_ssh_repository_needs_secrets() {
     let case = SchedulerCase::start(shape().evalq(e1).repository(SSH_REPOSITORY)).await;
     case.connect(W1, w_network(), &[]).await;
     case.connect(W2, w_network_secrets(), &[]).await;
+    case.connect(W3, w_eval(), &[]).await;
     let key = eval_key(e1);
 
     case.assign_queued_evals().await;
@@ -900,6 +902,11 @@ async fn q18_a_fetch_step_of_an_ssh_repository_needs_secrets() {
 
     let without_secrets = case.offers_full(W1).await;
     let with_secrets = case.offers_full(W2).await;
+    assert_eq!(
+        candidate_keys(&case.offers_full(W3).await),
+        BTreeSet::new(),
+        "after 2: offers(W3).candidates"
+    );
     assert_eq!(
         candidate_keys(&without_secrets),
         BTreeSet::new(),
