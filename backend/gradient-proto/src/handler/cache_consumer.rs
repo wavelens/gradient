@@ -29,7 +29,9 @@ fn consumer_capabilities() -> GradientCapabilities {
         core: true,
         build: false,
         eval: false,
-        fetch: false,
+        network: false,
+        secrets: false,
+        exec: false,
         cache: true,
         federate: false,
     }

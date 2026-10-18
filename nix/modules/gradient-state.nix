@@ -1026,12 +1026,22 @@
         '';
       };
 
-      enable_fetch = mkOption {
+      enable_network = mkOption {
         type = types.bool;
         default = true;
-        description = ''
-          Whether to grant this registration the worker's `fetch` capability.
-        '';
+        description = "Whether to grant this registration the worker's `network` capability.";
+      };
+
+      enable_secrets = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether to grant this registration the worker's `secrets` capability.";
+      };
+
+      enable_exec = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Whether to grant this registration the worker's `exec` capability.";
       };
 
       enable_eval = mkOption {

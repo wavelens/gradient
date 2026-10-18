@@ -345,7 +345,9 @@ fn registration_row(
         managed: false,
         url: Some(url),
         active: true,
-        enable_fetch: false,
+        enable_network: true,
+        enable_secrets: false,
+        enable_exec: false,
         enable_eval: true,
         enable_build: true,
         display_name: DISPLAY_NAME.into(),
@@ -371,7 +373,9 @@ fn team_worker_row(
         url: Some(url),
         display_name: DISPLAY_NAME.into(),
         gradient_ci: true,
-        enable_fetch: false,
+        enable_network: true,
+        enable_secrets: false,
+        enable_exec: false,
         enable_eval: true,
         enable_build: true,
         active: true,
@@ -449,7 +453,7 @@ mod tests {
         );
 
         assert!(row.gradient_ci && row.active && row.enable_eval && row.enable_build);
-        assert!(!row.enable_fetch && !row.managed);
+        assert!(row.enable_network && !row.enable_secrets && !row.managed);
         assert_eq!(row.token_encrypted.as_deref(), Some("encrypted"));
         assert_eq!(row.url.as_deref(), Some("wss://servers.gradient.ci/proto"));
     }

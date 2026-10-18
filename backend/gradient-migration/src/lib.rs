@@ -20,6 +20,7 @@ mod m20261015_000002_pull_request_summary;
 mod m20261016_000000_metric_input_pnames;
 mod m20261016_000001_metric_pname_without_version;
 mod m20261016_000002_team_webhooks;
+mod m20261018_000000_worker_network_capability;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -57,6 +58,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261016_000000_metric_input_pnames::Migration),
             Box::new(m20261016_000001_metric_pname_without_version::Migration),
             Box::new(m20261016_000002_team_webhooks::Migration),
+            Box::new(m20261018_000000_worker_network_capability::Migration),
         ]
     }
 }

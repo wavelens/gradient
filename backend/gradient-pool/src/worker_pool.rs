@@ -142,7 +142,7 @@ impl WorkerPool {
         self.workers.get(id).map(|slot| {
             let s = slot.shared();
             crate::WorkerCaps {
-                fetch: s.capabilities.fetch,
+                fetch: s.capabilities.network && s.capabilities.secrets,
                 architectures: s.architectures.clone(),
                 system_features: s.system_features.clone(),
                 capabilities: s.capabilities.clone(),
@@ -297,7 +297,9 @@ impl WorkerPool {
     pub fn has_idle_eval_only_worker(&self) -> bool {
         self.workers.values().any(|slot| match slot {
             WorkerSlot::Active(w) => {
-                w.capabilities.eval && !w.capabilities.fetch && w.assigned_jobs.is_empty()
+                w.capabilities.eval
+                    && !(w.capabilities.network && w.capabilities.secrets)
+                    && w.assigned_jobs.is_empty()
             }
             WorkerSlot::Draining(_) => false,
         })
@@ -477,7 +479,8 @@ mod tests {
     fn caps_ef(eval: bool, fetch: bool) -> GradientCapabilities {
         GradientCapabilities {
             eval,
-            fetch,
+            network: fetch,
+            secrets: fetch,
             ..GradientCapabilities::default()
         }
     }
@@ -680,7 +683,8 @@ mod tests {
         pool.register(
             "w1".into(),
             GradientCapabilities {
-                fetch: true,
+                network: true,
+                secrets: true,
                 eval: true,
                 ..Default::default()
             },

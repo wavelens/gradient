@@ -200,19 +200,6 @@
   },
   {
     "group": "capabilities",
-    "field": "fetch",
-    "flag": "capabilities-fetch",
-    "env": "GRADIENT_WORKER_CAPABILITIES_FETCH",
-    "type": "bool",
-    "description": "Whether to prefetch flake inputs and sources.",
-    "default": "true",
-    "values": [
-      "true",
-      "false"
-    ]
-  },
-  {
-    "group": "capabilities",
     "field": "eval",
     "flag": "capabilities-eval",
     "env": "GRADIENT_WORKER_CAPABILITIES_EVAL",
@@ -232,6 +219,45 @@
     "type": "bool",
     "description": "Whether to run Nix builds.",
     "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "capabilities",
+    "field": "network",
+    "flag": "capabilities-network",
+    "env": "GRADIENT_WORKER_CAPABILITIES_NETWORK",
+    "type": "bool",
+    "description": "Whether this worker may reach the internet. Cloning repositories, fetching flake inputs,\nsubstitutions, downloads and fixed-output builds run only on workers with it.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "capabilities",
+    "field": "secrets",
+    "flag": "capabilities-secrets",
+    "env": "GRADIENT_WORKER_CAPABILITIES_SECRETS",
+    "type": "bool",
+    "description": "Whether the server may send project credentials such as SSH keys to this worker.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "capabilities",
+    "field": "exec",
+    "flag": "capabilities-exec",
+    "env": "GRADIENT_WORKER_CAPABILITIES_EXEC",
+    "type": "bool",
+    "description": "Whether this worker advertises the `exec` capability. The server stores it but does not\nschedule by it yet.",
+    "default": "false",
     "values": [
       "true",
       "false"

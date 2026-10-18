@@ -45,7 +45,9 @@ async fn main() {
         capabilities: GradientCapabilities {
             core: false,
             federate: false,
-            fetch: true,
+            network: true,
+            secrets: true,
+            exec: true,
             eval: true,
             build: true,
             cache: false,

@@ -714,7 +714,7 @@ impl ProjectWorkerCounts {
             .filter(|w| eligible_for(w, project))
             .fold(Self::default(), |counts, w| Self {
                 eval: counts.eval + usize::from(w.capabilities.eval),
-                fetch: counts.fetch + usize::from(w.capabilities.fetch),
+                fetch: counts.fetch + usize::from(w.capabilities.network && w.capabilities.secrets),
                 connected: counts.connected + 1,
             })
     }
@@ -842,7 +842,8 @@ mod tests {
             id: "00000000-0000-4000-8000-000000000001".into(),
             capabilities: gradient_wire::types::GradientCapabilities {
                 eval,
-                fetch: eval,
+                network: eval,
+                secrets: eval,
                 ..Default::default()
             },
             architectures: vec![],

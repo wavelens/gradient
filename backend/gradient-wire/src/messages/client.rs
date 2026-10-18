@@ -14,7 +14,7 @@ use crate::types::{
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
-#[proto(oldest = 31)]
+#[proto(oldest = 35)]
 pub enum ClientMessage {
     InitConnection {
         capabilities: GradientCapabilities,

@@ -42,7 +42,9 @@ pub struct TeamWorkerEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     pub gradient_ci: bool,
-    pub enable_fetch: bool,
+    pub enable_network: bool,
+    pub enable_secrets: bool,
+    pub enable_exec: bool,
     pub enable_eval: bool,
     pub enable_build: bool,
     #[serde(flatten)]
@@ -65,7 +67,9 @@ impl TeamWorkerEntry {
             managed: worker.managed,
             url: worker.url,
             gradient_ci: worker.gradient_ci,
-            enable_fetch: worker.enable_fetch,
+            enable_network: worker.enable_network,
+            enable_secrets: worker.enable_secrets,
+            enable_exec: worker.enable_exec,
             enable_eval: worker.enable_eval,
             enable_build: worker.enable_build,
             connection,
@@ -200,7 +204,9 @@ pub async fn post_team_worker(
             url: body.url,
             display_name: body.display_name.trim().to_string(),
             gradient_ci: false,
-            enable_fetch: body.enable_fetch,
+            enable_network: body.enable_network,
+            enable_secrets: body.enable_secrets,
+            enable_exec: body.enable_exec,
             enable_eval: body.enable_eval,
             enable_build: body.enable_build,
             active: true,
@@ -266,8 +272,14 @@ pub async fn patch_team_worker(
     if let Some(name) = body.display_name {
         active.display_name = Set(name.trim().to_string());
     }
-    if let Some(value) = body.enable_fetch {
-        active.enable_fetch = Set(value);
+    if let Some(value) = body.enable_network {
+        active.enable_network = Set(value);
+    }
+    if let Some(value) = body.enable_secrets {
+        active.enable_secrets = Set(value);
+    }
+    if let Some(value) = body.enable_exec {
+        active.enable_exec = Set(value);
     }
     if let Some(value) = body.enable_eval {
         active.enable_eval = Set(value);

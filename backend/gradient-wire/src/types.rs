@@ -13,20 +13,24 @@ use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 pub struct GradientCapabilities {
     pub core: bool,
     pub federate: bool,
-    pub fetch: bool,
     pub eval: bool,
     pub build: bool,
     pub cache: bool,
+    pub network: bool,
+    pub secrets: bool,
+    pub exec: bool,
 }
 
 impl std::ops::BitOrAssign for GradientCapabilities {
     fn bitor_assign(&mut self, rhs: Self) {
         self.core |= rhs.core;
         self.federate |= rhs.federate;
-        self.fetch |= rhs.fetch;
         self.eval |= rhs.eval;
         self.build |= rhs.build;
         self.cache |= rhs.cache;
+        self.network |= rhs.network;
+        self.secrets |= rhs.secrets;
+        self.exec |= rhs.exec;
     }
 }
 
