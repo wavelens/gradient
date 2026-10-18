@@ -326,6 +326,7 @@ pub enum ImportOutcome {
 pub enum InputOutcome {
     Fetched { response: String },
     Failed { message: String },
+    Unplaced { message: String },
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]

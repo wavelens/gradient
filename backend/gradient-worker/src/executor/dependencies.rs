@@ -175,7 +175,7 @@ async fn fetch_input(
                 .map_err(|e| format!("pulling the fetched input {fetched} failed: {e:#}"))?;
             Ok(response)
         }
-        InputOutcome::Failed { message } => Err(message),
+        InputOutcome::Failed { message } | InputOutcome::Unplaced { message } => Err(message),
     }
 }
 

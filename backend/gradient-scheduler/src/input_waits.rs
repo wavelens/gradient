@@ -30,6 +30,7 @@ pub struct UnassignedFetch {
     pub project: ProjectId,
     pub request: String,
     pub needs_secrets: bool,
+    pub excluded: HashSet<String>,
 }
 
 #[derive(Debug)]
@@ -39,6 +40,7 @@ struct InputWait {
     needs_secrets: bool,
     waiters: Vec<InputWaiter>,
     fetch: Option<AssignedFetch>,
+    excluded: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +66,7 @@ impl InputWaits {
                 needs_secrets: new.needs_secrets,
                 waiters: Vec::new(),
                 fetch: None,
+                excluded: HashSet::new(),
             })
             .waiters
             .push(new.waiter);
@@ -80,6 +83,7 @@ impl InputWaits {
                 project: wait.project,
                 request: wait.request.clone(),
                 needs_secrets: wait.needs_secrets,
+                excluded: wait.excluded.clone(),
             })
             .collect();
         unassigned.sort_by(|a, b| a.fetch_key.cmp(&b.fetch_key));
@@ -112,6 +116,19 @@ impl InputWaits {
         waits.remove(&key).map(|w| w.waiters).unwrap_or_default()
     }
 
+    pub fn unplace(&self, worker: &str, fetch_id: &str) -> bool {
+        let mut waits = self.0.lock();
+        let Some(key) = key_of_fetch(&waits, worker, fetch_id) else {
+            return false;
+        };
+        let Some(wait) = waits.get_mut(&key) else {
+            return false;
+        };
+        wait.fetch = None;
+        wait.excluded.insert(worker.to_owned());
+        true
+    }
+
     pub fn waiters_of_fetch(&self, worker: &str, fetch_id: &str) -> Vec<InputWaiter> {
         let waits = self.0.lock();
         key_of_fetch(&waits, worker, fetch_id)
@@ -124,6 +141,7 @@ impl InputWaits {
         let mut waits = self.0.lock();
         for wait in waits.values_mut() {
             wait.waiters.retain(|w| w.worker != worker);
+            wait.excluded.remove(worker);
             if wait.fetch.as_ref().is_some_and(|f| f.worker == worker) {
                 wait.fetch = None;
             }
