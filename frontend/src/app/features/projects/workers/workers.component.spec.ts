@@ -38,7 +38,9 @@ const workerUnmanaged: ProjectWorkerEntry = {
   active: true,
   gradient_ci: false,
   connected: false,
-  enable_fetch: true,
+  enable_network: true,
+  enable_secrets: true,
+  enable_exec: false,
   enable_eval: true,
   enable_build: true,
 };
@@ -51,7 +53,9 @@ const workerOfTeam: ProjectWorkerEntry = {
   team: 'platform',
   gradient_ci: false,
   connected: false,
-  enable_fetch: true,
+  enable_network: true,
+  enable_secrets: true,
+  enable_exec: false,
   enable_eval: true,
   enable_build: true,
 };
@@ -253,7 +257,7 @@ describe('WorkersComponent - team workers', () => {
 describe('WorkersComponent - system features', () => {
   it('lists the architectures and keeps the system features behind an info button', async () => {
     const live = {
-      capabilities: { fetch: true, eval: true, build: true, federate: false },
+      capabilities: { network: true, secrets: true, exec: false, eval: true, build: true, federate: false },
       architectures: ['x86_64-linux'], system_features: ['kvm', 'nixos-test'], max_concurrent_builds: 1, assigned_job_count: 0, draining: false,
     } as unknown as ProjectWorkerEntry['live'];
     const fixture = setup({
@@ -274,7 +278,7 @@ describe('WorkersComponent - system features', () => {
 
 describe('WorkersComponent - connection badge', () => {
   const live = {
-    capabilities: { fetch: true, eval: true, build: true, federate: false },
+    capabilities: { network: true, secrets: true, exec: false, eval: true, build: true, federate: false },
     architectures: [], system_features: [], max_concurrent_builds: 1, assigned_job_count: 0, draining: false,
   } as unknown as ProjectWorkerEntry['live'];
   const badges = (fixture: ComponentFixture<WorkersComponent>) =>
@@ -325,7 +329,9 @@ const gciRegistration: ProjectWorkerEntry = {
     direction: 'outbound',
     before_auth: false,
   },
-  enable_fetch: false,
+  enable_network: true,
+  enable_secrets: false,
+  enable_exec: false,
   enable_eval: true,
   enable_build: true,
 };
@@ -379,11 +385,11 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
     const dialog = document.querySelector('.gr-dialog')!;
     expect(dialog.querySelector('#rename-name')).toBeNull();
     Array.from(dialog.querySelectorAll('gr-allowed-capabilities button'))
-      .find((b) => b.textContent?.includes('fetch'))!
+      .find((b) => b.textContent?.includes('secrets'))!
       .dispatchEvent(new Event('click'));
     buttonsLabelled(dialog, 'Save')[0].click();
 
-    expect(workers.patchWorker).toHaveBeenCalledWith('demo', 'g1', { enable_fetch: true });
+    expect(workers.patchWorker).toHaveBeenCalledWith('demo', 'g1', { enable_secrets: true });
   });
 
   it('links to the Gradient.CI site only while connected', async () => {

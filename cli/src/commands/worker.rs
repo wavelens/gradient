@@ -69,7 +69,9 @@ pub async fn handle(cmd: Commands, out: Output) {
                         token,
                         enable_build: None,
                         enable_eval: None,
-                        enable_fetch: None,
+                        enable_exec: None,
+                        enable_network: None,
+                        enable_secrets: None,
                     },
                 )
                 .await

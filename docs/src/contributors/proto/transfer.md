@@ -112,7 +112,7 @@ Before any build work starts, workers fetch all inputs that the local store does
 
 - The project's SSH key serve as the sole credential. Clones of private repositories and inputs depend on it.
 - Right before the `AssignJob` message, the server decrypt the key and send `Credential { SshKey }`.
-- Only a flake job with a fetch step on a `fetch`-capable worker receive the credential.
+- Only a flake job with a fetch step on a worker with `secrets` can receive the credential.
 - A project without a key receive no credential.
 - Workers hold the key in locked memory and zero it on drop.
 - At job completion, workers clear the key.

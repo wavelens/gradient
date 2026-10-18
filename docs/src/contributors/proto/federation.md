@@ -22,7 +22,7 @@ Each tenant gets one regular worker session toward the customer server. The hand
 
 | Aspect | Behavior |
 |---|---|
-| Capabilities | A fixed set, `GRADIENT_PROXY_UPSTREAM_CAPABILITIES` (default `fetch,eval,build`) |
+| Capabilities | A fixed set, `GRADIENT_PROXY_UPSTREAM_CAPABILITIES` (default `network,secrets,eval,build`) |
 | Hardware | `gradient_pool::aggregate()` over the downstream workers, sent as `WorkerCapabilities` and `WorkerMetrics` |
 | Aggregation | Capabilities OR'd, architectures and features unioned, slots, CPUs and RAM summed, fastest core score |
 | Aggregation scope | Per tenant: only that tenant's workers count |
@@ -82,7 +82,7 @@ Access control works at two levels.
 
 | Level | Controlled by |
 |---|---|
-| Server -> proxy | Per project: the proxy's `worker_registration` rows, tokens and `enable_fetch` / `enable_eval` / `enable_build` |
+| Server -> proxy | Per project: the proxy's `worker_registration` rows, tokens and the `enable_*` capability grants |
 | Proxy -> worker | Per worker: `authorized_peers` rows with tenant, token hash and allowed capabilities |
 
 The handshake negotiates the `federate` capability. The server exposes this as `proto.federate`, the worker as `capabilities.federate`. The flag has no effect in the code yet.

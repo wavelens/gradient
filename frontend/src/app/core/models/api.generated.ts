@@ -170,7 +170,7 @@ export interface BoardFleetPoint {
   connected: number;
   draining: number;
   eval: number;
-  fetch: number;
+  network: number;
   build: number;
 }
 
@@ -240,7 +240,7 @@ export interface BoardWorker {
   assigned_jobs: number;
   max_concurrent_builds: number;
   eval: boolean;
-  fetch: boolean;
+  network: boolean;
   build: boolean;
   architectures: string[];
   cpu_usage_pct?: number | null;
@@ -796,7 +796,7 @@ export interface ErrorResponseBody {
   message: string;
 }
 
-export type EvalCapability = "fetch" | "eval";
+export type EvalCapability = "network" | "secrets" | "eval";
 
 export interface EvaluateRequest {
   commit?: string | null;
@@ -1009,10 +1009,12 @@ export interface GradientCacheInfo {
 export interface GradientCapabilities {
   core: boolean;
   federate: boolean;
-  fetch: boolean;
   eval: boolean;
   build: boolean;
   cache: boolean;
+  network: boolean;
+  secrets: boolean;
+  exec: boolean;
 }
 
 export interface GrantCacheRequest {
@@ -1618,7 +1620,9 @@ export interface PatchUserSettingsRequest {
 export interface PatchWorkerRequest {
   active?: boolean | null;
   display_name?: string | null;
-  enable_fetch?: boolean | null;
+  enable_network?: boolean | null;
+  enable_secrets?: boolean | null;
+  enable_exec?: boolean | null;
   enable_eval?: boolean | null;
   enable_build?: boolean | null;
 }
@@ -1729,7 +1733,9 @@ export type ProjectWorkerEntry = WorkerConnection & {
   active: boolean;
   url?: string | null;
   created_by?: UserId | null;
-  enable_fetch: boolean;
+  enable_network: boolean;
+  enable_secrets: boolean;
+  enable_exec: boolean;
   enable_eval: boolean;
   enable_build: boolean;
   team?: string | null;
@@ -1788,7 +1794,9 @@ export interface RegisterWorkerRequest {
   url?: string | null;
   display_name: string;
   token?: string | null;
-  enable_fetch?: boolean;
+  enable_network?: boolean;
+  enable_secrets?: boolean;
+  enable_exec?: boolean;
   enable_eval?: boolean;
   enable_build?: boolean;
 }
@@ -2112,7 +2120,8 @@ export interface TeamCacheGrant {
 
 export interface TeamDemand {
   builds: UnmetRequirement[];
-  fetch: number;
+  network: number;
+  secrets: number;
   eval: number;
 }
 
@@ -2203,7 +2212,9 @@ export type TeamWorkerEntry = WorkerConnection & {
   managed: boolean;
   url?: string | null;
   gradient_ci: boolean;
-  enable_fetch: boolean;
+  enable_network: boolean;
+  enable_secrets: boolean;
+  enable_exec: boolean;
   enable_eval: boolean;
   enable_build: boolean;
   live?: WorkerLiveInfo | null;

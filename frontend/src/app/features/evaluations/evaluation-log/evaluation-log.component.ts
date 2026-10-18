@@ -1625,7 +1625,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         return `${reason.connected_workers} connected ${workerWord} (${archList}) cannot satisfy:`;
       }
       case 'eval_workers': {
-        const action = reason.capability === 'fetch' ? 'fetch the flake sources' : 'run the evaluation';
+        const action = {
+          network: 'fetch the flake sources',
+          secrets: 'fetch the flake sources with the project SSH key',
+          eval: 'run the evaluation',
+        }[reason.capability];
         const workerWord = reason.connected_workers === 1 ? 'worker is' : 'workers are';
         return reason.connected_workers === 0
           ? `No workers are connected to ${action}.`
@@ -1648,7 +1652,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   waitingTitle(reason?: WaitingReason | null): string {
     switch (reason?.kind) {
-      case 'eval_workers': return reason.capability === 'fetch' ? 'Waiting for a Fetch Worker' : 'Waiting for an Eval Worker';
+      case 'eval_workers': return {
+        network: 'Waiting for a Network Worker',
+        secrets: 'Waiting for a Worker with Secrets',
+        eval: 'Waiting for an Eval Worker',
+      }[reason.capability];
       case 'approval': return 'Awaiting Approval';
       case 'no_cache': return 'No Cache Configured';
       case 'cache_storage_full': return 'Cache Storage Full';

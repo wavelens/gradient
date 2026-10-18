@@ -9,15 +9,21 @@ flowchart LR
 
 ## Capabilities
 
-Each worker declares which job kinds it accepts. Three kinds exist.
+Workers declare their capabilities at the handshake. Capabilities cover the jobs and the access of a worker.
 
-| Capability | Job |
-|---|---|
-| Fetch | Clone the repository and download the flake inputs |
-| Evaluate | Walk the flake and report derivations |
-| Build | Build derivations and upload the outputs |
+| Capability | Default | Meaning |
+|---|---|---|
+| `network` | on | Internet access. Needed to clone the repository, fetch flake inputs, substitute from upstream caches and run fixed-output builds |
+| `secrets` | on | The server may send the project SSH key. Needed to clone a repository behind an SSH URL |
+| `exec` | off | Declared and stored. No job checks it yet |
+| `eval` | on | Walk the flake and report derivations |
+| `build` | on | Build derivations and upload the outputs |
 
-A single machine can handle all three kinds. Splitting them across machines also works: one machine with a lot of memory can evaluate, while several smaller machines build.
+- Public repositories need a worker with `network` for the fetch step.
+- Workers without `secrets` never get an SSH key.
+- A project or team registration can withhold each capability through `enable_network`, `enable_secrets`, `enable_exec`, `enable_eval` and `enable_build`.
+
+A single machine can hold every capability. A machine with a lot of memory can evaluate while smaller machines build.
 
 ## Matching Builds
 

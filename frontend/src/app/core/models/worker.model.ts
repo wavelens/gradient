@@ -8,14 +8,29 @@ import type { ProjectWorkerEntry } from './api.generated';
 
 export type AllowedCapabilities = Pick<
   ProjectWorkerEntry,
-  'enable_fetch' | 'enable_eval' | 'enable_build'
+  'enable_network' | 'enable_secrets' | 'enable_exec' | 'enable_eval' | 'enable_build'
 >;
+
+export const ALLOWED_CAPABILITY_KEYS: (keyof AllowedCapabilities)[] = [
+  'enable_network',
+  'enable_secrets',
+  'enable_exec',
+  'enable_eval',
+  'enable_build',
+];
+
+export const ALL_ALLOWED: AllowedCapabilities = {
+  enable_network: true,
+  enable_secrets: true,
+  enable_exec: false,
+  enable_eval: true,
+  enable_build: true,
+};
 
 export function changedCapabilities(
   before: AllowedCapabilities,
   after: AllowedCapabilities,
 ): Partial<AllowedCapabilities> {
-  const keys: (keyof AllowedCapabilities)[] = ['enable_fetch', 'enable_eval', 'enable_build'];
-  return Object.fromEntries(keys.filter((k) => before[k] !== after[k]).map((k) => [k, after[k]]));
+  return Object.fromEntries(ALLOWED_CAPABILITY_KEYS.filter((k) => before[k] !== after[k]).map((k) => [k, after[k]]));
 }
 

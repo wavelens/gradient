@@ -53,7 +53,9 @@ async fn create_worker_returns_response() {
                 token: None,
                 enable_build: None,
                 enable_eval: None,
-                enable_fetch: None,
+                enable_exec: None,
+                enable_network: None,
+                enable_secrets: None,
             },
         )
         .await

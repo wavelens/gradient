@@ -576,7 +576,8 @@ assert any(u["url"] == "https://cache.nixos.org"
 # Worker registration applied with its capability gates.
 worker = next(w for w in api("GET", "projects/stateproject/workers", token=sa_token)
               if w["worker_id"] == "a0000000-0000-0000-0000-0000000000aa")
-assert worker["enable_eval"] is True and worker["enable_fetch"] is False, worker
+assert worker["enable_eval"] is True and worker["enable_network"] is True, worker
+assert worker["enable_secrets"] is False and worker["enable_exec"] is False, worker
 
 # team workers
 team_worker_id = "a0000000-0000-0000-0000-0000000000bb"

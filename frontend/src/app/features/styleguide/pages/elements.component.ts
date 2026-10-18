@@ -83,7 +83,13 @@ export class ElementsComponent {
   ] as const;
   statusPhases: StatusPhase[] = ['queued', 'waiting', 'running', 'success', 'failure', 'aborted'];
   statusPhase = signal<StatusPhase>('queued');
-  allowed: AllowedCapabilities = { enable_fetch: true, enable_eval: true, enable_build: false };
+  allowed: AllowedCapabilities = {
+    enable_network: true,
+    enable_secrets: true,
+    enable_exec: false,
+    enable_eval: true,
+    enable_build: false,
+  };
   thunkSamples: { caption: string; progress: ThunkProgress }[] = [
     { caption: 'Against the median thunks of the recent evaluations', progress: thunkProgress({ kind: 'evaluating', thunks: 128_032_032 }, 450_000_000)! },
     { caption: 'Without a history, or past the last total, pulsing at full width', progress: thunkProgress({ kind: 'evaluating', thunks: 128_032_032 }, null)! },

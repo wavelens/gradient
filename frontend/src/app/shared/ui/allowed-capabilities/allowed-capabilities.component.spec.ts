@@ -10,7 +10,13 @@ import { AllowedCapabilitiesComponent } from './allowed-capabilities.component';
 function render(editable: boolean) {
   TestBed.configureTestingModule({ imports: [AllowedCapabilitiesComponent] });
   const fixture = TestBed.createComponent(AllowedCapabilitiesComponent);
-  fixture.componentRef.setInput('value', { enable_fetch: false, enable_eval: true, enable_build: true });
+  fixture.componentRef.setInput('value', {
+    enable_network: true,
+    enable_secrets: false,
+    enable_exec: false,
+    enable_eval: true,
+    enable_build: true,
+  });
   fixture.componentRef.setInput('editable', editable);
   fixture.detectChanges();
   return fixture;
@@ -23,19 +29,31 @@ describe('AllowedCapabilitiesComponent', () => {
     expect(root.textContent).toContain('Allowed:');
     expect(root.querySelectorAll('button').length).toBe(0);
     const off = Array.from(root.querySelectorAll('[data-allowed="false"]')).map((el) => el.textContent?.trim());
-    expect(off).toEqual(['fetch']);
+    expect(off).toEqual(['secrets', 'exec']);
+  });
+
+  it('lists the capabilities in the order network, secrets, exec, eval, build', () => {
+    const root = render(false).nativeElement as HTMLElement;
+    const labels = Array.from(root.querySelectorAll('[data-allowed]')).map((el) => el.textContent?.trim());
+    expect(labels).toEqual(['network', 'secrets', 'exec', 'eval', 'build']);
   });
 
   it('toggles only the clicked capability when editable', () => {
     const fixture = render(true);
-    const fetch = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button')).find(
-      (b) => b.textContent?.includes('fetch'),
+    const secrets = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('secrets'),
     )!;
 
-    fetch.click();
+    secrets.click();
     fixture.detectChanges();
 
-    expect(fixture.componentInstance.value()).toEqual({ enable_fetch: true, enable_eval: true, enable_build: true });
-    expect(fetch.getAttribute('aria-pressed')).toBe('true');
+    expect(fixture.componentInstance.value()).toEqual({
+      enable_network: true,
+      enable_secrets: true,
+      enable_exec: false,
+      enable_eval: true,
+      enable_build: true,
+    });
+    expect(secrets.getAttribute('aria-pressed')).toBe('true');
   });
 });

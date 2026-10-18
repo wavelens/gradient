@@ -358,7 +358,14 @@ export class BoardJobDetailComponent implements OnInit {
   protected readonly formatMegabytes = formatMegabytes;
   protected readonly formatDuration = formatDuration;
 
-  private static readonly WORKER_CAPS: (keyof GradientCapabilities)[] = ['federate', 'fetch', 'eval', 'build'];
+  private static readonly WORKER_CAPS: (keyof GradientCapabilities)[] = [
+    'federate',
+    'network',
+    'secrets',
+    'exec',
+    'eval',
+    'build',
+  ];
 
   currentState = computed(() => {
     const j = this.job();

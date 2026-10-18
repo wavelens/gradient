@@ -27,7 +27,7 @@ Workers take the job with the highest total score. Only jobs with a total of at 
 | `WaitTimeRule` | Bonus, up to 4000 | Raise the score of jobs that wait long, to prevent starvation. The wait count start at the moment all dependencies finish |
 | `QosRule` | Bonus, 5000, 1000 and 1000 | Put prioritized jobs above all others. Jobs of a build request ([`gradient build`](../guides/build-before-push.md) or [SSH](../guides/build-over-ssh.md)) receive another 1000. Builds of an imported derivation and their unfinished dependencies also receive 1000 while evaluations wait on the import |
 | `RescoreWaitRule` | Veto | Hold a build until a worker report the size of its missing data. The hold lift after 4 rounds |
-| `ReserveFetchWorkersRule` | Penalty, up to 300 | Keep fetch-capable workers free for fetching while capacity run short |
+| `ReserveFetchWorkersRule` | Penalty, up to 300 | Keep workers with `network` free for flake fetches while capacity run short |
 | `TransferLimitRule` | Penalty, 4000 | Hold large transfers while all transfer slots sit full, see [Transfer Limits](#transfer-limits) |
 
 The **Prioritize** entry in the task or evaluation menu set the `QosRule` flag on a build and its dependencies, or on a whole evaluation. A failed or aborted build or evaluation clear the flag. Only superusers can prioritize.

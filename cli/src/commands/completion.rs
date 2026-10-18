@@ -295,7 +295,8 @@ mod tests {
                         "worker_id": "builder-1", "display_name": "Builder One",
                         "registered_at": "now", "active": true, "connected": true,
                         "gradient_ci": false, "url": null,
-                        "created_by": null, "enable_fetch": true, "enable_eval": true,
+                        "created_by": null, "enable_network": true, "enable_secrets": true,
+                        "enable_exec": false, "enable_eval": true,
                         "enable_build": true, "live": null
                     }
                 ]

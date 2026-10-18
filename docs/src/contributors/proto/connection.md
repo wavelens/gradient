@@ -90,7 +90,9 @@ Two sides of a connection negotiate capabilities during the handshake. A capabil
 |---|---|
 | `core` | The server side of the protocol. Always enabled on the server, disabled on workers |
 | `cache` | Acting as a binary cache. Always enabled on the server |
-| `fetch` | Cloning repositories and prefetching flake inputs |
+| `network` | Internet access for clones, flake inputs, substitutions and fixed-output builds |
+| `secrets` | Receiving project credentials such as the SSH key |
+| `exec` | Declared and stored, with no behavior attached yet |
 | `eval` | Running flake evaluations |
 | `build` | Running Nix builds |
 | `federate` | Reserved. Part of the handshake, with no behavior attached yet |
@@ -160,7 +162,7 @@ In-flight work can be lost during a restart. Queued jobs survive.
 - The agreed version is the lower of both newest versions. Every later frame is for that version.
 - Two ranges without overlap can end the session with close code `1002` and `no shared protocol version: ours 30..=30, peer 31..=32`.
 - A first frame without `GRAD` came from protocol 26 or older. The session can end with `peer protocol is older than 30`.
-- The oldest supported version is 30. Older workers need an upgrade.
+- The oldest supported version is 35. Older workers need an upgrade.
 - Both sides are logging the reason at the `warn` level.
 - A server connecting to a worker can keep the reason as the worker's offline reason.
 - `gradient_wire::PROTO_VERSIONS` is the supported range, computed from the `#[proto]` annotations.

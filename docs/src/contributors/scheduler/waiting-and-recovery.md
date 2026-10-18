@@ -12,7 +12,7 @@ flowchart LR
 
 ## Fetch and Eval Split
 
-`assign_queued_evals` (`gradient-scheduler/src/loops/eval.rs`) can ask the pool once per pass for an idle evaluation-only worker (`WorkerPool::has_idle_eval_only_worker`: active, `eval` without `fetch`, no assigned job).
+`assign_queued_evals` (`gradient-scheduler/src/loops/eval.rs`) can ask the pool once per pass for an idle evaluation-only worker (`WorkerPool::has_idle_eval_only_worker`). Such workers are active, with `eval`, without `network` and without a job.
 
 | Pool at assignment | Job steps |
 |---|---|
@@ -21,10 +21,10 @@ flowchart LR
 
 - **Decision per pass:** one idle worker will split every evaluation queued in that pass.
 - **Source:** a repository evaluation must carry `FlakeSource::Repository` as source. A `/nix/store/...` source (`gradient build` upload) must carry `FlakeSource::Cached` as source. That source will still run `FetchFlake` to resolve inputs with the project SSH key (`flake_job_for_eval_source`).
-- **Routing:** `WorkerCaps::can_eval` (`gradient-pool/src/worker_caps.rs`) will require `fetch` for a `FetchFlake` step and `eval` for an evaluation step.
+- **Routing:** `WorkerCaps::can_eval` (`gradient-pool/src/worker_caps.rs`) will require `network` for a `FetchFlake` step and `eval` for an evaluation step. Repositories behind an SSH URL also need `secrets` (`WorkerCaps::can_fetch`).
 - **Follow-up:** `handle_job_completed` (`job_handlers/build_status.rs`) will react to `JobCompleted` of a fetch-only job (`is_fetch_only`). The handler must read `evaluation.flake_source` and enqueue `PendingEvalJob::cached_followup` under the same `eval:{id}` key. The follow-up will carry `FlakeSource::Cached` plus the source as a required path. A missing `flake_source` will fail the evaluation permanently.
 - **Worker side:** the evaluating worker will substitute the source from the cache and evaluate `path:<store path>` (`gradient-worker/src/executor/eval.rs`).
-- **Steering:** `ReserveFetchWorkersRule` (`gradient-pool/src/score/rules/builtin.rs`) will score a fetch-capable worker `-300 * (1 - idle / total)` for a job without `FetchFlake`. The penalty will fade as workers go idle. The rule will never refuse the job. See [Scoring](scoring.md).
+- **Steering:** `ReserveFetchWorkersRule` (`gradient-pool/src/score/rules/builtin.rs`) will score a worker with `network` at `-300 * (1 - idle / total)` for a job without `FetchFlake`. The penalty will fade as workers go idle. The rule will never refuse the job. See [Scoring](scoring.md).
 
 ## Waiting Reasons
 
@@ -32,7 +32,7 @@ The waiting pass `refresh_waiting_state` (`gradient-scheduler/src/waiting_state.
 
 | `WaitingReason` | Parked from | Unparked | Owner |
 |---|---|---|---|
-| `eval_workers { capability, connected_workers }` | `Fetching` with no `fetch` worker. `Queued`, `EvaluatingFlake`, `EvaluatingDerivation` with no `eval` worker | To `Queued` once the capability can connect | Waiting pass |
+| `eval_workers { capability, connected_workers }` | `Fetching` with no `network` worker, or no worker with `network` and `secrets` for an SSH repository (capability `secrets`). `Queued`, `EvaluatingFlake`, `EvaluatingDerivation` with no `eval` worker | To `Queued` once the capability can connect | Waiting pass |
 | `workers { unmet, connected_workers, available_architectures }` | `Building` with no worker that can fit the `(architecture, required_features)` of any blocking shared build | To `Building` once one worker can fit. To `Aborted` after 300 s on the same `unmet` set, unless `wait_for_workers` can be set on the task | Waiting pass |
 | `graph_stuck { pending_shared_builds }` | `Building` with a fitting worker for every blocking shared build, yet none can be handed out | To `Building` once the heal can free a shared build | Waiting pass |
 | `draining` | Every in-flight evaluation during an instance drain | At the end of draining or at startup (`resume_drained_evals`): to `Building` when the walk had finished (`status_after_draining`), otherwise to `Queued` | Waiting pass |

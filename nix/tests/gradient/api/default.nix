@@ -135,7 +135,7 @@ in {
                 token_file = toString stateWorkerToken;
                 display_name = "State Worker";
                 created_by = "stateadmin";
-                enable_fetch = false;
+                enable_secrets = false;
               };
 
               teams.stateteam = {

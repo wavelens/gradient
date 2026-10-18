@@ -12,6 +12,7 @@ import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import {
+  ALL_ALLOWED,
   AllowedCapabilities,
   changedCapabilities,
   gradientCiHost,
@@ -81,7 +82,7 @@ export class TeamWorkersComponent implements OnInit {
   issuedToken = signal<string | null>(null);
   editing = signal<TeamWorkerEntry | null>(null);
   editName = '';
-  editAllowed: AllowedCapabilities = { enable_fetch: true, enable_eval: true, enable_build: true };
+  editAllowed: AllowedCapabilities = ALL_ALLOWED;
   form: RegisterWorkerRequest = { worker_id: '', display_name: '' };
 
   isAdmin = computed(() => this.team()?.role === 'admin' || this.authService.user()?.superuser === true);

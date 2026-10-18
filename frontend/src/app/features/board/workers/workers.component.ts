@@ -132,7 +132,7 @@ export class BoardWorkersComponent implements OnInit {
   ]);
   capOverTime = computed(() => [
     { name: 'eval', data: this.fleet().map((p) => p.eval) },
-    { name: 'fetch', data: this.fleet().map((p) => p.fetch) },
+    { name: 'network', data: this.fleet().map((p) => p.network) },
     { name: 'build', data: this.fleet().map((p) => p.build) },
   ]);
 
