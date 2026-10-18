@@ -45,7 +45,11 @@ pub struct RegisterWorkerRequest {
     pub display_name: String,
     pub token: Option<String>,
     #[serde(default = "default_true")]
-    pub enable_fetch: bool,
+    pub enable_network: bool,
+    #[serde(default = "default_true")]
+    pub enable_secrets: bool,
+    #[serde(default)]
+    pub enable_exec: bool,
     #[serde(default = "default_true")]
     pub enable_eval: bool,
     #[serde(default = "default_true")]
@@ -68,7 +72,9 @@ pub struct ProjectWorkerEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     pub created_by: Option<UserId>,
-    pub enable_fetch: bool,
+    pub enable_network: bool,
+    pub enable_secrets: bool,
+    pub enable_exec: bool,
     pub enable_eval: bool,
     pub enable_build: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -93,7 +99,9 @@ impl ProjectWorkerEntry {
             active: registration.active,
             url: registration.url,
             created_by: registration.created_by,
-            enable_fetch: registration.enable_fetch,
+            enable_network: registration.enable_network,
+            enable_secrets: registration.enable_secrets,
+            enable_exec: registration.enable_exec,
             enable_eval: registration.enable_eval,
             enable_build: registration.enable_build,
             team: None,
@@ -116,7 +124,9 @@ impl ProjectWorkerEntry {
             active: worker.active,
             url: worker.url,
             created_by: worker.created_by,
-            enable_fetch: worker.enable_fetch,
+            enable_network: worker.enable_network,
+            enable_secrets: worker.enable_secrets,
+            enable_exec: worker.enable_exec,
             enable_eval: worker.enable_eval,
             enable_build: worker.enable_build,
             team: Some(team),
@@ -149,16 +159,27 @@ pub(crate) fn worker_connection(
 pub struct PatchWorkerRequest {
     pub active: Option<bool>,
     pub display_name: Option<String>,
-    pub enable_fetch: Option<bool>,
+    pub enable_network: Option<bool>,
+    pub enable_secrets: Option<bool>,
+    pub enable_exec: Option<bool>,
     pub enable_eval: Option<bool>,
     pub enable_build: Option<bool>,
 }
 
+pub(crate) fn patch_changes_capabilities(body: &PatchWorkerRequest) -> bool {
+    [
+        body.enable_network,
+        body.enable_secrets,
+        body.enable_exec,
+        body.enable_eval,
+        body.enable_build,
+    ]
+    .iter()
+    .any(Option::is_some)
+}
+
 pub(crate) fn patch_edits_managed_fields(body: &PatchWorkerRequest) -> bool {
-    body.display_name.is_some()
-        || body.enable_fetch.is_some()
-        || body.enable_eval.is_some()
-        || body.enable_build.is_some()
+    body.display_name.is_some() || patch_changes_capabilities(body)
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -263,7 +284,9 @@ pub async fn post_project_worker(
             url: body.url,
             display_name: body.display_name.trim().to_string(),
             active: true,
-            enable_fetch: body.enable_fetch,
+            enable_network: body.enable_network,
+            enable_secrets: body.enable_secrets,
+            enable_exec: body.enable_exec,
             enable_eval: body.enable_eval,
             enable_build: body.enable_build,
             created_by: Some(user.id),
@@ -600,10 +623,15 @@ pub async fn patch_project_worker(
     if let Some(ref name) = body.display_name {
         active_model.display_name = Set(name.trim().to_string());
     }
-    let caps_changed =
-        body.enable_fetch.is_some() || body.enable_eval.is_some() || body.enable_build.is_some();
-    if let Some(v) = body.enable_fetch {
-        active_model.enable_fetch = Set(v);
+    let caps_changed = patch_changes_capabilities(&body);
+    if let Some(v) = body.enable_network {
+        active_model.enable_network = Set(v);
+    }
+    if let Some(v) = body.enable_secrets {
+        active_model.enable_secrets = Set(v);
+    }
+    if let Some(v) = body.enable_exec {
+        active_model.enable_exec = Set(v);
     }
     if let Some(v) = body.enable_eval {
         active_model.enable_eval = Set(v);
@@ -753,7 +781,9 @@ mod tests {
             active: true,
             url: None,
             created_by: None,
-            enable_fetch: true,
+            enable_network: true,
+            enable_secrets: true,
+            enable_exec: true,
             enable_eval: true,
             enable_build: true,
             team: None,
@@ -791,7 +821,9 @@ mod tests {
         PatchWorkerRequest {
             active: None,
             display_name: None,
-            enable_fetch: None,
+            enable_network: None,
+            enable_secrets: None,
+            enable_exec: None,
             enable_eval: None,
             enable_build: None,
         }
@@ -815,7 +847,15 @@ mod tests {
                 ..empty_patch()
             },
             PatchWorkerRequest {
-                enable_fetch: Some(false),
+                enable_network: Some(false),
+                ..empty_patch()
+            },
+            PatchWorkerRequest {
+                enable_secrets: Some(false),
+                ..empty_patch()
+            },
+            PatchWorkerRequest {
+                enable_exec: Some(false),
                 ..empty_patch()
             },
             PatchWorkerRequest {
@@ -829,6 +869,20 @@ mod tests {
         ] {
             assert!(patch_edits_managed_fields(&body));
         }
+    }
+
+    #[test]
+    fn patching_secrets_changes_the_capabilities() {
+        let body = PatchWorkerRequest {
+            enable_secrets: Some(false),
+            ..empty_patch()
+        };
+        assert!(patch_changes_capabilities(&body));
+        assert!(!patch_changes_capabilities(&PatchWorkerRequest {
+            active: Some(false),
+            display_name: Some("x".into()),
+            ..empty_patch()
+        }));
     }
 
     #[test]

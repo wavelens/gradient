@@ -166,10 +166,6 @@ pub struct CapabilitiesArgs {
     #[arg(default_value = "false")]
     pub federate: bool,
 
-    /// Whether to prefetch flake inputs and sources.
-    #[arg(default_value = "true")]
-    pub fetch: bool,
-
     /// Whether to run Nix flake evaluations.
     #[arg(default_value = "true")]
     pub eval: bool,
@@ -177,6 +173,20 @@ pub struct CapabilitiesArgs {
     /// Whether to run Nix builds.
     #[arg(default_value = "true")]
     pub build: bool,
+
+    /// Whether this worker may reach the internet. Cloning repositories, fetching flake inputs,
+    /// substitutions, downloads and fixed-output builds run only on workers with it.
+    #[arg(default_value = "true")]
+    pub network: bool,
+
+    /// Whether the server may send project credentials such as SSH keys to this worker.
+    #[arg(default_value = "true")]
+    pub secrets: bool,
+
+    /// Whether this worker advertises the `exec` capability. The server stores it but does not
+    /// schedule by it yet.
+    #[arg(default_value = "false")]
+    pub exec: bool,
 }
 
 #[config_group("system", env = "worker_system")]

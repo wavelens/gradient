@@ -99,7 +99,7 @@ mod tests {
         let mut pool = WorkerPool::new();
         let eval = GradientCapabilities {
             eval: true,
-            fetch: true,
+            network: true,
             ..Default::default()
         };
         register(&mut pool, "a", build(), &["x86_64-linux"], &["kvm"], 4);
@@ -113,7 +113,7 @@ mod tests {
         );
 
         let agg = pool.aggregate();
-        assert!(agg.capabilities.build && agg.capabilities.eval && agg.capabilities.fetch);
+        assert!(agg.capabilities.build && agg.capabilities.eval && agg.capabilities.network);
         assert!(!agg.capabilities.cache);
         assert_eq!(
             agg.architectures

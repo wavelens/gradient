@@ -501,8 +501,8 @@ pub fn instance_tables() -> &'static [TableSpec] {
     const SPECS: &[TableSpec] = &[
         spec!(
             "worker_registration",
-            "CREATE TABLE worker_registration (id TEXT, peer_id TEXT, worker_id TEXT, created_at TEXT, managed INTEGER, url TEXT, active INTEGER, display_name TEXT, created_by TEXT, enable_fetch INTEGER, enable_eval INTEGER, enable_build INTEGER)",
-            "SELECT id::text, peer_id::text, worker_id::text, created_at::text, managed::int::text, url::text, active::int::text, display_name::text, created_by::text, enable_fetch::int::text, enable_eval::int::text, enable_build::int::text FROM worker_registration WHERE $1 IS NOT NULL",
+            "CREATE TABLE worker_registration (id TEXT, peer_id TEXT, worker_id TEXT, created_at TEXT, managed INTEGER, url TEXT, active INTEGER, display_name TEXT, created_by TEXT, enable_network INTEGER, enable_secrets INTEGER, enable_exec INTEGER, enable_eval INTEGER, enable_build INTEGER)",
+            "SELECT id::text, peer_id::text, worker_id::text, created_at::text, managed::int::text, url::text, active::int::text, display_name::text, created_by::text, enable_network::int::text, enable_secrets::int::text, enable_exec::int::text, enable_eval::int::text, enable_build::int::text FROM worker_registration WHERE $1 IS NOT NULL",
             "the whole instance",
             [
                 "id",
@@ -514,7 +514,9 @@ pub fn instance_tables() -> &'static [TableSpec] {
                 "active",
                 "display_name",
                 "created_by",
-                "enable_fetch",
+                "enable_network",
+                "enable_secrets",
+                "enable_exec",
                 "enable_eval",
                 "enable_build"
             ]
@@ -589,8 +591,8 @@ pub fn instance_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "team_worker",
-            "CREATE TABLE team_worker (id TEXT, team TEXT, worker_id TEXT, display_name TEXT, url TEXT, active INTEGER, gradient_ci INTEGER, enable_fetch INTEGER, enable_eval INTEGER, enable_build INTEGER, created_by TEXT, created_at TEXT)",
-            "SELECT id::text, team::text, worker_id::text, display_name::text, url::text, active::int::text, gradient_ci::int::text, enable_fetch::int::text, enable_eval::int::text, enable_build::int::text, created_by::text, created_at::text FROM team_worker WHERE $1 IS NOT NULL",
+            "CREATE TABLE team_worker (id TEXT, team TEXT, worker_id TEXT, display_name TEXT, url TEXT, active INTEGER, gradient_ci INTEGER, enable_network INTEGER, enable_secrets INTEGER, enable_exec INTEGER, enable_eval INTEGER, enable_build INTEGER, created_by TEXT, created_at TEXT)",
+            "SELECT id::text, team::text, worker_id::text, display_name::text, url::text, active::int::text, gradient_ci::int::text, enable_network::int::text, enable_secrets::int::text, enable_exec::int::text, enable_eval::int::text, enable_build::int::text, created_by::text, created_at::text FROM team_worker WHERE $1 IS NOT NULL",
             "the whole instance",
             [
                 "id",
@@ -600,7 +602,9 @@ pub fn instance_tables() -> &'static [TableSpec] {
                 "url",
                 "active",
                 "gradient_ci",
-                "enable_fetch",
+                "enable_network",
+                "enable_secrets",
+                "enable_exec",
                 "enable_eval",
                 "enable_build",
                 "created_by",

@@ -25,7 +25,9 @@ pub struct Model {
     /// connection.
     pub url: Option<String>,
     pub active: bool,
-    pub enable_fetch: bool,
+    pub enable_network: bool,
+    pub enable_secrets: bool,
+    pub enable_exec: bool,
     pub enable_eval: bool,
     pub enable_build: bool,
     pub display_name: String,

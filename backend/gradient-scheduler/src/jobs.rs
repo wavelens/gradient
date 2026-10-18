@@ -2171,7 +2171,8 @@ mod tests {
         let fetch_only = WorkerCaps {
             fetch: true,
             capabilities: GradientCapabilities {
-                fetch: true,
+                network: true,
+                secrets: true,
                 ..Default::default()
             },
             ..Default::default()
@@ -2187,7 +2188,8 @@ mod tests {
         let both = WorkerCaps {
             fetch: true,
             capabilities: GradientCapabilities {
-                fetch: true,
+                network: true,
+                secrets: true,
                 eval: true,
                 ..Default::default()
             },
@@ -2376,7 +2378,8 @@ mod tests {
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
             capabilities: GradientCapabilities {
-                fetch: true,
+                network: true,
+                secrets: true,
                 eval: true,
                 ..Default::default()
             },
@@ -2434,7 +2437,8 @@ mod tests {
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
             capabilities: GradientCapabilities {
-                fetch: true,
+                network: true,
+                secrets: true,
                 build: true,
                 ..Default::default()
             },

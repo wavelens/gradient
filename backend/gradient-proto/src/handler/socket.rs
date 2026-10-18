@@ -51,7 +51,7 @@ pub(super) async fn send_credentials_for_job(
     use gradient_wire::types::{FlakeStep, Job};
 
     let caps = scheduler.worker_gradient_caps(worker_id).await;
-    let worker_can_fetch = caps.as_ref().map(|c| c.fetch).unwrap_or(false);
+    let worker_can_fetch = caps.as_ref().is_some_and(|c| c.network && c.secrets);
 
     match job {
         Job::Flake(flake_job) => {

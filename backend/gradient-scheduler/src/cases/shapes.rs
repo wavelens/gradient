@@ -99,7 +99,8 @@ impl Profile {
 
 fn caps(fetch: bool, eval: bool, build: bool) -> GradientCapabilities {
     GradientCapabilities {
-        fetch,
+        network: fetch,
+        secrets: fetch,
         eval,
         build,
         ..GradientCapabilities::default()

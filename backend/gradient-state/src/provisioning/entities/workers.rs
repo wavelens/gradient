@@ -80,7 +80,9 @@ impl<'a> StateApplicator<'a> {
                     reg.url = Set(url.clone());
                     reg.display_name = Set(state_worker.display_name.clone());
                     reg.active = Set(state_worker.enabled);
-                    reg.enable_fetch = Set(state_worker.enable_fetch);
+                    reg.enable_network = Set(state_worker.enable_network);
+                    reg.enable_secrets = Set(state_worker.enable_secrets);
+                    reg.enable_exec = Set(state_worker.enable_exec);
                     reg.enable_eval = Set(state_worker.enable_eval);
                     reg.enable_build = Set(state_worker.enable_build);
                     reg.created_by = Set(created_by_id);
@@ -102,7 +104,9 @@ impl<'a> StateApplicator<'a> {
                         display_name: state_worker.display_name.clone(),
                         gradient_ci: false,
                         active: state_worker.enabled,
-                        enable_fetch: state_worker.enable_fetch,
+                        enable_network: state_worker.enable_network,
+                        enable_secrets: state_worker.enable_secrets,
+                        enable_exec: state_worker.enable_exec,
                         enable_eval: state_worker.enable_eval,
                         enable_build: state_worker.enable_build,
                         created_by: created_by_id,
@@ -165,7 +169,9 @@ async fn apply_team_worker<C: ConnectionTrait>(
         active.token_encrypted = Set(token_encrypted);
         active.url = Set(worker.url.clone());
         active.display_name = Set(worker.display_name.clone());
-        active.enable_fetch = Set(worker.enable_fetch);
+        active.enable_network = Set(worker.enable_network);
+        active.enable_secrets = Set(worker.enable_secrets);
+        active.enable_exec = Set(worker.enable_exec);
         active.enable_eval = Set(worker.enable_eval);
         active.enable_build = Set(worker.enable_build);
         active.active = Set(worker.enabled);
@@ -184,7 +190,9 @@ async fn apply_team_worker<C: ConnectionTrait>(
         url: worker.url.clone(),
         display_name: worker.display_name.clone(),
         gradient_ci: false,
-        enable_fetch: worker.enable_fetch,
+        enable_network: worker.enable_network,
+        enable_secrets: worker.enable_secrets,
+        enable_exec: worker.enable_exec,
         enable_eval: worker.enable_eval,
         enable_build: worker.enable_build,
         active: worker.enabled,
@@ -205,8 +213,25 @@ mod team_worker_tests {
     use gradient_fixtures::mock::{all_statements, mock_db};
     use sea_orm::MockExecResult;
 
-    #[tokio::test]
-    async fn a_declared_team_worker_is_inserted_as_managed() {
+    fn state_worker(enable_secrets: bool) -> StateWorker {
+        StateWorker {
+            worker_id: "w1".into(),
+            url: None,
+            projects: vec![],
+            team: Some("platform".into()),
+            token_file: "/dev/null".into(),
+            display_name: "W".into(),
+            created_by: None,
+            enable_network: true,
+            enable_secrets,
+            enable_exec: true,
+            enable_eval: true,
+            enable_build: true,
+            enabled: true,
+        }
+    }
+
+    async fn inserted_team_worker(worker: &StateWorker) -> sea_orm::Statement {
         let team = TeamId::now_v7();
         let db = mock_db()
             .append_query_results([Vec::<team_worker::Model>::new()])
@@ -220,28 +245,42 @@ mod team_worker_tests {
                 rows_affected: 1,
             }])
             .into_connection();
-        let worker = StateWorker {
-            worker_id: "w1".into(),
-            url: None,
-            projects: vec![],
-            team: Some("platform".into()),
-            token_file: "/dev/null".into(),
-            display_name: "W".into(),
-            created_by: None,
-            enable_fetch: true,
-            enable_eval: true,
-            enable_build: true,
-            enabled: true,
-        };
 
-        apply_team_worker(&db, &worker, team, None, "hash".into(), None)
+        apply_team_worker(&db, worker, team, None, "hash".into(), None)
             .await
             .unwrap();
 
-        let inserted = all_statements(db.into_transaction_log())
+        all_statements(db.into_transaction_log())
             .into_iter()
             .find(|s| s.sql.starts_with("INSERT INTO \"team_worker\""))
-            .expect("an INSERT INTO team_worker");
+            .expect("an INSERT INTO team_worker")
+    }
+
+    fn inserted_value(statement: &sea_orm::Statement, column: &str) -> sea_orm::Value {
+        let columns = statement.sql.split(['(', ')']).nth(1).expect("column list");
+        let index = columns
+            .split(", ")
+            .position(|c| c == format!("\"{column}\""))
+            .expect("column in the INSERT");
+        statement.values.as_ref().expect("values").0[index].clone()
+    }
+
+    #[tokio::test]
+    async fn a_declared_team_worker_is_inserted_as_managed() {
+        let inserted = inserted_team_worker(&state_worker(true)).await;
         assert!(inserted.sql.contains("\"managed\""));
+    }
+
+    #[tokio::test]
+    async fn a_worker_without_secrets_keeps_network() {
+        let inserted = inserted_team_worker(&state_worker(false)).await;
+        assert_eq!(
+            inserted_value(&inserted, "enable_secrets"),
+            sea_orm::Value::Bool(Some(false))
+        );
+        assert_eq!(
+            inserted_value(&inserted, "enable_network"),
+            sea_orm::Value::Bool(Some(true))
+        );
     }
 }

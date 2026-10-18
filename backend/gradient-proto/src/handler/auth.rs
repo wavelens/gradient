@@ -197,7 +197,9 @@ pub(super) async fn resolve_authorized(
 /// clamping the advertised set with it.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct EnabledCapsAggregate {
-    pub enable_fetch: bool,
+    pub enable_network: bool,
+    pub enable_secrets: bool,
+    pub enable_exec: bool,
     pub enable_eval: bool,
     pub enable_build: bool,
 }
@@ -205,7 +207,9 @@ pub(super) struct EnabledCapsAggregate {
 impl EnabledCapsAggregate {
     pub fn all() -> Self {
         Self {
-            enable_fetch: true,
+            enable_network: true,
+            enable_secrets: true,
+            enable_exec: true,
             enable_eval: true,
             enable_build: true,
         }
@@ -234,7 +238,9 @@ pub(super) async fn aggregate_enabled_caps(db: &WorkerDb, worker_id: &str) -> En
             gradient_db::teams::workers::active_team_worker(db, worker_id).await
         {
             return EnabledCapsAggregate {
-                enable_fetch: worker.enable_fetch,
+                enable_network: worker.enable_network,
+                enable_secrets: worker.enable_secrets,
+                enable_exec: worker.enable_exec,
                 enable_eval: worker.enable_eval,
                 enable_build: worker.enable_build,
             };
@@ -244,7 +250,9 @@ pub(super) async fn aggregate_enabled_caps(db: &WorkerDb, worker_id: &str) -> En
     }
 
     EnabledCapsAggregate {
-        enable_fetch: rows.iter().all(|r| r.enable_fetch),
+        enable_network: rows.iter().all(|r| r.enable_network),
+        enable_secrets: rows.iter().all(|r| r.enable_secrets),
+        enable_exec: rows.iter().all(|r| r.enable_exec),
         enable_eval: rows.iter().all(|r| r.enable_eval),
         enable_build: rows.iter().all(|r| r.enable_build),
     }
@@ -276,9 +284,11 @@ pub(super) fn negotiate_capabilities(
         core: true,
         cache: true,
         federate: client.federate && config.proto.federate,
-        fetch: client.fetch && enabled.enable_fetch,
         eval: client.eval && enabled.enable_eval,
         build: client.build && enabled.enable_build,
+        network: client.network && enabled.enable_network,
+        secrets: client.secrets && enabled.enable_secrets,
+        exec: client.exec && enabled.enable_exec,
     }
 }
 
@@ -295,9 +305,11 @@ mod tests {
             core: val,
             cache: val,
             federate: val,
-            fetch: val,
             eval: val,
             build: val,
+            network: val,
+            secrets: val,
+            exec: val,
         }
     }
 
@@ -363,14 +375,15 @@ mod tests {
             core: false,
             cache: false,
             federate: false,
-            fetch: true,
             eval: true,
             build: true,
+            network: true,
+            secrets: true,
+            exec: true,
         };
         let result = negotiate_capabilities(&state.config, client, EnabledCapsAggregate::all());
-        assert!(result.fetch);
-        assert!(result.eval);
-        assert!(result.build);
+        assert!(result.eval && result.build);
+        assert!(result.network && result.secrets && result.exec);
     }
 
     #[test]
@@ -378,14 +391,24 @@ mod tests {
         let state = make_state(false);
         let client = all_caps(true);
         let enabled = EnabledCapsAggregate {
-            enable_fetch: false,
             enable_eval: true,
             enable_build: false,
+            ..EnabledCapsAggregate::all()
         };
         let result = negotiate_capabilities(&state.config, client, enabled);
-        assert!(!result.fetch);
         assert!(result.eval);
         assert!(!result.build);
+    }
+
+    #[test]
+    fn negotiation_keeps_network_secrets_and_exec_only_when_enabled() {
+        let state = make_state(false);
+        let enabled = EnabledCapsAggregate {
+            enable_secrets: false,
+            ..EnabledCapsAggregate::all()
+        };
+        let result = negotiate_capabilities(&state.config, all_caps(true), enabled);
+        assert!(result.network && !result.secrets && result.exec);
     }
 
     use gradient_entity::project::Model as ProjectModel;

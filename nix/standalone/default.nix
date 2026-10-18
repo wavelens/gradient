@@ -27,7 +27,7 @@ in {
 
     worker = {
       enable = true;
-      capabilities = { fetch = true; eval = true; build = true; };
+      capabilities = { network = true; secrets = true; eval = true; build = true; };
     };
 
     state.users.admin = {

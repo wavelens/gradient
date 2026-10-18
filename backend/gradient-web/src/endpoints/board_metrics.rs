@@ -336,7 +336,7 @@ pub struct BoardFleetPoint {
     pub connected: i64,
     pub draining: i64,
     pub eval: i64,
-    pub fetch: i64,
+    pub network: i64,
     pub build: i64,
 }
 
@@ -347,7 +347,7 @@ impl From<worker_samples::FleetCount> for BoardFleetPoint {
             connected: fleet.connected,
             draining: fleet.draining,
             eval: fleet.eval,
-            fetch: fleet.fetch,
+            network: fleet.network,
             build: fleet.build,
         }
     }

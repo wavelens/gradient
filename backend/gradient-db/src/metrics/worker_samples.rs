@@ -78,7 +78,7 @@ fn board_fleet_sql(window_hours: i64, project_filter: Option<&str>) -> String {
                 count(DISTINCT worker_id) AS connected, \
                 count(DISTINCT worker_id) FILTER (WHERE state = {draining}) AS draining, \
                 count(DISTINCT worker_id) FILTER (WHERE (capabilities->>'eval')::boolean) AS ev, \
-                count(DISTINCT worker_id) FILTER (WHERE (capabilities->>'fetch')::boolean) AS ft, \
+                count(DISTINCT worker_id) FILTER (WHERE (capabilities->>'network')::boolean) AS nw, \
                 count(DISTINCT worker_id) FILTER (WHERE (capabilities->>'build')::boolean) AS bd \
          FROM worker_sample \
          WHERE at >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours'",
@@ -103,7 +103,7 @@ pub struct FleetCount {
     pub connected: i64,
     pub draining: i64,
     pub eval: i64,
-    pub fetch: i64,
+    pub network: i64,
     pub build: i64,
 }
 
@@ -123,7 +123,7 @@ pub async fn fleet_per_hour<C: ConnectionTrait>(
             connected: r.try_get("", "connected").unwrap_or(0),
             draining: r.try_get("", "draining").unwrap_or(0),
             eval: r.try_get("", "ev").unwrap_or(0),
-            fetch: r.try_get("", "ft").unwrap_or(0),
+            network: r.try_get("", "nw").unwrap_or(0),
             build: r.try_get("", "bd").unwrap_or(0),
         })
         .collect())

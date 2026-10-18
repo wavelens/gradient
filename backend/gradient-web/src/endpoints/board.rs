@@ -684,7 +684,7 @@ pub struct BoardWorker {
     pub assigned_jobs: i64,
     pub max_concurrent_builds: i64,
     pub eval: bool,
-    pub fetch: bool,
+    pub network: bool,
     pub build: bool,
     pub architectures: Vec<String>,
     pub cpu_usage_pct: Option<f32>,
@@ -748,7 +748,7 @@ pub async fn get_board_workers(
                 assigned_jobs: w.assigned_job_count as i64,
                 max_concurrent_builds: w.max_concurrent_builds as i64,
                 eval: w.capabilities.eval,
-                fetch: w.capabilities.fetch,
+                network: w.capabilities.network,
                 build: w.capabilities.build,
                 architectures: if accessible { w.architectures } else { vec![] },
                 cpu_usage_pct: accessible.then_some(w.cpu_usage_pct).flatten(),
@@ -822,8 +822,8 @@ fn aggregate_worker_load(
         if w.capabilities.eval {
             bump_capacity(&mut cap, "eval", slots);
         }
-        if w.capabilities.fetch {
-            bump_capacity(&mut cap, "fetch", slots);
+        if w.capabilities.network {
+            bump_capacity(&mut cap, "network", slots);
         }
         if w.capabilities.build {
             bump_capacity(&mut cap, "build", slots);
@@ -844,7 +844,7 @@ fn aggregate_worker_load(
                     bump_in_flight(&mut cap, "eval");
                 }
                 if j.fetch_step {
-                    bump_in_flight(&mut cap, "fetch");
+                    bump_in_flight(&mut cap, "network");
                 }
             }
         }
@@ -858,7 +858,7 @@ fn aggregate_worker_load(
         }
     }
 
-    let by_capability = ["eval", "fetch", "build"]
+    let by_capability = ["eval", "network", "build"]
         .into_iter()
         .map(|k| LoadBucket::from((k.to_owned(), cap.get(k).copied().unwrap_or_default())))
         .collect();
@@ -876,7 +876,7 @@ fn aggregate_worker_load(
     operation_id = "getBoardWorkerLoad",
     tag = "board",
     summary = "Fleet load by capability, architecture, and feature",
-    description = "Real per-dimension fleet load: for each capability (eval/fetch/build), architecture, and system feature, the in-flight job count against the summed slot capacity of the workers that can serve it. Answers whether the fleet is eval-, build-, or architecture-bound rather than showing one blended busy %. Scoped to the caller's projects (superusers see the whole fleet). Each bucket carries `{ key, in_flight, capacity, workers }`; busy % = in_flight / capacity.",
+    description = "Real per-dimension fleet load: for each capability (eval/network/build), architecture, and system feature, the in-flight job count against the summed slot capacity of the workers that can serve it. Answers whether the fleet is eval-, build-, or architecture-bound rather than showing one blended busy %. Scoped to the caller's projects (superusers see the whole fleet). Each bucket carries `{ key, in_flight, capacity, workers }`; busy % = in_flight / capacity.",
     responses((status = OK, description = "Fleet load breakdowns", body = WorkerLoad), WebError)
 )]
 pub async fn get_board_worker_load(
@@ -1374,7 +1374,7 @@ mod tests {
 
     fn worker(
         eval: bool,
-        fetch: bool,
+        network: bool,
         build: bool,
         arch: &[&str],
         features: &[&str],
@@ -1384,7 +1384,7 @@ mod tests {
             id: "w".into(),
             capabilities: GradientCapabilities {
                 eval,
-                fetch,
+                network,
                 build,
                 ..Default::default()
             },
@@ -1514,7 +1514,7 @@ mod tests {
         let cap = &load.by_capability;
         assert_eq!(
             cap.iter().map(|b| b.key.as_str()).collect::<Vec<_>>(),
-            ["eval", "fetch", "build"]
+            ["eval", "network", "build"]
         );
         assert_eq!(
             *bucket(cap, "eval"),
@@ -1526,9 +1526,9 @@ mod tests {
             }
         );
         assert_eq!(
-            *bucket(cap, "fetch"),
+            *bucket(cap, "network"),
             LoadBucket {
-                key: "fetch".into(),
+                key: "network".into(),
                 in_flight: 1,
                 capacity: 8,
                 workers: 1
@@ -1586,9 +1586,9 @@ mod tests {
         let load = aggregate_worker_load(&workers, &job_refs);
         assert!(load.by_architecture.iter().all(|b| b.key != BUILTIN_ARCH));
         assert_eq!(
-            *bucket(&load.by_capability, "fetch"),
+            *bucket(&load.by_capability, "network"),
             LoadBucket {
-                key: "fetch".into(),
+                key: "network".into(),
                 in_flight: 0,
                 capacity: 0,
                 workers: 0

@@ -161,7 +161,9 @@ mod tests {
         GradientCapabilities {
             core: false,
             federate: false,
-            fetch: true,
+            network: true,
+            secrets: true,
+            exec: true,
             eval: true,
             build: true,
             cache: false,
@@ -172,7 +174,9 @@ mod tests {
         GradientCapabilities {
             core: false,
             federate: false,
-            fetch: false,
+            network: false,
+            secrets: false,
+            exec: false,
             eval: false,
             build: false,
             cache: false,

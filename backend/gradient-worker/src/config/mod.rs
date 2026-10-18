@@ -130,10 +130,12 @@ impl WorkerConfig {
         GradientCapabilities {
             core: false,
             federate: self.capabilities.federate,
-            fetch: self.capabilities.fetch,
             eval: self.capabilities.eval,
             build: self.capabilities.build,
             cache: false,
+            network: self.capabilities.network,
+            secrets: self.capabilities.secrets,
+            exec: self.capabilities.exec,
         }
     }
 }

@@ -37,7 +37,9 @@ fn readonly_capabilities() -> GradientCapabilities {
         core: false,
         build: false,
         eval: false,
-        fetch: false,
+        network: false,
+        secrets: false,
+        exec: false,
         cache: true,
         federate: false,
     }

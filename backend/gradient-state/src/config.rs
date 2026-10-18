@@ -242,7 +242,11 @@ pub struct StateWorker {
     #[serde(default)]
     pub created_by: Option<String>,
     #[serde(default = "default_true")]
-    pub enable_fetch: bool,
+    pub enable_network: bool,
+    #[serde(default = "default_true")]
+    pub enable_secrets: bool,
+    #[serde(default)]
+    pub enable_exec: bool,
     #[serde(default = "default_true")]
     pub enable_eval: bool,
     #[serde(default = "default_true")]
