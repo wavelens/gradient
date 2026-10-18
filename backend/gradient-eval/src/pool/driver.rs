@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::ipc::EvalRequest;
 
-use super::import::RefuseImports;
+use super::dependencies::RefuseDependencies;
 use super::transport::{EvalWorker, SpawnConfig};
 
 pub async fn run_eval_driver(
@@ -29,9 +29,10 @@ pub async fn run_eval_driver(
     let live = Arc::new(Mutex::new(HashSet::new()));
     let mut worker = EvalWorker::spawn(
         &SpawnConfig {
-            cache_dir: eval_cache_dir,
+            cache_dir: eval_cache_dir.to_owned(),
             trace_dir: None,
             metrics: eval_metrics,
+            fetch_through_parent: false,
         },
         live,
         Arc::default(),
@@ -39,7 +40,7 @@ pub async fn run_eval_driver(
     .await
     .context("spawn eval worker for driver")?;
 
-    let imports = RefuseImports("the eval driver");
+    let dependencies = RefuseDependencies("the eval driver");
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
         let req: EvalRequest =
             serde_json::from_str(line).with_context(|| format!("parse request: {line}"))?;
@@ -54,7 +55,7 @@ pub async fn run_eval_driver(
                 wildcards,
                 input_overrides,
             } => worker
-                .plan(repository, wildcards, input_overrides, &imports)
+                .plan(repository, wildcards, input_overrides, &dependencies)
                 .await
                 .map(|(shards, errors)| json!({"kind": "plan_ok", "shards": shards, "errors": errors})),
             EvalRequest::List {
@@ -63,7 +64,7 @@ pub async fn run_eval_driver(
                 only,
                 input_overrides,
             } => worker
-                .list(repository, wildcards, only, input_overrides, &imports)
+                .list(repository, wildcards, only, input_overrides, &dependencies)
                 .await
                 .map(|l| {
                     json!({
@@ -91,8 +92,8 @@ pub async fn run_eval_driver(
             EvalRequest::FetchInput { .. } => {
                 Err(anyhow::anyhow!("the eval driver does not fetch inputs"))
             }
-            EvalRequest::BuildDone { .. } => Err(anyhow::anyhow!(
-                "the eval driver answers build requests itself"
+            EvalRequest::BuildDone { .. } | EvalRequest::InputDone { .. } => Err(anyhow::anyhow!(
+                "the eval driver answers requests to the parent itself"
             )),
         };
 

@@ -8,7 +8,9 @@ use crate::commands::attr_spec;
 use clap::Args;
 use etcetera::base_strategy::{BaseStrategy, choose_base_strategy};
 use gradient_eval::ipc::ResolvedItem;
-use gradient_eval::pool::{EvalPool, EvalPoolConfig, MemoryGuard, RefuseImports, default_workers};
+use gradient_eval::pool::{
+    EvalPool, EvalPoolConfig, MemoryGuard, RefuseDependencies, default_workers,
+};
 use serde::Serialize;
 use std::io::Write;
 use std::num::{NonZeroU64, NonZeroUsize};
@@ -101,6 +103,7 @@ async fn evaluate(
         cache_dir: eval_cache_dir(),
         trace_dir: None,
         metrics: false,
+        fetch_through_parent: false,
     });
 
     let out = std::sync::Mutex::new(std::io::stdout());
@@ -111,14 +114,14 @@ async fn evaluate(
         }
     };
 
-    let imports = RefuseImports("the local evaluation");
+    let dependencies = RefuseDependencies("the local evaluation");
     let found = |items: Vec<ResolvedItem>| items.into_iter().map(Job::from_item).for_each(print);
 
     let evaluated = if all_concrete(&wildcards) {
-        pool.list_attrs(flake_ref, wildcards, &[], &imports, &found)
+        pool.list_attrs(flake_ref, wildcards, &[], &dependencies, &found)
             .await
     } else {
-        pool.list_shards(flake_ref, wildcards, &[], &imports, &found)
+        pool.list_shards(flake_ref, wildcards, &[], &dependencies, &found)
             .await
     };
 

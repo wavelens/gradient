@@ -59,7 +59,11 @@ fn main() -> Result<()> {
     });
 
     if config.eval_subprocess {
-        return nix::eval_worker::run_eval_worker(config.eval.metrics).map_err(anyhow::Error::from);
+        return nix::eval_worker::run_eval_worker(
+            config.eval.metrics,
+            config.eval_fetch_through_parent,
+        )
+        .map_err(anyhow::Error::from);
     }
 
     if let Some(requests_path) = config.eval_driver.clone() {

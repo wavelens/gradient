@@ -14,7 +14,7 @@ use crate::stats::StatsDelta;
 
 /// The version must be bumped whenever the frame layout or a type's rkyv shape changes.
 /// A mismatch can only happen when the binary is replaced mid-run.
-pub const EVAL_IPC_VERSION: u8 = 10;
+pub const EVAL_IPC_VERSION: u8 = 11;
 
 pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
 
@@ -85,11 +85,17 @@ pub enum EvalRequest {
         input_overrides: Vec<(String, String)>,
     },
     FetchInput {
-        locked: String,
+        request: String,
         #[serde(default)]
         git_ssh_command: Option<String>,
     },
     BuildDone {
+        #[serde(default)]
+        error: Option<String>,
+    },
+    InputDone {
+        #[serde(default)]
+        response: Option<String>,
         #[serde(default)]
         error: Option<String>,
     },
@@ -117,13 +123,16 @@ pub enum EvalResponse {
     },
     CheckpointOk,
     FetchOk {
-        store_path: String,
+        response: String,
     },
     Stats {
         delta: StatsDelta,
     },
     NeedsBuild {
         derived_paths: Vec<String>,
+    },
+    NeedsInput {
+        request: String,
     },
     Err {
         message: String,
@@ -231,14 +240,14 @@ mod tests {
     #[test]
     fn a_fetch_request_and_its_frames_round_trip() {
         let req = EvalRequest::FetchInput {
-            locked: r#"{"type":"github","owner":"o","repo":"r","rev":"abc","narHash":"sha256-x"}"#
+            request: r#"{"builtin":"fetchTree","args":{"type":"github","owner":"o","repo":"r"}}"#
                 .into(),
             git_ssh_command: Some("ssh -i key".into()),
         };
         let back = decode_request(&encode_request(&req).unwrap()).unwrap();
         assert!(
-            matches!(back, EvalRequest::FetchInput { ref locked, ref git_ssh_command }
-            if locked.contains("github") && git_ssh_command.as_deref() == Some("ssh -i key"))
+            matches!(back, EvalRequest::FetchInput { ref request, ref git_ssh_command }
+            if request.contains("github") && git_ssh_command.as_deref() == Some("ssh -i key"))
         );
 
         let stats = EvalResponse::Stats {
@@ -274,6 +283,34 @@ mod tests {
         assert_eq!(json["op"], "build_done");
         let json = serde_json::to_value(&needs).unwrap();
         assert_eq!(json["kind"], "needs_build");
+    }
+
+    #[test]
+    fn needs_input_and_input_done_round_trip() {
+        let request = r#"{"builtin":"fetchurl","args":{"url":"https://example.org/x"}}"#;
+        let needs = EvalResponse::NeedsInput {
+            request: request.into(),
+        };
+        let back = decode_response(&encode_response(&needs).unwrap()).unwrap();
+        assert!(matches!(back, EvalResponse::NeedsInput { request: r } if r == request));
+
+        let done = EvalRequest::InputDone {
+            response: Some(r#"{"storePath":"/nix/store/aaaa-x"}"#.into()),
+            error: None,
+        };
+        let back = decode_request(&encode_request(&done).unwrap()).unwrap();
+        assert!(matches!(
+            back,
+            EvalRequest::InputDone { response: Some(r), error: None } if r.contains("aaaa-x")
+        ));
+
+        let json = serde_json::to_value(EvalRequest::InputDone {
+            response: None,
+            error: Some("404".into()),
+        })
+        .unwrap();
+        assert_eq!(json["op"], "input_done");
+        assert_eq!(serde_json::to_value(&needs).unwrap()["kind"], "needs_input");
     }
 
     #[test]

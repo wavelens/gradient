@@ -10,7 +10,7 @@ use anyhow::{Context as _, Result};
 use nix_bindings::flake::{FetchersSettings, FlakeSettings};
 use nix_bindings::{Context, EvalState, EvalStateBuilder, Store};
 
-pub use nix_bindings::RealiseHook;
+pub use nix_bindings::{FetchHook, RealiseHook};
 
 pub struct NixEvaluator {
     ctx: Arc<Context>,
@@ -19,6 +19,19 @@ pub struct NixEvaluator {
     fetch_settings: FetchersSettings,
     state: EvalState,
 }
+
+const FETCH_REQUEST: &str = r#"json:
+  let
+    request = builtins.fromJSON json;
+    fetch = builtins.getAttr request.builtin { inherit (builtins) fetchTree fetchTarball fetchurl; };
+    fetched = fetch request.args;
+    locked = builtins.intersectAttrs { narHash = null; rev = null; revCount = null; lastModified = null; } fetched;
+  in
+  builtins.toJSON (
+    if request.builtin == "fetchTree"
+    then { storePath = fetched.outPath; attrs = request.args // locked; }
+    else { storePath = fetched; }
+  )"#;
 
 pub struct StatsReader<'ev>(&'ev EvalState);
 
@@ -84,7 +97,7 @@ fn ensure_store_writable() {}
 
 impl NixEvaluator {
     #[allow(clippy::arc_with_non_send_sync)]
-    pub fn new(realise_hook: Option<RealiseHook>) -> Result<Self> {
+    pub fn new(realise_hook: Option<RealiseHook>, fetch_hook: Option<FetchHook>) -> Result<Self> {
         ensure_store_writable();
         let ctx = Arc::new(Context::new().context("nix context init")?);
         ctx.set_setting("show-trace", "true")?;
@@ -101,6 +114,9 @@ impl NixEvaluator {
             .set_setting("pure-eval", "true")?;
         if let Some(hook) = realise_hook {
             builder = builder.set_realise_hook(hook)?;
+        }
+        if let Some(hook) = fetch_hook {
+            builder = builder.set_fetch_hook(hook)?;
         }
         let state = builder.build().context("nix eval state build")?;
 
@@ -123,20 +139,17 @@ impl NixEvaluator {
         StatsReader(&self.state)
     }
 
-    pub fn fetch_tree(&self, locked: &str, git_ssh_command: Option<&str>) -> Result<String> {
+    pub fn fetch_tree(&self, request: &str, git_ssh_command: Option<&str>) -> Result<String> {
         self.ctx.set_log_format("internal-json")?;
         let _restore = SshCommand::set(git_ssh_command);
-        let fetched = self.fetch_tree_out_path(locked);
+        let fetched = self.answer_fetch(request);
         self.ctx.set_log_format("raw-with-logs")?;
         fetched
     }
 
-    fn fetch_tree_out_path(&self, locked: &str) -> Result<String> {
-        let fetch = self.state.eval_from_string(
-            "json: (builtins.fetchTree (builtins.fromJSON json)).outPath",
-            "/",
-        )?;
-        let json = self.state.make_string(locked)?;
+    fn answer_fetch(&self, request: &str) -> Result<String> {
+        let fetch = self.state.eval_from_string(FETCH_REQUEST, "/")?;
+        let json = self.state.make_string(request)?;
         Ok(fetch.call(&json)?.as_string()?)
     }
 

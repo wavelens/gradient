@@ -31,18 +31,11 @@ pub(super) struct EvalWorkerPool {
     max: usize,
     max_rss: u64,
     guard: MemoryGuard,
-    settings: WorkerSettings,
+    spawn: SpawnConfig,
     shutting_down: Arc<AtomicBool>,
     live: Arc<Mutex<HashSet<u32>>>,
     under_pressure: Arc<AtomicBool>,
     thunks: Arc<LiveThunks>,
-}
-
-#[derive(Debug)]
-struct WorkerSettings {
-    cache_dir: String,
-    trace_dir: Option<String>,
-    metrics: bool,
 }
 
 impl EvalWorkerPool {
@@ -50,9 +43,7 @@ impl EvalWorkerPool {
         workers: usize,
         max_rss: u64,
         guard: MemoryGuard,
-        cache_dir: String,
-        trace_dir: Option<String>,
-        metrics: bool,
+        spawn: SpawnConfig,
         thunks: Arc<LiveThunks>,
     ) -> Self {
         let max = workers.max(1);
@@ -62,11 +53,7 @@ impl EvalWorkerPool {
             max,
             max_rss,
             guard,
-            settings: WorkerSettings {
-                cache_dir,
-                trace_dir,
-                metrics,
-            },
+            spawn,
             shutting_down: Arc::new(AtomicBool::new(false)),
             live: Arc::new(Mutex::new(HashSet::new())),
             under_pressure: Arc::new(AtomicBool::new(false)),
@@ -123,11 +110,7 @@ impl EvalWorkerPool {
                 }
                 None => {
                     break EvalWorker::spawn(
-                        &SpawnConfig {
-                            cache_dir: &self.settings.cache_dir,
-                            trace_dir: self.settings.trace_dir.as_deref(),
-                            metrics: self.settings.metrics,
-                        },
+                        &self.spawn,
                         Arc::clone(&self.live),
                         Arc::clone(&self.thunks),
                     )
@@ -360,9 +343,12 @@ pub(super) mod tests {
             workers,
             2 * GIB,
             guard,
-            String::new(),
-            None,
-            true,
+            SpawnConfig {
+                cache_dir: String::new(),
+                trace_dir: None,
+                metrics: true,
+                fetch_through_parent: false,
+            },
             Arc::default(),
         )
     }
@@ -413,7 +399,7 @@ pub(super) mod tests {
             "repo".into(),
             vec![],
             vec![],
-            &super::super::RefuseImports("a test"),
+            &super::super::RefuseDependencies("a test"),
         );
         tokio::time::timeout(Duration::from_millis(200), call)
             .await
@@ -447,7 +433,7 @@ pub(super) mod tests {
                 "repo".into(),
                 vec![],
                 vec![],
-                &super::super::RefuseImports("a test"),
+                &super::super::RefuseDependencies("a test"),
             )
             .await
             .expect("plan");

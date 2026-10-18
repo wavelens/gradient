@@ -24,19 +24,25 @@ pub struct FlakeDiscovery {
 }
 
 #[async_trait]
-pub trait ImportBuilder: Send + Sync {
+pub trait EvalDependencies: Send + Sync {
     async fn build_imports(&self, derived_paths: Vec<String>) -> Result<(), String>;
+
+    async fn fetch_input(&self, request: String) -> Result<String, String>;
 }
 
-pub struct RefuseImports(pub &'static str);
+pub struct RefuseDependencies(pub &'static str);
 
 #[async_trait]
-impl ImportBuilder for RefuseImports {
+impl EvalDependencies for RefuseDependencies {
     async fn build_imports(&self, _derived_paths: Vec<String>) -> Result<(), String> {
         Err(format!(
             "import from derivation is not available during {}",
             self.0
         ))
+    }
+
+    async fn fetch_input(&self, _request: String) -> Result<String, String> {
+        Err(format!("fetching inputs is not available during {}", self.0))
     }
 }
 
@@ -49,7 +55,7 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
         repository: String,
         wildcards: Vec<String>,
         overrides: &[(String, String)],
-        imports: &dyn ImportBuilder,
+        dependencies: &dyn EvalDependencies,
         found: FoundDerivations<'_>,
     ) -> Result<FlakeDiscovery>;
 
