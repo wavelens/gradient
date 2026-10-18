@@ -66,6 +66,12 @@ pub trait JobReporter: Send + Sync {
 
     async fn request_import(&self, drv_paths: Vec<String>) -> Result<crate::types::ImportOutcome>;
 
+    async fn request_input(
+        &self,
+        request: String,
+        progress: std::sync::Arc<dyn InputProgressSink>,
+    ) -> Result<crate::types::InputOutcome>;
+
     async fn report_building(&mut self, build_id: String) -> Result<()>;
     async fn report_build_output(
         &mut self,
@@ -88,6 +94,10 @@ pub trait JobReporter: Send + Sync {
 #[async_trait]
 pub trait EvalProgressSink: Send + Sync {
     async fn report(&self, progress: crate::types::EvalProgress);
+}
+
+pub trait InputProgressSink: Send + Sync {
+    fn transfer(&self, bytes_done: u64, bytes_total: Option<u64>);
 }
 
 #[async_trait]

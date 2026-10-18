@@ -10,8 +10,8 @@ use gradient_util::sync::Mutex;
 use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, DiscoveredDerivation, EvalMessageLevel, QueryMode,
 };
-use gradient_wire::traits::{EvalProgressSink, JobReporter};
-use gradient_wire::types::{EvalProgress, ImportOutcome};
+use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter};
+use gradient_wire::types::{EvalProgress, ImportOutcome, InputOutcome};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -35,6 +35,9 @@ pub enum ReportedEvent {
     },
     ImportRequested {
         drv_paths: Vec<String>,
+    },
+    InputRequested {
+        request: String,
     },
     Building {
         build_id: String,
@@ -64,6 +67,8 @@ pub struct RecordingJobReporter {
     pub known_drv_paths: Vec<String>,
     pub upstream: std::collections::HashMap<String, String>,
     pub import_outcomes: std::collections::HashMap<String, ImportOutcome>,
+    pub input_outcomes: Vec<(String, InputOutcome)>,
+    pub input_progress: Vec<(u64, Option<u64>)>,
 }
 
 impl RecordingJobReporter {
@@ -89,6 +94,26 @@ impl RecordingJobReporter {
     pub fn with_import_outcome(mut self, drv_path: &str, outcome: ImportOutcome) -> Self {
         self.import_outcomes.insert(drv_path.to_owned(), outcome);
         self
+    }
+
+    pub fn with_input_outcome(mut self, request_part: &str, outcome: InputOutcome) -> Self {
+        self.input_outcomes.push((request_part.to_owned(), outcome));
+        self
+    }
+
+    pub fn with_input_progress(mut self, bytes_done: u64, bytes_total: Option<u64>) -> Self {
+        self.input_progress.push((bytes_done, bytes_total));
+        self
+    }
+
+    pub fn input_requests(&self) -> Vec<String> {
+        self.events()
+            .into_iter()
+            .filter_map(|e| match e {
+                ReportedEvent::InputRequested { request } => Some(request),
+                _ => None,
+            })
+            .collect()
     }
 
     pub fn events(&self) -> Vec<ReportedEvent> {
@@ -260,6 +285,28 @@ impl JobReporter for RecordingJobReporter {
             .find_map(|p| self.import_outcomes.get(p).cloned())
             .unwrap_or(ImportOutcome::Completed);
         self.record(ReportedEvent::ImportRequested { drv_paths });
+        Ok(outcome)
+    }
+
+    async fn request_input(
+        &self,
+        request: String,
+        progress: Arc<dyn InputProgressSink>,
+    ) -> Result<InputOutcome> {
+        let outcome = self
+            .input_outcomes
+            .iter()
+            .find(|(part, _)| request.contains(part.as_str()))
+            .map_or_else(
+                || InputOutcome::Failed {
+                    message: "no input fetch configured".to_owned(),
+                },
+                |(_, outcome)| outcome.clone(),
+            );
+        for &(bytes_done, bytes_total) in &self.input_progress {
+            progress.transfer(bytes_done, bytes_total);
+        }
+        self.record(ReportedEvent::InputRequested { request });
         Ok(outcome)
     }
 

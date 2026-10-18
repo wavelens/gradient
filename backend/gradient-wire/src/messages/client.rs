@@ -9,8 +9,8 @@ use bytes::Bytes;
 use crate::codec::Proto;
 use crate::types::{
     BuildFailureKind, BuildMetrics, BuildProgressPhase, CandidateScore, ClusterAddress,
-    EvalMessageLevel, EvalProgress, GradientCapabilities, JobKind, JobPhaseSpan, JobUpdateKind,
-    QueryMode, UploadMetadata, UploadObject,
+    EvalMessageLevel, EvalProgress, GradientCapabilities, InputOutcome, JobKind, JobPhaseSpan,
+    JobUpdateKind, QueryMode, UploadMetadata, UploadObject,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -197,6 +197,26 @@ pub enum ClientMessage {
         request_id: String,
         drv_paths: Vec<String>,
     },
+
+    #[proto(35)]
+    InputRequest {
+        job_id: String,
+        request_id: String,
+        request: String,
+    },
+
+    #[proto(35)]
+    InputFetched {
+        fetch_id: String,
+        outcome: InputOutcome,
+    },
+
+    #[proto(35)]
+    InputFetchProgress {
+        fetch_id: String,
+        bytes_done: u64,
+        bytes_total: Option<u64>,
+    },
 }
 
 impl ClientMessage {
@@ -216,7 +236,8 @@ impl ClientMessage {
             | ClientMessage::EvalMessage { job_id, .. }
             | ClientMessage::QueryKnownDerivations { job_id, .. }
             | ClientMessage::UploadRequest { job_id, .. }
-            | ClientMessage::ImportRequest { job_id, .. } => Some(job_id),
+            | ClientMessage::ImportRequest { job_id, .. }
+            | ClientMessage::InputRequest { job_id, .. } => Some(job_id),
             _ => None,
         }
     }
@@ -252,6 +273,9 @@ impl ClientMessage {
             ClientMessage::UploadFinished { .. } => "UploadFinished",
             ClientMessage::UploadCancel { .. } => "UploadCancel",
             ClientMessage::ImportRequest { .. } => "ImportRequest",
+            ClientMessage::InputRequest { .. } => "InputRequest",
+            ClientMessage::InputFetched { .. } => "InputFetched",
+            ClientMessage::InputFetchProgress { .. } => "InputFetchProgress",
         }
     }
 

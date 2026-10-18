@@ -571,7 +571,10 @@ mod tests {
 
         let fetched = pipe.request_input(request);
 
-        assert_eq!(fetched, Ok(r#"{"storePath":"/nix/store/aaaa-source"}"#.to_string()));
+        assert_eq!(
+            fetched,
+            Ok(r#"{"storePath":"/nix/store/aaaa-source"}"#.to_string())
+        );
         let sent = sent(pipe);
         assert!(
             matches!(&sent[..], [EvalResponse::NeedsInput { request: r }] if r == request),

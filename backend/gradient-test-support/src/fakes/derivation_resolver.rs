@@ -8,7 +8,7 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use gradient_derivation::Derivation;
 use gradient_sources::{
-    AttrError, DerivationResolver, FlakeDiscovery, FoundDerivations, EvalDependencies,
+    AttrError, DerivationResolver, EvalDependencies, FlakeDiscovery, FoundDerivations,
     ResolvedDerivation,
 };
 use std::collections::HashMap;

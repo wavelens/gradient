@@ -52,6 +52,7 @@ Flake jobs fetch and evaluate a flake. The server can pick the steps at queue ti
 - **Eval Cache:** Workers pull the evaluation cache before discovery and push the cache after a walk with derivations. Empty or schemaless caches stay local.
 - **Attribute Failures:** Workers send them as `EvalMessage { level: Error, source: "nix-eval:<attr>" }` before the last `EvalResult`.
 - **Import From Derivation:** Workers send `ImportRequest { drv_paths }` during discovery and wait for `ImportResult`.
+- **Missing Inputs:** Workers send `InputRequest { request }` for an input in neither the store nor the cache, and wait for `InputResult`. The server can send the download as `FetchInput` to a worker with `network`. That worker can push the input under the `fetch_id` and answer with `InputFetched`.
 - **Walk:** Workers walk an entry point as soon as discovery returned it.
 - **Waves:** Waves hold up to 256 of the most recently found derivations. Leaf derivations then come early in the walk, and their builds can start mid-evaluation.
 

@@ -27,10 +27,10 @@ use self::fan_out::{
 use self::transport::{Listing, SpawnConfig};
 use self::workers::EvalWorkerPool;
 
+pub use self::dependencies::{EvalDependencies, RefuseDependencies};
 pub use self::download::{DownloadSink, forward_nix_log};
 pub use self::driver::run_eval_driver;
 pub use self::fan_out::{CallStats, Discovery, FoundItems};
-pub use self::dependencies::{EvalDependencies, RefuseDependencies};
 pub use self::live_thunks::LiveThunks;
 pub use self::memory::{MemoryGuard, memory_guard_bytes, min_free_ram_guard, total_memory_bytes};
 pub use self::transport::EvalWorker;
@@ -223,7 +223,8 @@ impl EvalPool {
             let (listed_attrs, warnings, errors, calls_seen) =
                 (&listed_attrs, &warnings, &errors, &calls_seen);
             pooled_fan_out(self.workers.max(), calls, |call| async move {
-                let (listing, call_stats) = self.list_shard(repo, call, overrides, dependencies).await?;
+                let (listing, call_stats) =
+                    self.list_shard(repo, call, overrides, dependencies).await?;
                 let fresh: Vec<ResolvedItem> = {
                     let mut listed = lock(listed_attrs);
                     listing
