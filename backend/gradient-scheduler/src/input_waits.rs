@@ -167,6 +167,10 @@ impl InputWaits {
     }
 }
 
+pub(crate) fn input_fetch_key(fetch_id: &str) -> String {
+    format!("input:{fetch_id}")
+}
+
 fn key_of_fetch(
     waits: &HashMap<String, InputWait>,
     worker: &str,

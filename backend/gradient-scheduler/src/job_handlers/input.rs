@@ -13,9 +13,10 @@ use gradient_pool::{InputRequest, WorkerCaps, WorkerInfo};
 use gradient_types::*;
 use gradient_wire::types::InputOutcome;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::Scheduler;
+use crate::actor::SchedulerMsg;
 use crate::input_waits::{AssignedFetch, InputWaiter, NewInputWait, UnassignedFetch};
 use crate::jobs::PendingJob;
 
@@ -63,6 +64,7 @@ impl Scheduler {
         fetch_id: &str,
         outcome: InputOutcome,
     ) {
+        self.release_input_fetch(worker_id, fetch_id).await;
         let waiters = self.input_waits.take_fetched(worker_id, fetch_id);
         if waiters.is_empty() {
             debug!(%worker_id, %fetch_id, "input fetch answered without waiters; dropped");
@@ -150,34 +152,73 @@ impl Scheduler {
             return;
         }
 
-        let workers = self.board_workers().await;
+        let mut workers = self.board_workers().await;
         let mut load = self.input_waits.assigned_per_worker();
-        let mut signals = Vec::new();
         for fetch in unassigned {
-            let Some(worker) = fetch_worker(&workers, &load, &fetch) else {
+            if !self
+                .place_input_fetch(&fetch, &mut workers, &mut load)
+                .await
+            {
                 debug!(fetch_key = %fetch.fetch_key, "no connected worker can fetch the input yet");
-                continue;
-            };
+            }
+        }
+    }
+
+    async fn place_input_fetch(
+        &self,
+        fetch: &UnassignedFetch,
+        workers: &mut [WorkerInfo],
+        load: &mut HashMap<String, usize>,
+    ) -> bool {
+        for worker in fetch_workers(workers, load, fetch) {
             let fetch_id = uuid::Uuid::now_v7().to_string();
+            let signal = SessionSignal::FetchInput {
+                fetch_id: fetch_id.clone(),
+                project: fetch.project,
+                request: fetch.request.clone(),
+            };
+            let claimed = self
+                .call(|reply| SchedulerMsg::ClaimInputFetch {
+                    worker: worker.clone(),
+                    fetch_id: fetch_id.clone(),
+                    signal,
+                    reply,
+                })
+                .await
+                .unwrap_or(false);
+            if !claimed {
+                continue;
+            }
+
             let assigned = AssignedFetch {
                 fetch_id: fetch_id.clone(),
                 worker: worker.clone(),
             };
-            if self.input_waits.assign(&fetch.fetch_key, assigned) {
-                *load.entry(worker.clone()).or_default() += 1;
-                signals.push((
-                    worker,
-                    SessionSignal::FetchInput {
-                        fetch_id,
-                        project: fetch.project,
-                        request: fetch.request,
-                    },
-                ));
+            if !self.input_waits.assign(&fetch.fetch_key, assigned) {
+                self.release_input_fetch(&worker, &fetch_id).await;
+                return false;
             }
+            *load.entry(worker.clone()).or_default() += 1;
+            if let Some(info) = workers.iter_mut().find(|w| w.id == worker) {
+                info.assigned_build_count += 1;
+            }
+            return true;
         }
-        if !signals.is_empty() {
-            self.signal_workers(signals).await;
+        false
+    }
+
+    async fn release_input_fetch(&self, worker: &str, fetch_id: &str) {
+        let released = self
+            .call(|reply| SchedulerMsg::ReleaseInputFetch {
+                worker: worker.to_owned(),
+                fetch_id: fetch_id.to_owned(),
+                reply,
+            })
+            .await;
+        if let Err(e) = released {
+            warn!(error = %e, %worker, %fetch_id, "the build slot of an input fetch was not released");
         }
+        self.build_kick.kick();
     }
 
     async fn answer_inputs(&self, waiters: Vec<InputWaiter>, outcome: InputOutcome) {
@@ -198,14 +239,15 @@ impl Scheduler {
     }
 }
 
-fn fetch_worker(
+fn fetch_workers(
     workers: &[WorkerInfo],
     load: &HashMap<String, usize>,
     fetch: &UnassignedFetch,
-) -> Option<String> {
-    workers
+) -> Vec<String> {
+    let mut eligible: Vec<&WorkerInfo> = workers
         .iter()
         .filter(|w| !w.draining)
+        .filter(|w| w.assigned_build_count < w.max_concurrent_builds as usize)
         .filter(|w| {
             w.authorized_peers
                 .as_ref()
@@ -218,6 +260,7 @@ fn fetch_worker(
             }
             .can_fetch_input(fetch.needs_secrets)
         })
-        .min_by_key(|w| (load.get(&w.id).copied().unwrap_or_default(), w.id.clone()))
-        .map(|w| w.id.clone())
+        .collect();
+    eligible.sort_by_key(|w| (load.get(&w.id).copied().unwrap_or_default(), w.id.clone()));
+    eligible.into_iter().map(|w| w.id.clone()).collect()
 }

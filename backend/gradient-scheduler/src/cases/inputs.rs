@@ -12,8 +12,8 @@ use gradient_types::waiting_reason::{EvalCapability, WaitingReason};
 use gradient_wire::types::{InputOutcome, JobKind};
 
 use super::{
-    A, A_OUT, CaseShapes, SchedulerCase, eval_key, w_all, w_network_eval, w_network_secrets,
-    without_offers,
+    A, A_OUT, CaseShapes, Profile, SchedulerCase, eval_key, output_nar, w_all, w_network_eval,
+    w_network_secrets, without_offers,
 };
 
 const W1: &str = "w1";
@@ -38,7 +38,7 @@ async fn i01_an_input_request_goes_to_a_network_and_secrets_worker() {
     let case = SchedulerCase::start(shape().evalq(e1)).await;
     evaluating(&case, W1, e1).await;
     case.connect(W2, super::w_network(), &[]).await;
-    case.connect(W3, w_network_secrets(), &[]).await;
+    case.connect(W3, w_fetch(), &[]).await;
 
     case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
         .await;
@@ -65,7 +65,7 @@ async fn i02_two_evaluations_share_one_fetch() {
     let case = SchedulerCase::start(shape().evalq(e1).evalq(e2)).await;
     evaluating(&case, W1, e1).await;
     evaluating(&case, W2, e2).await;
-    case.connect(W3, w_network_secrets(), &[]).await;
+    case.connect(W3, w_fetch(), &[]).await;
 
     case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
         .await;
@@ -100,7 +100,7 @@ async fn i03_a_failed_fetch_answers_every_waiter() {
     let case = SchedulerCase::start(shape().evalq(e1).evalq(e2)).await;
     evaluating(&case, W1, e1).await;
     evaluating(&case, W2, e2).await;
-    case.connect(W3, w_network_secrets(), &[]).await;
+    case.connect(W3, w_fetch(), &[]).await;
     case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
         .await;
     case.input_request(W2, &eval_key(e2), "r2", SSH_REQUEST)
@@ -133,8 +133,8 @@ async fn i04_a_lost_fetch_worker_hands_the_fetch_to_another() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().evalq(e1)).await;
     evaluating(&case, W1, e1).await;
-    case.connect(W2, w_network_secrets(), &[]).await;
-    case.connect(W3, w_network_secrets(), &[]).await;
+    case.connect(W2, w_fetch(), &[]).await;
+    case.connect(W3, w_fetch(), &[]).await;
     case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
         .await;
     let first = single_fetch(&case, &[W1, W2, W3]);
@@ -188,7 +188,7 @@ async fn i05_an_abort_drops_the_input_wait() {
     assert_eq!(case.input_waits(), 0, "after 2: the wait is gone");
     case.check("step 2").await;
 
-    case.connect(W2, w_network_secrets(), &[]).await;
+    case.connect(W2, w_fetch(), &[]).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
         fetches_of(&case, &[W1, W2]),
@@ -230,7 +230,7 @@ async fn i06_without_a_fetch_worker_the_evaluation_waits_for_network() {
     );
     case.check("step 1").await;
 
-    case.connect(W2, w_network_secrets(), &[]).await;
+    case.connect(W2, w_fetch(), &[]).await;
     case.build_assign_pass(false, false).await;
     let fetch = single_fetch(&case, &[W1, W2]);
     assert_eq!(fetch.worker, W2, "after 2: the new worker gets the fetch");
@@ -250,7 +250,7 @@ async fn i07_an_input_request_from_a_build_job_is_dropped() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
     case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_network_secrets(), &[]).await;
+    case.connect(W2, w_fetch(), &[]).await;
     case.admit_startable_moves().await;
     case.offers_full(W1).await;
     case.score_all(W1).await;
@@ -276,8 +276,8 @@ async fn i08_fetch_progress_reaches_every_waiting_evaluation() {
     let case = SchedulerCase::start(shape().evalq(e1).evalq(e2)).await;
     evaluating(&case, W1, e1).await;
     evaluating(&case, W2, e2).await;
-    case.connect(W3, w_network_secrets(), &[]).await;
-    case.connect(W4, w_network_secrets(), &[]).await;
+    case.connect(W3, w_fetch(), &[]).await;
+    case.connect(W4, w_fetch(), &[]).await;
     case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
         .await;
     case.input_request(W2, &eval_key(e2), "r2", SSH_REQUEST)
@@ -321,6 +321,108 @@ async fn i08_fetch_progress_reaches_every_waiting_evaluation() {
     case.check("step 3").await;
 
     case.finish().await;
+}
+
+fn w_fetch() -> Profile {
+    w_network_secrets().slots(1)
+}
+
+#[tokio::test]
+async fn i09_an_input_fetch_waits_for_a_free_build_slot() {
+    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = SchedulerCase::start(shape().evalq(e1).one(e2, A, A_OUT)).await;
+    evaluating(&case, W1, e1).await;
+    case.connect(W2, w_all(), &[]).await;
+    let (a, a2) = building_on_w2(&case).await;
+
+    case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
+        .await;
+    assert_eq!(
+        fetch_signals(&case, W2),
+        vec![],
+        "after 2: W2 has no free build slot"
+    );
+    assert_eq!(case.input_waits(), 1, "after 2: the request waits");
+    case.check("step 2").await;
+
+    case.commit_nar(output_nar(A, A_OUT)).await;
+    case.complete(W2, &a, a2, Vec::new(), 5).await;
+    case.build_assign_pass(false, false).await;
+    assert_eq!(
+        fetch_signals(&case, W2).len(),
+        1,
+        "after 3: the freed slot takes the fetch"
+    );
+    case.signals(W1);
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn i10_a_running_fetch_takes_a_build_slot() {
+    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = SchedulerCase::start(shape().evalq(e1).one(e2, A, A_OUT)).await;
+    evaluating(&case, W1, e1).await;
+    case.connect(W2, w_all(), &[]).await;
+
+    case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
+        .await;
+    let fetches = fetch_signals(&case, W2);
+    let [SessionSignal::FetchInput { fetch_id, .. }] = fetches.as_slice() else {
+        panic!("after 1: W2 gets one FetchInput, got {fetches:?}");
+    };
+    case.check("step 1").await;
+
+    case.admit_startable_moves().await;
+    case.offers_full(W2).await;
+    case.score_all(W2).await;
+    let taken = case.request_job(W2, JobKind::Build).await;
+    assert!(
+        taken.is_none(),
+        "after 2: the fetch holds the only slot, got {:?}",
+        taken.map(|t| t.job_id().to_owned())
+    );
+    case.check("step 2").await;
+
+    case.input_fetched(W2, fetch_id, fetched()).await;
+    assert_eq!(
+        without_offers(case.signals(W1)),
+        vec![result(e1, "r1", fetched())],
+        "after 3: signals(W1)"
+    );
+    let build = case
+        .request_job(W2, JobKind::Build)
+        .await
+        .expect("after 3: the released slot takes build:A");
+    assert_eq!(build.job_id(), case.key(A).await, "after 3: build:A");
+    case.signals(W2);
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+async fn building_on_w2(case: &SchedulerCase) -> (String, gradient_entity::ids::DispatchedJobId) {
+    let a = case.key(A).await;
+    case.admit_startable_moves().await;
+    case.offers_full(W2).await;
+    case.score_all(W2).await;
+    let assignment = case
+        .request_job(W2, JobKind::Build)
+        .await
+        .expect("after 1: W2 gets build:A");
+    assert_eq!(assignment.job_id(), a, "after 1: build:A");
+    case.report_building(W2, &a).await;
+    case.signals(W2);
+    case.check("step 1").await;
+    (a, assignment.assignment_id())
+}
+
+fn fetch_signals(case: &SchedulerCase, worker: &str) -> Vec<SessionSignal> {
+    case.signals(worker)
+        .into_iter()
+        .filter(|s| matches!(s, SessionSignal::FetchInput { .. }))
+        .collect()
 }
 
 async fn evaluating(case: &SchedulerCase, worker: &str, evaluation: EvaluationId) {
