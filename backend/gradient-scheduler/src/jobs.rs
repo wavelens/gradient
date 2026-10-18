@@ -373,10 +373,7 @@ fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     match (job, caps) {
         (_, None) => true,
         (PendingJob::Eval(j), Some(c)) => c.can_eval(&j.job),
-        (PendingJob::Build(j), Some(c)) => c.can_build(
-            &j.job.requirement.architecture,
-            &j.job.requirement.required_features,
-        ),
+        (PendingJob::Build(j), Some(c)) => c.can_run_build(&j.job),
     }
 }
 
@@ -459,13 +456,13 @@ fn worker_context_of(caps: Option<&WorkerCaps>) -> WorkerContext<'_> {
         Some(c) => WorkerContext {
             architectures: &c.architectures,
             system_features: &c.system_features,
-            fetch: c.fetch,
+            fetches_flakes: c.capabilities.network,
             metrics: c.metrics,
         },
         None => WorkerContext {
             architectures: &[],
             system_features: &[],
-            fetch: false,
+            fetches_flakes: false,
             metrics: None,
         },
     }
@@ -2169,7 +2166,6 @@ mod tests {
     #[test]
     fn can_eval_requires_eval_for_evaluation_steps() {
         let fetch_only = WorkerCaps {
-            fetch: true,
             capabilities: GradientCapabilities {
                 network: true,
                 secrets: true,
@@ -2177,8 +2173,14 @@ mod tests {
             },
             ..Default::default()
         };
+        let network_only = WorkerCaps {
+            capabilities: GradientCapabilities {
+                network: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let eval_only = WorkerCaps {
-            fetch: false,
             capabilities: GradientCapabilities {
                 eval: true,
                 ..Default::default()
@@ -2186,7 +2188,6 @@ mod tests {
             ..Default::default()
         };
         let both = WorkerCaps {
-            fetch: true,
             capabilities: GradientCapabilities {
                 network: true,
                 secrets: true,
@@ -2201,7 +2202,13 @@ mod tests {
             FlakeStep::EvaluateDerivations,
         ]);
         let cached_eval = flake_job(vec![FlakeStep::EvaluateDerivations]);
-        let fetch = flake_job(vec![FlakeStep::FetchFlake]);
+        let fetch = FlakeJob {
+            source: FlakeSource::Repository {
+                url: "git+ssh://git@example.com/repo".into(),
+                commit: "abc123".into(),
+            },
+            ..flake_job(vec![FlakeStep::FetchFlake])
+        };
 
         assert!(!fetch_only.can_eval(&bundled), "fetch-only lacks eval");
         assert!(!eval_only.can_eval(&bundled), "eval-only lacks fetch");
@@ -2209,7 +2216,11 @@ mod tests {
         assert!(eval_only.can_eval(&cached_eval));
         assert!(!fetch_only.can_eval(&cached_eval), "cached eval needs eval");
         assert!(fetch_only.can_eval(&fetch));
-        assert!(!eval_only.can_eval(&fetch), "fetch step needs fetch");
+        assert!(!eval_only.can_eval(&fetch), "fetch step needs network");
+        assert!(
+            !network_only.can_eval(&fetch),
+            "fetch step of an ssh repository needs secrets"
+        );
     }
 
     #[test]
@@ -2352,13 +2363,12 @@ mod tests {
     #[test]
     fn fetch_flake_job_requires_fetch_capability() {
         // Regression guard for #252. A FetchFlake job is cloning over SSH and must only go to
-        // fetch-capable workers. Only those workers are receiving SSH credentials.
+        // workers with network and secrets. Only those workers are receiving SSH credentials.
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
         tracker.add_pending("j1".into(), fetch_eval_job(peer));
 
         let no_fetch = WorkerCaps {
-            fetch: false,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
             ..Default::default()
@@ -2369,12 +2379,11 @@ mod tests {
             tracker
                 .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &*p, &inst)
                 .is_none(),
-            "worker without fetch must not receive a fetch flake job"
+            "worker without network and secrets must not receive a fetch flake job"
         );
         assert_eq!(tracker.pending_count(), 1);
 
         let with_fetch = WorkerCaps {
-            fetch: true,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
             capabilities: GradientCapabilities {
@@ -2389,7 +2398,7 @@ mod tests {
             tracker
                 .take_best_of_kind("w2", None, Some(&with_fetch), &JobKind::Flake, &*p, &inst)
                 .is_some(),
-            "fetch- and eval-capable worker must receive the bundled flake job"
+            "worker with network, secrets and eval must receive the bundled flake job"
         );
     }
 
@@ -2400,7 +2409,6 @@ mod tests {
         tracker.add_pending("j1".into(), eval_job(peer));
 
         let eval_no_fetch = WorkerCaps {
-            fetch: false,
             architectures: vec![],
             system_features: vec![],
             capabilities: GradientCapabilities {
@@ -2422,7 +2430,7 @@ mod tests {
                     &inst
                 )
                 .is_some(),
-            "cached eval job must run on an eval-capable worker without fetch"
+            "cached eval job must run on an eval-capable worker without network"
         );
     }
 
@@ -2433,7 +2441,6 @@ mod tests {
         tracker.add_pending("j1".into(), fetch_eval_job(peer));
 
         let fetch_build = WorkerCaps {
-            fetch: true,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
             capabilities: GradientCapabilities {

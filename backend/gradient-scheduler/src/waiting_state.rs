@@ -18,6 +18,7 @@ use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_graph::Graph;
 use gradient_pool::WorkerInfo;
 use gradient_types::events::worker_demand::WorkerDemand;
+use gradient_types::input::check_repository_url_is_ssh;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, Value};
 use tracing::{error, info, warn};
@@ -25,7 +26,7 @@ use tracing::{error, info, warn};
 const DRV_RECOVERY_GRACE_SECS: i64 = 120;
 
 use crate::assessment_memo::AssessmentMemo;
-use crate::buildability::BuildabilityChecker;
+use crate::buildability::{BuildWorkerCaps, BuildabilityChecker};
 use crate::unbuildable::{Unbuildable, unbuildable};
 use gradient_db::evaluations::counters::EvalCounters;
 
@@ -92,7 +93,7 @@ impl WaitingRefresh<'_> {
         }
 
         let tasks = EvalTasks::load(&self.db.worker_db, &evals).await?;
-        let mut caps_by_project: HashMap<Option<ProjectId>, Vec<WorkerCaps>> = HashMap::new();
+        let mut caps_by_project: HashMap<Option<ProjectId>, Vec<BuildWorkerCaps>> = HashMap::new();
         let now = gradient_types::now();
         let mut unbuildables = Vec::new();
         let ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
@@ -148,9 +149,12 @@ impl WaitingRefresh<'_> {
                 EvaluationStatus::Queued
                 | EvaluationStatus::Fetching
                 | EvaluationStatus::EvaluatingFlake
-                | EvaluationStatus::EvaluatingDerivation => {
-                    decide_pre_build_target(eval.kind, eval.status, project_workers)
-                }
+                | EvaluationStatus::EvaluatingDerivation => decide_pre_build_target(
+                    eval.kind,
+                    eval.status,
+                    check_repository_url_is_ssh(&eval.repository),
+                    project_workers,
+                ),
                 EvaluationStatus::Building => {
                     match self
                         .build_phase_decision(eval.id, eval_counters, worker_caps, reason.as_ref())
@@ -185,7 +189,7 @@ impl WaitingRefresh<'_> {
                     to = ?target,
                     workers = project_workers.connected,
                     eval_workers = project_workers.eval,
-                    fetch_workers = project_workers.fetch,
+                    network_workers = project_workers.network,
                     "refreshing evaluation waiting state"
                 );
             }
@@ -309,7 +313,7 @@ impl WaitingRefresh<'_> {
         &self,
         evaluation_id: EvaluationId,
         counters: EvalCounters,
-        worker_caps: &[(Vec<String>, Vec<String>)],
+        worker_caps: &[BuildWorkerCaps],
         current: Option<&WaitingReason>,
     ) -> Result<BuildPhase> {
         let a = match assess_buildability(
@@ -396,7 +400,7 @@ async fn assess_buildability(
     memo: Option<&Mutex<AssessmentMemo>>,
     evaluation_id: EvaluationId,
     counters: EvalCounters,
-    worker_caps: &[(Vec<String>, Vec<String>)],
+    worker_caps: &[BuildWorkerCaps],
 ) -> Result<BuildPhase> {
     if let Some(phase) = phase_from_counters(counters) {
         return Ok(phase);
@@ -456,7 +460,7 @@ impl WaitingRefresh<'_> {
     async fn attempt_graph_unstick(
         &self,
         evaluation_id: EvaluationId,
-        worker_caps: &[(Vec<String>, Vec<String>)],
+        worker_caps: &[BuildWorkerCaps],
     ) -> Result<BuildPhase> {
         info!(%evaluation_id, "graph stuck: pool can build every pending shared build but none is dispatchable; self-healing");
 
@@ -669,21 +673,24 @@ async fn eval_blocking_shared_builds(
         .collect())
 }
 
-fn pre_build_capability(kind: EvaluationKind, status: EvaluationStatus) -> Option<EvalCapability> {
+fn pre_build_capability(
+    kind: EvaluationKind,
+    status: EvaluationStatus,
+    ssh_repository: bool,
+) -> Option<EvalCapability> {
     if kind == EvaluationKind::Ssh {
         return None;
     }
 
     match status {
-        EvaluationStatus::Fetching => Some(EvalCapability::Fetch),
+        EvaluationStatus::Fetching if ssh_repository => Some(EvalCapability::Secrets),
+        EvaluationStatus::Fetching => Some(EvalCapability::Network),
         EvaluationStatus::Queued
         | EvaluationStatus::EvaluatingFlake
         | EvaluationStatus::EvaluatingDerivation => Some(EvalCapability::Eval),
         _ => None,
     }
 }
-
-type WorkerCaps = (Vec<String>, Vec<String>);
 
 fn eligible_for(worker: &WorkerInfo, project: Option<ProjectId>) -> bool {
     worker
@@ -692,18 +699,25 @@ fn eligible_for(worker: &WorkerInfo, project: Option<ProjectId>) -> bool {
         .is_none_or(|peers| project.is_some_and(|p| peers.contains(&p)))
 }
 
-fn project_worker_caps(workers: &[WorkerInfo], project: Option<ProjectId>) -> Vec<WorkerCaps> {
+fn project_worker_caps(workers: &[WorkerInfo], project: Option<ProjectId>) -> Vec<BuildWorkerCaps> {
     workers
         .iter()
         .filter(|w| eligible_for(w, project))
-        .map(|w| (w.architectures.clone(), w.system_features.clone()))
+        .map(|w| {
+            (
+                w.architectures.clone(),
+                w.system_features.clone(),
+                w.capabilities.network,
+            )
+        })
         .collect()
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct ProjectWorkerCounts {
     eval: usize,
-    fetch: usize,
+    network: usize,
+    secrets: usize,
     connected: u32,
 }
 
@@ -714,14 +728,17 @@ impl ProjectWorkerCounts {
             .filter(|w| eligible_for(w, project))
             .fold(Self::default(), |counts, w| Self {
                 eval: counts.eval + usize::from(w.capabilities.eval),
-                fetch: counts.fetch + usize::from(w.capabilities.network && w.capabilities.secrets),
+                network: counts.network + usize::from(w.capabilities.network),
+                secrets: counts.secrets
+                    + usize::from(w.capabilities.network && w.capabilities.secrets),
                 connected: counts.connected + 1,
             })
     }
 
     fn provide(self, capability: EvalCapability) -> bool {
         match capability {
-            EvalCapability::Fetch => self.fetch > 0,
+            EvalCapability::Network => self.network > 0,
+            EvalCapability::Secrets => self.secrets > 0,
             EvalCapability::Eval => self.eval > 0,
         }
     }
@@ -730,9 +747,10 @@ impl ProjectWorkerCounts {
 fn decide_pre_build_target(
     kind: EvaluationKind,
     current: EvaluationStatus,
+    ssh_repository: bool,
     workers: ProjectWorkerCounts,
 ) -> Option<(EvaluationStatus, Option<WaitingReason>)> {
-    let capability = pre_build_capability(kind, current)?;
+    let capability = pre_build_capability(kind, current, ssh_repository)?;
     if workers.provide(capability) {
         return None;
     }
@@ -829,10 +847,11 @@ mod tests {
         }
     }
 
-    fn counts(eval: usize, fetch: usize, connected: u32) -> ProjectWorkerCounts {
+    fn counts(eval: usize, network: usize, connected: u32) -> ProjectWorkerCounts {
         ProjectWorkerCounts {
             eval,
-            fetch,
+            network,
+            secrets: network,
             connected,
         }
     }
@@ -922,7 +941,11 @@ mod tests {
         let w = capable_worker(&["x86_64-linux"], &["kvm"], None);
         assert_eq!(
             project_worker_caps(&[w], Some(ProjectId::now_v7())),
-            vec![(vec!["x86_64-linux".to_string()], vec!["kvm".to_string()])]
+            vec![(
+                vec!["x86_64-linux".to_string()],
+                vec!["kvm".to_string()],
+                true
+            )]
         );
     }
 
@@ -934,6 +957,7 @@ mod tests {
         let (target, reason) = decide_pre_build_target(
             EvaluationKind::Normal,
             EvaluationStatus::Queued,
+            false,
             ProjectWorkerCounts::of(&workers, Some(own)),
         )
         .expect("a project without its own eval worker must stall");
@@ -966,6 +990,7 @@ mod tests {
         let (target, reason) = decide_pre_build_target(
             EvaluationKind::Normal,
             EvaluationStatus::Queued,
+            false,
             counts(0, 1, 3),
         )
         .expect("stall must produce a transition");
@@ -976,17 +1001,47 @@ mod tests {
     }
 
     #[test]
-    fn pre_build_target_fetching_no_fetch_worker_stalls_to_fetch_waiting() {
+    fn pre_build_target_fetching_without_network_waits_for_network() {
         let (target, reason) = decide_pre_build_target(
             EvaluationKind::Normal,
             EvaluationStatus::Fetching,
+            false,
             counts(2, 0, 2),
         )
         .expect("stall must produce a transition");
         assert_eq!(target, EvaluationStatus::Waiting);
         let (cap, connected) = eval_workers_view(&reason.expect("stall carries a reason"));
-        assert_eq!(cap, EvalCapability::Fetch);
+        assert_eq!(cap, EvalCapability::Network);
         assert_eq!(connected, 2);
+    }
+
+    #[test]
+    fn fetching_an_ssh_repository_waits_for_secrets() {
+        let workers = ProjectWorkerCounts {
+            secrets: 0,
+            ..counts(2, 2, 2)
+        };
+        let (_, reason) = decide_pre_build_target(
+            EvaluationKind::Normal,
+            EvaluationStatus::Fetching,
+            true,
+            workers,
+        )
+        .expect("an ssh repository needs a worker with secrets");
+        assert_eq!(
+            eval_workers_view(&reason.expect("stall carries a reason")).0,
+            EvalCapability::Secrets
+        );
+        assert!(
+            decide_pre_build_target(
+                EvaluationKind::Normal,
+                EvaluationStatus::Fetching,
+                false,
+                workers,
+            )
+            .is_none(),
+            "a public repository needs only network"
+        );
     }
 
     #[test]
@@ -998,7 +1053,8 @@ mod tests {
             EvaluationStatus::Queued,
         ] {
             assert!(
-                decide_pre_build_target(EvaluationKind::Normal, status, counts(1, 1, 1)).is_none(),
+                decide_pre_build_target(EvaluationKind::Normal, status, false, counts(1, 1, 1))
+                    .is_none(),
                 "{status:?} with capable workers must be left alone"
             );
         }
@@ -1010,6 +1066,7 @@ mod tests {
             decide_pre_build_target(
                 EvaluationKind::Ssh,
                 EvaluationStatus::EvaluatingDerivation,
+                false,
                 counts(0, 0, 0)
             )
             .is_none()
@@ -1022,6 +1079,7 @@ mod tests {
             decide_pre_build_target(
                 EvaluationKind::Normal,
                 EvaluationStatus::Waiting,
+                false,
                 counts(0, 0, 0)
             )
             .is_none()
@@ -1030,6 +1088,7 @@ mod tests {
             decide_pre_build_target(
                 EvaluationKind::Normal,
                 EvaluationStatus::Waiting,
+                false,
                 counts(2, 2, 2)
             )
             .is_none()
@@ -1042,17 +1101,17 @@ mod tests {
         assert_eq!(target, EvaluationStatus::Queued);
         assert!(reason.is_none());
 
-        let (target, reason) = decide_eval_recovery(EvalCapability::Fetch, counts(0, 1, 1));
+        let (target, reason) = decide_eval_recovery(EvalCapability::Network, counts(0, 1, 1));
         assert_eq!(target, EvaluationStatus::Queued);
         assert!(reason.is_none());
     }
 
     #[test]
     fn eval_recovery_refreshes_reason_while_capability_absent() {
-        let (target, reason) = decide_eval_recovery(EvalCapability::Fetch, counts(5, 0, 5));
+        let (target, reason) = decide_eval_recovery(EvalCapability::Network, counts(5, 0, 5));
         assert_eq!(target, EvaluationStatus::Waiting);
         let (cap, connected) = eval_workers_view(&reason.expect("refresh carries a reason"));
-        assert_eq!(cap, EvalCapability::Fetch);
+        assert_eq!(cap, EvalCapability::Network);
         assert_eq!(connected, 5);
     }
 

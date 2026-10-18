@@ -21,7 +21,7 @@ use gradient_wire::types::{BuildFailureKind, FlakeStep, Job, JobKind};
 
 use super::{
     A, A_OUT, B, B_OUT, CaseShapes, SchedulerCase, SlotKind, Totals, ago, eval_key, failure,
-    is_recent, output_nar, w_all, w_build, w_eval, w_fetch_eval,
+    is_recent, output_nar, w_all, w_build, w_eval, w_network_build, w_network_eval,
 };
 use crate::actor::Offer;
 
@@ -658,7 +658,7 @@ async fn w11_a_worker_without_build_gets_no_download_job() {
         .system("builtin")
         .fixed_output();
     let case = SchedulerCase::start(seed).await;
-    case.connect(W1, w_fetch_eval(), &[]).await;
+    case.connect(W1, w_network_eval(), &[]).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -1365,6 +1365,64 @@ async fn w22_a_reauth_result_without_a_granted_project_aborts_no_running_job() {
         BuildStatus::Completed,
         "after 3: sb(A).status"
     );
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn w23_a_fixed_output_build_needs_network() {
+    only_a_network_worker_gets(shape().one(EvaluationId::now_v7(), A, A_OUT).fixed_output()).await;
+}
+
+#[tokio::test]
+async fn w24_a_substitute_needs_network() {
+    only_a_network_worker_gets(shape().passthrough(EvaluationId::now_v7())).await;
+}
+
+#[tokio::test]
+async fn w25_a_download_needs_network() {
+    only_a_network_worker_gets(
+        shape()
+            .one(EvaluationId::now_v7(), A, A_OUT)
+            .system("builtin")
+            .fixed_output(),
+    )
+    .await;
+}
+
+async fn only_a_network_worker_gets(seed: Shape) {
+    let case = SchedulerCase::start(seed).await;
+    case.connect(W1, w_build(), &[]).await;
+    case.connect(W2, w_network_build(), &[]).await;
+    let a = case.key(A).await;
+
+    case.admit_startable_moves().await;
+    let offline = case.offers_full(W1).await;
+    let online = case.offers_full(W2).await;
+    assert_eq!(
+        offered(&offline),
+        Vec::<String>::new(),
+        "after 1: offers(W1).candidates"
+    );
+    assert_eq!(
+        offered(&online),
+        vec![a.clone()],
+        "after 1: offers(W2).candidates"
+    );
+    case.check("step 1").await;
+
+    let nothing = case.request_job(W1, JobKind::Build).await;
+    assert!(nothing.is_none(), "after 2: W1 gets nothing");
+    assert!(case.pending(&a).await, "after 2: pending(build:A)");
+    case.check("step 2").await;
+
+    case.score_all(W2).await;
+    let job = case
+        .request_job(W2, JobKind::Build)
+        .await
+        .expect("after 3: W2 gets build:A");
+    assert_eq!(job.job_id(), a, "after 3: result.job_id");
     case.check("step 3").await;
 
     case.finish().await;

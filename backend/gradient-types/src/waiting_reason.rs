@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EvalCapability {
-    Fetch,
+    Network,
+    Secrets,
     Eval,
 }
 
@@ -22,7 +23,7 @@ pub enum WaitingReason {
         available_architectures: Vec<String>,
     },
     /// `connected_workers` is the whole connected pool. It can be above zero while only
-    /// build-only workers are online and an eval or fetch worker is missing.
+    /// build-only workers are online and an eval or network worker is missing.
     EvalWorkers {
         capability: EvalCapability,
         connected_workers: u32,
@@ -114,7 +115,8 @@ impl WaitingReason {
                 Some(gaps.join(";"))
             }
             Self::EvalWorkers { capability, .. } => Some(match capability {
-                EvalCapability::Fetch => "fetch".to_owned(),
+                EvalCapability::Network => "network".to_owned(),
+                EvalCapability::Secrets => "secrets".to_owned(),
                 EvalCapability::Eval => "eval".to_owned(),
             }),
             _ => None,
