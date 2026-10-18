@@ -106,6 +106,10 @@ pub struct WorkerConfig {
     #[arg(hide = true)]
     pub eval_subprocess: bool,
 
+    /// Let the eval subprocess ask its parent for missing inputs (internal - do not set manually).
+    #[arg(hide = true)]
+    pub eval_fetch_through_parent: bool,
+
     /// Drive one eval subprocess over the production rkyv transport from a JSONL request file.
     /// This internal harness serves the NixOS VM integration test.
     #[arg(hide = true)]
@@ -147,6 +151,7 @@ impl Default for WorkerConfig {
             idle_timeout: None,
             max_lifetime: None,
             eval_subprocess: false,
+            eval_fetch_through_parent: false,
             eval_driver: None,
             capabilities: CapabilitiesArgs::default(),
             system: SystemArgs::default(),

@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod dependencies;
 pub mod download;
 mod driver;
 pub mod fan_out;
-pub mod import;
 mod live_thunks;
 pub mod memory;
 mod transport;
@@ -24,21 +24,23 @@ use self::fan_out::{
     DiscoveryCall, MAX_CRASH_ATTEMPTS, crashed_listing, discovery_calls, entry_point_of,
     pooled_fan_out,
 };
-use self::transport::{EvalErrorResponse, Listing};
+use self::transport::{Listing, SpawnConfig};
 use self::workers::EvalWorkerPool;
 
 pub use self::download::{DownloadSink, forward_nix_log};
 pub use self::driver::run_eval_driver;
 pub use self::fan_out::{CallStats, Discovery, FoundItems};
-pub use self::import::{ImportBuilder, RefuseImports};
+pub use self::dependencies::{EvalDependencies, RefuseDependencies};
 pub use self::live_thunks::LiveThunks;
 pub use self::memory::{MemoryGuard, memory_guard_bytes, min_free_ram_guard, total_memory_bytes};
+pub use self::transport::EvalWorker;
 pub use self::workers::default_workers;
 
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+#[derive(Debug, Clone)]
 pub struct EvalPoolConfig {
     pub workers: usize,
     pub max_rss: u64,
@@ -46,6 +48,7 @@ pub struct EvalPoolConfig {
     pub cache_dir: String,
     pub trace_dir: Option<String>,
     pub metrics: bool,
+    pub fetch_through_parent: bool,
 }
 
 #[derive(Debug)]
@@ -62,9 +65,12 @@ impl EvalPool {
             config.workers,
             config.max_rss,
             config.memory,
-            config.cache_dir.clone(),
-            config.trace_dir,
-            config.metrics,
+            SpawnConfig {
+                cache_dir: config.cache_dir.clone(),
+                trace_dir: config.trace_dir,
+                metrics: config.metrics,
+                fetch_through_parent: config.fetch_through_parent,
+            },
             thunks,
         ));
         if tokio::runtime::Handle::try_current().is_ok() {
@@ -110,7 +116,7 @@ impl EvalPool {
         repository: String,
         attrs: Vec<String>,
         overrides: &[(String, String)],
-        imports: &dyn ImportBuilder,
+        dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
     ) -> Result<Discovery> {
         let requested = attrs.clone();
@@ -127,7 +133,7 @@ impl EvalPool {
             })
             .collect();
         let mut discovery = self
-            .run_calls(repository, calls, &[], overrides, imports, &recording)
+            .run_calls(repository, calls, &[], overrides, dependencies, &recording)
             .await?;
 
         let listed = listed.into_inner().unwrap_or_default();
@@ -150,7 +156,7 @@ impl EvalPool {
         repository: String,
         wildcards: Vec<String>,
         overrides: &[(String, String)],
-        imports: &dyn ImportBuilder,
+        dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
     ) -> Result<Discovery> {
         *lock(&self.patterns) = wildcards
@@ -166,7 +172,7 @@ impl EvalPool {
                     repository.clone(),
                     wildcards.clone(),
                     overrides.to_vec(),
-                    imports,
+                    dependencies,
                 )
                 .await
             {
@@ -191,7 +197,7 @@ impl EvalPool {
         );
 
         let mut discovery = self
-            .run_calls(repository, calls, &excludes, overrides, imports, found)
+            .run_calls(repository, calls, &excludes, overrides, dependencies, found)
             .await?;
         discovery.errors.extend(plan_errors);
         discovery.errors.sort_unstable();
@@ -205,7 +211,7 @@ impl EvalPool {
         calls: Vec<DiscoveryCall>,
         excludes: &[String],
         overrides: &[(String, String)],
-        imports: &dyn ImportBuilder,
+        dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
     ) -> Result<Discovery> {
         let listed_attrs = Mutex::new(HashSet::<String>::new());
@@ -217,7 +223,7 @@ impl EvalPool {
             let (listed_attrs, warnings, errors, calls_seen) =
                 (&listed_attrs, &warnings, &errors, &calls_seen);
             pooled_fan_out(self.workers.max(), calls, |call| async move {
-                let (listing, call_stats) = self.list_shard(repo, call, overrides, imports).await?;
+                let (listing, call_stats) = self.list_shard(repo, call, overrides, dependencies).await?;
                 let fresh: Vec<ResolvedItem> = {
                     let mut listed = lock(listed_attrs);
                     listing
@@ -259,12 +265,12 @@ impl EvalPool {
         repository: &str,
         call: DiscoveryCall,
         overrides: &[(String, String)],
-        imports: &dyn ImportBuilder,
+        dependencies: &dyn EvalDependencies,
     ) -> Result<(Listing, Option<CallStats>)> {
         let mut attempt = 0;
         loop {
             match self
-                .list_once(repository, call.clone(), overrides, imports)
+                .list_once(repository, call.clone(), overrides, dependencies)
                 .await
             {
                 Ok((listing, stats)) => return Ok((listing, Some(stats))),
@@ -286,7 +292,7 @@ impl EvalPool {
         repository: &str,
         call: DiscoveryCall,
         overrides: &[(String, String)],
-        imports: &dyn ImportBuilder,
+        dependencies: &dyn EvalDependencies,
     ) -> Result<(Listing, CallStats)> {
         let bucket = entry_point_of(
             call.wildcards
@@ -302,7 +308,7 @@ impl EvalPool {
                 call.wildcards,
                 call.only,
                 overrides.to_vec(),
-                imports,
+                dependencies,
             )
             .await
         {
@@ -363,23 +369,6 @@ impl EvalPool {
             }
         }
     }
-
-    pub async fn fetch_input(
-        &self,
-        locked: String,
-        git_ssh_command: Option<String>,
-        sink: Arc<dyn DownloadSink>,
-    ) -> Result<String> {
-        let mut worker = self.workers.acquire().await?;
-        let fetched = worker.fetch_input(locked, git_ssh_command, sink).await;
-        if fetched
-            .as_ref()
-            .is_err_and(|e| !e.is::<EvalErrorResponse>())
-        {
-            worker.mark_dead();
-        }
-        fetched
-    }
 }
 
 #[cfg(test)]
@@ -396,6 +385,7 @@ mod tests {
             cache_dir: String::new(),
             trace_dir: None,
             metrics: false,
+            fetch_through_parent: false,
         })
     }
 
@@ -425,7 +415,7 @@ mod tests {
                 "repo".into(),
                 vec!["packages.x86_64-linux.hello".into()],
                 &[],
-                &RefuseImports("the test"),
+                &RefuseDependencies("the test"),
                 &move |items| lock(found_ref).extend(items),
             )
             .await
@@ -454,7 +444,7 @@ mod tests {
                 "repo".into(),
                 vec!["packages.x86_64-linux.nope".into()],
                 &[],
-                &RefuseImports("the test"),
+                &RefuseDependencies("the test"),
                 &|_| {},
             )
             .await
@@ -462,30 +452,5 @@ mod tests {
 
         assert_eq!(discovery.errors.len(), 1, "{:?}", discovery.errors);
         assert_eq!(discovery.errors[0].attr, "packages.x86_64-linux.nope");
-    }
-
-    struct NullSink;
-
-    impl DownloadSink for NullSink {
-        fn transfer(&self, _id: u64, _done: u64, _expected: u64) {}
-    }
-
-    #[tokio::test]
-    async fn a_failed_fetch_keeps_the_worker_unless_its_pipe_broke() {
-        let pool = pool(1);
-        pool.workers.push_for_test(replying_worker(
-            &EvalResponse::Err {
-                message: "404".into(),
-            },
-            "fetch-404",
-        ));
-
-        let err = pool
-            .fetch_input("{}".into(), None, Arc::new(NullSink))
-            .await
-            .expect_err("a refused fetch is an error");
-
-        assert_eq!(err.to_string(), "eval worker: 404");
-        assert_eq!(pool.workers.idle_count(), 1, "an answered error keeps it");
     }
 }

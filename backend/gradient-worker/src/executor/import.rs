@@ -10,7 +10,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::{BoxFuture, FutureExt as _, Shared, join_all};
 use gradient_derivation::{Derivation, parse_drv};
-use gradient_sources::ImportBuilder;
+use gradient_sources::EvalDependencies;
 use gradient_util::store_path::strip_store_prefix;
 use gradient_util::sync::Mutex;
 use gradient_wire::types::ImportOutcome;
@@ -81,7 +81,7 @@ impl<'a> EvalImportBuilder<'a> {
 }
 
 #[async_trait]
-impl ImportBuilder for EvalImportBuilder<'_> {
+impl EvalDependencies for EvalImportBuilder<'_> {
     async fn build_imports(&self, derived_paths: Vec<String>) -> Result<(), String> {
         let mut drv_paths: Vec<String> = derived_paths
             .iter()
@@ -96,6 +96,10 @@ impl ImportBuilder for EvalImportBuilder<'_> {
 
         let imports: Vec<_> = drv_paths.into_iter().map(|drv| self.import(drv)).collect();
         join_all(imports).await.into_iter().collect()
+    }
+
+    async fn fetch_input(&self, _request: String) -> Result<String, String> {
+        Err("this worker's evaluator fetches its inputs itself".to_owned())
     }
 }
 

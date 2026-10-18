@@ -8,9 +8,11 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use gradient_derivation::{Derivation, parse_drv};
 use gradient_eval::ipc::ResolvedItem;
-use gradient_eval::pool::{CallStats, EvalPool, EvalPoolConfig, LiveThunks, MemoryGuard};
+use gradient_eval::pool::{
+    CallStats, EvalPool, EvalPoolConfig, EvalWorker, LiveThunks, MemoryGuard,
+};
 use gradient_sources::{
-    AttrError, DerivationResolver, FlakeDiscovery, FoundDerivations, ImportBuilder,
+    AttrError, DerivationResolver, EvalDependencies, FlakeDiscovery, FoundDerivations,
     ResolvedDerivation,
 };
 use gradient_util::store_path::nix_store_path;
@@ -23,15 +25,20 @@ use super::input_fetch::{DownloadTarget, InputFetcher};
 #[derive(Debug)]
 pub struct WorkerPoolResolver {
     pool: Arc<EvalPool>,
+    config: EvalPoolConfig,
     stats: Arc<Mutex<EvalStatsAccumulator>>,
 }
 
-struct SourceImports<'a>(&'a dyn ImportBuilder);
+struct SourceDependencies<'a>(&'a dyn EvalDependencies);
 
 #[async_trait]
-impl gradient_eval::pool::ImportBuilder for SourceImports<'_> {
+impl gradient_eval::pool::EvalDependencies for SourceDependencies<'_> {
     async fn build_imports(&self, derived_paths: Vec<String>) -> Result<(), String> {
         self.0.build_imports(derived_paths).await
+    }
+
+    async fn fetch_input(&self, request: String) -> Result<String, String> {
+        self.0.fetch_input(request).await
     }
 }
 
@@ -61,15 +68,18 @@ impl WorkerPoolResolver {
         trace_dir: Option<String>,
         eval_metrics: bool,
     ) -> Self {
+        let config = EvalPoolConfig {
+            workers: pool_size,
+            max_rss,
+            memory,
+            cache_dir: eval_cache_dir,
+            trace_dir,
+            metrics: eval_metrics,
+            fetch_through_parent: false,
+        };
         Self {
-            pool: EvalPool::new(EvalPoolConfig {
-                workers: pool_size,
-                max_rss,
-                memory,
-                cache_dir: eval_cache_dir,
-                trace_dir,
-                metrics: eval_metrics,
-            }),
+            pool: EvalPool::new(config.clone()),
+            config,
             stats: Arc::new(Mutex::new(EvalStatsAccumulator::default())),
         }
     }
@@ -126,9 +136,20 @@ impl InputFetcher for WorkerPoolResolver {
         git_ssh_command: Option<String>,
         target: DownloadTarget,
     ) -> Result<String> {
-        self.pool
-            .fetch_input(locked, git_ssh_command, Arc::new(target))
-            .await
+        let args: serde_json::Value =
+            serde_json::from_str(&locked).context("parse locked input attributes")?;
+        let request = serde_json::json!({ "builtin": "fetchTree", "args": args }).to_string();
+        let mut worker = EvalWorker::spawn_for_fetch(&self.config).await?;
+        let fetched = worker
+            .fetch(request, git_ssh_command, Arc::new(target))
+            .await;
+        worker.shutdown().await;
+        let response: serde_json::Value =
+            serde_json::from_str(&fetched?).context("parse fetch response")?;
+        response["storePath"]
+            .as_str()
+            .map(str::to_owned)
+            .context("fetch response without a store path")
     }
 }
 
@@ -139,7 +160,7 @@ impl DerivationResolver for WorkerPoolResolver {
         repository: String,
         wildcards: Vec<String>,
         overrides: &[(String, String)],
-        imports: &dyn ImportBuilder,
+        dependencies: &dyn EvalDependencies,
         found: FoundDerivations<'_>,
     ) -> Result<FlakeDiscovery> {
         let found_items = |items: Vec<ResolvedItem>| {
@@ -151,7 +172,7 @@ impl DerivationResolver for WorkerPoolResolver {
                 repository,
                 wildcards,
                 overrides,
-                &SourceImports(imports),
+                &SourceDependencies(dependencies),
                 &found_items,
             )
             .await?;

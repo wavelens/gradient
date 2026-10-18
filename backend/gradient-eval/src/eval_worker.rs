@@ -14,7 +14,7 @@ use crate::frames::Frames;
 use crate::ipc::{
     EVAL_IPC_VERSION, EvalRequest, EvalResponse, ResolvedItem, decode_request, read_frame,
 };
-use crate::nix_eval::{NixEvaluator, RealiseHook, StatsReader};
+use crate::nix_eval::{FetchHook, NixEvaluator, RealiseHook, StatsReader};
 
 pub(crate) struct ParentPipe<R, W> {
     reader: Mutex<R>,
@@ -34,36 +34,59 @@ impl<R: Read, W: Write> ParentPipe<R, W> {
     pub(crate) fn read_frame(&self) -> std::io::Result<Option<Vec<u8>>> {
         if self.broken.load(Ordering::Acquire) {
             return Err(std::io::Error::other(
-                "eval pipe broke during a build request",
+                "eval pipe broke during a request to the parent",
             ));
         }
         read_frame(&mut *self.reader.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
     pub(crate) fn request_build(&self, derived_paths: &[String]) -> Result<(), String> {
+        let need = EvalResponse::NeedsBuild {
+            derived_paths: derived_paths.to_vec(),
+        };
+        match self.ask(&need, "a build")? {
+            EvalRequest::BuildDone { error: None } => Ok(()),
+            EvalRequest::BuildDone { error: Some(error) } => Err(error),
+            other => Err(self.break_on(Some(other), "a build")),
+        }
+    }
+
+    pub(crate) fn request_input(&self, request: &str) -> Result<String, String> {
+        let need = EvalResponse::NeedsInput {
+            request: request.to_owned(),
+        };
+        match self.ask(&need, "an input")? {
+            EvalRequest::InputDone {
+                response: Some(response),
+                error: None,
+            } => Ok(response),
+            EvalRequest::InputDone {
+                error: Some(error), ..
+            } => Err(error),
+            other => Err(self.break_on(Some(other), "an input")),
+        }
+    }
+
+    fn ask(&self, need: &EvalResponse, what: &str) -> Result<EvalRequest, String> {
         self.frames
-            .send(&EvalResponse::NeedsBuild {
-                derived_paths: derived_paths.to_vec(),
-            })
-            .map_err(|e| format!("eval pipe closed while asking for a build: {e}"))?;
+            .send(need)
+            .map_err(|e| format!("eval pipe closed while asking for {what}: {e}"))?;
 
         let answer = match self.read_frame() {
             Ok(Some(payload)) => decode_request(&payload).ok(),
             Ok(None) | Err(_) => None,
         };
-        match answer {
-            Some(EvalRequest::BuildDone { error: None }) => Ok(()),
-            Some(EvalRequest::BuildDone { error: Some(error) }) => Err(error),
-            other => {
-                self.broken.store(true, Ordering::Release);
-                error!(?other, "eval worker: expected a build result");
-                Err("eval pipe closed while waiting for a build".to_string())
-            }
-        }
+        answer.ok_or_else(|| self.break_on(None, what))
+    }
+
+    fn break_on(&self, answer: Option<EvalRequest>, what: &str) -> String {
+        self.broken.store(true, Ordering::Release);
+        error!(?answer, "eval worker: expected the answer for {what}");
+        format!("eval pipe closed while waiting for {what}")
     }
 }
 
-pub fn run_eval_worker(collect_stats: bool) -> std::io::Result<()> {
+pub fn run_eval_worker(collect_stats: bool, fetch_through_parent: bool) -> std::io::Result<()> {
     let mut stdout = std::io::stdout();
     stdout.write_all(&[EVAL_IPC_VERSION])?;
     stdout.flush()?;
@@ -72,7 +95,8 @@ pub fn run_eval_worker(collect_stats: bool) -> std::io::Result<()> {
         std::io::stdin(),
         Frames::new(stdout, nix_bindings::EvalStats::default()),
     ));
-    let evaluator = match NixEvaluator::new(Some(realise_through(Arc::clone(&pipe)))) {
+    let fetch_hook = fetch_through_parent.then(|| fetch_through(Arc::clone(&pipe)));
+    let evaluator = match NixEvaluator::new(Some(realise_through(Arc::clone(&pipe))), fetch_hook) {
         Ok(e) => Some(e),
         Err(e) => {
             error!(
@@ -111,6 +135,14 @@ where
     W: Write + Send + 'static,
 {
     Box::new(move |derived_paths| pipe.request_build(derived_paths))
+}
+
+fn fetch_through<R, W>(pipe: Arc<ParentPipe<R, W>>) -> FetchHook
+where
+    R: Read + Send + 'static,
+    W: Write + Send + 'static,
+{
+    Box::new(move |request| pipe.request_input(request))
 }
 
 const STATS_TICK: std::time::Duration = std::time::Duration::from_secs(1);
@@ -168,8 +200,8 @@ fn answer_requests<R: Read, W: Write>(
                 trace!("eval worker shutting down on request");
                 return Ok(());
             }
-            EvalRequest::BuildDone { .. } => EvalResponse::Err {
-                message: "a build result arrived outside a build request".to_string(),
+            EvalRequest::BuildDone { .. } | EvalRequest::InputDone { .. } => EvalResponse::Err {
+                message: "an answer arrived outside a request to the parent".to_string(),
             },
             EvalRequest::Plan {
                 repository,
@@ -218,12 +250,12 @@ fn answer_requests<R: Read, W: Write>(
                 )
             }),
             EvalRequest::FetchInput {
-                locked,
+                request,
                 git_ssh_command,
             } => with_evaluator(evaluator, |ev| {
                 or_err(
-                    ev.fetch_tree(&locked, git_ssh_command.as_deref())
-                        .map(|store_path| EvalResponse::FetchOk { store_path }),
+                    ev.fetch_tree(&request, git_ssh_command.as_deref())
+                        .map(|response| EvalResponse::FetchOk { response }),
                 )
             }),
             EvalRequest::Fingerprint {
@@ -336,11 +368,12 @@ fn response_kind(resp: &EvalResponse) -> String {
             format!("FingerprintOk({})", fingerprint.is_some())
         }
         EvalResponse::CheckpointOk => "CheckpointOk".to_string(),
-        EvalResponse::FetchOk { store_path } => format!("FetchOk({store_path})"),
+        EvalResponse::FetchOk { response } => format!("FetchOk({response})"),
         EvalResponse::Stats { delta } => format!("Stats({} thunks)", delta.nr_thunks),
         EvalResponse::NeedsBuild { derived_paths } => {
             format!("NeedsBuild({} paths)", derived_paths.len())
         }
+        EvalResponse::NeedsInput { request } => format!("NeedsInput({request})"),
         EvalResponse::Err { message } => format!("Err({message})"),
     }
 }
@@ -525,6 +558,41 @@ mod tests {
         assert_eq!(
             pipe.request_build(&["/nix/store/aaaa-src.drv^out".into()]),
             Err("eval pipe closed while waiting for a build".to_string())
+        );
+    }
+
+    #[test]
+    fn request_input_returns_the_parent_answer() {
+        let request = r#"{"builtin":"fetchTree","args":{"type":"tarball","url":"https://x"}}"#;
+        let pipe = pipe_over(&[EvalRequest::InputDone {
+            response: Some(r#"{"storePath":"/nix/store/aaaa-source"}"#.into()),
+            error: None,
+        }]);
+
+        let fetched = pipe.request_input(request);
+
+        assert_eq!(fetched, Ok(r#"{"storePath":"/nix/store/aaaa-source"}"#.to_string()));
+        let sent = sent(pipe);
+        assert!(
+            matches!(&sent[..], [EvalResponse::NeedsInput { request: r }] if r == request),
+            "{sent:?}"
+        );
+    }
+
+    #[test]
+    fn a_wrong_answer_to_an_input_request_breaks_the_pipe() {
+        let pipe = pipe_over(&[
+            EvalRequest::BuildDone { error: None },
+            EvalRequest::Shutdown,
+        ]);
+
+        assert_eq!(
+            pipe.request_input("{}"),
+            Err("eval pipe closed while waiting for an input".to_string())
+        );
+        assert!(
+            pipe.read_frame().is_err(),
+            "a broken pipe ends the request loop"
         );
     }
 

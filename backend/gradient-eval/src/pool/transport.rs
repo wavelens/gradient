@@ -21,7 +21,8 @@ use crate::ipc::{
 use crate::stats::StatsDelta;
 
 use super::download::{DownloadSink, DownloadSlot, forward_nix_log};
-use super::import::{ImportBuilder, RefuseImports};
+use super::EvalPoolConfig;
+use super::dependencies::{EvalDependencies, RefuseDependencies};
 use super::live_thunks::LiveThunks;
 use super::lock;
 
@@ -37,22 +38,27 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 const EXIT_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
-pub(super) struct SpawnConfig<'a> {
-    pub(super) cache_dir: &'a str,
-    pub(super) trace_dir: Option<&'a str>,
+#[derive(Debug)]
+pub(super) struct SpawnConfig {
+    pub(super) cache_dir: String,
+    pub(super) trace_dir: Option<String>,
     pub(super) metrics: bool,
+    pub(super) fetch_through_parent: bool,
 }
 
 /// The subprocess is this binary re-executed, so the flags and the cache home form the contract
 /// with `run_eval_worker`.
-fn eval_subprocess_command(exe: &Path, config: &SpawnConfig<'_>) -> Command {
+fn eval_subprocess_command(exe: &Path, config: &SpawnConfig) -> Command {
     let mut command = Command::new(exe);
     command.arg("--eval-subprocess");
     if config.metrics {
         command.arg("--eval-metrics");
     }
-    command.env("NIX_CACHE_HOME", config.cache_dir);
-    if let Some(dir) = config.trace_dir {
+    if config.fetch_through_parent {
+        command.arg("--eval-fetch-through-parent");
+    }
+    command.env("NIX_CACHE_HOME", &config.cache_dir);
+    if let Some(dir) = &config.trace_dir {
         command.env("GRADIENT_WORKER_LOG_TRACE_DIR", dir);
     }
     for &(k, v) in eval_worker_stats_env(config.metrics) {
@@ -94,7 +100,7 @@ pub(super) struct Listing {
     pub(super) stats: Option<StatsDelta>,
 }
 
-pub(super) struct EvalWorker {
+pub struct EvalWorker {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
@@ -120,8 +126,18 @@ impl Drop for PidGuard {
 }
 
 impl EvalWorker {
+    pub async fn spawn_for_fetch(config: &EvalPoolConfig) -> Result<Self> {
+        let spawn = SpawnConfig {
+            cache_dir: config.cache_dir.clone(),
+            trace_dir: config.trace_dir.clone(),
+            metrics: false,
+            fetch_through_parent: false,
+        };
+        Self::spawn(&spawn, Arc::default(), Arc::default()).await
+    }
+
     pub(super) async fn spawn(
-        config: &SpawnConfig<'_>,
+        config: &SpawnConfig,
         live: Arc<Mutex<HashSet<u32>>>,
         thunks: Arc<LiveThunks>,
     ) -> Result<Self> {
@@ -236,7 +252,7 @@ impl EvalWorker {
         self.stdin.flush().await.context("flush eval worker stdin")
     }
 
-    async fn recv(&mut self, imports: &dyn ImportBuilder) -> Result<EvalResponse> {
+    async fn recv(&mut self, dependencies: &dyn EvalDependencies) -> Result<EvalResponse> {
         loop {
             match self.recv_frame().await? {
                 EvalResponse::Stats { delta } => {
@@ -244,13 +260,22 @@ impl EvalWorker {
                 }
                 EvalResponse::NeedsBuild { derived_paths } => {
                     let error = tokio::select! {
-                        built = imports.build_imports(derived_paths) => built.err(),
-                        status = self.child.wait() => anyhow::bail!(
-                            "eval worker exited during an import: {}",
-                            status.map_or_else(|e| e.to_string(), |s| s.to_string())
-                        ),
+                        built = dependencies.build_imports(derived_paths) => built.err(),
+                        status = self.child.wait() => anyhow::bail!(exited_during("an import", status)),
                     };
                     self.send(&EvalRequest::BuildDone { error }).await?;
+                }
+                EvalResponse::NeedsInput { request } => {
+                    let fetched = tokio::select! {
+                        fetched = dependencies.fetch_input(request) => fetched,
+                        status = self.child.wait() => anyhow::bail!(exited_during("an input fetch", status)),
+                    };
+                    let (response, error) = match fetched {
+                        Ok(response) => (Some(response), None),
+                        Err(error) => (None, Some(error)),
+                    };
+                    self.send(&EvalRequest::InputDone { response, error })
+                        .await?;
                 }
                 other => return Ok(other),
             }
@@ -313,11 +338,11 @@ impl EvalWorker {
         &mut self,
         req: EvalRequest,
         what: &'static str,
-        imports: &dyn ImportBuilder,
+        dependencies: &dyn EvalDependencies,
         extract: impl FnOnce(EvalResponse) -> std::result::Result<T, Box<EvalResponse>>,
     ) -> Result<T> {
         self.send(&req).await?;
-        let resp = self.recv(imports).await?;
+        let resp = self.recv(dependencies).await?;
         self.in_flight = false;
         match extract(resp) {
             Ok(v) => Ok(v),
@@ -333,7 +358,7 @@ impl EvalWorker {
         repository: String,
         wildcards: Vec<String>,
         input_overrides: Vec<(String, String)>,
-        imports: &dyn ImportBuilder,
+        dependencies: &dyn EvalDependencies,
     ) -> Result<(Vec<DiscoveryShard>, Vec<AttrError>)> {
         self.call(
             EvalRequest::Plan {
@@ -342,7 +367,7 @@ impl EvalWorker {
                 input_overrides,
             },
             "Plan",
-            imports,
+            dependencies,
             |resp| match resp {
                 EvalResponse::PlanOk { shards, errors } => Ok((shards, errors)),
                 other => Err(Box::new(other)),
@@ -357,7 +382,7 @@ impl EvalWorker {
         wildcards: Vec<String>,
         only: Option<Vec<String>>,
         input_overrides: Vec<(String, String)>,
-        imports: &dyn ImportBuilder,
+        dependencies: &dyn EvalDependencies,
     ) -> Result<Listing> {
         self.call(
             EvalRequest::List {
@@ -367,7 +392,7 @@ impl EvalWorker {
                 input_overrides,
             },
             "List",
-            imports,
+            dependencies,
             |resp| match resp {
                 EvalResponse::ListOk {
                     items,
@@ -399,7 +424,7 @@ impl EvalWorker {
                 input_overrides,
             },
             "Fingerprint",
-            &RefuseImports("the fingerprint"),
+            &RefuseDependencies("the fingerprint"),
             |resp| match resp {
                 EvalResponse::FingerprintOk { fingerprint } => Ok(fingerprint),
                 other => Err(Box::new(other)),
@@ -419,7 +444,7 @@ impl EvalWorker {
                 input_overrides,
             },
             "Checkpoint",
-            &RefuseImports("the eval-cache checkpoint"),
+            &RefuseDependencies("the eval-cache checkpoint"),
             |resp| match resp {
                 EvalResponse::CheckpointOk => Ok(()),
                 other => Err(Box::new(other)),
@@ -428,9 +453,9 @@ impl EvalWorker {
         .await
     }
 
-    pub(super) async fn fetch_input(
+    pub async fn fetch(
         &mut self,
-        locked: String,
+        request: String,
         git_ssh_command: Option<String>,
         sink: Arc<dyn DownloadSink>,
     ) -> Result<String> {
@@ -438,13 +463,13 @@ impl EvalWorker {
         let fetched = self
             .call(
                 EvalRequest::FetchInput {
-                    locked,
+                    request,
                     git_ssh_command,
                 },
                 "FetchInput",
-                &RefuseImports("an input fetch"),
+                &RefuseDependencies("an input fetch"),
                 |resp| match resp {
-                    EvalResponse::FetchOk { store_path } => Ok(store_path),
+                    EvalResponse::FetchOk { response } => Ok(response),
                     other => Err(Box::new(other)),
                 },
             )
@@ -453,7 +478,7 @@ impl EvalWorker {
         fetched
     }
 
-    pub(super) async fn shutdown(mut self) {
+    pub async fn shutdown(mut self) {
         let pid = self.child.id();
         trace!(pid, "sending Shutdown to eval worker");
         if let Err(e) = self.send(&EvalRequest::Shutdown).await {
@@ -485,6 +510,13 @@ impl EvalWorker {
     }
 }
 
+fn exited_during(what: &str, status: std::io::Result<std::process::ExitStatus>) -> String {
+    format!(
+        "eval worker exited during {what}: {}",
+        status.map_or_else(|e| e.to_string(), |s| s.to_string())
+    )
+}
+
 fn forward_stderr(stderr: ChildStderr, downloads: DownloadSlot) {
     #[expect(
         clippy::disallowed_methods,
@@ -508,14 +540,48 @@ mod tests {
     use super::*;
     use crate::ipc::{decode_request, encode_response};
 
-    struct RecordingImports(Mutex<Vec<Vec<String>>>);
+    #[derive(Default)]
+    struct RecordingDependencies {
+        builds: Mutex<Vec<Vec<String>>>,
+        inputs: Mutex<Vec<String>>,
+    }
 
     #[async_trait::async_trait]
-    impl ImportBuilder for RecordingImports {
+    impl EvalDependencies for RecordingDependencies {
         async fn build_imports(&self, derived_paths: Vec<String>) -> Result<(), String> {
-            lock(&self.0).push(derived_paths);
+            lock(&self.builds).push(derived_paths);
             Err("no builder here".into())
         }
+
+        async fn fetch_input(&self, request: String) -> Result<String, String> {
+            lock(&self.inputs).push(request);
+            Ok(r#"{"storePath":"/nix/store/aaaa-source"}"#.into())
+        }
+    }
+
+    fn asking_worker(
+        tag: &str,
+        request: &EvalRequest,
+        need: &EvalResponse,
+        answer_len: usize,
+        done: &EvalResponse,
+    ) -> (EvalWorker, std::path::PathBuf) {
+        let request_len = framed(&encode_request(request).unwrap()).len();
+        let need = temp_file(&format!("{tag}-need"), &framed(&encode_response(need).unwrap()));
+        let done = temp_file(&format!("{tag}-done"), &framed(&encode_response(done).unwrap()));
+        let answer = std::env::temp_dir().join(format!(
+            "gradient-transport-test-{}-{tag}-answer",
+            std::process::id()
+        ));
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg(format!(
+            "head -c {request_len} >/dev/null; cat '{}'; head -c {answer_len} >'{}'; cat '{}'; cat >/dev/null",
+            need.display(),
+            answer.display(),
+            done.display()
+        ));
+        let worker = EvalWorker::from_command(cmd, Arc::default()).expect("spawn sh");
+        (worker, answer)
     }
 
     fn framed(payload: &[u8]) -> Vec<u8> {
@@ -536,60 +602,45 @@ mod tests {
         path
     }
 
-    #[tokio::test]
-    async fn recv_answers_a_build_request_and_returns_the_final_frame() {
-        let plan = EvalRequest::Plan {
+    fn plan_request() -> EvalRequest {
+        EvalRequest::Plan {
             repository: "repo".into(),
             wildcards: vec![],
             input_overrides: vec![],
-        };
+        }
+    }
+
+    fn plan_ok() -> EvalResponse {
+        EvalResponse::PlanOk {
+            shards: vec![],
+            errors: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn recv_answers_a_build_request_and_returns_the_final_frame() {
         let expected_answer = EvalRequest::BuildDone {
             error: Some("no builder here".into()),
         };
-        let plan_len = framed(&encode_request(&plan).unwrap()).len();
-        let answer_len = framed(&encode_request(&expected_answer).unwrap()).len();
-        let needs = temp_file(
-            "needs",
-            &framed(
-                &encode_response(&EvalResponse::NeedsBuild {
-                    derived_paths: vec!["/nix/store/aaaa-src.drv^out".into()],
-                })
-                .unwrap(),
-            ),
+        let (mut worker, answer) = asking_worker(
+            "build",
+            &plan_request(),
+            &EvalResponse::NeedsBuild {
+                derived_paths: vec!["/nix/store/aaaa-src.drv^out".into()],
+            },
+            framed(&encode_request(&expected_answer).unwrap()).len(),
+            &plan_ok(),
         );
-        let done = temp_file(
-            "done",
-            &framed(
-                &encode_response(&EvalResponse::PlanOk {
-                    shards: vec![],
-                    errors: vec![],
-                })
-                .unwrap(),
-            ),
-        );
-        let answer = std::env::temp_dir().join(format!(
-            "gradient-transport-test-{}-answer",
-            std::process::id()
-        ));
-
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(format!(
-            "head -c {plan_len} >/dev/null; cat '{}'; head -c {answer_len} >'{}'; cat '{}'; cat >/dev/null",
-            needs.display(),
-            answer.display(),
-            done.display()
-        ));
-        let mut worker = EvalWorker::from_command(cmd, Arc::default()).expect("spawn sh");
-        let imports = RecordingImports(Mutex::new(Vec::new()));
+        let dependencies = RecordingDependencies::default();
 
         let (shards, errors) = worker
-            .plan("repo".into(), vec![], vec![], &imports)
+            .plan("repo".into(), vec![], vec![], &dependencies)
             .await
             .expect("the final frame after the build request");
 
         assert!(shards.is_empty() && errors.is_empty());
         assert_eq!(
-            imports.0.into_inner().unwrap_or_default(),
+            dependencies.builds.into_inner().unwrap_or_default(),
             vec![vec!["/nix/store/aaaa-src.drv^out".to_string()]]
         );
         let written = std::fs::read(&answer).expect("the answer frame");
@@ -601,14 +652,51 @@ mod tests {
         assert!(!worker.in_flight(), "the call ended in lockstep");
     }
 
+    #[tokio::test]
+    async fn recv_answers_an_input_request_through_the_dependencies() {
+        let request = r#"{"builtin":"fetchTree","args":{"type":"tarball","url":"https://x"}}"#;
+        let expected_answer = EvalRequest::InputDone {
+            response: Some(r#"{"storePath":"/nix/store/aaaa-source"}"#.into()),
+            error: None,
+        };
+        let (mut worker, answer) = asking_worker(
+            "input",
+            &plan_request(),
+            &EvalResponse::NeedsInput {
+                request: request.into(),
+            },
+            framed(&encode_request(&expected_answer).unwrap()).len(),
+            &plan_ok(),
+        );
+        let dependencies = RecordingDependencies::default();
+
+        worker
+            .plan("repo".into(), vec![], vec![], &dependencies)
+            .await
+            .expect("the final frame after the input request");
+
+        assert_eq!(
+            dependencies.inputs.into_inner().unwrap_or_default(),
+            vec![request.to_string()]
+        );
+        let written = std::fs::read(&answer).expect("the answer frame");
+        let back = decode_request(&written[4..]).expect("a request frame");
+        assert!(
+            matches!(&back, EvalRequest::InputDone { response: Some(r), error: None } if r.contains("aaaa-source")),
+            "{back:?}"
+        );
+        assert!(!worker.in_flight(), "the call ended in lockstep");
+    }
+
     #[test]
     fn the_spawned_command_asks_for_the_eval_subprocess() {
         let plain = eval_subprocess_command(
             Path::new("/usr/bin/gradient"),
             &SpawnConfig {
-                cache_dir: "/tmp/cache",
+                cache_dir: "/tmp/cache".into(),
                 trace_dir: None,
                 metrics: false,
+                fetch_through_parent: false,
             },
         );
         let args: Vec<String> = plain
@@ -632,9 +720,10 @@ mod tests {
         let metrics = eval_subprocess_command(
             Path::new("/usr/bin/gradient"),
             &SpawnConfig {
-                cache_dir: "/tmp/cache",
-                trace_dir: Some("/tmp/trace"),
+                cache_dir: "/tmp/cache".into(),
+                trace_dir: Some("/tmp/trace".into()),
                 metrics: true,
+                fetch_through_parent: true,
             },
         );
         let args: Vec<String> = metrics
@@ -646,7 +735,8 @@ mod tests {
             args,
             vec![
                 "--eval-subprocess".to_string(),
-                "--eval-metrics".to_string()
+                "--eval-metrics".to_string(),
+                "--eval-fetch-through-parent".to_string()
             ]
         );
         assert!(

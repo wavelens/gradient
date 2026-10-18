@@ -1552,7 +1552,7 @@ mod tests {
             _: String,
             _: Vec<String>,
             _: &[(String, String)],
-            _: &dyn gradient_sources::ImportBuilder,
+            _: &dyn gradient_sources::EvalDependencies,
             _: gradient_sources::FoundDerivations<'_>,
         ) -> Result<FlakeDiscovery> {
             std::future::pending().await
@@ -1737,7 +1737,7 @@ mod tests {
             _: String,
             _: Vec<String>,
             _: &[(String, String)],
-            _: &dyn gradient_sources::ImportBuilder,
+            _: &dyn gradient_sources::EvalDependencies,
             found: gradient_sources::FoundDerivations<'_>,
         ) -> Result<FlakeDiscovery> {
             found(vec![("hello".into(), Ok((self.drv_path.clone(), vec![])))]);
