@@ -8,7 +8,6 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{EvaluationId, ProjectId};
 use gradient_fixtures::shape::shape;
 use gradient_pool::session_port::SessionSignal;
-use gradient_types::waiting_reason::{EvalCapability, WaitingReason};
 use gradient_wire::types::{InputOutcome, JobKind};
 
 use super::{
@@ -145,6 +144,7 @@ async fn i04_a_lost_fetch_worker_hands_the_fetch_to_another() {
     case.check("step 1").await;
 
     case.disconnect(W2).await;
+    case.signals(W2);
     let second = single_fetch(&case, &[W1, W2, W3]);
     assert_eq!(second.worker, W3, "after 2: W3 takes over");
     assert_ne!(second.fetch_id, first.fetch_id, "after 2: a new fetch id");
@@ -206,7 +206,7 @@ async fn i05_an_abort_drops_the_input_wait() {
 }
 
 #[tokio::test]
-async fn i06_without_a_fetch_worker_the_evaluation_waits_for_network() {
+async fn i06_without_a_fetch_worker_the_evaluation_says_it_waits() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().evalq(e1)).await;
     evaluating(&case, W1, e1).await;
@@ -214,19 +214,17 @@ async fn i06_without_a_fetch_worker_the_evaluation_waits_for_network() {
     case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
         .await;
     case.refresh_waiting_state().await;
+    case.build_assign_pass(false, false).await;
     let row = case.evaluation(e1).await;
     assert_eq!(
-        (
-            row.status,
-            row.waiting_reason
-                .as_ref()
-                .and_then(WaitingReason::from_json)
-        ),
-        (
-            EvaluationStatus::EvaluatingDerivation,
-            Some(WaitingReason::eval_workers(EvalCapability::Network, 1))
-        ),
-        "after 1: evaluation(E1) keeps evaluating and names the gap"
+        (row.status, row.waiting_reason),
+        (EvaluationStatus::EvaluatingDerivation, None),
+        "after 1: evaluation(E1) keeps evaluating without a waiting reason"
+    );
+    assert_eq!(
+        wait_messages(&case, e1).await,
+        vec!["waiting for a worker with network and secrets to fetch an input".to_owned()],
+        "after 1: one message names the missing worker, also after a second pass"
     );
     case.check("step 1").await;
 
@@ -300,6 +298,7 @@ async fn i08_fetch_progress_reaches_every_waiting_evaluation() {
     case.check("step 2").await;
 
     case.disconnect(&first.worker).await;
+    case.signals(&first.worker);
     let second = single_fetch(&case, &[W1, W2, W3, W4]);
     case.input_fetch_progress(&first.worker, &first.fetch_id, 1024, Some(1024))
         .await;
@@ -454,11 +453,15 @@ async fn i12_an_unplaced_fetch_waits_when_no_other_worker_qualifies() {
         "after 2: W2 is not asked again"
     );
     assert_eq!(case.input_waits(), 1, "after 2: the request still waits");
-    let reason = case.evaluation(e1).await.waiting_reason;
     assert_eq!(
-        reason.as_ref().and_then(WaitingReason::from_json),
-        Some(WaitingReason::eval_workers(EvalCapability::Network, 2)),
-        "after 2: the evaluation waits for network"
+        case.evaluation(e1).await.waiting_reason,
+        None,
+        "after 2: no waiting reason while evaluating"
+    );
+    assert_eq!(
+        wait_messages(&case, e1).await,
+        vec!["waiting for a worker with network and secrets to fetch an input".to_owned()],
+        "after 2: the excluded W2 counts as no fetch worker"
     );
     case.check("step 2").await;
 
@@ -472,6 +475,15 @@ async fn i12_an_unplaced_fetch_waits_when_no_other_worker_qualifies() {
     case.check("step 3").await;
 
     case.finish().await;
+}
+
+async fn wait_messages(case: &SchedulerCase, evaluation: EvaluationId) -> Vec<String> {
+    case.messages(evaluation)
+        .await
+        .into_iter()
+        .filter(|m| m.source.as_deref() == Some("fetch"))
+        .map(|m| m.message)
+        .collect()
 }
 
 fn unplaced() -> InputOutcome {

@@ -41,6 +41,7 @@ struct InputWait {
     waiters: Vec<InputWaiter>,
     fetch: Option<AssignedFetch>,
     excluded: HashSet<String>,
+    announced: HashSet<EvaluationId>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +68,7 @@ impl InputWaits {
                 waiters: Vec::new(),
                 fetch: None,
                 excluded: HashSet::new(),
+                announced: HashSet::new(),
             })
             .waiters
             .push(new.waiter);
@@ -170,13 +172,19 @@ impl InputWaits {
             .collect()
     }
 
-    pub fn unassigned_evaluations(&self) -> HashSet<EvaluationId> {
-        self.0
-            .lock()
-            .values()
-            .filter(|w| w.fetch.is_none())
-            .flat_map(|w| w.waiters.iter().map(|waiter| waiter.evaluation))
-            .collect()
+    pub fn announce_unplaced(&self, fetch_key: &str) -> Vec<EvaluationId> {
+        let mut waits = self.0.lock();
+        let Some(wait) = waits.get_mut(fetch_key).filter(|w| w.fetch.is_none()) else {
+            return Vec::new();
+        };
+        let mut fresh: Vec<EvaluationId> = wait
+            .waiters
+            .iter()
+            .map(|waiter| waiter.evaluation)
+            .filter(|evaluation| wait.announced.insert(*evaluation))
+            .collect();
+        fresh.dedup();
+        fresh
     }
 
     #[cfg(test)]

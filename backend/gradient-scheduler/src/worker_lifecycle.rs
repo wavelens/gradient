@@ -329,7 +329,7 @@ impl Scheduler {
             graph: &self.graph,
             memo: &self.scoring.assessments,
         }
-        .run(&workers, &self.input_waiting_evaluations(), draining)
+        .run(&workers, draining)
         .await?;
         for unbuildable in unbuildables {
             self.abort_unbuildable_evaluation(unbuildable).await;
