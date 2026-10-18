@@ -19,6 +19,7 @@ use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::input_waits::{AssignedFetch, InputWaiter, NewInputWait, UnassignedFetch};
 use crate::jobs::PendingJob;
+use crate::waiting_state::announce_worker_gap;
 
 impl Scheduler {
     pub async fn handle_input_request(
@@ -149,10 +150,6 @@ impl Scheduler {
         Ok(())
     }
 
-    pub(crate) fn input_waiting_evaluations(&self) -> HashSet<EvaluationId> {
-        self.input_waits.unassigned_evaluations()
-    }
-
     async fn dispatch_input_fetches(&self) {
         let unassigned = self.input_waits.unassigned();
         if unassigned.is_empty() {
@@ -167,6 +164,10 @@ impl Scheduler {
                 .await
             {
                 debug!(fetch_key = %fetch.fetch_key, "no connected worker can fetch the input yet");
+                if !workers.iter().any(|w| can_ever_fetch(w, &fetch)) {
+                    self.announce_missing_fetch_worker(&fetch, workers.len())
+                        .await;
+                }
             }
         }
     }
@@ -214,6 +215,30 @@ impl Scheduler {
         false
     }
 
+    async fn announce_missing_fetch_worker(&self, fetch: &UnassignedFetch, connected: usize) {
+        let (capability, wanted) = if fetch.needs_secrets {
+            (EvalCapability::Secrets, "network and secrets")
+        } else {
+            (EvalCapability::Network, "network")
+        };
+        let reason =
+            WaitingReason::eval_workers(capability, connected.try_into().unwrap_or(u32::MAX));
+        for evaluation in self.input_waits.announce_unplaced(&fetch.fetch_key) {
+            let inserted = gradient_db::status::insert_worker_message(
+                &self.db.worker_db,
+                evaluation,
+                gradient_entity::evaluation_message::MessageLevel::Notice,
+                format!("waiting for a worker with {wanted} to fetch an input"),
+                "fetch".to_owned(),
+            )
+            .await;
+            if let Err(e) = inserted {
+                warn!(error = %e, %evaluation, "input wait message not recorded");
+            }
+            announce_worker_gap(&self.db, evaluation, fetch.project, &reason).await;
+        }
+    }
+
     async fn release_input_fetch(&self, worker: &str, fetch_id: &str) {
         let released = self
             .call(|reply| SchedulerMsg::ReleaseInputFetch {
@@ -246,6 +271,20 @@ impl Scheduler {
     }
 }
 
+fn can_ever_fetch(worker: &WorkerInfo, fetch: &UnassignedFetch) -> bool {
+    !worker.draining
+        && !fetch.excluded.contains(&worker.id)
+        && worker
+            .authorized_peers
+            .as_ref()
+            .is_none_or(|peers| peers.contains(&fetch.project))
+        && WorkerCaps {
+            capabilities: worker.capabilities.clone(),
+            ..WorkerCaps::default()
+        }
+        .can_fetch_input(fetch.needs_secrets)
+}
+
 fn fetch_workers(
     workers: &[WorkerInfo],
     load: &HashMap<String, usize>,
@@ -253,21 +292,8 @@ fn fetch_workers(
 ) -> Vec<String> {
     let mut eligible: Vec<&WorkerInfo> = workers
         .iter()
-        .filter(|w| !w.draining)
-        .filter(|w| !fetch.excluded.contains(&w.id))
+        .filter(|w| can_ever_fetch(w, fetch))
         .filter(|w| w.assigned_build_count < w.max_concurrent_builds as usize)
-        .filter(|w| {
-            w.authorized_peers
-                .as_ref()
-                .is_none_or(|peers| peers.contains(&fetch.project))
-        })
-        .filter(|w| {
-            WorkerCaps {
-                capabilities: w.capabilities.clone(),
-                ..WorkerCaps::default()
-            }
-            .can_fetch_input(fetch.needs_secrets)
-        })
         .collect();
     eligible.sort_by_key(|w| (load.get(&w.id).copied().unwrap_or_default(), w.id.clone()));
     eligible.into_iter().map(|w| w.id.clone()).collect()
