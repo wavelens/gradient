@@ -166,6 +166,17 @@ pub enum SchedulerMsg {
         signals: Vec<(String, SessionSignal)>,
         reply: RpcReplyPort<()>,
     },
+    ClaimInputFetch {
+        worker: String,
+        fetch_id: String,
+        signal: SessionSignal,
+        reply: RpcReplyPort<bool>,
+    },
+    ReleaseInputFetch {
+        worker: String,
+        fetch_id: String,
+        reply: RpcReplyPort<()>,
+    },
     DropCluster {
         seats: Vec<(String, String)>,
         reply: RpcReplyPort<()>,
@@ -937,6 +948,29 @@ impl Actor for CoreActor {
                 for (worker, signal) in signals {
                     core.pool.signal(&worker, signal);
                 }
+                let _ = reply.send(());
+            }
+            SchedulerMsg::ClaimInputFetch {
+                worker,
+                fetch_id,
+                signal,
+                reply,
+            } => {
+                let claimed = core.pool.has_capacity(&worker, &JobKind::Build);
+                if claimed {
+                    let key = crate::input_waits::input_fetch_key(&fetch_id);
+                    core.pool.assign_job(&worker, &key, JobKind::Build, 0);
+                    core.pool.signal(&worker, signal);
+                }
+                let _ = reply.send(claimed);
+            }
+            SchedulerMsg::ReleaseInputFetch {
+                worker,
+                fetch_id,
+                reply,
+            } => {
+                core.pool
+                    .release_job(&worker, &crate::input_waits::input_fetch_key(&fetch_id));
                 let _ = reply.send(());
             }
             SchedulerMsg::Candidates {

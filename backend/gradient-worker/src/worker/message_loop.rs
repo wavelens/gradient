@@ -254,6 +254,7 @@ pub(super) struct MessageLoopState {
     executor: JobExecutor,
     downloader: Arc<dyn InputDownloader>,
     fetches: tokio::task::JoinSet<()>,
+    running_fetches: Arc<std::sync::atomic::AtomicU32>,
     config: WorkerConfig,
     draining: bool,
     stopping: bool,
@@ -308,6 +309,7 @@ impl MessageLoopState {
                 executor.evaluator.resolver().config().clone(),
             )),
             fetches: tokio::task::JoinSet::new(),
+            running_fetches: Arc::default(),
             executor,
             config,
             draining: false,
@@ -344,7 +346,13 @@ impl MessageLoopState {
     }
 
     fn occupied(&self, kind: JobKind) -> u32 {
-        self.jobs.active(kind.clone()) + self.holds.held(&kind)
+        let fetches = match kind {
+            JobKind::Build => self
+                .running_fetches
+                .load(std::sync::atomic::Ordering::Acquire),
+            JobKind::Flake => 0,
+        };
+        self.jobs.active(kind.clone()) + self.holds.held(&kind) + fetches
     }
 
     fn max_for(&self, kind: JobKind) -> u32 {
@@ -858,7 +866,9 @@ impl MessageLoopState {
         let downloader = Arc::clone(&self.downloader);
         let writer = self.writer.clone();
         let binpath_ssh = self.executor.binpath_ssh.clone();
+        let running = RunningFetch::start(Arc::clone(&self.running_fetches));
         self.fetches.spawn(async move {
+            let _running = running;
             let fetch_id = fetch.fetch_id.clone();
             let report = UpdaterFetchReport(updater);
             let outcome = fetch_input(fetch, &*downloader, &report, &binpath_ssh).await;
@@ -1031,6 +1041,21 @@ impl MessageLoopState {
         for fp in &failed_peers {
             warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
         }
+    }
+}
+
+struct RunningFetch(Arc<std::sync::atomic::AtomicU32>);
+
+impl RunningFetch {
+    fn start(count: Arc<std::sync::atomic::AtomicU32>) -> Self {
+        count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Self(count)
+    }
+}
+
+impl Drop for RunningFetch {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
     }
 }
 
@@ -1255,6 +1280,20 @@ mod tests {
         assert!(idle.is_aborted(), "a job between checkpoints sees it too");
     }
 
+    struct StalledDownloader;
+
+    #[async_trait::async_trait]
+    impl InputDownloader for StalledDownloader {
+        async fn download(
+            &self,
+            _request: String,
+            _git_ssh_command: Option<String>,
+            _sink: Arc<dyn gradient_eval::pool::DownloadSink>,
+        ) -> Result<String> {
+            std::future::pending().await
+        }
+    }
+
     struct OfflineDownloader;
 
     #[async_trait::async_trait]
@@ -1359,6 +1398,51 @@ mod tests {
                     message: "offline".into()
                 },
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_running_input_fetch_occupies_a_build_slot() {
+        let server = gradient_test_support::prelude::MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
+        let (writer, _reader, _flush) = conn.split();
+        let gcroots = tempfile::tempdir().unwrap();
+        let mut state = MessageLoopState::new(
+            writer,
+            WorkerConfig::default(),
+            executor(gcroots.path()),
+            JobScorer::new(),
+            CredentialStore::new(),
+        );
+        state.downloader = Arc::new(StalledDownloader);
+        let _running = state.jobs.register(
+            "build:b1".to_owned(),
+            JobKind::Build,
+            "dispatch-1".to_owned(),
+            None,
+        );
+
+        state
+            .route(ServerMessage::FetchInput {
+                fetch_id: "f1".into(),
+                project: "p1".into(),
+                request: "{}".into(),
+                ssh_key: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(state.occupied(JobKind::Build), 2);
+        assert_eq!(state.occupied(JobKind::Flake), 0);
+        state.fetches.abort_all();
+        while state.fetches.join_next().await.is_some() {}
+        assert_eq!(
+            state.occupied(JobKind::Build),
+            1,
+            "an ended fetch frees its slot"
         );
     }
 }
