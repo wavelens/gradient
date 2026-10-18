@@ -42,7 +42,10 @@ impl EvalDependencies for RefuseDependencies {
     }
 
     async fn fetch_input(&self, _request: String) -> Result<String, String> {
-        Err(format!("fetching inputs is not available during {}", self.0))
+        Err(format!(
+            "fetching inputs is not available during {}",
+            self.0
+        ))
     }
 }
 

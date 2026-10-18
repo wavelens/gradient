@@ -28,6 +28,9 @@ client
 26:{u64,[0:{{str,u64,u64,str,seq<str>,opt<str>,opt<str>,opt<{str,seq<str>}>}},1:{u64}]}
 27:{u64}
 28:{str,str,seq<str>}
+29:{str,str,str}
+30:{str,[0:{str},1:{str}]}
+31:{str,u64,opt<u64>}
 server
 0:{seq<str>}
 1:{{bool,bool,bool,bool,bool,bool,bool,bool},seq<str>,seq<{str,str}>}
@@ -56,3 +59,6 @@ server
 24:{u64,[0:{},1:{str},2:{str}]}
 25:{str,seq<(str,str)>}
 26:{str,str,[0:{},1:{str,str,str},2:{str}]}
+27:{str,str,[0:{str},1:{str}]}
+28:{str,str,str,opt<str>}
+29:{str,str,u64,opt<u64>}

@@ -322,6 +322,12 @@ pub enum ImportOutcome {
     },
 }
 
+#[derive(Proto, Debug, Clone, PartialEq, Eq)]
+pub enum InputOutcome {
+    Fetched { response: String },
+    Failed { message: String },
+}
+
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub struct DerivationOutput {
     pub name: String,

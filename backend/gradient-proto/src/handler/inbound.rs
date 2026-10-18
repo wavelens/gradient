@@ -368,6 +368,12 @@ impl<'a> InboundContext<'a> {
                 }
                 true
             }
+            msg @ (ClientMessage::InputRequest { .. }
+            | ClientMessage::InputFetched { .. }
+            | ClientMessage::InputFetchProgress { .. }) => {
+                warn!(peer_id = %self.peer_id, variant = msg.variant_name(), "input fetches are not served yet");
+                true
+            }
             ClientMessage::EvalMessage {
                 job_id,
                 level,

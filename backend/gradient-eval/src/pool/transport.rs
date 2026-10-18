@@ -20,9 +20,9 @@ use crate::ipc::{
 };
 use crate::stats::StatsDelta;
 
-use super::download::{DownloadSink, DownloadSlot, forward_nix_log};
 use super::EvalPoolConfig;
 use super::dependencies::{EvalDependencies, RefuseDependencies};
+use super::download::{DownloadSink, DownloadSlot, forward_nix_log};
 use super::live_thunks::LiveThunks;
 use super::lock;
 
@@ -567,8 +567,14 @@ mod tests {
         done: &EvalResponse,
     ) -> (EvalWorker, std::path::PathBuf) {
         let request_len = framed(&encode_request(request).unwrap()).len();
-        let need = temp_file(&format!("{tag}-need"), &framed(&encode_response(need).unwrap()));
-        let done = temp_file(&format!("{tag}-done"), &framed(&encode_response(done).unwrap()));
+        let need = temp_file(
+            &format!("{tag}-need"),
+            &framed(&encode_response(need).unwrap()),
+        );
+        let done = temp_file(
+            &format!("{tag}-done"),
+            &framed(&encode_response(done).unwrap()),
+        );
         let answer = std::env::temp_dir().join(format!(
             "gradient-transport-test-{}-{tag}-answer",
             std::process::id()

@@ -14,7 +14,8 @@ use gradient_wire::messages::{
     CACHE_QUERY_MAX_PATHS, CACHE_QUERY_TIMEOUT, CACHE_QUERY_WINDOW, CachedPath, ClientMessage,
     QueryMode,
 };
-use gradient_wire::types::ImportOutcome;
+use gradient_wire::traits::InputProgressSink;
+use gradient_wire::types::{ImportOutcome, InputOutcome};
 use tokio::sync::oneshot;
 
 use crate::connection::ProtoWriter;
@@ -151,6 +152,88 @@ pub async fn request_import(
         .await?;
     rx.await.map_err(|_| {
         anyhow::anyhow!("import waiter dropped - the job ended or the connection closed")
+    })
+}
+
+pub struct InputWaiter {
+    job_id: String,
+    reply: oneshot::Sender<InputOutcome>,
+    progress: Arc<dyn InputProgressSink>,
+}
+
+pub type InputWaiters = Arc<Mutex<HashMap<String, InputWaiter>>>;
+
+pub fn register_input_waiter(
+    waiters: &InputWaiters,
+    request_id: String,
+    job_id: String,
+    progress: Arc<dyn InputProgressSink>,
+) -> oneshot::Receiver<InputOutcome> {
+    let (reply, rx) = oneshot::channel();
+    waiters.lock().insert(
+        request_id,
+        InputWaiter {
+            job_id,
+            reply,
+            progress,
+        },
+    );
+    rx
+}
+
+pub fn deliver_input_result(
+    waiters: &InputWaiters,
+    request_id: &str,
+    outcome: InputOutcome,
+) -> bool {
+    match waiters.lock().remove(request_id) {
+        Some(w) => {
+            let _ = w.reply.send(outcome);
+            true
+        }
+        None => false,
+    }
+}
+
+pub fn deliver_input_progress(
+    waiters: &InputWaiters,
+    request_id: &str,
+    bytes_done: u64,
+    bytes_total: Option<u64>,
+) -> bool {
+    let Some(progress) = waiters
+        .lock()
+        .get(request_id)
+        .map(|w| Arc::clone(&w.progress))
+    else {
+        return false;
+    };
+    progress.transfer(bytes_done, bytes_total);
+    true
+}
+
+pub fn forget_input_waiters_for_job(waiters: &InputWaiters, job_id: &str) {
+    waiters.lock().retain(|_, w| w.job_id != job_id);
+}
+
+pub async fn request_input(
+    job_id: &str,
+    writer: &ProtoWriter,
+    waiters: &InputWaiters,
+    request: String,
+    progress: Arc<dyn InputProgressSink>,
+) -> Result<InputOutcome> {
+    let request_id = uuid::Uuid::now_v7().to_string();
+    let rx = register_input_waiter(waiters, request_id.clone(), job_id.to_owned(), progress);
+    writer
+        .send(ClientMessage::InputRequest {
+            job_id: job_id.to_owned(),
+            request_id,
+            request,
+        })
+        .await?;
+    rx.await.map_err(|_| {
+        anyhow::anyhow!("input waiter dropped - the job ended or the connection closed")
     })
 }
 
@@ -370,5 +453,49 @@ mod tests {
         forget_import_waiters_for_job(&waiters, "job-A");
         assert_eq!(rx_a.try_recv(), Err(TryRecvError::Closed));
         assert!(waiters.lock().is_empty());
+    }
+
+    #[derive(Default)]
+    struct RecordedProgress(Mutex<Vec<(u64, Option<u64>)>>);
+
+    impl InputProgressSink for RecordedProgress {
+        fn transfer(&self, bytes_done: u64, bytes_total: Option<u64>) {
+            self.0.lock().push((bytes_done, bytes_total));
+        }
+    }
+
+    #[test]
+    fn an_input_result_reaches_its_waiter() {
+        use tokio::sync::oneshot::error::TryRecvError;
+        let waiters: InputWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let none = Arc::new(RecordedProgress::default());
+        let mut rx_a = register_input_waiter(&waiters, "r1".into(), "job-A".into(), none.clone());
+        let mut rx_b = register_input_waiter(&waiters, "r2".into(), "job-B".into(), none);
+        let fetched = InputOutcome::Fetched {
+            response: r#"{"storePath":"/nix/store/aaaa-source"}"#.into(),
+        };
+
+        assert!(deliver_input_result(&waiters, "r2", fetched.clone()));
+        assert_eq!(rx_b.try_recv(), Ok(fetched.clone()));
+        assert!(!deliver_input_result(&waiters, "r2", fetched));
+
+        forget_input_waiters_for_job(&waiters, "job-A");
+        assert_eq!(rx_a.try_recv(), Err(TryRecvError::Closed));
+        assert!(waiters.lock().is_empty());
+    }
+
+    #[test]
+    fn input_progress_reaches_the_sink_of_its_request() {
+        let waiters: InputWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let first = Arc::new(RecordedProgress::default());
+        let second = Arc::new(RecordedProgress::default());
+        let _rx1 = register_input_waiter(&waiters, "r1".into(), "job".into(), first.clone());
+        let _rx2 = register_input_waiter(&waiters, "r2".into(), "job".into(), second.clone());
+
+        assert!(deliver_input_progress(&waiters, "r2", 512, Some(1024)));
+        assert!(!deliver_input_progress(&waiters, "gone", 1, None));
+
+        assert!(first.0.lock().is_empty());
+        assert_eq!(*second.0.lock(), vec![(512, Some(1024))]);
     }
 }

@@ -9,8 +9,8 @@ use bytes::Bytes;
 use crate::codec::Proto;
 use crate::types::{
     CachedPath, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
-    EvalCachePullOutcome, GradientCapabilities, GrantTarget, ImportOutcome, Job, JobCandidate,
-    UploadOutcome,
+    EvalCachePullOutcome, GradientCapabilities, GrantTarget, ImportOutcome, InputOutcome, Job,
+    JobCandidate, UploadOutcome,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -168,6 +168,29 @@ pub enum ServerMessage {
         request_id: String,
         outcome: ImportOutcome,
     },
+
+    #[proto(35)]
+    InputResult {
+        job_id: String,
+        request_id: String,
+        outcome: InputOutcome,
+    },
+
+    #[proto(35)]
+    FetchInput {
+        fetch_id: String,
+        project: String,
+        request: String,
+        ssh_key: Option<String>,
+    },
+
+    #[proto(35)]
+    InputProgress {
+        job_id: String,
+        request_id: String,
+        bytes_done: u64,
+        bytes_total: Option<u64>,
+    },
 }
 
 impl ServerMessage {
@@ -181,7 +204,9 @@ impl ServerMessage {
             | ServerMessage::NarStreamHeader { job_id, .. }
             | ServerMessage::EvalCachePullResult { job_id, .. }
             | ServerMessage::EvalCacheChunk { job_id, .. }
-            | ServerMessage::ImportResult { job_id, .. } => Some(job_id),
+            | ServerMessage::ImportResult { job_id, .. }
+            | ServerMessage::InputResult { job_id, .. }
+            | ServerMessage::InputProgress { job_id, .. } => Some(job_id),
             _ => None,
         }
     }
@@ -215,13 +240,21 @@ impl ServerMessage {
             ServerMessage::UploadCommitted { .. } => "UploadCommitted",
             ServerMessage::Authenticate { .. } => "Authenticate",
             ServerMessage::ImportResult { .. } => "ImportResult",
+            ServerMessage::InputResult { .. } => "InputResult",
+            ServerMessage::FetchInput { .. } => "FetchInput",
+            ServerMessage::InputProgress { .. } => "InputProgress",
         }
     }
 
     pub fn carries_secret(&self) -> bool {
         matches!(
             self,
-            ServerMessage::Authenticate { .. } | ServerMessage::Credential { .. }
+            ServerMessage::Authenticate { .. }
+                | ServerMessage::Credential { .. }
+                | ServerMessage::FetchInput {
+                    ssh_key: Some(_),
+                    ..
+                }
         )
     }
 }

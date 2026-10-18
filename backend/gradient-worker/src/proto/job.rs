@@ -14,7 +14,7 @@ use gradient_wire::messages::{
     EvalCachePullOutcome, EvalMessageLevel, EvalStatsReport, JobPhase, JobUpdateKind, QueryMode,
 };
 use gradient_worker_client::correlation::{
-    AssignmentHandle, CacheWaiters, ImportWaiters, KnownDerivationWaiters,
+    AssignmentHandle, CacheWaiters, ImportWaiters, InputWaiters, KnownDerivationWaiters,
     cache_query_with_timeout, known_derivations_with_timeout,
 };
 use tracing::debug;
@@ -27,9 +27,10 @@ use crate::proto::prefetch::MissingInputs;
 use crate::proto::progress::{
     BuildProgressSink, EvalProgressSender, Progress, Tally, count_delivery,
 };
-use gradient_wire::traits::{EvalProgressSink, JobReporter};
+use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter};
 use gradient_wire::types::{
-    BuildProgressPhase, BuildStage, GrantTarget, ImportOutcome, UploadMetadata, UploadObject,
+    BuildProgressPhase, BuildStage, GrantTarget, ImportOutcome, InputOutcome, UploadMetadata,
+    UploadObject,
 };
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
@@ -42,6 +43,7 @@ pub struct JobUpdater {
     pub(crate) cache_waiters: CacheWaiters,
     pub(crate) known_derivation_waiters: KnownDerivationWaiters,
     pub(crate) import_waiters: ImportWaiters,
+    pub(crate) input_waiters: InputWaiters,
     pub(crate) nar_recv: NarReceiver,
     pub(crate) eval_cache_recv: EvalCacheReceiver,
     pub(crate) store: Option<Arc<LocalNixStore>>,
@@ -93,6 +95,7 @@ impl JobUpdater {
         cache_waiters: CacheWaiters,
         known_derivation_waiters: KnownDerivationWaiters,
         import_waiters: ImportWaiters,
+        input_waiters: InputWaiters,
         nar_recv: NarReceiver,
         eval_cache_recv: EvalCacheReceiver,
         store: Option<Arc<LocalNixStore>>,
@@ -106,6 +109,7 @@ impl JobUpdater {
             cache_waiters,
             known_derivation_waiters,
             import_waiters,
+            input_waiters,
             nar_recv,
             eval_cache_recv,
             store,
@@ -126,6 +130,7 @@ impl JobUpdater {
             cache_waiters: Arc::clone(&self.cache_waiters),
             known_derivation_waiters: Arc::clone(&self.known_derivation_waiters),
             import_waiters: Arc::clone(&self.import_waiters),
+            input_waiters: Arc::clone(&self.input_waiters),
             nar_recv: self.nar_recv.clone(),
             eval_cache_recv: self.eval_cache_recv.clone(),
             store: self.store.clone(),
@@ -561,6 +566,21 @@ impl JobReporter for JobUpdater {
         .await
     }
 
+    async fn request_input(
+        &self,
+        request: String,
+        progress: Arc<dyn InputProgressSink>,
+    ) -> Result<InputOutcome> {
+        gradient_worker_client::correlation::request_input(
+            &self.job_id,
+            &self.writer,
+            &self.input_waiters,
+            request,
+            progress,
+        )
+        .await
+    }
+
     async fn report_building(&mut self, build_id: String) -> Result<()> {
         self.send_update(JobUpdateKind::Building { build_id }).await
     }
@@ -649,6 +669,7 @@ mod tests {
         let cache_waiters = Arc::new(Mutex::new(HashMap::new()));
         let known_derivation_waiters = Arc::new(Mutex::new(HashMap::new()));
         let import_waiters = Arc::new(Mutex::new(HashMap::new()));
+        let input_waiters = Arc::new(Mutex::new(HashMap::new()));
         let nar_recv = NarReceiver::new();
         let eval_cache_recv = EvalCacheReceiver::new();
         let updater = JobUpdater::new(
@@ -658,6 +679,7 @@ mod tests {
             cache_waiters,
             known_derivation_waiters,
             import_waiters,
+            input_waiters,
             nar_recv,
             eval_cache_recv,
             None,
@@ -968,6 +990,72 @@ mod tests {
             CACHE_QUERY_WINDOW,
             "the window must fill"
         );
+        pump.abort();
+    }
+
+    struct NoProgress;
+
+    impl InputProgressSink for NoProgress {
+        fn transfer(&self, _bytes_done: u64, _bytes_total: Option<u64>) {}
+    }
+
+    #[tokio::test]
+    async fn request_input_sends_an_input_request_and_returns_the_result() {
+        use gradient_wire::messages::ServerMessage;
+        const REQUEST: &str =
+            r#"{"builtin":"fetchTree","args":{"type":"tarball","url":"https://x"}}"#;
+        let (conn, server_task, job_id) = server_then_client!("job-input", |sc| {
+            let ClientMessage::InputRequest {
+                job_id,
+                request_id,
+                request,
+            } = sc.recv().await.unwrap()
+            else {
+                panic!("expected an InputRequest");
+            };
+            assert_eq!((job_id.as_str(), request.as_str()), ("job-input", REQUEST));
+            sc.send(ServerMessage::InputResult {
+                job_id,
+                request_id,
+                outcome: InputOutcome::Fetched {
+                    response: r#"{"storePath":"/nix/store/aaaa-source"}"#.into(),
+                },
+            })
+            .await
+            .unwrap();
+        });
+
+        let (updater, mut reader) = make_updater(job_id, conn);
+        let waiters = Arc::clone(&updater.input_waiters);
+        let pump = tokio::spawn(async move {
+            while let Some(msg) = reader.recv().await {
+                if let ServerMessage::InputResult {
+                    request_id,
+                    outcome,
+                    ..
+                } = msg
+                {
+                    gradient_worker_client::correlation::deliver_input_result(
+                        &waiters,
+                        &request_id,
+                        outcome,
+                    );
+                }
+            }
+        });
+
+        let outcome = updater
+            .request_input(REQUEST.into(), Arc::new(NoProgress))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome,
+            InputOutcome::Fetched {
+                response: r#"{"storePath":"/nix/store/aaaa-source"}"#.into()
+            }
+        );
+        server_task.await.unwrap();
         pump.abort();
     }
 }

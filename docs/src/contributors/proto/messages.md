@@ -33,6 +33,9 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `UploadGrant` | Upload admission: skip, passthrough (with resume offset), presigned PUT or multipart | `request_id`, `target` |
 | `UploadCommitted` | Upload outcome: ok, retry or rejected | `request_id`, `outcome` |
 | `ImportResult` | Reply to `ImportRequest`, sent after the imported derivations finished: completed, failed with the build, or unknown | `job_id`, `request_id`, `outcome` |
+| `InputResult` | Reply to `InputRequest`: the fetch answer with the store path, or the download error | `job_id`, `request_id`, `outcome` |
+| `InputProgress` | Download bytes of the input fetch an `InputRequest` waits for | `job_id`, `request_id`, `bytes_done`, `bytes_total` |
+| `FetchInput` | Download one input for a project and push the result to the cache. Carries the project SSH key only for a worker with `secrets` | `fetch_id`, `project`, `request`, `ssh_key` |
 
 ## Worker -> Server
 
@@ -67,6 +70,9 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `UploadFinished` | Marks an upload done and carries NAR metadata | `request_id`, `metadata` |
 | `UploadCancel` | Cancels an upload in progress | `request_id` |
 | `ImportRequest` | Builds the given derivations now, because the evaluation needs them | `job_id`, `request_id`, `drv_paths` |
+| `InputRequest` | Asks for an input missing from the store and the cache, because the evaluation needs the input | `job_id`, `request_id`, `request` |
+| `InputFetchProgress` | Reports download bytes of a `FetchInput` | `fetch_id`, `bytes_done`, `bytes_total` |
+| `InputFetched` | Reply to `FetchInput` after the push: the fetch answer or the download error | `fetch_id`, `outcome` |
 
 ## Cache Query Modes
 

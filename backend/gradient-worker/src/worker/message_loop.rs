@@ -28,7 +28,7 @@ use crate::proto::job::JobUpdater;
 use crate::proto::scorer::JobScorer;
 use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
 use gradient_worker_client::correlation::{
-    AssignmentHandle, CacheWaiters, ImportWaiters, KnownDerivationWaiters,
+    AssignmentHandle, CacheWaiters, ImportWaiters, InputWaiters, KnownDerivationWaiters,
 };
 
 use super::cluster::{ClusterChannels, ClusterHolds, HeldJob};
@@ -236,6 +236,7 @@ pub(super) struct MessageLoopState {
     cache_waiters: CacheWaiters,
     known_derivation_waiters: KnownDerivationWaiters,
     import_waiters: ImportWaiters,
+    input_waiters: InputWaiters,
     nar_recv: gradient_worker_client::nar_recv::NarReceiver,
     eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver,
     uploads: gradient_worker_client::upload::UploadClient,
@@ -284,6 +285,7 @@ impl MessageLoopState {
             cache_waiters: Arc::new(Mutex::new(HashMap::new())),
             known_derivation_waiters: Arc::new(Mutex::new(HashMap::new())),
             import_waiters: Arc::new(Mutex::new(HashMap::new())),
+            input_waiters: Arc::new(Mutex::new(HashMap::new())),
             nar_recv,
             eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver::new(),
             jobs: JobRegistry {
@@ -443,6 +445,35 @@ impl MessageLoopState {
             } => {
                 self.on_import_result(job_id, request_id, outcome);
             }
+            ServerMessage::InputResult {
+                job_id,
+                request_id,
+                outcome,
+            } => {
+                if !gradient_worker_client::correlation::deliver_input_result(
+                    &self.input_waiters,
+                    &request_id,
+                    outcome,
+                ) {
+                    debug!(%job_id, %request_id, "InputResult arrived after its waiter cleared");
+                }
+            }
+            ServerMessage::InputProgress {
+                request_id,
+                bytes_done,
+                bytes_total,
+                ..
+            } => {
+                gradient_worker_client::correlation::deliver_input_progress(
+                    &self.input_waiters,
+                    &request_id,
+                    bytes_done,
+                    bytes_total,
+                );
+            }
+            ServerMessage::FetchInput { fetch_id, .. } => {
+                warn!(%fetch_id, "this worker does not run input fetches yet");
+            }
         }
         Ok(())
     }
@@ -465,6 +496,10 @@ impl MessageLoopState {
         );
         gradient_worker_client::correlation::forget_import_waiters_for_job(
             &self.import_waiters,
+            &job_id,
+        );
+        gradient_worker_client::correlation::forget_input_waiters_for_job(
+            &self.input_waiters,
             &job_id,
         );
         self.nar_recv.forget_job(&job_id);
@@ -753,6 +788,7 @@ impl MessageLoopState {
         let job_cache_waiters = Arc::clone(&self.cache_waiters);
         let job_known_derivation_waiters = Arc::clone(&self.known_derivation_waiters);
         let job_import_waiters = Arc::clone(&self.import_waiters);
+        let job_input_waiters = Arc::clone(&self.input_waiters);
         let job_nar_recv = self.nar_recv.clone();
         let job_eval_cache_recv = self.eval_cache_recv.clone();
         let job_uploads = self.uploads.clone();
@@ -771,6 +807,7 @@ impl MessageLoopState {
                 job_cache_waiters,
                 job_known_derivation_waiters,
                 job_import_waiters,
+                job_input_waiters,
                 job_nar_recv,
                 job_eval_cache_recv,
                 Some(job_store),
