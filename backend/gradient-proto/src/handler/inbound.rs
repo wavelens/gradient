@@ -941,7 +941,11 @@ impl RpcContext {
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, external, "CacheQuery");
         let answer = async {
-            let project_id = match self.active.project(&job_id) {
+            let project_id = match self
+                .active
+                .project(&job_id)
+                .or_else(|| self.active.fetch_project(&job_id))
+            {
                 Some(project_id) => Some(project_id),
                 None => self.scheduler.project_for_job(&job_id).await,
             };

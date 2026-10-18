@@ -92,6 +92,10 @@ impl WorkerPoolResolver {
         self.pool.cache_dir()
     }
 
+    pub(crate) fn config(&self) -> &EvalPoolConfig {
+        &self.config
+    }
+
     pub async fn shutdown(&self) {
         self.pool.shutdown().await;
     }

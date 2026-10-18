@@ -13,6 +13,7 @@ pub mod eval;
 pub(crate) mod failure;
 pub mod fetch;
 mod import;
+pub(crate) mod input_fetch;
 pub mod log_limit;
 mod progress_report;
 mod source;

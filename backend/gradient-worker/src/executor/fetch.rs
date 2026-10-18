@@ -475,7 +475,7 @@ async fn run_input_update(
     updater.report_input_update(candidate, bumped).await
 }
 
-async fn ssh_key_env(
+pub(super) async fn ssh_key_env(
     ssh_key: Option<&str>,
     binpath_ssh: &str,
 ) -> Result<Option<(NamedTempFile, String)>> {
