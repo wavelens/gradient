@@ -75,14 +75,14 @@ impl AssessmentMemo {
 }
 
 pub(crate) fn caps_fingerprint(caps: &Caps) -> u64 {
-    let mut workers: Vec<(Vec<&str>, Vec<&str>, bool)> = caps
+    let mut workers: Vec<(Vec<&str>, Vec<&str>, bool, bool)> = caps
         .iter()
-        .map(|(archs, feats, network)| {
-            let mut archs: Vec<&str> = archs.iter().map(String::as_str).collect();
-            let mut feats: Vec<&str> = feats.iter().map(String::as_str).collect();
+        .map(|w| {
+            let mut archs: Vec<&str> = w.architectures.iter().map(String::as_str).collect();
+            let mut feats: Vec<&str> = w.features.iter().map(String::as_str).collect();
             archs.sort_unstable();
             feats.sort_unstable();
-            (archs, feats, *network)
+            (archs, feats, w.network, w.build)
         })
         .collect();
     workers.sort_unstable();
@@ -97,7 +97,12 @@ mod tests {
     use super::*;
 
     fn caps() -> Vec<BuildWorkerCaps> {
-        vec![(vec!["x86_64-linux".to_owned()], vec![], true)]
+        vec![BuildWorkerCaps {
+            architectures: vec!["x86_64-linux".to_owned()],
+            features: Vec::new(),
+            network: true,
+            build: true,
+        }]
     }
 
     #[test]
@@ -134,9 +139,15 @@ mod tests {
 
     #[test]
     fn the_fingerprint_ignores_worker_order() {
+        let worker = |arch: &str, features: Vec<String>, network: bool| BuildWorkerCaps {
+            architectures: vec![arch.to_owned()],
+            features,
+            network,
+            build: true,
+        };
         let a = vec![
-            (vec!["a".to_owned()], vec!["kvm".to_owned()], true),
-            (vec!["b".to_owned()], vec![], false),
+            worker("a", vec!["kvm".to_owned()], true),
+            worker("b", vec![], false),
         ];
         let b = vec![a[1].clone(), a[0].clone()];
         assert_eq!(caps_fingerprint(&a), caps_fingerprint(&b));

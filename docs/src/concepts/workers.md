@@ -19,7 +19,9 @@ Workers declare their capabilities at the handshake. Capabilities cover the jobs
 | `eval` | on | Walk the flake and report derivations |
 | `build` | on | Build derivations and upload the outputs |
 
-- Public repositories need a worker with `network` for the fetch step.
+- A worker with `network` can perform the fetch step for public repositories.
+- A worker with `network` and `build` can run fixed-output builds.
+- A worker with `network` alone can take substitutes and downloads. No Nix build is involved in either.
 - Workers without `secrets` never get an SSH key.
 - An evaluating worker never downloads an input itself. The server can hand each missing input to a worker with `network`, plus `secrets` for an SSH URL. The evaluation can then pull the input from the cache.
 - A project or team registration can withhold each capability through `enable_network`, `enable_secrets`, `enable_exec`, `enable_eval` and `enable_build`.

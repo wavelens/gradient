@@ -43,10 +43,13 @@ impl WorkerCaps {
             .builds
             .iter()
             .any(|b| build_needs_network(b.kind, b.is_fixed_output));
-        self.can_build(
-            &job.requirement.architecture,
-            &job.requirement.required_features,
-        ) && (!needs_network || self.capabilities.network)
+        let only_transfers = job.builds.iter().all(|b| b.kind != BuildSpecKind::Build);
+        let runs_here = only_transfers
+            || self.can_build(
+                &job.requirement.architecture,
+                &job.requirement.required_features,
+            );
+        runs_here && (!needs_network || self.capabilities.network)
     }
 
     pub fn can_eval(&self, job: &FlakeJob) -> bool {
@@ -98,11 +101,15 @@ mod tests {
     }
 
     fn fixed_output_job() -> BuildJob {
+        job_of(BuildSpecKind::Build)
+    }
+
+    fn job_of(kind: BuildSpecKind) -> BuildJob {
         BuildJob {
             builds: vec![gradient_wire::types::BuildSpec {
                 build_id: "b1".into(),
                 drv_path: String::new(),
-                kind: BuildSpecKind::Build,
+                kind,
                 is_fixed_output: true,
                 outputs: Vec::new(),
                 timeout_secs: None,
@@ -137,6 +144,24 @@ mod tests {
             !with(false, true).can_run_build(&job),
             "build without network"
         );
+    }
+
+    #[test]
+    fn a_substitute_or_download_needs_only_network() {
+        let network_only = WorkerCaps {
+            capabilities: GradientCapabilities {
+                network: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        for kind in [BuildSpecKind::Substitute, BuildSpecKind::Download] {
+            assert!(network_only.can_run_build(&job_of(kind)), "{kind:?}");
+            assert!(
+                !WorkerCaps::default().can_run_build(&job_of(kind)),
+                "{kind:?} without network"
+            );
+        }
     }
 
     fn repository(url: &str) -> FlakeSource {
