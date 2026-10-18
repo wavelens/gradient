@@ -10,6 +10,7 @@ mod build_status;
 mod cluster;
 mod eval_status;
 pub(crate) mod import;
+mod input;
 mod priority;
 mod queue;
 pub(crate) mod timeline;

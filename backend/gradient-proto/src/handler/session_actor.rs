@@ -30,7 +30,10 @@ use super::inbound::{ActiveJobs, InboundContext, RpcContext};
 use super::job_events::{JobEvents, SchedulerJobEvents};
 use super::log_lane::LogLane;
 use super::session::on_reauth_notify;
-use super::socket::{ProtoSocket, ProtoWriter, job_offer_chunks, recv_client_msg, send_server_msg};
+use super::socket::{
+    InputFetch, ProtoSocket, ProtoWriter, job_offer_chunks, recv_client_msg, send_input_fetch,
+    send_server_msg,
+};
 use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::Rejection;
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
@@ -280,6 +283,69 @@ impl Actor for SessionActor {
                     outcome,
                 };
                 if send_server_msg(&st.writer, &msg).await.is_err() {
+                    myself.stop(Some("write failed".into()));
+                }
+            }
+            SessionMsg::Signal(SessionSignal::InputResult {
+                job_id,
+                request_id,
+                outcome,
+            }) => {
+                if !st.active.contains(&job_id) {
+                    debug!(peer_id = %st.peer_id, %job_id, "input result for a job this session no longer runs");
+                    return Ok(());
+                }
+
+                let msg = ServerMessage::InputResult {
+                    job_id,
+                    request_id,
+                    outcome,
+                };
+                if send_server_msg(&st.writer, &msg).await.is_err() {
+                    myself.stop(Some("write failed".into()));
+                }
+            }
+            SessionMsg::Signal(SessionSignal::InputProgress {
+                job_id,
+                request_id,
+                bytes_done,
+                bytes_total,
+            }) => {
+                if !st.active.contains(&job_id) {
+                    return Ok(());
+                }
+
+                let msg = ServerMessage::InputProgress {
+                    job_id,
+                    request_id,
+                    bytes_done,
+                    bytes_total,
+                };
+                if send_server_msg(&st.writer, &msg).await.is_err() {
+                    myself.stop(Some("write failed".into()));
+                }
+            }
+            SessionMsg::Signal(SessionSignal::FetchInput {
+                fetch_id,
+                project,
+                request,
+            }) => {
+                st.active.insert_fetch(fetch_id.clone(), project);
+                let fetch = InputFetch {
+                    fetch_id,
+                    project,
+                    request,
+                };
+                if send_input_fetch(
+                    &st.writer,
+                    &st.handles.db,
+                    &st.scheduler,
+                    &st.peer_id,
+                    fetch,
+                )
+                .await
+                .is_err()
+                {
                     myself.stop(Some("write failed".into()));
                 }
             }

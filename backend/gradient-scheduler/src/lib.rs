@@ -14,6 +14,7 @@ pub mod connection_failures;
 pub mod draining;
 pub mod eval;
 pub mod import_waits;
+pub mod input_waits;
 pub mod instance;
 pub mod jobs;
 pub mod log_substitution;
@@ -73,6 +74,7 @@ pub struct Scheduler {
     pub draining: draining::Draining,
     pub connection_failures: Arc<connection_failures::ConnectionFailures>,
     pub(crate) import_waits: import_waits::ImportWaits,
+    pub(crate) input_waits: input_waits::InputWaits,
     pub(crate) workers: worker_memory::WorkerMemory,
 }
 
@@ -97,6 +99,7 @@ impl Scheduler {
             draining: draining::Draining::default(),
             connection_failures: Arc::default(),
             import_waits: import_waits::ImportWaits::default(),
+            input_waits: input_waits::InputWaits::default(),
             workers: worker_memory::WorkerMemory::default(),
         }
     }

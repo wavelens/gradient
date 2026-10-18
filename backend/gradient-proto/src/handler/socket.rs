@@ -64,34 +64,82 @@ fn sends_ssh_key(
         && matches!(job, Job::Flake(flake_job) if flake_job.steps.contains(&FlakeStep::FetchFlake))
 }
 
+pub(super) async fn send_input_fetch(
+    writer: &ProtoWriter,
+    db: &DbContext,
+    scheduler: &gradient_scheduler::Scheduler,
+    worker_id: &str,
+    fetch: InputFetch,
+) -> Result<(), gradient_wire::session::frame::SendError> {
+    let caps = scheduler.worker_gradient_caps(worker_id).await;
+    let ssh_key = if sends_input_ssh_key(caps.as_ref(), &fetch.request) {
+        project_ssh_key(db, fetch.project).await
+    } else {
+        None
+    };
+    send_server_msg(
+        writer,
+        &ServerMessage::FetchInput {
+            fetch_id: fetch.fetch_id,
+            project: fetch.project.to_string(),
+            request: fetch.request,
+            ssh_key,
+        },
+    )
+    .await
+}
+
+pub(super) struct InputFetch {
+    pub fetch_id: String,
+    pub project: ProjectId,
+    pub request: String,
+}
+
+fn sends_input_ssh_key(
+    caps: Option<&gradient_wire::types::GradientCapabilities>,
+    request: &str,
+) -> bool {
+    caps.is_some_and(|c| c.secrets)
+        && gradient_pool::InputRequest::parse(request).is_ok_and(|r| r.needs_secrets)
+}
+
 async fn send_ssh_key_credential(writer: &ProtoWriter, db: &DbContext, project_id: ProjectId) {
     use gradient_wire::types::CredentialKind;
 
+    if let Some(private_key) = project_ssh_key(db, project_id).await {
+        let _ = send_server_msg(
+            writer,
+            &ServerMessage::Credential {
+                kind: CredentialKind::SshKey,
+                data: private_key.into_bytes().into(),
+            },
+        )
+        .await;
+        debug!(%project_id, "SSH key credential sent");
+    }
+}
+
+async fn project_ssh_key(db: &DbContext, project_id: ProjectId) -> Option<String> {
     match by_id::<EProject, _>(&db.worker_db, project_id).await {
-        Ok(Some(project)) => {
-            match gradient_sources::ssh_key::decrypt_ssh_private_key(
-                &db.config.secrets.crypt_file,
-                project,
-                &db.config.server.serve_url,
-            ) {
-                Ok((private_key, _public_key)) => {
-                    let _ = send_server_msg(
-                        writer,
-                        &ServerMessage::Credential {
-                            kind: CredentialKind::SshKey,
-                            data: private_key.into_bytes().into(),
-                        },
-                    )
-                    .await;
-                    debug!(%project_id, "SSH key credential sent");
-                }
-                Err(e) => {
-                    debug!(%project_id, error = %e, "no SSH key for project (may be HTTPS repo)");
-                }
+        Ok(Some(project)) => match gradient_sources::ssh_key::decrypt_ssh_private_key(
+            &db.config.secrets.crypt_file,
+            project,
+            &db.config.server.serve_url,
+        ) {
+            Ok((private_key, _public_key)) => Some(private_key),
+            Err(e) => {
+                debug!(%project_id, error = %e, "no SSH key for project (may be HTTPS repo)");
+                None
             }
+        },
+        Ok(None) => {
+            warn!(%project_id, "project not found for SSH key lookup");
+            None
         }
-        Ok(None) => warn!(%project_id, "project not found for SSH key lookup"),
-        Err(e) => warn!(%project_id, error = %e, "failed to fetch project for SSH key"),
+        Err(e) => {
+            warn!(%project_id, error = %e, "failed to fetch project for SSH key");
+            None
+        }
     }
 }
 
@@ -129,5 +177,26 @@ mod tests {
             ..network_only
         };
         assert!(sends_ssh_key(Some(&with_secrets), &fetch_job()));
+    }
+
+    #[test]
+    fn no_input_ssh_key_without_negotiated_secrets() {
+        let ssh =
+            r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+ssh://git@example.com/r"}}"#;
+        let https =
+            r#"{"builtin":"fetchTree","args":{"type":"git","url":"https://example.com/r"}}"#;
+        let network_only = GradientCapabilities {
+            network: true,
+            ..Default::default()
+        };
+        let with_secrets = GradientCapabilities {
+            secrets: true,
+            ..network_only
+        };
+
+        assert!(!sends_input_ssh_key(Some(&network_only), ssh));
+        assert!(!sends_input_ssh_key(None, ssh));
+        assert!(!sends_input_ssh_key(Some(&with_secrets), https));
+        assert!(sends_input_ssh_key(Some(&with_secrets), ssh));
     }
 }

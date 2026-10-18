@@ -40,6 +40,7 @@ impl WaitingRefresh<'_> {
     pub(crate) async fn run(
         &self,
         workers: &[WorkerInfo],
+        input_waiting: &HashSet<EvaluationId>,
         draining: bool,
     ) -> Result<Vec<Unbuildable>> {
         gradient_db::evaluations::counters::fold_shared_build_deltas(&self.db.worker_db)
@@ -154,7 +155,15 @@ impl WaitingRefresh<'_> {
                     eval.status,
                     check_repository_url_is_ssh(&eval.repository),
                     project_workers,
-                ),
+                )
+                .or_else(|| {
+                    decide_input_wait(
+                        eval.status,
+                        reason.as_ref(),
+                        input_waiting.contains(&eval.id),
+                        project_workers.connected,
+                    )
+                }),
                 EvaluationStatus::Building => {
                     match self
                         .build_phase_decision(eval.id, eval_counters, worker_caps, reason.as_ref())
@@ -772,6 +781,32 @@ fn decide_eval_recovery(
             EvaluationStatus::Waiting,
             Some(WaitingReason::eval_workers(capability, workers.connected)),
         )
+    }
+}
+
+fn decide_input_wait(
+    status: EvaluationStatus,
+    current: Option<&WaitingReason>,
+    waits_for_input: bool,
+    connected: u32,
+) -> Option<(EvaluationStatus, Option<WaitingReason>)> {
+    let waits_for_network = matches!(
+        current,
+        Some(WaitingReason::EvalWorkers {
+            capability: EvalCapability::Network,
+            ..
+        })
+    );
+    match (waits_for_input, waits_for_network) {
+        (true, _) => Some((
+            status,
+            Some(WaitingReason::eval_workers(
+                EvalCapability::Network,
+                connected,
+            )),
+        )),
+        (false, true) => Some((status, None)),
+        (false, false) => None,
     }
 }
 

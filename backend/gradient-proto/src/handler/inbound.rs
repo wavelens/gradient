@@ -48,9 +48,24 @@ pub(crate) struct ActiveJob {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct ActiveJobs(Arc<gradient_util::sync::Mutex<HashMap<String, ActiveJob>>>);
+pub(crate) struct ActiveJobs(
+    Arc<gradient_util::sync::Mutex<HashMap<String, ActiveJob>>>,
+    Arc<gradient_util::sync::Mutex<HashMap<String, ProjectId>>>,
+);
 
 impl ActiveJobs {
+    pub(crate) fn insert_fetch(&self, fetch_id: String, project: ProjectId) {
+        self.1.lock().insert(fetch_id, project);
+    }
+
+    pub(crate) fn fetch_project(&self, fetch_id: &str) -> Option<ProjectId> {
+        self.1.lock().get(fetch_id).copied()
+    }
+
+    pub(crate) fn remove_fetch(&self, fetch_id: &str) -> Option<ProjectId> {
+        self.1.lock().remove(fetch_id)
+    }
+
     pub(crate) fn insert(&self, job_id: String, job: ActiveJob) {
         self.0.lock().insert(job_id, job);
     }
@@ -117,7 +132,10 @@ impl ActiveJobs {
 
 impl From<HashMap<String, ActiveJob>> for ActiveJobs {
     fn from(jobs: HashMap<String, ActiveJob>) -> Self {
-        Self(Arc::new(gradient_util::sync::Mutex::new(jobs)))
+        Self(
+            Arc::new(gradient_util::sync::Mutex::new(jobs)),
+            Arc::default(),
+        )
     }
 }
 
@@ -368,10 +386,53 @@ impl<'a> InboundContext<'a> {
                 }
                 true
             }
-            msg @ (ClientMessage::InputRequest { .. }
-            | ClientMessage::InputFetched { .. }
-            | ClientMessage::InputFetchProgress { .. }) => {
-                warn!(peer_id = %self.peer_id, variant = msg.variant_name(), "input fetches are not served yet");
+            ClientMessage::InputRequest {
+                job_id,
+                request_id,
+                request,
+            } => {
+                if self.owns_handed_dispatch(&job_id).await && self.active.eval(&job_id).is_some() {
+                    self.job_events
+                        .push(JobEvent::InputRequest {
+                            job_id,
+                            request_id,
+                            request,
+                        })
+                        .await;
+                } else {
+                    warn!(peer_id = %self.peer_id, %job_id, "input request for an evaluation this session does not run");
+                }
+                true
+            }
+            ClientMessage::InputFetched { fetch_id, outcome } => {
+                if self.active.remove_fetch(&fetch_id).is_some() {
+                    self.job_events
+                        .push(JobEvent::InputFetched { fetch_id, outcome })
+                        .await;
+                } else {
+                    warn!(peer_id = %self.peer_id, %fetch_id, "answer for an input fetch this session does not run");
+                }
+                true
+            }
+            ClientMessage::InputFetchProgress {
+                fetch_id,
+                bytes_done,
+                bytes_total,
+            } => {
+                if self.active.fetch_project(&fetch_id).is_some() {
+                    let scheduler = Arc::clone(self.scheduler);
+                    let peer_id = self.peer_id.to_owned();
+                    self.handles.db.shutdown.spawn(async move {
+                        scheduler
+                            .handle_input_fetch_progress(
+                                &peer_id,
+                                &fetch_id,
+                                bytes_done,
+                                bytes_total,
+                            )
+                            .await;
+                    });
+                }
                 true
             }
             ClientMessage::EvalMessage {
