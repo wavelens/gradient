@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::executor::input_fetch::{
+    InputDownloader, InputFetchJob, SubprocessDownloader, UpdaterFetchReport, fetch_input,
+};
 use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -249,6 +252,8 @@ pub(super) struct MessageLoopState {
     credentials: CredentialStore,
     scorer: JobScorer,
     executor: JobExecutor,
+    downloader: Arc<dyn InputDownloader>,
+    fetches: tokio::task::JoinSet<()>,
     config: WorkerConfig,
     draining: bool,
     stopping: bool,
@@ -299,6 +304,10 @@ impl MessageLoopState {
             max_build: config.build.max_concurrent.get(),
             credentials,
             scorer,
+            downloader: Arc::new(SubprocessDownloader(
+                executor.evaluator.resolver().config().clone(),
+            )),
+            fetches: tokio::task::JoinSet::new(),
             executor,
             config,
             draining: false,
@@ -325,6 +334,7 @@ impl MessageLoopState {
     async fn begin_stop(&mut self) -> Result<()> {
         self.stopping = true;
         self.begin_drain().await?;
+        self.fetches.abort_all();
         let aborted = self.jobs.abort_all();
         info!(
             aborted,
@@ -471,8 +481,18 @@ impl MessageLoopState {
                     bytes_total,
                 );
             }
-            ServerMessage::FetchInput { fetch_id, .. } => {
-                warn!(%fetch_id, "this worker does not run input fetches yet");
+            ServerMessage::FetchInput {
+                fetch_id,
+                project,
+                request,
+                ssh_key,
+            } => {
+                self.on_fetch_input(InputFetchJob {
+                    fetch_id,
+                    project,
+                    request,
+                    ssh_key,
+                });
             }
         }
         Ok(())
@@ -816,6 +836,39 @@ impl MessageLoopState {
             );
             let result = run_job(executor, job, &mut updater, &credentials, abort_rx).await;
             let _ = job_done_tx.send((jid, result));
+        });
+    }
+
+    fn on_fetch_input(&mut self, fetch: InputFetchJob) {
+        while self.fetches.try_join_next().is_some() {}
+        let updater = JobUpdater::new(
+            fetch.fetch_id.clone(),
+            AssignmentHandle::new(String::new()),
+            self.writer.clone(),
+            Arc::clone(&self.cache_waiters),
+            Arc::clone(&self.known_derivation_waiters),
+            Arc::clone(&self.import_waiters),
+            Arc::clone(&self.input_waiters),
+            self.nar_recv.clone(),
+            self.eval_cache_recv.clone(),
+            Some(Arc::clone(&self.executor.store)),
+            crate::executor::timeline::JobTimeline::new(),
+            self.uploads.clone(),
+        );
+        let downloader = Arc::clone(&self.downloader);
+        let writer = self.writer.clone();
+        let binpath_ssh = self.executor.binpath_ssh.clone();
+        self.fetches.spawn(async move {
+            let fetch_id = fetch.fetch_id.clone();
+            let report = UpdaterFetchReport(updater);
+            let outcome = fetch_input(fetch, &*downloader, &report, &binpath_ssh).await;
+            report.0.uploads.forget_job(&fetch_id);
+            if let Err(e) = writer
+                .send(ClientMessage::InputFetched { fetch_id, outcome })
+                .await
+            {
+                warn!(error = %e, "input fetch answer not sent");
+            }
         });
     }
 
@@ -1200,5 +1253,112 @@ mod tests {
             "reported as an abort: {err:#}"
         );
         assert!(idle.is_aborted(), "a job between checkpoints sees it too");
+    }
+
+    struct OfflineDownloader;
+
+    #[async_trait::async_trait]
+    impl InputDownloader for OfflineDownloader {
+        async fn download(
+            &self,
+            _request: String,
+            _git_ssh_command: Option<String>,
+            _sink: Arc<dyn gradient_eval::pool::DownloadSink>,
+        ) -> Result<String> {
+            Err(anyhow::anyhow!("offline"))
+        }
+    }
+
+    fn executor(gcroots: &std::path::Path) -> JobExecutor {
+        let store =
+            crate::nix::store::LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1)
+                .unwrap();
+        let config = WorkerConfig::default();
+        JobExecutor::new(
+            store.clone(),
+            crate::executor::WorkerEvaluator::new(
+                std::num::NonZeroUsize::MIN,
+                0,
+                config.memory_guard().unwrap(),
+                String::new(),
+                false,
+                false,
+            ),
+            crate::nix::gcroots::GcRootKeeper::new(gcroots.to_str().unwrap(), Arc::new(store)),
+            "ssh".into(),
+            crate::executor::log_limit::LogRateLimits {
+                burst_bytes_per_min: 0,
+                sustained_bytes_per_hour: 0,
+            },
+            false,
+            crate::executor::BuildHost {
+                build_cores: None,
+                cpu_core_score: 0,
+            },
+        )
+    }
+
+    #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test stands in for the server by hand"
+    )]
+    async fn an_input_fetch_runs_while_the_eval_pool_is_full() {
+        let server = gradient_test_support::prelude::MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+        let answered = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            sc.recv().await
+        });
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
+        let (writer, _reader, _flush) = conn.split();
+        let gcroots = tempfile::tempdir().unwrap();
+        let mut config = WorkerConfig::default();
+        config.eval.max_concurrent = std::num::NonZeroU32::MIN;
+        let mut state = MessageLoopState::new(
+            writer,
+            config,
+            executor(gcroots.path()),
+            JobScorer::new(),
+            CredentialStore::new(),
+        );
+        state.downloader = Arc::new(OfflineDownloader);
+        let _running = state.jobs.register(
+            "eval:e1".to_owned(),
+            JobKind::Flake,
+            "dispatch-1".to_owned(),
+            None,
+        );
+        assert_eq!(
+            state.occupied(JobKind::Flake),
+            state.max_for(JobKind::Flake)
+        );
+
+        state
+            .route(ServerMessage::FetchInput {
+                fetch_id: "f1".into(),
+                project: "p1".into(),
+                request: "{}".into(),
+                ssh_key: None,
+            })
+            .await
+            .unwrap();
+
+        let sent = tokio::time::timeout(std::time::Duration::from_secs(5), answered)
+            .await
+            .expect("the fetch answers while every eval slot is taken")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            sent,
+            ClientMessage::InputFetched {
+                fetch_id: "f1".into(),
+                outcome: gradient_wire::types::InputOutcome::Failed {
+                    message: "offline".into()
+                },
+            }
+        );
     }
 }
