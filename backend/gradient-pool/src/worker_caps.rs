@@ -97,6 +97,48 @@ mod tests {
         assert!(builder.can_build("x86_64-linux", &[]));
     }
 
+    fn fixed_output_job() -> BuildJob {
+        BuildJob {
+            builds: vec![gradient_wire::types::BuildSpec {
+                build_id: "b1".into(),
+                drv_path: String::new(),
+                kind: BuildSpecKind::Build,
+                is_fixed_output: true,
+                outputs: Vec::new(),
+                timeout_secs: None,
+                max_silent_secs: None,
+                build_cores: None,
+            }],
+            requirement: gradient_wire::types::BuildRequirement {
+                architecture: "x86_64-linux".into(),
+                required_features: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_fixed_output_build_needs_network_and_build() {
+        let with = |network: bool, build: bool| WorkerCaps {
+            architectures: vec!["x86_64-linux".into()],
+            capabilities: GradientCapabilities {
+                network,
+                build,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let job = fixed_output_job();
+        assert!(with(true, true).can_run_build(&job));
+        assert!(
+            !with(true, false).can_run_build(&job),
+            "network without build"
+        );
+        assert!(
+            !with(false, true).can_run_build(&job),
+            "build without network"
+        );
+    }
+
     fn repository(url: &str) -> FlakeSource {
         FlakeSource::Repository {
             url: url.into(),

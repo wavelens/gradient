@@ -19,7 +19,7 @@ use tracing::{debug, warn};
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
-use crate::buildability::{BuildWorkerCaps, BuildabilityChecker};
+use crate::buildability::{BuildWorkerCaps, BuildabilityChecker, build_worker_caps};
 use crate::import_waits::{ImportAnswer, ImportWait, ImportedBuild};
 
 pub(crate) const NO_ENTRY_POINT: &str = "no entry point recorded for the import";
@@ -213,8 +213,8 @@ impl Scheduler {
         let worker_caps: Vec<BuildWorkerCaps> = self
             .board_workers()
             .await
-            .into_iter()
-            .map(|w| (w.architectures, w.system_features, w.capabilities.network))
+            .iter()
+            .filter_map(build_worker_caps)
             .collect();
         let checker = BuildabilityChecker::load(&self.db.worker_db, &candidates).await?;
         let unbuildable: HashMap<DerivationBuildId, String> = checker
