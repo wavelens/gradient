@@ -48,19 +48,20 @@ pub(super) async fn send_credentials_for_job(
     job: &gradient_wire::types::Job,
     project_id: ProjectId,
 ) {
+    let caps = scheduler.worker_gradient_caps(worker_id).await;
+    if sends_ssh_key(caps.as_ref(), job) {
+        send_ssh_key_credential(writer, db, project_id).await;
+    }
+}
+
+fn sends_ssh_key(
+    caps: Option<&gradient_wire::types::GradientCapabilities>,
+    job: &gradient_wire::types::Job,
+) -> bool {
     use gradient_wire::types::{FlakeStep, Job};
 
-    let caps = scheduler.worker_gradient_caps(worker_id).await;
-    let worker_can_fetch = caps.as_ref().is_some_and(|c| c.network && c.secrets);
-
-    match job {
-        Job::Flake(flake_job) => {
-            if worker_can_fetch && flake_job.steps.contains(&FlakeStep::FetchFlake) {
-                send_ssh_key_credential(writer, db, project_id).await;
-            }
-        }
-        Job::Build(_) => {}
-    }
+    caps.is_some_and(|c| c.secrets)
+        && matches!(job, Job::Flake(flake_job) if flake_job.steps.contains(&FlakeStep::FetchFlake))
 }
 
 async fn send_ssh_key_credential(writer: &ProtoWriter, db: &DbContext, project_id: ProjectId) {
@@ -91,5 +92,42 @@ async fn send_ssh_key_credential(writer: &ProtoWriter, db: &DbContext, project_i
         }
         Ok(None) => warn!(%project_id, "project not found for SSH key lookup"),
         Err(e) => warn!(%project_id, error = %e, "failed to fetch project for SSH key"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_wire::types::{FlakeJob, FlakeSource, FlakeStep, GradientCapabilities, Job};
+
+    fn fetch_job() -> Job {
+        Job::Flake(FlakeJob {
+            steps: vec![FlakeStep::FetchFlake],
+            source: FlakeSource::Repository {
+                url: "git+ssh://git@example.com/repo".into(),
+                commit: "abc123".into(),
+            },
+            wildcards: vec![],
+            timeout_secs: None,
+            input_overrides: vec![],
+            input_update: None,
+        })
+    }
+
+    #[test]
+    fn no_ssh_key_without_secrets() {
+        let network_only = GradientCapabilities {
+            network: true,
+            eval: true,
+            ..Default::default()
+        };
+        assert!(!sends_ssh_key(Some(&network_only), &fetch_job()));
+        assert!(!sends_ssh_key(None, &fetch_job()));
+
+        let with_secrets = GradientCapabilities {
+            secrets: true,
+            ..network_only
+        };
+        assert!(sends_ssh_key(Some(&with_secrets), &fetch_job()));
     }
 }

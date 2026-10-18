@@ -17,7 +17,9 @@ use gradient_db::evaluations::counters::EvalCounters;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 
-pub(crate) type Caps = [(Vec<String>, Vec<String>)];
+use crate::buildability::BuildWorkerCaps;
+
+pub(crate) type Caps = [BuildWorkerCaps];
 
 struct Entry {
     key: (EvalCounters, u64),
@@ -73,14 +75,14 @@ impl AssessmentMemo {
 }
 
 pub(crate) fn caps_fingerprint(caps: &Caps) -> u64 {
-    let mut workers: Vec<(Vec<&str>, Vec<&str>)> = caps
+    let mut workers: Vec<(Vec<&str>, Vec<&str>, bool)> = caps
         .iter()
-        .map(|(archs, feats)| {
+        .map(|(archs, feats, network)| {
             let mut archs: Vec<&str> = archs.iter().map(String::as_str).collect();
             let mut feats: Vec<&str> = feats.iter().map(String::as_str).collect();
             archs.sort_unstable();
             feats.sort_unstable();
-            (archs, feats)
+            (archs, feats, *network)
         })
         .collect();
     workers.sort_unstable();
@@ -94,8 +96,8 @@ pub(crate) fn caps_fingerprint(caps: &Caps) -> u64 {
 mod tests {
     use super::*;
 
-    fn caps() -> Vec<(Vec<String>, Vec<String>)> {
-        vec![(vec!["x86_64-linux".to_owned()], vec![])]
+    fn caps() -> Vec<BuildWorkerCaps> {
+        vec![(vec!["x86_64-linux".to_owned()], vec![], true)]
     }
 
     #[test]
@@ -133,8 +135,8 @@ mod tests {
     #[test]
     fn the_fingerprint_ignores_worker_order() {
         let a = vec![
-            (vec!["a".to_owned()], vec!["kvm".to_owned()]),
-            (vec!["b".to_owned()], vec![]),
+            (vec!["a".to_owned()], vec!["kvm".to_owned()], true),
+            (vec!["b".to_owned()], vec![], false),
         ];
         let b = vec![a[1].clone(), a[0].clone()];
         assert_eq!(caps_fingerprint(&a), caps_fingerprint(&b));

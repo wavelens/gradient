@@ -74,7 +74,7 @@ impl ScoreRule for ReserveFetchWorkersRule {
         instance: &InstanceContext,
     ) -> f64 {
         let cached_eval = matches!(job.job.kind(), JobKindContext::Eval(e) if !e.fetch_flake);
-        if !(worker.fetch && cached_eval) {
+        if !(worker.fetches_flakes && cached_eval) {
             return 0.0;
         }
 
@@ -88,7 +88,7 @@ impl ScoreRule for ReserveFetchWorkersRule {
     }
 
     fn description(&self) -> &'static str {
-        "Keeps fetch-capable workers free for flake fetches by penalizing them for cached evaluations, easing off as idle workers appear."
+        "Keeps workers that can fetch flakes free for flake fetches by penalizing them for cached evaluations, easing off as idle workers appear."
     }
 }
 
@@ -159,10 +159,10 @@ mod tests {
         ScoredJob::new_eval("test", ProjectId::now_v7(), fetch_flake, &NO_ESTIMATE)
     }
 
-    fn worker<'a>(archs: &'a [String], fetch: bool) -> WorkerContext<'a> {
+    fn worker<'a>(archs: &'a [String], fetches_flakes: bool) -> WorkerContext<'a> {
         WorkerContext {
             architectures: archs,
-            fetch,
+            fetches_flakes,
             ..Default::default()
         }
     }

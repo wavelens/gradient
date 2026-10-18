@@ -16,7 +16,10 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::assign_mode::decide_build_spec_kind;
 use crate::count::clamp_to_u32;
+use gradient_pool::build_needs_network;
 use gradient_wire::types::BuildSpecKind;
+
+pub(crate) type BuildWorkerCaps = (Vec<String>, Vec<String>, bool);
 
 pub(crate) struct BuildabilityChecker {
     drv_by_id: HashMap<DerivationId, MDerivation>,
@@ -69,7 +72,7 @@ impl BuildabilityChecker {
     pub(crate) fn any_buildable(
         &self,
         shared_builds: &[MDerivationBuild],
-        worker_caps: &[(Vec<String>, Vec<String>)],
+        worker_caps: &[BuildWorkerCaps],
     ) -> bool {
         shared_builds.iter().any(|a| {
             if a.status == BuildStatus::Building {
@@ -88,17 +91,22 @@ impl BuildabilityChecker {
         &self,
         build: &MDerivationBuild,
         drv: &MDerivation,
-        worker_caps: &[(Vec<String>, Vec<String>)],
+        worker_caps: &[BuildWorkerCaps],
     ) -> bool {
-        match decide_build_spec_kind(
+        let kind = decide_build_spec_kind(
             build.cache_available,
             &drv.architecture,
             drv.is_fixed_output,
-        ) {
-            BuildSpecKind::Substitute | BuildSpecKind::Download => !worker_caps.is_empty(),
+        );
+        let needs_network = build_needs_network(kind, drv.is_fixed_output);
+        let mut able = worker_caps
+            .iter()
+            .filter(|(_, _, network)| *network || !needs_network);
+        match kind {
+            BuildSpecKind::Substitute | BuildSpecKind::Download => able.next().is_some(),
             BuildSpecKind::Build => {
                 let required = self.required_features_for(&build.derivation);
-                worker_caps.iter().any(|(arch, feats)| {
+                able.any(|(arch, feats, _)| {
                     let arch_ok = drv.architecture == gradient_types::BUILTIN_ARCH
                         || arch.iter().any(|a| a == &drv.architecture);
                     let feats_ok = required.iter().all(|f| feats.iter().any(|sf| sf == f));
@@ -126,7 +134,7 @@ impl BuildabilityChecker {
     pub(crate) fn unbuildable_imports(
         &self,
         imports: &[MDerivationBuild],
-        worker_caps: &[(Vec<String>, Vec<String>)],
+        worker_caps: &[BuildWorkerCaps],
     ) -> Vec<(DerivationBuildId, UnmetRequirement)> {
         imports
             .iter()
@@ -154,7 +162,7 @@ impl BuildabilityChecker {
     pub(crate) fn compute_waiting_reason(
         &self,
         shared_builds: &[MDerivationBuild],
-        worker_caps: &[(Vec<String>, Vec<String>)],
+        worker_caps: &[BuildWorkerCaps],
     ) -> WaitingReason {
         let mut grouped: BTreeMap<(String, Vec<String>), u32> = BTreeMap::new();
         for a in shared_builds {
@@ -187,7 +195,7 @@ impl BuildabilityChecker {
 
         let mut available_architectures: Vec<String> = worker_caps
             .iter()
-            .flat_map(|(archs, _)| archs.iter().cloned())
+            .flat_map(|(archs, _, _)| archs.iter().cloned())
             .collect();
         available_architectures.sort_unstable();
         available_architectures.dedup();
@@ -287,7 +295,7 @@ mod tests {
         let builds = vec![build_for(d_x86.id, eval_id), build_for(d_arm.id, eval_id)];
         let checker = checker_with(vec![d_x86, d_arm], vec![]);
 
-        let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
+        let caps: Vec<BuildWorkerCaps> = vec![(vec!["x86_64-linux".into()], vec![], true)];
         let reason = checker.compute_waiting_reason(&builds, &caps);
         let (unmet, connected_workers, available_architectures) = workers_view(&reason);
 
@@ -307,7 +315,7 @@ mod tests {
         let builds = vec![build_for(drv_id, eval_id)];
         let checker = checker_with(vec![d], vec![(drv_id, feat_id, "kvm")]);
 
-        let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
+        let caps: Vec<BuildWorkerCaps> = vec![(vec!["x86_64-linux".into()], vec![], true)];
         let reason = checker.compute_waiting_reason(&builds, &caps);
         let (unmet, _, _) = workers_view(&reason);
 
@@ -345,7 +353,7 @@ mod tests {
         let builds = vec![build_for(d.id, eval_id)];
         let checker = checker_with(vec![d], vec![]);
 
-        let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
+        let caps: Vec<BuildWorkerCaps> = vec![(vec!["x86_64-linux".into()], vec![], true)];
         let reason = checker.compute_waiting_reason(&builds, &caps);
         let (unmet, _, _) = workers_view(&reason);
 
@@ -369,7 +377,7 @@ mod tests {
         let build = cache_available_build(d.id, eval_id);
         let checker = checker_with(vec![d], vec![]);
 
-        let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
+        let caps: Vec<BuildWorkerCaps> = vec![(vec!["x86_64-linux".into()], vec![], true)];
         let builds = [build];
         assert!(checker.any_buildable(&builds, &caps));
         let reason = checker.compute_waiting_reason(&builds, &caps);
@@ -405,7 +413,7 @@ mod tests {
         build.cache_available = false;
         let checker = checker_with(vec![d], vec![]);
 
-        let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
+        let caps: Vec<BuildWorkerCaps> = vec![(vec!["x86_64-linux".into()], vec![], true)];
         let builds = [build];
         assert!(!checker.any_buildable(&builds, &caps));
         let reason = checker.compute_waiting_reason(&builds, &caps);
@@ -415,13 +423,24 @@ mod tests {
     }
 
     #[test]
+    fn a_fixed_output_build_needs_a_network_worker() {
+        let mut d = drv(DerivationId::now_v7(), "x86_64-linux");
+        d.is_fixed_output = true;
+        let builds = [build_for(d.id, EvaluationId::now_v7())];
+        let checker = checker_with(vec![d], vec![]);
+
+        assert!(!checker.any_buildable(&builds, &[(vec!["x86_64-linux".into()], vec![], false)]));
+        assert!(checker.any_buildable(&builds, &[(vec!["x86_64-linux".into()], vec![], true)]));
+    }
+
+    #[test]
     fn dependency_blocked_shared_build_is_not_buildable() {
         let eval_id = EvaluationId::now_v7();
         let d = drv(DerivationId::now_v7(), "x86_64-linux");
         let mut b = build_for(d.id, eval_id);
         b.status = BuildStatus::Created;
         let checker = checker_with(vec![d], vec![]);
-        let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
+        let caps = vec![(vec!["x86_64-linux".to_string()], vec![], true)];
         assert!(!checker.any_buildable(&[b], &caps));
     }
 
@@ -432,12 +451,13 @@ mod tests {
         let b = build_for(d.id, eval_id);
         let checker = checker_with(vec![d], vec![]);
         let shared_builds = std::slice::from_ref(&b);
-        assert!(
-            checker.any_buildable(shared_builds, &[(vec!["x86_64-linux".to_string()], vec![])])
-        );
+        assert!(checker.any_buildable(
+            shared_builds,
+            &[(vec!["x86_64-linux".to_string()], vec![], true)]
+        ));
         assert!(!checker.any_buildable(
             shared_builds,
-            &[(vec!["aarch64-linux".to_string()], vec![])]
+            &[(vec!["aarch64-linux".to_string()], vec![], true)]
         ));
     }
 
@@ -455,7 +475,7 @@ mod tests {
             pending(linux.id, BuildStatus::Queued),
         );
         let checker = checker_with(vec![darwin, linux], vec![]);
-        let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
+        let caps = vec![(vec!["x86_64-linux".to_string()], vec![], true)];
 
         let unbuildable = checker.unbuildable_imports(&[stuck.clone(), building, buildable], &caps);
 

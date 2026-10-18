@@ -303,7 +303,7 @@ mod tests {
         let with_cores = |cpu_core_score| WorkerContext {
             architectures: &archs,
             system_features: &feats,
-            fetch: false,
+            fetches_flakes: false,
             metrics: Some(WorkerMetricsView {
                 cpu_core_score,
                 ..Default::default()
@@ -349,7 +349,7 @@ mod tests {
         let with_cores = |cpu_core_score, ram_free_mb| WorkerContext {
             architectures: &archs,
             system_features: &feats,
-            fetch: false,
+            fetches_flakes: false,
             metrics: Some(WorkerMetricsView {
                 cpu_core_score,
                 ram_total_mb: 128_000,

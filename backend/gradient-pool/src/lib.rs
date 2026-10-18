@@ -15,6 +15,6 @@ pub mod worker_state;
 
 pub use self::aggregate::{Aggregate, aggregate};
 pub use self::peer_auth::PeerAuth;
-pub use self::worker_caps::WorkerCaps;
+pub use self::worker_caps::{WorkerCaps, build_needs_network};
 pub use self::worker_pool::{WorkerInfo, WorkerPool, WorkerSlot};
 pub use self::worker_state::{WorkerProfile, WorkerShared};

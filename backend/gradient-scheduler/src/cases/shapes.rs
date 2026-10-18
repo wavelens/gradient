@@ -97,10 +97,10 @@ impl Profile {
     }
 }
 
-fn caps(fetch: bool, eval: bool, build: bool) -> GradientCapabilities {
+fn caps(network: bool, secrets: bool, eval: bool, build: bool) -> GradientCapabilities {
     GradientCapabilities {
-        network: fetch,
-        secrets: fetch,
+        network,
+        secrets,
         eval,
         build,
         ..GradientCapabilities::default()
@@ -109,7 +109,7 @@ fn caps(fetch: bool, eval: bool, build: bool) -> GradientCapabilities {
 
 pub(crate) fn w_all() -> Profile {
     Profile {
-        caps: caps(true, true, true),
+        caps: caps(true, true, true, true),
         hardware: None,
     }
     .slots(1)
@@ -117,7 +117,15 @@ pub(crate) fn w_all() -> Profile {
 
 pub(crate) fn w_build() -> Profile {
     Profile {
-        caps: caps(false, false, true),
+        caps: caps(false, false, false, true),
+        hardware: None,
+    }
+    .slots(1)
+}
+
+pub(crate) fn w_network_build() -> Profile {
+    Profile {
+        caps: caps(true, false, false, true),
         hardware: None,
     }
     .slots(1)
@@ -125,21 +133,28 @@ pub(crate) fn w_build() -> Profile {
 
 pub(crate) fn w_eval() -> Profile {
     Profile {
-        caps: caps(false, true, false),
+        caps: caps(false, false, true, false),
         hardware: None,
     }
 }
 
-pub(crate) fn w_fetch_eval() -> Profile {
+pub(crate) fn w_network_eval() -> Profile {
     Profile {
-        caps: caps(true, true, false),
+        caps: caps(true, false, true, false),
         hardware: None,
     }
 }
 
-pub(crate) fn w_fetch() -> Profile {
+pub(crate) fn w_network() -> Profile {
     Profile {
-        caps: caps(true, false, false),
+        caps: caps(true, false, false, false),
+        hardware: None,
+    }
+}
+
+pub(crate) fn w_network_secrets() -> Profile {
+    Profile {
+        caps: caps(true, true, false, false),
         hardware: None,
     }
 }

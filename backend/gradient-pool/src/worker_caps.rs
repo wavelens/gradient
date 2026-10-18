@@ -4,13 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_wire::types::{FlakeJob, FlakeStep, JobKind};
+use gradient_types::input::check_repository_url_is_ssh;
+use gradient_wire::types::{BuildJob, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep, JobKind};
+
+pub fn build_needs_network(kind: BuildSpecKind, is_fixed_output: bool) -> bool {
+    kind != BuildSpecKind::Build || is_fixed_output
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct WorkerCaps {
-    /// The server is sending SSH credentials only to fetch-capable workers. Any `FetchFlake` step
-    /// is therefore requiring this flag.
-    pub fetch: bool,
     pub architectures: Vec<String>,
     pub system_features: Vec<String>,
     pub capabilities: gradient_wire::types::GradientCapabilities,
@@ -22,7 +24,7 @@ pub struct WorkerCaps {
 impl WorkerCaps {
     pub fn takes_jobs_of(&self, kind: &JobKind) -> bool {
         match kind {
-            JobKind::Flake => self.capabilities.eval || self.fetch,
+            JobKind::Flake => self.capabilities.eval || self.capabilities.network,
             JobKind::Build => self.capabilities.build,
         }
     }
@@ -36,14 +38,30 @@ impl WorkerCaps {
         self.takes_jobs_of(&JobKind::Build) && arch_ok && features_ok
     }
 
+    pub fn can_run_build(&self, job: &BuildJob) -> bool {
+        let needs_network = job
+            .builds
+            .iter()
+            .any(|b| build_needs_network(b.kind, b.is_fixed_output));
+        self.can_build(
+            &job.requirement.architecture,
+            &job.requirement.required_features,
+        ) && (!needs_network || self.capabilities.network)
+    }
+
     pub fn can_eval(&self, job: &FlakeJob) -> bool {
-        let needs_fetch = job.steps.contains(&FlakeStep::FetchFlake);
         let needs_eval = job
             .steps
             .iter()
             .any(|t| matches!(t, FlakeStep::EvaluateFlake | FlakeStep::EvaluateDerivations));
 
-        (!needs_fetch || self.fetch) && (!needs_eval || self.capabilities.eval)
+        (!job.steps.contains(&FlakeStep::FetchFlake) || self.can_fetch(&job.source))
+            && (!needs_eval || self.capabilities.eval)
+    }
+
+    pub fn can_fetch(&self, source: &FlakeSource) -> bool {
+        let needs_secrets = matches!(source, FlakeSource::Repository { url, .. } if check_repository_url_is_ssh(url));
+        self.capabilities.network && (!needs_secrets || self.capabilities.secrets)
     }
 }
 
@@ -73,5 +91,26 @@ mod tests {
         let builder = x86_worker(true);
         assert!(builder.can_build(gradient_types::BUILTIN_ARCH, &[]));
         assert!(builder.can_build("x86_64-linux", &[]));
+    }
+
+    fn repository(url: &str) -> FlakeSource {
+        FlakeSource::Repository {
+            url: url.into(),
+            commit: "abc123".into(),
+        }
+    }
+
+    #[test]
+    fn an_ssh_repository_needs_secrets_and_a_public_one_only_network() {
+        let network_only = WorkerCaps {
+            capabilities: GradientCapabilities {
+                network: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(network_only.can_fetch(&repository("https://example.com/repo")));
+        assert!(!network_only.can_fetch(&repository("git+ssh://git@example.com/repo")));
+        assert!(!WorkerCaps::default().can_fetch(&repository("https://example.com/repo")));
     }
 }

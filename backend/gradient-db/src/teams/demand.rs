@@ -15,7 +15,8 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct TeamDemand {
     pub builds: Vec<UnmetRequirement>,
-    pub fetch: u32,
+    pub network: u32,
+    pub secrets: u32,
     pub eval: u32,
 }
 
@@ -63,7 +64,8 @@ fn aggregate(reasons: impl IntoIterator<Item = WaitingReason>) -> TeamDemand {
                 }
             }
             WaitingReason::EvalWorkers { capability, .. } => match capability {
-                EvalCapability::Fetch => demand.fetch += 1,
+                EvalCapability::Network => demand.network += 1,
+                EvalCapability::Secrets => demand.secrets += 1,
                 EvalCapability::Eval => demand.eval += 1,
             },
             _ => {}
@@ -147,13 +149,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn counts_eval_and_fetch_gaps() {
+    async fn counts_eval_network_and_secrets_gaps() {
         let db = mock_db()
             .append_query_results([vec![grant(ProjectId::now_v7())]])
             .append_query_results([vec![
                 waiting(WaitingReason::eval_workers(EvalCapability::Eval, 0)),
                 waiting(WaitingReason::eval_workers(EvalCapability::Eval, 2)),
-                waiting(WaitingReason::eval_workers(EvalCapability::Fetch, 0)),
+                waiting(WaitingReason::eval_workers(EvalCapability::Network, 0)),
+                waiting(WaitingReason::eval_workers(EvalCapability::Secrets, 1)),
                 waiting(WaitingReason::Draining),
             ]])
             .into_connection();
@@ -162,7 +165,7 @@ mod tests {
             .await
             .expect("demand");
 
-        assert_eq!((demand.eval, demand.fetch), (2, 1));
+        assert_eq!((demand.eval, demand.network, demand.secrets), (2, 1, 1));
         assert!(demand.builds.is_empty());
     }
 

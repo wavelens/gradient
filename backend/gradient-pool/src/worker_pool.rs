@@ -142,7 +142,6 @@ impl WorkerPool {
         self.workers.get(id).map(|slot| {
             let s = slot.shared();
             crate::WorkerCaps {
-                fetch: s.capabilities.network && s.capabilities.secrets,
                 architectures: s.architectures.clone(),
                 system_features: s.system_features.clone(),
                 capabilities: s.capabilities.clone(),
@@ -297,9 +296,7 @@ impl WorkerPool {
     pub fn has_idle_eval_only_worker(&self) -> bool {
         self.workers.values().any(|slot| match slot {
             WorkerSlot::Active(w) => {
-                w.capabilities.eval
-                    && !(w.capabilities.network && w.capabilities.secrets)
-                    && w.assigned_jobs.is_empty()
+                w.capabilities.eval && !w.capabilities.network && w.assigned_jobs.is_empty()
             }
             WorkerSlot::Draining(_) => false,
         })
@@ -476,11 +473,10 @@ mod tests {
         (Arc::new(tx), rx)
     }
 
-    fn caps_ef(eval: bool, fetch: bool) -> GradientCapabilities {
+    fn eval_caps(eval: bool, network: bool) -> GradientCapabilities {
         GradientCapabilities {
             eval,
-            network: fetch,
-            secrets: fetch,
+            network,
             ..GradientCapabilities::default()
         }
     }
@@ -488,13 +484,18 @@ mod tests {
     #[test]
     fn idle_eval_only_worker_detected() {
         let mut pool = WorkerPool::new();
-        pool.register("f1".into(), caps_ef(true, true), HashSet::new(), port().0);
+        pool.register("f1".into(), eval_caps(true, true), HashSet::new(), port().0);
         assert!(
             !pool.has_idle_eval_only_worker(),
-            "only a fetch worker present"
+            "only a network worker present"
         );
 
-        pool.register("e1".into(), caps_ef(true, false), HashSet::new(), port().0);
+        pool.register(
+            "e1".into(),
+            eval_caps(true, false),
+            HashSet::new(),
+            port().0,
+        );
         assert!(
             pool.has_idle_eval_only_worker(),
             "idle eval-only worker present"
@@ -510,7 +511,12 @@ mod tests {
     #[test]
     fn draining_eval_only_worker_does_not_count() {
         let mut pool = WorkerPool::new();
-        pool.register("e1".into(), caps_ef(true, false), HashSet::new(), port().0);
+        pool.register(
+            "e1".into(),
+            eval_caps(true, false),
+            HashSet::new(),
+            port().0,
+        );
         pool.mark_draining("e1");
         assert!(
             !pool.has_idle_eval_only_worker(),
@@ -706,7 +712,7 @@ mod tests {
         pool.update_metrics("w1", 12.5, 9000, None, None, None);
 
         let caps = pool.worker_caps("w1").unwrap();
-        assert!(caps.fetch);
+        assert!(caps.capabilities.network);
         assert!(caps.capabilities.eval);
         assert_eq!(caps.architectures, vec!["x86_64-linux"]);
         assert_eq!(caps.system_features, vec!["kvm"]);

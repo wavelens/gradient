@@ -83,7 +83,7 @@ impl<'a> JobContext<'a> {
 pub struct WorkerContext<'a> {
     pub architectures: &'a [String],
     pub system_features: &'a [String],
-    pub fetch: bool,
+    pub fetches_flakes: bool,
     pub metrics: Option<WorkerMetricsView>,
 }
 

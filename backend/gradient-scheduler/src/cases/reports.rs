@@ -23,8 +23,8 @@ use gradient_wire::types::{
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, SchedulerCase, ago, attr_of, build_output, drv,
-    drv_nar, eval_key, failure, is_recent, job_ids, output_nar, span, w_all, w_eval, w_fetch_eval,
-    with_attr, with_output,
+    drv_nar, eval_key, failure, is_recent, job_ids, output_nar, span, w_all, w_eval,
+    w_network_eval, with_attr, with_output,
 };
 use crate::jobs::PendingJob;
 
@@ -1077,7 +1077,7 @@ async fn r17_a_completed_fetch_job_enqueues_the_cached_follow_up_for_an_eval_wor
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().evalq(e1)).await;
     let k = eval_key(e1);
-    case.connect(W1, w_fetch_eval(), &[]).await;
+    case.connect(W1, w_network_eval(), &[]).await;
     case.connect(W2, w_eval(), &[]).await;
 
     case.assign_queued_evals().await;
@@ -1221,7 +1221,7 @@ async fn r18_a_completed_fetch_job_without_a_flake_source_fails_the_evaluation()
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().evalq(e1)).await;
     let k = eval_key(e1);
-    case.connect(W1, w_fetch_eval(), &[]).await;
+    case.connect(W1, w_network_eval(), &[]).await;
     case.connect(W2, w_eval(), &[]).await;
 
     case.assign_queued_evals().await;

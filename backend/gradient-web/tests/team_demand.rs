@@ -58,6 +58,7 @@ async fn admin_reads_demand() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert_eq!(body["message"]["eval"], 1);
-    assert_eq!(body["message"]["fetch"], 0);
+    assert_eq!(body["message"]["network"], 0);
+    assert_eq!(body["message"]["secrets"], 0);
     assert_eq!(body["message"]["builds"], serde_json::json!([]));
 }

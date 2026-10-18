@@ -22,8 +22,11 @@ use gradient_wire::types::{
 
 use super::{
     A, A_OUT, ARM, B, B_OUT, C, C_OUT, CaseShapes, REPOSITORY, S_OUT, SchedulerCase, X86, ago,
-    attr_of, drv_nar, eval_key, store_path, w_all, w_build, w_eval, w_fetch, w_fetch_eval,
+    attr_of, drv_nar, eval_key, store_path, w_all, w_build, w_eval, w_network, w_network_eval,
+    w_network_secrets,
 };
+
+const SSH_REPOSITORY: &str = "git+ssh://git@example.invalid/repo.git";
 
 const W1: &str = "w1";
 const W2: &str = "w2";
@@ -163,7 +166,7 @@ async fn q04_an_idle_evaluation_only_worker_splits_the_pass_and_without_one_no_s
         EvaluationId::now_v7(),
     );
     let case = SchedulerCase::start(shape().evalq(e1).evalq(e2)).await;
-    case.connect(W1, w_fetch_eval(), &[]).await;
+    case.connect(W1, w_network_eval(), &[]).await;
     case.connect(W2, w_eval(), &[]).await;
 
     case.assign_queued_evals().await;
@@ -213,7 +216,7 @@ async fn q05_an_evaluation_only_worker_running_a_job_causes_no_split() {
         EvaluationId::now_v7(),
     );
     let case = SchedulerCase::start(shape().evalq(e1).evalq(e2)).await;
-    case.connect(W1, w_fetch_eval(), &[]).await;
+    case.connect(W1, w_network_eval(), &[]).await;
     case.connect(W2, w_eval(), &[]).await;
     let key = eval_key(e1);
 
@@ -327,10 +330,10 @@ async fn q07_an_input_update_evaluation_is_queued_on_its_base_commit_with_the_up
 }
 
 #[tokio::test]
-async fn q08_a_fetch_step_needs_fetch_and_an_evaluation_step_needs_eval() {
+async fn q08_a_fetch_step_needs_network_and_an_evaluation_step_needs_eval() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().evalq(e1).evalq(e2)).await;
-    case.connect(W1, w_fetch(), &[]).await;
+    case.connect(W1, w_network(), &[]).await;
     case.connect(W2, w_eval(), &[]).await;
     let key = eval_key(e1);
 
@@ -419,7 +422,7 @@ async fn q09_a_queued_evaluation_without_an_eval_worker_waits_until_one_connects
 }
 
 #[tokio::test]
-async fn q10_a_fetching_evaluation_without_a_fetch_worker_waits_on_fetch() {
+async fn q10_a_fetching_evaluation_without_a_network_worker_waits_on_network() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(
         shape()
@@ -434,13 +437,13 @@ async fn q10_a_fetching_evaluation_without_a_fetch_worker_waits_on_fetch() {
         waiting_state(&case, e1).await,
         (
             EvaluationStatus::Waiting,
-            Some(WaitingReason::eval_workers(EvalCapability::Fetch, 1)),
+            Some(WaitingReason::eval_workers(EvalCapability::Network, 1)),
         ),
         "after 1: evaluation(E1)"
     );
     case.check("step 1").await;
 
-    case.connect(W1, w_fetch_eval(), &[]).await;
+    case.connect(W1, w_network_eval(), &[]).await;
     case.refresh_waiting_state().await;
     assert_eq!(
         waiting_state(&case, e1).await,
@@ -882,4 +885,79 @@ async fn recoveries_of(
         .into_iter()
         .filter(|e| e.kind == EvaluationKind::DrvRecovery && e.previous == Some(evaluation))
         .collect()
+}
+
+#[tokio::test]
+async fn q18_a_fetch_step_of_an_ssh_repository_needs_secrets() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().evalq(e1).repository(SSH_REPOSITORY)).await;
+    case.connect(W1, w_network(), &[]).await;
+    case.connect(W2, w_network_secrets(), &[]).await;
+    let key = eval_key(e1);
+
+    case.assign_queued_evals().await;
+    case.check("step 1").await;
+
+    let without_secrets = case.offers_full(W1).await;
+    let with_secrets = case.offers_full(W2).await;
+    assert_eq!(
+        candidate_keys(&without_secrets),
+        BTreeSet::new(),
+        "after 2: offers(W1).candidates"
+    );
+    assert_eq!(
+        candidate_keys(&with_secrets),
+        BTreeSet::from([key.clone()]),
+        "after 2: offers(W2).candidates"
+    );
+    case.check("step 2").await;
+
+    case.score_all(W2).await;
+    let fetch = case
+        .request_job(W2, JobKind::Flake)
+        .await
+        .expect("after 3: W2 gets the fetch job of E1");
+    assert_eq!(fetch.job_id(), key, "after 3: the fetch job of E1");
+    case.report_flake_source(W2, &key, &store_path(S_OUT, "s"))
+        .await;
+    case.complete(W2, &key, fetch.assignment_id(), Vec::new(), 1)
+        .await;
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn q19_a_fetching_evaluation_of_an_ssh_repository_waits_on_secrets() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        shape()
+            .evalq(e1)
+            .repository(SSH_REPOSITORY)
+            .evaluation_status(EvaluationStatus::Fetching),
+    )
+    .await;
+    case.connect(W1, w_network_eval(), &[]).await;
+
+    case.refresh_waiting_state().await;
+    assert_eq!(
+        waiting_state(&case, e1).await,
+        (
+            EvaluationStatus::Waiting,
+            Some(WaitingReason::eval_workers(EvalCapability::Secrets, 1)),
+        ),
+        "after 1: evaluation(E1)"
+    );
+    case.check("step 1").await;
+
+    case.connect(W2, w_network_secrets(), &[]).await;
+    case.refresh_waiting_state().await;
+    assert_eq!(
+        waiting_state(&case, e1).await,
+        (EvaluationStatus::Queued, None),
+        "after 2: evaluation(E1)"
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
 }
