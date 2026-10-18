@@ -8,11 +8,11 @@ pub mod abort;
 pub mod build;
 mod build_metrics;
 pub mod compress;
+mod dependencies;
 mod download;
 pub mod eval;
 pub(crate) mod failure;
 pub mod fetch;
-mod import;
 pub(crate) mod input_fetch;
 pub mod log_limit;
 mod progress_report;
@@ -397,8 +397,6 @@ impl JobExecutor {
             updater as &mut dyn gradient_wire::traits::JobReporter,
             credentials,
             &*self.store,
-            &**self.evaluator.resolver(),
-            &self.binpath_ssh,
             abort.clone(),
         )
         .await

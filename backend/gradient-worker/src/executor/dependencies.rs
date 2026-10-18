@@ -13,23 +13,27 @@ use gradient_derivation::{Derivation, parse_drv};
 use gradient_sources::EvalDependencies;
 use gradient_util::store_path::strip_store_prefix;
 use gradient_util::sync::Mutex;
-use gradient_wire::types::ImportOutcome;
+use gradient_wire::traits::InputProgressSink;
+use gradient_wire::types::{ImportOutcome, InputOutcome};
 
 use super::AbortSignal;
 use super::eval::{Root, walk_and_publish};
 use crate::traits::{DrvReader, JobReporter};
+use gradient_wire::messages::QueryMode;
 
 type ImportFuture<'a> = Shared<BoxFuture<'a, Result<(), String>>>;
+type InputFuture<'a> = Shared<BoxFuture<'a, Result<String, String>>>;
 
-pub(super) struct EvalImportBuilder<'a> {
+pub(super) struct EvalDependencySource<'a> {
     reporter: &'a dyn JobReporter,
     drv_reader: &'a dyn DrvReader,
     abort: AbortSignal,
     names: Arc<Mutex<HashMap<String, String>>>,
     in_flight: Mutex<HashMap<String, ImportFuture<'a>>>,
+    inputs: InputSource<'a>,
 }
 
-impl<'a> EvalImportBuilder<'a> {
+impl<'a> EvalDependencySource<'a> {
     pub(super) fn new(
         reporter: &'a dyn JobReporter,
         drv_reader: &'a dyn DrvReader,
@@ -41,6 +45,7 @@ impl<'a> EvalImportBuilder<'a> {
             abort,
             names: Arc::default(),
             in_flight: Mutex::default(),
+            inputs: InputSource::new(reporter),
         }
     }
 
@@ -81,7 +86,7 @@ impl<'a> EvalImportBuilder<'a> {
 }
 
 #[async_trait]
-impl EvalDependencies for EvalImportBuilder<'_> {
+impl EvalDependencies for EvalDependencySource<'_> {
     async fn build_imports(&self, derived_paths: Vec<String>) -> Result<(), String> {
         let mut drv_paths: Vec<String> = derived_paths
             .iter()
@@ -98,9 +103,93 @@ impl EvalDependencies for EvalImportBuilder<'_> {
         join_all(imports).await.into_iter().collect()
     }
 
-    async fn fetch_input(&self, _request: String) -> Result<String, String> {
-        Err("this worker's evaluator fetches its inputs itself".to_owned())
+    async fn fetch_input(&self, request: String) -> Result<String, String> {
+        self.inputs.fetch(request, Arc::new(NoProgress)).await
     }
+}
+
+struct NoProgress;
+
+impl InputProgressSink for NoProgress {
+    fn transfer(&self, _bytes_done: u64, _bytes_total: Option<u64>) {}
+}
+
+pub(super) struct InputSource<'a> {
+    reporter: &'a dyn JobReporter,
+    in_flight: Mutex<HashMap<String, InputFuture<'a>>>,
+}
+
+impl<'a> InputSource<'a> {
+    pub(super) fn new(reporter: &'a dyn JobReporter) -> Self {
+        Self {
+            reporter,
+            in_flight: Mutex::default(),
+        }
+    }
+
+    pub(super) async fn fetch(
+        &self,
+        request: String,
+        progress: Arc<dyn InputProgressSink>,
+    ) -> Result<String, String> {
+        let store_path = store_path_of(&request)?;
+        let key = store_path.clone().unwrap_or_else(|| request.clone());
+        let fetch = self
+            .in_flight
+            .lock()
+            .entry(key)
+            .or_insert_with(|| {
+                fetch_input(self.reporter, request, store_path, progress)
+                    .boxed()
+                    .shared()
+            })
+            .clone();
+        fetch.await
+    }
+}
+
+async fn fetch_input(
+    reporter: &dyn JobReporter,
+    request: String,
+    store_path: Option<String>,
+    progress: Arc<dyn InputProgressSink>,
+) -> Result<String, String> {
+    if let Some(path) = store_path
+        && in_cache(reporter, &path).await
+        && reporter.pull_paths(vec![path.clone()]).await.is_ok()
+    {
+        return Ok(serde_json::json!({ "storePath": path }).to_string());
+    }
+
+    let outcome = reporter
+        .request_input(request, progress)
+        .await
+        .map_err(|e| format!("input request failed: {e:#}"))?;
+    match outcome {
+        InputOutcome::Fetched { response } => {
+            let fetched = store_path_of(&response)?
+                .ok_or_else(|| "the fetch answer names no store path".to_owned())?;
+            reporter
+                .pull_paths(vec![fetched.clone()])
+                .await
+                .map_err(|e| format!("pulling the fetched input {fetched} failed: {e:#}"))?;
+            Ok(response)
+        }
+        InputOutcome::Failed { message } => Err(message),
+    }
+}
+
+async fn in_cache(reporter: &dyn JobReporter, path: &str) -> bool {
+    reporter
+        .query_cache(vec![path.to_owned()], QueryMode::Pull)
+        .await
+        .is_ok_and(|cached| cached.iter().any(|c| c.cached && c.path == path))
+}
+
+fn store_path_of(json: &str) -> Result<Option<String>, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("malformed input request: {e}"))?;
+    Ok(value["storePath"].as_str().map(str::to_owned))
 }
 
 async fn import_derivation(
@@ -111,7 +200,7 @@ async fn import_derivation(
     drv_path: String,
 ) -> Result<(), String> {
     let drv = read_drv(drv_reader, &drv_path).await?;
-    let attr = EvalImportBuilder::import_attr(&mut names.lock(), &drv.system, &drv_path);
+    let attr = EvalDependencySource::import_attr(&mut names.lock(), &drv.system, &drv_path);
     let root = Root {
         drv_path: drv_path.clone(),
         attr,
@@ -216,7 +305,7 @@ mod tests {
     async fn concurrent_requests_for_a_path_share_the_result() {
         let reporter = RecordingJobReporter::new().with_import_outcome(SOURCE_A, failed(SOURCE_A));
         let reader = reader();
-        let builder = EvalImportBuilder::new(&reporter, &reader, AbortSignal::never());
+        let builder = EvalDependencySource::new(&reporter, &reader, AbortSignal::never());
 
         let (first, second) = tokio::join!(
             builder.build_imports(vec![format!("{SOURCE_A}^out")]),
@@ -232,7 +321,7 @@ mod tests {
     async fn a_completed_import_pulls_its_outputs() {
         let reporter = RecordingJobReporter::new();
         let reader = reader();
-        let builder = EvalImportBuilder::new(&reporter, &reader, AbortSignal::never());
+        let builder = EvalDependencySource::new(&reporter, &reader, AbortSignal::never());
 
         builder
             .build_imports(vec![format!("{SOURCE_A}^out")])
@@ -266,7 +355,7 @@ mod tests {
     async fn a_failed_import_names_the_build() {
         let reporter = RecordingJobReporter::new().with_import_outcome(SOURCE_A, failed(SOURCE_A));
         let reader = reader();
-        let builder = EvalImportBuilder::new(&reporter, &reader, AbortSignal::never());
+        let builder = EvalDependencySource::new(&reporter, &reader, AbortSignal::never());
 
         let built = builder.build_imports(vec![format!("{SOURCE_A}^out")]).await;
 
@@ -287,7 +376,7 @@ mod tests {
     async fn a_repeated_name_gets_a_hash_suffix() {
         let reporter = RecordingJobReporter::new();
         let reader = reader();
-        let builder = EvalImportBuilder::new(&reporter, &reader, AbortSignal::never());
+        let builder = EvalDependencySource::new(&reporter, &reader, AbortSignal::never());
 
         builder
             .build_imports(vec![format!("{SOURCE_A}^out"), format!("{SOURCE_B}^out")])
@@ -316,13 +405,86 @@ mod tests {
         let drv = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12.drv";
 
         assert_eq!(
-            EvalImportBuilder::import_attr(&mut names, "aarch64-linux", drv),
+            EvalDependencySource::import_attr(&mut names, "aarch64-linux", drv),
             "other.aarch64-linux.hello-2.12"
         );
         assert_eq!(
-            EvalImportBuilder::import_attr(&mut names, "aarch64-linux", drv),
+            EvalDependencySource::import_attr(&mut names, "aarch64-linux", drv),
             "other.aarch64-linux.hello-2.12",
             "the same derivation keeps its attribute"
         );
+    }
+
+    const INPUT: &str = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-source";
+
+    fn request() -> String {
+        format!(
+            r#"{{"builtin":"fetchTree","args":{{"type":"tarball","url":"https://example.com/x.tar.gz"}},"storePath":"{INPUT}"}}"#
+        )
+    }
+
+    fn fetched() -> InputOutcome {
+        InputOutcome::Fetched {
+            response: format!(r#"{{"storePath":"{INPUT}","attrs":{{"type":"tarball"}}}}"#),
+        }
+    }
+
+    fn pulled(reporter: &RecordingJobReporter) -> Vec<Vec<String>> {
+        reporter
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                ReportedEvent::PathsPulled { paths } => Some(paths),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn an_input_in_the_cache_is_pulled_without_a_fetch() {
+        let reporter = RecordingJobReporter::new().with_cached_paths(vec![INPUT.into()]);
+        let reader = reader();
+        let source = EvalDependencySource::new(&reporter, &reader, AbortSignal::never());
+
+        let answer = source.fetch_input(request()).await;
+
+        assert_eq!(answer, Ok(format!(r#"{{"storePath":"{INPUT}"}}"#)));
+        assert_eq!(pulled(&reporter), vec![vec![INPUT.to_owned()]]);
+        assert!(reporter.input_requests().is_empty(), "no InputRequest");
+    }
+
+    #[tokio::test]
+    async fn a_missing_input_is_fetched_through_the_server_and_pulled() {
+        let reporter = RecordingJobReporter::new().with_input_outcome(INPUT, fetched());
+        let reader = reader();
+        let source = EvalDependencySource::new(&reporter, &reader, AbortSignal::never());
+
+        let answer = source.fetch_input(request()).await;
+
+        let InputOutcome::Fetched { response } = fetched() else {
+            unreachable!()
+        };
+        assert_eq!(answer, Ok(response));
+        assert_eq!(reporter.input_requests(), vec![request()]);
+        assert_eq!(pulled(&reporter), vec![vec![INPUT.to_owned()]]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_input_is_not_requested_twice() {
+        let reporter = RecordingJobReporter::new().with_input_outcome(
+            INPUT,
+            InputOutcome::Failed {
+                message: "HTTP error 404".into(),
+            },
+        );
+        let reader = reader();
+        let source = EvalDependencySource::new(&reporter, &reader, AbortSignal::never());
+
+        let first = source.fetch_input(request()).await;
+        let second = source.fetch_input(request()).await;
+
+        assert_eq!(first, Err("HTTP error 404".to_owned()));
+        assert_eq!(second, first);
+        assert_eq!(reporter.input_requests().len(), 1);
     }
 }

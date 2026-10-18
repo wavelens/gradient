@@ -5,8 +5,6 @@
  */
 
 pub mod eval_stats;
-mod input_fetch;
 mod resolver;
 
-pub(crate) use self::input_fetch::{DownloadTarget, InputBoard, InputFetcher};
 pub use self::resolver::WorkerPoolResolver;

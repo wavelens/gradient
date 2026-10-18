@@ -172,7 +172,7 @@ pub fn run() -> std::io::Result<()> {
 
     #[cfg(feature = "eval")]
     if let Some(metrics) = eval::subprocess_flags(&std::env::args().collect::<Vec<_>>()) {
-        return gradient_eval::eval_worker::run_eval_worker(metrics, false);
+        return gradient_eval::eval_worker::run_eval_worker(metrics);
     }
 
     let cli = Cli::parse();

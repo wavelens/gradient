@@ -54,9 +54,6 @@ fn eval_subprocess_command(exe: &Path, config: &SpawnConfig) -> Command {
     if config.metrics {
         command.arg("--eval-metrics");
     }
-    if config.fetch_through_parent {
-        command.arg("--eval-fetch-through-parent");
-    }
     command.env("NIX_CACHE_HOME", &config.cache_dir);
     if let Some(dir) = &config.trace_dir {
         command.env("GRADIENT_WORKER_LOG_TRACE_DIR", dir);
@@ -172,6 +169,11 @@ impl EvalWorker {
         }
 
         worker.expect_handshake().await?;
+        worker
+            .stdin
+            .write_all(&[u8::from(config.fetch_through_parent)])
+            .await
+            .context("tell the eval worker how to fetch inputs")?;
 
         // Register the pid after the handshake: a kill mid-handshake is a spawn error, not an
         // attribute error.
@@ -741,8 +743,7 @@ mod tests {
             args,
             vec![
                 "--eval-subprocess".to_string(),
-                "--eval-metrics".to_string(),
-                "--eval-fetch-through-parent".to_string()
+                "--eval-metrics".to_string()
             ]
         );
         assert!(

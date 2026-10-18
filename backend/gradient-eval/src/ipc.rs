@@ -14,7 +14,7 @@ use crate::stats::StatsDelta;
 
 /// The version must be bumped whenever the frame layout or a type's rkyv shape changes.
 /// A mismatch can only happen when the binary is replaced mid-run.
-pub const EVAL_IPC_VERSION: u8 = 11;
+pub const EVAL_IPC_VERSION: u8 = 12;
 
 pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
 
