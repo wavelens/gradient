@@ -24,7 +24,8 @@ const FETCH_REQUEST: &str = r#"json:
   let
     request = builtins.fromJSON json;
     fetch = builtins.getAttr request.builtin { inherit (builtins) fetchTree fetchTarball fetchurl; };
-    fetched = fetch request.args;
+    isGitTree = request.builtin == "fetchTree" && (request.args.type or null) == "git";
+    fetched = fetch (if isGitTree then { shallow = false; } // request.args else request.args);
     locked = builtins.intersectAttrs { narHash = null; rev = null; revCount = null; lastModified = null; } fetched;
   in
   builtins.toJSON (
