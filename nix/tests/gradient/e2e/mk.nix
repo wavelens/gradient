@@ -2488,8 +2488,13 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         server.succeed(f"sed -i 's#\\[hash\\]#{input_hash}#g' /var/lib/git/test/flake.lock")
         server.succeed(f"{GIT} -C /var/lib/git/test commit -am 'input'")
         server.succeed("chown git:git -R /var/lib/git/test")
+        for task in ("task", "task2"):
+            server.succeed(
+                f'{CURL} -sf -X POST -H "Authorization: Bearer {token}" '
+                f'-H "Content-Type: application/json" -d \'{{}}\' {API}/tasks/project/{task}/evaluate'
+            )
 
-        poll(f"SELECT count(*) {input_evals};", "2", "both tasks did not pick up the input commit")
+        poll(f"SELECT count(*) {input_evals};", "2", "both tasks did not start an evaluation of the input commit")
         poll(f"SELECT string_agg(DISTINCT status::text, ',') {input_evals};", "5",
              "the evaluations of the input flake did not complete", timeout=600)
         server.succeed(f"{CURL} -sf {CACHE}/{input_narinfo}")
