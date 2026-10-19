@@ -7,8 +7,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_types::MappingContext;
 use gradient_types::ids::CacheId;
+use gradient_types::{MappingContext, StorePath, StorePathMapper};
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 
@@ -17,7 +17,12 @@ use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage
 use gradient_wire::session::handshake as handshake_fsm;
 
 use super::SessionHandles;
-use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, recv_client_msg, send_server_msg};
+use super::cache::{path_in_cache, query_for_cache};
+use super::nar_serve::{ServeSlot, serve_nar_request};
+use super::socket::{
+    HANDSHAKE_TIMEOUT, ProtoSocket, ProtoWriter, recv_client_msg, send_server_msg,
+};
+use super::store_paths::{inbound_or_refuse, outbound_message};
 
 const CACHE_SESSION_IDLE_TIMEOUT_SECS: u64 = 120;
 
@@ -43,6 +48,105 @@ fn readonly_capabilities() -> GradientCapabilities {
         exec: false,
         cache: true,
         federate: false,
+    }
+}
+
+struct CacheSession {
+    handles: SessionHandles,
+    writer: ProtoWriter,
+    cache_id: CacheId,
+    mapper: StorePathMapper,
+    nar_serve_semaphore: Arc<Semaphore>,
+    max_serves: usize,
+}
+
+impl CacheSession {
+    fn new(handles: SessionHandles, writer: ProtoWriter, cache_id: CacheId) -> Self {
+        let max_serves = handles.db.config.nar.max_concurrent_serves.get();
+        let mapper = handles
+            .db
+            .store_path_mapper(MappingContext::Cache(cache_id));
+        Self {
+            handles,
+            writer,
+            cache_id,
+            mapper,
+            nar_serve_semaphore: Arc::new(Semaphore::new(max_serves)),
+            max_serves,
+        }
+    }
+
+    fn serving_nothing(&self) -> bool {
+        self.nar_serve_semaphore.available_permits() == self.max_serves
+    }
+
+    async fn serve(&self, msg: ClientMessage) -> bool {
+        let cache_id = self.cache_id;
+        if let Some(rejection) = rejection_for(&msg) {
+            warn!(%cache_id, variant = msg.variant_name(), "rejecting message on cache session");
+            return send_server_msg(&self.writer, &ServerMessage::from(rejection))
+                .await
+                .is_ok();
+        }
+        let Some(msg) = inbound_or_refuse(&self.writer, &self.mapper, msg).await else {
+            return true;
+        };
+
+        match msg {
+            ClientMessage::CacheQuery {
+                query_id,
+                paths,
+                mode,
+                ..
+            } => {
+                let cached = query_for_cache(&self.handles, cache_id, &paths, mode).await;
+                let status = ServerMessage::CacheStatus { query_id, cached };
+                send_server_msg(&self.writer, &outbound_message(status, &self.mapper))
+                    .await
+                    .is_ok()
+            }
+            ClientMessage::NarRequest { job_id, paths } => self.serve_nars(job_id, paths).await,
+            _ => true,
+        }
+    }
+
+    async fn serve_nars(&self, job_id: String, paths: Vec<String>) -> bool {
+        let cache_id = self.cache_id;
+        for store_path in paths {
+            let in_cache = match StorePath::parse_stored(&store_path) {
+                Ok(path) => path_in_cache(&self.handles.cache_db, cache_id, &path).await,
+                Err(_) => false,
+            };
+            if !in_cache {
+                debug!(%cache_id, %store_path, "skipping path not in this cache");
+                continue;
+            }
+            let Some(slot) = ServeSlot::acquire(
+                Arc::clone(&self.nar_serve_semaphore),
+                Arc::clone(&self.handles.nar_downloads),
+            )
+            .await
+            else {
+                warn!("nar serve semaphore closed");
+                return false;
+            };
+
+            let handles = self.handles.clone();
+            let writer = self.writer.clone();
+            let mapper = self.mapper.clone();
+            let job_id = job_id.clone();
+            let shutdown = handles.db.shutdown.clone();
+            shutdown.spawn(async move {
+                let _slot = slot;
+                if let Err(e) =
+                    serve_nar_request(&handles, &writer, &mapper, &job_id, &store_path, 0, None)
+                        .await
+                {
+                    debug!(%store_path, error = %e, "cache NAR serve task failed");
+                }
+            });
+        }
+        true
     }
 }
 
@@ -84,19 +188,15 @@ pub async fn handle_cache_socket(
     let send_chunk_timeout =
         Duration::from_secs(handles.db.config.nar.send_chunk_timeout_secs.get());
     let (mut reader, writer) = socket.split(send_chunk_timeout, &handles.db.shutdown);
-    let max_serves = handles.db.config.nar.max_concurrent_serves.get();
-    let nar_serve_semaphore = Arc::new(Semaphore::new(max_serves));
     let idle = Duration::from_secs(CACHE_SESSION_IDLE_TIMEOUT_SECS);
     let cancel = handles.db.shutdown.token();
-    let mapper = handles
-        .db
-        .store_path_mapper(MappingContext::Cache(cache_id));
+    let session = CacheSession::new(handles, writer, cache_id);
 
     loop {
         // The idle timeout is only enforced while no NAR transfer is in flight. A client quietly
         // receiving a large download must not be disconnected.
         let next = async {
-            if nar_serve_semaphore.available_permits() == max_serves {
+            if session.serving_nothing() {
                 match tokio::time::timeout(idle, recv_client_msg(&mut reader)).await {
                     Ok(m) => m,
                     Err(_) => {
@@ -116,73 +216,8 @@ pub async fn handle_cache_socket(
             },
         };
 
-        if let Some(rejection) = rejection_for(&msg) {
-            warn!(%cache_id, variant = msg.variant_name(), "rejecting message on cache session");
-            if send_server_msg(&writer, &ServerMessage::from(rejection))
-                .await
-                .is_err()
-            {
-                break;
-            }
-            continue;
-        }
-
-        match msg {
-            ClientMessage::CacheQuery {
-                query_id,
-                paths,
-                mode,
-                ..
-            } => {
-                let cached = super::cache::query_for_cache(&handles, cache_id, &paths, mode).await;
-                if send_server_msg(&writer, &ServerMessage::CacheStatus { query_id, cached })
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            ClientMessage::NarRequest { job_id, paths } => {
-                for store_path in paths {
-                    if !super::cache::path_in_cache(&handles.cache_db, cache_id, &store_path).await
-                    {
-                        debug!(%cache_id, %store_path, "skipping path not in this cache");
-                        continue;
-                    }
-                    let Some(slot) = super::nar_serve::ServeSlot::acquire(
-                        Arc::clone(&nar_serve_semaphore),
-                        Arc::clone(&handles.nar_downloads),
-                    )
-                    .await
-                    else {
-                        warn!("nar serve semaphore closed");
-                        return;
-                    };
-
-                    let handles = handles.clone();
-                    let writer = writer.clone();
-                    let job_id = job_id.clone();
-                    let mapper = mapper.clone();
-                    let shutdown = handles.db.shutdown.clone();
-                    shutdown.spawn(async move {
-                        let _slot = slot;
-                        if let Err(e) = super::nar_serve::serve_nar_request(
-                            &handles,
-                            &writer,
-                            &mapper,
-                            &job_id,
-                            &store_path,
-                            0,
-                            None,
-                        )
-                        .await
-                        {
-                            debug!(%store_path, error = %e, "cache NAR serve task failed");
-                        }
-                    });
-                }
-            }
-            _ => {}
+        if !session.serve(msg).await {
+            break;
         }
     }
 
@@ -243,5 +278,62 @@ mod tests {
             })
             .is_some()
         );
+    }
+
+    #[tokio::test]
+    async fn a_cache_socket_query_answers_with_the_paths_asked_for() {
+        use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
+        use gradient_test_support::state::TestState;
+
+        let cache_id = CacheId::nil();
+        let stored = gradient_entity::cached_path::Model {
+            hash: EXAMPLE_STORED_HASH.into(),
+            file_hash: Some("sha256:f".into()),
+            confirmed: true,
+            ..Default::default()
+        };
+        let cache_db = gradient_fixtures::mock::mock_db()
+            .append_query_results([vec![stored.clone()]])
+            .append_query_results([vec![gradient_entity::cached_path_signature::Model {
+                cached_path: stored.id,
+                cache: cache_id,
+                ..Default::default()
+            }]])
+            .append_query_results([vec![stored]])
+            .into_connection();
+        let state = TestState::new()
+            .cache_db(cache_db)
+            .store_path_mapping(Arc::new(RotatedHashMapping))
+            .build();
+        let (writer, mut sent) = ProtoWriter::spy(Duration::from_secs(5));
+        let session = CacheSession::new(SessionHandles::from_state(&state), writer, cache_id);
+        let query = |query_id: &str, path: String| ClientMessage::CacheQuery {
+            job_id: "job".into(),
+            query_id: query_id.into(),
+            paths: vec![path],
+            mode: QueryMode::Normal,
+            nar_sizes: vec![],
+            external: false,
+        };
+        let decode = |bytes| {
+            gradient_wire::codec::from_bytes::<ServerMessage>(
+                bytes,
+                *gradient_wire::PROTO_VERSIONS.end(),
+            )
+            .expect("a server message")
+        };
+        let asked = format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-hello");
+
+        assert!(session.serve(query("q1", asked.clone())).await);
+        let ServerMessage::CacheStatus { cached, .. } = decode(sent.try_recv().unwrap()) else {
+            panic!("a CacheStatus")
+        };
+        assert_eq!(cached[0].path, asked);
+
+        assert!(session.serve(query("q2", "abc-hello".into())).await);
+        assert!(matches!(
+            decode(sent.try_recv().unwrap()),
+            ServerMessage::CacheError { query_id, .. } if query_id == "q2"
+        ));
     }
 }

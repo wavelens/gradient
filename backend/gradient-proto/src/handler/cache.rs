@@ -686,10 +686,7 @@ pub(super) async fn query_for_cache(
     result
 }
 
-pub(super) async fn path_in_cache(db: &CacheDb, cache_id: CacheId, store_path: &str) -> bool {
-    let Ok(path) = StorePath::parse_stored(store_path) else {
-        return false;
-    };
+pub(super) async fn path_in_cache(db: &CacheDb, cache_id: CacheId, path: &StorePath) -> bool {
     !hashes_in_cache(db, cache_id, &[path.hash()])
         .await
         .is_empty()
