@@ -90,6 +90,7 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
         events: gradient_types::EventBus::new(16),
         wake: Default::default(),
         memory: Default::default(),
+        store_path_mapping: Arc::new(gradient_entity::IdentityMapping),
     };
 
     (ctx, worker_db)

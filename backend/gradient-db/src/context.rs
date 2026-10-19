@@ -13,6 +13,7 @@ use tokio::sync::{Notify, mpsc};
 
 use crate::pool::{WebDb, WorkerDb};
 use crate::scheduling::startable_set::StartableSet;
+use gradient_entity::{MappingContext, StorePathMapper, StorePathMapping};
 use gradient_storage::StorageCtx;
 use gradient_types::{DerivationId, EvaluationId, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
@@ -182,9 +183,14 @@ pub struct DbContext {
     pub events: gradient_types::EventBus,
     pub wake: Wakeups,
     pub memory: DbMemory,
+    pub store_path_mapping: Arc<dyn StorePathMapping>,
 }
 
 impl DbContext {
+    pub fn store_path_mapper(&self, context: MappingContext) -> StorePathMapper {
+        StorePathMapper::new(Arc::clone(&self.store_path_mapping), context)
+    }
+
     pub fn in_transaction(&self, tx: Arc<sea_orm::DatabaseTransaction>) -> DbContext {
         DbContext {
             worker_db: self.worker_db.in_transaction(tx),

@@ -51,6 +51,7 @@ pub async fn ctx_with_crypt_file(db: DatabaseConnection, crypt_file: &str) -> Db
         events: gradient_types::EventBus::new(16),
         wake: Default::default(),
         memory: Default::default(),
+        store_path_mapping: Arc::new(gradient_entity::IdentityMapping),
     }
 }
 

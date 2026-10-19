@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod extensions;
 pub mod state_root;
 pub mod upstream;
 pub mod upstream_source;
 
+pub use extensions::ServerExtensions;
 pub use gradient_graph::Graph;
 pub use state_root::{
     AppState, BUILD_PROGRESS_TTL, EVAL_PROGRESS_TTL, InstanceMemory, LAST_USED_STAMP_INTERVAL,
@@ -57,7 +59,10 @@ pub enum InitError {
     LocalStorage(String),
 }
 
-pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
+pub async fn init_state(
+    cli: Cli,
+    extensions: ServerExtensions,
+) -> Result<Arc<ServerState>, InitError> {
     if cli.secrets.crypt_file.is_empty() || cli.secrets.jwt_file.is_empty() {
         return Err(InitError::MissingSecrets);
     }
@@ -219,6 +224,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         events: gradient_types::EventBus::default(),
         wake: Default::default(),
         graph: Graph::new(),
+        extensions,
         memory: InstanceMemory {
             db: DbMemory {
                 probe_requests: gradient_db::ProbeRequests::channel(),

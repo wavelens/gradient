@@ -242,6 +242,10 @@ publish.workspace     = true
 [lints]
 workspace = true
 
+[lib]
+name = "gradient_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "gradient-server"
 path = "src/main.rs"

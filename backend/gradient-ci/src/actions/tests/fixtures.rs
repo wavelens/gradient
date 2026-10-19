@@ -174,6 +174,7 @@ pub fn make_ctx_with(worker: sea_orm::MockDatabase) -> crate::CiContext {
         events: gradient_types::EventBus::default(),
         wake: Default::default(),
         memory: Default::default(),
+        store_path_mapping: std::sync::Arc::new(gradient_entity::IdentityMapping),
     };
     CiContext {
         db,
