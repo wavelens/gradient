@@ -45,7 +45,7 @@ impl ImportInput<'_> {
 }
 
 fn parse_store_path(store_path: &str) -> anyhow::Result<StorePath> {
-    let sp = StorePath::parse(store_path)?;
+    let sp = StorePath::parse_stored(store_path)?;
     if !is_nix32_hash(sp.hash()) {
         anyhow::bail!(StorePathError::Malformed(store_path.to_owned()));
     }

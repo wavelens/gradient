@@ -107,7 +107,11 @@ impl Scheduler {
     ) -> Result<Result<Vec<(ImportedBuild, ImportBuild)>, ImportOutcome>> {
         let hashes: Vec<Option<String>> = drv_paths
             .iter()
-            .map(|p| StorePath::parse(p).ok().map(|sp| sp.hash().to_owned()))
+            .map(|p| {
+                StorePath::parse_stored(p)
+                    .ok()
+                    .map(|sp| sp.hash().to_owned())
+            })
             .collect();
         let rows = gradient_db::evaluations::imports::import_builds(
             &self.db.worker_db,

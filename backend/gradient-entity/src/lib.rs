@@ -8,7 +8,7 @@ pub mod ids;
 pub mod store_path;
 pub mod transition;
 
-pub use store_path::{STORE_DIR, StorePath, StorePathError};
+pub use store_path::{OriginalStorePath, STORE_DIR, StoreHash, StorePath, StorePathError};
 
 pub mod admin_task;
 pub mod api;

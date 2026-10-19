@@ -41,7 +41,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl Model {
     pub fn as_store_path(&self) -> crate::StorePath {
-        crate::StorePath::from_parts(self.hash.clone(), self.package.clone())
+        crate::StorePath::from_stored(self.hash.clone(), self.package.clone())
     }
 
     pub fn store_path(&self) -> String {

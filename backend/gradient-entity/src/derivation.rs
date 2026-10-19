@@ -35,7 +35,7 @@ pub struct Model {
 
 impl Model {
     pub fn as_store_path(&self) -> crate::StorePath {
-        crate::StorePath::from_parts(self.hash.clone(), format!("{}.drv", self.name))
+        crate::StorePath::from_stored(self.hash.clone(), format!("{}.drv", self.name))
     }
 
     pub fn drv_path(&self) -> String {

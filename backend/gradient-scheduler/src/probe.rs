@@ -309,7 +309,7 @@ pub(crate) async fn plan_probes(
         let Some(evaluation) = evaluation_of.get(&o.derivation) else {
             continue;
         };
-        let sp = StorePath::from_parts(o.hash.clone(), o.package.clone());
+        let sp = StorePath::from_stored(o.hash.clone(), o.package.clone());
         by_evaluation
             .entry(*evaluation)
             .or_default()

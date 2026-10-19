@@ -156,7 +156,7 @@ impl JobContextView {
                         .iter()
                         .map(|t| DerivationRef {
                             build_id: t.build_id.clone(),
-                            drv_path: gradient_types::StorePath::parse(&t.drv_path)
+                            drv_path: gradient_types::StorePath::parse_stored(&t.drv_path)
                                 .map(|sp| sp.base())
                                 .unwrap_or_else(|_| t.drv_path.clone()),
                             pname: b.pname.clone(),

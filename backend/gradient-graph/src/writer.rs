@@ -325,7 +325,7 @@ async fn claim_landed_paths(
         .iter()
         .zip(committed)
         .filter(|(_, outcome)| outcome.is_ok())
-        .filter_map(|(commit, _)| StorePath::parse(&commit.store_path).ok())
+        .filter_map(|(commit, _)| StorePath::parse_stored(&commit.store_path).ok())
         .map(|path| path.hash().to_owned())
         .collect();
     if hashes.is_empty() {
