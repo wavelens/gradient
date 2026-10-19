@@ -48,12 +48,9 @@ pub(super) async fn mark_nar_stored(
     store_path: &str,
     record: &NarUploadRecord<'_>,
 ) -> anyhow::Result<()> {
-    let hash_name = store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
-    let hash = hash_name.split('-').next().unwrap_or("");
-
-    if hash.is_empty() {
+    let Ok(path) = StorePath::parse_stored(store_path) else {
         return Ok(());
-    }
+    };
 
     let committed = graph
         .commit_nar(NarCommit {
@@ -74,7 +71,7 @@ pub(super) async fn mark_nar_stored(
     for cache in committed.signed {
         events.publish(NarSigned {
             cache,
-            hash: hash.to_owned(),
+            hash: path.hash().to_owned(),
         });
     }
 

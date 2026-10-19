@@ -12,7 +12,7 @@ use gradient_graph::Demotion;
 use gradient_storage::passthrough::{
     PassthroughError, PassthroughLimits, PassthroughRequest, send_nar,
 };
-use gradient_types::RuntimeConfig;
+use gradient_types::{RuntimeConfig, StorePath};
 use gradient_util::telemetry::{GAUGES, Gauges};
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::session::frame::send_server_msg;
@@ -86,11 +86,12 @@ pub(super) async fn serve_nar_request(
         chunk_read: Duration::from_secs(nar_cfg.send_chunk_timeout_secs.get()),
         chunk_bytes: usize::try_from(nar_cfg.chunk_bytes).unwrap_or(usize::MAX),
     };
-    let Some(key) = store_hash(store_path) else {
+    let Ok(path) = StorePath::parse_stored(store_path) else {
         let reason = format!("invalid store path: {store_path}");
         unavailable(writer, job_id, store_path, &reason).await;
         return Err(anyhow::anyhow!(reason));
     };
+    let key = path.hash();
     let req = PassthroughRequest {
         job_id,
         store_path,
@@ -157,15 +158,6 @@ async fn awaiting_upload(db: &WorkerDb, config: &RuntimeConfig, hash: &str) -> b
         Ok(Some(row)) => !row.confirmed && row.created_at > gradient_types::now() - grace,
         _ => false,
     }
-}
-
-fn store_hash(store_path: &str) -> Option<&str> {
-    let hash = store_path
-        .strip_prefix("/nix/store/")
-        .unwrap_or(store_path)
-        .split('-')
-        .next()?;
-    (hash.len() == 32 && hash.bytes().all(|b| b.is_ascii_alphanumeric())).then_some(hash)
 }
 
 #[cfg(test)]
@@ -342,7 +334,7 @@ mod serve_nar_tests {
             &SessionHandles::from_state(&state),
             &writer,
             "job-1",
-            "not-a-store-path",
+            "not_a_store_path",
             0,
             None,
         )
