@@ -12,7 +12,7 @@ use gradient_graph::Demotion;
 use gradient_storage::passthrough::{
     PassthroughError, PassthroughLimits, PassthroughRequest, send_nar,
 };
-use gradient_types::{RuntimeConfig, StorePath};
+use gradient_types::{RuntimeConfig, StorePath, StorePathMapper};
 use gradient_util::telemetry::{GAUGES, Gauges};
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::session::frame::send_server_msg;
@@ -75,6 +75,7 @@ impl Drop for ServeSlot {
 pub(super) async fn serve_nar_request(
     handles: &SessionHandles,
     writer: &ProtoWriter,
+    mapper: &StorePathMapper,
     job_id: &str,
     store_path: &str,
     resume_from: u64,
@@ -86,15 +87,18 @@ pub(super) async fn serve_nar_request(
         chunk_read: Duration::from_secs(nar_cfg.send_chunk_timeout_secs.get()),
         chunk_bytes: usize::try_from(nar_cfg.chunk_bytes).unwrap_or(usize::MAX),
     };
+    let original = mapper
+        .outbound_text(store_path)
+        .unwrap_or_else(|_| store_path.to_owned());
     let Ok(path) = StorePath::parse_stored(store_path) else {
-        let reason = format!("invalid store path: {store_path}");
-        unavailable(writer, job_id, store_path, &reason).await;
+        let reason = format!("invalid store path: {original}");
+        unavailable(writer, job_id, &original, &reason).await;
         return Err(anyhow::anyhow!(reason));
     };
     let key = path.hash();
     let req = PassthroughRequest {
         job_id,
-        store_path,
+        store_path: &original,
         key,
         resume_from,
         client_token,
@@ -102,7 +106,7 @@ pub(super) async fn serve_nar_request(
     match send_nar(&handles.db.storage.nar_storage, writer, req, limits).await {
         Ok(_) => Ok(()),
         Err(PassthroughError::NotFound(reason)) => {
-            unavailable(writer, job_id, store_path, &reason).await;
+            unavailable(writer, job_id, &original, &reason).await;
             invalidate_cached_path(handles, key, store_path).await;
             Err(anyhow::anyhow!(reason))
         }
@@ -170,6 +174,13 @@ mod serve_nar_tests {
     use gradient_wire::messages::ServerMessage;
     use tokio::sync::mpsc;
 
+    fn identity() -> StorePathMapper {
+        StorePathMapper::new(
+            Arc::new(gradient_types::IdentityMapping),
+            gradient_types::MappingContext::Cache(gradient_types::ids::CacheId::nil()),
+        )
+    }
+
     fn spy_writer(timeout: Duration) -> (ProtoWriter, mpsc::Receiver<Bytes>) {
         ProtoWriter::spy(timeout)
     }
@@ -198,6 +209,7 @@ mod serve_nar_tests {
         serve_nar_request(
             &SessionHandles::from_state(&state),
             &writer,
+            &identity(),
             "job-1",
             &store_path,
             0,
@@ -251,6 +263,7 @@ mod serve_nar_tests {
         let res = serve_nar_request(
             &SessionHandles::from_state(&state),
             &writer,
+            &identity(),
             "job-1",
             "/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-missing",
             0,
@@ -291,6 +304,7 @@ mod serve_nar_tests {
         serve_nar_request(
             &SessionHandles::from_state(&state),
             &writer,
+            &identity(),
             "job-1",
             &store_path,
             0,
@@ -333,6 +347,7 @@ mod serve_nar_tests {
         let res = serve_nar_request(
             &SessionHandles::from_state(&state),
             &writer,
+            &identity(),
             "job-1",
             "not_a_store_path",
             0,

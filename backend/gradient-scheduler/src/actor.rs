@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::time::{Duration, Instant};
@@ -55,6 +55,7 @@ pub struct WorkerMetrics {
 #[derive(Debug, Clone, Default)]
 pub struct Offer {
     pub candidates: Vec<JobCandidate>,
+    pub projects: HashMap<String, ProjectId>,
     pub generation: u64,
 }
 
@@ -477,16 +478,21 @@ impl SchedulerCore {
 
     fn candidates(&mut self, worker: &str, only_new: bool) -> Offer {
         let (authorized, caps) = self.auth_and_caps(worker);
-        let mut candidates = self
+        let mut offered = self
             .tracker
             .candidates_for_worker(authorized.as_ref(), caps.as_ref());
-        let visible: HashSet<String> = candidates.iter().map(|c| c.job_id.clone()).collect();
+        let visible: HashSet<String> = offered.iter().map(|(c, _)| c.job_id.clone()).collect();
         if only_new && let Some(sent) = self.pool.sent_candidates_for(worker) {
-            candidates.retain(|c| !sent.contains(&c.job_id));
+            offered.retain(|(c, _)| !sent.contains(&c.job_id));
         }
         self.pool.set_sent_candidates(worker, visible);
+        let projects = offered
+            .iter()
+            .map(|(c, project)| (c.job_id.clone(), *project))
+            .collect();
         Offer {
-            candidates,
+            candidates: offered.into_iter().map(|(c, _)| c).collect(),
+            projects,
             generation: self.offers,
         }
     }

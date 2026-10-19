@@ -715,14 +715,14 @@ impl JobTracker {
         &self,
         authorized: Option<&HashSet<ProjectId>>,
         caps: Option<&WorkerCaps>,
-    ) -> Vec<JobCandidate> {
+    ) -> Vec<(JobCandidate, ProjectId)> {
         let members = self
             .clusters
             .jobs()
             .filter(|(_, job)| visible_to(job, authorized, caps));
         self.eligible_for_worker(authorized, caps)
             .chain(members)
-            .map(|(id, job)| job.as_candidate(id))
+            .map(|(id, job)| (job.as_candidate(id), job.project_id()))
             .collect()
     }
 
@@ -2333,7 +2333,7 @@ mod tests {
 
         let candidates = tracker.candidates_for_worker(Some(&authorized), None);
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].job_id, "ja");
+        assert_eq!(candidates[0].0.job_id, "ja");
     }
 
     #[test]
@@ -2355,7 +2355,7 @@ mod tests {
 
         let x86_caps = build_caps(&["x86_64-linux"], &[]);
         let candidates = tracker.candidates_for_worker(None, Some(&x86_caps));
-        let mut ids: Vec<_> = candidates.iter().map(|c| c.job_id.clone()).collect();
+        let mut ids: Vec<_> = candidates.iter().map(|(c, _)| c.job_id.clone()).collect();
         ids.sort();
         assert_eq!(ids, vec!["any".to_string(), "x86".to_string()]);
     }
@@ -3086,7 +3086,7 @@ mod tests {
 
         let offered = tracker.candidates_for_worker(None, None);
         assert_eq!(offered.len(), 1);
-        assert_eq!(offered[0].job_id, "m1");
+        assert_eq!(offered[0].0.job_id, "m1");
         assert!(tracker.contains_job("m1"));
 
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
