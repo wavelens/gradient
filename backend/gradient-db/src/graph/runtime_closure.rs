@@ -19,8 +19,9 @@ struct ReferenceTokens {
 }
 
 pub fn parse_reference_hash(reference: &str) -> Option<String> {
-    let hash = reference.split('-').next().unwrap_or_default();
-    (!hash.is_empty()).then(|| hash.to_string())
+    StorePath::parse_stored(reference)
+        .ok()
+        .map(|path| path.hash().to_owned())
 }
 
 fn tokens(references: Option<String>) -> Vec<String> {
@@ -178,7 +179,7 @@ mod tests {
             parse_reference_hash("abc123-hello-2.10").as_deref(),
             Some("abc123")
         );
-        assert_eq!(parse_reference_hash("abc123").as_deref(), Some("abc123"));
+        assert_eq!(parse_reference_hash("abc123"), None);
         assert_eq!(parse_reference_hash(""), None);
     }
 

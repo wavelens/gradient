@@ -9,13 +9,6 @@ use gradient_db::DbContext;
 use gradient_types::*;
 use tracing::{info, warn};
 
-fn store_path_hash(store_path: &str) -> Option<&str> {
-    store_path
-        .strip_prefix("/nix/store/")
-        .and_then(|s| s.split('-').next())
-        .filter(|h| !h.is_empty())
-}
-
 async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[DerivationId]) -> bool {
     for d in derivations {
         if gradient_db::graph::reachability::derivation_is_reachable(db, *d)
@@ -45,9 +38,10 @@ pub(crate) async fn repair_missing_inputs(
     let mut kept: Vec<&str> = Vec::new();
     let mut demoted_producers: Vec<DerivationId> = Vec::new();
     for path in missing_paths {
-        let Some(hash) = store_path_hash(path) else {
+        let Ok(stored) = StorePath::parse_stored(path) else {
             continue;
         };
+        let hash = stored.hash();
 
         match gradient_db::caches::demotion::diagnose_missing_input(
             db,
@@ -123,19 +117,4 @@ pub(crate) async fn repair_missing_inputs(
         "repaired missing inputs: gone objects purged, present and producerless paths kept"
     );
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::store_path_hash;
-
-    #[test]
-    fn store_path_hash_extracts_32_char_hash() {
-        assert_eq!(
-            store_path_hash("/nix/store/g9y0fvqh2c991vjprgz9mvdm0zj7ggij-python3-static-3.13"),
-            Some("g9y0fvqh2c991vjprgz9mvdm0zj7ggij")
-        );
-        assert_eq!(store_path_hash("not-a-store-path"), None);
-        assert_eq!(store_path_hash("/nix/store/"), None);
-    }
 }

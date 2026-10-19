@@ -11,9 +11,9 @@ use std::time::Instant;
 use gradient_types::events::{build, evaluation};
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId, TaskId};
 use gradient_types::{
-    BuildProgress, BuildProgressPhase, EvaluationProgress, MappingContext, StorePathMapper,
+    BuildProgress, BuildProgressPhase, EvaluationProgress, MappingContext, StorePath,
+    StorePathMapper,
 };
-use gradient_util::store_path::strip_nix_store_prefix;
 use tokio::sync::Semaphore;
 use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
 
@@ -1088,12 +1088,9 @@ impl RpcContext {
         debug!(peer_id = %self.peer_id, %job_id, %query_id, count = drv_paths.len(), "QueryKnownDerivations");
         let hashes: Vec<String> = drv_paths
             .iter()
-            .map(|p| strip_nix_store_prefix(p))
-            .filter_map(|p| {
-                gradient_sources::parse_drv_hash_name(&p)
-                    .ok()
-                    .map(|(h, _)| h)
-            })
+            .filter_map(|p| StorePath::parse_stored(p).ok())
+            .filter(StorePath::is_derivation)
+            .map(|p| p.hash().to_owned())
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();

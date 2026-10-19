@@ -12,10 +12,6 @@ pub fn nix_store_path(hash_name: &str) -> String {
     }
 }
 
-pub fn strip_nix_store_prefix(path: &str) -> String {
-    path.strip_prefix("/nix/store/").unwrap_or(path).to_string()
-}
-
 pub fn strip_store_prefix(path: &str) -> &str {
     path.strip_prefix("/nix/store/").unwrap_or(path)
 }
@@ -25,7 +21,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nix_store_path_and_strip_round_trip() {
+    fn nix_store_path_adds_the_store_prefix() {
         for (input, expected) in [
             ("abc123-foo", "/nix/store/abc123-foo"),
             ("/nix/store/abc123-foo", "/nix/store/abc123-foo"),
@@ -33,14 +29,6 @@ mod tests {
             ("", "/nix/store/"),
         ] {
             assert_eq!(nix_store_path(input), expected, "{input}");
-        }
-        for (input, expected) in [
-            ("/nix/store/abc123-foo", "abc123-foo"),
-            ("abc123-foo", "abc123-foo"),
-            ("/tmp/foo", "/tmp/foo"),
-            ("", ""),
-        ] {
-            assert_eq!(strip_nix_store_prefix(input), expected, "{input}");
         }
     }
 
