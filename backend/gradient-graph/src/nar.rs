@@ -25,7 +25,7 @@ use crate::messages::{NarCommit, NarCommitted, SignTargets};
 /// The shared build locks are always taken after the `cached_path` lock, never before.
 pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<NarCommitted> {
     let db = &ctx.worker_db;
-    let sp = StorePath::parse(&c.store_path)?;
+    let sp = StorePath::parse_stored(&c.store_path)?;
     if !is_nix32_hash(sp.hash()) {
         anyhow::bail!(StorePathError::Malformed(c.store_path.clone()));
     }
@@ -107,7 +107,7 @@ pub(crate) async fn commit_batch(
     let paths = commits
         .iter()
         .map(|c| {
-            let sp = StorePath::parse(&c.store_path)?;
+            let sp = StorePath::parse_stored(&c.store_path)?;
             if !is_nix32_hash(sp.hash()) {
                 anyhow::bail!(StorePathError::Malformed(c.store_path.clone()));
             }
@@ -308,7 +308,7 @@ fn union(a: &[DerivationId], b: &[DerivationId]) -> Vec<DerivationId> {
 }
 
 pub(crate) fn after_commit(ctx: &DbContext, committed: &NarCommitted, store_path: &str) {
-    let Ok(sp) = StorePath::parse(store_path) else {
+    let Ok(sp) = StorePath::parse_stored(store_path) else {
         return;
     };
     if !gradient_db::caches::debug_info::carries_debug_info(sp.name()) {

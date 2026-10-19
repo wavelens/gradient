@@ -623,7 +623,8 @@ fn known_upstream(output: &mut derivation_output::Model) {
 }
 
 pub(crate) fn drv_hash_name(path: &str) -> (String, String) {
-    let parsed = StorePath::parse(path).unwrap_or_else(|_| panic!("{path} is no store path"));
+    let parsed =
+        StorePath::parse_stored(path).unwrap_or_else(|_| panic!("{path} is no store path"));
     let name = parsed
         .name()
         .strip_suffix(".drv")

@@ -1331,7 +1331,7 @@ impl From<flake_output_node::Model> for FlakeGraphNode {
             kind: n.kind,
             is_derivation: n.is_derivation,
             drv_path: n.drv_path.map(|p| {
-                gradient_entity::StorePath::parse(&p)
+                gradient_entity::StorePath::parse_stored(&p)
                     .map(|sp| sp.base())
                     .unwrap_or(p)
             }),

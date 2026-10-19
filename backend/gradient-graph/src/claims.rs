@@ -84,7 +84,7 @@ impl Claim {
             .collect();
 
         Some(signer.sign_narinfo_raw(
-            &StorePath::from_parts(&self.hash, &self.package).full(),
+            &StorePath::from_stored(&self.hash, &self.package).full(),
             &normalize_nar_hash(nar_hash),
             nar_size as u64,
             &references,

@@ -454,7 +454,7 @@ impl BatchWriter<'_> {
                 let hashes: Vec<String> = d
                     .outputs
                     .iter()
-                    .filter_map(|o| StorePath::parse(&o.path).ok())
+                    .filter_map(|o| StorePath::parse_stored(&o.path).ok())
                     .map(|sp| sp.hash().to_owned())
                     .collect();
                 ids.get(&d.drv_path)
@@ -771,7 +771,7 @@ impl BatchWriter<'_> {
             };
 
             for src in &d.input_sources {
-                let Ok(store_path) = StorePath::parse(src) else {
+                let Ok(store_path) = StorePath::parse_stored(src) else {
                     continue;
                 };
 
@@ -1309,13 +1309,13 @@ pub(crate) async fn fail_evaluation(ctx: &DbContext, evaluation: EvaluationId, m
 }
 
 fn drv_hash_name(drv_path: &str) -> Option<(String, String)> {
-    let sp = StorePath::parse(drv_path).ok()?;
+    let sp = StorePath::parse_stored(drv_path).ok()?;
     let name = sp.name().strip_suffix(".drv")?;
     Some((sp.hash().to_owned(), name.to_owned()))
 }
 
 fn output_hash_name(path: &str) -> Option<(String, String)> {
-    let sp = StorePath::parse(path).ok()?;
+    let sp = StorePath::parse_stored(path).ok()?;
     Some((sp.hash().to_owned(), sp.name().to_owned()))
 }
 
