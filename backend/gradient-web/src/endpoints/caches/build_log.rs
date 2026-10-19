@@ -17,7 +17,7 @@ use gradient_core::upstream_source::{fetch_upstream_log, substitution_sources};
 use gradient_db::WebDb;
 use gradient_db::caches::upstream::pull_through_upstream_caches;
 use gradient_storage::LogStorage;
-use gradient_types::{MappingContext, OriginalStorePath, StorePathMapper};
+use gradient_types::{OriginalStorePath, StorePathMapper};
 use std::sync::Arc;
 
 /// A pull-through cache is substituting paths it never built (#547). The upstream caches are asked
@@ -49,7 +49,7 @@ pub async fn log(
     )
     .await?;
 
-    let mapper = state.store_path_mapper(MappingContext::Cache(ctx.cache.id));
+    let mapper = state.cache_mapper(ctx.cache.id);
     if let Some(body) = local_log(&state.web_db, &state.log_storage, &ctx, &mapper, &drv).await? {
         return log_response(body, "HIT");
     }

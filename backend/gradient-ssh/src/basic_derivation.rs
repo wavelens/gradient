@@ -53,7 +53,7 @@ fn drv_file(drv: &BasicDerivation) -> anyhow::Result<DrvFile> {
 }
 
 pub async fn import(session: &Session, drv: &BasicDerivation) -> anyhow::Result<String> {
-    let (info, nar) = stored_drv(drv, &session.store_path_mapper())?;
+    let (info, nar) = stored_drv(drv, &session.mapper)?;
     crate::ingest::import(session, &info, nar.as_slice()).await?;
     Ok(info.path.full())
 }
@@ -120,9 +120,9 @@ mod tests {
 
     #[test]
     fn a_derivation_path_is_computed_over_original_inputs() {
-        let mapper = gradient_types::StorePathMapper::new(
+        let mapper = gradient_types::StorePathMapper::for_cache(
             std::sync::Arc::new(gradient_entity::RotatedHashMapping),
-            gradient_types::MappingContext::Project(gradient_types::ProjectId::nil()),
+            gradient_types::ids::CacheId::nil(),
         );
         let drv = basic(ATERM);
 

@@ -18,7 +18,6 @@ use gradient_core::ServerState;
 use gradient_storage::nar_extract::{
     ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
 };
-use gradient_types::MappingContext;
 use std::sync::Arc;
 
 fn hardened(builder: axum::http::response::Builder) -> axum::http::response::Builder {
@@ -53,7 +52,7 @@ pub async fn serve(
         cache,
     )
     .await?;
-    let mapper = state.store_path_mapper(MappingContext::Cache(ctx.cache.id));
+    let mapper = state.cache_mapper(ctx.cache.id);
     let stored = stored_hash(&mapper, &hash)?;
     let (_size, stream) =
         fetch_nar_stream(&state.web_db, &state.nar_storage, ctx.cache.id, &stored).await?;

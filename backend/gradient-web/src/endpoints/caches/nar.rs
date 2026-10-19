@@ -64,7 +64,7 @@ pub async fn nar(
     )
     .await?;
 
-    let mapper = state.store_path_mapper(MappingContext::Cache(ctx.cache.id));
+    let mapper = state.cache_mapper(ctx.cache.id);
     let effective_hash = resolve_effective_hash_db(&state.web_db, &mapper, &path_hash).await?;
     let (size, stream) = super::helpers::fetch_nar_stream(
         &state.web_db,
@@ -305,10 +305,7 @@ mod tests {
     }
 
     fn identity() -> StorePathMapper {
-        StorePathMapper::new(
-            Arc::new(IdentityMapping),
-            MappingContext::Cache(CacheId::nil()),
-        )
+        StorePathMapper::for_cache(Arc::new(IdentityMapping), CacheId::nil())
     }
 
     fn runtime() -> tokio::runtime::Runtime {
@@ -346,9 +343,9 @@ mod tests {
         let db = mock_db()
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
-        let mapper = StorePathMapper::new(
+        let mapper = StorePathMapper::for_cache(
             Arc::new(gradient_entity::RotatedHashMapping),
-            MappingContext::Cache(CacheId::nil()),
+            CacheId::nil(),
         );
 
         let effective = runtime()

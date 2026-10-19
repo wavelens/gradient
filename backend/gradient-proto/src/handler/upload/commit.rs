@@ -8,8 +8,8 @@ use gradient_db::cache_paths::project_write_caches;
 use gradient_db::{DbContext, WorkerDb};
 use gradient_storage::NarStore;
 use gradient_storage::admission::UploadPermit;
+use gradient_types::RuntimeConfig;
 use gradient_types::ids::{CacheId, ProjectId};
-use gradient_types::{MappingContext, RuntimeConfig};
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::types::{NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
@@ -18,7 +18,7 @@ use super::super::SessionHandles;
 use super::super::eval_cache::eval_cache_key;
 use super::super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
 use super::super::socket::{ProtoWriter, send_server_msg};
-use super::super::store_paths::inbound_upload_metadata;
+use super::super::store_paths::{inbound_upload_metadata, unmapped_project};
 use super::table::Transfer;
 use crate::import::{WriteNeeded, nar_write_needed};
 
@@ -38,23 +38,23 @@ pub(super) struct Commit {
 /// recorded it, and a second upload of the path is waiting instead of overwriting the object.
 #[tracing::instrument(name = "upload_commit", level = "debug", skip_all)]
 pub(super) async fn run(c: Commit) {
-    let mapper = c
-        .handles
-        .db
-        .store_path_mapper(MappingContext::Project(c.project));
+    let metadata = match c.handles.db.project_mapper(c.project).await {
+        Ok(mapper) => inbound_upload_metadata(c.metadata, &mapper).map_err(|e| e.to_string()),
+        Err(e) => Err(unmapped_project(&e)),
+    };
     let writable = match &c.object {
         UploadObject::EvalCache { .. } => {
             project_write_caches(&c.handles.db.worker_db, c.project).await
         }
         UploadObject::Nar { .. } => Ok(Vec::new()),
     };
-    let placed = match (inbound_upload_metadata(c.metadata, &mapper), writable) {
+    let placed = match (metadata, writable) {
         (Ok(metadata), Ok(writable)) => {
             place(&c.handles.db, &writable, &c.object, c.transfer, &metadata)
                 .await
                 .map(|()| (metadata, writable))
         }
-        (Err(e), _) => Err(rejected(e.to_string())),
+        (Err(reason), _) => Err(rejected(reason)),
         (_, Err(e)) => Err(retry(format!("looking up the writable caches: {e}"))),
     };
     let outcome = match placed {

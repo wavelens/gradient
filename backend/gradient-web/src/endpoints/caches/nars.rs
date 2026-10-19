@@ -145,7 +145,7 @@ pub async fn list(
         "last_fetched_at" => NarOrder::LastFetchedAt,
         _ => NarOrder::CreatedAt,
     };
-    let mapper = db.store_path_mapper(MappingContext::Cache(cache.id));
+    let mapper = db.cache_mapper(cache.id);
     let hash_prefix = match q.hash.as_deref().filter(|s| !s.is_empty()) {
         Some(prefix) => match mapper.inbound_prefix(prefix) {
             Some(stored) => Some(stored),
@@ -203,7 +203,7 @@ pub async fn show(
     }: CacheScope<Readable>,
 ) -> WebResult<Json<BaseResponse<NarDetail>>> {
     let hash: String = params.param("hash")?;
-    let mapper = db.store_path_mapper(MappingContext::Cache(cache.id));
+    let mapper = db.cache_mapper(cache.id);
     let hash = stored_hash(&mapper, &hash)?;
 
     let cp = gradient_db::cached_paths::by_hash(&db.web_db, &hash)
@@ -255,10 +255,7 @@ pub async fn available(
     if hash.is_empty() {
         return Err(CacheRefusal::MissingHashQuery.into());
     }
-    let hash = stored_hash(
-        &db.store_path_mapper(MappingContext::Cache(cache.id)),
-        &hash,
-    )?;
+    let hash = stored_hash(&db.cache_mapper(cache.id), &hash)?;
     let cp = gradient_db::cached_paths::by_hash(&db.web_db, &hash).await?;
     let exists = if let Some(cp) = cp {
         gradient_db::cached_paths::signature_in_cache(&db.web_db, cp.id, cache.id)
@@ -288,7 +285,7 @@ pub async fn delete(
     audit: Audit,
 ) -> WebResult<impl IntoResponse> {
     let hash: String = params.param("hash")?;
-    let mapper = db.store_path_mapper(MappingContext::Cache(cache.id));
+    let mapper = db.cache_mapper(cache.id);
     let stored = stored_hash(&mapper, &hash)?;
 
     let (cp, outcome) =

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gradient_types::ids::CacheId;
-use gradient_types::{MappingContext, StorePath, StorePathMapper};
+use gradient_types::{StorePath, StorePathMapper};
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 
@@ -63,9 +63,7 @@ struct CacheSession {
 impl CacheSession {
     fn new(handles: SessionHandles, writer: ProtoWriter, cache_id: CacheId) -> Self {
         let max_serves = handles.db.config.nar.max_concurrent_serves.get();
-        let mapper = handles
-            .db
-            .store_path_mapper(MappingContext::Cache(cache_id));
+        let mapper = handles.db.cache_mapper(cache_id);
         Self {
             handles,
             writer,

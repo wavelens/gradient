@@ -762,9 +762,9 @@ mod tests {
         lookup_upstream_narinfo(
             Arc::new(endpoints),
             Arc::new(Semaphore::new(4)),
-            gradient_types::StorePathMapper::new(
+            gradient_types::StorePathMapper::for_cache(
                 Arc::new(gradient_types::IdentityMapping),
-                gradient_types::MappingContext::Project(gradient_types::ProjectId::nil()),
+                gradient_types::ids::CacheId::nil(),
             ),
             StorePath::parse_stored(SIGNED_PATH).expect("path"),
         )
@@ -938,9 +938,9 @@ mod tests {
             public_key: Some(key),
             ..ep(None, None)
         };
-        let mapper = gradient_types::StorePathMapper::new(
+        let mapper = gradient_types::StorePathMapper::for_cache(
             Arc::new(RotatedHashMapping),
-            gradient_types::MappingContext::Project(gradient_types::ProjectId::nil()),
+            gradient_types::ids::CacheId::nil(),
         );
 
         let batch = probe_batch(

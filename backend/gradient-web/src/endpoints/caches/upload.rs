@@ -121,10 +121,7 @@ pub async fn nars_upload(
             return Err(CacheRefusal::MissingPart("narinfo").into());
         }
     };
-    let upload = match MappedUpload::new(
-        narinfo,
-        &state.store_path_mapper(MappingContext::Cache(cache.id)),
-    ) {
+    let upload = match MappedUpload::new(narinfo, &state.cache_mapper(cache.id)) {
         Ok(upload) => upload,
         Err(e) => {
             let _ = upload_store.discard(&stage_key).await;
@@ -335,7 +332,7 @@ pub async fn nar_chunk(
 ) -> WebResult<impl IntoResponse> {
     let store_hash = stored_segment(
         &params.param::<String>("hash")?,
-        &state.store_path_mapper(MappingContext::Cache(cache.id)),
+        &state.cache_mapper(cache.id),
     )?;
 
     let max = u64::try_from(state.config.nar.max_upload_size.get()).unwrap_or(u64::MAX);
@@ -385,7 +382,7 @@ pub async fn nar_finalize(
     audit: Audit,
     axum::Json(narinfo): axum::Json<NarinfoPart>,
 ) -> WebResult<impl IntoResponse> {
-    let mapper = state.store_path_mapper(MappingContext::Cache(cache.id));
+    let mapper = state.cache_mapper(cache.id);
     let store_hash = stored_segment(&params.param::<String>("hash")?, &mapper)?;
     let upload = MappedUpload::new(narinfo, &mapper)?;
     let narinfo = &upload.narinfo;
@@ -461,7 +458,7 @@ pub async fn nar_finalize(
 mod tests {
     use super::{NarinfoPart, require_safe_hash, stored_narinfo};
     use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
-    use gradient_types::{CacheId, MappingContext, StorePathMapper};
+    use gradient_types::{CacheId, StorePathMapper};
     use std::sync::Arc;
 
     fn part(store_path: String, references: Vec<String>) -> NarinfoPart {
@@ -477,10 +474,7 @@ mod tests {
     }
 
     fn rotated() -> StorePathMapper {
-        StorePathMapper::new(
-            Arc::new(RotatedHashMapping),
-            MappingContext::Cache(CacheId::nil()),
-        )
+        StorePathMapper::for_cache(Arc::new(RotatedHashMapping), CacheId::nil())
     }
 
     #[test]

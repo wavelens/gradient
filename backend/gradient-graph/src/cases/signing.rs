@@ -6,10 +6,10 @@
 
 use std::sync::Arc;
 
+use gradient_entity::RotatedHashMapping;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::cached_path_signature;
 use gradient_entity::ids::{CacheId, EvaluationId};
-use gradient_entity::{MappingContext, RotatedHashMapping};
 use gradient_fixtures::shape::shape;
 
 use super::{
@@ -425,7 +425,7 @@ async fn k10_a_signature_verifies_over_the_outbound_paths() {
     let stored = commit_of_b(case.project_caches(e1).await);
     case.commit_nar(stored.clone()).await;
 
-    let mapper = case.ctx.store_path_mapper(MappingContext::Cache(c1));
+    let mapper = case.ctx.cache_mapper(c1);
     let seen = NarCommit {
         store_path: mapper
             .outbound_text(&stored.store_path)

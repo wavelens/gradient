@@ -87,7 +87,7 @@ pub async fn get_build(
     let derivation_outputs =
         gradient_db::derivation_outputs::of_derivation(&state.web_db, derivation.id).await?;
 
-    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project.id));
+    let mapper = state.project_mapper(ctx.project.id).await?;
     let mut outputs = HashMap::new();
     for output in derivation_outputs {
         let path = StorePath::from(output.clone()).base();

@@ -497,7 +497,7 @@ async fn sign_into_caches(
         for (cache, signer) in &signers[&c.targets] {
             let signature = match (&fingerprint, signer) {
                 (Some((store_path, nar_hash)), Some(signer)) => Some(signer.sign_stored_narinfo(
-                    &ctx.store_path_mapper(MappingContext::Cache(*cache)),
+                    &ctx.cache_mapper(*cache),
                     store_path,
                     nar_hash,
                     c.nar_size as u64,

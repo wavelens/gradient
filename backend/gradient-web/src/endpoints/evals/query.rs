@@ -152,7 +152,8 @@ pub async fn get_evaluation(
             task_name: ctx.task_name,
             task_display_name: ctx.task_display_name,
             repository: state
-                .store_path_mapper(MappingContext::Project(ctx.project_id))
+                .project_mapper(ctx.project_id)
+                .await?
                 .outbound_if_store_path(&evaluation.repository),
             commit: commit_hash,
             wildcard: evaluation.wildcard,
@@ -216,7 +217,7 @@ pub async fn get_evaluation_builds(
     let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
         .await?;
     let evaluation = ctx.evaluation;
-    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project_id));
+    let mapper = state.project_mapper(ctx.project_id).await?;
 
     let jobs = gradient_db::build_jobs::of_evaluation(&state.web_db, evaluation.id).await?;
 

@@ -74,14 +74,9 @@ async fn load_session(
     used.last_used_at = Set(Some(now()));
     used.update(&handles.db.web_db).await?;
 
-    Ok(Some(Session {
-        handles: handles.clone(),
-        user,
-        project,
-        permissions,
-        caches,
-        closed: handles.db.shutdown.child_token(),
-    }))
+    Ok(Some(
+        Session::open(handles.clone(), user, project, permissions, caches).await?,
+    ))
 }
 
 #[cfg(test)]

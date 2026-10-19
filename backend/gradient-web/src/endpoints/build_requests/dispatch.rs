@@ -31,7 +31,7 @@ use gradient_types::ids::{
 use gradient_types::input::{check_flake_input_override, check_manifest_path, decode_blake3_hex};
 use gradient_types::{
     BaseResponse, ECache, EUploadSession, MCommit, MEvaluation, MEvaluationFlakeInputOverride,
-    MUploadSession, MUser, MappingContext, OriginalStorePath, StorePath, StorePathMapper, now,
+    MUploadSession, MUser, OriginalStorePath, StorePath, StorePathMapper, now,
 };
 use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
@@ -171,7 +171,7 @@ pub(super) async fn finalize_build_request(
         check_flake_input_override(input_name, url)?;
     }
 
-    let mapper = db.store_path_mapper(MappingContext::Project(project));
+    let mapper = db.project_mapper(project).await?;
     let stored = stored_source_path(&mapper, &nar.store_path)?;
     db.storage
         .nar_storage
@@ -360,14 +360,11 @@ async fn materialise_staging(
 mod tests {
     use super::*;
     use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
-    use gradient_types::ProjectId;
+    use gradient_types::CacheId;
 
     #[test]
     fn a_source_nar_is_stored_under_its_mapped_path() {
-        let mapper = StorePathMapper::new(
-            Arc::new(RotatedHashMapping),
-            MappingContext::Project(ProjectId::nil()),
-        );
+        let mapper = StorePathMapper::for_cache(Arc::new(RotatedHashMapping), CacheId::nil());
 
         let stored = stored_source_path(
             &mapper,

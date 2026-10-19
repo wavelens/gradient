@@ -82,7 +82,7 @@ impl DrvSource for CacheDrvSource<'_> {
                 let mut contents = Vec::new();
                 reader.read_to_end(&mut contents).await?;
                 let drv = parse_drv(&contents)?;
-                return stored_derivation(&self.session.store_path_mapper(), drv).map(Some);
+                return stored_derivation(&self.session.mapper, drv).map(Some);
             }
         }
 
@@ -445,29 +445,23 @@ mod tests {
     #[tokio::test]
     async fn building_without_trigger_evaluation_is_refused() {
         let db = empty_db();
-        let session = Session {
-            handles: SshHandles::from_state(&TestState::new().web_db(db.clone()).build()),
-            user: gradient_fixtures::rows::user(),
-            project: gradient_fixtures::rows::project(),
-            permissions: 0,
-            caches: vec![],
-            closed: Default::default(),
-        };
+        let session = session(db.clone()).await;
 
         let e = start(&session, &[path("a")]).await.expect_err("refused");
         assert!(e.to_string().contains("TriggerEvaluation"), "{e}");
         assert!(db.into_transaction_log().is_empty());
     }
 
-    fn session(db: sea_orm::DatabaseConnection) -> Session {
-        Session {
-            handles: SshHandles::from_state(&TestState::new().web_db(db).build()),
-            user: gradient_fixtures::rows::user(),
-            project: gradient_fixtures::rows::project(),
-            permissions: 0,
-            caches: vec![],
-            closed: Default::default(),
-        }
+    async fn session(db: sea_orm::DatabaseConnection) -> Session {
+        Session::open(
+            SshHandles::from_state(&TestState::new().web_db(db).build()),
+            gradient_fixtures::rows::user(),
+            gradient_fixtures::rows::project(),
+            0,
+            vec![],
+        )
+        .await
+        .unwrap()
     }
 
     fn build_request_task() -> MTask {
@@ -506,7 +500,7 @@ mod tests {
             .append_query_results([vec![task.clone()]])
             .append_query_results([vec![running.clone()]])
             .into_connection();
-        let session = session(db);
+        let session = session(db).await;
 
         let target = evaluation_for(&session, &[path("a")])
             .await
@@ -544,7 +538,7 @@ mod tests {
             .append_query_results([vec![commit()]])
             .append_query_results([vec![created.clone()]])
             .into_connection();
-        let session = session(db);
+        let session = session(db).await;
 
         let target = evaluation_for(&session, &[path("a")])
             .await

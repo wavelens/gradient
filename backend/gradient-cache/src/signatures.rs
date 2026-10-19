@@ -186,10 +186,7 @@ impl SignSweep {
 
             let nar_hash_nix32 = normalize_nar_hash(nar_hash);
 
-            let mapper = StorePathMapper::new(
-                Arc::clone(&self.store_path_mapping),
-                MappingContext::Cache(cache.id),
-            );
+            let mapper = StorePathMapper::for_cache(Arc::clone(&self.store_path_mapping), cache.id);
             let sig_bytes = signer.sign_stored_narinfo(
                 &mapper,
                 &store_path,

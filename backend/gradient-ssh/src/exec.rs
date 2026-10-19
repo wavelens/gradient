@@ -153,7 +153,7 @@ async fn realise(
     derivations: &[String],
     add_root: Option<String>,
 ) -> u32 {
-    let mapper = session.store_path_mapper();
+    let mapper = session.mapper.clone();
     let derivations = match derivations
         .iter()
         .map(|drv| stored_full(&mapper, drv))

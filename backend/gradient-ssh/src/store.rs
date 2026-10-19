@@ -56,7 +56,7 @@ impl Backend for SshBackend {
 
     fn handler(self: &Arc<Self>, _conn: ConnInfo) -> CacheStore {
         CacheStore {
-            mapper: self.session.store_path_mapper(),
+            mapper: self.session.mapper.clone(),
             session: self.session.clone(),
         }
     }
@@ -440,19 +440,21 @@ mod tests {
         tokio::io::WriteHalf<tokio::io::DuplexStream>,
     >;
 
-    fn session_over(db: DatabaseConnection) -> Arc<Session> {
-        session_in(TestState::new().web_db(db))
+    async fn session_over(db: DatabaseConnection) -> Arc<Session> {
+        session_in(TestState::new().web_db(db)).await
     }
 
-    fn session_in(state: TestState) -> Arc<Session> {
-        Arc::new(Session {
-            handles: SshHandles::from_state(&state.build()),
-            user: gradient_fixtures::rows::user(),
-            project: gradient_fixtures::rows::project(),
-            permissions: 0,
-            caches: vec![CacheId::now_v7()],
-            closed: Default::default(),
-        })
+    async fn session_in(state: TestState) -> Arc<Session> {
+        let session = Session::open(
+            SshHandles::from_state(&state.build()),
+            gradient_fixtures::rows::user(),
+            gradient_fixtures::rows::project(),
+            0,
+            vec![CacheId::now_v7()],
+        )
+        .await
+        .unwrap();
+        Arc::new(session)
     }
 
     async fn connect(session: Arc<Session>) -> (JoinSet<()>, TestClient) {
@@ -515,7 +517,7 @@ mod tests {
             .append_query_results([vec![served_row()]])
             .append_query_results([vec![references_row()]])
             .into_connection();
-        let (_server, mut client) = connect(session_over(db)).await;
+        let (_server, mut client) = connect(session_over(db).await).await;
 
         let info = client
             .query_path_info(&hello())
@@ -547,7 +549,8 @@ mod tests {
             TestState::new()
                 .web_db(db.clone())
                 .store_path_mapping(Arc::new(RotatedHashMapping)),
-        );
+        )
+        .await;
         let (_server, mut client) = connect(session).await;
         let asked = StorePath::from_base_path(&format!("{original}-hello")).expect("path");
 
@@ -568,7 +571,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
-        let (_server, mut client) = connect(session_over(db)).await;
+        let (_server, mut client) = connect(session_over(db).await).await;
 
         assert!(!client.is_valid_path(&hello()).await.expect("valid"));
         assert!(
@@ -589,7 +592,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_client_is_not_trusted() {
-        let session = session_over(empty_db());
+        let session = session_over(empty_db()).await;
         let backend = Arc::new(SshBackend::new(session));
         let store = backend.handler(next_conn(None));
         assert_eq!(store.trust_level(), Some(TrustLevel::NotTrusted));
@@ -598,7 +601,7 @@ mod tests {
     #[tokio::test]
     async fn garbage_collection_is_refused() {
         let db = empty_db();
-        let (_server, mut client) = connect(session_over(db)).await;
+        let (_server, mut client) = connect(session_over(db).await).await;
 
         let err = client.find_roots().await.expect_err("refused");
         assert!(err.to_string().contains("unimplemented"), "{err}");
@@ -609,7 +612,7 @@ mod tests {
         let db = mock_db()
             .append_query_results([vec![served_row()]])
             .into_connection();
-        let (_server, mut client) = connect(session_over(db)).await;
+        let (_server, mut client) = connect(session_over(db).await).await;
         let nar = nar_of(b"already there").await;
         let info = ValidPathInfo {
             path: hello(),
@@ -644,7 +647,7 @@ mod tests {
         let db = mock_db()
             .append_query_results([vec![served_row()]])
             .into_connection();
-        let (_server, mut client) = connect(session_over(db)).await;
+        let (_server, mut client) = connect(session_over(db).await).await;
 
         let results = client
             .build_paths_with_results(&[DerivedPath::Opaque(hello())], BuildMode::Normal)
@@ -662,7 +665,7 @@ mod tests {
         let db = mock_db()
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
-        let (_server, mut client) = connect(session_over(db)).await;
+        let (_server, mut client) = connect(session_over(db).await).await;
 
         let err = client
             .build_paths(&[DerivedPath::Opaque(hello())], BuildMode::Normal)

@@ -54,7 +54,7 @@ pub fn build_paths(
     paths: Vec<DerivedPath>,
 ) -> impl ResultLog<Output = DaemonResult<Vec<KeyedBuildResult>>> + Send + 'static {
     streamed(session, move |session, log| async move {
-        let mapper = session.store_path_mapper();
+        let mapper = session.mapper.clone();
         let derivations = requested_derivations(&session, &mapper, &paths).await?;
         let outcome = if derivations.is_empty() {
             None
@@ -83,7 +83,7 @@ pub fn build_derivation(
             .map_err(err)?;
         let result = outcome.results.iter().find(|(path, _)| *path == drv_path);
         Ok(build_result(result_inner(
-            &session.store_path_mapper(),
+            &session.mapper,
             result.map(|(_, r)| r),
         )))
     })

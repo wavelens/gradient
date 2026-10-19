@@ -193,6 +193,15 @@ impl From<gradient_db::status::BuildRefusal> for WebError {
     }
 }
 
+impl From<gradient_types::MappingError> for WebError {
+    fn from(err: gradient_types::MappingError) -> Self {
+        Self::ServiceUnavailable(
+            ErrorCode::SERVICE_UNAVAILABLE,
+            format!("store paths of this project cannot be mapped: {err}"),
+        )
+    }
+}
+
 impl From<JsonRejection> for WebError {
     fn from(err: JsonRejection) -> Self {
         let text = err.to_string();

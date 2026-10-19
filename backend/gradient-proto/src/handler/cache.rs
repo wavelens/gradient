@@ -20,6 +20,7 @@ use tokio::sync::Semaphore;
 use tracing::warn;
 
 use super::SessionHandles;
+use super::store_paths::project_mapper;
 
 fn stored_sizes(
     cached_paths: &[gradient_entity::cached_path::Model],
@@ -570,10 +571,10 @@ async fn query(
         .filter(|(h, _)| !resolved.contains(h))
         .collect();
 
-    if !uncached_pairs.is_empty() {
-        let mapper = handles
-            .db
-            .store_path_mapper(MappingContext::Project(project_id));
+    if uncached_pairs.is_empty() {
+        return Ok(result);
+    }
+    if let Some(mapper) = project_mapper(&handles.db, project_id).await {
         extend_with_upstream_results(
             &handles.cache_db,
             &handles.upstream_query,

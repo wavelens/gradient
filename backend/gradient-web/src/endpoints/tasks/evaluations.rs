@@ -549,10 +549,7 @@ pub async fn get_task_entry_points(
     } else {
         EntryPointRelatedData::load(&db.web_db, &evaluation, &entry_points)
             .await?
-            .build_summaries(
-                &db.store_path_mapper(MappingContext::Project(task.project)),
-                &entry_points,
-            )
+            .build_summaries(&db.project_mapper(task.project).await?, &entry_points)
     };
 
     Ok(ok_json(PaginatedEntryPoints {
