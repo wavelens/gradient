@@ -144,12 +144,7 @@ async fn sign_claims(ctx: &DbContext, claims: Statement) -> anyhow::Result<()> {
                 signature: signers
                     .get(&claim.cache)
                     .and_then(Option::as_ref)
-                    .and_then(|signer| {
-                        claim.signature(
-                            signer,
-                            &ctx.store_path_mapper(MappingContext::Cache(claim.cache)),
-                        )
-                    }),
+                    .and_then(|signer| claim.signature(signer, &ctx.cache_mapper(claim.cache))),
                 created_at,
                 ..Default::default()
             }

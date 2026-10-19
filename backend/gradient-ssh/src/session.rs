@@ -36,17 +36,31 @@ pub struct Session {
     pub project: MProject,
     pub permissions: PermissionMask,
     pub caches: Vec<CacheId>,
+    pub mapper: StorePathMapper,
     pub closed: CancellationToken,
 }
 
 impl Session {
-    pub fn may(&self, permission: Permission) -> bool {
-        mask_grants(self.permissions, permission)
+    pub async fn open(
+        handles: SshHandles,
+        user: MUser,
+        project: MProject,
+        permissions: PermissionMask,
+        caches: Vec<CacheId>,
+    ) -> Result<Self, MappingError> {
+        let mapper = handles.db.project_mapper(project.id).await?;
+        Ok(Self {
+            closed: handles.db.shutdown.child_token(),
+            handles,
+            user,
+            project,
+            permissions,
+            caches,
+            mapper,
+        })
     }
 
-    pub fn store_path_mapper(&self) -> StorePathMapper {
-        self.handles
-            .db
-            .store_path_mapper(MappingContext::Project(self.project.id))
+    pub fn may(&self, permission: Permission) -> bool {
+        mask_grants(self.permissions, permission)
     }
 }

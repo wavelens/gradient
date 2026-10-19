@@ -201,7 +201,7 @@ pub async fn path(
     )
     .await?;
 
-    let mapper = state.store_path_mapper(MappingContext::Cache(ctx.cache.id));
+    let mapper = state.cache_mapper(ctx.cache.id);
     if let Ok(path_info) = get_nar_by_hash(
         &state.web_db,
         &state.config,

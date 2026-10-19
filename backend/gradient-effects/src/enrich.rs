@@ -73,12 +73,13 @@ async fn enrich_build<C: ConnectionTrait>(
     b.task = Some(scope.task);
     b.project = Some(scope.project);
     b.evaluation_kind = Some(eval_kind_str(scope.evaluation.kind).to_owned());
-    let mapper = StorePathMapper::new(Arc::clone(mapping), MappingContext::Project(scope.project));
-    b.derivation_path = EDerivation::find_by_id(b.derivation)
-        .one(db)
-        .await
-        .context("look up the derivation of a build report")?
-        .map(|d| mapper.outbound(&d.as_store_path()).full());
+    if let Some(mapper) = project_mapper(mapping, scope.project).await {
+        b.derivation_path = EDerivation::find_by_id(b.derivation)
+            .one(db)
+            .await
+            .context("look up the derivation of a build report")?
+            .map(|d| mapper.outbound(&d.as_store_path()).full());
+    }
     Ok(Some(b))
 }
 
@@ -92,17 +93,30 @@ async fn enrich_evaluation<C: ConnectionTrait>(
     };
     e.task = Some(scope.task);
     e.project = Some(scope.project);
-    let mapper = StorePathMapper::new(Arc::clone(mapping), MappingContext::Project(scope.project));
-    e.repository = Some(mapper.outbound_if_store_path(&scope.evaluation.repository));
+    e.repository = project_mapper(mapping, scope.project)
+        .await
+        .map(|mapper| mapper.outbound_if_store_path(&scope.evaluation.repository));
     e.evaluation_kind = Some(eval_kind_str(scope.evaluation.kind).to_owned());
     Ok(Some(e))
+}
+
+async fn project_mapper(
+    mapping: &Arc<dyn StorePathMapping>,
+    project: ProjectId,
+) -> Option<StorePathMapper> {
+    StorePathMapper::for_project(Arc::clone(mapping), project)
+        .await
+        .inspect_err(|error| tracing::warn!(%project, %error, "event leaves out its store paths"))
+        .ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use gradient_entity::build::BuildStatus;
-    use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
+    use gradient_entity::{
+        EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping, UnresolvableProjectMapping,
+    };
     use gradient_fixtures::mock::{empty_db, mock_db};
 
     #[tokio::test]
@@ -159,6 +173,37 @@ mod tests {
             reported.derivation_path,
             Some(format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-hello.drv"))
         );
+    }
+
+    #[tokio::test]
+    async fn a_build_of_a_project_that_does_not_resolve_names_no_derivation_path() {
+        let evaluation = MEvaluation {
+            id: EvaluationId::now_v7(),
+            task: Some(TaskId::now_v7()),
+            ..Default::default()
+        };
+        let task = MTask {
+            id: evaluation.task.unwrap(),
+            project: ProjectId::now_v7(),
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_query_results([vec![evaluation.clone()]])
+            .append_query_results([vec![task]])
+            .into_connection();
+        let event: Event = build::Reported {
+            evaluation_id: evaluation.id,
+            derivation: DerivationId::now_v7(),
+            ..Default::default()
+        }
+        .into();
+        let mapping: Arc<dyn StorePathMapping> = Arc::new(UnresolvableProjectMapping);
+
+        let Some(Event::BuildReported(reported)) = enrich_with(&db, &mapping, event).await.unwrap()
+        else {
+            panic!("the build is reported");
+        };
+        assert_eq!(reported.derivation_path, None);
     }
 
     #[tokio::test]

@@ -16,8 +16,8 @@ use std::time::Duration;
 use gradient_pool::session_port::{SessionPort, SessionSignal};
 use gradient_scheduler::Scheduler;
 use gradient_storage::admission::UploadAdmission;
+use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
-use gradient_types::{MappingContext, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tokio::sync::{Semaphore, oneshot};
@@ -34,7 +34,7 @@ use super::socket::{
     InputFetch, ProtoSocket, ProtoWriter, job_offer_chunks, recv_client_msg, send_input_fetch,
     send_server_msg,
 };
-use super::store_paths::{outbound_message, outbound_offer};
+use super::store_paths::{outbound_message, outbound_offer, project_mapper};
 use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::Rejection;
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
@@ -283,10 +283,10 @@ impl Actor for SessionActor {
                     request_id,
                     outcome,
                 };
-                if send_server_msg(&st.writer, &outbound_to(st, project, msg))
-                    .await
-                    .is_err()
-                {
+                let Some(msg) = outbound_to(st, project, msg).await else {
+                    return Ok(());
+                };
+                if send_server_msg(&st.writer, &msg).await.is_err() {
                     myself.stop(Some("write failed".into()));
                 }
             }
@@ -305,10 +305,10 @@ impl Actor for SessionActor {
                     request_id,
                     outcome,
                 };
-                if send_server_msg(&st.writer, &outbound_to(st, project, msg))
-                    .await
-                    .is_err()
-                {
+                let Some(msg) = outbound_to(st, project, msg).await else {
+                    return Ok(());
+                };
+                if send_server_msg(&st.writer, &msg).await.is_err() {
                     myself.stop(Some("write failed".into()));
                 }
             }
@@ -450,19 +450,20 @@ impl Actor for SessionActor {
     }
 }
 
-fn outbound_to(st: &SessionState, project: ProjectId, msg: ServerMessage) -> ServerMessage {
-    let mapper = st
-        .handles
-        .db
-        .store_path_mapper(MappingContext::Project(project));
-    outbound_message(msg, &mapper)
+async fn outbound_to(
+    st: &SessionState,
+    project: ProjectId,
+    msg: ServerMessage,
+) -> Option<ServerMessage> {
+    let mapper = project_mapper(&st.handles.db, project).await?;
+    Some(outbound_message(msg, &mapper))
 }
 
 #[tracing::instrument(level = "debug", skip_all, fields(candidates = tracing::field::Empty))]
 async fn offer_jobs(st: &mut SessionState) -> bool {
     let offer = st.scheduler.get_new_job_candidates(&st.peer_id).await;
     st.offers_seen = offer.generation;
-    let candidates = outbound_offer(offer, &st.handles.db);
+    let candidates = outbound_offer(offer, &st.handles.db).await;
     tracing::Span::current().record("candidates", candidates.len());
     if candidates.is_empty() {
         return true;

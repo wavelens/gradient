@@ -175,9 +175,9 @@ mod serve_nar_tests {
     use tokio::sync::mpsc;
 
     fn identity() -> StorePathMapper {
-        StorePathMapper::new(
+        StorePathMapper::for_cache(
             Arc::new(gradient_types::IdentityMapping),
-            gradient_types::MappingContext::Cache(gradient_types::ids::CacheId::nil()),
+            gradient_types::ids::CacheId::nil(),
         )
     }
 

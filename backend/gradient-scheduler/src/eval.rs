@@ -57,8 +57,14 @@ pub async fn probe_outputs(
         return answer;
     }
 
+    let mapper = match StorePathMapper::for_project(Arc::clone(mapping), project_id).await {
+        Ok(mapper) => mapper,
+        Err(e) => {
+            warn!(error = %e, evaluation = %evaluation.id, "upstream probe: the project's store paths cannot be mapped; treating every path as a miss");
+            return answer;
+        }
+    };
     let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
-    let mapper = StorePathMapper::new(Arc::clone(mapping), MappingContext::Project(project_id));
     let batch = gradient_core::upstream::probe_batch(
         endpoints,
         Arc::clone(upstream_query),

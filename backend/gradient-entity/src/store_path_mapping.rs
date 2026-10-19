@@ -80,10 +80,6 @@ pub struct StorePathMapper {
 }
 
 impl StorePathMapper {
-    pub fn new(mapping: Arc<dyn StorePathMapping>, context: MappingContext) -> Self {
-        Self { mapping, context }
-    }
-
     pub fn for_cache(mapping: Arc<dyn StorePathMapping>, cache: CacheId) -> Self {
         Self {
             mapping,

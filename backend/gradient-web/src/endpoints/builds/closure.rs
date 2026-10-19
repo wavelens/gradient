@@ -276,7 +276,7 @@ pub async fn get_build_closure(
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
-    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project.id));
+    let mapper = state.project_mapper(ctx.project.id).await?;
     let graph = build_closure_graph(&state.web_db, vec![ctx.build_job.derivation]).await?;
     Ok(ok_json(graph.with_original_paths(&mapper)))
 }
@@ -307,7 +307,7 @@ pub async fn get_eval_closure(
             .map(|ep| ep.derivation)
             .collect();
 
-    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project_id));
+    let mapper = state.project_mapper(ctx.project_id).await?;
     let graph = build_closure_graph(&state.web_db, roots).await?;
     Ok(ok_json(graph.with_original_paths(&mapper)))
 }
@@ -376,7 +376,7 @@ pub async fn get_build_runtime_closure(
     )
     .await?;
 
-    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project.id));
+    let mapper = state.project_mapper(ctx.project.id).await?;
     let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
     Ok(ok_json(graph.with_original_hashes(&mapper)))
 }
@@ -409,7 +409,7 @@ pub async fn get_eval_runtime_closure(
 
     let seeds =
         gradient_db::graph::runtime_closure::output_hashes_for_drvs(&state.web_db, &roots).await?;
-    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project_id));
+    let mapper = state.project_mapper(ctx.project_id).await?;
     let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
     Ok(ok_json(graph.with_original_hashes(&mapper)))
 }

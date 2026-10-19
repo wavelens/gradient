@@ -91,16 +91,13 @@ mod tests {
     use super::*;
     use gradient_derivation::DerivationOutput;
     use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
-    use gradient_types::{MappingContext, ProjectId};
+    use gradient_types::CacheId;
     use std::sync::Arc;
 
     #[test]
     fn a_derivation_read_from_the_cache_names_stored_paths() {
         let (o, s) = (EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH);
-        let mapper = StorePathMapper::new(
-            Arc::new(RotatedHashMapping),
-            MappingContext::Project(ProjectId::nil()),
-        );
+        let mapper = StorePathMapper::for_cache(Arc::new(RotatedHashMapping), CacheId::nil());
         let output = |path: String| DerivationOutput {
             name: "out".into(),
             path,

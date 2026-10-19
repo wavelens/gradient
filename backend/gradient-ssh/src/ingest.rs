@@ -247,22 +247,21 @@ mod tests {
 
     const NAR: &[u8] = b"nix-archive-1 stand-in bytes";
 
-    fn session(db: DatabaseConnection, permissions: i64) -> Arc<Session> {
-        Arc::new(Session {
-            handles: SshHandles::from_state(&TestState::new().web_db(db).build()),
-            user: gradient_fixtures::rows::user(),
-            project: gradient_fixtures::rows::project(),
+    async fn session(db: DatabaseConnection, permissions: i64) -> Arc<Session> {
+        let session = Session::open(
+            SshHandles::from_state(&TestState::new().web_db(db).build()),
+            gradient_fixtures::rows::user(),
+            gradient_fixtures::rows::project(),
             permissions,
-            caches: vec![CacheId::now_v7()],
-            closed: Default::default(),
-        })
+            vec![CacheId::now_v7()],
+        )
+        .await
+        .unwrap();
+        Arc::new(session)
     }
 
     fn info(nar: &[u8]) -> StoredPathInfo {
-        let mapper = StorePathMapper::new(
-            Arc::new(IdentityMapping),
-            MappingContext::Project(ProjectId::nil()),
-        );
+        let mapper = StorePathMapper::for_cache(Arc::new(IdentityMapping), CacheId::nil());
         let client = ValidPathInfo {
             path: StorePath::from_base_path("0123456789abcdfghijklmnpqrsvwxyz-hello")
                 .expect("path"),
@@ -286,7 +285,7 @@ mod tests {
         let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .into_connection();
-        let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation]));
+        let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
         let mut info = info(NAR);
         info.nar_hash = NarHash::digest(b"other");
 
@@ -303,7 +302,7 @@ mod tests {
         let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .into_connection();
-        let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
+        let session = session(db, mask_from(&[Permission::TriggerEvaluation])).await;
         let mut info = info(NAR);
         info.nar_size += 1;
 
@@ -316,7 +315,7 @@ mod tests {
     #[tokio::test]
     async fn copying_in_without_trigger_evaluation_is_refused() {
         let db = empty_db();
-        let session = session(db, 0);
+        let session = session(db, 0).await;
 
         let e = import(&session, &info(NAR), NAR)
             .await
@@ -329,7 +328,7 @@ mod tests {
         let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .into_connection();
-        let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
+        let session = session(db, mask_from(&[Permission::TriggerEvaluation])).await;
         let mut info = info(NAR);
         info.nar_size = 4;
 
@@ -350,7 +349,7 @@ mod tests {
         let db = mock_db()
             .append_query_results([vec![existing]])
             .into_connection();
-        let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation]));
+        let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
         let mut upload = NAR;
 
         import(&session, &info(NAR), &mut upload)
@@ -375,7 +374,7 @@ mod tests {
         let db = mock_db()
             .append_query_results([vec![existing]])
             .into_connection();
-        let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
+        let session = session(db, mask_from(&[Permission::TriggerEvaluation])).await;
         let info = info(NAR);
         let (holder, mut admitted) = session.handles.upload_admission.open_session("holder");
         holder.request(1, ObjectKey::Nar(info.path.hash().to_owned()), 1, false);

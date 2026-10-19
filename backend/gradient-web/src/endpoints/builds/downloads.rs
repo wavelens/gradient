@@ -205,7 +205,7 @@ pub async fn get_build_downloads(
         gradient_db::derivation_outputs::of_derivation(&state.web_db, ctx.build_job.derivation)
             .await?;
 
-    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project.id));
+    let mapper = state.project_mapper(ctx.project.id).await?;
     let products = collect_build_products(&state.web_db, build_id, build_outputs)
         .await
         .into_iter()

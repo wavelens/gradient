@@ -13,7 +13,8 @@ use tokio::sync::{Notify, mpsc};
 
 use crate::pool::{WebDb, WorkerDb};
 use crate::scheduling::startable_set::StartableSet;
-use gradient_entity::{MappingContext, StorePathMapper, StorePathMapping};
+use gradient_entity::ids::{CacheId, ProjectId};
+use gradient_entity::{MappingError, StorePathMapper, StorePathMapping};
 use gradient_storage::StorageCtx;
 use gradient_types::{DerivationId, EvaluationId, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
@@ -187,8 +188,15 @@ pub struct DbContext {
 }
 
 impl DbContext {
-    pub fn store_path_mapper(&self, context: MappingContext) -> StorePathMapper {
-        StorePathMapper::new(Arc::clone(&self.store_path_mapping), context)
+    pub fn cache_mapper(&self, cache: CacheId) -> StorePathMapper {
+        StorePathMapper::for_cache(Arc::clone(&self.store_path_mapping), cache)
+    }
+
+    pub async fn project_mapper(
+        &self,
+        project: ProjectId,
+    ) -> Result<StorePathMapper, MappingError> {
+        StorePathMapper::for_project(Arc::clone(&self.store_path_mapping), project).await
     }
 
     pub fn in_transaction(&self, tx: Arc<sea_orm::DatabaseTransaction>) -> DbContext {

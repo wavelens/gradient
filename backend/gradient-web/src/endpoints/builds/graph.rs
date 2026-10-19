@@ -151,7 +151,7 @@ pub async fn get_build_graph(
 ) -> WebResult<Json<BaseResponse<BuildGraph>>> {
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
-    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project.id));
+    let mapper = state.project_mapper(ctx.project.id).await?;
     let mut graph = dependency_graph(&state.web_db, &ctx.build_job).await?;
     for node in &mut graph.nodes {
         node.path = original_text(&mapper, std::mem::take(&mut node.path));

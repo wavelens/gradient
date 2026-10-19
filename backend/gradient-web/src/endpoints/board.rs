@@ -521,10 +521,7 @@ pub async fn get_dispatched_job(
             return Err(WebError::not_found(Resource::Job));
         }
 
-        outbound_drv_paths(
-            &mut c.job_context,
-            &state.store_path_mapper(MappingContext::Project(c.project)),
-        );
+        outbound_drv_paths(&mut c.job_context, &state.project_mapper(c.project).await?);
 
         let (project, worker_name) =
             job_names(&state.web_db, &scope, c.project.into(), &c.worker_id).await?;
@@ -563,7 +560,7 @@ pub async fn get_dispatched_job(
             evaluation_id: c.evaluation_id.into(),
             evaluation: eval_job_evaluation(
                 &state.web_db,
-                &state.store_path_mapper(MappingContext::Project(c.project)),
+                &state.project_mapper(c.project).await?,
                 c.kind,
                 c.evaluation_id,
             )
@@ -589,7 +586,7 @@ pub async fn get_dispatched_job(
         return Err(WebError::not_found(Resource::Job));
     }
 
-    let mapper = state.store_path_mapper(MappingContext::Project(j.project));
+    let mapper = state.project_mapper(j.project).await?;
     outbound_drv_paths(&mut j.job_context, &mapper);
     if let Some(candidates) = &mut j.candidates {
         outbound_drv_paths(candidates, &mapper);
@@ -1403,7 +1400,7 @@ pub async fn get_eval_flake_graph(
         .await?;
     let rows = gradient_db::flake_output_nodes::of_evaluation(&state.web_db, evaluation_id).await?;
 
-    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project_id));
+    let mapper = state.project_mapper(ctx.project_id).await?;
     let out = rows
         .into_iter()
         .map(FlakeGraphNode::from)
@@ -1674,9 +1671,9 @@ mod tests {
             gradient_entity::EXAMPLE_ORIGINAL_HASH,
             gradient_entity::EXAMPLE_STORED_HASH,
         );
-        let mapper = StorePathMapper::new(
+        let mapper = StorePathMapper::for_cache(
             Arc::new(gradient_entity::RotatedHashMapping),
-            MappingContext::Project(ProjectId::nil()),
+            CacheId::nil(),
         );
         let mut value = serde_json::json!({
             "derivations": [{ "drv_path": format!("{stored}-a.drv"), "name": "a" }]

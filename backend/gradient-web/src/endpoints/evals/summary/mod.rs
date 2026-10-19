@@ -118,7 +118,7 @@ pub async fn get_evaluation_summary(
         failures_total: failures.len(),
         failures: failed_builds(
             db,
-            &state.store_path_mapper(MappingContext::Project(ctx.project_id)),
+            &state.project_mapper(ctx.project_id).await?,
             &loaded,
             failures,
         )

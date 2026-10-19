@@ -19,7 +19,7 @@ use gradient_scheduler::Scheduler;
 use gradient_scheduler::jobs::eval_job_key;
 use gradient_test_support::state::TestState;
 use gradient_types::events::EventRx;
-use gradient_types::ids::{CacheId, EvaluationId, ProjectId};
+use gradient_types::ids::{CacheId, EvaluationId};
 use gradient_types::{BuildArgs, MappingContext, StoreHash, StorePathMapping};
 use gradient_wire::PROTO_VERSIONS;
 use gradient_wire::codec::{from_bytes, to_bytes};
@@ -53,7 +53,7 @@ const WAIT: Duration = Duration::from_secs(60);
 fn rotate(original: &str) -> String {
     RotatedHashMapping
         .inbound(
-            MappingContext::Project(ProjectId::nil()),
+            MappingContext::Cache(CacheId::nil()),
             StoreHash::parse(original).unwrap(),
         )
         .to_string()

@@ -109,7 +109,7 @@ pub async fn get_artefacts(
     let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
         .await?;
     let evaluation = ctx.evaluation;
-    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project_id));
+    let mapper = state.project_mapper(ctx.project_id).await?;
 
     let entry_points =
         gradient_db::entry_points::of_evaluation(&state.web_db, evaluation.id).await?;

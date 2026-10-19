@@ -9,7 +9,8 @@ use std::convert::Infallible;
 use gradient_db::DbContext;
 use gradient_entity::StorePathError;
 use gradient_scheduler::actor::Offer;
-use gradient_types::{MappingContext, StorePathMapper};
+use gradient_types::ids::ProjectId;
+use gradient_types::{MappingError, StorePathMapper};
 use gradient_wire::messages::{BuildFailureKind, ClientMessage, ServerMessage};
 use gradient_wire::types::{
     FlakeSource, ImportOutcome, InputOutcome, Job, JobCandidate, JobUpdateKind, UploadMetadata,
@@ -268,24 +269,36 @@ fn outbound_candidate_fields(
     paths.paths(&mut candidate.output_paths)
 }
 
-pub(super) fn outbound_offer(offer: Offer, db: &DbContext) -> Vec<JobCandidate> {
-    offer
-        .candidates
-        .into_iter()
-        .filter_map(|candidate| {
-            let project = *offer.projects.get(&candidate.job_id)?;
-            let mapper = db.store_path_mapper(MappingContext::Project(project));
-            Some(outbound_candidate(candidate, &mapper))
-        })
-        .collect()
+pub(super) async fn outbound_offer(offer: Offer, db: &DbContext) -> Vec<JobCandidate> {
+    let mut candidates = Vec::with_capacity(offer.candidates.len());
+    for candidate in offer.candidates {
+        let Some(&project) = offer.projects.get(&candidate.job_id) else {
+            continue;
+        };
+        if let Some(mapper) = project_mapper(db, project).await {
+            candidates.push(outbound_candidate(candidate, &mapper));
+        }
+    }
+    candidates
+}
+
+pub(super) fn unmapped_project(error: &MappingError) -> String {
+    format!("the project's store paths cannot be mapped: {error}")
+}
+
+pub(super) async fn project_mapper(db: &DbContext, project: ProjectId) -> Option<StorePathMapper> {
+    db.project_mapper(project)
+        .await
+        .inspect_err(|error| tracing::warn!(%project, "{}", unmapped_project(error)))
+        .ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
-    use gradient_types::ids::ProjectId;
-    use gradient_types::{MappingContext, StorePathMapper};
+    use gradient_types::StorePathMapper;
+    use gradient_types::ids::CacheId;
     use gradient_wire::messages::ServerMessage;
     use gradient_wire::types::{
         BuildJob, BuildOutput, BuildProduct, BuildSpec, DerivationOutput, DiscoveredDerivation,
@@ -297,10 +310,7 @@ mod tests {
     const S: &str = EXAMPLE_STORED_HASH;
 
     fn mapper() -> StorePathMapper {
-        StorePathMapper::new(
-            Arc::new(RotatedHashMapping),
-            MappingContext::Project(ProjectId::nil()),
-        )
+        StorePathMapper::for_cache(Arc::new(RotatedHashMapping), CacheId::nil())
     }
 
     #[test]

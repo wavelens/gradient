@@ -326,14 +326,15 @@ mod tests {
             .append_query_results([vec![attempt]])
             .append_query_results([Vec::<gradient_entity::build_log_chunk::Model>::new()])
             .into_connection();
-        let session = Session {
-            handles: SshHandles::from_state(&TestState::new().web_db(db).build()),
-            user: gradient_fixtures::rows::user(),
-            project: gradient_fixtures::rows::project(),
-            permissions: 0,
-            caches: vec![],
-            closed: Default::default(),
-        };
+        let session = Session::open(
+            SshHandles::from_state(&TestState::new().web_db(db).build()),
+            gradient_fixtures::rows::user(),
+            gradient_fixtures::rows::project(),
+            0,
+            vec![],
+        )
+        .await
+        .unwrap();
         let mut logs = BuildLogs {
             drv_paths: HashMap::from([(build.id, DRV.to_owned())]),
             open: vec![build.id],

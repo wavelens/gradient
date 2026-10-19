@@ -85,7 +85,7 @@ fn signed_events(
         .iter()
         .map(|&cache| NarSigned {
             cache,
-            hash: StorePathMapper::new(Arc::clone(mapping), MappingContext::Cache(cache))
+            hash: StorePathMapper::for_cache(Arc::clone(mapping), cache)
                 .outbound(path)
                 .hash()
                 .to_string(),

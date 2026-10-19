@@ -11,8 +11,7 @@ use std::time::Instant;
 use gradient_types::events::{build, evaluation};
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId, TaskId};
 use gradient_types::{
-    BuildProgress, BuildProgressPhase, EvaluationProgress, MappingContext, StorePath,
-    StorePathMapper,
+    BuildProgress, BuildProgressPhase, EvaluationProgress, StorePath, StorePathMapper,
 };
 use tokio::sync::Semaphore;
 use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
@@ -22,8 +21,8 @@ use gradient_scheduler::jobs::{Assignment, PendingJob};
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_wire::Rejection;
 use gradient_wire::messages::{
-    CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership, JobKind, JobUpdateKind,
-    ServerMessage,
+    BuildFailureKind, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership,
+    JobKind, JobUpdateKind, ServerMessage,
 };
 use gradient_wire::types::{
     BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
@@ -41,7 +40,9 @@ use super::refusal::refuse;
 use super::socket::{
     ProtoWriter, job_offer_chunks, send_credentials_for_job, send_error, send_server_msg,
 };
-use super::store_paths::{inbound_or_refuse, outbound_message, outbound_offer};
+use super::store_paths::{
+    inbound_or_refuse, outbound_message, outbound_offer, project_mapper, unmapped_project,
+};
 use super::upload::UploadSession;
 use gradient_db::cache_paths::project_read_caches;
 
@@ -535,14 +536,18 @@ impl<'a> InboundContext<'a> {
             }
             _ => None,
         };
-        match project {
-            Some(project) => {
-                let mapper = self.mapper(project);
-                let mapped = inbound_or_refuse(self.writer, &mapper, msg).await?;
-                Some((mapped, Some(mapper)))
+        let Some(project) = project else {
+            return Some((msg, None));
+        };
+        let mapper = match self.handles.db.project_mapper(project).await {
+            Ok(mapper) => mapper,
+            Err(e) => {
+                refuse(self.writer, &msg, &unmapped_project(&e)).await;
+                return None;
             }
-            None => Some((msg, None)),
-        }
+        };
+        let mapped = inbound_or_refuse(self.writer, &mapper, msg).await?;
+        Some((mapped, Some(mapper)))
     }
 
     async fn on_job_update(&self, job_id: String, update: JobUpdateKind) {
@@ -583,12 +588,6 @@ impl<'a> InboundContext<'a> {
             }
             None => false,
         }
-    }
-
-    fn mapper(&self, project: ProjectId) -> StorePathMapper {
-        self.handles
-            .db
-            .store_path_mapper(MappingContext::Project(project))
     }
 
     fn rpc(&self) -> RpcContext {
@@ -713,7 +712,7 @@ impl<'a> InboundContext<'a> {
     async fn on_request_job_list(&mut self) -> bool {
         debug!(peer_id = %self.peer_id, "RequestJobList");
         let offer = self.scheduler.get_job_candidates(self.peer_id).await;
-        self.send_job_list_chunks(outbound_offer(offer, &self.handles.db))
+        self.send_job_list_chunks(outbound_offer(offer, &self.handles.db).await)
             .await
     }
 
@@ -767,6 +766,9 @@ impl<'a> InboundContext<'a> {
         cluster: Option<ClusterMembership>,
     ) -> bool {
         tracing::Span::current().record("job_id", assignment.job_id());
+        let Some(mapper) = project_mapper(&self.handles.db, assignment.project_id).await else {
+            return self.fail_unmappable(assignment.job_id()).await;
+        };
         self.active.insert(
             assignment.job_id().to_owned(),
             ActiveJob {
@@ -787,7 +789,6 @@ impl<'a> InboundContext<'a> {
         .await;
         let job_id = assignment.job_id().to_owned();
         let assigned = debug_span!("assign_job", %job_id);
-        let mapper = self.mapper(assignment.project_id);
         let assign = ServerMessage::AssignJob {
             job_id,
             assignment_id: assignment.assignment_id().to_string(),
@@ -798,6 +799,24 @@ impl<'a> InboundContext<'a> {
             .instrument(assigned)
             .await
             .is_ok()
+    }
+
+    async fn fail_unmappable(&self, job_id: &str) -> bool {
+        let failed = self
+            .scheduler
+            .handle_job_failed(
+                self.peer_id,
+                job_id,
+                "the project's store paths cannot be mapped",
+                BuildFailureKind::Transient,
+                &[],
+                None,
+            )
+            .await;
+        if let Err(e) = failed {
+            warn!(peer_id = %self.peer_id, %job_id, error = %e, "releasing an unmappable job failed");
+        }
+        true
     }
 
     #[tracing::instrument(level = "debug", skip_all, fields(scores = scores.len(), is_final))]
@@ -1001,10 +1020,13 @@ impl RpcContext {
             refuse(&self.writer, &msg, "the job does not resolve to a project").await;
             return;
         };
-        let mapper = self
-            .handles
-            .db
-            .store_path_mapper(MappingContext::Project(project_id));
+        let mapper = match self.handles.db.project_mapper(project_id).await {
+            Ok(mapper) => mapper,
+            Err(e) => {
+                refuse(&self.writer, &msg, &unmapped_project(&e)).await;
+                return;
+            }
+        };
         let Some(msg) = inbound_or_refuse(&self.writer, &mapper, msg).await else {
             return;
         };
@@ -1702,6 +1724,36 @@ mod assignment_response_tests {
         assert!(matches!(
             decode(sent.try_recv().expect("a refusal")),
             ServerMessage::Error { code: 400, .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_message_whose_project_does_not_resolve_is_refused_in_the_reply_it_waits_for() {
+        use super::fixture::{JOB, TestSession, decode};
+        use gradient_entity::{EXAMPLE_ORIGINAL_HASH, UnresolvableProjectMapping};
+        use gradient_wire::types::ImportOutcome;
+
+        let state = TestState::new()
+            .worker_db(empty_db())
+            .store_path_mapping(Arc::new(UnresolvableProjectMapping))
+            .build();
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        let asked = format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-hello.drv");
+
+        let import = ClientMessage::ImportRequest {
+            job_id: JOB.into(),
+            request_id: "r1".into(),
+            drv_paths: vec![asked.clone()],
+        };
+        assert!(ctx.handle(import, uploads).await);
+        assert!(matches!(
+            decode(sent.try_recv().expect("a refusal")),
+            ServerMessage::ImportResult {
+                request_id,
+                outcome: ImportOutcome::Unknown { drv_path },
+                ..
+            } if request_id == "r1" && drv_path == asked
         ));
     }
 
