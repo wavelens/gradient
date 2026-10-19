@@ -10,7 +10,9 @@ use std::time::Instant;
 
 use gradient_types::events::{build, evaluation};
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId, TaskId};
-use gradient_types::{BuildProgress, BuildProgressPhase, EvaluationProgress, MappingContext};
+use gradient_types::{
+    BuildProgress, BuildProgressPhase, EvaluationProgress, MappingContext, StorePathMapper,
+};
 use gradient_util::store_path::strip_nix_store_prefix;
 use tokio::sync::Semaphore;
 use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
@@ -39,7 +41,7 @@ use super::refusal::refuse;
 use super::socket::{
     ProtoWriter, job_offer_chunks, send_credentials_for_job, send_error, send_server_msg,
 };
-use super::store_paths::inbound_message;
+use super::store_paths::{inbound_or_refuse, outbound_message, outbound_offer};
 use super::upload::UploadSession;
 
 #[derive(Clone)]
@@ -167,7 +169,7 @@ pub(super) struct InboundContext<'a> {
 impl<'a> InboundContext<'a> {
     pub async fn handle(&mut self, msg: ClientMessage, uploads: &mut UploadSession) -> bool {
         trace!(variant = msg.variant_name(), "received client message");
-        let Some(msg) = self.admit(msg).await else {
+        let Some((msg, mapper)) = self.admit(msg).await else {
             return true;
         };
         match msg {
@@ -354,7 +356,9 @@ impl<'a> InboundContext<'a> {
                 true
             }
             ClientMessage::NarRequest { job_id, paths } => {
-                self.on_nar_request(job_id, paths).await;
+                if let Some(mapper) = mapper {
+                    self.on_nar_request(job_id, paths, mapper).await;
+                }
                 true
             }
             ClientMessage::NarRequestResume {
@@ -363,8 +367,16 @@ impl<'a> InboundContext<'a> {
                 received_bytes,
                 stream_token,
             } => {
-                self.on_nar_request_resume(job_id, store_path, received_bytes, stream_token)
+                if let Some(mapper) = mapper {
+                    self.on_nar_request_resume(
+                        job_id,
+                        store_path,
+                        received_bytes,
+                        stream_token,
+                        mapper,
+                    )
                     .await;
+                }
                 true
             }
             ClientMessage::EvalCachePull {
@@ -502,7 +514,7 @@ impl<'a> InboundContext<'a> {
         }
     }
 
-    async fn admit(&self, msg: ClientMessage) -> Option<ClientMessage> {
+    async fn admit(&self, msg: ClientMessage) -> Option<(ClientMessage, Option<StorePathMapper>)> {
         let project = match &msg {
             ClientMessage::InputFetched { fetch_id, .. } => self.active.fetch_project(fetch_id),
             ClientMessage::JobUpdate { job_id, .. }
@@ -523,8 +535,12 @@ impl<'a> InboundContext<'a> {
             _ => None,
         };
         match project {
-            Some(project) => mapped_inbound(self.handles, self.writer, project, msg).await,
-            None => Some(msg),
+            Some(project) => {
+                let mapper = self.mapper(project);
+                let mapped = inbound_or_refuse(self.writer, &mapper, msg).await?;
+                Some((mapped, Some(mapper)))
+            }
+            None => Some((msg, None)),
         }
     }
 
@@ -566,6 +582,12 @@ impl<'a> InboundContext<'a> {
             }
             None => false,
         }
+    }
+
+    fn mapper(&self, project: ProjectId) -> StorePathMapper {
+        self.handles
+            .db
+            .store_path_mapper(MappingContext::Project(project))
     }
 
     fn rpc(&self) -> RpcContext {
@@ -680,8 +702,9 @@ impl<'a> InboundContext<'a> {
 
     async fn on_request_job_list(&mut self) -> bool {
         debug!(peer_id = %self.peer_id, "RequestJobList");
-        let candidates = self.scheduler.get_job_candidates(self.peer_id).await;
-        self.send_job_list_chunks(candidates).await
+        let offer = self.scheduler.get_job_candidates(self.peer_id).await;
+        self.send_job_list_chunks(outbound_offer(offer, &self.handles.db))
+            .await
     }
 
     async fn send_job_list_chunks(
@@ -754,18 +777,17 @@ impl<'a> InboundContext<'a> {
         .await;
         let job_id = assignment.job_id().to_owned();
         let assigned = debug_span!("assign_job", %job_id);
-        send_server_msg(
-            self.writer,
-            &ServerMessage::AssignJob {
-                job_id,
-                assignment_id: assignment.assignment_id().to_string(),
-                job: assignment.job,
-                cluster: cluster.map(Box::new),
-            },
-        )
-        .instrument(assigned)
-        .await
-        .is_ok()
+        let mapper = self.mapper(assignment.project_id);
+        let assign = ServerMessage::AssignJob {
+            job_id,
+            assignment_id: assignment.assignment_id().to_string(),
+            job: assignment.job,
+            cluster: cluster.map(Box::new),
+        };
+        send_server_msg(self.writer, &outbound_message(assign, &mapper))
+            .instrument(assigned)
+            .await
+            .is_ok()
     }
 
     #[tracing::instrument(level = "debug", skip_all, fields(scores = scores.len(), is_final))]
@@ -851,7 +873,12 @@ impl<'a> InboundContext<'a> {
         });
     }
 
-    async fn on_nar_request(&mut self, job_id: String, paths: Vec<String>) {
+    async fn on_nar_request(
+        &mut self,
+        job_id: String,
+        paths: Vec<String>,
+        mapper: StorePathMapper,
+    ) {
         debug!(peer_id = %self.peer_id, %job_id, count = paths.len(), "NarRequest");
         let shutdown = self.handles.db.shutdown.clone();
         for store_path in paths {
@@ -860,6 +887,7 @@ impl<'a> InboundContext<'a> {
             let permit = Arc::clone(self.nar_serve_semaphore);
             let peer_id = self.peer_id.to_owned();
             let job_id = job_id.clone();
+            let mapper = mapper.clone();
             shutdown.spawn(async move {
                 let server = Arc::clone(&handles.nar_downloads);
                 let Some(_slot) = ServeSlot::acquire(permit, server).await else {
@@ -867,7 +895,8 @@ impl<'a> InboundContext<'a> {
                 };
 
                 if let Err(e) =
-                    serve_nar_request(&handles, &writer, &job_id, &store_path, 0, None).await
+                    serve_nar_request(&handles, &writer, &mapper, &job_id, &store_path, 0, None)
+                        .await
                 {
                     warn!(%peer_id, %job_id, %store_path, error = %e, "NarRequest serve failed");
                 }
@@ -881,6 +910,7 @@ impl<'a> InboundContext<'a> {
         store_path: String,
         received_bytes: u64,
         stream_token: String,
+        mapper: StorePathMapper,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, received_bytes, "NarRequestResume");
         let handles = self.handles.clone();
@@ -897,6 +927,7 @@ impl<'a> InboundContext<'a> {
             if let Err(e) = serve_nar_request(
                 &handles,
                 &writer,
+                &mapper,
                 &job_id,
                 &store_path,
                 received_bytes,
@@ -960,10 +991,14 @@ impl RpcContext {
             refuse(&self.writer, &msg, "no job of this session").await;
             return;
         };
-        let Some(msg) = mapped_inbound(&self.handles, &self.writer, project_id, msg).await else {
+        let mapper = self
+            .handles
+            .db
+            .store_path_mapper(MappingContext::Project(project_id));
+        let Some(msg) = inbound_or_refuse(&self.writer, &mapper, msg).await else {
             return;
         };
-        match msg {
+        let reply = match msg {
             ClientMessage::CacheQuery {
                 job_id,
                 query_id,
@@ -985,7 +1020,14 @@ impl RpcContext {
                 self.on_query_known_derivations(job_id, query_id, drv_paths)
                     .await
             }
-            _ => {}
+            _ => return,
+        };
+        let variant = reply.variant_name();
+        if send_server_msg(&self.writer, &outbound_message(reply, &mapper))
+            .await
+            .is_err()
+        {
+            debug!(peer_id = %self.peer_id, variant, "reply send failed; connection closing");
         }
     }
 
@@ -1002,7 +1044,7 @@ impl RpcContext {
         nar_sizes: Vec<Option<u64>>,
         mode: gradient_wire::types::QueryMode,
         external: bool,
-    ) {
+    ) -> ServerMessage {
         debug!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, external, "CacheQuery");
         let answer = handle_cache_query(
             &self.handles,
@@ -1015,7 +1057,7 @@ impl RpcContext {
 
         // A DB error or an over-budget handler is indeterminate, never "absent". `CacheError` is
         // making the worker retry instead of failing the eval with `InputsUnavailable`.
-        let reply = match tokio::time::timeout(CACHE_QUERY_BUDGET, answer).await {
+        match tokio::time::timeout(CACHE_QUERY_BUDGET, answer).await {
             Ok(Ok(cached)) => {
                 debug!(peer_id = %self.peer_id, %job_id, %query_id, entries = cached.len(), "CacheStatus");
                 ServerMessage::CacheStatus { query_id, cached }
@@ -1034,10 +1076,6 @@ impl RpcContext {
                     message: "cache query exceeded server budget".to_string(),
                 }
             }
-        };
-
-        if send_server_msg(&self.writer, &reply).await.is_err() {
-            debug!(peer_id = %self.peer_id, "CacheStatus/CacheError send failed; connection closing");
         }
     }
 
@@ -1046,7 +1084,7 @@ impl RpcContext {
         job_id: String,
         query_id: String,
         drv_paths: Vec<String>,
-    ) {
+    ) -> ServerMessage {
         debug!(peer_id = %self.peer_id, %job_id, %query_id, count = drv_paths.len(), "QueryKnownDerivations");
         let hashes: Vec<String> = drv_paths
             .iter()
@@ -1076,15 +1114,7 @@ impl RpcContext {
             }
         };
         debug!(peer_id = %self.peer_id, %job_id, %query_id, known = known.len(), "KnownDerivations");
-        if send_server_msg(
-            &self.writer,
-            &ServerMessage::KnownDerivations { query_id, known },
-        )
-        .await
-        .is_err()
-        {
-            debug!(peer_id = %self.peer_id, "KnownDerivations send failed; connection closing");
-        }
+        ServerMessage::KnownDerivations { query_id, known }
     }
 
     async fn on_worker_metrics(&self, metrics: WorkerMetrics) {
@@ -1092,24 +1122,6 @@ impl RpcContext {
         self.scheduler
             .update_worker_metrics(&self.peer_id, metrics)
             .await;
-    }
-}
-
-async fn mapped_inbound(
-    handles: &SessionHandles,
-    writer: &ProtoWriter,
-    project: ProjectId,
-    msg: ClientMessage,
-) -> Option<ClientMessage> {
-    let mapper = handles
-        .db
-        .store_path_mapper(MappingContext::Project(project));
-    match inbound_message(msg.clone(), &mapper) {
-        Ok(mapped) => Some(mapped),
-        Err(e) => {
-            refuse(writer, &msg, &e.to_string()).await;
-            None
-        }
     }
 }
 
@@ -1684,5 +1696,45 @@ mod assignment_response_tests {
             decode(sent.try_recv().expect("a refusal")),
             ServerMessage::Error { code: 400, .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn a_cache_status_names_the_paths_the_worker_asked_for() {
+        use super::fixture::{JOB, TestSession, decode};
+        use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
+
+        let stored = gradient_entity::cached_path::Model {
+            hash: EXAMPLE_STORED_HASH.into(),
+            file_hash: Some("sha256:f".into()),
+            confirmed: true,
+            ..Default::default()
+        };
+        let cache_db = gradient_fixtures::mock::mock_db()
+            .append_query_results([vec![stored]])
+            .into_connection();
+        let state = TestState::new()
+            .cache_db(cache_db)
+            .store_path_mapping(Arc::new(RotatedHashMapping))
+            .build();
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (ctx, _uploads) = session.split();
+        let asked = format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-hello");
+
+        ctx.rpc().serve(ClientMessage::CacheQuery {
+            job_id: JOB.into(),
+            query_id: "q1".into(),
+            paths: vec![asked.clone()],
+            nar_sizes: vec![None],
+            mode: gradient_wire::types::QueryMode::Normal,
+            external: false,
+        });
+        let reply = tokio::time::timeout(Duration::from_secs(5), sent.recv())
+            .await
+            .expect("answered")
+            .expect("reply sent");
+        let ServerMessage::CacheStatus { cached, .. } = decode(reply) else {
+            panic!("a CacheStatus")
+        };
+        assert_eq!(cached[0].path, asked);
     }
 }

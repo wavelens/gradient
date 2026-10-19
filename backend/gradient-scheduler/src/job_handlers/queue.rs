@@ -8,7 +8,7 @@ use crate::Scheduler;
 use crate::actor::{Offer, SchedulerMsg};
 use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingJob};
 use gradient_pool::WorkerInfo;
-use gradient_wire::types::{GradientCapabilities, JobCandidate};
+use gradient_wire::types::GradientCapabilities;
 
 impl Scheduler {
     pub async fn enqueue_eval_job(
@@ -86,7 +86,7 @@ impl Scheduler {
         .await
     }
 
-    pub async fn get_job_candidates(&self, worker_id: &str) -> Vec<JobCandidate> {
+    pub async fn get_job_candidates(&self, worker_id: &str) -> Offer {
         let worker = worker_id.to_owned();
         self.call(|reply| SchedulerMsg::Candidates {
             worker,
@@ -94,7 +94,6 @@ impl Scheduler {
             reply,
         })
         .await
-        .map(|o| o.candidates)
         .unwrap_or_default()
     }
 

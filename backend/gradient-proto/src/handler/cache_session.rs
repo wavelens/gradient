@@ -7,6 +7,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use gradient_types::MappingContext;
 use gradient_types::ids::CacheId;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
@@ -87,6 +88,9 @@ pub async fn handle_cache_socket(
     let nar_serve_semaphore = Arc::new(Semaphore::new(max_serves));
     let idle = Duration::from_secs(CACHE_SESSION_IDLE_TIMEOUT_SECS);
     let cancel = handles.db.shutdown.token();
+    let mapper = handles
+        .db
+        .store_path_mapper(MappingContext::Cache(cache_id));
 
     loop {
         // The idle timeout is only enforced while no NAR transfer is in flight. A client quietly
@@ -158,12 +162,14 @@ pub async fn handle_cache_socket(
                     let handles = handles.clone();
                     let writer = writer.clone();
                     let job_id = job_id.clone();
+                    let mapper = mapper.clone();
                     let shutdown = handles.db.shutdown.clone();
                     shutdown.spawn(async move {
                         let _slot = slot;
                         if let Err(e) = super::nar_serve::serve_nar_request(
                             &handles,
                             &writer,
+                            &mapper,
                             &job_id,
                             &store_path,
                             0,

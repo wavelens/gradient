@@ -4,32 +4,40 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::convert::Infallible;
+
+use gradient_db::DbContext;
 use gradient_entity::StorePathError;
-use gradient_types::StorePathMapper;
-use gradient_wire::messages::ClientMessage;
-use gradient_wire::types::{InputOutcome, JobUpdateKind, UploadMetadata, UploadObject};
+use gradient_scheduler::actor::Offer;
+use gradient_types::{MappingContext, StorePathMapper};
+use gradient_wire::messages::{ClientMessage, ServerMessage};
+use gradient_wire::types::{
+    FlakeSource, ImportOutcome, InputOutcome, Job, JobCandidate, JobUpdateKind, UploadMetadata,
+    UploadObject,
+};
 use serde_json::Value;
 
-type MapText = fn(&StorePathMapper, &str) -> Result<String, StorePathError>;
+use super::refusal::refuse;
+use super::socket::ProtoWriter;
 
-struct TextMapper<'a> {
+struct TextMapper<'a, E> {
     mapper: &'a StorePathMapper,
-    map: MapText,
+    map: fn(&StorePathMapper, &str) -> Result<String, E>,
 }
 
-impl TextMapper<'_> {
-    fn path(&self, text: &mut String) -> Result<(), StorePathError> {
+impl<E> TextMapper<'_, E> {
+    fn path(&self, text: &mut String) -> Result<(), E> {
         if !text.is_empty() {
             *text = (self.map)(self.mapper, text)?;
         }
         Ok(())
     }
 
-    fn paths(&self, texts: &mut [String]) -> Result<(), StorePathError> {
+    fn paths(&self, texts: &mut [String]) -> Result<(), E> {
         texts.iter_mut().try_for_each(|text| self.path(text))
     }
 
-    fn json_store_path(&self, json: &mut String) -> Result<(), StorePathError> {
+    fn json_store_path(&self, json: &mut String) -> Result<(), E> {
         let Ok(mut value) = serde_json::from_str::<Value>(json) else {
             return Ok(());
         };
@@ -42,10 +50,21 @@ impl TextMapper<'_> {
     }
 }
 
-fn inbound(mapper: &StorePathMapper) -> TextMapper<'_> {
+fn inbound(mapper: &StorePathMapper) -> TextMapper<'_, StorePathError> {
     TextMapper {
         mapper,
         map: StorePathMapper::inbound_text,
+    }
+}
+
+fn outbound(mapper: &StorePathMapper) -> TextMapper<'_, Infallible> {
+    TextMapper {
+        mapper,
+        map: |mapper, text| {
+            Ok(mapper
+                .outbound_text(text)
+                .unwrap_or_else(|_| text.to_owned()))
+        },
     }
 }
 
@@ -78,7 +97,10 @@ pub(super) fn inbound_message(
     Ok(msg)
 }
 
-fn inbound_update(update: &mut JobUpdateKind, paths: &TextMapper) -> Result<(), StorePathError> {
+fn inbound_update(
+    update: &mut JobUpdateKind,
+    paths: &TextMapper<StorePathError>,
+) -> Result<(), StorePathError> {
     match update {
         JobUpdateKind::EvalResult { derivations, .. } => {
             for derivation in derivations {
@@ -114,6 +136,20 @@ fn inbound_update(update: &mut JobUpdateKind, paths: &TextMapper) -> Result<(), 
     Ok(())
 }
 
+pub(super) async fn inbound_or_refuse(
+    writer: &ProtoWriter,
+    mapper: &StorePathMapper,
+    msg: ClientMessage,
+) -> Option<ClientMessage> {
+    match inbound_message(msg.clone(), mapper) {
+        Ok(mapped) => Some(mapped),
+        Err(e) => {
+            refuse(writer, &msg, &e.to_string()).await;
+            None
+        }
+    }
+}
+
 pub(super) fn inbound_upload_metadata(
     mut metadata: UploadMetadata,
     mapper: &StorePathMapper,
@@ -128,15 +164,104 @@ pub(super) fn inbound_upload_metadata(
     Ok(metadata)
 }
 
+pub(super) fn outbound_message(mut msg: ServerMessage, mapper: &StorePathMapper) -> ServerMessage {
+    let paths = outbound(mapper);
+    let Ok(()) = outbound_fields(&mut msg, &paths);
+    msg
+}
+
+fn outbound_fields(
+    msg: &mut ServerMessage,
+    paths: &TextMapper<Infallible>,
+) -> Result<(), Infallible> {
+    match msg {
+        ServerMessage::AssignJob { job, .. } => match job {
+            Job::Build(build) => {
+                for spec in &mut build.builds {
+                    paths.path(&mut spec.drv_path)?;
+                    for output in &mut spec.outputs {
+                        paths.path(&mut output.path)?;
+                    }
+                }
+            }
+            Job::Flake(flake) => {
+                if let FlakeSource::Cached { store_path } = &mut flake.source {
+                    paths.path(store_path)?;
+                }
+            }
+        },
+        ServerMessage::JobOffer { candidates } | ServerMessage::JobListChunk { candidates, .. } => {
+            for candidate in candidates {
+                outbound_candidate_fields(candidate, paths)?;
+            }
+        }
+        ServerMessage::CacheStatus { cached, .. } => {
+            for entry in cached {
+                paths.path(&mut entry.path)?;
+                if let Some(references) = &mut entry.references {
+                    paths.paths(references)?;
+                }
+                if let Some(deriver) = &mut entry.deriver {
+                    paths.path(deriver)?;
+                }
+            }
+        }
+        ServerMessage::KnownDerivations { known, .. } => paths.paths(known)?,
+        ServerMessage::ImportResult {
+            outcome: ImportOutcome::Failed { drv_path, .. } | ImportOutcome::Unknown { drv_path },
+            ..
+        } => paths.path(drv_path)?,
+        ServerMessage::FetchInput { request, .. } => paths.json_store_path(request)?,
+        ServerMessage::InputResult {
+            outcome: InputOutcome::Fetched { response },
+            ..
+        } => paths.json_store_path(response)?,
+        _ => {}
+    }
+    Ok(())
+}
+
+pub(super) fn outbound_candidate(
+    mut candidate: JobCandidate,
+    mapper: &StorePathMapper,
+) -> JobCandidate {
+    let Ok(()) = outbound_candidate_fields(&mut candidate, &outbound(mapper));
+    candidate
+}
+
+fn outbound_candidate_fields(
+    candidate: &mut JobCandidate,
+    paths: &TextMapper<Infallible>,
+) -> Result<(), Infallible> {
+    for required in &mut candidate.required_paths {
+        paths.path(&mut required.path)?;
+    }
+    paths.paths(&mut candidate.drv_paths)?;
+    paths.paths(&mut candidate.output_paths)
+}
+
+pub(super) fn outbound_offer(offer: Offer, db: &DbContext) -> Vec<JobCandidate> {
+    offer
+        .candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let project = *offer.projects.get(&candidate.job_id)?;
+            let mapper = db.store_path_mapper(MappingContext::Project(project));
+            Some(outbound_candidate(candidate, &mapper))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
     use gradient_types::ids::ProjectId;
     use gradient_types::{MappingContext, StorePathMapper};
+    use gradient_wire::messages::ServerMessage;
     use gradient_wire::types::{
-        BuildOutput, BuildProduct, DerivationOutput, DiscoveredDerivation, JobUpdateKind,
-        NarUploadMetadata, UploadMetadata,
+        BuildJob, BuildOutput, BuildProduct, BuildSpec, DerivationOutput, DiscoveredDerivation,
+        Job, JobCandidate, JobUpdateKind, NarUploadMetadata, RequiredPath, UploadMetadata,
     };
     use std::sync::Arc;
 
@@ -289,5 +414,60 @@ mod tests {
             paths: vec!["/nix/store/abc-a".into()],
         };
         assert!(inbound_message(msg, &mapper()).is_err());
+    }
+
+    #[test]
+    fn an_assigned_build_names_original_paths() {
+        let msg = ServerMessage::AssignJob {
+            job_id: "j1".into(),
+            assignment_id: "a1".into(),
+            job: Job::Build(BuildJob {
+                builds: vec![BuildSpec {
+                    build_id: "b1".into(),
+                    drv_path: format!("{S}-a.drv"),
+                    kind: Default::default(),
+                    is_fixed_output: false,
+                    outputs: vec![DerivationOutput {
+                        name: "out".into(),
+                        path: format!("/nix/store/{S}-a"),
+                    }],
+                    timeout_secs: None,
+                    max_silent_secs: None,
+                    build_cores: None,
+                }],
+                requirement: Default::default(),
+            }),
+            cluster: None,
+        };
+        let ServerMessage::AssignJob {
+            job: Job::Build(job),
+            ..
+        } = outbound_message(msg, &mapper())
+        else {
+            panic!("an AssignJob stays an AssignJob")
+        };
+        assert_eq!(job.builds[0].drv_path, format!("{O}-a.drv"));
+        assert_eq!(job.builds[0].outputs[0].path, format!("/nix/store/{O}-a"));
+    }
+
+    #[test]
+    fn an_offered_candidate_names_original_paths() {
+        let candidate = JobCandidate {
+            job_id: "j1".into(),
+            required_paths: vec![RequiredPath {
+                path: format!("/nix/store/{S}-dep"),
+                cache_info: None,
+            }],
+            drv_paths: vec![format!("/nix/store/{S}-a.drv")],
+            output_paths: vec![format!("/nix/store/{S}-a")],
+            requirement: None,
+        };
+        let candidate = outbound_candidate(candidate, &mapper());
+        assert_eq!(
+            candidate.required_paths[0].path,
+            format!("/nix/store/{O}-dep")
+        );
+        assert_eq!(candidate.drv_paths, vec![format!("/nix/store/{O}-a.drv")]);
+        assert_eq!(candidate.output_paths, vec![format!("/nix/store/{O}-a")]);
     }
 }

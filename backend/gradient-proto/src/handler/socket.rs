@@ -13,6 +13,8 @@ use tracing::{debug, warn};
 use gradient_scheduler::Scheduler;
 use gradient_wire::messages::ServerMessage;
 
+use super::store_paths::{outbound_message, outbound_offer};
+
 pub use gradient_wire::session::frame::{
     BULK_CHUNK_SIZE, HANDSHAKE_TIMEOUT, ProtoSocket, ProtoWriter, recv_client_msg, send_error,
     send_server_msg,
@@ -25,11 +27,12 @@ pub(super) async fn push_pending_candidates(
     peer_id: &str,
 ) {
     let offer = scheduler.get_new_job_candidates(peer_id).await;
-    if offer.candidates.is_empty() {
+    let candidates = outbound_offer(offer, &scheduler.db);
+    if candidates.is_empty() {
         return;
     }
-    debug!(%peer_id, count = offer.candidates.len(), "pushing job offer (delta) after message processing");
-    for chunk in job_offer_chunks(&offer.candidates) {
+    debug!(%peer_id, count = candidates.len(), "pushing job offer (delta) after message processing");
+    for chunk in job_offer_chunks(&candidates) {
         let _ = send_server_msg(
             writer,
             &ServerMessage::JobOffer {
@@ -77,16 +80,14 @@ pub(super) async fn send_input_fetch(
     } else {
         None
     };
-    send_server_msg(
-        writer,
-        &ServerMessage::FetchInput {
-            fetch_id: fetch.fetch_id,
-            project: fetch.project.to_string(),
-            request: fetch.request,
-            ssh_key,
-        },
-    )
-    .await
+    let mapper = db.store_path_mapper(MappingContext::Project(fetch.project));
+    let msg = ServerMessage::FetchInput {
+        fetch_id: fetch.fetch_id,
+        project: fetch.project.to_string(),
+        request: fetch.request,
+        ssh_key,
+    };
+    send_server_msg(writer, &outbound_message(msg, &mapper)).await
 }
 
 pub(super) struct InputFetch {
