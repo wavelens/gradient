@@ -13,14 +13,19 @@ use gradient_db::DbContext;
 use gradient_types::events::{Event, build, evaluation};
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, EntityTrait};
+use std::sync::Arc;
 
 pub async fn enrich(ctx: &DbContext, event: Event) -> Result<Option<Event>> {
-    enrich_with(&ctx.worker_db, event).await
+    enrich_with(&ctx.worker_db, &ctx.store_path_mapping, event).await
 }
 
-pub async fn enrich_with<C: ConnectionTrait>(db: &C, event: Event) -> Result<Option<Event>> {
+pub async fn enrich_with<C: ConnectionTrait>(
+    db: &C,
+    mapping: &Arc<dyn StorePathMapping>,
+    event: Event,
+) -> Result<Option<Event>> {
     Ok(match event {
-        Event::BuildReported(b) => enrich_build(db, b).await?.map(Event::from),
+        Event::BuildReported(b) => enrich_build(db, mapping, b).await?.map(Event::from),
         Event::EvaluationReported(e) => enrich_evaluation(db, e).await?.map(Event::from),
         other => Some(other),
     })
@@ -59,6 +64,7 @@ async fn evaluation_scope<C: ConnectionTrait>(db: &C, id: EvaluationId) -> Resul
 
 async fn enrich_build<C: ConnectionTrait>(
     db: &C,
+    mapping: &Arc<dyn StorePathMapping>,
     mut b: build::Reported,
 ) -> Result<Option<build::Reported>> {
     let Some(scope) = evaluation_scope(db, b.evaluation_id).await? else {
@@ -67,11 +73,12 @@ async fn enrich_build<C: ConnectionTrait>(
     b.task = Some(scope.task);
     b.project = Some(scope.project);
     b.evaluation_kind = Some(eval_kind_str(scope.evaluation.kind).to_owned());
+    let mapper = StorePathMapper::new(Arc::clone(mapping), MappingContext::Project(scope.project));
     b.derivation_path = EDerivation::find_by_id(b.derivation)
         .one(db)
         .await
         .context("look up the derivation of a build report")?
-        .map(|d| d.store_path());
+        .map(|d| mapper.outbound(&d.as_store_path()).full());
     Ok(Some(b))
 }
 
@@ -93,6 +100,7 @@ async fn enrich_evaluation<C: ConnectionTrait>(
 mod tests {
     use super::*;
     use gradient_entity::build::BuildStatus;
+    use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
     use gradient_fixtures::mock::{empty_db, mock_db};
 
     #[tokio::test]
@@ -106,7 +114,49 @@ mod tests {
         }
         .into();
 
-        assert!(enrich_with(&db, event).await.unwrap().is_none());
+        let mapping: Arc<dyn StorePathMapping> = Arc::new(gradient_entity::IdentityMapping);
+        assert!(enrich_with(&db, &mapping, event).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_reported_build_names_its_original_derivation_path() {
+        let evaluation = MEvaluation {
+            id: EvaluationId::now_v7(),
+            task: Some(TaskId::now_v7()),
+            ..Default::default()
+        };
+        let task = MTask {
+            id: evaluation.task.unwrap(),
+            project: ProjectId::now_v7(),
+            ..Default::default()
+        };
+        let derivation = MDerivation {
+            id: DerivationId::now_v7(),
+            hash: EXAMPLE_STORED_HASH.into(),
+            name: "hello".into(),
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_query_results([vec![evaluation.clone()]])
+            .append_query_results([vec![task]])
+            .append_query_results([vec![derivation.clone()]])
+            .into_connection();
+        let event: Event = build::Reported {
+            evaluation_id: evaluation.id,
+            derivation: derivation.id,
+            ..Default::default()
+        }
+        .into();
+        let mapping: Arc<dyn StorePathMapping> = Arc::new(RotatedHashMapping);
+
+        let Some(Event::BuildReported(reported)) = enrich_with(&db, &mapping, event).await.unwrap()
+        else {
+            panic!("the build is reported");
+        };
+        assert_eq!(
+            reported.derivation_path,
+            Some(format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-hello.drv"))
+        );
     }
 
     #[tokio::test]
@@ -118,7 +168,11 @@ mod tests {
         }
         .into();
 
-        assert_eq!(enrich_with(&db, event.clone()).await.unwrap(), Some(event));
+        let mapping: Arc<dyn StorePathMapping> = Arc::new(gradient_entity::IdentityMapping);
+        assert_eq!(
+            enrich_with(&db, &mapping, event.clone()).await.unwrap(),
+            Some(event)
+        );
         assert!(db.into_transaction_log().is_empty());
     }
 }
