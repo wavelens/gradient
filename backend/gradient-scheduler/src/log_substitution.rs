@@ -13,6 +13,7 @@ use gradient_core::upstream_source::{UpstreamSource, fetch_upstream_log};
 use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::evaluation::Entity as EEvaluation;
+use gradient_types::MappingContext;
 use gradient_types::ids::{DerivationBuildId, DerivationId, ProjectId};
 use tracing::{debug, warn};
 
@@ -72,6 +73,12 @@ pub async fn substitute_log(
         }
     };
 
+    let Ok(drv_path) = db
+        .store_path_mapper(MappingContext::Project(project_id))
+        .outbound_text(&drv_path)
+    else {
+        return Ok(());
+    };
     let Some(drv_basename) = std::path::Path::new(&drv_path)
         .file_name()
         .and_then(|n| n.to_str())

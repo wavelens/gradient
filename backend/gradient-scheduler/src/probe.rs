@@ -32,6 +32,7 @@ type Inbox = Mutex<Option<UnboundedReceiver<Vec<DerivationId>>>>;
 
 pub(crate) struct UpstreamProbe {
     db: WorkerDb,
+    store_path_mapping: Arc<dyn StorePathMapping>,
     graph: Arc<Graph>,
     upstream_query: Arc<Semaphore>,
     wake: Arc<Notify>,
@@ -43,6 +44,7 @@ impl UpstreamProbe {
     pub(crate) fn new(db: &DbContext, graph: &Arc<Graph>, upstream_query: &Arc<Semaphore>) -> Self {
         Self {
             db: db.worker_db.clone(),
+            store_path_mapping: Arc::clone(&db.store_path_mapping),
             graph: Arc::clone(graph),
             upstream_query: Arc::clone(upstream_query),
             wake: db.memory.probe_requests.wake(),
@@ -81,6 +83,7 @@ impl UpstreamProbe {
             for chunk in targets.chunks(PROBE_BATCH) {
                 let answer = crate::eval::probe_outputs(
                     &self.db,
+                    &self.store_path_mapping,
                     &self.upstream_query,
                     evaluation,
                     chunk.to_vec(),
@@ -178,7 +181,7 @@ fn unanswered_need_query() -> sea_orm::Select<EDerivationBuild> {
 
 #[derive(Debug, Default)]
 pub(crate) struct ProbePlan {
-    pub rounds: Vec<(MEvaluation, Vec<(String, String)>)>,
+    pub rounds: Vec<(MEvaluation, Vec<StorePath>)>,
     pub answered: Vec<DerivationId>,
     pub owners: HashMap<String, Vec<DerivationId>>,
 }
@@ -300,7 +303,7 @@ pub(crate) async fn plan_probes(
             .or_insert(job.evaluation);
     }
 
-    let mut by_evaluation: HashMap<EvaluationId, HashMap<String, String>> = HashMap::new();
+    let mut by_evaluation: HashMap<EvaluationId, HashMap<String, StorePath>> = HashMap::new();
     let mut owners: HashMap<String, Vec<DerivationId>> = HashMap::new();
     let cached = gradient_db::derivation_outputs::cached_anywhere(db, &outputs)
         .await
@@ -309,11 +312,10 @@ pub(crate) async fn plan_probes(
         let Some(evaluation) = evaluation_of.get(&o.derivation) else {
             continue;
         };
-        let sp = StorePath::from_stored(o.hash.clone(), o.package.clone());
         by_evaluation
             .entry(*evaluation)
             .or_default()
-            .insert(o.hash.clone(), sp.full());
+            .insert(o.hash.clone(), StorePath::from(o.clone()));
         owners.entry(o.hash.clone()).or_default().push(o.derivation);
     }
     if by_evaluation.is_empty() {
@@ -339,7 +341,7 @@ pub(crate) async fn plan_probes(
         .filter_map(|e| {
             by_evaluation
                 .remove(&e.id)
-                .map(|targets| (e, targets.into_iter().collect()))
+                .map(|targets| (e, targets.into_values().collect()))
         })
         .collect();
 

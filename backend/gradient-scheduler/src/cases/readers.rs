@@ -46,7 +46,7 @@ pub(crate) fn planned_targets(plan: &ProbePlan) -> BTreeMap<EvaluationId, BTreeS
         .map(|(evaluation, targets)| {
             (
                 evaluation.id,
-                targets.iter().map(|(hash, _)| hash.clone()).collect(),
+                targets.iter().map(|path| path.hash().to_owned()).collect(),
             )
         })
         .collect()
