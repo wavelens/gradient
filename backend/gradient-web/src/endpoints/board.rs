@@ -561,7 +561,13 @@ pub async fn get_dispatched_job(
             derivation_build_id: c.derivation_build.map(Into::into),
             derivations,
             evaluation_id: c.evaluation_id.into(),
-            evaluation: eval_job_evaluation(&state.web_db, c.kind, c.evaluation_id).await?,
+            evaluation: eval_job_evaluation(
+                &state.web_db,
+                &state.store_path_mapper(MappingContext::Project(c.project)),
+                c.kind,
+                c.evaluation_id,
+            )
+            .await?,
             pname: c.pname,
             score_breakdown: c.score_breakdown,
             worker_context: c.worker_context,
@@ -661,7 +667,8 @@ pub async fn get_dispatched_job(
         derivation_build_id: shared_build_id.map(Into::into),
         derivations,
         evaluation_id: j.evaluation_id.into(),
-        evaluation: eval_job_evaluation(&state.web_db, i16::from(j.kind), j.evaluation_id).await?,
+        evaluation: eval_job_evaluation(&state.web_db, &mapper, i16::from(j.kind), j.evaluation_id)
+            .await?,
         pname,
         score_breakdown: j.score_breakdown,
         worker_context: j.worker_context,
@@ -698,6 +705,7 @@ async fn job_names<C: ConnectionTrait>(
 
 async fn eval_job_evaluation<C: ConnectionTrait>(
     db: &C,
+    mapper: &StorePathMapper,
     kind: i16,
     evaluation: EvaluationId,
 ) -> Result<Option<JobEvaluationView>, sea_orm::DbErr> {
@@ -705,7 +713,10 @@ async fn eval_job_evaluation<C: ConnectionTrait>(
         return Ok(None);
     }
 
-    job_evaluation(db, evaluation).await
+    Ok(job_evaluation(db, evaluation).await?.map(|mut view| {
+        view.repository = mapper.outbound_if_store_path(&view.repository);
+        view
+    }))
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

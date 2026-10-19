@@ -26,7 +26,7 @@ pub async fn enrich_with<C: ConnectionTrait>(
 ) -> Result<Option<Event>> {
     Ok(match event {
         Event::BuildReported(b) => enrich_build(db, mapping, b).await?.map(Event::from),
-        Event::EvaluationReported(e) => enrich_evaluation(db, e).await?.map(Event::from),
+        Event::EvaluationReported(e) => enrich_evaluation(db, mapping, e).await?.map(Event::from),
         other => Some(other),
     })
 }
@@ -84,6 +84,7 @@ async fn enrich_build<C: ConnectionTrait>(
 
 async fn enrich_evaluation<C: ConnectionTrait>(
     db: &C,
+    mapping: &Arc<dyn StorePathMapping>,
     mut e: evaluation::Reported,
 ) -> Result<Option<evaluation::Reported>> {
     let Some(scope) = evaluation_scope(db, e.evaluation_id).await? else {
@@ -91,7 +92,8 @@ async fn enrich_evaluation<C: ConnectionTrait>(
     };
     e.task = Some(scope.task);
     e.project = Some(scope.project);
-    e.repository = Some(scope.evaluation.repository);
+    let mapper = StorePathMapper::new(Arc::clone(mapping), MappingContext::Project(scope.project));
+    e.repository = Some(mapper.outbound_if_store_path(&scope.evaluation.repository));
     e.evaluation_kind = Some(eval_kind_str(scope.evaluation.kind).to_owned());
     Ok(Some(e))
 }
