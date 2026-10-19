@@ -6,13 +6,11 @@
 
 use gradient_db::WorkerDb;
 use gradient_db::metrics::cache_traffic::CacheTraffic;
-use gradient_entity::dispatched_job::{Column as CDispatchedJob, Entity as EDispatchedJob};
 use gradient_graph::{Graph, NarCommit, SignTargets};
 use gradient_types::events::cache::NarSigned;
 use gradient_types::ids::ProjectId;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Select};
-use tracing::warn;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 pub(super) struct NarUploadRecord<'a> {
     pub file_hash: &'a str,
@@ -28,13 +26,9 @@ pub(super) struct NarUploadRecord<'a> {
 pub(super) async fn record_nar_push_metric(
     db: &WorkerDb,
     cache_traffic: &CacheTraffic,
-    project_id: Option<ProjectId>,
+    project_id: ProjectId,
     bytes: i64,
 ) -> anyhow::Result<()> {
-    let Some(project_id) = project_id else {
-        return Ok(());
-    };
-
     let project_cache = EProjectCache::find()
         .filter(CProjectCache::Project.eq(project_id))
         .one(db)
@@ -50,7 +44,7 @@ pub(super) async fn record_nar_push_metric(
 pub(super) async fn mark_nar_stored(
     graph: &Graph,
     events: &EventBus,
-    project_id: Option<ProjectId>,
+    project_id: ProjectId,
     store_path: &str,
     record: &NarUploadRecord<'_>,
 ) -> anyhow::Result<()> {
@@ -61,10 +55,6 @@ pub(super) async fn mark_nar_stored(
         return Ok(());
     }
 
-    let targets = match project_id {
-        Some(project_id) => SignTargets::ProjectCaches(project_id),
-        None => SignTargets::None,
-    };
     let committed = graph
         .commit_nar(NarCommit {
             store_path: store_path.to_owned(),
@@ -75,7 +65,7 @@ pub(super) async fn mark_nar_stored(
             references: record.references.to_vec(),
             deriver: record.deriver.map(str::to_owned),
             ca: record.ca.map(str::to_owned),
-            targets,
+            targets: SignTargets::ProjectCaches(project_id),
             confirmed: record.confirmed,
             built_by_worker: true,
         })
@@ -89,89 +79,4 @@ pub(super) async fn mark_nar_stored(
     }
 
     Ok(())
-}
-
-fn dispatched_job_query(worker_id: &str, job_id: &str) -> Select<EDispatchedJob> {
-    EDispatchedJob::find()
-        .filter(CDispatchedJob::JobId.eq(job_id))
-        .filter(CDispatchedJob::WorkerId.eq(worker_id))
-        .order_by_desc(CDispatchedJob::DispatchedAt)
-}
-
-/// `JobCompleted` is overtaking its own trailing `NarUploaded` because the control lane is drained
-/// first. The scheduler has then evicted the job, and the dispatch row is the only source for the
-/// cache claim. The worker filter is keeping a concurrent dispatch elsewhere from answering for
-/// this upload.
-pub(super) async fn project_for_dispatched_job<C: ConnectionTrait>(
-    db: &C,
-    worker_id: &str,
-    job_id: &str,
-) -> Option<ProjectId> {
-    dispatched_job_query(worker_id, job_id)
-        .one(db)
-        .await
-        .map_err(|e| warn!(%job_id, %worker_id, error = %e, "dispatched_job lookup for a late NAR failed"))
-        .ok()
-        .flatten()
-        .map(|row| row.project)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use gradient_fixtures::mock::mock_db;
-    use sea_orm::{DatabaseBackend, QueryTrait};
-    use uuid::Uuid;
-
-    const JOB: &str = "build:01a07af6-9d9f-7300-8aa1-fb82b0c18446";
-    const WORKER: &str = "builder-1";
-
-    fn project() -> ProjectId {
-        ProjectId::new(
-            Uuid::parse_str("019e8549-eef3-7b92-96a2-f3842f585407").expect("project uuid"),
-        )
-    }
-
-    fn row() -> gradient_entity::dispatched_job::Model {
-        gradient_entity::dispatched_job::Model {
-            id: gradient_entity::ids::DispatchedJobId::now_v7(),
-            project: project(),
-            worker_id: WORKER.to_owned(),
-            job_id: Some(JOB.to_owned()),
-            ..Default::default()
-        }
-    }
-
-    #[tokio::test]
-    async fn a_late_nar_still_resolves_its_project_from_the_assignment_row() {
-        let db = mock_db()
-            .append_query_results([vec![row()]])
-            .into_connection();
-
-        assert_eq!(
-            project_for_dispatched_job(&db, WORKER, JOB).await,
-            Some(project())
-        );
-    }
-
-    #[tokio::test]
-    async fn no_assignment_row_yields_no_project() {
-        let db = mock_db()
-            .append_query_results([Vec::<gradient_entity::dispatched_job::Model>::new()])
-            .into_connection();
-
-        assert_eq!(project_for_dispatched_job(&db, WORKER, JOB).await, None);
-    }
-
-    #[test]
-    fn the_lookup_is_pinned_to_this_worker_and_the_newest_assignment() {
-        let sql = dispatched_job_query(WORKER, JOB)
-            .build(DatabaseBackend::Postgres)
-            .to_string();
-
-        assert!(sql.contains("\"job_id\" = "), "{sql}");
-        assert!(sql.contains("\"worker_id\" = "), "{sql}");
-        assert!(sql.contains("ORDER BY"), "{sql}");
-        assert!(sql.contains("\"dispatched_at\" DESC"), "{sql}");
-    }
 }

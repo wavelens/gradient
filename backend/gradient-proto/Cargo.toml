@@ -49,6 +49,7 @@ axum = { workspace = true, features = ["ws", "http1", "tokio"] }
 
 [dev-dependencies]
 gradient-wire = { workspace = true, features = ["testing"] }
+gradient-entity = { workspace = true, features = ["testing"] }
 serde_json   = { workspace = true }
 tempfile     = { workspace = true }
 tokio        = { workspace = true, features = ["macros", "sync", "net", "rt-multi-thread"] }

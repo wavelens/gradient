@@ -448,7 +448,7 @@ async fn extend_with_gradient_proto_results(
 
 async fn query(
     handles: &SessionHandles,
-    project_id: Option<ProjectId>,
+    project_id: ProjectId,
     paths: &[String],
     nar_sizes: &[Option<u64>],
     mode: gradient_wire::types::QueryMode,
@@ -492,10 +492,8 @@ async fn query(
     let cached_path_rows = load_cached_path_rows(&handles.cache_db, &hashes).await?;
     let cached_map = stored_sizes(&cached_path_rows);
 
-    if matches!(mode, QueryMode::Push)
-        && let Some(oid) = project_id
-    {
-        ensure_push_signatures(&handles.cache_db, oid, &cached_path_rows).await;
+    if matches!(mode, QueryMode::Push) {
+        ensure_push_signatures(&handles.cache_db, project_id, &cached_path_rows).await;
     }
 
     let rows_by_hash: HashMap<&str, &gradient_entity::cached_path::Model> = cached_path_rows
@@ -553,13 +551,11 @@ async fn query(
         .filter(|(h, _)| !resolved.contains(h))
         .collect();
 
-    if !uncached_pairs.is_empty()
-        && let Some(oid) = project_id
-    {
+    if !uncached_pairs.is_empty() {
         extend_with_upstream_results(
             &handles.cache_db,
             &handles.upstream_query,
-            oid,
+            project_id,
             uncached_pairs.clone(),
             &mut result,
         )
@@ -567,7 +563,7 @@ async fn query(
         extend_with_gradient_proto_results(
             &handles.cache_db,
             &handles.db.config,
-            oid,
+            project_id,
             &uncached_pairs,
             &mut result,
         )
@@ -717,7 +713,7 @@ pub(super) async fn path_in_cache(db: &CacheDb, cache_id: CacheId, store_path: &
 
 pub(super) async fn handle_cache_query(
     handles: &SessionHandles,
-    project_id: Option<ProjectId>,
+    project_id: ProjectId,
     paths: &[String],
     nar_sizes: &[Option<u64>],
     mode: gradient_wire::types::QueryMode,
@@ -770,7 +766,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
-                None,
+                ProjectId::nil(),
                 &paths,
                 &[],
                 QueryMode::Push,
@@ -807,7 +803,7 @@ mod tests {
         let sizes = [Some(1024), Some(8 * 1024 * 1024 * 1024)];
         let result = query(
             &SessionHandles::from_state(&state),
-            None,
+            ProjectId::nil(),
             &paths,
             &sizes,
             QueryMode::Push,
@@ -832,7 +828,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
-                None,
+                ProjectId::nil(),
                 &paths,
                 &[],
                 QueryMode::Pull,
@@ -849,7 +845,7 @@ mod tests {
         let state = make_state();
         let err = handle_cache_query(
             &SessionHandles::from_state(&state),
-            None,
+            ProjectId::nil(),
             &["/nix/store/a-a".to_owned(), "/nix/store/b-b".to_owned()],
             &[],
             QueryMode::Pull,
@@ -867,7 +863,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
-                None,
+                ProjectId::nil(),
                 &[],
                 &[],
                 QueryMode::Normal,
@@ -880,7 +876,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
-                None,
+                ProjectId::nil(),
                 &[],
                 &[],
                 QueryMode::Push,
@@ -893,7 +889,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
-                None,
+                ProjectId::nil(),
                 &[],
                 &[],
                 QueryMode::Pull,
@@ -916,7 +912,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
-                None,
+                ProjectId::nil(),
                 &paths,
                 &[],
                 QueryMode::Normal,
@@ -929,7 +925,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
-                None,
+                ProjectId::nil(),
                 &paths,
                 &[None; 2],
                 QueryMode::Push,
@@ -942,7 +938,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
-                None,
+                ProjectId::nil(),
                 &paths,
                 &[],
                 QueryMode::Pull,
@@ -960,7 +956,7 @@ mod tests {
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
         let result = query(
             &SessionHandles::from_state(&state),
-            None,
+            ProjectId::nil(),
             &paths,
             &[],
             QueryMode::Normal,
@@ -984,7 +980,7 @@ mod tests {
 
         let result = query(
             &SessionHandles::from_state(&state),
-            None,
+            ProjectId::nil(),
             &paths,
             &[],
             QueryMode::Pull,
@@ -1008,7 +1004,7 @@ mod tests {
         ];
         let result = query(
             &SessionHandles::from_state(&state),
-            None,
+            ProjectId::nil(),
             &paths,
             &[None; 2],
             QueryMode::Push,
@@ -1045,7 +1041,7 @@ mod tests {
             };
             let result = query(
                 &SessionHandles::from_state(&state),
-                None,
+                ProjectId::nil(),
                 &paths,
                 sizes,
                 mode,
