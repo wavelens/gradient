@@ -101,6 +101,33 @@ impl TestDatabase {
             .collect()
     }
 
+    pub async fn columns_containing(&self, needle: &str) -> Vec<String> {
+        assert!(
+            needle.chars().all(|c| c.is_ascii_alphanumeric()),
+            "{needle} is no plain hash"
+        );
+        let columns = self
+            .texts(
+                "SELECT table_name || '.' || column_name FROM information_schema.columns \
+                 WHERE table_schema = 'public' \
+                 AND (data_type IN ('text', 'character varying', 'jsonb') OR udt_name = '_text') \
+                 ORDER BY 1",
+            )
+            .await;
+        let mut containing = Vec::new();
+        for column in columns {
+            let (table, name) = column.split_once('.').expect("table.column");
+            let hits = self
+                .texts(&format!(
+                    "SELECT '{column}'::text FROM public.\"{table}\" \
+                     WHERE \"{name}\"::text LIKE '%{needle}%' LIMIT 1"
+                ))
+                .await;
+            containing.extend(hits);
+        }
+        containing
+    }
+
     pub async fn find_derivation(&self, path: &str) -> Option<derivation::Model> {
         let (hash, name) = crate::shape::drv_hash_name(path);
         derivation::Entity::find()

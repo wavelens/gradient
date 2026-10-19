@@ -54,4 +54,5 @@ gradient-entity = { workspace = true, features = ["testing"] }
 tempfile     = { workspace = true }
 tokio        = { workspace = true, features = ["macros", "sync", "net", "rt-multi-thread"] }
 gradient-fixtures = { workspace = true }
+gradient-graph = { workspace = true, features = ["testing"] }
 gradient-test-support = { workspace = true }
