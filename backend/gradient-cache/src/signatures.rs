@@ -55,6 +55,7 @@ ON CONFLICT (cached_path, cache) DO NOTHING
 pub(crate) struct SignSweep {
     pub(crate) db: WorkerDb,
     pub(crate) config: Arc<RuntimeConfig>,
+    pub(crate) store_path_mapping: Arc<dyn StorePathMapping>,
     pub(crate) period: Duration,
 }
 
@@ -185,8 +186,17 @@ impl SignSweep {
 
             let nar_hash_nix32 = normalize_nar_hash(nar_hash);
 
-            let sig_bytes =
-                signer.sign_narinfo_raw(&store_path, &nar_hash_nix32, nar_size as u64, &refs);
+            let mapper = StorePathMapper::new(
+                Arc::clone(&self.store_path_mapping),
+                MappingContext::Cache(cache.id),
+            );
+            let sig_bytes = signer.sign_stored_narinfo(
+                &mapper,
+                &store_path,
+                &nar_hash_nix32,
+                nar_size as u64,
+                &refs,
+            );
 
             let mut am = row.into_active_model();
             am.signature = Set(Some(sig_bytes));
