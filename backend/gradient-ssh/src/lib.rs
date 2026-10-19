@@ -20,6 +20,7 @@ mod roots;
 mod server;
 mod session;
 mod store;
+mod store_paths;
 
 use gradient_core::ServerState;
 use russh::server::Server as _;

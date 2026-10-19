@@ -5,6 +5,7 @@
  */
 
 use crate::session::Session;
+use crate::store_paths::StoredPathInfo;
 use gradient_util::nar::single_file_nar;
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_store_aterm::print_derivation_aterm;
@@ -53,7 +54,6 @@ fn drv_file(drv: &BasicDerivation) -> anyhow::Result<DrvFile> {
 pub async fn import(session: &Session, drv: &BasicDerivation) -> anyhow::Result<String> {
     let file = drv_file(drv)?;
     let nar = single_file_nar(&file.aterm, false);
-    let store_dir = StoreDir::default();
     let info = ValidPathInfo {
         path: file.path.clone(),
         info: UnkeyedValidPathInfo {
@@ -65,12 +65,13 @@ pub async fn import(session: &Session, drv: &BasicDerivation) -> anyhow::Result<
             ultimate: false,
             signatures: Default::default(),
             ca: Some(ContentAddress::Text(file.digest)),
-            store_dir: store_dir.clone(),
+            store_dir: StoreDir::default(),
         },
     };
 
+    let info = StoredPathInfo::inbound(&session.store_path_mapper(), &info)?;
     crate::ingest::import(session, &info, nar.as_slice()).await?;
-    Ok(store_dir.display(&file.path).to_string())
+    Ok(info.path.full())
 }
 
 #[cfg(test)]

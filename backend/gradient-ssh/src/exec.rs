@@ -9,6 +9,7 @@ use crate::commands::Command;
 use crate::roots::Roots;
 use crate::session::Session;
 use crate::store::SshBackend;
+use crate::store_paths::{original_text, stored_full};
 use harmonia_protocol::log::LogMessage;
 use russh::ChannelId;
 use russh::server::{Handle, Msg};
@@ -152,9 +153,21 @@ async fn realise(
     derivations: &[String],
     add_root: Option<String>,
 ) -> u32 {
+    let mapper = session.store_path_mapper();
+    let derivations = match derivations
+        .iter()
+        .map(|drv| stored_full(&mapper, drv))
+        .collect::<anyhow::Result<Vec<_>>>()
+    {
+        Ok(derivations) => derivations,
+        Err(error) => {
+            output.stderr(format!("error: {error}")).await;
+            return 1;
+        }
+    };
     let (tx, mut rx) = mpsc::unbounded_channel::<LogMessage>();
     let build = async move {
-        crate::build_request::run(session, derivations, move |message| {
+        crate::build_request::run(session, &derivations, move |message| {
             let _ = tx.send(message);
         })
         .await
@@ -181,7 +194,11 @@ async fn realise(
     let mut paths = Vec::new();
     for (_, result) in outcome.results {
         match result {
-            Ok(outputs) => paths.extend(outputs.into_values()),
+            Ok(outputs) => paths.extend(
+                outputs
+                    .values()
+                    .filter_map(|path| original_text(&mapper, path).ok()),
+            ),
             Err(failure) => {
                 failed = true;
                 output.stderr(failure.message).await;
