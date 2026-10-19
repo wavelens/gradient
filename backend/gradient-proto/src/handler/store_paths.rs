@@ -10,7 +10,7 @@ use gradient_db::DbContext;
 use gradient_entity::StorePathError;
 use gradient_scheduler::actor::Offer;
 use gradient_types::{MappingContext, StorePathMapper};
-use gradient_wire::messages::{ClientMessage, ServerMessage};
+use gradient_wire::messages::{BuildFailureKind, ClientMessage, ServerMessage};
 use gradient_wire::types::{
     FlakeSource, ImportOutcome, InputOutcome, Job, JobCandidate, JobUpdateKind, UploadMetadata,
     UploadObject,
@@ -75,6 +75,10 @@ pub(super) fn inbound_message(
     let paths = inbound(mapper);
     match &mut msg {
         ClientMessage::JobUpdate { update, .. } => inbound_update(update, &paths)?,
+        ClientMessage::JobFailed {
+            kind: BuildFailureKind::CorruptEvalCache,
+            ..
+        } => {}
         ClientMessage::JobFailed { missing_paths, .. } => paths.paths(missing_paths)?,
         ClientMessage::CacheQuery { paths: queried, .. } => paths.paths(queried)?,
         ClientMessage::QueryKnownDerivations { drv_paths, .. }
@@ -414,6 +418,27 @@ mod tests {
             paths: vec!["/nix/store/abc-a".into()],
         };
         assert!(inbound_message(msg, &mapper()).is_err());
+    }
+
+    #[test]
+    fn a_corrupt_eval_cache_failure_keeps_its_fingerprint() {
+        let fingerprint = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        let msg = ClientMessage::JobFailed {
+            job_id: "j1".into(),
+            assignment_id: "a1".into(),
+            error: "corrupt".into(),
+            kind: BuildFailureKind::CorruptEvalCache,
+            missing_paths: vec![fingerprint.into()],
+            spans: Vec::new(),
+            elapsed_ms: 0,
+            metrics: None,
+        };
+        let ClientMessage::JobFailed { missing_paths, .. } =
+            inbound_message(msg, &mapper()).unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(missing_paths, vec![fingerprint]);
     }
 
     #[test]
