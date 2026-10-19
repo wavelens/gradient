@@ -94,6 +94,13 @@ impl StorePathMapper {
         Ok(parts.join(&self.mapping.outbound(self.context, hash)))
     }
 
+    pub fn outbound_if_store_path(&self, text: &str) -> String {
+        match text.strip_prefix(STORE_DIR) {
+            Some(_) => self.outbound_text(text).unwrap_or_else(|_| text.to_owned()),
+            None => text.to_owned(),
+        }
+    }
+
     pub fn inbound_prefix(&self, prefix: &str) -> Option<String> {
         self.mapping.inbound_prefix(self.context, prefix)
     }
@@ -227,5 +234,17 @@ mod tests {
             format!("/nix/store/{o}-hello")
         );
         assert!(mapper.inbound_text("abc-hello").is_err());
+    }
+
+    #[test]
+    fn only_a_store_path_repository_is_mapped_outbound() {
+        let (o, s) = (EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH);
+        let mapper = rotated(MappingContext::Project(ProjectId::nil()));
+        assert_eq!(
+            mapper.outbound_if_store_path(&format!("/nix/store/{s}-source")),
+            format!("/nix/store/{o}-source")
+        );
+        let url = "https://example.invalid/my-repo";
+        assert_eq!(mapper.outbound_if_store_path(url), url);
     }
 }

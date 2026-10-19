@@ -151,7 +151,9 @@ pub async fn get_evaluation(
             task: evaluation.task,
             task_name: ctx.task_name,
             task_display_name: ctx.task_display_name,
-            repository: evaluation.repository,
+            repository: state
+                .store_path_mapper(MappingContext::Project(ctx.project_id))
+                .outbound_if_store_path(&evaluation.repository),
             commit: commit_hash,
             wildcard: evaluation.wildcard,
             status: evaluation.status,
