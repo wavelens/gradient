@@ -7,6 +7,8 @@
 //! Storage migrations are to the NAR, log and blob layout what database migrations are to the
 //! schema. Apply them in order and before any deep GC unit.
 
+mod eval_cache_per_cache;
+
 use crate::units::{Step, next_unit};
 use anyhow::{Context, Result};
 use futures::future::BoxFuture;
@@ -25,7 +27,7 @@ pub(crate) trait StorageMigration: Send + Sync {
 }
 
 fn migrations() -> Vec<Box<dyn StorageMigration>> {
-    Vec::new()
+    vec![Box::new(eval_cache_per_cache::EvalCachePerCache)]
 }
 
 pub(super) async fn step(db: &DbContext) -> Result<Step> {

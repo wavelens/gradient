@@ -639,6 +639,19 @@ impl NarStore {
         Ok(hashes)
     }
 
+    pub async fn list_eval_cache_keys(&self) -> Result<Vec<String>> {
+        let listed = Path::from(format!("{}eval-cache", self.prefix));
+        let mut stream = self.inner.list(Some(&listed));
+        let mut keys = Vec::new();
+        while let Some(item) = stream.next().await {
+            let location = item.context("list eval-cache")?.location.to_string();
+            if let Some(key) = location.strip_prefix(self.prefix.as_str()) {
+                keys.push(key.to_owned());
+            }
+        }
+        Ok(keys)
+    }
+
     pub async fn list_blobs(&self) -> Result<Vec<(uuid::Uuid, [u8; 32])>> {
         let prefix = Path::from(format!("{}build-request-blobs", self.prefix));
         let mut stream = self.inner.list(Some(&prefix));
