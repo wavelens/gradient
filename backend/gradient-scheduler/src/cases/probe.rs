@@ -5,7 +5,9 @@
  */
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
+use gradient_entity::UnresolvableProjectMapping;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::derivation_build;
@@ -64,13 +66,10 @@ async fn p01_planning_keeps_wanted_unprobed_builds_and_drops_stubs_and_cached_ou
         targets(&[(e1, &[A_OUT])]),
         "after 1: result.targets"
     );
-    assert!(
-        plan.answered.contains(&b),
-        "after 1: result.answered contains B"
-    );
+    assert!(plan.asked.contains(&b), "after 1: result.asked contains B");
     for (path, id) in [(S, s), (N, n)] {
         assert!(
-            !plan.answered.contains(&id) && !plan.owners.values().flatten().any(|o| *o == id),
+            !plan.asked.contains(&id) && !plan.owners.values().flatten().any(|o| *o == id),
             "after 1: {path} in no set"
         );
     }
@@ -198,12 +197,12 @@ async fn p04_a_404_from_every_upstream_is_a_final_miss() {
 
     let plan = case.plan_probes(&[A]).await;
     assert_eq!(
-        plan.answered
+        plan.asked
             .iter()
             .copied()
             .collect::<BTreeSet<DerivationId>>(),
         BTreeSet::from([a, b]),
-        "after 1: plan.answered"
+        "after 1: plan.asked"
     );
     case.probe_round(&[A]).await;
     let shared_a = case.sb(A).await;
@@ -545,6 +544,97 @@ async fn p12_a_build_with_two_outputs_is_not_probed_while_an_output_has_no_answe
         (shared.probed, shared.cache_available),
         (true, false),
         "after 2: sb(A)"
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn p13_a_dependency_no_evaluation_names_is_not_asked_and_stays_unprobed() {
+    let e1 = EvaluationId::now_v7();
+    let u1 = UpstreamServer::start().await;
+    u1.miss(A_OUT).await;
+    u1.miss(B_OUT).await;
+    let given = shape()
+        .evaluation(e1)
+        .evaluation_status(EvaluationStatus::Building)
+        .unprobed(A, A_OUT)
+        .depends_on(B)
+        .derivation(B)
+        .walked()
+        .drv_cached()
+        .output(B_OUT)
+        .build_status(BuildStatus::Skipped)
+        .into_cache(CacheId::now_v7())
+        .http_upstream(&u1, CacheSubscriptionMode::ReadWrite, true);
+    let case = SchedulerCase::start(given).await;
+    let (a, b) = (case.db.id_of(A).await, case.db.id_of(B).await);
+
+    let plan = case.plan_probes(&[A]).await;
+    assert_eq!(
+        (planned_targets(&plan), plan.asked.clone()),
+        (targets(&[(e1, &[A_OUT])]), vec![a]),
+        "after 1: result.targets and result.asked"
+    );
+    assert!(
+        !plan.owners.values().flatten().any(|o| *o == b),
+        "after 1: B owns no asked output"
+    );
+    case.check("step 1").await;
+
+    case.probe_round(&[A]).await;
+    let (shared_a, shared_b) = (case.sb(A).await, case.sb(B).await);
+    assert_eq!(
+        (
+            (shared_a.probed, shared_a.cache_available),
+            (shared_b.probed, shared_b.cache_available)
+        ),
+        ((true, false), (false, false)),
+        "after 2: sb(A) is a miss, sb(B) is still unanswered"
+    );
+    assert_eq!(
+        case.upstream_metrics().await,
+        vec![tally(&u1, 1, 0, 1)],
+        "after 2: upstream_metric(U1.url) counts A_OUT only"
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn p14_a_project_whose_store_paths_cannot_be_mapped_is_asked_again_later() {
+    let e1 = EvaluationId::now_v7();
+    let u1 = UpstreamServer::start().await;
+    u1.miss(A_OUT).await;
+    let given = shape()
+        .evaluation(e1)
+        .evaluation_status(EvaluationStatus::Building)
+        .unprobed(A, A_OUT)
+        .into_cache(CacheId::now_v7())
+        .http_upstream(&u1, CacheSubscriptionMode::ReadWrite, true);
+    let case = SchedulerCase::start(given).await;
+
+    case.probe_round_mapped(Arc::new(UnresolvableProjectMapping), &[A])
+        .await;
+    assert_eq!(
+        build_state(&case.sb(A).await),
+        (false, false, BuildStatus::Created),
+        "after 1: sb(A) {{probed, cache_available, status}}"
+    );
+    assert_eq!(
+        case.upstream_metrics().await,
+        vec![],
+        "after 1: no upstream_metric rows"
+    );
+    case.check("step 1").await;
+
+    case.probe_round(&[A]).await;
+    assert_eq!(
+        build_state(&case.sb(A).await),
+        (true, false, BuildStatus::Queued),
+        "after 2: sb(A) {{probed, cache_available, status}}"
     );
     case.check("step 2").await;
 

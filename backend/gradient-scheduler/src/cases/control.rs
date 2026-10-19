@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::NaiveDateTime;
@@ -11,6 +12,7 @@ use gradient_ci::ApplyOutcome;
 use gradient_db::deliveries::pending::{self, Outcome, PendingDeliveryKind};
 use gradient_db::deliveries::trigger_fire::{TriggerFire, enqueue_trigger_fires};
 use gradient_db::status::BuildRefusal;
+use gradient_entity::StorePathMapping;
 use gradient_entity::ids::{DerivationId, DispatchedJobId, EvaluationId, TaskTriggerId};
 use gradient_entity::{dispatched_job, evaluation, pending_delivery, task};
 use gradient_fixtures::shape::build_assignment;
@@ -328,6 +330,15 @@ impl SchedulerCase {
     pub async fn probe_round(&self, paths: &[&str]) {
         let ids = self.derivation_ids(paths).await;
         self.probe.round(ids).await.expect("the probe round runs");
+    }
+
+    pub async fn probe_round_mapped(&self, mapping: Arc<dyn StorePathMapping>, paths: &[&str]) {
+        let mut ctx = self.ctx.clone();
+        ctx.store_path_mapping = mapping;
+        let probe =
+            crate::probe::UpstreamProbe::new(&ctx, &self.graph, &self.scheduler.upstream_query);
+        let ids = self.derivation_ids(paths).await;
+        probe.round(ids).await.expect("the probe round runs");
     }
 
     pub async fn plan_probes(&self, paths: &[&str]) -> ProbePlan {

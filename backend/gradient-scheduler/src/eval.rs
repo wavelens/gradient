@@ -22,6 +22,15 @@ pub struct ProbeAnswer {
     pub unanswered: HashSet<String>,
 }
 
+impl ProbeAnswer {
+    fn unanswered_for(to_probe: &[StorePath]) -> Self {
+        Self {
+            hits: HashMap::new(),
+            unanswered: to_probe.iter().map(|p| p.hash().to_owned()).collect(),
+        }
+    }
+}
+
 /// This is the only function here leaving the process. Probing is running in its own loop for that
 /// reason, never on a graph path.
 pub async fn probe_outputs(
@@ -31,13 +40,12 @@ pub async fn probe_outputs(
     evaluation: &MEvaluation,
     to_probe: Vec<StorePath>,
 ) -> ProbeAnswer {
-    let mut answer = ProbeAnswer::default();
     if to_probe.is_empty() {
-        return answer;
+        return ProbeAnswer::default();
     }
 
     let Some(project_id) = crate::loops::project_id_for_eval(db, evaluation).await else {
-        return answer;
+        return ProbeAnswer::unanswered_for(&to_probe);
     };
     let endpoints = match gradient_db::caches::upstream::upstream_endpoints_for_project(
         db,
@@ -49,19 +57,18 @@ pub async fn probe_outputs(
         Ok(endpoints) => endpoints,
         Err(e) => {
             warn!(error = %e, evaluation = %evaluation.id, "upstream probe: could not read the upstream caches; asking again later");
-            answer.unanswered = to_probe.iter().map(|p| p.hash().to_owned()).collect();
-            return answer;
+            return ProbeAnswer::unanswered_for(&to_probe);
         }
     };
     if endpoints.is_empty() {
-        return answer;
+        return ProbeAnswer::default();
     }
 
     let mapper = match StorePathMapper::for_project(Arc::clone(mapping), project_id).await {
         Ok(mapper) => mapper,
         Err(e) => {
-            warn!(error = %e, evaluation = %evaluation.id, "upstream probe: the project's store paths cannot be mapped; treating every path as a miss");
-            return answer;
+            warn!(error = %e, evaluation = %evaluation.id, "upstream probe: the project's store paths cannot be mapped; asking again later");
+            return ProbeAnswer::unanswered_for(&to_probe);
         }
     };
     let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
@@ -95,7 +102,10 @@ pub async fn probe_outputs(
         warn!(error = %e, "failed to flush upstream metrics");
     }
 
-    answer.unanswered = batch.unanswered.into_keys().collect();
+    let mut answer = ProbeAnswer {
+        hits: HashMap::new(),
+        unanswered: batch.unanswered.into_keys().collect(),
+    };
     for (hash, cp) in batch.found {
         answer.hits.insert(
             hash,
