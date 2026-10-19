@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_db::WorkerDb;
 use gradient_db::metrics::cache_traffic::CacheTraffic;
+use gradient_db::{DbContext, WorkerDb};
 use gradient_graph::{Graph, NarCommit, SignTargets};
 use gradient_types::events::cache::NarSigned;
 use gradient_types::ids::ProjectId;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use std::sync::Arc;
 
 pub(super) struct NarUploadRecord<'a> {
     pub file_hash: &'a str,
@@ -43,7 +44,7 @@ pub(super) async fn record_nar_push_metric(
 
 pub(super) async fn mark_nar_stored(
     graph: &Graph,
-    events: &EventBus,
+    db: &DbContext,
     project_id: ProjectId,
     store_path: &str,
     record: &NarUploadRecord<'_>,
@@ -68,12 +69,48 @@ pub(super) async fn mark_nar_stored(
         })
         .await?;
 
-    for cache in committed.signed {
-        events.publish(NarSigned {
-            cache,
-            hash: path.hash().to_owned(),
-        });
+    for event in signed_events(&db.store_path_mapping, &committed.signed, &path) {
+        db.events.publish(event);
     }
 
     Ok(())
+}
+
+fn signed_events(
+    mapping: &Arc<dyn StorePathMapping>,
+    caches: &[CacheId],
+    path: &StorePath,
+) -> Vec<NarSigned> {
+    caches
+        .iter()
+        .map(|&cache| NarSigned {
+            cache,
+            hash: StorePathMapper::new(Arc::clone(mapping), MappingContext::Cache(cache))
+                .outbound(path)
+                .hash()
+                .to_string(),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
+
+    #[test]
+    fn a_signed_nar_is_announced_with_its_original_hash() {
+        let mapping: Arc<dyn StorePathMapping> = Arc::new(RotatedHashMapping);
+        let path = StorePath::parse_stored(&format!("/nix/store/{EXAMPLE_STORED_HASH}-hello"))
+            .expect("a stored path");
+        let caches = vec![CacheId::now_v7(), CacheId::now_v7()];
+
+        let events = signed_events(&mapping, &caches, &path);
+
+        assert_eq!(events.len(), 2);
+        for (event, cache) in events.iter().zip(&caches) {
+            assert_eq!(event.cache, *cache);
+            assert_eq!(event.hash, EXAMPLE_ORIGINAL_HASH);
+        }
+    }
 }

@@ -156,14 +156,8 @@ async fn record(
                 ca: meta.ca.as_deref(),
                 confirmed: true,
             };
-            if let Err(e) = mark_nar_stored(
-                &handles.graph,
-                &handles.db.events,
-                project_id,
-                store_path,
-                &record,
-            )
-            .await
+            if let Err(e) =
+                mark_nar_stored(&handles.graph, &handles.db, project_id, store_path, &record).await
             {
                 return retry(format!("recording {store_path} in the cache index: {e:#}"));
             }
