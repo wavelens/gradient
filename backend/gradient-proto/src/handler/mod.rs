@@ -23,6 +23,8 @@ mod session_actor;
 mod sessions;
 mod socket;
 mod store_paths;
+#[cfg(test)]
+mod stored_paths;
 mod tap;
 mod upload;
 

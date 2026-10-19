@@ -585,7 +585,7 @@ fn split_uploads(st: &mut SessionState) -> (InboundContext<'_>, &mut UploadSessi
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::handler) mod tests {
     use super::super::sessions::{Sessions, SessionsArgs, SessionsMsg};
     use super::*;
     use futures::{SinkExt, StreamExt};
@@ -666,7 +666,8 @@ mod tests {
         }
     }
 
-    async fn connected_pair() -> (ProtoSocket, WebSocketStream<MaybeTlsStream<TcpStream>>) {
+    pub(in crate::handler) async fn connected_pair()
+    -> (ProtoSocket, WebSocketStream<MaybeTlsStream<TcpStream>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let dial = tokio_tungstenite::connect_async(format!("ws://{addr}/proto"));
