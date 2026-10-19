@@ -50,6 +50,7 @@ Flake jobs fetch and evaluate a flake. The server can pick the steps at queue ti
 | `EvaluateDerivations` | Eval cache pull, attribute discovery, closure walk, eval cache push |
 
 - **Eval Cache:** Workers pull the evaluation cache before discovery and push the cache after a walk with derivations. Empty or schemaless caches stay local.
+- **Eval Cache Entries:** Entries belong to a single cache. Pulls read the newest entry among the readable caches of the project. Pushes write one entry into every writable cache of the project.
 - **Attribute Failures:** Workers send them as `EvalMessage { level: Error, source: "nix-eval:<attr>" }` before the last `EvalResult`.
 - **Import From Derivation:** Workers send `ImportRequest { drv_paths }` during discovery and wait for `ImportResult`.
 - **Missing Inputs:** Workers send `InputRequest { request }` for an input in neither the store nor the cache, and wait for `InputResult`. The server can send the download as `FetchInput` to a worker with `network`. That worker can push the input under the `fetch_id` and answer with `InputFetched`.

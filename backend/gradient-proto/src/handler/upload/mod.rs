@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey};
 use gradient_storage::{NarStore, PartialStore, StorageTarget, upload_lease};
 use gradient_types::StorePath;
+use gradient_types::ids::ProjectId;
 use gradient_wire::messages::{ServerMessage, is_small_upload};
 use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
@@ -28,13 +29,10 @@ pub(super) struct UploadSession {
     pub idle_lease: Duration,
 }
 
-pub(super) fn object_key(object: &UploadObject) -> Option<ObjectKey> {
-    match object {
-        UploadObject::Nar { store_path } => StorePath::parse_stored(store_path)
-            .ok()
-            .map(|path| ObjectKey::Nar(path.hash().to_owned())),
-        UploadObject::EvalCache { fingerprint } => Some(ObjectKey::EvalCache(fingerprint.clone())),
-    }
+pub(super) fn nar_key(store_path: &str) -> Option<String> {
+    StorePath::parse_stored(store_path)
+        .ok()
+        .map(|path| path.hash().to_owned())
 }
 
 fn key_name(key: &ObjectKey) -> &str {
@@ -53,16 +51,6 @@ impl InboundContext<'_> {
         size: u64,
         uploads: &mut UploadSession,
     ) {
-        let Some(key) = object_key(&object) else {
-            return self
-                .settle(
-                    request_id,
-                    UploadOutcome::Rejected {
-                        reason: format!("malformed upload object {object:?}"),
-                    },
-                )
-                .await;
-        };
         let Some(project) = self.active.session_project(&job_id) else {
             return self
                 .settle(
@@ -73,11 +61,27 @@ impl InboundContext<'_> {
                 )
                 .await;
         };
-        if let UploadObject::EvalCache { fingerprint } = &object
-            && !super::eval_cache::accepts_push(&self.handles.db.worker_db, fingerprint, size).await
-        {
-            return self.grant(request_id, GrantTarget::Skip).await;
-        }
+        let key = match &object {
+            UploadObject::Nar { store_path } => match nar_key(store_path) {
+                Some(hash) => ObjectKey::Nar(hash),
+                None => {
+                    return self
+                        .settle(
+                            request_id,
+                            UploadOutcome::Rejected {
+                                reason: format!("malformed upload object {object:?}"),
+                            },
+                        )
+                        .await;
+                }
+            },
+            UploadObject::EvalCache { fingerprint } => {
+                match self.eval_cache_target(project, fingerprint, size).await {
+                    Some(key) => ObjectKey::EvalCache(key),
+                    None => return self.grant(request_id, GrantTarget::Skip).await,
+                }
+            }
+        };
         let priority = gradient_wire::messages::is_small_upload(size);
         if !uploads
             .table
@@ -164,6 +168,25 @@ impl InboundContext<'_> {
                 }
             }
         }
+    }
+
+    async fn eval_cache_target(
+        &self,
+        project: ProjectId,
+        fingerprint: &str,
+        size: u64,
+    ) -> Option<String> {
+        let db = &self.handles.db.worker_db;
+        let writable = gradient_db::cache_paths::project_write_caches(db, project)
+            .await
+            .unwrap_or_else(|e| {
+                warn!(peer_id = %self.peer_id, %project, error = %e, "writable caches lookup failed");
+                Vec::new()
+            });
+        let &target = writable.first()?;
+        super::eval_cache::accepts_push(db, &writable, fingerprint, size)
+            .await
+            .then(|| super::eval_cache::eval_cache_key(target, fingerprint))
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
@@ -361,8 +384,9 @@ impl InboundContext<'_> {
 }
 
 pub(super) async fn abandon_transfer(nar_storage: &NarStore, granted: Granted) {
-    if let (Transfer::Multipart { upload_id }, Some(ObjectKey::Nar(hash))) =
-        (&granted.transfer, object_key(&granted.object))
+    if let (Transfer::Multipart { upload_id }, UploadObject::Nar { store_path }) =
+        (&granted.transfer, &granted.object)
+        && let Some(hash) = nar_key(store_path)
     {
         nar_storage.abort_multipart(&hash, upload_id).await;
     }

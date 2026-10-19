@@ -529,55 +529,56 @@ impl NarStore {
         }
     }
 
-    fn eval_cache_path(&self, fingerprint: &str) -> Path {
-        Path::from(format!("{}eval-cache/{}", self.prefix, fingerprint))
+    fn eval_cache_path(&self, key: &str) -> Path {
+        Path::from(format!("{}{}", self.prefix, key))
     }
 
-    pub async fn put_eval_cache(&self, fingerprint: &str, data: Vec<u8>) -> Result<()> {
-        self.put_object(self.eval_cache_path(fingerprint), data)
-            .await
+    pub async fn put_eval_cache(&self, key: &str, data: Vec<u8>) -> Result<()> {
+        self.put_object(self.eval_cache_path(key), data).await
     }
 
-    pub async fn get_eval_cache(&self, fingerprint: &str) -> Result<Option<Vec<u8>>> {
-        self.get_object(&self.eval_cache_path(fingerprint)).await
+    pub async fn get_eval_cache(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.get_object(&self.eval_cache_path(key)).await
     }
 
     pub async fn get_eval_cache_stream(
         &self,
-        fingerprint: &str,
+        key: &str,
     ) -> Result<Option<(u64, BoxStream<'static, Result<Bytes>>)>> {
-        self.get_stream_object(&self.eval_cache_path(fingerprint), None)
+        self.get_stream_object(&self.eval_cache_path(key), None)
             .await
     }
 
     pub async fn presigned_eval_cache_get_url(
         &self,
-        fingerprint: &str,
+        key: &str,
         expires_in: std::time::Duration,
     ) -> Result<Option<String>> {
-        self.presign_object(
-            reqwest::Method::GET,
-            &self.eval_cache_path(fingerprint),
-            expires_in,
-        )
-        .await
+        self.presign_object(reqwest::Method::GET, &self.eval_cache_path(key), expires_in)
+            .await
     }
 
     pub async fn presigned_eval_cache_put_url(
         &self,
-        fingerprint: &str,
+        key: &str,
         expires_in: std::time::Duration,
     ) -> Result<Option<String>> {
-        self.presign_object(
-            reqwest::Method::PUT,
-            &self.eval_cache_path(fingerprint),
-            expires_in,
-        )
-        .await
+        self.presign_object(reqwest::Method::PUT, &self.eval_cache_path(key), expires_in)
+            .await
     }
 
-    pub async fn delete_eval_cache(&self, fingerprint: &str) -> Result<()> {
-        self.delete_object(&self.eval_cache_path(fingerprint)).await
+    pub async fn copy_eval_cache(&self, from_key: &str, to_key: &str) -> Result<()> {
+        self.inner
+            .copy(
+                &self.eval_cache_path(from_key),
+                &self.eval_cache_path(to_key),
+            )
+            .await
+            .with_context(|| format!("copy eval-cache object {from_key} to {to_key}"))
+    }
+
+    pub async fn delete_eval_cache(&self, key: &str) -> Result<()> {
+        self.delete_object(&self.eval_cache_path(key)).await
     }
 
     fn blob_path(&self, project: uuid::Uuid, hash: &[u8; 32]) -> Path {
@@ -786,22 +787,22 @@ impl NarStore {
                 .await?
                 .map(|url| StorageTarget::Put { url })
                 .ok_or_else(missing),
-            ObjectKey::EvalCache(fingerprint) => self
-                .presigned_eval_cache_put_url(fingerprint, PRESIGN_TTL)
+            ObjectKey::EvalCache(key) => self
+                .presigned_eval_cache_put_url(key, PRESIGN_TTL)
                 .await?
                 .map(|url| StorageTarget::Put { url })
                 .ok_or_else(missing),
         }
     }
 
-    pub async fn verify_eval_cache(&self, fingerprint: &str, size: u64) -> Result<()> {
+    pub async fn verify_eval_cache(&self, key: &str, size: u64) -> Result<()> {
         let meta = self
-            .head_object(&self.eval_cache_path(fingerprint))
+            .head_object(&self.eval_cache_path(key))
             .await?
-            .with_context(|| format!("eval-cache object for {fingerprint} is missing"))?;
+            .with_context(|| format!("eval-cache object {key} is missing"))?;
         anyhow::ensure!(
             meta.size == size,
-            "eval-cache object for {fingerprint} is {} bytes, expected {size}",
+            "eval-cache object {key} is {} bytes, expected {size}",
             meta.size
         );
         Ok(())
@@ -840,7 +841,7 @@ mod tests {
         let store = NarStore::local(dir.path()).unwrap();
         for object in [
             ObjectKey::Nar("a".repeat(32)),
-            ObjectKey::EvalCache("fp".into()),
+            ObjectKey::EvalCache("eval-cache/c/fp".into()),
         ] {
             assert_eq!(
                 store
@@ -871,7 +872,7 @@ mod tests {
             .unwrap();
         assert!(matches!(nar, StorageTarget::Put { .. }), "{nar:?}");
         let blob = store
-            .upload_target(&ObjectKey::EvalCache("fp".into()), 1024)
+            .upload_target(&ObjectKey::EvalCache("eval-cache/c/fp".into()), 1024)
             .await
             .unwrap();
         assert!(matches!(blob, StorageTarget::Put { .. }), "{blob:?}");
@@ -1010,6 +1011,23 @@ mod tests {
             .expect("put_reader");
         let got = store.get("streamed").await.expect("get").expect("present");
         assert_eq!(got, payload);
+    }
+
+    #[tokio::test]
+    async fn a_copied_eval_cache_blob_reads_back_under_its_new_key() {
+        let (_d, store) = local_store();
+        store
+            .put_eval_cache("eval-cache/a/fp", b"blob".to_vec())
+            .await
+            .expect("put");
+        store
+            .copy_eval_cache("eval-cache/a/fp", "eval-cache/b/fp")
+            .await
+            .expect("copy");
+        assert_eq!(
+            store.get_eval_cache("eval-cache/b/fp").await.expect("get"),
+            Some(b"blob".to_vec())
+        );
     }
 
     #[tokio::test]

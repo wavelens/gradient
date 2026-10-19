@@ -8,14 +8,14 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::EvalCacheStoreId;
+use crate::ids::{CacheId, EvalCacheStoreId};
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "eval_cache_store")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: EvalCacheStoreId,
-    #[sea_orm(unique)]
+    pub cache: CacheId,
     pub fingerprint: String,
     pub storage_path: String,
     pub size_bytes: i64,

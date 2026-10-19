@@ -311,18 +311,28 @@ async fn heal_corrupt_eval_cache(
     evaluation_id: EvaluationId,
     fingerprint: &str,
 ) -> Result<bool> {
-    let purged = EEvalCacheStore::delete_many()
+    let rows = EEvalCacheStore::find()
         .filter(CEvalCacheStore::Fingerprint.eq(fingerprint))
-        .exec(&ctx.worker_db)
-        .await?
-        .rows_affected;
-    if purged == 0 {
+        .all(&ctx.worker_db)
+        .await?;
+    if rows.is_empty() {
         warn!(%evaluation_id, %fingerprint, "corrupt eval-cache recurred with no shared blob to purge; failing eval");
         return Ok(false);
     }
 
-    if let Err(e) = ctx.storage.nar_storage.delete_eval_cache(fingerprint).await {
-        warn!(%fingerprint, error = %e, "failed to delete corrupt eval-cache object");
+    EEvalCacheStore::delete_many()
+        .filter(CEvalCacheStore::Fingerprint.eq(fingerprint))
+        .exec(&ctx.worker_db)
+        .await?;
+    for row in rows {
+        if let Err(e) = ctx
+            .storage
+            .nar_storage
+            .delete_eval_cache(&row.storage_path)
+            .await
+        {
+            warn!(key = %row.storage_path, error = %e, "failed to delete corrupt eval-cache object");
+        }
     }
 
     requeue_evaluation(ctx, evaluation_id).await?;
