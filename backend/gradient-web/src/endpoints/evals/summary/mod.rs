@@ -9,6 +9,7 @@ mod analysis;
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::store_paths::original_text;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -115,7 +116,13 @@ pub async fn get_evaluation_summary(
     Ok(ok_json(EvaluationFailureSummary {
         packages: analysis::package_counts(&loaded.graph),
         failures_total: failures.len(),
-        failures: failed_builds(db, &loaded, failures).await?,
+        failures: failed_builds(
+            db,
+            &state.store_path_mapper(MappingContext::Project(ctx.project_id)),
+            &loaded,
+            failures,
+        )
+        .await?,
         failed_attributes: failed_attribute_reports(loaded.failed_attributes, baseline),
         fixed_total: fixed.len(),
         fixed: fixed.into_iter().take(FIXED_SHOWN).collect(),
@@ -194,6 +201,7 @@ async fn compared_evaluation<C: ConnectionTrait>(
 
 async fn failed_builds<C: ConnectionTrait>(
     db: &C,
+    mapper: &StorePathMapper,
     loaded: &LoadedEvaluation,
     failures: Vec<Failure>,
 ) -> Result<Vec<FailedBuildSummary>, DbErr> {
@@ -210,7 +218,7 @@ async fn failed_builds<C: ConnectionTrait>(
             Some(FailedBuildSummary {
                 build_id: *loaded.build_jobs.get(&failure.derivation)?,
                 name: derivation.name.clone(),
-                derivation_path: derivation.drv_path(),
+                derivation_path: original_text(mapper, derivation.drv_path()),
                 architecture: derivation.architecture.clone(),
                 status: failure.status,
                 attributes: failure.attributes,

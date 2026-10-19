@@ -7,6 +7,7 @@
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::store_paths::original_text;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -52,9 +53,13 @@ pub struct OutputArtefacts {
 }
 
 impl OutputArtefacts {
-    fn new(output: MDerivationOutput, products: Vec<ProductArtefact>) -> Self {
+    fn new(
+        mapper: &StorePathMapper,
+        output: MDerivationOutput,
+        products: Vec<ProductArtefact>,
+    ) -> Self {
         Self {
-            store_path: StorePath::from(output.clone()).base(),
+            store_path: original_text(mapper, StorePath::from(output.clone()).base()),
             name: output.name,
             products,
         }
@@ -104,6 +109,7 @@ pub async fn get_artefacts(
     let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
         .await?;
     let evaluation = ctx.evaluation;
+    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project_id));
 
     let entry_points =
         gradient_db::entry_points::of_evaluation(&state.web_db, evaluation.id).await?;
@@ -178,14 +184,17 @@ pub async fn get_artefacts(
                         .cloned()
                         .unwrap_or_default()
                         .into_iter()
-                        .map(ProductArtefact::from)
+                        .map(|p| ProductArtefact {
+                            path: original_text(&mapper, p.path.clone()),
+                            ..ProductArtefact::from(p)
+                        })
                         .collect();
-                    OutputArtefacts::new(o, products)
+                    OutputArtefacts::new(&mapper, o, products)
                 })
                 .collect();
             Some(EntryPointArtefacts {
                 attr: ep.eval,
-                derivation: drv.drv_path(),
+                derivation: original_text(&mapper, drv.drv_path()),
                 build_id,
                 outputs,
             })
