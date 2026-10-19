@@ -5,6 +5,7 @@
  */
 
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,6 +18,7 @@ use gradient_graph::{Graph, testing};
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::jobs::eval_job_key;
 use gradient_test_support::state::TestState;
+use gradient_types::events::EventRx;
 use gradient_types::ids::{CacheId, EvaluationId, ProjectId};
 use gradient_types::{BuildArgs, MappingContext, StoreHash, StorePathMapping};
 use gradient_wire::PROTO_VERSIONS;
@@ -30,6 +32,8 @@ use gradient_wire::types::{
 use ractor::Actor;
 use ractor::rpc::CallResult;
 use tokio::net::TcpStream;
+use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::oneshot;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
@@ -262,6 +266,42 @@ async fn eventually(db: &TestDatabase, ready: impl AsyncFn(&TestDatabase) -> boo
     }
 }
 
+async fn collect_event_lines(
+    mut events: EventRx,
+    mut flow_ended: oneshot::Receiver<()>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    loop {
+        tokio::select! {
+            biased;
+            received = events.recv() => match received {
+                Ok(envelope) => lines.push(envelope.to_line()),
+                Err(RecvError::Lagged(missed)) => panic!("missed {missed} events"),
+                Err(RecvError::Closed) => break,
+            },
+            _ = &mut flow_ended => break,
+        }
+    }
+    while let Ok(envelope) = events.try_recv() {
+        lines.push(envelope.to_line());
+    }
+    lines
+}
+
+fn object_keys(dir: &Path) -> Vec<String> {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .flat_map(|entry| {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                object_keys(&path)
+            } else {
+                vec![path.to_string_lossy().into_owned()]
+            }
+        })
+        .collect()
+}
+
 fn discovered(drv: &str, out: &str, name: &str, attr: &str) -> DiscoveredDerivation {
     DiscoveredDerivation {
         attr: attr.into(),
@@ -305,6 +345,10 @@ async fn after_an_evaluation_build_and_upload_no_original_hash_is_stored() {
         .graph(Arc::clone(&graph))
         .store_path_mapping(Arc::new(RotatedHashMapping))
         .build();
+    let (end_flow, flow_ended) = oneshot::channel();
+    let event_lines = state
+        .shutdown
+        .spawn(collect_event_lines(state.events.subscribe(), flow_ended));
     graph.spawn(state.db(), None, None).await.unwrap();
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
     scheduler.start();
@@ -476,6 +520,22 @@ async fn after_an_evaluation_build_and_upload_no_original_hash_is_stored() {
     let frames = format!("{:?}", worker.received);
     for original in ORIGINALS {
         assert!(!frames.contains(&rotate(original)), "{original}");
+    }
+    let _ = end_flow.send(());
+    let event_lines = event_lines.await.unwrap();
+    assert!(!event_lines.is_empty());
+    for line in &event_lines {
+        for original in ORIGINALS {
+            assert!(!line.contains(&rotate(original)), "{original} in {line}");
+        }
+    }
+    let keys = object_keys(storage.path());
+    assert!(!keys.is_empty());
+    let root = storage.path().to_string_lossy().into_owned();
+    for key in keys.iter().map(|key| key.trim_start_matches(&root)) {
+        for original in ORIGINALS {
+            assert!(!key.contains(original), "{original} in {key}");
+        }
     }
 
     sessions.stop(None);
