@@ -9,8 +9,9 @@ use crate::fakes::email::InMemoryEmailSender;
 use crate::log_storage::NoopLogStorage;
 use axum_test::TestServer;
 use chrono::{DateTime, Utc};
-use gradient_core::{Graph, InstanceMemory, ServerState};
+use gradient_core::{Graph, InstanceMemory, ServerExtensions, ServerState};
 use gradient_db::{CacheDb, WebDb, WorkerDb};
+use gradient_entity::StorePathMapping;
 use gradient_fixtures::mock::empty_db;
 use gradient_notify::EmailSender;
 use gradient_storage::{LogStorage, NarStore};
@@ -33,6 +34,7 @@ pub struct TestState {
     email: Arc<dyn EmailSender>,
     graph: Option<Arc<Graph>>,
     started_at: Option<DateTime<Utc>>,
+    extensions: ServerExtensions,
 }
 
 impl Default for TestState {
@@ -48,6 +50,7 @@ impl Default for TestState {
             email: Arc::new(InMemoryEmailSender::new()),
             graph: None,
             started_at: None,
+            extensions: ServerExtensions::default(),
         }
     }
 }
@@ -107,6 +110,11 @@ impl TestState {
         self
     }
 
+    pub fn store_path_mapping(mut self, mapping: Arc<dyn StorePathMapping>) -> Self {
+        self.extensions.store_path_mapping = mapping;
+        self
+    }
+
     pub fn build(self) -> Arc<ServerState> {
         let mut config = RuntimeConfig::from_cli(&self.cli).expect("valid test config");
         for change in self.config_changes {
@@ -132,6 +140,7 @@ impl TestState {
             events: gradient_types::EventBus::default(),
             wake: Default::default(),
             graph: self.graph.unwrap_or_else(Graph::stub),
+            extensions: self.extensions,
             memory: InstanceMemory {
                 db: Default::default(),
                 last_used_stamps: gradient_core::last_used_stamps(),

@@ -18,6 +18,7 @@ use gradient_ci::CiContext;
 use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::metrics::cache_traffic::CacheTraffic;
 use gradient_db::{CacheDb, DbContext, DbMemory, Wakeups, WebDb, WorkerDb};
+use gradient_entity::{MappingContext, StorePathMapper};
 use gradient_git_host::GitHostRegistry;
 use gradient_graph::Graph;
 use gradient_notify::EmailSender;
@@ -29,6 +30,8 @@ use gradient_types::{
 use gradient_util::debounce::Debounce;
 use gradient_util::latest::Latest;
 use gradient_util::shutdown::Shutdown;
+
+use crate::ServerExtensions;
 
 #[derive(Debug)]
 pub struct InstanceMemory {
@@ -66,6 +69,7 @@ pub struct AppState {
     pub graph: Arc<Graph>,
     pub memory: InstanceMemory,
     pub wake: Wakeups,
+    pub extensions: ServerExtensions,
 }
 
 pub type ServerState = AppState;
@@ -106,7 +110,12 @@ impl AppState {
             events: self.events.clone(),
             wake: self.wake.clone(),
             memory: self.memory.db.clone(),
+            store_path_mapping: Arc::clone(&self.extensions.store_path_mapping),
         }
+    }
+
+    pub fn store_path_mapper(&self, context: MappingContext) -> StorePathMapper {
+        StorePathMapper::new(Arc::clone(&self.extensions.store_path_mapping), context)
     }
 
     pub fn ci(&self) -> CiContext {
@@ -124,5 +133,29 @@ impl AppState {
 
     pub async fn record_evaluation_created(&self, eval: &gradient_types::MEvaluation) {
         self.db().record_evaluation_created(eval).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use gradient_entity::ids::ProjectId;
+    use gradient_entity::{
+        EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, MappingContext, RotatedHashMapping,
+    };
+
+    #[test]
+    fn the_server_mapping_reaches_the_database_context() {
+        let state = gradient_test_support::state::TestState::new()
+            .store_path_mapping(Arc::new(RotatedHashMapping))
+            .build();
+        let mapper = state
+            .db()
+            .store_path_mapper(MappingContext::Project(ProjectId::nil()));
+        assert_eq!(
+            mapper.outbound_text(EXAMPLE_STORED_HASH).unwrap(),
+            EXAMPLE_ORIGINAL_HASH
+        );
     }
 }

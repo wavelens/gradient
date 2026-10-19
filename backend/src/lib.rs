@@ -1,0 +1,181 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use gradient_core::{ServerExtensions, init_state};
+use gradient_types::Cli;
+use gradient_types::cli::LogArgs;
+use gradient_util::logging::{LogSetup, LogWriter, NOISY_DEPS, TraceSetup};
+use std::sync::Arc;
+use tracing::info;
+
+fn log_overrides(log: &LogArgs) -> [(&'static str, Option<&str>); 7] {
+    [
+        ("gradient_web", log.level_web.as_deref()),
+        ("gradient_cache", log.level_cache.as_deref()),
+        ("gradient_proto", log.level_proto.as_deref()),
+        ("gradient_wire", log.level_proto.as_deref()),
+        ("gradient_storage::passthrough", log.level_proto.as_deref()),
+        ("gradient_scheduler", log.level_scheduler.as_deref()),
+        ("gradient_pool", log.level_scheduler.as_deref()),
+    ]
+}
+
+fn init_logging(log: &LogArgs) {
+    let overrides = log_overrides(log);
+    gradient_util::logging::init(&LogSetup {
+        level: &log.level_default,
+        overrides: &overrides,
+        quiet: NOISY_DEPS,
+        honor_rust_log: true,
+        writer: LogWriter::Stdout,
+        trace: log.trace_dir.as_deref().map(|dir| TraceSetup {
+            dir,
+            process: "server",
+        }),
+    });
+}
+
+pub async fn run(cli: Cli, extensions: ServerExtensions) -> std::io::Result<()> {
+    init_logging(&cli.log);
+
+    if cli.state.validate {
+        return validate_state_and_exit(cli.state.file.as_deref());
+    }
+
+    let state = match init_state(cli, extensions).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "server bootstrap failed");
+            std::process::exit(1);
+        }
+    };
+
+    info!(
+        version = env!("CARGO_PKG_VERSION"),
+        ip = %state.config.server.listen_addr,
+        port = state.config.server.port,
+        log_level = %state.config.log.level_default,
+        web_log_level = state.config.log.level_web.as_deref().unwrap_or("(default)"),
+        cache_log_level = state.config.log.level_cache.as_deref().unwrap_or("(default)"),
+        proto_log_level = state.config.log.level_proto.as_deref().unwrap_or("(default)"),
+        scheduler_log_level = state.config.log.level_scheduler.as_deref().unwrap_or("(default)"),
+        "Starting Gradient server"
+    );
+
+    let _guard = if state.config.sentry.enable {
+        let dsn = gradient_types::cli::effective_sentry_dsn(&state.config.sentry);
+        info!(dsn, "Error reporting enabled - initializing Sentry");
+        Some(sentry::init(dsn.to_string()))
+    } else {
+        info!("Error reporting disabled");
+        None
+    };
+
+    state
+        .shutdown
+        .supervise_now(state.graph.child_spec(state.db()))
+        .await
+        .map_err(std::io::Error::other)?;
+    let scheduler = Arc::new(gradient_scheduler::Scheduler::new(Arc::clone(&state)));
+    state
+        .shutdown
+        .supervise_now(gradient_effects::child_spec(
+            Arc::clone(&state),
+            Arc::clone(&scheduler),
+        ))
+        .await
+        .map_err(std::io::Error::other)?;
+
+    info!("Starting cache service");
+    gradient_cache::start_cache(Arc::clone(&state)).await?;
+
+    if state.config.ssh.enable {
+        info!("Starting SSH service");
+        gradient_ssh::start(Arc::clone(&state)).await?;
+    }
+
+    info!("Starting web service");
+    gradient_web::serve_web(Arc::clone(&state), scheduler).await?;
+
+    Ok(())
+}
+
+fn validate_state_and_exit(state_file: Option<&str>) -> std::io::Result<()> {
+    let Some(path) = state_file else {
+        eprintln!("--state-validate requires --state-file");
+        std::process::exit(2);
+    };
+    match gradient_state::validate_state_file(path) {
+        Ok(errors) if errors.is_empty() => {
+            println!("State configuration '{path}' is valid");
+            Ok(())
+        }
+        Ok(errors) => {
+            eprintln!("State configuration '{path}' is invalid:");
+            for e in &errors {
+                eprintln!("  - {e}");
+            }
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Failed to load state file '{path}': {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn server_directive(log: &LogArgs) -> String {
+        let overrides = log_overrides(log);
+        gradient_util::logging::directive(&LogSetup {
+            level: &log.level_default,
+            overrides: &overrides,
+            quiet: NOISY_DEPS,
+            honor_rust_log: true,
+            writer: LogWriter::Stdout,
+            trace: None,
+        })
+    }
+
+    #[test]
+    fn directive_targets_gradient_crates_and_suppresses_noise() {
+        let logging = LogArgs {
+            level_default: "info".into(),
+            level_web: Some("debug".into()),
+            level_scheduler: Some("trace".into()),
+            ..Default::default()
+        };
+        let d = server_directive(&logging);
+        assert!(d.starts_with("info,"));
+        assert!(d.contains("hyper=warn"));
+        assert!(d.contains("sqlx=warn"));
+        assert!(d.contains("gradient_web=debug"));
+        assert!(d.contains("gradient_scheduler=trace"));
+        assert!(d.contains("gradient_pool=trace"));
+        assert!(!d.contains("builder="));
+    }
+
+    #[test]
+    fn the_proto_level_reaches_the_passed_through_nar_sender() {
+        let logging = LogArgs {
+            level_proto: Some("trace".into()),
+            ..Default::default()
+        };
+        let d = server_directive(&logging);
+        assert!(d.contains("gradient_storage::passthrough=trace"), "{d}");
+    }
+
+    #[test]
+    fn directive_without_overrides_is_global_plus_noise() {
+        let d = server_directive(&LogArgs::default());
+        assert!(d.starts_with("info,"));
+        assert!(d.contains("rustls=warn"));
+        assert!(!d.contains("gradient_web="));
+    }
+}
