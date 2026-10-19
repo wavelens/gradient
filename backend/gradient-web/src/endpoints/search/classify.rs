@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-const NIX32: &str = "0123456789abcdfghijklmnpqrsvwxyz";
+use gradient_types::{OriginalStorePath, StoreHash};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CommitRange {
@@ -14,17 +14,15 @@ pub struct CommitRange {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Lookups {
-    pub nar: Option<String>,
+    pub nar: Option<StoreHash>,
     pub commit: Option<CommitRange>,
     pub text: Option<String>,
 }
 
-fn nar_hash(q: &str) -> Option<String> {
-    let base = q.strip_prefix("/nix/store/").unwrap_or(q);
-    let hash = base.get(..32)?;
-    let rest = &base[32..];
-    (hash.chars().all(|c| NIX32.contains(c)) && (rest.is_empty() || rest.starts_with('-')))
-        .then(|| hash.to_string())
+fn nar_hash(q: &str) -> Option<StoreHash> {
+    StoreHash::parse(q)
+        .or_else(|_| OriginalStorePath::parse(q).map(|path| path.hash().clone()))
+        .ok()
 }
 
 fn commit_range(q: &str) -> Option<CommitRange> {
@@ -58,14 +56,17 @@ mod tests {
     #[test]
     fn a_store_path_is_a_nar_and_a_name() {
         let l = classify(&format!("/nix/store/{HASH}-hello-2.12.1"));
-        assert_eq!(l.nar.as_deref(), Some(HASH));
+        assert_eq!(l.nar.as_ref().map(StoreHash::as_str), Some(HASH));
         assert!(l.commit.is_none());
         assert!(l.text.is_some());
     }
 
     #[test]
     fn a_bare_hash_is_a_nar() {
-        assert_eq!(classify(HASH).nar.as_deref(), Some(HASH));
+        assert_eq!(
+            classify(HASH).nar.as_ref().map(StoreHash::as_str),
+            Some(HASH)
+        );
     }
 
     #[test]

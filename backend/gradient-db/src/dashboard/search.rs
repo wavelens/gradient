@@ -9,10 +9,15 @@ use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr, QueryResult, Value};
 
 crate::sql! {
-    SEARCH_NARS = concat!("SELECT c.name AS cache, cp.hash, cp.package FROM cached_path cp \
+    READABLE_CACHE_IDS = concat!("SELECT c.id FROM cache c WHERE ", cache_readable!()),
+        params = [UserId],
+        tier = Bulk;
+
+    SEARCH_NARS = concat!("SELECT c.id AS cache_id, c.name AS cache, cp.hash, cp.package FROM cached_path cp \
         JOIN cached_path_signature s ON s.cached_path = cp.id JOIN cache c ON c.id = s.cache \
-        WHERE cp.hash = $2 AND ", cache_readable!(), " ORDER BY c.name LIMIT 10"),
-        params = [UserId, CachedPathHash],
+        WHERE (c.id, cp.hash) IN (SELECT * FROM unnest($2::uuid[], $3::text[])) AND ", cache_readable!(), " \
+        ORDER BY c.name LIMIT 10"),
+        params = [UserId, CacheIds(4), CachedPathHashes(4)],
         tier = Bulk;
 
     SEARCH_COMMITS = concat!("SELECT p.name AS project, t.name AS task, e.id AS evaluation, \
@@ -42,6 +47,7 @@ crate::sql! {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NarHitRow {
+    pub cache_id: CacheId,
     pub cache: String,
     pub hash: String,
     pub package: String,
@@ -90,6 +96,7 @@ fn name_kind(raw: &str, project: Option<String>) -> Result<NameKind, DbErr> {
 
 fn nar_hit_row(r: &QueryResult) -> Result<NarHitRow, DbErr> {
     Ok(NarHitRow {
+        cache_id: r.try_get("", "cache_id")?,
         cache: r.try_get("", "cache")?,
         hash: r.try_get("", "hash")?,
         package: r.try_get("", "package")?,
@@ -114,12 +121,27 @@ pub(super) fn name_hit_row(r: &QueryResult) -> Result<NameHitRow, DbErr> {
     })
 }
 
+pub async fn readable_cache_ids<C: ConnectionTrait>(
+    db: &C,
+    user: UserId,
+) -> Result<Vec<CacheId>, DbErr> {
+    db.query_all_raw(READABLE_CACHE_IDS.bind([user_value(user)]))
+        .await?
+        .iter()
+        .map(|r| r.try_get("", "id"))
+        .collect()
+}
+
 pub async fn search_nars<C: ConnectionTrait>(
     db: &C,
-    hash: &str,
+    lookups: &[(CacheId, StoreHash)],
     user: UserId,
 ) -> Result<Vec<NarHitRow>, DbErr> {
-    db.query_all_raw(SEARCH_NARS.bind([user_value(user), hash.into()]))
+    let (caches, hashes): (Vec<uuid::Uuid>, Vec<String>) = lookups
+        .iter()
+        .map(|(cache, hash)| (cache.into_inner(), hash.to_string()))
+        .unzip();
+    db.query_all_raw(SEARCH_NARS.bind([user_value(user), Value::from(caches), Value::from(hashes)]))
         .await?
         .iter()
         .map(nar_hit_row)
