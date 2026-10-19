@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_derivation::Derivation;
 use gradient_types::{OriginalStorePath, StoreHash, StorePath, StorePathMapper};
 use harmonia_protocol::valid_path_info::ValidPathInfo;
 use harmonia_store_path::{StorePath as ClientPath, StorePathHash};
@@ -33,6 +34,22 @@ pub fn original_text(mapper: &StorePathMapper, stored: &str) -> anyhow::Result<S
 
 pub fn stored_full(mapper: &StorePathMapper, original: &str) -> anyhow::Result<String> {
     Ok(mapper.inbound(&OriginalStorePath::parse(original)?).full())
+}
+
+pub fn stored_derivation(
+    mapper: &StorePathMapper,
+    mut drv: Derivation,
+) -> anyhow::Result<Derivation> {
+    for output in drv.outputs.iter_mut().filter(|o| !o.path.is_empty()) {
+        output.path = mapper.inbound_text(&output.path)?;
+    }
+    for (input, _) in &mut drv.input_derivations {
+        *input = mapper.inbound_text(input)?;
+    }
+    for source in &mut drv.input_sources {
+        *source = mapper.inbound_text(source)?;
+    }
+    Ok(drv)
 }
 
 pub struct StoredPathInfo {
@@ -66,5 +83,51 @@ impl StoredPathInfo {
             nar_hash: info.info.nar_hash,
             nar_size: info.info.nar_size,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_derivation::DerivationOutput;
+    use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
+    use gradient_types::{MappingContext, ProjectId};
+    use std::sync::Arc;
+
+    #[test]
+    fn a_derivation_read_from_the_cache_names_stored_paths() {
+        let (o, s) = (EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH);
+        let mapper = StorePathMapper::new(
+            Arc::new(RotatedHashMapping),
+            MappingContext::Project(ProjectId::nil()),
+        );
+        let output = |path: String| DerivationOutput {
+            name: "out".into(),
+            path,
+            hash_algo: String::new(),
+            hash: String::new(),
+        };
+        let drv = Derivation {
+            outputs: vec![output(format!("/nix/store/{o}-hello"))],
+            input_derivations: vec![(format!("/nix/store/{o}-dep.drv"), vec!["out".into()])],
+            input_sources: vec![format!("/nix/store/{o}-src")],
+            system: "x86_64-linux".into(),
+            builder: format!("/nix/store/{o}-bash/bin/bash"),
+            args: Vec::new(),
+            environment: Default::default(),
+        };
+
+        let stored = stored_derivation(&mapper, drv).expect("stored");
+
+        assert_eq!(
+            stored.outputs,
+            vec![output(format!("/nix/store/{s}-hello"))]
+        );
+        assert_eq!(
+            stored.input_derivations,
+            vec![(format!("/nix/store/{s}-dep.drv"), vec!["out".to_owned()])]
+        );
+        assert_eq!(stored.input_sources, vec![format!("/nix/store/{s}-src")]);
+        assert_eq!(stored.builder, format!("/nix/store/{o}-bash/bin/bash"));
     }
 }

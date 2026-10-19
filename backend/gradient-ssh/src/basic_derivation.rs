@@ -6,6 +6,7 @@
 
 use crate::session::Session;
 use crate::store_paths::StoredPathInfo;
+use gradient_types::StorePathMapper;
 use gradient_util::nar::single_file_nar;
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_store_aterm::print_derivation_aterm;
@@ -52,6 +53,15 @@ fn drv_file(drv: &BasicDerivation) -> anyhow::Result<DrvFile> {
 }
 
 pub async fn import(session: &Session, drv: &BasicDerivation) -> anyhow::Result<String> {
+    let (info, nar) = stored_drv(drv, &session.store_path_mapper())?;
+    crate::ingest::import(session, &info, nar.as_slice()).await?;
+    Ok(info.path.full())
+}
+
+fn stored_drv(
+    drv: &BasicDerivation,
+    mapper: &StorePathMapper,
+) -> anyhow::Result<(StoredPathInfo, Vec<u8>)> {
     let file = drv_file(drv)?;
     let nar = single_file_nar(&file.aterm, false);
     let info = ValidPathInfo {
@@ -69,9 +79,7 @@ pub async fn import(session: &Session, drv: &BasicDerivation) -> anyhow::Result<
         },
     };
 
-    let info = StoredPathInfo::inbound(&session.store_path_mapper(), &info)?;
-    crate::ingest::import(session, &info, nar.as_slice()).await?;
-    Ok(info.path.full())
+    Ok((StoredPathInfo::inbound(mapper, &info)?, nar))
 }
 
 #[cfg(test)]
@@ -107,6 +115,27 @@ mod tests {
             args: drv.args,
             env: drv.env,
             structured_attrs: drv.structured_attrs,
+        }
+    }
+
+    #[test]
+    fn a_derivation_path_is_computed_over_original_inputs() {
+        let mapper = gradient_types::StorePathMapper::new(
+            std::sync::Arc::new(gradient_entity::RotatedHashMapping),
+            gradient_types::MappingContext::Project(gradient_types::ProjectId::nil()),
+        );
+        let drv = basic(ATERM);
+
+        let (info, nar) = stored_drv(&drv, &mapper).expect("drv");
+
+        let original = gradient_types::OriginalStorePath::parse(PATH.trim()).expect("path");
+        assert_eq!(info.path, mapper.inbound(&original));
+        assert_eq!(info.original.to_string(), original.base());
+        assert_eq!(info.nar_size, nar.len() as u64);
+        for input in &drv.inputs {
+            let input =
+                gradient_types::OriginalStorePath::parse(&input.to_string()).expect("input");
+            assert!(info.references.contains(&mapper.inbound(&input).base()));
         }
     }
 

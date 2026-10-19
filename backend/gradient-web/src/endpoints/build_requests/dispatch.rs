@@ -31,7 +31,7 @@ use gradient_types::ids::{
 use gradient_types::input::{check_flake_input_override, check_manifest_path, decode_blake3_hex};
 use gradient_types::{
     BaseResponse, ECache, EUploadSession, MCommit, MEvaluation, MEvaluationFlakeInputOverride,
-    MUploadSession, MUser, now,
+    MUploadSession, MUser, MappingContext, OriginalStorePath, StorePath, StorePathMapper, now,
 };
 use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
@@ -171,15 +171,17 @@ pub(super) async fn finalize_build_request(
         check_flake_input_override(input_name, url)?;
     }
 
+    let mapper = db.store_path_mapper(MappingContext::Project(project));
+    let stored = stored_source_path(&mapper, &nar.store_path)?;
     db.storage
         .nar_storage
-        .put(&nar.store_hash, nar.compressed_bytes.clone())
+        .put(stored.hash(), nar.compressed_bytes.clone())
         .await
         .context("store source NAR")?;
 
     graph
         .commit_nar(NarCommit {
-            store_path: format!("{}-source", nar.store_hash),
+            store_path: stored.base(),
             file_hash: nar.file_hash_sri.clone(),
             file_size: nar.file_size as i64,
             nar_size: nar.nar_size as i64,
@@ -198,7 +200,7 @@ pub(super) async fn finalize_build_request(
         project,
         user,
         BuildRequestSource {
-            repository: nar.store_path.clone(),
+            repository: stored.full(),
             commit_hash: vec![0; 20],
             commit_message: format!("Build request {}", nar.store_hash),
             target: options.target,
@@ -218,6 +220,11 @@ pub(super) async fn finalize_build_request(
     tx.commit().await?;
 
     Ok(response)
+}
+
+fn stored_source_path(mapper: &StorePathMapper, store_path: &str) -> anyhow::Result<StorePath> {
+    let original = OriginalStorePath::parse(store_path).context("source NAR store path")?;
+    Ok(mapper.inbound(&original))
 }
 
 pub(super) struct BuildRequestSource {
@@ -347,4 +354,30 @@ async fn materialise_staging(
             .with_context(|| format!("write {}", entry.path))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
+    use gradient_types::ProjectId;
+
+    #[test]
+    fn a_source_nar_is_stored_under_its_mapped_path() {
+        let mapper = StorePathMapper::new(
+            Arc::new(RotatedHashMapping),
+            MappingContext::Project(ProjectId::nil()),
+        );
+
+        let stored = stored_source_path(
+            &mapper,
+            &format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-source"),
+        )
+        .expect("stored");
+
+        assert_eq!(
+            stored.full(),
+            format!("/nix/store/{EXAMPLE_STORED_HASH}-source")
+        );
+    }
 }
