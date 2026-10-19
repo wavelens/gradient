@@ -17,6 +17,7 @@ use axum::extract::{Multipart, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use gradient_core::ServerState;
+use gradient_entity::StorePathError;
 use gradient_proto::import::{ImportInput, SignTargets, import_nar_reader};
 use gradient_storage::PartialStore;
 use gradient_types::events::EventOwner;
@@ -120,6 +121,17 @@ pub async fn nars_upload(
             return Err(CacheRefusal::MissingPart("narinfo").into());
         }
     };
+    let upload = match MappedUpload::new(
+        narinfo,
+        &state.store_path_mapper(MappingContext::Cache(cache.id)),
+    ) {
+        Ok(upload) => upload,
+        Err(e) => {
+            let _ = upload_store.discard(&stage_key).await;
+            return Err(e);
+        }
+    };
+    let narinfo = &upload.narinfo;
     let staged_size = staged_size.ok_or(CacheRefusal::MissingPart("nar"))?;
 
     if staged_size as i64 != narinfo.file_size {
@@ -153,7 +165,7 @@ pub async fn nars_upload(
     let claim = admit_nar(
         &state.config,
         &state.memory.upload_admission,
-        &narinfo_hash(&narinfo.store_path),
+        &upload.stored_hash,
         narinfo.file_size as u64,
     )
     .await?;
@@ -166,16 +178,7 @@ pub async fn nars_upload(
         &state.nar_storage,
         &state.graph,
         nar_reader,
-        ImportInput {
-            store_path: &narinfo.store_path,
-            file_hash: &narinfo.file_hash,
-            file_size: narinfo.file_size,
-            nar_size: narinfo.nar_size,
-            nar_hash: &narinfo.nar_hash,
-            references: &narinfo.references,
-            deriver: narinfo.deriver.as_deref(),
-            ca: None,
-        },
+        upload.import_input(),
         SignTargets::Cache(cache.id),
     )
     .await
@@ -189,30 +192,76 @@ pub async fn nars_upload(
     for cache in outcome.signed {
         state.events.publish(NarSigned {
             cache,
-            hash: narinfo_hash(&narinfo.store_path),
+            hash: upload.original_hash.clone(),
         });
     }
 
-    audit.write(Action::CacheNarUpload, EventOwner::cache(cache.id), json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "store_path": narinfo.store_path, "created": outcome.created, }))
+    audit.write(Action::CacheNarUpload, EventOwner::cache(cache.id), json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "store_path": upload.client_path, "created": outcome.created, }))
     .await;
 
     Ok((
         StatusCode::CREATED,
         ok_json(StoredNar {
-            store_path: narinfo.store_path,
+            store_path: upload.client_path,
             created: outcome.created,
         }),
     ))
 }
 
-fn narinfo_hash(store_path: &str) -> String {
-    store_path
-        .strip_prefix("/nix/store/")
-        .unwrap_or(store_path)
-        .split('-')
-        .next()
-        .unwrap_or("")
-        .to_owned()
+fn stored_narinfo(
+    part: NarinfoPart,
+    mapper: &StorePathMapper,
+) -> Result<NarinfoPart, StorePathError> {
+    Ok(NarinfoPart {
+        store_path: mapper.inbound_text(&part.store_path)?,
+        references: part
+            .references
+            .iter()
+            .map(|reference| mapper.inbound_text(reference))
+            .collect::<Result<_, _>>()?,
+        deriver: part
+            .deriver
+            .as_deref()
+            .map(|deriver| mapper.inbound_text(deriver))
+            .transpose()?,
+        ..part
+    })
+}
+
+struct MappedUpload {
+    client_path: String,
+    original_hash: String,
+    stored_hash: String,
+    narinfo: NarinfoPart,
+}
+
+impl MappedUpload {
+    fn new(narinfo: NarinfoPart, mapper: &StorePathMapper) -> WebResult<Self> {
+        let original = OriginalStorePath::parse(&narinfo.store_path)
+            .map_err(|_| CacheRefusal::InvalidStoreHash)?;
+        let client_path = narinfo.store_path.clone();
+        let narinfo =
+            stored_narinfo(narinfo, mapper).map_err(|_| CacheRefusal::InvalidStoreHash)?;
+        Ok(Self {
+            client_path,
+            original_hash: original.hash().to_string(),
+            stored_hash: mapper.inbound_hash(original.hash().clone()).to_string(),
+            narinfo,
+        })
+    }
+
+    fn import_input(&self) -> ImportInput<'_> {
+        ImportInput {
+            store_path: &self.narinfo.store_path,
+            file_hash: &self.narinfo.file_hash,
+            file_size: self.narinfo.file_size,
+            nar_size: self.narinfo.nar_size,
+            nar_hash: &self.narinfo.nar_hash,
+            references: &self.narinfo.references,
+            deriver: self.narinfo.deriver.as_deref(),
+            ca: None,
+        }
+    }
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -251,6 +300,14 @@ async fn stage_nar_field(
     Ok(offset)
 }
 
+fn stored_segment(segment: &str, mapper: &StorePathMapper) -> WebResult<String> {
+    let stored = mapper
+        .inbound_text(segment)
+        .map_err(|_| CacheRefusal::InvalidStoreHash)?;
+    require_safe_hash(&stored)?;
+    Ok(stored)
+}
+
 fn require_safe_hash(store_hash: &str) -> WebResult<()> {
     if store_hash.is_empty() || store_hash.contains('/') || store_hash.contains("..") {
         return Err(CacheRefusal::InvalidStoreHash.into());
@@ -276,9 +333,10 @@ pub async fn nar_chunk(
     Query(NarChunkQuery { offset }): Query<NarChunkQuery>,
     body: Bytes,
 ) -> WebResult<impl IntoResponse> {
-    let store_hash: String = params.param("hash")?;
-
-    require_safe_hash(&store_hash)?;
+    let store_hash = stored_segment(
+        &params.param::<String>("hash")?,
+        &state.store_path_mapper(MappingContext::Cache(cache.id)),
+    )?;
 
     let max = u64::try_from(state.config.nar.max_upload_size.get()).unwrap_or(u64::MAX);
     if offset + body.len() as u64 > max {
@@ -327,9 +385,10 @@ pub async fn nar_finalize(
     audit: Audit,
     axum::Json(narinfo): axum::Json<NarinfoPart>,
 ) -> WebResult<impl IntoResponse> {
-    let store_hash: String = params.param("hash")?;
-
-    require_safe_hash(&store_hash)?;
+    let mapper = state.store_path_mapper(MappingContext::Cache(cache.id));
+    let store_hash = stored_segment(&params.param::<String>("hash")?, &mapper)?;
+    let upload = MappedUpload::new(narinfo, &mapper)?;
+    let narinfo = &upload.narinfo;
 
     let store = upload_partial_store(&state.config)?;
     let key = format!("{}/{store_hash}", cache.id);
@@ -345,7 +404,7 @@ pub async fn nar_finalize(
     let claim = admit_nar(
         &state.config,
         &state.memory.upload_admission,
-        &narinfo_hash(&narinfo.store_path),
+        &upload.stored_hash,
         narinfo.file_size as u64,
     )
     .await?;
@@ -368,16 +427,7 @@ pub async fn nar_finalize(
         &state.nar_storage,
         &state.graph,
         nar_reader,
-        ImportInput {
-            store_path: &narinfo.store_path,
-            file_hash: &narinfo.file_hash,
-            file_size: narinfo.file_size,
-            nar_size: narinfo.nar_size,
-            nar_hash: &narinfo.nar_hash,
-            references: &narinfo.references,
-            deriver: narinfo.deriver.as_deref(),
-            ca: None,
-        },
+        upload.import_input(),
         SignTargets::Cache(cache.id),
     )
     .await
@@ -391,17 +441,17 @@ pub async fn nar_finalize(
     for cache in outcome.signed {
         state.events.publish(NarSigned {
             cache,
-            hash: narinfo_hash(&narinfo.store_path),
+            hash: upload.original_hash.clone(),
         });
     }
 
-    audit.write(Action::CacheNarUpload, EventOwner::cache(cache.id), json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "store_path": narinfo.store_path, "created": outcome.created, "chunked": true, }))
+    audit.write(Action::CacheNarUpload, EventOwner::cache(cache.id), json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "store_path": upload.client_path, "created": outcome.created, "chunked": true, }))
     .await;
 
     Ok((
         StatusCode::CREATED,
         ok_json(StoredNar {
-            store_path: narinfo.store_path,
+            store_path: upload.client_path,
             created: outcome.created,
         }),
     ))
@@ -409,7 +459,61 @@ pub async fn nar_finalize(
 
 #[cfg(test)]
 mod tests {
-    use super::require_safe_hash;
+    use super::{NarinfoPart, require_safe_hash, stored_narinfo};
+    use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
+    use gradient_types::{CacheId, MappingContext, StorePathMapper};
+    use std::sync::Arc;
+
+    fn part(store_path: String, references: Vec<String>) -> NarinfoPart {
+        NarinfoPart {
+            store_path,
+            file_hash: "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into(),
+            file_size: 5,
+            nar_size: 5,
+            nar_hash: "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into(),
+            references,
+            deriver: None,
+        }
+    }
+
+    fn rotated() -> StorePathMapper {
+        StorePathMapper::new(
+            Arc::new(RotatedHashMapping),
+            MappingContext::Cache(CacheId::nil()),
+        )
+    }
+
+    #[test]
+    fn an_uploaded_narinfo_is_stored_under_its_mapped_hash() {
+        let (o, s) = (EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH);
+        let uploaded = NarinfoPart {
+            deriver: Some(format!("{o}-hello.drv")),
+            ..part(
+                format!("/nix/store/{o}-hello"),
+                vec![format!("/nix/store/{o}-hello")],
+            )
+        };
+
+        let stored = stored_narinfo(uploaded, &rotated()).unwrap();
+
+        assert_eq!(stored.store_path, format!("/nix/store/{s}-hello"));
+        assert_eq!(stored.references, vec![format!("/nix/store/{s}-hello")]);
+        assert_eq!(stored.deriver, Some(format!("{s}-hello.drv")));
+        assert_eq!(stored.file_size, 5);
+    }
+
+    #[test]
+    fn an_uploaded_narinfo_with_a_short_hash_is_refused() {
+        let o = EXAMPLE_ORIGINAL_HASH;
+        assert!(stored_narinfo(part("abc-hello".into(), Vec::new()), &rotated()).is_err());
+        assert!(
+            stored_narinfo(
+                part(format!("{o}-hello"), vec!["abc-bash".into()]),
+                &rotated()
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn accepts_a_normal_store_basename() {
