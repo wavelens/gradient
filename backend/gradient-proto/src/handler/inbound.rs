@@ -43,6 +43,7 @@ use super::socket::{
 };
 use super::store_paths::{inbound_or_refuse, outbound_message, outbound_offer};
 use super::upload::UploadSession;
+use gradient_db::cache_paths::project_read_caches;
 
 #[derive(Clone)]
 pub(crate) struct ActiveJob {
@@ -608,10 +609,19 @@ impl<'a> InboundContext<'a> {
     }
 
     async fn on_eval_cache_pull(&mut self, job_id: String, fingerprint: String) {
+        let db = &self.handles.db.worker_db;
+        let readable = match self.active.job_project(self.scheduler, &job_id).await {
+            Some(project) => project_read_caches(db, project).await.unwrap_or_else(|e| {
+                warn!(peer_id = %self.peer_id, %job_id, error = %e, "readable caches lookup failed");
+                Vec::new()
+            }),
+            None => Vec::new(),
+        };
         handle_eval_cache_pull(
-            &self.handles.db.worker_db,
+            db,
             &self.handles.db.storage.nar_storage,
             self.writer,
+            &readable,
             job_id,
             fingerprint,
         )

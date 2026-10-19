@@ -110,8 +110,8 @@ impl EvalCacheSweep {
         let mut freed: u64 = 0;
         let mut evicted = 0usize;
         for row in models {
-            if let Err(e) = self.nar_storage.delete_eval_cache(&row.fingerprint).await {
-                warn!(fingerprint = %row.fingerprint, error = ?e, "eval-cache sweep: blob delete failed");
+            if let Err(e) = self.nar_storage.delete_eval_cache(&row.storage_path).await {
+                warn!(key = %row.storage_path, error = ?e, "eval-cache sweep: blob delete failed");
             }
 
             match EEvalCacheStore::delete_by_id(row.id).exec(&self.db).await {

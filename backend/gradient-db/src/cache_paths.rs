@@ -82,6 +82,37 @@ pub async fn project_read_caches<C: ConnectionTrait>(
         .await
 }
 
+pub async fn project_write_caches<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+) -> Result<Vec<CacheId>, DbErr> {
+    let subscribed: Vec<CacheId> = EProjectCache::find()
+        .filter(CProjectCache::Project.eq(project))
+        .filter(CProjectCache::Mode.is_in([
+            CacheSubscriptionMode::ReadWrite,
+            CacheSubscriptionMode::WriteOnly,
+        ]))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|link| link.cache)
+        .collect();
+    if subscribed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut active: Vec<CacheId> = ECache::find()
+        .filter(CCache::Id.is_in(subscribed))
+        .filter(CCache::Active.eq(true))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|cache| cache.id)
+        .collect();
+    active.sort();
+    Ok(active)
+}
+
 pub async fn served_path<C: ConnectionTrait>(
     db: &C,
     caches: &[CacheId],

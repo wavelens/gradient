@@ -296,10 +296,12 @@ impl Shape {
     }
 
     pub fn eval_cache(mut self, fingerprint: &str) -> Self {
+        let cache = self.caches[self.cache.expect("name a cache first")].id;
         self.eval_caches.push(eval_cache_store::Model {
             id: EvalCacheStoreId::now_v7(),
+            cache,
             fingerprint: fingerprint.into(),
-            storage_path: format!("eval-cache/{fingerprint}"),
+            storage_path: format!("eval-cache/{cache}/{fingerprint}"),
             size_bytes: 1,
             created_at: test_date(),
             updated_at: test_date(),

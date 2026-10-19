@@ -4,16 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::cache_paths::project_write_caches;
 use gradient_db::{DbContext, WorkerDb};
 use gradient_storage::NarStore;
-use gradient_storage::admission::{ObjectKey, UploadPermit};
-use gradient_types::ids::ProjectId;
+use gradient_storage::admission::UploadPermit;
+use gradient_types::ids::{CacheId, ProjectId};
 use gradient_types::{MappingContext, RuntimeConfig};
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::types::{NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
 
 use super::super::SessionHandles;
+use super::super::eval_cache::eval_cache_key;
 use super::super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
 use super::super::socket::{ProtoWriter, send_server_msg};
 use super::super::store_paths::inbound_upload_metadata;
@@ -40,17 +42,26 @@ pub(super) async fn run(c: Commit) {
         .handles
         .db
         .store_path_mapper(MappingContext::Project(c.project));
-    let placed = match inbound_upload_metadata(c.metadata, &mapper) {
-        Ok(metadata) => place(&c.handles.db, &c.object, c.transfer, &metadata)
-            .await
-            .map(|()| metadata),
-        Err(e) => Err(rejected(e.to_string())),
+    let writable = match &c.object {
+        UploadObject::EvalCache { .. } => {
+            project_write_caches(&c.handles.db.worker_db, c.project).await
+        }
+        UploadObject::Nar { .. } => Ok(Vec::new()),
+    };
+    let placed = match (inbound_upload_metadata(c.metadata, &mapper), writable) {
+        (Ok(metadata), Ok(writable)) => {
+            place(&c.handles.db, &writable, &c.object, c.transfer, &metadata)
+                .await
+                .map(|()| (metadata, writable))
+        }
+        (Err(e), _) => Err(rejected(e.to_string())),
+        (_, Err(e)) => Err(retry(format!("looking up the writable caches: {e}"))),
     };
     let outcome = match placed {
-        Ok(metadata) => {
+        Ok((metadata, writable)) => {
             let mut permit = c.permit;
             permit.release_budget();
-            let outcome = record(&c.handles, c.project, &c.object, &metadata).await;
+            let outcome = record(&c.handles, c.project, &writable, &c.object, &metadata).await;
             if matches!(outcome, UploadOutcome::Ok) {
                 permit.committed();
             }
@@ -88,13 +99,14 @@ fn rejected(reason: String) -> UploadOutcome {
 #[tracing::instrument(name = "place_upload", level = "debug", skip_all)]
 async fn place(
     db: &DbContext,
+    writable: &[CacheId],
     object: &UploadObject,
     transfer: Transfer,
     metadata: &UploadMetadata,
 ) -> Result<(), UploadOutcome> {
     match (object, metadata) {
         (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta)) => {
-            let Some(ObjectKey::Nar(hash)) = super::object_key(object) else {
+            let Some(hash) = super::nar_key(store_path) else {
                 return Err(rejected(format!("malformed store path {store_path}")));
             };
             match transfer {
@@ -114,7 +126,11 @@ async fn place(
             }
         }
         (UploadObject::EvalCache { fingerprint }, UploadMetadata::EvalCache { size_bytes }) => {
-            place_eval_cache(&db.storage.nar_storage, fingerprint, transfer, *size_bytes).await
+            let Some(&target) = writable.first() else {
+                return Err(rejected("the project has no writable cache".into()));
+            };
+            let key = eval_cache_key(target, fingerprint);
+            place_eval_cache(&db.storage.nar_storage, &key, transfer, *size_bytes).await
         }
         _ => Err(rejected("metadata does not match the upload object".into())),
     }
@@ -124,6 +140,7 @@ async fn place(
 async fn record(
     handles: &SessionHandles,
     project_id: ProjectId,
+    writable: &[CacheId],
     object: &UploadObject,
     metadata: &UploadMetadata,
 ) -> UploadOutcome {
@@ -161,6 +178,8 @@ async fn record(
         (UploadObject::EvalCache { fingerprint }, UploadMetadata::EvalCache { size_bytes }) => {
             super::super::eval_cache::record_eval_cache(
                 &handles.db.worker_db,
+                &handles.db.storage.nar_storage,
+                writable,
                 fingerprint,
                 *size_bytes,
             )
@@ -244,7 +263,7 @@ async fn place_presigned(
 
 async fn place_eval_cache(
     nar_storage: &NarStore,
-    fingerprint: &str,
+    key: &str,
     transfer: Transfer,
     size_bytes: u64,
 ) -> Result<(), UploadOutcome> {
@@ -259,13 +278,10 @@ async fn place_eval_cache(
             }
             let bytes = tokio::fs::read(&staged.path).await.map_err(retry)?;
             let _ = tokio::fs::remove_file(&staged.path).await;
-            nar_storage
-                .put_eval_cache(fingerprint, bytes)
-                .await
-                .map_err(retry)
+            nar_storage.put_eval_cache(key, bytes).await.map_err(retry)
         }
         Transfer::Put | Transfer::Multipart { .. } => nar_storage
-            .verify_eval_cache(fingerprint, size_bytes)
+            .verify_eval_cache(key, size_bytes)
             .await
             .map_err(retry),
     }
@@ -409,6 +425,7 @@ mod tests {
 
         place(
             &state.db(),
+            &[],
             &UploadObject::Nar {
                 store_path: format!("/nix/store/{hash}-p"),
             },

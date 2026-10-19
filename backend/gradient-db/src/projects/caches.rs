@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::ids::{CacheId, ProjectId};
 use gradient_types::{CProjectCache, EProjectCache, MProjectCache};
 use sea_orm::{ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
@@ -13,31 +12,9 @@ pub async fn project_has_writable_cache<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
 ) -> Result<bool, sea_orm::DbErr> {
-    use gradient_entity::cache::{Column as CCache, Entity as ECache};
-    use gradient_entity::project_cache::{Column as COC, Entity as EOC};
-
-    let cache_ids: Vec<CacheId> = EOC::find()
-        .filter(COC::Project.eq(project))
-        .filter(COC::Mode.is_in([
-            CacheSubscriptionMode::ReadWrite,
-            CacheSubscriptionMode::WriteOnly,
-        ]))
-        .all(db)
+    Ok(!crate::cache_paths::project_write_caches(db, project)
         .await?
-        .into_iter()
-        .map(|r| r.cache)
-        .collect();
-
-    if cache_ids.is_empty() {
-        return Ok(false);
-    }
-
-    let row = ECache::find()
-        .filter(CCache::Id.is_in(cache_ids))
-        .filter(CCache::Active.eq(true))
-        .one(db)
-        .await?;
-    Ok(row.is_some())
+        .is_empty())
 }
 
 pub async fn subscriptions_of<C: ConnectionTrait>(

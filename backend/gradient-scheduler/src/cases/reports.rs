@@ -11,7 +11,7 @@ use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_entity::evaluation_message::MessageLevel;
-use gradient_entity::ids::{DispatchedJobId, EvaluationId};
+use gradient_entity::ids::{CacheId, DispatchedJobId, EvaluationId};
 use gradient_entity::pending_delivery::PendingDeliveryKind;
 use gradient_fixtures::shape::shape;
 use gradient_pool::session_port::SessionSignal;
@@ -952,7 +952,13 @@ async fn r14_a_canceled_eval_job_puts_the_evaluation_back_to_queued() {
 #[tokio::test]
 async fn r15_a_corrupt_eval_cache_purges_the_blob_and_requeues_then_fails() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(shape().evalq(e1).eval_cache("F")).await;
+    let case = SchedulerCase::start(
+        shape()
+            .evalq(e1)
+            .into_cache(CacheId::now_v7())
+            .eval_cache("F"),
+    )
+    .await;
     let k = eval_key(e1);
     let a1 = case.evalrun(W1, e1).await;
     case.advance_evaluation(W1, &k, EvaluationStatus::EvaluatingDerivation)
