@@ -187,6 +187,8 @@ pub async fn path(
 
     let path_hash =
         get_hash_from_url(path.clone()).map_err(|_| WebError::not_found(Resource::Path))?;
+    let store_hash =
+        StoreHash::parse(&path_hash).map_err(|_| WebError::not_found(Resource::Path))?;
 
     let client_ip = cache_client_ip(&state.config, &headers, peer);
     let ctx = CacheContext::load(
@@ -199,11 +201,13 @@ pub async fn path(
     )
     .await?;
 
+    let mapper = state.store_path_mapper(MappingContext::Cache(ctx.cache.id));
     if let Ok(path_info) = get_nar_by_hash(
         &state.web_db,
         &state.config,
         ctx.cache.clone(),
-        path_hash.clone(),
+        &mapper,
+        store_hash,
     )
     .await
     {

@@ -11,12 +11,14 @@
 
 use axum::extract::connect_info::MockConnectInfo;
 use axum_test::TestServer;
+use gradient_entity::{MappingContext, RotatedHashMapping, StorePathMapping};
 use gradient_fixtures::mock::mock_db;
 use gradient_storage::NarStore;
 use gradient_test_support::prelude::test_cli;
 use gradient_test_support::state::TestState;
 use gradient_types::ids::*;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use uuid::Uuid;
 
 const STORE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -204,4 +206,41 @@ async fn a_nar_this_cache_holds_no_claim_on_is_not_served() {
         .await;
 
     resp.assert_status_not_found();
+}
+
+#[tokio::test]
+async fn a_nar_url_file_hash_is_looked_up_unmapped() {
+    let cli = test_cli();
+    let db = mock_db()
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![cached_path_row()]])
+        .append_query_results([vec![served()]])
+        .into_connection();
+    let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
+    nar_storage
+        .put(STORE_HASH, blob())
+        .await
+        .expect("seed NAR blob");
+    let state = TestState::new()
+        .web_db(db.clone())
+        .nar_storage(nar_storage)
+        .store_path_mapping(Arc::new(RotatedHashMapping))
+        .build();
+
+    let router = gradient_web::create_router(state)
+        .expect("router")
+        .layer(MockConnectInfo(
+            "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
+        ));
+    TestServer::new(router)
+        .get(&format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst"))
+        .await
+        .assert_status_ok();
+
+    let rotated = RotatedHashMapping
+        .inbound_prefix(MappingContext::Cache(cache_id()), FILE_HASH_NIX32)
+        .unwrap();
+    let log = format!("{:?}", db.into_transaction_log());
+    assert!(log.contains(&format!("sha256:{FILE_HASH_NIX32}")), "{log}");
+    assert!(!log.contains(&rotated), "{log}");
 }

@@ -119,13 +119,24 @@ async fn require_cache_auth(
     }
 }
 
+pub(super) fn stored_hash(mapper: &StorePathMapper, hash: &str) -> WebResult<String> {
+    let hash = StoreHash::parse(hash).map_err(|_| WebError::not_found(Resource::Path))?;
+    Ok(mapper.inbound_hash(hash).to_string())
+}
+
+pub(super) fn original_text(mapper: &StorePathMapper, text: String) -> String {
+    mapper.outbound_text(&text).unwrap_or(text)
+}
+
 pub(super) async fn get_nar_by_hash(
     db: &WebDb,
     config: &RuntimeConfig,
     cache: MCache,
-    hash: String,
+    mapper: &StorePathMapper,
+    hash: StoreHash,
 ) -> Result<NixPathInfo, WebError> {
-    let cached_path_row = gradient_db::cached_paths::by_hash(db, &hash)
+    let hash = mapper.inbound_hash(hash);
+    let cached_path_row = gradient_db::cached_paths::by_hash(db, hash.as_str())
         .await
         .map_err(WebError::from)?
         .filter(|row| row.is_fully_cached())
@@ -169,17 +180,22 @@ pub(super) async fn get_nar_by_hash(
     let file_hash_nix32 = strip_hash_algo(&file_hash).to_string();
 
     Ok(NixPathInfo {
-        store_path: cached_path_row.store_path(),
+        store_path: original_text(mapper, cached_path_row.store_path()),
         url: format!("nar/{}.nar.zst", file_hash_nix32),
         compression: "zstd".to_string(),
         file_hash,
         file_size,
         nar_hash,
         nar_size,
-        references,
-        deriver: cached_path_row.deriver.clone(),
+        references: references
+            .into_iter()
+            .map(|reference| original_text(mapper, reference))
+            .collect(),
+        deriver: cached_path_row
+            .deriver
+            .map(|deriver| original_text(mapper, deriver)),
         sig,
-        ca: cached_path_row.ca.clone(),
+        ca: cached_path_row.ca,
     })
 }
 
@@ -237,15 +253,13 @@ pub async fn fetch_nar_stream(
     db: &WebDb,
     nar_storage: &NarStore,
     cache: CacheId,
-    path_hash: &str,
-) -> WebResult<(String, u64, BoxStream<'static, anyhow::Result<Bytes>>)> {
-    let effective_hash =
-        crate::endpoints::caches::nar::resolve_effective_hash_db(db, path_hash).await?;
-    if !gradient_db::cached_paths::signed_in_cache(db, cache, &effective_hash).await? {
+    stored_hash: &str,
+) -> WebResult<(u64, BoxStream<'static, anyhow::Result<Bytes>>)> {
+    if !gradient_db::cached_paths::signed_in_cache(db, cache, stored_hash).await? {
         return Err(WebError::not_found(Resource::Path));
     }
     let source = nar_storage
-        .open(&effective_hash, 0)
+        .open(stored_hash, 0)
         .await
         .context("read NAR")?
         .or_not_found(Resource::Path)?;
@@ -259,7 +273,7 @@ pub async fn fetch_nar_stream(
         }
         NarSource::Stream { size, stream } => (size, stream),
     };
-    Ok((effective_hash, size, stream))
+    Ok((size, stream))
 }
 
 #[derive(Debug, Clone, Copy)]

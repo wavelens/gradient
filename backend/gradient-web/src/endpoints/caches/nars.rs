@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::delete_nar_from_cache;
+use super::helpers::{delete_nar_from_cache, original_text, stored_hash};
 use super::refusal::CacheRefusal;
 use crate::api_spec::CachePath;
 use crate::audit::Audit;
@@ -57,17 +57,25 @@ pub struct NarDetail {
 }
 
 impl NarDetail {
-    fn new(path: MCachedPath, signature: MCachedPathSignature, references: Vec<String>) -> Self {
+    fn new(
+        path: MCachedPath,
+        signature: MCachedPathSignature,
+        references: Vec<String>,
+        mapper: &StorePathMapper,
+    ) -> Self {
         Self {
-            store_path: path.as_store_path().base(),
-            hash: path.hash,
+            store_path: original_text(mapper, path.as_store_path().base()),
+            hash: original_text(mapper, path.hash),
             package: path.package,
             nar_size: path.nar_size,
             file_size: path.file_size,
             file_hash: path.file_hash,
             nar_hash: path.nar_hash,
-            references,
-            deriver: path.deriver,
+            references: references
+                .into_iter()
+                .map(|reference| original_text(mapper, reference))
+                .collect(),
+            deriver: path.deriver.map(|deriver| original_text(mapper, deriver)),
             ca: path.ca,
             created_at: path.created_at,
             last_fetched_at: signature.last_fetched_at,
@@ -136,9 +144,24 @@ pub async fn list(
         "last_fetched_at" => NarOrder::LastFetchedAt,
         _ => NarOrder::CreatedAt,
     };
+    let mapper = db.store_path_mapper(MappingContext::Cache(cache.id));
+    let hash_prefix = match q.hash.as_deref().filter(|s| !s.is_empty()) {
+        Some(prefix) => match mapper.inbound_prefix(prefix) {
+            Some(stored) => Some(stored),
+            None => {
+                return Ok(ok_json(Paginated {
+                    items: Vec::new(),
+                    total: 0,
+                    page,
+                    per_page,
+                }));
+            }
+        },
+        None => None,
+    };
     let filter = NarFilter {
         cache: cache.id,
-        hash_prefix: q.hash.as_deref().filter(|s| !s.is_empty()),
+        hash_prefix: hash_prefix.as_deref(),
         package: q.package.as_deref().filter(|s| !s.is_empty()),
     };
 
@@ -146,7 +169,14 @@ pub async fn list(
     let items = gradient_db::cached_paths::page_in_cache(
         &db.web_db, filter, order, ascending, per_page, offset,
     )
-    .await?;
+    .await?
+    .into_iter()
+    .map(|item| NarSummary {
+        hash: original_text(&mapper, item.hash),
+        store_path: original_text(&mapper, item.store_path),
+        ..item
+    })
+    .collect();
 
     Ok(ok_json(Paginated {
         items,
@@ -172,6 +202,8 @@ pub async fn show(
     }: CacheScope<Readable>,
 ) -> WebResult<Json<BaseResponse<NarDetail>>> {
     let hash: String = params.param("hash")?;
+    let mapper = db.store_path_mapper(MappingContext::Cache(cache.id));
+    let hash = stored_hash(&mapper, &hash)?;
 
     let cp = gradient_db::cached_paths::by_hash(&db.web_db, &hash)
         .await?
@@ -181,7 +213,7 @@ pub async fn show(
         .or_not_found(Resource::Signature)?;
     let references =
         gradient_db::graph::runtime_closure::references_for_hash(&db.web_db, &hash).await?;
-    Ok(ok_json(NarDetail::new(cp, sig, references)))
+    Ok(ok_json(NarDetail::new(cp, sig, references, &mapper)))
 }
 
 #[utoipa::path(
@@ -222,6 +254,10 @@ pub async fn available(
     if hash.is_empty() {
         return Err(CacheRefusal::MissingHashQuery.into());
     }
+    let hash = stored_hash(
+        &db.store_path_mapper(MappingContext::Cache(cache.id)),
+        &hash,
+    )?;
     let cp = gradient_db::cached_paths::by_hash(&db.web_db, &hash).await?;
     let exists = if let Some(cp) = cp {
         gradient_db::cached_paths::signature_in_cache(&db.web_db, cp.id, cache.id)
@@ -244,15 +280,19 @@ pub async fn available(
     responses((status = NO_CONTENT, description = "NAR removed from this cache"), WebError)
 )]
 pub async fn delete(
-    CacheScope { cache, params, .. }: CacheScope<Requires<can::WriteStore>>,
+    CacheScope {
+        cache, params, db, ..
+    }: CacheScope<Requires<can::WriteStore>>,
     state: State<Arc<ServerState>>,
     audit: Audit,
 ) -> WebResult<impl IntoResponse> {
     let hash: String = params.param("hash")?;
+    let mapper = db.store_path_mapper(MappingContext::Cache(cache.id));
+    let stored = stored_hash(&mapper, &hash)?;
 
     let (cp, outcome) =
-        delete_nar_from_cache(&state.nar_storage, &state.graph, cache.id, &hash).await?;
-    audit.write(Action::CacheNarDelete, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "hash": hash, "store_path": cp.store_path(), "ref_counted_others": outcome.ref_counted_others, }))
+        delete_nar_from_cache(&state.nar_storage, &state.graph, cache.id, &stored).await?;
+    audit.write(Action::CacheNarDelete, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "hash": hash, "store_path": original_text(&mapper, cp.store_path()), "ref_counted_others": outcome.ref_counted_others, }))
     .await;
     Ok(StatusCode::NO_CONTENT)
 }
