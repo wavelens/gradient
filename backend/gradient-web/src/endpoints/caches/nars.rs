@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::{delete_nar_from_cache, original_text, stored_hash};
+use super::helpers::delete_nar_from_cache;
 use super::refusal::CacheRefusal;
 use crate::api_spec::CachePath;
 use crate::audit::Audit;
@@ -11,6 +11,7 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
 use crate::scope::{CacheScope, Readable, Requires, can};
+use crate::store_paths::{original_text, stored_hash};
 use anyhow::Context;
 use axum::Json;
 use axum::extract::{Query, State};

@@ -10,6 +10,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser, decode_download_token, encode
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::resource::Resource;
+use crate::store_paths::original_text;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -204,7 +205,15 @@ pub async fn get_build_downloads(
         gradient_db::derivation_outputs::of_derivation(&state.web_db, ctx.build_job.derivation)
             .await?;
 
-    let products = collect_build_products(&state.web_db, build_id, build_outputs).await;
+    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project.id));
+    let products = collect_build_products(&state.web_db, build_id, build_outputs)
+        .await
+        .into_iter()
+        .map(|product| BuildProduct {
+            path: original_text(&mapper, product.path),
+            ..product
+        })
+        .collect::<Vec<_>>();
 
     Ok(ok_json(products))
 }

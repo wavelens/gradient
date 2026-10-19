@@ -29,6 +29,7 @@ pub mod resource;
 mod routes;
 pub mod scim;
 pub mod scope;
+mod store_paths;
 
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, MatchedPath};

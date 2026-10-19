@@ -8,6 +8,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::store_paths::original_text;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -74,6 +75,28 @@ pub struct ClosureGraph {
     pub truncated: bool,
     pub nodes: Vec<ClosureNode>,
     pub edges: Vec<ClosureEdge>,
+}
+
+impl ClosureGraph {
+    fn with_original_paths(mut self, mapper: &StorePathMapper) -> Self {
+        for node in &mut self.nodes {
+            node.path = original_text(mapper, std::mem::take(&mut node.path));
+        }
+        self
+    }
+
+    fn with_original_hashes(mut self, mapper: &StorePathMapper) -> Self {
+        let original = |hash: &mut String| *hash = original_text(mapper, std::mem::take(hash));
+        self.roots.iter_mut().for_each(original);
+        for node in &mut self.nodes {
+            original(&mut node.id);
+        }
+        for edge in &mut self.edges {
+            original(&mut edge.source);
+            original(&mut edge.target);
+        }
+        self.with_original_paths(mapper)
+    }
 }
 
 pub async fn derivation_closure_reachable<C>(
@@ -253,8 +276,9 @@ pub async fn get_build_closure(
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
+    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project.id));
     let graph = build_closure_graph(&state.web_db, vec![ctx.build_job.derivation]).await?;
-    Ok(ok_json(graph))
+    Ok(ok_json(graph.with_original_paths(&mapper)))
 }
 
 #[utoipa::path(
@@ -273,7 +297,7 @@ pub async fn get_eval_closure(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
-    let _ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
         .await?;
 
     let roots: Vec<DerivationId> =
@@ -283,8 +307,9 @@ pub async fn get_eval_closure(
             .map(|ep| ep.derivation)
             .collect();
 
+    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project_id));
     let graph = build_closure_graph(&state.web_db, roots).await?;
-    Ok(ok_json(graph))
+    Ok(ok_json(graph.with_original_paths(&mapper)))
 }
 
 pub async fn build_runtime_closure_graph<C>(
@@ -351,8 +376,9 @@ pub async fn get_build_runtime_closure(
     )
     .await?;
 
+    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project.id));
     let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
-    Ok(ok_json(graph))
+    Ok(ok_json(graph.with_original_hashes(&mapper)))
 }
 
 #[utoipa::path(
@@ -371,7 +397,7 @@ pub async fn get_eval_runtime_closure(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
-    let _ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
         .await?;
 
     let roots: Vec<DerivationId> =
@@ -383,8 +409,9 @@ pub async fn get_eval_runtime_closure(
 
     let seeds =
         gradient_db::graph::runtime_closure::output_hashes_for_drvs(&state.web_db, &roots).await?;
+    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project_id));
     let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
-    Ok(ok_json(graph))
+    Ok(ok_json(graph.with_original_hashes(&mapper)))
 }
 
 #[cfg(test)]

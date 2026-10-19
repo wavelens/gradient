@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::{CacheContext, cache_client_ip, fetch_nar_stream, stored_hash};
+use super::helpers::{CacheContext, cache_client_ip, fetch_nar_stream};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
+use crate::store_paths::stored_hash;
 use anyhow::Context;
 use axum::Json;
 use axum::extract::{Path, State};
