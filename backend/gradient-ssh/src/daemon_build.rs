@@ -7,7 +7,9 @@
 use crate::build_wait::{BuildOutcome, DrvResult};
 use crate::session::Session;
 use crate::store::err;
+use crate::store_paths::{original, stored};
 use gradient_db::cache_paths::served_hashes;
+use gradient_types::StorePathMapper;
 use harmonia_protocol::daemon::wire::types2::{
     BuildResult, BuildResultFailure, BuildResultInner, BuildResultSuccess, KeyedBuildResult,
     SuccessStatus,
@@ -52,7 +54,8 @@ pub fn build_paths(
     paths: Vec<DerivedPath>,
 ) -> impl ResultLog<Output = DaemonResult<Vec<KeyedBuildResult>>> + Send + 'static {
     streamed(session, move |session, log| async move {
-        let derivations = requested_derivations(&session, &paths).await?;
+        let mapper = session.store_path_mapper();
+        let derivations = requested_derivations(&session, &mapper, &paths).await?;
         let outcome = if derivations.is_empty() {
             None
         } else {
@@ -63,7 +66,7 @@ pub fn build_paths(
             )
         };
 
-        Ok(keyed_results(&paths, outcome))
+        Ok(keyed_results(&mapper, &paths, outcome))
     })
 }
 
@@ -79,12 +82,16 @@ pub fn build_derivation(
             .await
             .map_err(err)?;
         let result = outcome.results.iter().find(|(path, _)| *path == drv_path);
-        Ok(build_result(result_inner(result.map(|(_, r)| r))))
+        Ok(build_result(result_inner(
+            &session.store_path_mapper(),
+            result.map(|(_, r)| r),
+        )))
     })
 }
 
 async fn requested_derivations(
     session: &Session,
+    mapper: &StorePathMapper,
     paths: &[DerivedPath],
 ) -> DaemonResult<Vec<String>> {
     let mut derivations = Vec::new();
@@ -92,7 +99,9 @@ async fn requested_derivations(
     for path in paths {
         match path {
             DerivedPath::Built { drv_path, .. } => match drv_path.as_ref() {
-                SingleDerivedPath::Opaque(drv) => derivations.push(format!("/nix/store/{drv}")),
+                SingleDerivedPath::Opaque(drv) => {
+                    derivations.push(stored(mapper, drv).map_err(err)?.full())
+                }
                 SingleDerivedPath::Built { .. } => {
                     return Err(err("dynamic derivations are not supported over SSH"));
                 }
@@ -101,13 +110,18 @@ async fn requested_derivations(
         }
     }
 
-    let hashes: Vec<String> = opaque.iter().map(|p| p.hash().to_string()).collect();
+    let hashes: Vec<String> = opaque
+        .iter()
+        .map(|p| stored(mapper, p).map(|s| s.hash().to_owned()))
+        .collect::<anyhow::Result<_>>()
+        .map_err(err)?;
     let served = served_hashes(&session.handles.db.web_db, &session.caches, &hashes)
         .await
         .map_err(err)?;
-    if let Some(missing) = opaque
+    if let Some((missing, _)) = opaque
         .iter()
-        .find(|p| !served.contains(&p.hash().to_string()))
+        .zip(&hashes)
+        .find(|(_, hash)| !served.contains(*hash))
     {
         return Err(err(format!("{missing} is not in the project caches")));
     }
@@ -115,7 +129,11 @@ async fn requested_derivations(
     Ok(derivations)
 }
 
-fn keyed_results(paths: &[DerivedPath], outcome: Option<BuildOutcome>) -> Vec<KeyedBuildResult> {
+fn keyed_results(
+    mapper: &StorePathMapper,
+    paths: &[DerivedPath],
+    outcome: Option<BuildOutcome>,
+) -> Vec<KeyedBuildResult> {
     let by_drv: HashMap<String, DrvResult> = outcome
         .map(|o| o.results.into_iter().collect())
         .unwrap_or_default();
@@ -125,9 +143,12 @@ fn keyed_results(paths: &[DerivedPath], outcome: Option<BuildOutcome>) -> Vec<Ke
         .map(|path| {
             let inner = match path {
                 DerivedPath::Built { drv_path, .. } => match drv_path.as_ref() {
-                    SingleDerivedPath::Opaque(drv) => {
-                        result_inner(by_drv.get(&format!("/nix/store/{drv}")))
-                    }
+                    SingleDerivedPath::Opaque(drv) => result_inner(
+                        mapper,
+                        stored(mapper, drv)
+                            .ok()
+                            .and_then(|drv| by_drv.get(&drv.full())),
+                    ),
                     SingleDerivedPath::Built { .. } => already_valid(),
                 },
                 DerivedPath::Opaque(_) => already_valid(),
@@ -141,9 +162,9 @@ fn keyed_results(paths: &[DerivedPath], outcome: Option<BuildOutcome>) -> Vec<Ke
         .collect()
 }
 
-fn result_inner(result: Option<&DrvResult>) -> BuildResultInner {
+fn result_inner(mapper: &StorePathMapper, result: Option<&DrvResult>) -> BuildResultInner {
     match result {
-        Some(Ok(outputs)) => built(outputs),
+        Some(Ok(outputs)) => built(mapper, outputs),
         Some(Err(failure)) => BuildResultInner::Failure(BuildResultFailure {
             status: failure.status,
             error_msg: failure.message.clone().into_bytes(),
@@ -168,14 +189,11 @@ fn build_result(inner: BuildResultInner) -> BuildResult {
     }
 }
 
-fn built(outputs: &BTreeMap<String, String>) -> BuildResultInner {
+fn built(mapper: &StorePathMapper, outputs: &BTreeMap<String, String>) -> BuildResultInner {
     let built_outputs = outputs
         .iter()
         .filter_map(|(name, path)| {
-            let out_path = harmonia_store_path::StorePath::from_base_path(
-                path.strip_prefix("/nix/store/").unwrap_or(path),
-            )
-            .ok()?;
+            let out_path = original(mapper, path).ok()?;
             Some((
                 name.parse().ok()?,
                 UnkeyedRealisation {

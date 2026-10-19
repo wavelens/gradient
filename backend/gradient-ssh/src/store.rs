@@ -5,10 +5,12 @@
  */
 
 use crate::session::Session;
+use crate::store_paths::{StoredPathInfo, original, stored, stored_hash};
 use futures::{Stream, StreamExt as _};
 use gradient_daemon::backend::{Backend, ConnInfo};
 use gradient_daemon::journal::Journal;
 use gradient_db::cache_paths::{ServedPath, served_hashes, served_path};
+use gradient_types::StorePathMapper;
 use gradient_util::nix_hash::normalize_nar_hash;
 use harmonia_protocol::daemon::wire::types2::{
     BuildMode, BuildResult, KeyedBuildResult, QueryMissingResult,
@@ -54,6 +56,7 @@ impl Backend for SshBackend {
 
     fn handler(self: &Arc<Self>, _conn: ConnInfo) -> CacheStore {
         CacheStore {
+            mapper: self.session.store_path_mapper(),
             session: self.session.clone(),
         }
     }
@@ -69,6 +72,7 @@ impl Backend for SshBackend {
 
 pub struct CacheStore {
     session: Arc<Session>,
+    mapper: StorePathMapper,
 }
 
 const CONCURRENT_COMMITS: usize = 8;
@@ -85,20 +89,20 @@ pub(crate) fn err(e: impl Display) -> DaemonError {
     DaemonError::custom(format!("{e:#}"))
 }
 
-fn parse_store_path(path: &str) -> anyhow::Result<StorePath> {
-    let base = path.strip_prefix("/nix/store/").unwrap_or(path);
-    StorePath::from_base_path(base).map_err(|e| anyhow::anyhow!("{base}: {e}"))
-}
-
 impl CacheStore {
+    fn stored_info(&self, info: &ValidPathInfo) -> DaemonResult<StoredPathInfo> {
+        StoredPathInfo::inbound(&self.mapper, info).map_err(err)
+    }
+
     async fn served(&self, path: &StorePath) -> DaemonResult<Option<ServedPath>> {
-        served_path(
-            &self.session.handles.db.web_db,
-            &self.session.caches,
-            &path.hash().to_string(),
-        )
-        .await
-        .map_err(err)
+        let path = stored(&self.mapper, path).map_err(err)?;
+        self.served_stored(path.hash()).await
+    }
+
+    async fn served_stored(&self, hash: &str) -> DaemonResult<Option<ServedPath>> {
+        served_path(&self.session.handles.db.web_db, &self.session.caches, hash)
+            .await
+            .map_err(err)
     }
 
     async fn copy_in(
@@ -106,12 +110,13 @@ impl CacheStore {
         info: &ValidPathInfo,
         reader: impl AsyncBufRead + Send + Unpin,
     ) -> DaemonResult<()> {
-        if self.served(&info.path).await?.is_some() {
+        let info = self.stored_info(info)?;
+        if self.served_stored(info.path.hash()).await?.is_some() {
             tokio::io::copy(&mut std::pin::pin!(reader), &mut tokio::io::sink()).await?;
             return Ok(());
         }
 
-        crate::ingest::import(&self.session, info, reader)
+        crate::ingest::import(&self.session, &info, reader)
             .await
             .map_err(err)
     }
@@ -131,7 +136,7 @@ impl CacheStore {
             gradient_db::graph::runtime_closure::references_for_hash(&handles.db.web_db, &row.hash)
                 .await?
                 .iter()
-                .map(|r| parse_store_path(r))
+                .map(|r| original(&self.mapper, r))
                 .collect::<anyhow::Result<_>>()?;
 
         let signatures = row
@@ -149,7 +154,11 @@ impl CacheStore {
             .collect();
 
         Ok(UnkeyedValidPathInfo {
-            deriver: row.deriver.as_deref().map(parse_store_path).transpose()?,
+            deriver: row
+                .deriver
+                .as_deref()
+                .map(|d| original(&self.mapper, d))
+                .transpose()?,
             nar_hash,
             references,
             registration_time: None,
@@ -188,7 +197,11 @@ impl DaemonStore for CacheStore {
         _substitute: bool,
     ) -> impl ResultLog<Output = DaemonResult<StorePathSet>> + Send + 'a {
         async move {
-            let hashes: Vec<String> = paths.iter().map(|p| p.hash().to_string()).collect();
+            let hashes: Vec<String> = paths
+                .iter()
+                .map(|p| stored(&self.mapper, p).map(|s| s.hash().to_owned()))
+                .collect::<anyhow::Result<_>>()
+                .map_err(err)?;
             let served = served_hashes(
                 &self.session.handles.db.web_db,
                 &self.session.caches,
@@ -199,8 +212,9 @@ impl DaemonStore for CacheStore {
 
             Ok(paths
                 .iter()
-                .filter(|p| served.contains(&p.hash().to_string()))
-                .cloned()
+                .zip(&hashes)
+                .filter(|(_, hash)| served.contains(*hash))
+                .map(|(p, _)| p.clone())
                 .collect())
         }
         .empty_logs()
@@ -225,15 +239,10 @@ impl DaemonStore for CacheStore {
         hash: &'a StorePathHash,
     ) -> impl ResultLog<Output = DaemonResult<Option<StorePath>>> + Send + 'a {
         async move {
-            let row = served_path(
-                &self.session.handles.db.web_db,
-                &self.session.caches,
-                &hash.to_string(),
-            )
-            .await
-            .map_err(err)?;
+            let hash = stored_hash(&self.mapper, hash).map_err(err)?;
+            let row = self.served_stored(&hash).await?;
 
-            row.map(|r| parse_store_path(&format!("{}-{}", r.hash, r.package)).map_err(err))
+            row.map(|r| original(&self.mapper, &format!("{}-{}", r.hash, r.package)).map_err(err))
                 .transpose()
         }
         .empty_logs()
@@ -244,17 +253,15 @@ impl DaemonStore for CacheStore {
         path: &'s StorePath,
     ) -> impl ResultLog<Output = DaemonResult<impl AsyncBufRead + Send + use<>>> + Send + 's {
         async move {
-            if self.served(path).await?.is_none() {
+            let stored = stored(&self.mapper, path).map_err(err)?;
+            if self.served_stored(stored.hash()).await?.is_none() {
                 return Err(err(format!("{path} is not in the project caches")));
             }
 
-            crate::nar::open_raw(
-                &self.session.handles.db.storage.nar_storage,
-                &path.hash().to_string(),
-            )
-            .await
-            .map_err(err)?
-            .ok_or_else(|| err(format!("{path} has no stored NAR")))
+            crate::nar::open_raw(&self.session.handles.db.storage.nar_storage, stored.hash())
+                .await
+                .map_err(err)?
+                .ok_or_else(|| err(format!("{path} has no stored NAR")))
         }
         .empty_logs()
     }
@@ -293,7 +300,8 @@ impl DaemonStore for CacheStore {
             let mut commits = JoinSet::new();
             while let Some(item) = stream.next().await {
                 let AddToStoreItem { info, reader } = item?;
-                if self.served(&info.path).await?.is_some() {
+                let info = self.stored_info(&info)?;
+                if self.served_stored(info.path.hash()).await?.is_some() {
                     tokio::io::copy(&mut std::pin::pin!(reader), &mut tokio::io::sink()).await?;
                     continue;
                 }
@@ -415,6 +423,7 @@ mod tests {
     use super::*;
     use crate::session::SshHandles;
     use gradient_daemon::server::{next_conn, serve_stream};
+    use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
     use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_test_support::state::TestState;
     use gradient_types::CacheId;
@@ -432,8 +441,12 @@ mod tests {
     >;
 
     fn session_over(db: DatabaseConnection) -> Arc<Session> {
+        session_in(TestState::new().web_db(db))
+    }
+
+    fn session_in(state: TestState) -> Arc<Session> {
         Arc::new(Session {
-            handles: SshHandles::from_state(&TestState::new().web_db(db).build()),
+            handles: SshHandles::from_state(&state.build()),
             user: gradient_fixtures::rows::user(),
             project: gradient_fixtures::rows::project(),
             permissions: 0,
@@ -512,6 +525,41 @@ mod tests {
         assert_eq!(info.nar_size, 42);
         assert_eq!(info.signatures.len(), 1);
         assert!(info.references.contains(&hello()));
+    }
+
+    #[tokio::test]
+    async fn path_info_names_the_path_the_client_asked_for() {
+        let (original, stored) = (EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH);
+        let mut row = served_row();
+        row.insert("hash".to_owned(), Value::from(stored));
+        let references = BTreeMap::from([
+            ("hash".to_owned(), Value::from(stored)),
+            (
+                "references".to_owned(),
+                Value::from(Some(format!("{stored}-hello"))),
+            ),
+        ]);
+        let db = mock_db()
+            .append_query_results([vec![row]])
+            .append_query_results([vec![references]])
+            .into_connection();
+        let session = session_in(
+            TestState::new()
+                .web_db(db.clone())
+                .store_path_mapping(Arc::new(RotatedHashMapping)),
+        );
+        let (_server, mut client) = connect(session).await;
+        let asked = StorePath::from_base_path(&format!("{original}-hello")).expect("path");
+
+        let info = client
+            .query_path_info(&asked)
+            .await
+            .expect("info")
+            .expect("served");
+        assert!(info.references.contains(&asked));
+        let log = format!("{:?}", db.into_transaction_log());
+        assert!(log.contains(stored), "{log}");
+        assert!(!log.contains(original), "{log}");
     }
 
     #[tokio::test]

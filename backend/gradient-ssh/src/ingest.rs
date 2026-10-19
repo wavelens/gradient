@@ -5,6 +5,7 @@
  */
 
 use crate::session::Session;
+use crate::store_paths::StoredPathInfo;
 use anyhow::Context as _;
 use async_compression::Level;
 use async_compression::tokio::write::ZstdEncoder;
@@ -15,7 +16,6 @@ use gradient_types::events::cache::NarSigned;
 use gradient_types::permissions::Permission;
 use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
-use harmonia_protocol::valid_path_info::ValidPathInfo;
 use harmonia_store_path_info::NarHash;
 use harmonia_utils_hash::{Algorithm, Context, HashFormat as _, Sha256};
 use std::path::Path;
@@ -41,7 +41,7 @@ pub struct Staged {
 
 pub async fn import(
     session: &Session,
-    info: &ValidPathInfo,
+    info: &StoredPathInfo,
     reader: impl AsyncRead + Unpin + Send,
 ) -> anyhow::Result<()> {
     let pending = stage(session, info, reader).await?;
@@ -50,7 +50,7 @@ pub async fn import(
 
 pub async fn stage(
     session: &Session,
-    info: &ValidPathInfo,
+    info: &StoredPathInfo,
     mut reader: impl AsyncRead + Unpin + Send,
 ) -> anyhow::Result<Pending> {
     anyhow::ensure!(
@@ -60,49 +60,49 @@ pub async fn stage(
     );
 
     let handles = &session.handles;
-    let hash = info.path.hash().to_string();
+    let hash = info.path.hash();
     let claim = claim_path(
         &handles.db.config,
         &handles.upload_admission,
-        &hash,
-        info.info.nar_size,
+        hash,
+        info.nar_size,
     )
     .await?;
-    if let Some(known) = stored_path(&handles.db.web_db, &hash).await? {
+    if let Some(known) = stored_path(&handles.db.web_db, hash).await? {
         if let Some(claim) = claim {
             claim.committed();
         }
 
         tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
-        let announced = normalize_nar_hash(&info.info.nar_hash.as_sri().to_string());
+        let announced = normalize_nar_hash(&info.nar_hash.as_sri().to_string());
         if known.nar_hash.as_deref().map(normalize_nar_hash) == Some(announced) {
             return Ok(Pending::Known(known));
         }
 
-        debug!(path = %info.path, "other content is stored for this path; dropping the upload");
+        debug!(path = %info.original, "other content is stored for this path; dropping the upload");
         return Ok(Pending::OtherContentStored);
     }
 
     let permit = claim.with_context(|| {
         format!(
             "{} was stored by another upload and removed again, retry",
-            info.path
+            info.original
         )
     })?;
     let dir = handles.db.config.server.nar_upload_partial_dir();
     tokio::fs::create_dir_all(&dir).await?;
     let file = tempfile::NamedTempFile::new_in(&dir)?;
     let (nar_hash, nar_size, file_hash, file_size) =
-        compress_into(reader, file.path(), info.info.nar_size).await?;
+        compress_into(reader, file.path(), info.nar_size).await?;
     anyhow::ensure!(
-        nar_size == info.info.nar_size,
+        nar_size == info.nar_size,
         "NAR size of {} does not match",
-        info.path
+        info.original
     );
     anyhow::ensure!(
-        nar_hash == info.info.nar_hash,
+        nar_hash == info.nar_hash,
         "NAR hash of {} does not match",
-        info.path
+        info.original
     );
 
     Ok(Pending::New(Staged {
@@ -117,7 +117,7 @@ pub async fn stage(
 
 pub async fn commit(
     session: &Session,
-    info: &ValidPathInfo,
+    info: &StoredPathInfo,
     pending: Pending,
 ) -> anyhow::Result<()> {
     let handles = &session.handles;
@@ -132,15 +132,7 @@ pub async fn commit(
         }
         Pending::OtherContentStored => Vec::new(),
         Pending::New(staged) => {
-            let store_path = format!("/nix/store/{}", info.path);
-            let references: Vec<String> =
-                info.info.references.iter().map(|r| r.to_string()).collect();
-            let deriver = info
-                .info
-                .deriver
-                .as_ref()
-                .map(|d| format!("/nix/store/{d}"));
-            let ca = info.info.ca.as_ref().map(|c| c.to_string());
+            let store_path = info.path.full();
             let nar_hash = staged.nar_hash.as_sri().to_string();
             let committed = import_nar_reader(
                 &handles.db.web_db,
@@ -153,9 +145,9 @@ pub async fn commit(
                     file_size: staged.file_size as i64,
                     nar_size: staged.nar_size as i64,
                     nar_hash: &nar_hash,
-                    references: &references,
-                    deriver: deriver.as_deref(),
-                    ca: ca.as_deref(),
+                    references: &info.references,
+                    deriver: info.deriver.as_deref(),
+                    ca: info.ca.as_deref(),
                 },
                 targets,
             )
@@ -168,7 +160,7 @@ pub async fn commit(
     for cache in signed {
         handles.db.events.publish(NarSigned {
             cache,
-            hash: info.path.hash().to_string(),
+            hash: info.original.hash().to_string(),
         });
     }
 
@@ -248,7 +240,7 @@ mod tests {
     use gradient_test_support::state::TestState;
     use gradient_types::permissions::{Permission, mask_from};
     use gradient_types::{CacheId, MCachedPath};
-    use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
+    use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
     use harmonia_store_path::{StoreDir, StorePath};
     use sea_orm::DatabaseConnection;
     use std::sync::Arc;
@@ -266,8 +258,12 @@ mod tests {
         })
     }
 
-    fn info(nar: &[u8]) -> ValidPathInfo {
-        ValidPathInfo {
+    fn info(nar: &[u8]) -> StoredPathInfo {
+        let mapper = StorePathMapper::new(
+            Arc::new(IdentityMapping),
+            MappingContext::Project(ProjectId::nil()),
+        );
+        let client = ValidPathInfo {
             path: StorePath::from_base_path("0123456789abcdfghijklmnpqrsvwxyz-hello")
                 .expect("path"),
             info: UnkeyedValidPathInfo {
@@ -281,7 +277,8 @@ mod tests {
                 ca: None,
                 store_dir: StoreDir::default(),
             },
-        }
+        };
+        StoredPathInfo::inbound(&mapper, &client).expect("stored info")
     }
 
     #[tokio::test]
@@ -291,7 +288,7 @@ mod tests {
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation]));
         let mut info = info(NAR);
-        info.info.nar_hash = NarHash::digest(b"other");
+        info.nar_hash = NarHash::digest(b"other");
 
         let e = import(&session, &info, NAR)
             .await
@@ -308,7 +305,7 @@ mod tests {
             .into_connection();
         let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
         let mut info = info(NAR);
-        info.info.nar_size += 1;
+        info.nar_size += 1;
 
         let e = import(&session, &info, NAR)
             .await
@@ -334,7 +331,7 @@ mod tests {
             .into_connection();
         let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
         let mut info = info(NAR);
-        info.info.nar_size = 4;
+        info.nar_size = 4;
 
         let e = import(&session, &info, NAR).await.expect_err("too long");
         assert!(e.to_string().contains("longer than announced"), "{e}");
@@ -381,7 +378,7 @@ mod tests {
         let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
         let info = info(NAR);
         let (holder, mut admitted) = session.handles.upload_admission.open_session("holder");
-        holder.request(1, ObjectKey::Nar(info.path.hash().to_string()), 1, false);
+        holder.request(1, ObjectKey::Nar(info.path.hash().to_owned()), 1, false);
         let Some(Admitted::Granted { permit, .. }) = admitted.recv().await else {
             panic!("the holder leads the path");
         };

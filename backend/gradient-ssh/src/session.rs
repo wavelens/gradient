@@ -43,4 +43,10 @@ impl Session {
     pub fn may(&self, permission: Permission) -> bool {
         mask_grants(self.permissions, permission)
     }
+
+    pub fn store_path_mapper(&self) -> StorePathMapper {
+        self.handles
+            .db
+            .store_path_mapper(MappingContext::Project(self.project.id))
+    }
 }
