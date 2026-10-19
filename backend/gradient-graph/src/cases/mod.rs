@@ -29,6 +29,7 @@ use std::time::Duration;
 use gradient_db::evaluations::counters::eval_counters;
 use gradient_db::graph::consistency::ConsistencyReport;
 use gradient_db::{DbContext, DbMemory, ProbeRequests};
+use gradient_entity::StorePathMapping;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation_dependency::EdgeKind;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
@@ -95,7 +96,20 @@ impl Case {
         case
     }
 
+    pub async fn start_with_mapping(shape: Shape, mapping: Arc<dyn StorePathMapping>) -> Self {
+        let (case, report) = Self::start_mapped(shape, Some(mapping)).await;
+        assert_eq!(report.total(), 0, "drift after the seed: {report:?}");
+        case
+    }
+
     pub async fn start_with_drift(shape: Shape) -> (Self, ConsistencyReport) {
+        Self::start_mapped(shape, None).await
+    }
+
+    async fn start_mapped(
+        shape: Shape,
+        mapping: Option<Arc<dyn StorePathMapping>>,
+    ) -> (Self, ConsistencyReport) {
         let declared = shape.declared_statuses();
         let secret = SECRET.with(|(_, path)| path.clone());
         let db = shape.into_database().await;
@@ -109,6 +123,7 @@ impl Case {
                 probe_requests,
                 ..ctx.memory.clone()
             },
+            store_path_mapping: mapping.unwrap_or_else(|| Arc::clone(&ctx.store_path_mapping)),
             ..ctx
         };
 

@@ -73,7 +73,7 @@ struct Claim {
 }
 
 impl Claim {
-    fn signature(&self, signer: &CacheSigner) -> Option<Vec<u8>> {
+    fn signature(&self, signer: &CacheSigner, mapper: &StorePathMapper) -> Option<Vec<u8>> {
         let (nar_hash, nar_size) = (self.nar_hash.as_deref()?, self.nar_size?);
         let references: Vec<String> = self
             .references
@@ -83,7 +83,8 @@ impl Claim {
             .map(str::to_owned)
             .collect();
 
-        Some(signer.sign_narinfo_raw(
+        Some(signer.sign_stored_narinfo(
+            mapper,
             &StorePath::from_stored(&self.hash, &self.package).full(),
             &normalize_nar_hash(nar_hash),
             nar_size as u64,
@@ -143,7 +144,12 @@ async fn sign_claims(ctx: &DbContext, claims: Statement) -> anyhow::Result<()> {
                 signature: signers
                     .get(&claim.cache)
                     .and_then(Option::as_ref)
-                    .and_then(|signer| claim.signature(signer)),
+                    .and_then(|signer| {
+                        claim.signature(
+                            signer,
+                            &ctx.store_path_mapper(MappingContext::Cache(claim.cache)),
+                        )
+                    }),
                 created_at,
                 ..Default::default()
             }

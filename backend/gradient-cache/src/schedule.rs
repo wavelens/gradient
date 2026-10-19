@@ -35,6 +35,7 @@ pub(crate) fn child_specs(state: &ServerState) -> Vec<ChildSpec> {
         ChildSpec::pass(SignSweep {
             db: state.worker_db.clone(),
             config: Arc::clone(config),
+            store_path_mapping: Arc::clone(&state.extensions.store_path_mapping),
             period: secs(config.cache.sign_sweep_interval_secs),
         }),
         ChildSpec::pass(DebugIndex {
