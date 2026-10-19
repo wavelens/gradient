@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::{CacheContext, cache_client_ip, original_text, stored_hash};
+use super::helpers::{CacheContext, cache_client_ip};
 use super::refusal::CacheRefusal;
 use crate::api_spec::Binary;
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::resource::Resource;
+use crate::store_paths::{original_text, stored_hash};
 use anyhow::Context;
 use axum::body::Body;
 use axum::extract::{Path, RawQuery, State};

@@ -12,6 +12,7 @@ use crate::helpers::OptionExt;
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
+use crate::store_paths::original_text;
 use anyhow::Context;
 use axum::http::HeaderMap;
 use base64::Engine;
@@ -117,15 +118,6 @@ async fn require_cache_auth(
         Some(user) if user_can_access_cache(db, cache, &user).await => Ok(()),
         _ => Err(CacheRefusal::AuthenticationRequired.into()),
     }
-}
-
-pub(super) fn stored_hash(mapper: &StorePathMapper, hash: &str) -> WebResult<String> {
-    let hash = StoreHash::parse(hash).map_err(|_| WebError::not_found(Resource::Path))?;
-    Ok(mapper.inbound_hash(hash).to_string())
-}
-
-pub(super) fn original_text(mapper: &StorePathMapper, text: String) -> String {
-    mapper.outbound_text(&text).unwrap_or(text)
 }
 
 pub(super) async fn get_nar_by_hash(

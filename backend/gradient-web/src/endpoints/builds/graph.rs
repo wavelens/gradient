@@ -7,6 +7,7 @@
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::store_paths::original_text;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -150,9 +151,13 @@ pub async fn get_build_graph(
 ) -> WebResult<Json<BaseResponse<BuildGraph>>> {
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
-    Ok(ok_json(
-        dependency_graph(&state.web_db, &ctx.build_job).await?,
-    ))
+    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project.id));
+    let mut graph = dependency_graph(&state.web_db, &ctx.build_job).await?;
+    for node in &mut graph.nodes {
+        node.path = original_text(&mapper, std::mem::take(&mut node.path));
+    }
+
+    Ok(ok_json(graph))
 }
 
 #[cfg(test)]
