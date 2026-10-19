@@ -21,6 +21,7 @@ use crate::permissions::Permission;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{Readable, Requires, TaskScope, can};
+use crate::store_paths::original_text;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -548,7 +549,10 @@ pub async fn get_task_entry_points(
     } else {
         EntryPointRelatedData::load(&db.web_db, &evaluation, &entry_points)
             .await?
-            .build_summaries(&entry_points)
+            .build_summaries(
+                &db.store_path_mapper(MappingContext::Project(task.project)),
+                &entry_points,
+            )
     };
 
     Ok(ok_json(PaginatedEntryPoints {
@@ -685,7 +689,11 @@ impl EntryPointRelatedData {
         })
     }
 
-    fn build_summaries(&self, entry_points: &[MEntryPoint]) -> Vec<EntryPointSummary> {
+    fn build_summaries(
+        &self,
+        mapper: &StorePathMapper,
+        entry_points: &[MEntryPoint],
+    ) -> Vec<EntryPointSummary> {
         let mut summaries = Vec::new();
         for ep in entry_points {
             let Some(&build_id) = self.build_jobs.get(&ep.derivation) else {
@@ -704,7 +712,7 @@ impl EntryPointRelatedData {
             summaries.push(EntryPointSummary {
                 id: ep.id,
                 build_id,
-                derivation_path: drv.drv_path(),
+                derivation_path: original_text(mapper, drv.drv_path()),
                 eval: ep.eval.clone(),
                 build_status,
                 has_artefacts: *self.has_products.get(&ep.derivation).unwrap_or(&false),
@@ -712,7 +720,10 @@ impl EntryPointRelatedData {
                     .outputs
                     .get(&ep.derivation)
                     .cloned()
-                    .unwrap_or_default(),
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(name, path)| (name, original_text(mapper, path)))
+                    .collect(),
                 architecture: drv.architecture.clone(),
                 build_time_ms: attempt.and_then(|a| a.duration_ms()),
                 build_started_at: attempt.and_then(|a| a.build_started_at),

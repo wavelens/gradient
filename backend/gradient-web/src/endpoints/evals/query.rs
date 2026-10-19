@@ -8,6 +8,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::resource::Resource;
+use crate::store_paths::original_text;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -213,6 +214,7 @@ pub async fn get_evaluation_builds(
     let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
         .await?;
     let evaluation = ctx.evaluation;
+    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project_id));
 
     let jobs = gradient_db::build_jobs::of_evaluation(&state.web_db, evaluation.id).await?;
 
@@ -335,7 +337,7 @@ pub async fn get_evaluation_builds(
 
         page.push(BuildItem {
             id: j.id,
-            name: drv.drv_path(),
+            name: original_text(&mapper, drv.drv_path()),
             status: format!("{:?}", status),
             has_artefacts: has_artefacts.contains(&j.derivation),
             updated_at: shared_build.updated_at,

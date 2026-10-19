@@ -14,6 +14,7 @@ use crate::helpers::ok_json;
 use crate::lookup::require;
 use crate::metrics_scope::MetricsScope;
 use crate::resource::Resource;
+use crate::store_paths::original_text;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
@@ -376,6 +377,27 @@ pub struct JobDerivationView {
     pub pname: Option<String>,
 }
 
+fn outbound_drv_paths(value: &mut serde_json::Value, mapper: &StorePathMapper) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            for (key, field) in fields.iter_mut() {
+                match field {
+                    serde_json::Value::String(path) if key == "drv_path" => {
+                        *path = original_text(mapper, std::mem::take(path));
+                    }
+                    _ => outbound_drv_paths(field, mapper),
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                outbound_drv_paths(item, mapper);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn snapshot_derivations(
     job_context: &serde_json::Value,
 ) -> Vec<(DerivationBuildId, String, Option<String>)> {
@@ -494,10 +516,15 @@ pub async fn get_dispatched_job(
 
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
-    if let Some(c) = scheduler.candidate_detail(DispatchedJobId::from(id)).await {
+    if let Some(mut c) = scheduler.candidate_detail(DispatchedJobId::from(id)).await {
         if !scope.allows(&Uuid::from(c.project)) {
             return Err(WebError::not_found(Resource::Job));
         }
+
+        outbound_drv_paths(
+            &mut c.job_context,
+            &state.store_path_mapper(MappingContext::Project(c.project)),
+        );
 
         let (project, worker_name) =
             job_names(&state.web_db, &scope, c.project.into(), &c.worker_id).await?;
@@ -546,7 +573,7 @@ pub async fn get_dispatched_job(
         }));
     }
 
-    let j = require::<gradient_entity::dispatched_job::Entity>(
+    let mut j = require::<gradient_entity::dispatched_job::Entity>(
         &state.web_db,
         DispatchedJobId::from(id),
     )
@@ -554,6 +581,12 @@ pub async fn get_dispatched_job(
 
     if !scope.allows(&Uuid::from(j.project)) {
         return Err(WebError::not_found(Resource::Job));
+    }
+
+    let mapper = state.store_path_mapper(MappingContext::Project(j.project));
+    outbound_drv_paths(&mut j.job_context, &mapper);
+    if let Some(candidates) = &mut j.candidates {
+        outbound_drv_paths(candidates, &mapper);
     }
 
     let (project, worker_name) =
@@ -1355,11 +1388,19 @@ pub async fn get_eval_flake_graph(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<Vec<FlakeGraphNode>>>> {
-    let _ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
         .await?;
     let rows = gradient_db::flake_output_nodes::of_evaluation(&state.web_db, evaluation_id).await?;
 
-    let out = rows.into_iter().map(FlakeGraphNode::from).collect();
+    let mapper = state.store_path_mapper(MappingContext::Project(ctx.project_id));
+    let out = rows
+        .into_iter()
+        .map(FlakeGraphNode::from)
+        .map(|node| FlakeGraphNode {
+            drv_path: node.drv_path.map(|p| original_text(&mapper, p)),
+            ..node
+        })
+        .collect();
     Ok(ok_json(out))
 }
 
@@ -1613,6 +1654,30 @@ mod tests {
                 "aaa-curl.drv".to_string(),
                 Some("curl".to_string())
             )]
+        );
+    }
+
+    #[test]
+    fn drv_paths_inside_job_context_are_mapped_outbound() {
+        let (original, stored) = (
+            gradient_entity::EXAMPLE_ORIGINAL_HASH,
+            gradient_entity::EXAMPLE_STORED_HASH,
+        );
+        let mapper = StorePathMapper::new(
+            Arc::new(gradient_entity::RotatedHashMapping),
+            MappingContext::Project(ProjectId::nil()),
+        );
+        let mut value = serde_json::json!({
+            "derivations": [{ "drv_path": format!("{stored}-a.drv"), "name": "a" }]
+        });
+
+        outbound_drv_paths(&mut value, &mapper);
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "derivations": [{ "drv_path": format!("{original}-a.drv"), "name": "a" }]
+            })
         );
     }
 
