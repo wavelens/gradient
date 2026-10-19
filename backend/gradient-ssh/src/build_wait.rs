@@ -12,7 +12,6 @@ use gradient_derivation::Derivation;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
-use gradient_util::store_path::strip_nix_store_prefix;
 use harmonia_protocol::daemon::wire::types2::FailureStatus;
 use harmonia_protocol::log::LogMessage;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -173,11 +172,8 @@ async fn closure_derivations(
     let paths: HashSet<&str> = closure.iter().map(String::as_str).collect();
     let hashes: Vec<String> = closure
         .iter()
-        .filter_map(|p| {
-            strip_nix_store_prefix(p)
-                .split_once('-')
-                .map(|(h, _)| h.to_string())
-        })
+        .filter_map(|p| StorePath::parse_stored(p).ok())
+        .map(|p| p.hash().to_owned())
         .collect();
     Ok(gradient_db::fetch_in_chunks(&hashes, |chunk| async {
         EDerivation::find()

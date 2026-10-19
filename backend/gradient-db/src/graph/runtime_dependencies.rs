@@ -89,9 +89,8 @@ crate::sql_lazy! {
 }
 
 pub(crate) fn hash_of_token(token: &str) -> Option<String> {
-    let base = token.trim_start_matches("/nix/store/");
-    let hash = base.split('-').next()?;
-    gradient_util::nix_hash::is_nix32_hash(hash).then(|| hash.to_owned())
+    let path = gradient_types::StorePath::parse_stored(token).ok()?;
+    gradient_util::nix_hash::is_nix32_hash(path.hash()).then(|| path.hash().to_owned())
 }
 
 pub async fn producers_of_tokens<C: ConnectionTrait>(

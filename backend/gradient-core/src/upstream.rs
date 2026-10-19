@@ -515,8 +515,8 @@ fn names_path_hash(body: &str, path_hash: &str) -> bool {
     body.lines()
         .filter_map(|l| l.strip_prefix("StorePath: "))
         .next_back()
-        .and_then(|p| gradient_sources::get_hash_from_path(p.trim().to_owned()).ok())
-        .is_some_and(|(hash, _)| hash == path_hash)
+        .and_then(|p| StorePath::parse_stored(p.trim()).ok())
+        .is_some_and(|p| p.hash() == path_hash)
 }
 
 pub fn parse_upstream_narinfo(base_url: &str, store_path: &str, body: &str) -> Option<CachedPath> {

@@ -11,7 +11,6 @@ use tracing::{debug, warn};
 
 use gradient_graph::RecordBatch;
 use gradient_types::*;
-use gradient_util::store_path::strip_nix_store_prefix;
 use gradient_wire::types::DiscoveredDerivation;
 
 use crate::Scheduler;
@@ -187,9 +186,9 @@ impl Scheduler {
         // Store paths are canonicalised to the bare `<hash>-<name>` form before reaching the graph
         // writer. The `/nix/store/` prefix is added back only at the worker and API boundary.
         for d in &mut derivations {
-            d.drv_path = strip_nix_store_prefix(&d.drv_path);
+            d.drv_path = StorePath::parse_stored(&d.drv_path)?.base();
             for dep in &mut d.dependencies {
-                *dep = strip_nix_store_prefix(dep);
+                *dep = StorePath::parse_stored(dep)?.base();
             }
         }
 
