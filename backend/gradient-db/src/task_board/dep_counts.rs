@@ -49,7 +49,8 @@ crate::sql! {
                                         WHERE derivation = ANY($1::uuid[]))) \
                    ORDER BY id FOR NO KEY UPDATE) locked \
              WHERE e.id = locked.id",
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        tier = Bulk;
 }
 
 pub async fn bump_graph_version<C: ConnectionTrait>(
