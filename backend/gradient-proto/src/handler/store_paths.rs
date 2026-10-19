@@ -131,7 +131,7 @@ fn inbound_update(
                 paths.path(&mut output.store_path)?;
                 paths.path(&mut output.hash)?;
                 for product in &mut output.products {
-                    paths.path(&mut product.path)?;
+                    product.path = paths.mapper.inbound_if_store_path(&product.path);
                 }
             }
         }
@@ -366,6 +366,41 @@ mod tests {
             outputs[0].products[0].path,
             format!("/nix/store/{S}-a/doc.pdf")
         );
+    }
+
+    #[test]
+    fn a_build_product_outside_the_store_is_admitted_unchanged() {
+        let msg = ClientMessage::JobUpdate {
+            job_id: "j1".into(),
+            assignment_id: "a1".into(),
+            update: JobUpdateKind::BuildOutput {
+                build_id: "b1".into(),
+                outputs: vec![BuildOutput {
+                    name: "out".into(),
+                    store_path: format!("/nix/store/{O}-a"),
+                    hash: O.into(),
+                    nar_size: None,
+                    nar_hash: None,
+                    products: vec![BuildProduct {
+                        file_type: "doc".into(),
+                        subtype: "pdf".into(),
+                        name: "manual.pdf".into(),
+                        path: "share/doc/manual.pdf".into(),
+                        size: None,
+                    }],
+                }],
+                metrics: None,
+                substituted: false,
+            },
+        };
+        let ClientMessage::JobUpdate {
+            update: JobUpdateKind::BuildOutput { outputs, .. },
+            ..
+        } = inbound_message(msg, &mapper()).unwrap()
+        else {
+            panic!("a BuildOutput stays a BuildOutput")
+        };
+        assert_eq!(outputs[0].products[0].path, "share/doc/manual.pdf");
     }
 
     #[test]

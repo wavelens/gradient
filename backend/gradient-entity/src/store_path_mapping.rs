@@ -94,9 +94,21 @@ impl StorePathMapper {
         Ok(parts.join(&self.mapping.outbound(self.context, hash)))
     }
 
+    pub fn inbound_if_store_path(&self, text: &str) -> String {
+        self.if_store_path(text, Self::inbound_text)
+    }
+
     pub fn outbound_if_store_path(&self, text: &str) -> String {
+        self.if_store_path(text, Self::outbound_text)
+    }
+
+    fn if_store_path(
+        &self,
+        text: &str,
+        map: fn(&Self, &str) -> Result<String, StorePathError>,
+    ) -> String {
         match text.strip_prefix(STORE_DIR) {
-            Some(_) => self.outbound_text(text).unwrap_or_else(|_| text.to_owned()),
+            Some(_) => map(self, text).unwrap_or_else(|_| text.to_owned()),
             None => text.to_owned(),
         }
     }
