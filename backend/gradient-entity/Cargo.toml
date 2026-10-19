@@ -19,6 +19,7 @@ testing = []
 
 [dependencies]
 chrono     = { workspace = true }
+futures    = { workspace = true }
 num_enum   = { workspace = true }
 sea-orm    = { workspace = true }
 serde      = { workspace = true }

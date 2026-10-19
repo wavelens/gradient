@@ -7,6 +7,8 @@
 use std::fmt;
 use std::sync::Arc;
 
+use futures::future::BoxFuture;
+
 use crate::ids::{CacheId, ProjectId};
 use crate::store_path::{
     NIX32_ALPHABET, OriginalStorePath, STORE_DIR, StoreHash, StorePath, StorePathError,
@@ -18,7 +20,31 @@ pub enum MappingContext {
     Cache(CacheId),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MappingError(String);
+
+impl MappingError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+}
+
+impl fmt::Display for MappingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for MappingError {}
+
 pub trait StorePathMapping: Send + Sync {
+    fn resolve(
+        &self,
+        context: MappingContext,
+    ) -> BoxFuture<'_, Result<MappingContext, MappingError>> {
+        Box::pin(std::future::ready(Ok(context)))
+    }
+
     fn inbound(&self, context: MappingContext, hash: StoreHash) -> StoreHash;
     fn outbound(&self, context: MappingContext, hash: StoreHash) -> StoreHash;
     fn inbound_prefix(&self, context: MappingContext, prefix: &str) -> Option<String>;
@@ -56,6 +82,21 @@ pub struct StorePathMapper {
 impl StorePathMapper {
     pub fn new(mapping: Arc<dyn StorePathMapping>, context: MappingContext) -> Self {
         Self { mapping, context }
+    }
+
+    pub fn for_cache(mapping: Arc<dyn StorePathMapping>, cache: CacheId) -> Self {
+        Self {
+            mapping,
+            context: MappingContext::Cache(cache),
+        }
+    }
+
+    pub async fn for_project(
+        mapping: Arc<dyn StorePathMapping>,
+        project: ProjectId,
+    ) -> Result<Self, MappingError> {
+        let context = mapping.resolve(MappingContext::Project(project)).await?;
+        Ok(Self { mapping, context })
     }
 
     pub fn context(&self) -> MappingContext {
@@ -182,12 +223,86 @@ impl StorePathMapping for RotatedHashMapping {
     }
 }
 
+#[cfg(feature = "testing")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct UnresolvableProjectMapping;
+
+#[cfg(feature = "testing")]
+impl StorePathMapping for UnresolvableProjectMapping {
+    fn resolve(
+        &self,
+        context: MappingContext,
+    ) -> BoxFuture<'_, Result<MappingContext, MappingError>> {
+        let resolved = match context {
+            MappingContext::Project(project) => Err(MappingError::new(format!(
+                "project {project} has no mapping context"
+            ))),
+            MappingContext::Cache(_) => Ok(context),
+        };
+        Box::pin(std::future::ready(resolved))
+    }
+
+    fn inbound(&self, _context: MappingContext, hash: StoreHash) -> StoreHash {
+        hash
+    }
+
+    fn outbound(&self, _context: MappingContext, hash: StoreHash) -> StoreHash {
+        hash
+    }
+
+    fn inbound_prefix(&self, _context: MappingContext, prefix: &str) -> Option<String> {
+        Some(prefix.to_owned())
+    }
+}
+
 #[cfg(all(test, feature = "testing"))]
 mod tests {
     use super::*;
 
-    fn rotated(context: MappingContext) -> StorePathMapper {
-        StorePathMapper::new(Arc::new(RotatedHashMapping), context)
+    fn rotated() -> StorePathMapper {
+        StorePathMapper::for_cache(Arc::new(RotatedHashMapping), CacheId::nil())
+    }
+
+    struct ProjectCacheMapping(CacheId);
+
+    impl StorePathMapping for ProjectCacheMapping {
+        fn resolve(
+            &self,
+            context: MappingContext,
+        ) -> BoxFuture<'_, Result<MappingContext, MappingError>> {
+            let resolved = match context {
+                MappingContext::Project(_) => MappingContext::Cache(self.0),
+                MappingContext::Cache(_) => context,
+            };
+            Box::pin(std::future::ready(Ok(resolved)))
+        }
+
+        fn inbound(&self, _context: MappingContext, hash: StoreHash) -> StoreHash {
+            hash
+        }
+
+        fn outbound(&self, _context: MappingContext, hash: StoreHash) -> StoreHash {
+            hash
+        }
+
+        fn inbound_prefix(&self, _context: MappingContext, prefix: &str) -> Option<String> {
+            Some(prefix.to_owned())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_project_mapper_maps_with_the_resolved_context() {
+        let cache = CacheId::new(uuid::Uuid::from_u128(0x5c4e_d2a1));
+        let project = ProjectId::new(uuid::Uuid::from_u128(0x9b07_e113));
+        let mapper = StorePathMapper::for_project(Arc::new(ProjectCacheMapping(cache)), project)
+            .await
+            .unwrap();
+        assert_eq!(mapper.context(), MappingContext::Cache(cache));
+
+        let identity = StorePathMapper::for_project(Arc::new(IdentityMapping), project)
+            .await
+            .unwrap();
+        assert_eq!(identity.context(), MappingContext::Project(project));
     }
 
     #[test]
@@ -227,7 +342,7 @@ mod tests {
     #[test]
     fn text_mapping_swaps_only_the_hash() {
         let (o, s) = (EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH);
-        let mapper = rotated(MappingContext::Project(ProjectId::nil()));
+        let mapper = rotated();
         assert_eq!(
             mapper
                 .inbound_text(&format!("/nix/store/{o}-hello/share/doc"))
@@ -251,7 +366,7 @@ mod tests {
     #[test]
     fn only_a_store_path_repository_is_mapped_outbound() {
         let (o, s) = (EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH);
-        let mapper = rotated(MappingContext::Project(ProjectId::nil()));
+        let mapper = rotated();
         assert_eq!(
             mapper.outbound_if_store_path(&format!("/nix/store/{s}-source")),
             format!("/nix/store/{o}-source")

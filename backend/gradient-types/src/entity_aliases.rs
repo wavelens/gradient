@@ -13,8 +13,8 @@ use uuid::Uuid;
 
 pub use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 pub use gradient_entity::{
-    IdentityMapping, MappingContext, OriginalStorePath, STORE_DIR, StoreHash, StorePath,
-    StorePathMapper, StorePathMapping,
+    IdentityMapping, MappingContext, MappingError, OriginalStorePath, STORE_DIR, StoreHash,
+    StorePath, StorePathMapper, StorePathMapping,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
