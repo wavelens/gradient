@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub use gradient_entity::team_user::{TeamMemberSource, TeamRole};
-pub use gradient_entity::{OriginalStorePath, STORE_DIR, StoreHash, StorePath};
+pub use gradient_entity::{
+    IdentityMapping, MappingContext, OriginalStorePath, STORE_DIR, StoreHash, StorePath,
+    StorePathMapper, StorePathMapping,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ListItem {

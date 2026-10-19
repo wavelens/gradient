@@ -14,6 +14,9 @@ path = "src/lib.rs"
 [lints]
 workspace = true
 
+[features]
+testing = []
+
 [dependencies]
 chrono     = { workspace = true }
 num_enum   = { workspace = true }

@@ -15,7 +15,7 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
-gradient-entity    = { workspace = true }
+gradient-entity    = { workspace = true, features = ["testing"] }
 gradient-migration = { workspace = true }
 gradient-types     = { workspace = true }
 

@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub const STORE_DIR: &str = "/nix/store";
 
-const NIX32_ALPHABET: &str = "0123456789abcdfghijklmnpqrsvwxyz";
+pub(crate) const NIX32_ALPHABET: &str = "0123456789abcdfghijklmnpqrsvwxyz";
 const STORE_HASH_LENGTH: usize = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -63,6 +63,13 @@ pub struct OriginalStorePath {
 }
 
 impl OriginalStorePath {
+    pub(crate) fn from_hash(hash: StoreHash, name: &str) -> Self {
+        Self {
+            hash,
+            name: name.to_owned(),
+        }
+    }
+
     pub fn parse(input: &str) -> Result<Self, StorePathError> {
         let (hash, name) = split_base(input)?;
         let hash =
@@ -116,6 +123,17 @@ impl StorePath {
             hash: StoreHash::stored(hash.into()),
             name: name.into(),
         }
+    }
+
+    pub(crate) fn from_hash(hash: StoreHash, name: &str) -> Self {
+        Self {
+            hash,
+            name: name.to_owned(),
+        }
+    }
+
+    pub(crate) fn store_hash(&self) -> &StoreHash {
+        &self.hash
     }
 
     pub fn parse_stored(input: &str) -> Result<Self, StorePathError> {
