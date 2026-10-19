@@ -652,7 +652,7 @@ async fn w10_a_worker_without_build_gets_no_substitute_job() {
 }
 
 #[tokio::test]
-async fn w11_a_worker_without_build_gets_no_download_job() {
+async fn w11_a_network_worker_without_build_gets_the_download_job() {
     let seed = shape()
         .one(EvaluationId::now_v7(), A, A_OUT)
         .system("builtin")
@@ -663,14 +663,17 @@ async fn w11_a_worker_without_build_gets_no_download_job() {
 
     case.admit_startable_moves().await;
     let offer = case.offers_full(W1).await;
-    let nothing = case.request_job(W1, JobKind::Build).await;
     assert_eq!(
         offered(&offer),
-        Vec::<String>::new(),
+        vec![a.clone()],
         "after 1: offers result.candidates"
     );
-    assert!(nothing.is_none(), "after 1: request result == nothing");
-    assert_eq!(case.assignments(&a).await, vec![], "after 1: dj == []");
+    case.score_all(W1).await;
+    let assignment = case
+        .request_job(W1, JobKind::Build)
+        .await
+        .expect("after 1: W1 gets download:A");
+    assert_eq!(assignment.job_id(), a, "after 1: result.job_id");
     case.check("step 1").await;
 
     case.finish().await;
