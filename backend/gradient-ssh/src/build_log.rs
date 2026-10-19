@@ -198,7 +198,7 @@ impl PlainLog {
             LogMessage::Message(m) => Some(String::from_utf8_lossy(&m.text).into_owned()),
             LogMessage::StartActivity(a) => {
                 if let Some(Field::String(path)) = a.fields.first() {
-                    let name = drv_name(&String::from_utf8_lossy(path)).to_owned();
+                    let name = drv_name(&String::from_utf8_lossy(path));
                     self.names.insert(a.id, name);
                 }
 

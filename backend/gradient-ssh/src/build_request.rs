@@ -6,6 +6,7 @@
 
 use crate::build_wait::{BuildOutcome, wait};
 use crate::session::Session;
+use crate::store_paths::stored_derivation;
 use futures::StreamExt as _;
 use gradient_db::Hold;
 use gradient_db::build_request_task::ensure_build_request_task;
@@ -15,7 +16,6 @@ use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_graph::{RecordBatch, Transition};
 use gradient_types::permissions::Permission;
 use gradient_types::*;
-use gradient_util::store_path::strip_nix_store_prefix;
 use gradient_wire::types::DiscoveredDerivation;
 use harmonia_protocol::log::LogMessage;
 use sea_orm::{
@@ -61,8 +61,8 @@ struct CacheDrvSource<'a> {
 
 impl DrvSource for CacheDrvSource<'_> {
     async fn read(&self, drv_path: &str) -> anyhow::Result<Option<Derivation>> {
-        let base = strip_nix_store_prefix(drv_path);
-        let hash = base.split('-').next().unwrap_or_default();
+        let path = StorePath::parse_stored(drv_path)?;
+        let hash = path.hash();
         let handles = &self.session.handles;
         if gradient_db::cache_paths::served_path(&handles.db.web_db, &self.session.caches, hash)
             .await?
@@ -81,7 +81,8 @@ impl DrvSource for CacheDrvSource<'_> {
             if let harmonia_file_nar::NarEvent::File { mut reader, .. } = event? {
                 let mut contents = Vec::new();
                 reader.read_to_end(&mut contents).await?;
-                return parse_drv(&contents).map(Some);
+                let drv = parse_drv(&contents)?;
+                return stored_derivation(&self.session.store_path_mapper(), drv).map(Some);
             }
         }
 
@@ -89,10 +90,13 @@ impl DrvSource for CacheDrvSource<'_> {
     }
 }
 
-pub fn drv_name(drv_path: &str) -> &str {
-    let base = drv_path.strip_prefix("/nix/store/").unwrap_or(drv_path);
-    let name = base.split_once('-').map_or(base, |(_, name)| name);
-    name.strip_suffix(".drv").unwrap_or(name)
+pub fn drv_name(drv_path: &str) -> String {
+    let name = StorePath::parse_stored(drv_path)
+        .map_or_else(|_| drv_path.to_owned(), |path| path.name().to_owned());
+    match name.strip_suffix(".drv") {
+        Some(name) => name.to_owned(),
+        None => name,
+    }
 }
 
 pub async fn closure(
@@ -224,7 +228,7 @@ async fn create_evaluation(
 ) -> anyhow::Result<EvaluationId> {
     let handles = &session.handles;
 
-    let names: Vec<&str> = drv_paths.iter().map(|p| drv_name(p)).collect();
+    let names: Vec<String> = drv_paths.iter().map(|p| drv_name(p)).collect();
     let tx = handles.db.web_db.inner().begin().await?;
     let commit = MCommit {
         id: CommitId::now_v7(),
@@ -310,17 +314,16 @@ async fn add_batches(
     let derivations: Vec<DiscoveredDerivation> = closure
         .iter()
         .map(|(path, drv)| {
-            let attr = requested
-                .contains(path.as_str())
-                .then(|| drv_name(path).to_string());
-            let mut discovered = discovered_derivation(attr, strip_nix_store_prefix(path), drv);
+            let attr = requested.contains(path.as_str()).then(|| drv_name(path));
+            let mut discovered =
+                discovered_derivation(attr, StorePath::parse_stored(path)?.base(), drv);
             for dependency in &mut discovered.dependencies {
-                *dependency = strip_nix_store_prefix(dependency);
+                *dependency = StorePath::parse_stored(dependency)?.base();
             }
 
-            discovered
+            Ok(discovered)
         })
-        .collect();
+        .collect::<anyhow::Result<_>>()?;
 
     for batch in derivations.chunks(RECORD_BATCH_SIZE) {
         let report = handles
