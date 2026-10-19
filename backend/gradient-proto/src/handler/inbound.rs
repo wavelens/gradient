@@ -528,7 +528,7 @@ impl<'a> InboundContext<'a> {
             | ClientMessage::UploadRequest { job_id, .. } => {
                 let project = self.active.job_project(self.scheduler, job_id).await;
                 if project.is_none() {
-                    refuse(self.writer, &msg, "no job of this session").await;
+                    refuse(self.writer, &msg, "the job does not resolve to a project").await;
                     return None;
                 }
                 project
@@ -998,7 +998,7 @@ impl RpcContext {
 
     async fn answer(&self, msg: ClientMessage) {
         let Some(project_id) = self.job_project(msg.job_id().unwrap_or_default()).await else {
-            refuse(&self.writer, &msg, "no job of this session").await;
+            refuse(&self.writer, &msg, "the job does not resolve to a project").await;
             return;
         };
         let mapper = self
@@ -1743,5 +1743,46 @@ mod assignment_response_tests {
             panic!("a CacheStatus")
         };
         assert_eq!(cached[0].path, asked);
+    }
+
+    #[tokio::test]
+    async fn a_malformed_cache_query_path_is_answered_as_not_cached() {
+        use super::fixture::{JOB, TestSession, decode};
+        use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
+
+        let stored = gradient_entity::cached_path::Model {
+            hash: EXAMPLE_STORED_HASH.into(),
+            file_hash: Some("sha256:f".into()),
+            confirmed: true,
+            ..Default::default()
+        };
+        let cache_db = gradient_fixtures::mock::mock_db()
+            .append_query_results([vec![stored]])
+            .into_connection();
+        let state = TestState::new()
+            .cache_db(cache_db)
+            .store_path_mapping(Arc::new(RotatedHashMapping))
+            .build();
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (ctx, _uploads) = session.split();
+        let asked = format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-hello");
+
+        ctx.rpc().serve(ClientMessage::CacheQuery {
+            job_id: JOB.into(),
+            query_id: "q1".into(),
+            paths: vec!["/nix/store/abc-malformed".into(), asked.clone()],
+            nar_sizes: vec![None, None],
+            mode: gradient_wire::types::QueryMode::Normal,
+            external: false,
+        });
+        let reply = tokio::time::timeout(Duration::from_secs(5), sent.recv())
+            .await
+            .expect("answered")
+            .expect("reply sent");
+        let ServerMessage::CacheStatus { cached, .. } = decode(reply) else {
+            panic!("a CacheStatus")
+        };
+        let cached: Vec<String> = cached.into_iter().map(|hit| hit.path).collect();
+        assert_eq!(cached, vec![asked]);
     }
 }

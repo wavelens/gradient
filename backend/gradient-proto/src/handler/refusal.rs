@@ -5,7 +5,7 @@
  */
 
 use gradient_wire::messages::{ClientMessage, ServerMessage};
-use gradient_wire::types::{EvalCachePullOutcome, UploadOutcome};
+use gradient_wire::types::{EvalCachePullOutcome, ImportOutcome, InputOutcome, UploadOutcome};
 use tracing::warn;
 
 use super::socket::{ProtoWriter, send_server_msg};
@@ -37,6 +37,24 @@ pub(super) fn refusal(msg: &ClientMessage, reason: &str) -> Vec<ServerMessage> {
         ClientMessage::EvalCachePull { job_id, .. } => vec![ServerMessage::EvalCachePullResult {
             job_id: job_id.clone(),
             outcome: EvalCachePullOutcome::Miss,
+        }],
+        ClientMessage::ImportRequest {
+            job_id,
+            request_id,
+            drv_paths,
+        } => vec![ServerMessage::ImportResult {
+            job_id: job_id.clone(),
+            request_id: request_id.clone(),
+            outcome: ImportOutcome::Unknown {
+                drv_path: drv_paths.first().cloned().unwrap_or_default(),
+            },
+        }],
+        ClientMessage::InputRequest {
+            job_id, request_id, ..
+        } => vec![ServerMessage::InputResult {
+            job_id: job_id.clone(),
+            request_id: request_id.clone(),
+            outcome: InputOutcome::Failed { message },
         }],
         _ => vec![ServerMessage::Error { code: 400, message }],
     }
@@ -108,11 +126,29 @@ mod tests {
         let import = ClientMessage::ImportRequest {
             job_id: "j1".into(),
             request_id: "r".into(),
-            drv_paths: vec![],
+            drv_paths: vec!["/nix/store/a.drv".into(), "/nix/store/b.drv".into()],
         };
         assert!(matches!(
             refusal(&import, "no job").as_slice(),
-            [ServerMessage::Error { code: 400, .. }]
+            [ServerMessage::ImportResult {
+                request_id,
+                outcome: ImportOutcome::Unknown { drv_path },
+                ..
+            }] if request_id == "r" && drv_path == "/nix/store/a.drv"
+        ));
+
+        let input = ClientMessage::InputRequest {
+            job_id: "j1".into(),
+            request_id: "r".into(),
+            request: "{}".into(),
+        };
+        assert!(matches!(
+            refusal(&input, "no job").as_slice(),
+            [ServerMessage::InputResult {
+                request_id,
+                outcome: InputOutcome::Failed { .. },
+                ..
+            }] if request_id == "r"
         ));
     }
 }
