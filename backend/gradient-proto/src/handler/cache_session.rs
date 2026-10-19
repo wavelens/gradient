@@ -333,7 +333,7 @@ mod tests {
         assert!(session.serve(query("q2", "abc-hello".into())).await);
         assert!(matches!(
             decode(sent.try_recv().unwrap()),
-            ServerMessage::CacheError { query_id, .. } if query_id == "q2"
+            ServerMessage::CacheStatus { query_id, cached } if query_id == "q2" && cached.is_empty()
         ));
     }
 }
