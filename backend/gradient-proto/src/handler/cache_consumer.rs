@@ -6,6 +6,8 @@
 
 use std::time::Duration;
 
+use gradient_core::upstream::inbound_cached_path;
+use gradient_types::{StorePath, StorePathMapper};
 use gradient_wire::types::{CachedPath, GradientCapabilities, QueryMode};
 
 use gradient_wire::messages::{ClientMessage, ServerMessage};
@@ -41,7 +43,8 @@ pub(crate) async fn pull_paths(
     base_url: &str,
     remote_cache: &str,
     api_key: Option<&str>,
-    paths: &[String],
+    mapper: &StorePathMapper,
+    paths: &[StorePath],
 ) -> Vec<CachedPath> {
     let url = proto_ws_url(base_url, remote_cache);
     let mut socket = match gradient_wire::client::dial_with_auth(&url, api_key).await {
@@ -67,7 +70,7 @@ pub(crate) async fn pull_paths(
     let query = ClientMessage::CacheQuery {
         job_id: uuid::Uuid::now_v7().to_string(),
         query_id: uuid::Uuid::now_v7().to_string(),
-        paths: paths.to_vec(),
+        paths: paths.iter().map(|p| mapper.outbound(p).full()).collect(),
         mode: QueryMode::Pull,
         nar_sizes: Vec::new(),
         external: false,
@@ -77,9 +80,11 @@ pub(crate) async fn pull_paths(
     }
 
     match tokio::time::timeout(Duration::from_secs(30), reader.recv()).await {
-        Ok(Some(ServerMessage::CacheStatus { cached, .. })) => {
-            cached.into_iter().filter(|c| c.cached).collect()
-        }
+        Ok(Some(ServerMessage::CacheStatus { cached, .. })) => cached
+            .into_iter()
+            .filter(|c| c.cached)
+            .filter_map(|c| inbound_cached_path(mapper, c).ok())
+            .collect(),
         _ => vec![],
     }
 }

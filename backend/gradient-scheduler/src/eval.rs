@@ -26,9 +26,10 @@ pub struct ProbeAnswer {
 /// reason, never on a graph path.
 pub async fn probe_outputs(
     db: &WorkerDb,
+    mapping: &Arc<dyn StorePathMapping>,
     upstream_query: &Arc<Semaphore>,
     evaluation: &MEvaluation,
-    to_probe: Vec<(String, String)>,
+    to_probe: Vec<StorePath>,
 ) -> ProbeAnswer {
     let mut answer = ProbeAnswer::default();
     if to_probe.is_empty() {
@@ -48,7 +49,7 @@ pub async fn probe_outputs(
         Ok(endpoints) => endpoints,
         Err(e) => {
             warn!(error = %e, evaluation = %evaluation.id, "upstream probe: could not read the upstream caches; asking again later");
-            answer.unanswered = to_probe.into_iter().map(|(hash, _)| hash).collect();
+            answer.unanswered = to_probe.iter().map(|p| p.hash().to_owned()).collect();
             return answer;
         }
     };
@@ -57,8 +58,14 @@ pub async fn probe_outputs(
     }
 
     let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
-    let batch =
-        gradient_core::upstream::probe_batch(endpoints, Arc::clone(upstream_query), to_probe).await;
+    let mapper = StorePathMapper::new(Arc::clone(mapping), MappingContext::Project(project_id));
+    let batch = gradient_core::upstream::probe_batch(
+        endpoints,
+        Arc::clone(upstream_query),
+        mapper,
+        to_probe,
+    )
+    .await;
     warn_unanswered(db, evaluation, &batch.unanswered, &id_to_url).await;
 
     // The same URL under different upstream ids is folding into one metric series (#417).

@@ -346,7 +346,8 @@ async fn extend_with_upstream_results(
     db: &CacheDb,
     upstream_query: &Arc<Semaphore>,
     project_id: ProjectId,
-    uncached_pairs: Vec<(String, String)>,
+    mapper: &StorePathMapper,
+    uncached_pairs: &[(String, String)],
     result: &mut Vec<gradient_wire::types::CachedPath>,
 ) {
     const UPSTREAM_WINDOW_MINUTES: i64 = 60;
@@ -370,11 +371,30 @@ async fn extend_with_upstream_results(
 
     let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
 
-    let batch =
-        gradient_core::upstream::probe_batch(endpoints, Arc::clone(upstream_query), uncached_pairs)
-            .await;
+    let requested: HashMap<&str, &str> = uncached_pairs
+        .iter()
+        .map(|(hash, path)| (hash.as_str(), path.as_str()))
+        .collect();
+    let targets = uncached_pairs
+        .iter()
+        .filter_map(|(_, path)| StorePath::parse_stored(path).ok())
+        .collect();
+    let batch = gradient_core::upstream::probe_batch(
+        endpoints,
+        Arc::clone(upstream_query),
+        mapper.clone(),
+        targets,
+    )
+    .await;
 
-    result.extend(batch.found.into_values());
+    result.extend(batch.found.into_iter().map(|(hash, cp)| {
+        gradient_wire::types::CachedPath {
+            path: requested
+                .get(hash.as_str())
+                .map_or(cp.path.clone(), |p| (*p).to_owned()),
+            ..cp
+        }
+    }));
 
     let mut by_url: HashMap<String, gradient_db::caches::upstream::UpstreamAccum> = HashMap::new();
     for (id, accum) in &batch.stats {
@@ -401,6 +421,7 @@ async fn extend_with_gradient_proto_results(
     db: &CacheDb,
     config: &RuntimeConfig,
     project_id: ProjectId,
+    mapper: &StorePathMapper,
     uncached_pairs: &[(String, String)],
     result: &mut Vec<gradient_wire::types::CachedPath>,
 ) {
@@ -421,10 +442,10 @@ async fn extend_with_gradient_proto_results(
     }
 
     let already: HashSet<String> = result.iter().map(|c| c.path.clone()).collect();
-    let want: Vec<String> = uncached_pairs
+    let want: Vec<StorePath> = uncached_pairs
         .iter()
-        .map(|(_, p)| p.clone())
-        .filter(|p| !already.contains(p))
+        .filter(|(_, p)| !already.contains(p))
+        .filter_map(|(_, p)| StorePath::parse_stored(p).ok())
         .collect();
     if want.is_empty() {
         return;
@@ -435,9 +456,14 @@ async fn extend_with_gradient_proto_results(
             .api_key_enc
             .as_deref()
             .and_then(|enc| gradient_sources::decrypt_secret(&config.secrets.crypt_file, enc).ok());
-        let found =
-            super::cache_consumer::pull_paths(&up.url, &up.remote_cache, api_key.as_deref(), &want)
-                .await;
+        let found = super::cache_consumer::pull_paths(
+            &up.url,
+            &up.remote_cache,
+            api_key.as_deref(),
+            mapper,
+            &want,
+        )
+        .await;
         for cp in found {
             if !result.iter().any(|r| r.path == cp.path) {
                 result.push(cp);
@@ -545,11 +571,15 @@ async fn query(
         .collect();
 
     if !uncached_pairs.is_empty() {
+        let mapper = handles
+            .db
+            .store_path_mapper(MappingContext::Project(project_id));
         extend_with_upstream_results(
             &handles.cache_db,
             &handles.upstream_query,
             project_id,
-            uncached_pairs.clone(),
+            &mapper,
+            &uncached_pairs,
             &mut result,
         )
         .await;
@@ -557,6 +587,7 @@ async fn query(
             &handles.cache_db,
             &handles.db.config,
             project_id,
+            &mapper,
             &uncached_pairs,
             &mut result,
         )

@@ -13,7 +13,9 @@ use gradient_util::sync::Mutex;
 use tokio::sync::Semaphore;
 
 use gradient_db::caches::upstream::{UpstreamAccum, UpstreamEndpoint};
+use gradient_entity::StorePathError;
 use gradient_types::ids::CacheUpstreamId;
+use gradient_types::{StorePath, StorePathMapper};
 use gradient_wire::types::CachedPath;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,6 +228,7 @@ impl ProbeResult {
 async fn probe_one(
     pool: &Arc<Semaphore>,
     ep: &UpstreamEndpoint,
+    mapper: &StorePathMapper,
     hash: &str,
     store_path: &str,
 ) -> (f64, SampleKind, Option<CachedPath>) {
@@ -253,7 +256,9 @@ async fn probe_one(
 
     let out = match resp {
         Ok(r) if r.status().is_success() => match r.text().await {
-            Ok(body) => match verified_narinfo(ep, hash, store_path, &body) {
+            Ok(body) => match verified_narinfo(ep, hash, store_path, &body)
+                .and_then(|cp| inbound_cached_path(mapper, cp).ok())
+            {
                 Some(cp) => (latency_ms, SampleKind::Hit, Some(cp)),
                 None => (latency_ms, SampleKind::Miss, None),
             },
@@ -334,12 +339,30 @@ pub async fn fetch_narinfo_body(
     None
 }
 
+pub fn inbound_cached_path(
+    mapper: &StorePathMapper,
+    cp: CachedPath,
+) -> Result<CachedPath, StorePathError> {
+    Ok(CachedPath {
+        path: mapper.inbound_text(&cp.path)?,
+        references: cp
+            .references
+            .map(|refs| refs.iter().map(|r| mapper.inbound_text(r)).collect())
+            .transpose()?,
+        deriver: cp.deriver.map(|d| mapper.inbound_text(&d)).transpose()?,
+        ..cp
+    })
+}
+
 pub async fn lookup_upstream_narinfo(
     endpoints: Arc<Vec<UpstreamEndpoint>>,
     pool: Arc<Semaphore>,
-    hash: String,
-    store_path: String,
+    mapper: StorePathMapper,
+    target: StorePath,
 ) -> ProbeResult {
+    let original = mapper.outbound(&target);
+    let hash = original.hash().to_string();
+    let store_path = original.full();
     let mut samples = Vec::new();
 
     // A tripped upstream is skipped rather than probed and recorded. Folding a sample never taken
@@ -367,10 +390,9 @@ pub async fn lookup_upstream_narinfo(
             .iter()
             .map(|ep| {
                 let pool = Arc::clone(&pool);
-                let hash = hash.clone();
-                let path = store_path.clone();
+                let (mapper, hash, path) = (&mapper, &hash, &store_path);
                 async move {
-                    let (latency, kind, cp) = probe_one(&pool, ep, &hash, &path).await;
+                    let (latency, kind, cp) = probe_one(&pool, ep, mapper, hash, path).await;
                     (ep.id, latency, kind, cp)
                 }
             })
@@ -390,7 +412,7 @@ pub async fn lookup_upstream_narinfo(
     }
 
     for ep in endpoints.iter() {
-        let (latency, kind, cp) = probe_one(&pool, ep, &hash, &store_path).await;
+        let (latency, kind, cp) = probe_one(&pool, ep, &mapper, &hash, &store_path).await;
         let is_hit = matches!(kind, SampleKind::Hit);
         samples.push(ProbeSample {
             upstream: ep.id,
@@ -415,7 +437,8 @@ pub struct BatchProbe {
 pub async fn probe_batch(
     mut endpoints: Vec<UpstreamEndpoint>,
     pool: Arc<Semaphore>,
-    targets: Vec<(String, String)>,
+    mapper: StorePathMapper,
+    targets: Vec<StorePath>,
 ) -> BatchProbe {
     use futures::stream::{FuturesUnordered, StreamExt as _};
 
@@ -429,18 +452,20 @@ pub async fn probe_batch(
 
     let mut futs = FuturesUnordered::new();
     let mut iter = targets.into_iter();
-    let push = |futs: &mut FuturesUnordered<_>, hash: String, path: String| {
+    let push = |futs: &mut FuturesUnordered<_>, target: StorePath| {
         let eps = Arc::clone(&endpoints);
         let pool = Arc::clone(&pool);
+        let mapper = mapper.clone();
         futs.push(async move {
-            let res = lookup_upstream_narinfo(eps, pool, hash.clone(), path).await;
+            let hash = target.hash().to_owned();
+            let res = lookup_upstream_narinfo(eps, pool, mapper, target).await;
             (hash, res)
         });
     };
 
     for _ in 0..BATCH_WINDOW {
         match iter.next() {
-            Some((hash, path)) => push(&mut futs, hash, path),
+            Some(target) => push(&mut futs, target),
             None => break,
         }
     }
@@ -453,8 +478,8 @@ pub async fn probe_batch(
             batch.unanswered.insert(hash, res.unanswered);
         }
 
-        if let Some((hash, path)) = iter.next() {
-            push(&mut futs, hash, path);
+        if let Some(target) = iter.next() {
+            push(&mut futs, target);
         }
     }
 
@@ -737,8 +762,11 @@ mod tests {
         lookup_upstream_narinfo(
             Arc::new(endpoints),
             Arc::new(Semaphore::new(4)),
-            SIGNED_HASH.to_owned(),
-            SIGNED_PATH.to_owned(),
+            gradient_types::StorePathMapper::new(
+                Arc::new(gradient_types::IdentityMapping),
+                gradient_types::MappingContext::Project(gradient_types::ProjectId::nil()),
+            ),
+            StorePath::parse_stored(SIGNED_PATH).expect("path"),
         )
         .await
     }
@@ -873,16 +901,62 @@ mod tests {
     const SIGNED_PATH: &str = "/nix/store/brj5bb4pny8pnngq3qdymkllwql6z29j-hello-2.12";
 
     fn signed_narinfo(store_path: &str) -> (String, String) {
+        signed_narinfo_referencing(store_path, None)
+    }
+
+    fn signed_narinfo_referencing(store_path: &str, reference: Option<&str>) -> (String, String) {
         use base64::{Engine as _, engine::general_purpose::STANDARD};
         let keypair = ed25519_compact::KeyPair::generate();
         let nar_hash = "sha256:1bnnhb0pfx49mg15fmk3jx34wj8j24ygqcq7xww9g8qcyaf23rkf";
-        let fingerprint = format!("1;{store_path};{nar_hash};120;");
+        let full_reference = reference.map_or(String::new(), |r| format!("/nix/store/{r}"));
+        let fingerprint = format!("1;{store_path};{nar_hash};120;{full_reference}");
         let sig = STANDARD.encode(*keypair.sk.sign(fingerprint, None));
         let body = format!(
             "StorePath: {store_path}\nURL: nar/x.nar.xz\nNarHash: {nar_hash}\nNarSize: 120\n\
-             References: \nSig: upstream-1:{sig}\n"
+             References: {}\nSig: upstream-1:{sig}\n",
+            reference.unwrap_or_default()
         );
         (body, format!("upstream-1:{}", STANDARD.encode(*keypair.pk)))
+    }
+
+    #[tokio::test]
+    async fn an_upstream_is_asked_for_the_original_hash_and_answers_in_stored_form() {
+        use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
+        let (original, stored) = (EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH);
+        let (body, key) = signed_narinfo_referencing(
+            &format!("/nix/store/{original}-hello"),
+            Some(&format!("{original}-dep")),
+        );
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(format!("/{original}.narinfo")))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+        let endpoint = UpstreamEndpoint {
+            url: server.uri(),
+            public_key: Some(key),
+            ..ep(None, None)
+        };
+        let mapper = gradient_types::StorePathMapper::new(
+            Arc::new(RotatedHashMapping),
+            gradient_types::MappingContext::Project(gradient_types::ProjectId::nil()),
+        );
+
+        let batch = probe_batch(
+            vec![endpoint],
+            Arc::new(Semaphore::new(4)),
+            mapper,
+            vec![gradient_types::StorePath::from_stored(stored, "hello")],
+        )
+        .await;
+
+        let found = &batch.found[stored];
+        assert_eq!(found.path, format!("/nix/store/{stored}-hello"));
+        assert_eq!(
+            found.references,
+            Some(vec![format!("/nix/store/{stored}-dep")])
+        );
     }
 
     fn ep_with_key(public_key: Option<String>) -> UpstreamEndpoint {
