@@ -18,6 +18,7 @@ use gradient_entity::StorePath;
 use gradient_graph::Graph;
 use gradient_types::*;
 use gradient_util::supervision::{Pass, PassError, RunsOn};
+use sea_orm::sea_query::Query;
 use sea_orm::{ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{Mutex, Notify, Semaphore};
@@ -168,6 +169,10 @@ async fn unanswered_need(db: &WorkerDb) -> Result<Vec<DerivationId>> {
 }
 
 fn unanswered_need_query() -> sea_orm::Select<EDerivationBuild> {
+    let named = Query::select()
+        .column(CBuildJob::DerivationBuild)
+        .from(EBuildJob::default())
+        .to_owned();
     EDerivationBuild::find()
         .join(
             JoinType::InnerJoin,
@@ -176,13 +181,14 @@ fn unanswered_need_query() -> sea_orm::Select<EDerivationBuild> {
         .filter(CDerivationBuild::Probed.eq(false))
         .filter(CDerivationBuild::Wanted.eq(true))
         .filter(CDerivation::Walked.eq(true))
+        .filter(CDerivationBuild::Id.in_subquery(named))
         .limit(PROBE_BATCH as u64)
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct ProbePlan {
     pub rounds: Vec<(MEvaluation, Vec<StorePath>)>,
-    pub answered: Vec<DerivationId>,
+    pub asked: Vec<DerivationId>,
     pub owners: HashMap<String, Vec<DerivationId>>,
 }
 
@@ -197,7 +203,7 @@ impl ProbePlan {
             .flatten()
             .copied()
             .collect();
-        self.answered
+        self.asked
             .iter()
             .copied()
             .filter(|d| !waiting.contains(d))
@@ -281,14 +287,55 @@ pub(crate) async fn plan_probes(
     })
     .await
     .context("load the outputs of the shared builds that became wanted")?;
+    let cached = gradient_db::derivation_outputs::cached_anywhere(db, &outputs)
+        .await
+        .context("find the outputs some cache already holds")?;
+    let to_ask: Vec<&MDerivationOutput> =
+        outputs.iter().filter(|o| !cached.contains(&o.id)).collect();
+    let evaluation_of = evaluation_naming_each(db, &to_ask).await?;
+
+    let mut plan = ProbePlan::default();
+    let mut by_evaluation: HashMap<EvaluationId, (MEvaluation, HashMap<String, StorePath>)> =
+        HashMap::new();
+    let mut unaskable: HashSet<DerivationId> = HashSet::new();
+    for o in to_ask {
+        let Some(evaluation) = evaluation_of.get(&o.derivation) else {
+            unaskable.insert(o.derivation);
+            continue;
+        };
+        by_evaluation
+            .entry(evaluation.id)
+            .or_insert_with(|| (evaluation.clone(), HashMap::new()))
+            .1
+            .insert(o.hash.clone(), StorePath::from(o.clone()));
+        plan.owners
+            .entry(o.hash.clone())
+            .or_default()
+            .push(o.derivation);
+    }
+
     let recorded: HashSet<DerivationId> = outputs.iter().map(|o| o.derivation).collect();
-    let answered: Vec<DerivationId> = shared_builds
+    plan.asked = shared_builds
         .iter()
         .copied()
-        .filter(|d| recorded.contains(d))
+        .filter(|d| recorded.contains(d) && !unaskable.contains(d))
+        .collect();
+    plan.rounds = by_evaluation
+        .into_values()
+        .map(|(evaluation, targets)| (evaluation, targets.into_values().collect()))
         .collect();
 
-    let jobs = gradient_db::fetch_in_chunks(&answered, |chunk| async move {
+    Ok(plan)
+}
+
+async fn evaluation_naming_each(
+    db: &WorkerDb,
+    outputs: &[&MDerivationOutput],
+) -> Result<HashMap<DerivationId, MEvaluation>> {
+    let mut derivations: Vec<DerivationId> = outputs.iter().map(|o| o.derivation).collect();
+    derivations.sort_unstable();
+    derivations.dedup();
+    let jobs = gradient_db::fetch_in_chunks(&derivations, |chunk| async move {
         EBuildJob::find()
             .filter(CBuildJob::Derivation.is_in(chunk))
             .all(db)
@@ -296,60 +343,33 @@ pub(crate) async fn plan_probes(
     })
     .await
     .context("find an evaluation naming each shared build that became wanted")?;
-    let mut evaluation_of: HashMap<DerivationId, EvaluationId> = HashMap::new();
-    for job in &jobs {
-        evaluation_of
-            .entry(job.derivation)
-            .or_insert(job.evaluation);
-    }
 
-    let mut by_evaluation: HashMap<EvaluationId, HashMap<String, StorePath>> = HashMap::new();
-    let mut owners: HashMap<String, Vec<DerivationId>> = HashMap::new();
-    let cached = gradient_db::derivation_outputs::cached_anywhere(db, &outputs)
-        .await
-        .context("find the outputs some cache already holds")?;
-    for o in outputs.iter().filter(|o| !cached.contains(&o.id)) {
-        let Some(evaluation) = evaluation_of.get(&o.derivation) else {
-            continue;
-        };
-        by_evaluation
-            .entry(*evaluation)
-            .or_default()
-            .insert(o.hash.clone(), StorePath::from(o.clone()));
-        owners.entry(o.hash.clone()).or_default().push(o.derivation);
-    }
-    if by_evaluation.is_empty() {
-        return Ok(ProbePlan {
-            rounds: Vec::new(),
-            answered,
-            owners,
-        });
-    }
-
-    let ids: Vec<EvaluationId> = by_evaluation.keys().copied().collect();
-    let evaluations = gradient_db::fetch_in_chunks(&ids, |chunk| async move {
-        EEvaluation::find()
-            .filter(CEvaluation::Id.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await
-    .context("load the evaluations the probe reads its upstream caches through")?;
-
-    let rounds = evaluations
-        .into_iter()
-        .filter_map(|e| {
-            by_evaluation
-                .remove(&e.id)
-                .map(|targets| (e, targets.into_values().collect()))
+    let mut ids: Vec<EvaluationId> = jobs.iter().map(|j| j.evaluation).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let evaluations: HashMap<EvaluationId, MEvaluation> =
+        gradient_db::fetch_in_chunks(&ids, |chunk| async move {
+            EEvaluation::find()
+                .filter(CEvaluation::Id.is_in(chunk))
+                .all(db)
+                .await
         })
+        .await
+        .context("load the evaluations the probe reads its upstream caches through")?
+        .into_iter()
+        .map(|e| (e.id, e))
         .collect();
 
-    Ok(ProbePlan {
-        rounds,
-        answered,
-        owners,
-    })
+    let mut evaluation_of: HashMap<DerivationId, MEvaluation> = HashMap::new();
+    for job in jobs {
+        if let Some(evaluation) = evaluations.get(&job.evaluation) {
+            evaluation_of
+                .entry(job.derivation)
+                .or_insert_with(|| evaluation.clone());
+        }
+    }
+
+    Ok(evaluation_of)
 }
 
 #[cfg(test)]
@@ -384,7 +404,7 @@ mod tests {
         let (silent, missed) = (DerivationId::now_v7(), DerivationId::now_v7());
         let plan = ProbePlan {
             rounds: Vec::new(),
-            answered: vec![silent, missed],
+            asked: vec![silent, missed],
             owners: HashMap::from([
                 ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(), vec![silent]),
                 ("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned(), vec![missed]),
@@ -407,11 +427,17 @@ mod tests {
     }
 
     #[test]
-    fn the_sweep_reads_only_walked_shared_builds() {
+    fn the_sweep_reads_only_walked_shared_builds_an_evaluation_names() {
         use sea_orm::QueryTrait as _;
         let sql = unanswered_need_query()
             .build(DatabaseBackend::Postgres)
             .to_string();
         assert!(sql.contains(r#""derivation"."walked" = TRUE"#), "{sql}");
+        assert!(
+            sql.contains(
+                r#""derivation_build"."id" IN (SELECT "derivation_build" FROM "build_job")"#
+            ),
+            "{sql}"
+        );
     }
 }
