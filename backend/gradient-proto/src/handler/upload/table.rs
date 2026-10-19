@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use gradient_storage::PartialWriter;
 use gradient_storage::admission::UploadPermit;
+use gradient_types::ids::ProjectId;
 use gradient_wire::types::{UploadMetadata, UploadObject};
 
 pub(in crate::handler) enum Transfer {
@@ -39,12 +40,14 @@ impl Lease {
 
 pub(in crate::handler) struct Queued {
     pub job_id: String,
+    pub project: ProjectId,
     pub object: UploadObject,
     pub size: u64,
 }
 
 pub(in crate::handler) struct Granted {
     pub job_id: String,
+    pub project: ProjectId,
     pub object: UploadObject,
     pub size: u64,
     pub permit: UploadPermit,
@@ -79,6 +82,7 @@ impl UploadTable {
         &mut self,
         id: u64,
         job_id: String,
+        project: ProjectId,
         object: UploadObject,
         size: u64,
     ) -> bool {
@@ -89,6 +93,7 @@ impl UploadTable {
             id,
             Entry::Queued(Queued {
                 job_id,
+                project,
                 object,
                 size,
             }),
@@ -221,11 +226,12 @@ mod tests {
         let (_session, permit) = permit(&admission, 1).await;
         let mut table = UploadTable::default();
         let start = Instant::now();
-        assert!(table.queue(1, "build:1".into(), nar(0), 10));
+        assert!(table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), 10));
         table.grant(
             1,
             Granted {
                 job_id: "build:1".into(),
+                project: ProjectId::nil(),
                 object: nar(0),
                 size: 10,
                 permit,
@@ -262,11 +268,12 @@ mod tests {
         let (_session, permit) = permit(&admission, 1).await;
         let mut table = UploadTable::default();
         let start = Instant::now();
-        table.queue(1, "build:1".into(), nar(0), 10);
+        table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), 10);
         table.grant(
             1,
             Granted {
                 job_id: "build:1".into(),
+                project: ProjectId::nil(),
                 object: nar(0),
                 size: 10,
                 permit,
@@ -290,16 +297,16 @@ mod tests {
     #[test]
     fn a_duplicate_request_id_is_refused() {
         let mut table = UploadTable::default();
-        assert!(table.queue(1, "build:1".into(), nar(0), 1));
-        assert!(!table.queue(1, "build:1".into(), nar(1), 1));
+        assert!(table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), 1));
+        assert!(!table.queue(1, "build:1".into(), ProjectId::nil(), nar(1), 1));
     }
 
     #[test]
     fn forgetting_a_job_returns_only_its_requests() {
         let mut table = UploadTable::default();
-        table.queue(1, "build:1".into(), nar(0), 1);
-        table.queue(2, "build:2".into(), nar(1), 1);
-        table.queue(3, "build:1".into(), nar(2), 1);
+        table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), 1);
+        table.queue(2, "build:2".into(), ProjectId::nil(), nar(1), 1);
+        table.queue(3, "build:1".into(), ProjectId::nil(), nar(2), 1);
         let mut ids: Vec<u64> = table
             .forget_job("build:1")
             .into_iter()

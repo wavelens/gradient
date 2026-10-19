@@ -17,6 +17,7 @@ mod job_events;
 mod log_lane;
 mod nar;
 mod nar_serve;
+mod refusal;
 mod session;
 mod session_actor;
 mod sessions;

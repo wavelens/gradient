@@ -7,7 +7,6 @@
 mod commit;
 mod table;
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey};
@@ -65,7 +64,7 @@ impl InboundContext<'_> {
                 )
                 .await;
         };
-        if !self.active.contains(&job_id) && self.active.fetch_project(&job_id).is_none() {
+        let Some(project) = self.active.session_project(&job_id) else {
             return self
                 .settle(
                     request_id,
@@ -74,14 +73,17 @@ impl InboundContext<'_> {
                     },
                 )
                 .await;
-        }
+        };
         if let UploadObject::EvalCache { fingerprint } = &object
             && !super::eval_cache::accepts_push(&self.handles.db.worker_db, fingerprint, size).await
         {
             return self.grant(request_id, GrantTarget::Skip).await;
         }
         let priority = gradient_wire::messages::is_small_upload(size);
-        if !uploads.table.queue(request_id, job_id, object, size) {
+        if !uploads
+            .table
+            .queue(request_id, job_id, project, object, size)
+        {
             return self
                 .settle(
                     request_id,
@@ -137,6 +139,7 @@ impl InboundContext<'_> {
                             id,
                             Granted {
                                 job_id: queued.job_id,
+                                project: queued.project,
                                 object: queued.object,
                                 size: queued.size,
                                 permit,
@@ -310,28 +313,12 @@ impl InboundContext<'_> {
         let Some(metadata) = granted.finished else {
             return;
         };
-        let project = {
-            let scheduler = Arc::clone(self.scheduler);
-            let db = self.handles.db.worker_db.clone();
-            let peer_id = self.peer_id.to_owned();
-            let job_id = granted.job_id.clone();
-            let fetch_project = self.active.fetch_project(&job_id);
-            Box::pin(async move {
-                if fetch_project.is_some() {
-                    return fetch_project;
-                }
-                match scheduler.project_for_job(&job_id).await {
-                    Some(id) => Some(id),
-                    None => super::nar::project_for_dispatched_job(&db, &peer_id, &job_id).await,
-                }
-            })
-        };
         let c = commit::Commit {
             writer: self.writer.clone(),
             handles: self.handles.clone(),
             peer_id: self.peer_id.to_owned(),
             request_id,
-            project,
+            project: granted.project,
             object: granted.object,
             transfer: granted.transfer,
             metadata,

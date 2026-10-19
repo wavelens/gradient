@@ -35,6 +35,7 @@ use super::eval_cache::handle_eval_cache_pull;
 use super::job_events::{JobEvent, JobEvents};
 use super::log_lane::LogLane;
 use super::nar_serve::{ServeSlot, serve_nar_request};
+use super::refusal::refuse;
 use super::socket::{
     ProtoWriter, job_offer_chunks, send_credentials_for_job, send_error, send_server_msg,
 };
@@ -84,6 +85,17 @@ impl ActiveJobs {
 
     pub(crate) fn project(&self, job_id: &str) -> Option<ProjectId> {
         self.0.lock().get(job_id).map(|a| a.pending.project_id())
+    }
+
+    pub(crate) fn session_project(&self, job_id: &str) -> Option<ProjectId> {
+        self.project(job_id).or_else(|| self.fetch_project(job_id))
+    }
+
+    async fn job_project(&self, scheduler: &Scheduler, job_id: &str) -> Option<ProjectId> {
+        match self.session_project(job_id) {
+            Some(project) => Some(project),
+            None => scheduler.project_for_job(job_id).await,
+        }
     }
 
     pub(crate) fn build(&self, job_id: &str, task_index: u32) -> Option<DerivationBuildId> {
@@ -154,6 +166,9 @@ pub(super) struct InboundContext<'a> {
 impl<'a> InboundContext<'a> {
     pub async fn handle(&mut self, msg: ClientMessage, uploads: &mut UploadSession) -> bool {
         trace!(variant = msg.variant_name(), "received client message");
+        let Some(msg) = self.admit(msg).await else {
+            return true;
+        };
         match msg {
             ClientMessage::InitConnection { .. } => {
                 send_error(self.writer, 400, "unexpected InitConnection".into()).await;
@@ -484,6 +499,30 @@ impl<'a> InboundContext<'a> {
                 true
             }
         }
+    }
+
+    async fn admit(&self, msg: ClientMessage) -> Option<ClientMessage> {
+        let needs_project = matches!(
+            msg,
+            ClientMessage::NarRequest { .. }
+                | ClientMessage::NarRequestResume { .. }
+                | ClientMessage::EvalCachePull { .. }
+                | ClientMessage::ImportRequest { .. }
+                | ClientMessage::InputRequest { .. }
+        );
+        let Some(job_id) = msg.job_id().filter(|_| needs_project) else {
+            return Some(msg);
+        };
+        if self
+            .active
+            .job_project(self.scheduler, job_id)
+            .await
+            .is_none()
+        {
+            refuse(self.writer, &msg, "no job of this session").await;
+            return None;
+        }
+        Some(msg)
     }
 
     async fn on_job_update(&self, job_id: String, update: JobUpdateKind) {
@@ -895,7 +934,29 @@ impl RpcContext {
     }
 
     pub(super) fn serve(&self, msg: ClientMessage) -> Option<ClientMessage> {
+        if !matches!(
+            msg,
+            ClientMessage::CacheQuery { .. } | ClientMessage::QueryKnownDerivations { .. }
+        ) {
+            return Some(msg);
+        }
         let rpc = self.clone();
+        self.handles
+            .db
+            .shutdown
+            .spawn(async move { rpc.answer(msg).await });
+        None
+    }
+
+    pub(super) async fn job_project(&self, job_id: &str) -> Option<ProjectId> {
+        self.active.job_project(&self.scheduler, job_id).await
+    }
+
+    async fn answer(&self, msg: ClientMessage) {
+        let Some(project_id) = self.job_project(msg.job_id().unwrap_or_default()).await else {
+            refuse(&self.writer, &msg, "no job of this session").await;
+            return;
+        };
         match msg {
             ClientMessage::CacheQuery {
                 job_id,
@@ -905,24 +966,20 @@ impl RpcContext {
                 mode,
                 external,
             } => {
-                self.handles.db.shutdown.spawn(async move {
-                    rpc.on_cache_query(job_id, query_id, paths, nar_sizes, mode, external)
-                        .await
-                });
-                None
+                self.on_cache_query(
+                    project_id, job_id, query_id, paths, nar_sizes, mode, external,
+                )
+                .await
             }
             ClientMessage::QueryKnownDerivations {
                 job_id,
                 query_id,
                 drv_paths,
             } => {
-                self.handles.db.shutdown.spawn(async move {
-                    rpc.on_query_known_derivations(job_id, query_id, drv_paths)
-                        .await
-                });
-                None
+                self.on_query_known_derivations(job_id, query_id, drv_paths)
+                    .await
             }
-            other => Some(other),
+            _ => {}
         }
     }
 
@@ -932,6 +989,7 @@ impl RpcContext {
     )]
     async fn on_cache_query(
         &self,
+        project_id: ProjectId,
         job_id: String,
         query_id: String,
         paths: Vec<String>,
@@ -940,25 +998,14 @@ impl RpcContext {
         external: bool,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, external, "CacheQuery");
-        let answer = async {
-            let project_id = match self
-                .active
-                .project(&job_id)
-                .or_else(|| self.active.fetch_project(&job_id))
-            {
-                Some(project_id) => Some(project_id),
-                None => self.scheduler.project_for_job(&job_id).await,
-            };
-            handle_cache_query(
-                &self.handles,
-                project_id,
-                &paths,
-                &nar_sizes,
-                mode,
-                external,
-            )
-            .await
-        };
+        let answer = handle_cache_query(
+            &self.handles,
+            project_id,
+            &paths,
+            &nar_sizes,
+            mode,
+            external,
+        );
 
         // A DB error or an over-budget handler is indeterminate, never "absent". `CacheError` is
         // making the worker retry instead of failing the eval with `InputsUnavailable`.
@@ -1542,6 +1589,48 @@ mod assignment_response_tests {
                     if query_id == "q1"
             ),
             "{reply:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cache_query_for_a_job_no_session_runs_is_refused_and_the_next_is_answered() {
+        use super::fixture::{JOB, TestSession, decode};
+        use gradient_entity::EXAMPLE_ORIGINAL_HASH;
+
+        let cache_db = gradient_fixtures::mock::mock_db()
+            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+            .into_connection();
+        let state = TestState::new().cache_db(cache_db).build();
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (ctx, _uploads) = session.split();
+        let query = |job_id: &str, query_id: &str| ClientMessage::CacheQuery {
+            job_id: job_id.into(),
+            query_id: query_id.into(),
+            paths: vec![format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-a")],
+            nar_sizes: vec![None],
+            mode: gradient_wire::types::QueryMode::Normal,
+            external: false,
+        };
+        let mut reply = async || {
+            let bytes = tokio::time::timeout(Duration::from_secs(5), sent.recv())
+                .await
+                .expect("answered")
+                .expect("reply sent");
+            decode(bytes)
+        };
+
+        ctx.rpc().serve(query("unknown", "q1"));
+        let refused = reply().await;
+        assert!(
+            matches!(&refused, ServerMessage::CacheError { query_id, .. } if query_id == "q1"),
+            "{refused:?}"
+        );
+
+        ctx.rpc().serve(query(JOB, "q2"));
+        let answered = reply().await;
+        assert!(
+            matches!(&answered, ServerMessage::CacheStatus { query_id, .. } if query_id == "q2"),
+            "{answered:?}"
         );
     }
 }

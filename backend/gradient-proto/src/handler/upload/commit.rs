@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use futures::future::BoxFuture;
 use gradient_db::{DbContext, WorkerDb};
 use gradient_storage::NarStore;
 use gradient_storage::admission::{ObjectKey, UploadPermit};
@@ -25,9 +24,7 @@ pub(super) struct Commit {
     pub handles: SessionHandles,
     pub peer_id: String,
     pub request_id: u64,
-    /// This is resolved off the session's reader loop. The scheduler is answering from a mailbox
-    /// that a claim in flight can hold for its lock waits.
-    pub project: BoxFuture<'static, Option<ProjectId>>,
+    pub project: ProjectId,
     pub object: UploadObject,
     pub transfer: Transfer,
     pub metadata: UploadMetadata,
@@ -42,8 +39,7 @@ pub(super) async fn run(c: Commit) {
         Ok(()) => {
             let mut permit = c.permit;
             permit.release_budget();
-            let project_id = c.project.await;
-            let outcome = record(&c.handles, project_id, &c.object, &c.metadata).await;
+            let outcome = record(&c.handles, c.project, &c.object, &c.metadata).await;
             if matches!(outcome, UploadOutcome::Ok) {
                 permit.committed();
             }
@@ -116,7 +112,7 @@ async fn place(
 #[tracing::instrument(name = "upload_graph_commit", level = "debug", skip_all)]
 async fn record(
     handles: &SessionHandles,
-    project_id: Option<ProjectId>,
+    project_id: ProjectId,
     object: &UploadObject,
     metadata: &UploadMetadata,
 ) -> UploadOutcome {
@@ -302,7 +298,7 @@ mod tests {
             handles: SessionHandles::from_state(&state),
             peer_id: "w1".into(),
             request_id: 1,
-            project: Box::pin(std::future::ready(None)),
+            project: ProjectId::nil(),
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
@@ -347,7 +343,7 @@ mod tests {
             handles: SessionHandles::from_state(&state),
             peer_id: "w1".into(),
             request_id: 1,
-            project: Box::pin(std::future::ready(None)),
+            project: ProjectId::nil(),
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
@@ -446,7 +442,7 @@ mod tests {
             handles: SessionHandles::from_state(&state),
             peer_id: "w1".into(),
             request_id: 1,
-            project: Box::pin(std::future::ready(None)),
+            project: ProjectId::nil(),
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
@@ -505,7 +501,7 @@ mod tests {
             handles: SessionHandles::from_state(&state),
             peer_id: "w1".into(),
             request_id: 1,
-            project: Box::pin(std::future::ready(None)),
+            project: ProjectId::nil(),
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
