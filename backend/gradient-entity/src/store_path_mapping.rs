@@ -74,6 +74,10 @@ impl StorePathMapper {
         OriginalStorePath::from_hash(hash, path.name())
     }
 
+    pub fn inbound_hash(&self, hash: StoreHash) -> StoreHash {
+        self.mapping.inbound(self.context, hash)
+    }
+
     pub fn inbound_text(&self, text: &str) -> Result<String, StorePathError> {
         let parts = TextParts::split(text);
         let hash =

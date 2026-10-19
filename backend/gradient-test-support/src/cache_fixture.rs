@@ -142,7 +142,6 @@ async fn public_cache_storing_nar(served: bool) -> Arc<ServerState> {
 
     let db = mock_db()
         .append_query_results([vec![cache_row]])
-        .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .append_query_results([served_gate(served)])
         .into_connection();
 

@@ -16,8 +16,8 @@ use gradient_core::ServerState;
 use gradient_core::upstream_source::{fetch_upstream_log, substitution_sources};
 use gradient_db::WebDb;
 use gradient_db::caches::upstream::pull_through_upstream_caches;
-use gradient_sources::parse_drv_hash_name;
 use gradient_storage::LogStorage;
+use gradient_types::{MappingContext, OriginalStorePath, StorePathMapper};
 use std::sync::Arc;
 
 /// A pull-through cache is substituting paths it never built (#547). The upstream caches are asked
@@ -49,7 +49,8 @@ pub async fn log(
     )
     .await?;
 
-    if let Some(body) = local_log(&state.web_db, &state.log_storage, &ctx, &drv).await? {
+    let mapper = state.store_path_mapper(MappingContext::Cache(ctx.cache.id));
+    if let Some(body) = local_log(&state.web_db, &state.log_storage, &ctx, &mapper, &drv).await? {
         return log_response(body, "HIT");
     }
 
@@ -66,17 +67,26 @@ async fn local_log(
     db: &WebDb,
     log_storage: &Arc<dyn LogStorage>,
     ctx: &CacheContext,
+    mapper: &StorePathMapper,
     drv: &str,
 ) -> WebResult<Option<String>> {
-    let Ok((drv_hash, drv_name)) = parse_drv_hash_name(drv) else {
+    let Ok(original) = OriginalStorePath::parse(drv) else {
+        return Ok(None);
+    };
+    let stored = mapper.inbound(&original);
+    let Some(drv_name) = stored
+        .name()
+        .strip_suffix(".drv")
+        .filter(|name| !name.is_empty())
+    else {
         return Ok(None);
     };
 
     let Some(derivation) = gradient_db::cached_paths::derivation_signed_in_cache(
         db,
         ctx.cache.id,
-        &drv_hash,
-        &drv_name,
+        stored.hash(),
+        drv_name,
     )
     .await?
     else {

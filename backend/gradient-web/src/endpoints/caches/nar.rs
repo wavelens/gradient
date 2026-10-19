@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::{CacheContext, cache_client_ip};
+use super::helpers::{CacheContext, cache_client_ip, original_text, stored_hash};
 use super::refusal::CacheRefusal;
 use crate::api_spec::Binary;
 use crate::client_ip::OptionalPeer;
@@ -63,18 +63,20 @@ pub async fn nar(
     )
     .await?;
 
-    let (effective_hash, size, stream) = super::helpers::fetch_nar_stream(
+    let mapper = state.store_path_mapper(MappingContext::Cache(ctx.cache.id));
+    let effective_hash = resolve_effective_hash_db(&state.web_db, &mapper, &path_hash).await?;
+    let (size, stream) = super::helpers::fetch_nar_stream(
         &state.web_db,
         &state.nar_storage,
         ctx.cache.id,
-        &path_hash,
+        &effective_hash,
     )
     .await?;
 
     super::super::stats::record_nar_traffic(&state.memory.cache_traffic, ctx.cache.id, size as i64);
     state.events.publish(NarFetched {
         cache: ctx.cache.id,
-        hash: effective_hash.clone(),
+        hash: original_text(&mapper, effective_hash.clone()),
         size,
     });
     spawn_fetch_stamp(
@@ -167,6 +169,7 @@ fn named_first(sources: Vec<UpstreamSource>, named: Uuid) -> Vec<UpstreamSource>
 
 pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
     db: &C,
+    mapper: &StorePathMapper,
     path_hash: &str,
 ) -> WebResult<String> {
     let candidates = vec![format!("blake3:{path_hash}"), format!("sha256:{path_hash}")];
@@ -177,7 +180,7 @@ pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
         return Ok(row.hash);
     }
 
-    Ok(path_hash.to_string())
+    stored_hash(mapper, path_hash)
 }
 
 fn spawn_fetch_stamp(shutdown: &Shutdown, worker_db: &WorkerDb, cache_id: CacheId, hash: String) {
@@ -300,6 +303,13 @@ mod tests {
         }
     }
 
+    fn identity() -> StorePathMapper {
+        StorePathMapper::new(
+            Arc::new(IdentityMapping),
+            MappingContext::Cache(CacheId::nil()),
+        )
+    }
+
     fn runtime() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -314,21 +324,40 @@ mod tests {
             .into_connection();
 
         let effective = runtime()
-            .block_on(resolve_effective_hash_db(&db, FILE_HASH_NIX32))
+            .block_on(resolve_effective_hash_db(&db, &identity(), FILE_HASH_NIX32))
             .expect("resolve should succeed");
         assert_eq!(effective, STORE_HASH);
     }
 
     #[test]
-    fn resolve_falls_back_to_url_hash_when_no_match() {
+    fn an_unknown_file_hash_is_not_found() {
         let db = mock_db()
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
 
+        let result =
+            runtime().block_on(resolve_effective_hash_db(&db, &identity(), FILE_HASH_NIX32));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_store_hash_in_a_nar_url_is_mapped_inbound() {
+        let db = mock_db()
+            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+            .into_connection();
+        let mapper = StorePathMapper::new(
+            Arc::new(gradient_entity::RotatedHashMapping),
+            MappingContext::Cache(CacheId::nil()),
+        );
+
         let effective = runtime()
-            .block_on(resolve_effective_hash_db(&db, FILE_HASH_NIX32))
+            .block_on(resolve_effective_hash_db(
+                &db,
+                &mapper,
+                gradient_entity::EXAMPLE_ORIGINAL_HASH,
+            ))
             .expect("resolve should succeed");
-        assert_eq!(effective, FILE_HASH_NIX32);
+        assert_eq!(effective, gradient_entity::EXAMPLE_STORED_HASH);
     }
 
     #[test]
@@ -351,7 +380,7 @@ mod tests {
             .into_connection();
 
         let effective = runtime()
-            .block_on(resolve_effective_hash_db(&db, FILE_HASH_NIX32))
+            .block_on(resolve_effective_hash_db(&db, &identity(), FILE_HASH_NIX32))
             .expect("resolve should succeed");
         assert_eq!(effective, STORE_HASH);
     }
