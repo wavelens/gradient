@@ -13,8 +13,8 @@ use axum::{Extension, Json};
 use classify::{Lookups, classify};
 use gradient_core::ServerState;
 use gradient_db::dashboard::{
-    CommitHitRow, NameHitRow, NameKind, NarHitRow, search_commits, search_names, search_nars,
-    starred,
+    CommitHitRow, NameHitRow, NameKind, NarHitRow, readable_cache_ids, search_commits,
+    search_names, search_nars, starred,
 };
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr};
@@ -75,16 +75,28 @@ impl From<CommitHitRow> for SearchHit {
     }
 }
 
-impl From<NarHitRow> for SearchHit {
-    fn from(n: NarHitRow) -> Self {
-        Self {
-            kind: HitKind::Nar,
-            route: format!("/caches/{}/nars?hash={}", n.cache, n.hash),
-            label: n.package,
-            sublabel: n.cache,
-            starred: false,
-        }
+fn nar_hit(n: NarHitRow, typed: &StoreHash) -> SearchHit {
+    SearchHit {
+        kind: HitKind::Nar,
+        route: format!("/caches/{}/nars?hash={typed}", n.cache),
+        label: n.package,
+        sublabel: n.cache,
+        starred: false,
     }
+}
+
+fn nar_lookups(
+    hash: &StoreHash,
+    caches: &[CacheId],
+    mapping: &Arc<dyn StorePathMapping>,
+) -> Vec<(CacheId, StoreHash)> {
+    caches
+        .iter()
+        .map(|&cache| {
+            let stored = mapping.inbound(MappingContext::Cache(cache), hash.clone());
+            (cache, stored)
+        })
+        .collect()
 }
 
 fn per_kind(limit: Option<u64>) -> u64 {
@@ -123,6 +135,7 @@ fn cache_hit(name: String, starred: bool) -> SearchHit {
 
 pub async fn search<C: ConnectionTrait>(
     db: &C,
+    mapping: &Arc<dyn StorePathMapping>,
     user: UserId,
     lookups: Lookups,
     per_kind: u64,
@@ -136,8 +149,9 @@ pub async fn search<C: ConnectionTrait>(
     };
     let mut hits = Vec::new();
     if let Some(hash) = &lookups.nar {
-        let nars = search_nars(db, hash, user).await?;
-        hits.extend(nars.into_iter().map(SearchHit::from));
+        let caches = readable_cache_ids(db, user).await?;
+        let nars = search_nars(db, &nar_lookups(hash, &caches, mapping), user).await?;
+        hits.extend(nars.into_iter().map(|n| nar_hit(n, hash)));
     }
     if let Some(range) = &lookups.commit {
         let commits = search_commits(db, &range.low, &range.high, user).await?;
@@ -163,13 +177,21 @@ pub async fn get_search(
     Extension(user): Extension<MUser>,
     Query(q): Query<SearchQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<SearchHit>>>> {
-    let hits = search(&state.web_db, user.id, classify(&q.q), per_kind(q.limit)).await?;
+    let hits = search(
+        &state.web_db,
+        &state.extensions.store_path_mapping,
+        user.id,
+        classify(&q.q),
+        per_kind(q.limit),
+    )
+    .await?;
     Ok(ok_json(hits))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
     use gradient_fixtures::mock::mock_db;
     use sea_orm::Value;
     use std::collections::BTreeMap;
@@ -194,8 +216,23 @@ mod tests {
 
     async fn run(results: Vec<Vec<Row>>, q: &str) -> (Vec<SearchHit>, usize) {
         let db = mock_db().append_query_results(results).into_connection();
-        let hits = search(&db, UserId::now_v7(), classify(q), 5).await.unwrap();
+        let mapping: Arc<dyn StorePathMapping> = Arc::new(IdentityMapping);
+        let hits = search(&db, &mapping, UserId::now_v7(), classify(q), 5)
+            .await
+            .unwrap();
         (hits, db.into_transaction_log().len())
+    }
+
+    #[test]
+    fn a_nar_query_is_mapped_once_per_readable_cache() {
+        let (c1, c2) = (CacheId::now_v7(), CacheId::now_v7());
+        let hash = StoreHash::parse(EXAMPLE_ORIGINAL_HASH).unwrap();
+        let stored = StoreHash::parse(EXAMPLE_STORED_HASH).unwrap();
+        let mapping: Arc<dyn StorePathMapping> = Arc::new(RotatedHashMapping);
+        assert_eq!(
+            nar_lookups(&hash, &[c1, c2], &mapping),
+            vec![(c1, stored.clone()), (c2, stored)]
+        );
     }
 
     #[test]
@@ -236,7 +273,8 @@ mod tests {
         let db = mock_db()
             .append_query_results([vec![name_row("task", None, "hosts", false)]])
             .into_connection();
-        let result = search(&db, UserId::now_v7(), classify("hosts"), 5).await;
+        let mapping: Arc<dyn StorePathMapping> = Arc::new(IdentityMapping);
+        let result = search(&db, &mapping, UserId::now_v7(), classify("hosts"), 5).await;
         assert!(result.is_err());
     }
 
@@ -268,18 +306,21 @@ mod tests {
 
     #[tokio::test]
     async fn a_nar_hash_routes_to_the_cache_nar_listing() {
+        let cache = CacheId::now_v7();
+        let readable = BTreeMap::from([("id", Value::from(cache.into_inner()))]);
         let nar = BTreeMap::from([
+            ("cache_id", Value::from(cache.into_inner())),
             ("cache", Value::from("main")),
             ("hash", Value::from(HASH)),
             ("package", Value::from("hello-2.12.1")),
         ]);
-        let (hits, statements) = run(vec![vec![nar], vec![]], HASH).await;
+        let (hits, statements) = run(vec![vec![readable], vec![nar], vec![]], HASH).await;
 
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].kind, HitKind::Nar);
         assert_eq!(hits[0].route, format!("/caches/main/nars?hash={HASH}"));
         assert_eq!(hits[0].label, "hello-2.12.1");
-        assert_eq!(statements, 2);
+        assert_eq!(statements, 3);
     }
 
     #[tokio::test]
