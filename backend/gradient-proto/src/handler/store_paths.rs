@@ -80,7 +80,11 @@ pub(super) fn inbound_message(
             ..
         } => {}
         ClientMessage::JobFailed { missing_paths, .. } => paths.paths(missing_paths)?,
-        ClientMessage::CacheQuery { paths: queried, .. } => paths.paths(queried)?,
+        ClientMessage::CacheQuery {
+            paths: queried,
+            nar_sizes,
+            ..
+        } => inbound_queried(queried, nar_sizes, &paths),
         ClientMessage::QueryKnownDerivations { drv_paths, .. }
         | ClientMessage::ImportRequest { drv_paths, .. } => paths.paths(drv_paths)?,
         ClientMessage::NarRequest {
@@ -99,6 +103,26 @@ pub(super) fn inbound_message(
         _ => {}
     }
     Ok(msg)
+}
+
+fn inbound_queried(
+    queried: &mut Vec<String>,
+    nar_sizes: &mut Vec<Option<u64>>,
+    paths: &TextMapper<StorePathError>,
+) {
+    let mapped: Vec<bool> = queried
+        .iter_mut()
+        .map(|path| paths.path(path).is_ok())
+        .collect();
+    if nar_sizes.len() == mapped.len() {
+        retain_mapped(nar_sizes, &mapped);
+    }
+    retain_mapped(queried, &mapped);
+}
+
+fn retain_mapped<T>(items: &mut Vec<T>, mapped: &[bool]) {
+    let mut mapped = mapped.iter();
+    items.retain(|_| mapped.next().copied().unwrap_or(false));
 }
 
 fn inbound_update(
@@ -453,6 +477,26 @@ mod tests {
             paths: vec!["/nix/store/abc-a".into()],
         };
         assert!(inbound_message(msg, &mapper()).is_err());
+    }
+
+    #[test]
+    fn a_cache_query_drops_only_its_malformed_paths() {
+        let msg = ClientMessage::CacheQuery {
+            job_id: "j1".into(),
+            query_id: "q1".into(),
+            paths: vec!["/nix/store/abc-a".into(), format!("/nix/store/{O}-b")],
+            mode: gradient_wire::types::QueryMode::Push,
+            nar_sizes: vec![Some(1), Some(2)],
+            external: false,
+        };
+        let ClientMessage::CacheQuery {
+            paths, nar_sizes, ..
+        } = inbound_message(msg, &mapper()).unwrap()
+        else {
+            panic!("a CacheQuery stays a CacheQuery")
+        };
+        assert_eq!(paths, vec![format!("/nix/store/{S}-b")]);
+        assert_eq!(nar_sizes, vec![Some(2)]);
     }
 
     #[test]
