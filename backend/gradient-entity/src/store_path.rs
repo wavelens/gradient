@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub const STORE_DIR: &str = "/nix/store";
 
-pub(crate) const NIX32_ALPHABET: &str = "0123456789abcdfghijklmnpqrsvwxyz";
+pub const NIX32_ALPHABET: &str = "0123456789abcdfghijklmnpqrsvwxyz";
 const STORE_HASH_LENGTH: usize = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

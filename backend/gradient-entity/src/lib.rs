@@ -9,7 +9,9 @@ pub mod store_path;
 pub mod store_path_mapping;
 pub mod transition;
 
-pub use store_path::{OriginalStorePath, STORE_DIR, StoreHash, StorePath, StorePathError};
+pub use store_path::{
+    NIX32_ALPHABET, OriginalStorePath, STORE_DIR, StoreHash, StorePath, StorePathError,
+};
 #[cfg(feature = "testing")]
 pub use store_path_mapping::{
     EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping, UnresolvableProjectMapping,

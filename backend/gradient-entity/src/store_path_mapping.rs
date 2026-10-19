@@ -10,9 +10,7 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 
 use crate::ids::{CacheId, ProjectId};
-use crate::store_path::{
-    NIX32_ALPHABET, OriginalStorePath, STORE_DIR, StoreHash, StorePath, StorePathError,
-};
+use crate::store_path::{OriginalStorePath, STORE_DIR, StoreHash, StorePath, StorePathError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MappingContext {
@@ -194,7 +192,7 @@ pub struct RotatedHashMapping;
 #[cfg(feature = "testing")]
 impl RotatedHashMapping {
     fn rotate(text: &str, steps: usize) -> String {
-        let alphabet: Vec<char> = NIX32_ALPHABET.chars().collect();
+        let alphabet: Vec<char> = crate::NIX32_ALPHABET.chars().collect();
         text.chars()
             .map(|c| match alphabet.iter().position(|&a| a == c) {
                 Some(index) => alphabet[(index + steps) % alphabet.len()],
@@ -211,7 +209,7 @@ impl StorePathMapping for RotatedHashMapping {
     }
 
     fn outbound(&self, _context: MappingContext, hash: StoreHash) -> StoreHash {
-        StoreHash::stored(Self::rotate(hash.as_str(), NIX32_ALPHABET.len() - 1))
+        StoreHash::stored(Self::rotate(hash.as_str(), crate::NIX32_ALPHABET.len() - 1))
     }
 
     fn inbound_prefix(&self, _context: MappingContext, prefix: &str) -> Option<String> {
