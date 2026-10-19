@@ -2705,6 +2705,7 @@ name = "gradient-entity"
 version = "2.0.0"
 dependencies = [
  "chrono",
+ "futures",
  "num_enum",
  "sea-orm",
  "serde",

@@ -11,8 +11,12 @@ pub mod transition;
 
 pub use store_path::{OriginalStorePath, STORE_DIR, StoreHash, StorePath, StorePathError};
 #[cfg(feature = "testing")]
-pub use store_path_mapping::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
-pub use store_path_mapping::{IdentityMapping, MappingContext, StorePathMapper, StorePathMapping};
+pub use store_path_mapping::{
+    EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping, UnresolvableProjectMapping,
+};
+pub use store_path_mapping::{
+    IdentityMapping, MappingContext, MappingError, StorePathMapper, StorePathMapping,
+};
 
 pub mod admin_task;
 pub mod api;
