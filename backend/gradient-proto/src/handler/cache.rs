@@ -470,17 +470,10 @@ async fn query(
         ));
     }
 
-    let hash_path_pairs: Vec<(&str, &str)> = paths
+    let parsed = parse_stored_paths(paths);
+    let hash_path_pairs: Vec<(&str, &str)> = parsed
         .iter()
-        .filter_map(|p| {
-            let base = p.strip_prefix("/nix/store/").unwrap_or(p);
-            let hash = base.split('-').next()?;
-            if hash.len() == 32 {
-                Some((hash, p.as_str()))
-            } else {
-                None
-            }
-        })
+        .map(|(stored, path)| (stored.hash(), *path))
         .collect();
 
     if hash_path_pairs.is_empty() {
@@ -633,17 +626,10 @@ pub(super) async fn query_for_cache(
         return vec![];
     }
 
-    let hash_path_pairs: Vec<(&str, &str)> = paths
+    let parsed = parse_stored_paths(paths);
+    let hash_path_pairs: Vec<(&str, &str)> = parsed
         .iter()
-        .filter_map(|p| {
-            let base = p.strip_prefix("/nix/store/").unwrap_or(p);
-            let hash = base.split('-').next()?;
-            if hash.len() == 32 {
-                Some((hash, p.as_str()))
-            } else {
-                None
-            }
-        })
+        .map(|(stored, path)| (stored.hash(), *path))
         .collect();
 
     if hash_path_pairs.is_empty() {
@@ -701,14 +687,19 @@ pub(super) async fn query_for_cache(
 }
 
 pub(super) async fn path_in_cache(db: &CacheDb, cache_id: CacheId, store_path: &str) -> bool {
-    let base = store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
-    let Some(hash) = base.split('-').next() else {
+    let Ok(path) = StorePath::parse_stored(store_path) else {
         return false;
     };
-    if hash.len() != 32 {
-        return false;
-    }
-    !hashes_in_cache(db, cache_id, &[hash]).await.is_empty()
+    !hashes_in_cache(db, cache_id, &[path.hash()])
+        .await
+        .is_empty()
+}
+
+fn parse_stored_paths(paths: &[String]) -> Vec<(StorePath, &str)> {
+    paths
+        .iter()
+        .filter_map(|path| Some((StorePath::parse_stored(path).ok()?, path.as_str())))
+        .collect()
 }
 
 pub(super) async fn handle_cache_query(
@@ -902,55 +893,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cache_query_invalid_store_paths_skipped() {
-        let state = make_state();
-
-        let paths = vec![
-            "not-a-store-path".to_string(),
-            "/nix/store/short-name".to_string(),
-        ];
-        assert!(
-            query(
-                &SessionHandles::from_state(&state),
-                ProjectId::nil(),
-                &paths,
-                &[],
-                QueryMode::Normal,
-                false
-            )
-            .await
-            .unwrap()
-            .is_empty()
-        );
-        assert!(
-            query(
-                &SessionHandles::from_state(&state),
-                ProjectId::nil(),
-                &paths,
-                &[None; 2],
-                QueryMode::Push,
-                false
-            )
-            .await
-            .unwrap()
-            .is_empty()
-        );
-        assert!(
-            query(
-                &SessionHandles::from_state(&state),
-                ProjectId::nil(),
-                &paths,
-                &[],
-                QueryMode::Pull,
-                false
-            )
-            .await
-            .unwrap()
-            .is_empty()
-        );
-    }
-
-    #[tokio::test]
     async fn cache_query_normal_uncached_returns_empty() {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
@@ -1027,30 +969,6 @@ mod tests {
         let returned_paths: Vec<&str> = result.iter().map(|c| c.path.as_str()).collect();
         assert!(returned_paths.contains(&paths[0].as_str()));
         assert!(returned_paths.contains(&paths[1].as_str()));
-    }
-
-    #[tokio::test]
-    async fn cache_query_rejects_overlong_hash() {
-        let state = make_state();
-        let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
-        for mode in [QueryMode::Normal, QueryMode::Pull, QueryMode::Push] {
-            let sizes: &[Option<u64>] = if matches!(mode, QueryMode::Push) {
-                &[None]
-            } else {
-                &[]
-            };
-            let result = query(
-                &SessionHandles::from_state(&state),
-                ProjectId::nil(),
-                &paths,
-                sizes,
-                mode,
-                false,
-            )
-            .await
-            .unwrap();
-            assert!(result.is_empty(), "33-char hash must be filtered out");
-        }
     }
 
     #[tokio::test]

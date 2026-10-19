@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use gradient_types::events::{build, evaluation};
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId, TaskId};
-use gradient_types::{BuildProgress, BuildProgressPhase, EvaluationProgress};
+use gradient_types::{BuildProgress, BuildProgressPhase, EvaluationProgress, MappingContext};
 use gradient_util::store_path::strip_nix_store_prefix;
 use tokio::sync::Semaphore;
 use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
@@ -39,6 +39,7 @@ use super::refusal::refuse;
 use super::socket::{
     ProtoWriter, job_offer_chunks, send_credentials_for_job, send_error, send_server_msg,
 };
+use super::store_paths::inbound_message;
 use super::upload::UploadSession;
 
 #[derive(Clone)]
@@ -502,27 +503,29 @@ impl<'a> InboundContext<'a> {
     }
 
     async fn admit(&self, msg: ClientMessage) -> Option<ClientMessage> {
-        let needs_project = matches!(
-            msg,
-            ClientMessage::NarRequest { .. }
-                | ClientMessage::NarRequestResume { .. }
-                | ClientMessage::EvalCachePull { .. }
-                | ClientMessage::ImportRequest { .. }
-                | ClientMessage::InputRequest { .. }
-        );
-        let Some(job_id) = msg.job_id().filter(|_| needs_project) else {
-            return Some(msg);
+        let project = match &msg {
+            ClientMessage::InputFetched { fetch_id, .. } => self.active.fetch_project(fetch_id),
+            ClientMessage::JobUpdate { job_id, .. }
+            | ClientMessage::JobFailed { job_id, .. }
+            | ClientMessage::NarRequest { job_id, .. }
+            | ClientMessage::NarRequestResume { job_id, .. }
+            | ClientMessage::EvalCachePull { job_id, .. }
+            | ClientMessage::ImportRequest { job_id, .. }
+            | ClientMessage::InputRequest { job_id, .. }
+            | ClientMessage::UploadRequest { job_id, .. } => {
+                let project = self.active.job_project(self.scheduler, job_id).await;
+                if project.is_none() {
+                    refuse(self.writer, &msg, "no job of this session").await;
+                    return None;
+                }
+                project
+            }
+            _ => None,
         };
-        if self
-            .active
-            .job_project(self.scheduler, job_id)
-            .await
-            .is_none()
-        {
-            refuse(self.writer, &msg, "no job of this session").await;
-            return None;
+        match project {
+            Some(project) => mapped_inbound(self.handles, self.writer, project, msg).await,
+            None => Some(msg),
         }
-        Some(msg)
     }
 
     async fn on_job_update(&self, job_id: String, update: JobUpdateKind) {
@@ -957,6 +960,9 @@ impl RpcContext {
             refuse(&self.writer, &msg, "no job of this session").await;
             return;
         };
+        let Some(msg) = mapped_inbound(&self.handles, &self.writer, project_id, msg).await else {
+            return;
+        };
         match msg {
             ClientMessage::CacheQuery {
                 job_id,
@@ -1086,6 +1092,24 @@ impl RpcContext {
         self.scheduler
             .update_worker_metrics(&self.peer_id, metrics)
             .await;
+    }
+}
+
+async fn mapped_inbound(
+    handles: &SessionHandles,
+    writer: &ProtoWriter,
+    project: ProjectId,
+    msg: ClientMessage,
+) -> Option<ClientMessage> {
+    let mapper = handles
+        .db
+        .store_path_mapper(MappingContext::Project(project));
+    match inbound_message(msg.clone(), &mapper) {
+        Ok(mapped) => Some(mapped),
+        Err(e) => {
+            refuse(writer, &msg, &e.to_string()).await;
+            None
+        }
     }
 }
 
@@ -1632,5 +1656,33 @@ mod assignment_response_tests {
             matches!(&answered, ServerMessage::CacheStatus { query_id, .. } if query_id == "q2"),
             "{answered:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_malformed_path_refuses_only_its_message() {
+        use super::fixture::{JOB, TestSession, decode};
+
+        let state = test_state(empty_db());
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        let malformed = ClientMessage::JobUpdate {
+            job_id: JOB.into(),
+            assignment_id: DispatchedJobId::now_v7().to_string(),
+            update: JobUpdateKind::EvalResult {
+                derivations: vec![gradient_wire::types::DiscoveredDerivation {
+                    attr: "a".into(),
+                    drv_path: "abc-a.drv".into(),
+                    ..Default::default()
+                }],
+                warnings: vec![],
+                errors: vec![],
+            },
+        };
+
+        assert!(ctx.handle(malformed, uploads).await);
+        assert!(matches!(
+            decode(sent.try_recv().expect("a refusal")),
+            ServerMessage::Error { code: 400, .. }
+        ));
     }
 }

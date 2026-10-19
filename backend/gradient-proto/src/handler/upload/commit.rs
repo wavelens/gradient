@@ -7,8 +7,8 @@
 use gradient_db::{DbContext, WorkerDb};
 use gradient_storage::NarStore;
 use gradient_storage::admission::{ObjectKey, UploadPermit};
-use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
+use gradient_types::{MappingContext, RuntimeConfig};
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::types::{NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
@@ -16,6 +16,7 @@ use tracing::warn;
 use super::super::SessionHandles;
 use super::super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
 use super::super::socket::{ProtoWriter, send_server_msg};
+use super::super::store_paths::inbound_upload_metadata;
 use super::table::Transfer;
 use crate::import::{WriteNeeded, nar_write_needed};
 
@@ -35,11 +36,21 @@ pub(super) struct Commit {
 /// recorded it, and a second upload of the path is waiting instead of overwriting the object.
 #[tracing::instrument(name = "upload_commit", level = "debug", skip_all)]
 pub(super) async fn run(c: Commit) {
-    let outcome = match place(&c.handles.db, &c.object, c.transfer, &c.metadata).await {
-        Ok(()) => {
+    let mapper = c
+        .handles
+        .db
+        .store_path_mapper(MappingContext::Project(c.project));
+    let placed = match inbound_upload_metadata(c.metadata, &mapper) {
+        Ok(metadata) => place(&c.handles.db, &c.object, c.transfer, &metadata)
+            .await
+            .map(|()| metadata),
+        Err(e) => Err(rejected(e.to_string())),
+    };
+    let outcome = match placed {
+        Ok(metadata) => {
             let mut permit = c.permit;
             permit.release_budget();
-            let outcome = record(&c.handles, c.project, &c.object, &c.metadata).await;
+            let outcome = record(&c.handles, c.project, &c.object, &metadata).await;
             if matches!(outcome, UploadOutcome::Ok) {
                 permit.committed();
             }

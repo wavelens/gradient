@@ -37,6 +37,7 @@ ractor            = { workspace = true }
 reqwest           = { workspace = true }
 sea-orm           = { workspace = true }
 serde             = { workspace = true }
+serde_json        = { workspace = true }
 thiserror         = { workspace = true }
 tokio             = { workspace = true, features = ["fs", "macros", "sync"] }
 tokio-tungstenite = { workspace = true }
@@ -50,7 +51,6 @@ axum = { workspace = true, features = ["ws", "http1", "tokio"] }
 [dev-dependencies]
 gradient-wire = { workspace = true, features = ["testing"] }
 gradient-entity = { workspace = true, features = ["testing"] }
-serde_json   = { workspace = true }
 tempfile     = { workspace = true }
 tokio        = { workspace = true, features = ["macros", "sync", "net", "rt-multi-thread"] }
 gradient-fixtures = { workspace = true }

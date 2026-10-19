@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey};
 use gradient_storage::{NarStore, PartialStore, StorageTarget, upload_lease};
+use gradient_types::StorePath;
 use gradient_wire::messages::{ServerMessage, is_small_upload};
 use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
@@ -29,11 +30,9 @@ pub(super) struct UploadSession {
 
 pub(super) fn object_key(object: &UploadObject) -> Option<ObjectKey> {
     match object {
-        UploadObject::Nar { store_path } => {
-            let name = store_path.strip_prefix("/nix/store/")?;
-            let hash = name.split('-').next()?;
-            (hash.len() == 32).then(|| ObjectKey::Nar(hash.to_owned()))
-        }
+        UploadObject::Nar { store_path } => StorePath::parse_stored(store_path)
+            .ok()
+            .map(|path| ObjectKey::Nar(path.hash().to_owned())),
         UploadObject::EvalCache { fingerprint } => Some(ObjectKey::EvalCache(fingerprint.clone())),
     }
 }
