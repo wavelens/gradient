@@ -27,11 +27,7 @@ pub fn init_crypto_provider() {
 
 fn rustls_root_store() -> rustls::RootCertStore {
     let mut roots = rustls::RootCertStore::empty();
-    let native = rustls_native_certs::load_native_certs();
-    for cert in native.certs {
-        let _ = roots.add(cert);
-    }
-    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
     roots
 }
 
@@ -116,20 +112,9 @@ mod tests {
         init_crypto_provider();
         init_crypto_provider();
 
-        let mut roots = rustls::RootCertStore::empty();
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         let _ = rustls::ClientConfig::builder()
-            .with_root_certificates(roots)
+            .with_root_certificates(rustls::RootCertStore::empty())
             .with_no_client_auth();
-    }
-
-    #[test]
-    fn root_store_contains_webpki_baseline() {
-        let roots = rustls_root_store();
-        assert!(
-            roots.len() >= webpki_roots::TLS_SERVER_ROOTS.len(),
-            "root store missing webpki baseline",
-        );
     }
 
     fn trickling_server(bytes: usize, gap: Duration) -> String {

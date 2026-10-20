@@ -35,7 +35,6 @@ reqwest              = { version = "0.13", features = ["multipart"] }
 reqwest-streams      = { version = "0.20", features = ["json"] }
 rustls               = { version = "0.23", default-features = false, features = ["std", "aws-lc-rs", "tls12"] }
 rustls-native-certs  = { version = "0.8" }
-webpki-roots         = { version = "1.0", default-features = false }
 
 # Serialization
 bytes      = { version = "1" }

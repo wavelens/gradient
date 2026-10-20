@@ -53,9 +53,7 @@ rand                  = { workspace = true }
 reqwest               = { workspace = true }
 ring                  = { workspace = true }
 rustls                = { workspace = true }
-rustls-native-certs   = { workspace = true }
 utoipa            = { workspace = true }
-webpki-roots          = { workspace = true }
 sea-orm               = { workspace = true }
 sea-orm-migration     = { workspace = true }
 serde                 = { workspace = true }

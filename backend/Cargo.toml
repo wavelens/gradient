@@ -125,8 +125,9 @@ tracing            = { version = "0.1", default-features = false, features = ["s
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "ansi", "smallvec", "tracing-log", "env-filter", "json"] }
 
 # Database (sea-orm)
-sea-orm           = { version = "2.0", default-features = false, features = ["macros", "json-array", "mock", "postgres-array", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "with-json", "with-uuid"] }
-sea-orm-migration = { version = "2.0", default-features = false, features = ["cli", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "with-json", "with-uuid"] }
+sea-orm           = { version = "2.0", default-features = false, features = ["macros", "json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-chrono", "with-json", "with-uuid"] }
+sea-orm-migration = { version = "2.0", default-features = false, features = ["cli", "runtime-tokio", "sqlx-postgres", "with-chrono", "with-json", "with-uuid"] }
+sqlx              = { version = "0.9", default-features = false, features = ["tls-rustls-ring-native-roots"] }
 
 # HTTP / networking
 async-ssh2-lite      = { version = "0.5", default-features = false, features = ["tokio"] }
@@ -140,7 +141,7 @@ h2                   = { version = "0.4", default-features = false }
 http                 = { version = "1.4", default-features = false }
 http-body-util       = { version = "0.1", default-features = false }
 jsonwebtoken         = { version = "11.0", default-features = false, features = ["aws_lc_rs"] }
-lettre               = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1-rustls-tls"] }
+lettre               = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "rustls-native-certs", "aws-lc-rs"] }
 reqwest              = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "stream", "charset", "http2", "multipart", "brotli", "gzip", "deflate"] }
 tower                = { version = "0.5", default-features = false }
 tower-http           = { version = "0.7", default-features = false, features = ["cors", "request-id", "trace"] }
@@ -191,7 +192,6 @@ subtle        = { version = "2.6", default-features = false }
 tempfile      = { version = "3.27", default-features = false }
 rusqlite      = { version = "0.40", default-features = false, features = ["bundled"] }
 url           = { version = "2.5", default-features = false }
-webpki-roots  = { version = "1.0", default-features = false }
 
 # Enum primitive conversions
 num_enum = { version = "0.7", default-features = false }

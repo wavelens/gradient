@@ -2575,7 +2575,6 @@ dependencies = [
  "reqwest",
  "ring",
  "rustls",
- "rustls-native-certs",
  "sea-orm",
  "sea-orm-migration",
  "serde",
@@ -2593,7 +2592,6 @@ dependencies = [
  "url",
  "utoipa",
  "uuid",
- "webpki-roots",
  "wiremock",
  "zstd",
 ]
@@ -2653,6 +2651,7 @@ dependencies = [
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "sqlx",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -3189,7 +3188,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
- "webpki-roots",
  "wiremock",
 ]
 
@@ -4295,13 +4293,10 @@ version = "0.11.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2c646bd5cc763b1087b15493e29a64be6147ba8f19342004fa52048ee596eae"
 dependencies = [
- "async-trait",
  "base64 0.23.1",
  "email-encoding",
  "email_address",
  "fastrand",
- "futures-io",
- "futures-util",
  "httpdate",
  "idna",
  "mime",
@@ -4309,11 +4304,10 @@ dependencies = [
  "percent-encoding",
  "quoted_printable",
  "rustls",
+ "rustls-native-certs",
  "socket2",
  "tokio",
- "tokio-rustls",
  "url",
- "webpki-roots",
 ]
 
 [[package]]
@@ -7393,6 +7387,7 @@ dependencies = [
  "percent-encoding",
  "rust_decimal",
  "rustls",
+ "rustls-native-certs",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -7404,7 +7399,6 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
- "webpki-roots",
 ]
 
 [[package]]

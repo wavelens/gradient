@@ -8,14 +8,12 @@ async fn builder_requires_base_url() {
     assert!(res.is_err());
 }
 
-// `webpki-roots` must stay a fallback. The CLI then still builds in Nix sandboxes and minimal
-// containers without `/etc/ssl/certs`.
 #[tokio::test]
 async fn builder_succeeds_without_system_certs() {
     Client::builder()
         .base_url("http://localhost")
         .build()
-        .expect("client builds with bundled TLS roots");
+        .expect("client builds without system TLS roots");
 }
 
 #[tokio::test]
