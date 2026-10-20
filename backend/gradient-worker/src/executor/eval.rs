@@ -14,6 +14,7 @@ use super::progress_report::{ChangeReporter, thunk_progress};
 use crate::nix::wildcard_walk;
 use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
+use futures::future::BoxFuture;
 use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
 use gradient_eval::pool::MemoryGuard;
@@ -129,6 +130,7 @@ fn unmatched_target_errors(wildcards: &[String]) -> Vec<String> {
 }
 
 const DRV_READ_CONCURRENCY: usize = 256;
+const KNOWN_QUERIES_IN_FLIGHT: usize = 2;
 
 use crate::proto::job::JobUpdater;
 use crate::traits::{DrvReader, FsDrvReader, JobReporter};
@@ -526,10 +528,10 @@ pub(super) async fn walk_and_publish(
 ) -> Result<()> {
     let (flushes, published) = mpsc::channel(PUBLISH_BACKLOG);
     let walk = async {
-        let mut walker = ClosureWalker::new(drv_reader, flushes);
+        let mut walker = ClosureWalker::new(drv_reader, reporter, flushes);
         roots.into_iter().for_each(|root| walker.add_root(root));
-        while !walker.pending.is_empty() {
-            walker.walk_wave(reporter, abort).await?;
+        while walker.has_work_left() {
+            walker.advance_walk(abort).await?;
         }
         walker.completed();
         walker.flush().await
@@ -569,8 +571,12 @@ impl FoundAttrs {
     }
 }
 
+type KnownAnswer = (Vec<String>, HashSet<String>);
+
 struct ClosureWalker<'a> {
     drv_reader: &'a dyn DrvReader,
+    reporter: &'a dyn JobReporter,
+    known_queries: FuturesOrdered<BoxFuture<'a, KnownAnswer>>,
     batch: Vec<DiscoveredDerivation>,
     visited: HashSet<String>,
     rooted: HashSet<String>,
@@ -582,9 +588,15 @@ struct ClosureWalker<'a> {
 }
 
 impl<'a> ClosureWalker<'a> {
-    fn new(drv_reader: &'a dyn DrvReader, flushes: mpsc::Sender<Flush>) -> Self {
+    fn new(
+        drv_reader: &'a dyn DrvReader,
+        reporter: &'a dyn JobReporter,
+        flushes: mpsc::Sender<Flush>,
+    ) -> Self {
         Self {
             drv_reader,
+            reporter,
+            known_queries: FuturesOrdered::new(),
             batch: Vec::new(),
             visited: HashSet::new(),
             rooted: HashSet::new(),
@@ -604,16 +616,15 @@ impl<'a> ClosureWalker<'a> {
 
     async fn walk_found(
         mut self,
-        reporter: &dyn JobReporter,
         attrs: &mut mpsc::UnboundedReceiver<ResolvedDerivation>,
         abort: &super::AbortSignal,
     ) -> Result<(FoundAttrs, Flush)> {
         let mut found = FoundAttrs::default();
         loop {
-            let next = if self.pending.is_empty() {
-                attrs.recv().await
-            } else {
+            let next = if self.has_work_left() {
                 attrs.try_recv().ok()
+            } else {
+                attrs.recv().await
             };
             match next {
                 Some(attr) => {
@@ -621,8 +632,8 @@ impl<'a> ClosureWalker<'a> {
                         self.add_root(root);
                     }
                 }
-                None if self.pending.is_empty() => break,
-                None => self.walk_wave(reporter, abort).await?,
+                None if !self.has_work_left() => break,
+                None => self.advance_walk(abort).await?,
             }
         }
         self.completed();
@@ -634,15 +645,24 @@ impl<'a> ClosureWalker<'a> {
         Ok((found, rest))
     }
 
-    async fn walk_wave(
-        &mut self,
-        reporter: &dyn JobReporter,
-        abort: &super::AbortSignal,
-    ) -> Result<()> {
+    fn has_work_left(&self) -> bool {
+        !self.pending.is_empty() || !self.known_queries.is_empty()
+    }
+
+    async fn advance_walk(&mut self, abort: &super::AbortSignal) -> Result<()> {
         if abort.is_aborted() {
             return Err(abort_err());
         }
-        self.process_wave(reporter).await
+        if self.known_queries.len() < KNOWN_QUERIES_IN_FLIGHT {
+            let wave = self.next_wave();
+            if !wave.is_empty() {
+                return self.process_wave(wave).await;
+            }
+        }
+        if let Some(answer) = self.known_queries.next().await {
+            self.enqueue_unknown(answer);
+        }
+        Ok(())
     }
 
     fn completed(&self) {
@@ -683,12 +703,36 @@ impl<'a> ClosureWalker<'a> {
     }
 
     #[tracing::instrument(name = "wave", level = "debug", skip_all, fields(pending = self.pending.len()))]
-    async fn process_wave(&mut self, reporter: &dyn JobReporter) -> Result<()> {
-        let wave = self.next_wave();
-        let parsed_drvs = parse_drv_wave(self.drv_reader, &wave).await?;
+    async fn process_wave(&mut self, wave: Vec<Queued>) -> Result<()> {
+        let parsed_drvs = self.parse_while_asking(&wave).await?;
+        let new_deps = self.unvisited_inputs(&parsed_drvs);
+        self.ask_known(new_deps);
+        self.record_wave(wave, parsed_drvs).await
+    }
 
+    async fn parse_while_asking(
+        &mut self,
+        wave: &[Queued],
+    ) -> Result<Vec<(gradient_derivation::Derivation, u64)>> {
+        let drv_reader = self.drv_reader;
+        let parse = parse_drv_wave(drv_reader, wave);
+        tokio::pin!(parse);
+        loop {
+            tokio::select! {
+                parsed = &mut parse => return parsed,
+                Some(answer) = self.known_queries.next(), if !self.known_queries.is_empty() => {
+                    self.enqueue_unknown(answer);
+                }
+            }
+        }
+    }
+
+    fn unvisited_inputs(
+        &mut self,
+        parsed: &[(gradient_derivation::Derivation, u64)],
+    ) -> Vec<String> {
         let mut new_deps: Vec<String> = Vec::new();
-        for (drv, _) in &parsed_drvs {
+        for (drv, _) in parsed {
             for (input_drv, _) in &drv.input_derivations {
                 if !self.visited.contains(input_drv.as_str()) {
                     new_deps.push(input_drv.clone());
@@ -697,38 +741,46 @@ impl<'a> ClosureWalker<'a> {
         }
         new_deps.sort_unstable();
         new_deps.dedup();
+        self.visited.extend(new_deps.iter().cloned());
+        new_deps
+    }
 
-        for dep in &new_deps {
-            self.visited.insert(dep.clone());
-        }
-
-        let known_set: HashSet<String> = if new_deps.is_empty() {
-            HashSet::new()
-        } else {
-            reporter
-                .query_known_derivations(new_deps.clone())
+    fn ask_known(&mut self, deps: Vec<String>) {
+        let reporter = self.reporter;
+        self.known_queries.push_back(Box::pin(async move {
+            if deps.is_empty() {
+                return (deps, HashSet::new());
+            }
+            let known: HashSet<String> = reporter
+                .query_known_derivations(deps.clone())
                 .await
                 .unwrap_or_else(|e| {
                     warn!(error = %e, "query_known_derivations failed; treating all as unknown");
                     vec![]
                 })
                 .into_iter()
-                .collect()
-        };
+                .collect();
+            (deps, known)
+        }));
+    }
 
-        if !known_set.is_empty() {
-            debug!(
-                pruned = known_set.len(),
-                "closure walk: pruning known subtrees"
-            );
+    fn enqueue_unknown(&mut self, (asked, known): KnownAnswer) {
+        if !known.is_empty() {
+            debug!(pruned = known.len(), "closure walk: pruning known subtrees");
         }
+        self.pending.extend(
+            asked
+                .into_iter()
+                .filter(|dep| !known.contains(dep))
+                .map(Queued::Dependency),
+        );
+    }
 
-        for dep in new_deps {
-            if !known_set.contains(&dep) {
-                self.pending.push_back(Queued::Dependency(dep));
-            }
-        }
-
+    async fn record_wave(
+        &mut self,
+        wave: Vec<Queued>,
+        parsed_drvs: Vec<(gradient_derivation::Derivation, u64)>,
+    ) -> Result<()> {
         for (queued, (drv, nar_size)) in wave.into_iter().zip(parsed_drvs) {
             self.paths
                 .push((queued.drv_path().to_owned(), Some(nar_size)));
@@ -902,7 +954,7 @@ async fn discover_and_walk(
         )
         .await)
     };
-    let walk = ClosureWalker::new(drv_reader, flushes).walk_found(reporter, &mut found_rx, abort);
+    let walk = ClosureWalker::new(drv_reader, reporter, flushes).walk_found(&mut found_rx, abort);
     let ((listed, (found, mut rest)), mut pushed) = tokio::try_join!(
         async { tokio::try_join!(discovery, walk) },
         publish(reporter, published),
@@ -1866,5 +1918,54 @@ mod tests {
             at(&chain[3]) < at(&wide[0]),
             "the end of the chain waits behind the whole wide level"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_next_wave_is_asked_about_before_the_last_answer_arrives() {
+        let parents: Vec<String> = (1..=600).map(numbered_drv).collect();
+        let children: Vec<String> = (1001..=1600).map(numbered_drv).collect();
+        let root = numbered_drv(1_000_000);
+        let mut drvs: std::collections::HashMap<String, Vec<u8>> = parents
+            .iter()
+            .zip(&children)
+            .map(|(parent, child)| (parent.clone(), drv_needing(std::slice::from_ref(child))))
+            .collect();
+        drvs.extend(
+            children
+                .iter()
+                .map(|child| (child.clone(), drv_needing(&[]))),
+        );
+        drvs.insert(root.clone(), drv_needing(&parents));
+        let reporter =
+            RecordingJobReporter::new().with_known_query_delay(std::time::Duration::from_secs(1));
+
+        walk_and_publish(
+            &FakeDrvReader::from_raw_drvs(drvs),
+            &reporter,
+            vec![Root {
+                drv_path: root.clone(),
+                attr: "root".into(),
+                ifd: false,
+            }],
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
+
+        let mut walked: Vec<String> = reporter
+            .all_eval_derivations()
+            .into_iter()
+            .map(|d| d.drv_path)
+            .collect();
+        walked.sort_unstable();
+        let mut expected: Vec<String> = [vec![root], parents, children].concat();
+        expected.sort_unstable();
+        assert_eq!(
+            walked, expected,
+            "every derivation is reported exactly once"
+        );
+        let peak = reporter.peak_known_queries_in_flight();
+        assert!(peak > 1, "the walk waited on every answer alone");
+        assert!(peak <= KNOWN_QUERIES_IN_FLIGHT, "{peak} queries in flight");
     }
 }

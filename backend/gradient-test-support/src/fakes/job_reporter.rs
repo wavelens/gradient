@@ -13,6 +13,8 @@ use gradient_wire::messages::{
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter};
 use gradient_wire::types::{EvalProgress, ImportOutcome, InputOutcome};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub enum ReportedEvent {
@@ -65,6 +67,9 @@ pub struct RecordingJobReporter {
     events: Arc<Mutex<Vec<ReportedEvent>>>,
     pub cached_paths: Vec<String>,
     pub known_drv_paths: Vec<String>,
+    pub known_query_delay: Option<Duration>,
+    known_queries_in_flight: Arc<AtomicUsize>,
+    peak_known_queries_in_flight: Arc<AtomicUsize>,
     pub upstream: std::collections::HashMap<String, String>,
     pub import_outcomes: std::collections::HashMap<String, ImportOutcome>,
     pub input_outcomes: Vec<(String, InputOutcome)>,
@@ -84,6 +89,15 @@ impl RecordingJobReporter {
     pub fn with_known_drv_paths(mut self, paths: Vec<String>) -> Self {
         self.known_drv_paths = paths;
         self
+    }
+
+    pub fn with_known_query_delay(mut self, delay: Duration) -> Self {
+        self.known_query_delay = Some(delay);
+        self
+    }
+
+    pub fn peak_known_queries_in_flight(&self) -> usize {
+        self.peak_known_queries_in_flight.load(Ordering::SeqCst)
     }
 
     pub fn with_upstream(mut self, path: &str, url: &str) -> Self {
@@ -195,6 +209,14 @@ impl JobReporter for RecordingJobReporter {
     }
 
     async fn query_known_derivations(&self, drv_paths: Vec<String>) -> Result<Vec<String>> {
+        let in_flight = self.known_queries_in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak_known_queries_in_flight
+            .fetch_max(in_flight, Ordering::SeqCst);
+        if let Some(delay) = self.known_query_delay {
+            tokio::time::sleep(delay).await;
+        }
+        self.known_queries_in_flight.fetch_sub(1, Ordering::SeqCst);
+
         let known_set: std::collections::HashSet<&str> =
             self.known_drv_paths.iter().map(|s| s.as_str()).collect();
         Ok(drv_paths
