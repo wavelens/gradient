@@ -27,7 +27,7 @@ Standalone mode runs the whole Gradient stack on one machine. This setup suits p
     nix run github:wavelens/gradient/latest#standalone
     ```
 
-    This runs a QEMU VM in the terminal with a root login. Projects, the cache and every build persist in the disk image `gradient.qcow2` in the current directory across a restart. Stop the VM with `Ctrl-a x`.
+    This runs a QEMU VM in the terminal with a root login. Projects, the cache and every build persist in the disk image `gradient.qcow2` in the current directory across a restart. Press `Ctrl-a x` to stop the VM. The run script can rebuild the image of the VM's Nix store before every boot. A startup can take longer than a plain VM.
 
 ??? note "Image Provenance"
     Release images come with a signed build provenance and an SBOM. The GitHub CLI can verify the provenance against the repository.

@@ -19,6 +19,8 @@
     diskSize = 32768;
     graphics = false;
     writableStoreUseTmpfs = false;
+    useNixStoreImage = true;
+    writableStore = true;
     forwardPorts = [
       { from = "host"; host.address = "127.0.0.1"; host.port = 8080; guest.port = 80; }
     ];
