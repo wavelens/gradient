@@ -5,6 +5,7 @@
  */
 
 { lib
+, cacert
 , craneLib
 , git
 , glibc
@@ -152,7 +153,7 @@ craneLib.buildPackage (commonArgs // rec {
     cargoNextestExtraArgs = "--no-fail-fast";
     doInstallCargoArtifacts = false;
 
-    nativeCheckInputs = [ git postgresql_18 postgresqlTestHook ];
+    nativeCheckInputs = [ cacert git postgresql_18 postgresqlTestHook ];
     postgresqlTestUserOptions = "LOGIN CREATEDB";
     postgresqlExtraSettings = ''
       fsync = off
