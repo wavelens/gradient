@@ -44,6 +44,7 @@ With `postgres.enable`, host-independent defaults come from `mkDefault` entries.
 | `wal_compression` | `lz4` | Shrinks the full page images in the write-ahead log |
 | `wal_buffers` | `64MB` | Keeps large graph writes from flushing the write-ahead log mid-transaction |
 | `checkpoint_timeout` | `15min` | Fewer checkpoints mean fewer full page images after each one |
+| `synchronous_commit` | `off` | A commit no longer waits for the disk. A database crash loses at most the last second of commits, with no corruption |
 
 RAM-dependent settings live in module options.
 
@@ -54,7 +55,7 @@ RAM-dependent settings live in module options.
 | `postgres.workMem` | `"32MB"` for the default pool sizes |
 | `postgres.maintenanceWorkMem` | Up to `"1GB"` with RAM to spare |
 
-All ten values for an external database (`database.urlFile`) need manual entry.
+All eleven values are manual for an external database (`database.urlFile`).
 
 ## Prometheus and OpenTelemetry
 
