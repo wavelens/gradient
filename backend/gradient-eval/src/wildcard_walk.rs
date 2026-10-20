@@ -95,7 +95,7 @@ enum Sink<'a> {
 impl Sink<'_> {
     fn emit_leaf(&mut self, path: Vec<String>) {
         match self {
-            Sink::Derivations { out, .. } => out.push(path.join(".")),
+            Sink::Derivations { out, .. } => out.push(segments_to_pattern(&path)),
             Sink::Shards(out) => out.push(Shard {
                 segments: path,
                 only: None,
@@ -166,7 +166,7 @@ fn tolerate<T: Default>(res: Result<T>, path: &[String], diags: &mut Vec<AttrErr
 fn attempt<T>(res: Result<T>, path: &[String], diags: &mut Vec<AttrError>) -> Option<T> {
     res.map_err(|e| {
         diags.push(AttrError {
-            attr: path.join("."),
+            attr: segments_to_pattern(path),
             message: format!("{e:#}"),
         })
     })
@@ -201,7 +201,7 @@ fn traverse<N: WalkNode>(
         match sink {
             Sink::Derivations { out, .. } => {
                 if tolerate(node.is_derivation(), path, diags) {
-                    out.push(path.join("."));
+                    out.push(segments_to_pattern(path));
                 }
             }
             Sink::Shards(_) => sink.emit_leaf(path.to_vec()),
@@ -412,12 +412,7 @@ fn collect_derivations<N: WalkNode>(
         );
     }
 
-    out.retain(|p| {
-        let seg: Vec<&str> = p.split('.').collect();
-        !excludes
-            .iter()
-            .any(|ex| ex.len() == seg.len() && ex.iter().zip(&seg).all(|(a, b)| a == b))
-    });
+    out.retain(|p| !excludes.contains(&parse_pattern(p).1));
     out.sort();
     out.dedup();
     diags.sort();
@@ -662,6 +657,30 @@ mod tests {
                 "packages.x86_64-linux.cowsay",
                 "packages.x86_64-linux.hello"
             ]
+        );
+    }
+
+    #[test]
+    fn discover_quotes_a_dotted_name_for_the_lookup_and_the_exclude() {
+        let root = StubNode::set(vec![(
+            "packages",
+            StubNode::set(vec![
+                ("0.0.10.in-addr.arpa", StubNode::drv()),
+                ("mgmt.example.org", StubNode::drv()),
+                ("template", StubNode::drv()),
+            ]),
+        )]);
+        let excludes = [
+            segs(&["packages", "template"]),
+            segs(&["packages", "mgmt.example.org"]),
+        ];
+
+        let got = discover(&&root, &[segs(&["packages", "**"])], &excludes).0;
+
+        assert_eq!(got, vec![r#"packages."0.0.10.in-addr.arpa""#]);
+        assert_eq!(
+            parse_pattern(&got[0]),
+            (false, segs(&["packages", "0.0.10.in-addr.arpa"]))
         );
     }
 
