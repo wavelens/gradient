@@ -515,6 +515,10 @@ impl<M> MsgReader<M> {
 
 impl<M: WireMessage> MsgReader<M> {
     pub async fn recv(&mut self) -> Option<M> {
+        self.recv_sized().await.map(|(msg, _)| msg)
+    }
+
+    pub async fn recv_sized(&mut self) -> Option<(M, usize)> {
         let bytes = self.inner.recv_bytes().await?;
         let len = bytes.len();
         let msg = codec::from_bytes::<M>(bytes, self.version)
@@ -525,7 +529,7 @@ impl<M: WireMessage> MsgReader<M> {
             observer.observe(&msg, len);
         }
 
-        Some(msg)
+        Some((msg, len))
     }
 }
 
