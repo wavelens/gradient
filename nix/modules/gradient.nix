@@ -790,6 +790,9 @@ in {
           max_connections = lib.mkDefault 200;
           random_page_cost = lib.mkDefault 1.1;
           max_locks_per_transaction = lib.mkDefault 1024;
+          wal_compression = lib.mkDefault "lz4";
+          wal_buffers = lib.mkDefault "64MB";
+          checkpoint_timeout = lib.mkDefault "15min";
         } // lib.optionalAttrs (cfg.postgres.sharedBuffers != null) {
           shared_buffers = cfg.postgres.sharedBuffers;
         } // lib.optionalAttrs (cfg.postgres.effectiveCacheSize != null) {

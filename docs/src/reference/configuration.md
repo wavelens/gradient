@@ -41,6 +41,9 @@ With `postgres.enable`, host-independent defaults come from `mkDefault` entries.
 | `random_page_cost` | `1.1` | Matches SSD storage and keeps the planner on index-only scans of the graph tables |
 | `max_connections` | `200` | Covers the three server pools (56 connections by default), autovacuum and `psql` |
 | `max_locks_per_transaction` | `1024` | Graph writes lock every shared build they touch. The server logs warnings below `256` |
+| `wal_compression` | `lz4` | Shrinks the full page images in the write-ahead log |
+| `wal_buffers` | `64MB` | Keeps large graph writes from flushing the write-ahead log mid-transaction |
+| `checkpoint_timeout` | `15min` | Fewer checkpoints mean fewer full page images after each one |
 
 RAM-dependent settings live in module options.
 
@@ -51,7 +54,7 @@ RAM-dependent settings live in module options.
 | `postgres.workMem` | `"32MB"` for the default pool sizes |
 | `postgres.maintenanceWorkMem` | Up to `"1GB"` with RAM to spare |
 
-An external database (`database.urlFile`) needs all seven values set by hand.
+All ten values for an external database (`database.urlFile`) need manual entry.
 
 ## Prometheus and OpenTelemetry
 
