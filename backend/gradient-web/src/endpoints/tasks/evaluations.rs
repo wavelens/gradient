@@ -26,7 +26,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
-use gradient_core::ServerState;
+use gradient_core::{InstanceMemory, ServerState};
 use gradient_db::WebDb;
 use gradient_db::evaluations::TaskEvaluationFilter;
 use gradient_db::lookup::{by_id, by_ids, get_any_project_by_name};
@@ -42,7 +42,6 @@ use gradient_storage::nar_extract::{
 use gradient_types::branch_key;
 use gradient_types::input::{hex_to_vec, vec_to_hex};
 use gradient_types::*;
-use gradient_util::latest::Latest;
 use sea_orm::Iterable;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -58,7 +57,7 @@ pub struct EvaluateRequest {
 
 pub(super) async fn evaluations_to_summaries(
     web_db: &WebDb,
-    eval_progress: &Latest<EvaluationId, EvaluationProgress>,
+    memory: &InstanceMemory,
     evaluations: Vec<MEvaluation>,
 ) -> Result<Vec<EvaluationSummary>, WebError> {
     if evaluations.is_empty() {
@@ -85,8 +84,12 @@ pub(super) async fn evaluations_to_summaries(
         .map(|(id, u)| (id, u.name))
         .collect();
 
-    let status_counts =
-        gradient_db::task_board::build_status_counts_by_evaluation(db, &eval_ids).await?;
+    let status_counts = gradient_db::task_board::cached_build_status_counts(
+        db,
+        &memory.build_status_counts,
+        &evaluations,
+    )
+    .await?;
     let message_counts = gradient_db::task_board::evaluation_message_counts(db, &eval_ids).await?;
     let eval_jobs =
         gradient_db::scheduling::assignment_record::latest_eval_jobs(db, &eval_ids).await?;
@@ -164,7 +167,7 @@ pub(super) async fn evaluations_to_summaries(
             finished_at: evaluation.finished_at,
             updated_at: evaluation.updated_at,
             progress: live_progress(
-                eval_progress,
+                &memory.eval_progress,
                 evaluation.id,
                 evaluation.status,
                 Instant::now(),
@@ -369,9 +372,7 @@ pub async fn get_task_evaluations(
         }
     };
 
-    let summaries =
-        evaluations_to_summaries(&state.0.web_db, &state.0.memory.eval_progress, evaluations)
-            .await?;
+    let summaries = evaluations_to_summaries(&state.0.web_db, &state.0.memory, evaluations).await?;
 
     Ok(ok_json(summaries))
 }
@@ -401,8 +402,7 @@ pub async fn get_task_details(
     let evaluations = gradient_db::evaluations::latest_of_task(&state.web_db, task.id, 10).await?;
 
     let evaluation_summaries =
-        evaluations_to_summaries(&state.0.web_db, &state.0.memory.eval_progress, evaluations)
-            .await?;
+        evaluations_to_summaries(&state.0.web_db, &state.0.memory, evaluations).await?;
 
     let (building, queued) =
         gradient_db::task_board::task_queue_summary(&state.web_db, task.id).await?;

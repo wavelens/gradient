@@ -8,13 +8,19 @@ pub mod dep_counts;
 
 use crate::fetch_in_chunks;
 use gradient_entity::build::BuildStatus;
+use gradient_entity::evaluation;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_entity::ids::{EntryPointId, EvaluationId, TaskId};
+use gradient_util::latest::Latest;
 use sea_orm::{
     ActiveEnum, ConnectionTrait, DatabaseTransaction, DbErr, FromQueryResult, TransactionTrait,
 };
 use std::collections::HashMap;
+use std::time::Instant;
 use uuid::Uuid;
+
+pub type BuildStatusCounts = HashMap<BuildStatus, i64>;
+pub type BuildStatusCountsCache = Latest<EvaluationId, (i64, BuildStatusCounts)>;
 
 #[derive(Debug, FromQueryResult)]
 struct EvalStatusCountRow {
@@ -52,6 +58,40 @@ pub async fn build_status_counts_by_evaluation<C: ConnectionTrait>(
                 .entry(status)
                 .or_insert(0) += r.cnt;
         }
+    }
+
+    Ok(out)
+}
+
+/// Every status move and every new build job is bumping `graph_version`, so counts stay valid
+/// until the evaluation's version moves.
+pub async fn cached_build_status_counts<C: ConnectionTrait>(
+    db: &C,
+    cache: &BuildStatusCountsCache,
+    evaluations: &[evaluation::Model],
+) -> Result<HashMap<EvaluationId, BuildStatusCounts>, DbErr> {
+    let now = Instant::now();
+    let mut out = HashMap::with_capacity(evaluations.len());
+    let mut stale = Vec::new();
+    for evaluation in evaluations {
+        match cache.get(&evaluation.id, now) {
+            Some((version, counts)) if version == evaluation.graph_version => {
+                out.insert(evaluation.id, counts);
+            }
+            _ => stale.push(evaluation),
+        }
+    }
+
+    let stale_ids: Vec<EvaluationId> = stale.iter().map(|e| e.id).collect();
+    let mut counted = build_status_counts_by_evaluation(db, &stale_ids).await?;
+    for evaluation in stale {
+        let counts = counted.remove(&evaluation.id).unwrap_or_default();
+        cache.set(
+            evaluation.id,
+            (evaluation.graph_version, counts.clone()),
+            now,
+        );
+        out.insert(evaluation.id, counts);
     }
 
     Ok(out)
@@ -237,7 +277,56 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::DEP_COUNTS_SQL;
+    use super::*;
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::Value;
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
+    fn counted(
+        evaluation: EvaluationId,
+        status: BuildStatus,
+        cnt: i64,
+    ) -> BTreeMap<&'static str, Value> {
+        BTreeMap::from([
+            ("evaluation", Value::Uuid(Some(evaluation.into_inner()))),
+            ("status", Value::Int(Some(status as i32))),
+            ("cnt", Value::BigInt(Some(cnt))),
+        ])
+    }
+
+    #[tokio::test]
+    async fn counts_are_reread_only_after_the_graph_version_moves() {
+        let id = EvaluationId::now_v7();
+        let at = |graph_version| evaluation::Model {
+            id,
+            graph_version,
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_query_results([vec![counted(id, BuildStatus::Queued, 3)]])
+            .append_query_results([vec![counted(id, BuildStatus::Completed, 3)]])
+            .into_connection();
+        let cache = BuildStatusCountsCache::new(Duration::from_secs(600));
+
+        let first = cached_build_status_counts(&db, &cache, &[at(7)])
+            .await
+            .unwrap();
+        let same = cached_build_status_counts(&db, &cache, &[at(7)])
+            .await
+            .unwrap();
+        let moved = cached_build_status_counts(&db, &cache, &[at(8)])
+            .await
+            .unwrap();
+
+        assert_eq!(first[&id][&BuildStatus::Queued], 3);
+        assert_eq!(
+            same, first,
+            "an unchanged graph version must not query again"
+        );
+        assert_eq!(moved[&id].get(&BuildStatus::Completed), Some(&3));
+        assert_eq!(db.into_transaction_log().len(), 2);
+    }
 
     fn norm(s: &str) -> String {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
