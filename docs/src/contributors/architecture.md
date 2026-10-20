@@ -62,7 +62,7 @@ root
 |---|---|---|
 | `graph` | Every request-path write to `derivation*`, `build_job`, `build_attempt`, `cached_path`, and the retires of maintenance | [Shared Builds](scheduler/shared-builds.md) |
 | `scheduler-core` | `WorkerPool` and the candidate cache (`JobTracker`). `Scheduler` is a facade, one message per method | [Capabilities and Assignment](proto/capabilities-and-dispatch.md) |
-| `SessionActor` | One worker connection. The reader will hand the actor frames in order, up to 64 unanswered. TCP backpressure will hold any frame beyond that | [Connection](proto/connection.md) |
+| `SessionActor` | One worker connection. Frames come from the reader in order, up to 32 MiB unanswered. TCP backpressure can hold any frame past that limit. `CacheQuery` and `QueryKnownDerivations` get their answer from the reader directly. | [Connection](proto/connection.md) |
 | `effects` | Pending deliveries (`pending_delivery`): 8 workers, 6 attempts with backoff doubling from 30 s (capped at 15 min), then dead letter | [Events and Webhooks](../reference/events.md) |
 
 - **Pull-based assignment:** A claim means a `dispatched_job` insert in Postgres (`gradient_db::scheduling::assignment_record::claim_assignment`). The scheduler actor can only cache candidates.

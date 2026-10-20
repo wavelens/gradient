@@ -31,8 +31,7 @@ use super::job_events::{JobEvents, SchedulerJobEvents};
 use super::log_lane::LogLane;
 use super::session::on_reauth_notify;
 use super::socket::{
-    InputFetch, ProtoSocket, ProtoWriter, job_offer_chunks, recv_client_msg, send_input_fetch,
-    send_server_msg,
+    InputFetch, ProtoSocket, ProtoWriter, job_offer_chunks, send_input_fetch, send_server_msg,
 };
 use super::store_paths::{outbound_message, outbound_offer, project_mapper};
 use super::upload::{UploadSession, UploadTable, abandon_transfer};
@@ -487,8 +486,9 @@ async fn offer_jobs(st: &mut SessionState) -> bool {
     true
 }
 
-/// Reading ahead is keeping a lookup awaited by the worker from sitting unread behind a slow frame.
-const READ_AHEAD: usize = 64;
+/// Unanswered frames are budgeted in bytes, not in count: a graph that lags behind holds up many
+/// small reports and a frame cap stopped the reader before a lookup the worker awaits.
+const READ_AHEAD_BYTES: usize = 32 * 1024 * 1024;
 
 async fn read_loop(
     mut reader: ProtoReader,
@@ -503,27 +503,32 @@ async fn read_loop(
             Ordering::Relaxed,
         )
     };
-    let mut unanswered: VecDeque<oneshot::Receiver<bool>> = VecDeque::new();
+    let mut unanswered: VecDeque<(oneshot::Receiver<bool>, usize)> = VecDeque::new();
+    let mut unanswered_bytes = 0;
     let mut in_flight =
         tokio::time::interval_at(tokio::time::Instant::now() + stamp_every, stamp_every);
     loop {
         tokio::select! {
             biased;
-            answered = async { unanswered.front_mut().expect("guarded").await }, if !unanswered.is_empty() => {
-                unanswered.pop_front();
+            answered = async { (&mut unanswered.front_mut().expect("guarded").0).await }, if !unanswered.is_empty() => {
+                if let Some((_, bytes)) = unanswered.pop_front() {
+                    unanswered_bytes -= bytes;
+                }
                 if !matches!(answered, Ok(true)) {
                     return;
                 }
             }
-            inbound = recv_client_msg(&mut reader), if unanswered.len() < READ_AHEAD => {
-                let Some(inbound) = inbound else { break };
+            inbound = reader.recv_sized(), if unanswered_bytes < READ_AHEAD_BYTES => {
+                let Some((inbound, len)) = inbound else { break };
                 stamp();
                 let Some(msg) = serve(inbound) else { continue };
                 let (reply, answered) = oneshot::channel();
                 if session.send_message(SessionMsg::Frame(msg, reply.into())).is_err() {
                     return;
                 }
-                unanswered.push_back(answered);
+                let bytes = len + size_of::<SessionMsg>();
+                unanswered_bytes += bytes;
+                unanswered.push_back((answered, bytes));
             }
             _ = in_flight.tick(), if !unanswered.is_empty() => stamp(),
         }
@@ -589,6 +594,7 @@ fn split_uploads(st: &mut SessionState) -> (InboundContext<'_>, &mut UploadSessi
 pub(in crate::handler) mod tests {
     use super::super::sessions::{Sessions, SessionsArgs, SessionsMsg};
     use super::*;
+    use bytes::Bytes;
     use futures::{SinkExt, StreamExt};
     use gradient_fixtures::mock::empty_db;
     use gradient_test_support::prelude::*;
@@ -661,6 +667,36 @@ pub(in crate::handler) mod tests {
                     }
                 }
                 _ => {}
+            }
+
+            Ok(())
+        }
+    }
+
+    struct BacklogSession;
+
+    impl Actor for BacklogSession {
+        type Msg = SessionMsg;
+        type State = tokio::sync::watch::Receiver<bool>;
+        type Arguments = tokio::sync::watch::Receiver<bool>;
+
+        async fn pre_start(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            graph_caught_up: Self::Arguments,
+        ) -> Result<Self::State, ActorProcessingErr> {
+            Ok(graph_caught_up)
+        }
+
+        async fn handle(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            msg: Self::Msg,
+            graph_caught_up: &mut Self::State,
+        ) -> Result<(), ActorProcessingErr> {
+            if let SessionMsg::Frame(_, reply) = msg {
+                let _ = graph_caught_up.wait_for(|caught_up| *caught_up).await;
+                let _ = reply.send(false);
             }
 
             Ok(())
@@ -902,6 +938,64 @@ pub(in crate::handler) mod tests {
             .expect("the lookup is not queued behind the held frame");
 
         session.send_message(SessionMsg::Reattach).unwrap();
+        reading.await.unwrap();
+        session.stop(None);
+        join.await.unwrap();
+
+        assert_eq!(query.as_deref(), Some("q1"));
+    }
+
+    #[tokio::test]
+    async fn a_cache_query_behind_hundreds_of_unanswered_log_chunks_is_served() {
+        let (socket, mut client) = connected_pair().await;
+        let state = test_state(empty_db());
+        let (reader, _writer) = socket.split(Duration::from_secs(5), &state.shutdown);
+        let (catch_up, graph_caught_up) = tokio::sync::watch::channel(false);
+        let (session, join) = Actor::spawn(None, BacklogSession, graph_caught_up)
+            .await
+            .unwrap();
+        let (served_tx, mut served) = tokio::sync::mpsc::unbounded_channel();
+
+        let log_chunks = (0..500).map(|_| ClientMessage::LogChunk {
+            job_id: "j1".into(),
+            task_index: 0,
+            data: Bytes::from_static(b"building\n"),
+        });
+        let query = ClientMessage::CacheQuery {
+            job_id: "j1".into(),
+            query_id: "q1".into(),
+            paths: Vec::new(),
+            nar_sizes: Vec::new(),
+            mode: gradient_wire::types::QueryMode::Pull,
+            external: false,
+        };
+        for msg in log_chunks.chain([query]) {
+            client
+                .feed(Message::Binary(
+                    to_bytes(&msg, *PROTO_VERSIONS.end()).unwrap(),
+                ))
+                .await
+                .unwrap();
+        }
+        client.flush().await.unwrap();
+        let reading = state.shutdown.spawn(read_loop(
+            reader,
+            session.clone(),
+            Arc::new(AtomicI64::new(0)),
+            IN_FLIGHT_STAMP,
+            move |msg| match msg {
+                ClientMessage::CacheQuery { query_id, .. } => {
+                    let _ = served_tx.send(query_id);
+                    None
+                }
+                other => Some(other),
+            },
+        ));
+        let query = tokio::time::timeout(Duration::from_secs(5), served.recv())
+            .await
+            .expect("the lookup is read while the session is behind the graph");
+
+        catch_up.send(true).unwrap();
         reading.await.unwrap();
         session.stop(None);
         join.await.unwrap();
