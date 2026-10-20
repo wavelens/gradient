@@ -68,6 +68,7 @@ fn active_triggers_sql(trigger_type: TriggerType) -> String {
          JOIN task p ON pt.task = p.id \
          JOIN integration i ON i.project = p.project \
          WHERE pt.active = true \
+           AND p.active = true \
            AND pt.trigger_type = {} \
            AND i.id = $1",
         i16::from(trigger_type),
@@ -95,10 +96,12 @@ pub async fn active_of_integration<C: ConnectionTrait>(
 }
 
 crate::sql! {
-    ACTIVE_TASK_IDS_FOR_INTEGRATION = "SELECT DISTINCT task FROM task_trigger \
-         WHERE active = true \
-           AND trigger_type = $1 \
-           AND (config->>'integration_id')::uuid = $2",
+    ACTIVE_TASK_IDS_FOR_INTEGRATION = "SELECT DISTINCT tt.task FROM task_trigger tt \
+         JOIN task t ON t.id = tt.task \
+         WHERE tt.active = true \
+           AND t.active = true \
+           AND tt.trigger_type = $1 \
+           AND (tt.config->>'integration_id')::uuid = $2",
         params = [Int(2), IntegrationId];
 }
 
