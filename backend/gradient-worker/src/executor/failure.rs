@@ -108,27 +108,7 @@ pub(super) fn looks_like_oom(msg: &str) -> bool {
             || l.contains("cannot allocate memory")
             || l.contains("oom-killer")
             || l.contains("killed")
-    }) || exit_code_two(msg)
-}
-
-/// Nix output for a builder that the OOM killer ended: `exit code 2`, or `Exit Code 2` alone.
-fn exit_code_two(msg: &str) -> bool {
-    diagnosis_lines(msg).any(|line| {
-        let l = line.to_ascii_lowercase();
-        let named = l.match_indices("exit code 2").any(|(at, _)| {
-            !l[at + "exit code 2".len()..].starts_with(|c: char| c.is_ascii_digit())
-        });
-
-        named || ends_in_a_lone_two(line)
     })
-}
-
-fn ends_in_a_lone_two(line: &str) -> bool {
-    line.trim_end()
-        .rsplit_once(' ')
-        .is_some_and(|(head, tail)| {
-            tail == "2" && (head.contains("error") || head.contains("failed"))
-        })
 }
 
 /// These signatures describe the store or the daemon, not the derivation.
@@ -152,8 +132,13 @@ pub(super) fn looks_like_infra_failure(msg: &str) -> bool {
     })
 }
 
-pub(super) fn classify_build_error(msg: &str) -> BuildFailureKind {
-    if looks_like_oom(msg) || looks_like_infra_failure(msg) {
+/// Only a daemon without resource accounting leaves the message to guess an OOM kill from.
+pub(super) fn classify_build_error(msg: &str, oom_kills: Option<u64>) -> BuildFailureKind {
+    let out_of_memory = match oom_kills {
+        Some(kills) => kills > 0,
+        None => looks_like_oom(msg),
+    };
+    if out_of_memory || looks_like_infra_failure(msg) {
         BuildFailureKind::Transient
     } else {
         BuildFailureKind::Permanent
@@ -241,11 +226,14 @@ mod tests {
     #[test]
     fn classify_and_looks_like_oom() {
         assert_eq!(
-            classify_build_error("gcc: fatal error: Killed signal terminated program cc1plus"),
+            classify_build_error(
+                "gcc: fatal error: Killed signal terminated program cc1plus",
+                None
+            ),
             BuildFailureKind::Transient
         );
         assert_eq!(
-            classify_build_error("error: undefined reference to `foo'"),
+            classify_build_error("error: undefined reference to `foo'", None),
             BuildFailureKind::Permanent
         );
         assert!(looks_like_oom("Cannot allocate memory"));
@@ -255,31 +243,32 @@ mod tests {
     }
 
     #[test]
-    fn an_oom_exit_code_two_stays_retryable() {
-        for msg in [
-            "error: builder for '/nix/store/x-y.drv' failed with exit code 2",
-            "error: builder for '/nix/store/x-y.drv' failed with exit code 2; last 10 log lines:",
-            "Cannot build '/nix/store/x-y.drv'.\nReason: builder failed with exit code 2.\nOutput paths:\n  /nix/store/z-y",
-            "failed with exit code 2 ",
-            "Exit Code 2",
-        ] {
-            assert_eq!(
-                classify_build_error(msg),
-                BuildFailureKind::Transient,
-                "an OOM kill must stay retryable: {msg}"
-            );
-        }
+    fn the_daemon_oom_count_overrides_the_message() {
+        let make_failure =
+            "Cannot build '/nix/store/x-git.drv'.\nReason: builder failed with exit code 2.";
+        assert_eq!(
+            classify_build_error(make_failure, Some(0)),
+            BuildFailureKind::Permanent,
+            "a make failure without an OOM kill must not be retried"
+        );
+        assert_eq!(
+            classify_build_error("error: undefined reference to `foo'", Some(1)),
+            BuildFailureKind::Transient,
+            "a counted OOM kill stays retryable whatever the message"
+        );
     }
 
     #[test]
-    fn any_other_exit_code_stays_permanent() {
+    fn an_exit_code_alone_stays_permanent() {
         for msg in [
+            "error: builder for '/nix/store/x-y.drv' failed with exit code 2",
+            "Cannot build '/nix/store/x-y.drv'.\nReason: builder failed with exit code 2.\nOutput paths:\n  /nix/store/z-y",
             "error: builder for '/nix/store/x-y.drv' failed with exit code 25",
             "error: builder for '/nix/store/x-y-1.2.drv' failed with exit code 1",
             "make: *** [Makefile:42: all] Error 2",
         ] {
             assert_eq!(
-                classify_build_error(msg),
+                classify_build_error(msg, None),
                 BuildFailureKind::Permanent,
                 "a deterministic failure must not be retried: {msg}"
             );
@@ -319,7 +308,7 @@ mod tests {
             "error: connection reset by peer",
         ] {
             assert_eq!(
-                classify_build_error(msg),
+                classify_build_error(msg, None),
                 BuildFailureKind::Transient,
                 "infrastructure failure must stay retryable: {msg}"
             );
@@ -330,7 +319,10 @@ mod tests {
     fn ansi_coloured_daemon_errors_are_still_recognised() {
         let coloured = "build failed: \u{1b}[31;1merror:\u{1b}[0m path \
              '\u{1b}[35;1m/nix/store/p59cz-coreutils-9.11.tar.xz\u{1b}[0m' is not valid";
-        assert_eq!(classify_build_error(coloured), BuildFailureKind::Transient);
+        assert_eq!(
+            classify_build_error(coloured, None),
+            BuildFailureKind::Transient
+        );
     }
 
     #[test]
@@ -341,7 +333,7 @@ mod tests {
             "make: *** [Makefile:42: all] Error 2",
         ] {
             assert_eq!(
-                classify_build_error(msg),
+                classify_build_error(msg, None),
                 BuildFailureKind::Permanent,
                 "deterministic build failure must not be retried: {msg}"
             );
