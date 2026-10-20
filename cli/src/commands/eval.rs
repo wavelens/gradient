@@ -56,7 +56,7 @@ pub struct Job {
 impl Job {
     fn from_item(item: ResolvedItem) -> Self {
         Job {
-            attr_path: item.attr.split('.').map(str::to_string).collect(),
+            attr_path: gradient_eval::wildcard_walk::parse_pattern(&item.attr).1,
             attr: item.attr,
             drv_path: item.drv_path.map(|drv| gradient_eval::nix_store_path(&drv)),
             references: item.references,
@@ -66,7 +66,7 @@ impl Job {
 
     fn failed(attr: String, error: String) -> Self {
         Job {
-            attr_path: attr.split('.').map(str::to_string).collect(),
+            attr_path: gradient_eval::wildcard_walk::parse_pattern(&attr).1,
             attr,
             drv_path: None,
             references: vec![],

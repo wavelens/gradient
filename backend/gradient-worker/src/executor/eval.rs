@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use super::dependencies::EvalDependencySource;
 use super::progress_report::{ChangeReporter, thunk_progress};
+use crate::nix::wildcard_walk;
 use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
 use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
@@ -111,8 +112,9 @@ fn explicit_attr_set(wildcards: &[String]) -> HashSet<String> {
     wildcards
         .iter()
         .filter_map(|w| {
-            let (exclude, segs) = crate::nix::wildcard_walk::parse_pattern(w);
-            (!exclude && !segs.iter().any(|s| s.contains('*'))).then(|| segs.join("."))
+            let (exclude, segs) = wildcard_walk::parse_pattern(w);
+            (!exclude && !segs.iter().any(|s| s.contains('*')))
+                .then(|| wildcard_walk::segments_to_pattern(&segs))
         })
         .collect()
 }
@@ -787,10 +789,9 @@ fn flake_nodes_from_roots(roots: &[Root]) -> Vec<FlakeOutputNode> {
     roots
         .iter()
         .map(|Root { attr, drv_path, .. }| {
-            let (parent, name) = match attr.rsplit_once('.') {
-                Some((p, n)) => (Some(p.to_string()), n.to_string()),
-                None => (None, attr.clone()),
-            };
+            let mut segs = wildcard_walk::parse_pattern(attr).1;
+            let name = segs.pop().unwrap_or_default();
+            let parent = (!segs.is_empty()).then(|| wildcard_walk::segments_to_pattern(&segs));
 
             FlakeOutputNode {
                 path: attr.clone(),
@@ -1161,8 +1162,8 @@ mod tests {
 
         assert!(set.contains("packages.x86_64-linux.hello"));
         assert!(
-            set.contains("checks.py.3.unit"),
-            "quoted dots collapse to the discovered path form"
+            set.contains(r#"checks."py.3".unit"#),
+            "quoted dots keep the discovered path form"
         );
         assert!(
             !set.contains("packages.x86_64-linux.broken"),

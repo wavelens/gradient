@@ -11,6 +11,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 
 use crate::ipc::{AttrError, DiscoveryShard, ResolvedItem};
 use crate::stats::StatsDelta;
+use crate::wildcard_walk::{parse_pattern, segments_to_pattern};
 
 use super::transport::Listing;
 
@@ -107,9 +108,8 @@ fn glob_matches(glob: &str, name: &str) -> bool {
 }
 
 pub(super) fn entry_point_of(attr: &str, patterns: &[String]) -> String {
-    let attr_segs: Vec<&str> = attr.split('.').collect();
-    let matches = |pat: &str| {
-        let pat_segs: Vec<&str> = pat.split('.').collect();
+    let attr_segs = parse_pattern(attr).1;
+    let matches = |pat_segs: &[String]| {
         pat_segs.len() <= attr_segs.len()
             && pat_segs
                 .iter()
@@ -119,14 +119,11 @@ pub(super) fn entry_point_of(attr: &str, patterns: &[String]) -> String {
 
     patterns
         .iter()
-        .filter(|p| matches(p))
-        .max_by_key(|p| {
-            let segs = p.split('.').count();
-            let literals = p.split('.').filter(|s| !s.contains('*')).count();
-            (segs, literals)
-        })
-        .cloned()
-        .unwrap_or_else(|| attr_segs.first().copied().unwrap_or("").to_string())
+        .map(|p| (p, parse_pattern(p).1))
+        .filter(|(_, segs)| matches(segs))
+        .max_by_key(|(_, segs)| (segs.len(), segs.iter().filter(|s| !s.contains('*')).count()))
+        .map(|(p, _)| p.clone())
+        .unwrap_or_else(|| segments_to_pattern(&attr_segs[..attr_segs.len().min(1)]))
 }
 
 /// Split crashed batches until single members remain, then retry a lone member or whole attribute
@@ -159,10 +156,10 @@ pub(super) fn crashed_listing(
 }
 
 fn member_attr(pattern: &str, name: &str) -> String {
-    match pattern.rsplit_once('.') {
-        Some((prefix, _)) => format!("{prefix}.{name}"),
-        None => name.to_string(),
-    }
+    let mut segs = parse_pattern(pattern).1;
+    segs.pop();
+    segs.push(name.to_string());
+    segments_to_pattern(&segs)
 }
 
 pub(super) async fn pooled_fan_out<T, Fut>(
