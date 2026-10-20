@@ -14,10 +14,12 @@ use std::sync::LazyLock;
 
 use crate::graph::can_start::ids;
 
+/// A bare `NOT EXISTS` becomes an anti join, which the overestimated `&&` matches turn into a scan
+/// of every edge. The scalar subquery stays one index probe per candidate pair.
 fn no_edge_back(referrer: &str, producer: &str) -> String {
     format!(
-        "NOT EXISTS (SELECT 1 FROM derivation_dependency back \
-         WHERE back.derivation = {producer} AND back.dependency = {referrer})"
+        "(SELECT NOT EXISTS (SELECT 1 FROM derivation_dependency back \
+         WHERE back.derivation = {producer} AND back.dependency = {referrer}))"
     )
 }
 
