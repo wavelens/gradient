@@ -18,6 +18,7 @@ use chrono::Utc;
 use gradient_ci::trigger::InputUpdateOutcome;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::ServerState;
+use gradient_db::DbContext;
 use gradient_db::lookup::by_ids;
 use gradient_scheduler::Scheduler;
 use gradient_sources::resolve_head;
@@ -369,7 +370,7 @@ pub async fn fire_now(
                 source_comment: None,
                 instance_max_storage_gb: state.config.cache.max_storage_gb,
             };
-            apply_now(&state, &scheduler, &proj, input).await?
+            apply_now(&db, &scheduler, &proj, input).await?
         }
         InputUpdateOutcome::AlreadyRunning => {
             serde_json::json!({ "outcome": "InputUpdateRunning" })
@@ -386,12 +387,12 @@ pub async fn fire_now(
 }
 
 async fn apply_now(
-    state: &ServerState,
+    db: &DbContext,
     scheduler: &Scheduler,
     task: &MTask,
     input: ApplyInput,
 ) -> WebResult<serde_json::Value> {
-    let outcome = apply_trigger(&state.web_db, task, input)
+    let outcome = apply_trigger(&db.web_db, task, input)
         .await
         .context("apply the trigger")?;
 
@@ -407,7 +408,7 @@ async fn apply_now(
                     .await;
             }
 
-            state.record_evaluation_created(&eval).await;
+            db.record_evaluation_created(&eval).await;
             serde_json::json!({
                 "outcome": "Created",
                 "evaluation_id": eval.id,
