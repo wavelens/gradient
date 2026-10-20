@@ -43,7 +43,7 @@ harmonia-store-derivation = { workspace = true }
 sea-orm             = { workspace = true }
 serde               = { workspace = true }
 tempfile            = { workspace = true }
-tokio               = { workspace = true, features = ["macros", "sync"] }
+tokio               = { workspace = true, features = ["macros", "sync", "time"] }
 tokio-tungstenite   = { workspace = true }
 uuid                = { workspace = true }
 zstd                = { workspace = true }
