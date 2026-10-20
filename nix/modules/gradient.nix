@@ -793,6 +793,7 @@ in {
           wal_compression = lib.mkDefault "lz4";
           wal_buffers = lib.mkDefault "64MB";
           checkpoint_timeout = lib.mkDefault "15min";
+          synchronous_commit = lib.mkDefault "off";
         } // lib.optionalAttrs (cfg.postgres.sharedBuffers != null) {
           shared_buffers = cfg.postgres.sharedBuffers;
         } // lib.optionalAttrs (cfg.postgres.effectiveCacheSize != null) {
