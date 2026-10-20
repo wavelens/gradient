@@ -545,7 +545,7 @@ pub async fn test_action(
         "id": "00000000-0000-0000-0000-000000000000",
         "status": "ok",
         "time": now.to_rfc3339(),
-        "link": format!("https://gradient.example/tasks/{}/{}", project, task),
+        "link": test_fire_link(&ci, proj.id, &project, &task).await?,
         "owner": "gradient-test",
         "repo": task,
         "sha": "0000000000000000000000000000000000000000",
@@ -562,6 +562,20 @@ pub async fn test_action(
         .context("run the test fire")?;
 
     Ok(ok_json(serde_json::Value::Null))
+}
+
+async fn test_fire_link(
+    ci: &gradient_ci::CiContext,
+    task_id: TaskId,
+    project: &str,
+    task: &str,
+) -> WebResult<String> {
+    let frontend_url = &ci.db.config.server.frontend_url;
+    let latest = gradient_db::evaluations::latest_of_task(&ci.db.web_db, task_id, 1).await?;
+    Ok(match latest.first() {
+        Some(evaluation) => format!("{frontend_url}/project/{project}/log/{}", evaluation.id),
+        None => format!("{frontend_url}/project/{project}/task/{task}"),
+    })
 }
 
 #[utoipa::path(

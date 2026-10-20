@@ -10,13 +10,13 @@
 )]
 
 use axum_test::TestServer;
-use gradient_entity::{ids::*, task_action, task_action_delivery, team};
+use gradient_entity::{evaluation, ids::*, task_action, task_action_delivery, team};
 use gradient_fixtures::ids::{task_id, user_id};
 use gradient_fixtures::mock::mock_db;
 use gradient_fixtures::rows::{admin_role, project, project_member, task};
 use gradient_fixtures::test_date;
 use gradient_notify::EmailSender;
-use gradient_test_support::fakes::email::InMemoryEmailSender;
+use gradient_test_support::fakes::email::{InMemoryEmailSender, SentEmail};
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::make_token;
 use gradient_test_support::web::{make_test_server, with_auth};
@@ -540,6 +540,51 @@ async fn regenerate_token_rejects_non_web_request_action() {
             .contains("send_web_request"),
         "expected send_web_request mention, got: {}",
         body["message"]
+    );
+}
+
+#[tokio::test]
+async fn test_fire_links_to_the_latest_evaluation_on_the_frontend() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let evaluation_id =
+        EvaluationId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000e1").unwrap());
+
+    let web_db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![send_mail_action_row()]])
+        .append_query_results([vec![evaluation::Model {
+            id: evaluation_id,
+            task: Some(task_id()),
+            ..Default::default()
+        }]]);
+    let worker_db = mock_db().append_query_results([vec![task()]]);
+    let email = Arc::new(InMemoryEmailSender::new());
+
+    let server = TestState::new()
+        .web_db(web_db.into_connection())
+        .worker_db(worker_db.into_connection())
+        .email(email.clone())
+        .config(|c| c.server.frontend_url = "https://ci.example.org".into())
+        .server();
+    let res = server
+        .post(&format!("{}/{}/test", BASE_URL, action_id()))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status_ok();
+    let bodies: Vec<String> = email
+        .sent()
+        .into_iter()
+        .filter_map(|mail| match mail {
+            SentEmail::ActionMail { body, .. } => Some(body),
+            _ => None,
+        })
+        .collect();
+    let expected =
+        format!("Link: https://ci.example.org/project/test-project/log/{evaluation_id}\n");
+    assert!(
+        bodies.iter().any(|body| body.contains(&expected)),
+        "{bodies:?}"
     );
 }
 
