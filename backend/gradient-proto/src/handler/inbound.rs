@@ -258,7 +258,7 @@ impl<'a> InboundContext<'a> {
                 update,
             } => {
                 if self.owns(&job_id, &assignment_id).await {
-                    debug!(peer_id = %self.peer_id, %job_id, ?update, "JobUpdate");
+                    trace!(peer_id = %self.peer_id, %job_id, ?update, "JobUpdate");
                     self.on_job_update(job_id, update).await;
                 }
                 true
@@ -634,7 +634,7 @@ impl<'a> InboundContext<'a> {
         source: String,
         message: String,
     ) {
-        debug!(peer_id = %self.peer_id, %job_id, ?level, %source, "EvalMessage");
+        trace!(peer_id = %self.peer_id, %job_id, ?level, %source, "EvalMessage");
         if let Err(e) = self
             .scheduler
             .record_eval_message(&job_id, level, source, message)
@@ -753,7 +753,7 @@ impl<'a> InboundContext<'a> {
 
     #[tracing::instrument(level = "debug", skip_all, fields(?kind, job_id = tracing::field::Empty))]
     async fn on_request_job(&mut self, kind: JobKind) -> bool {
-        debug!(peer_id = %self.peer_id, ?kind, "RequestJob");
+        trace!(peer_id = %self.peer_id, ?kind, "RequestJob");
         match self.scheduler.request_job(self.peer_id, kind).await {
             Some(assignment) => self.hand_out(assignment, None).await,
             None => true,
@@ -821,7 +821,7 @@ impl<'a> InboundContext<'a> {
 
     #[tracing::instrument(level = "debug", skip_all, fields(scores = scores.len(), is_final))]
     async fn on_request_job_chunk(&mut self, scores: Vec<CandidateScore>, is_final: bool) {
-        debug!(peer_id = %self.peer_id, count = scores.len(), is_final, "RequestJobChunk");
+        trace!(peer_id = %self.peer_id, count = scores.len(), is_final, "RequestJobChunk");
         self.scheduler.record_scores(self.peer_id, scores).await;
     }
 
@@ -864,7 +864,7 @@ impl<'a> InboundContext<'a> {
     }
 
     async fn on_log_chunk(&mut self, job_id: &str, task_index: u32, data: &[u8]) {
-        debug!(peer_id = %self.peer_id, %job_id, task_index, bytes = data.len(), "LogChunk");
+        trace!(peer_id = %self.peer_id, %job_id, task_index, bytes = data.len(), "LogChunk");
         match self.active.build(job_id, task_index) {
             Some(build) => self.logs.append(build, data.to_vec()).await,
             None => {
@@ -908,7 +908,7 @@ impl<'a> InboundContext<'a> {
         paths: Vec<String>,
         mapper: StorePathMapper,
     ) {
-        debug!(peer_id = %self.peer_id, %job_id, count = paths.len(), "NarRequest");
+        trace!(peer_id = %self.peer_id, %job_id, count = paths.len(), "NarRequest");
         let shutdown = self.handles.db.shutdown.clone();
         for store_path in paths {
             let handles = self.handles.clone();
@@ -941,7 +941,7 @@ impl<'a> InboundContext<'a> {
         stream_token: String,
         mapper: StorePathMapper,
     ) {
-        debug!(peer_id = %self.peer_id, %job_id, %store_path, received_bytes, "NarRequestResume");
+        trace!(peer_id = %self.peer_id, %job_id, %store_path, received_bytes, "NarRequestResume");
         let handles = self.handles.clone();
         let writer = self.writer.clone();
         let permit = Arc::clone(self.nar_serve_semaphore);
@@ -1077,7 +1077,7 @@ impl RpcContext {
         mode: gradient_wire::types::QueryMode,
         external: bool,
     ) -> ServerMessage {
-        debug!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, external, "CacheQuery");
+        trace!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, external, "CacheQuery");
         let answer = handle_cache_query(
             &self.handles,
             project_id,
@@ -1091,7 +1091,7 @@ impl RpcContext {
         // making the worker retry instead of failing the eval with `InputsUnavailable`.
         match tokio::time::timeout(CACHE_QUERY_BUDGET, answer).await {
             Ok(Ok(cached)) => {
-                debug!(peer_id = %self.peer_id, %job_id, %query_id, entries = cached.len(), "CacheStatus");
+                trace!(peer_id = %self.peer_id, %job_id, %query_id, entries = cached.len(), "CacheStatus");
                 ServerMessage::CacheStatus { query_id, cached }
             }
             Ok(Err(e)) => {
@@ -1117,7 +1117,7 @@ impl RpcContext {
         query_id: String,
         drv_paths: Vec<String>,
     ) -> ServerMessage {
-        debug!(peer_id = %self.peer_id, %job_id, %query_id, count = drv_paths.len(), "QueryKnownDerivations");
+        trace!(peer_id = %self.peer_id, %job_id, %query_id, count = drv_paths.len(), "QueryKnownDerivations");
         let hashes: Vec<String> = drv_paths
             .iter()
             .filter_map(|p| StorePath::parse_stored(p).ok())
@@ -1142,7 +1142,7 @@ impl RpcContext {
                 vec![]
             }
         };
-        debug!(peer_id = %self.peer_id, %job_id, %query_id, known = known.len(), "KnownDerivations");
+        trace!(peer_id = %self.peer_id, %job_id, %query_id, known = known.len(), "KnownDerivations");
         ServerMessage::KnownDerivations { query_id, known }
     }
 
