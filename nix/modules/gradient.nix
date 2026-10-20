@@ -790,7 +790,7 @@ in {
           max_connections = lib.mkDefault 200;
           random_page_cost = lib.mkDefault 1.1;
           max_locks_per_transaction = lib.mkDefault 1024;
-          wal_compression = lib.mkDefault "lz4";
+          wal_compression = lib.mkDefault "zstd";
           wal_buffers = lib.mkDefault "64MB";
           checkpoint_timeout = lib.mkDefault "15min";
           synchronous_commit = lib.mkDefault "off";
