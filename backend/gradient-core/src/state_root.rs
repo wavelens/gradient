@@ -17,6 +17,7 @@ use uuid::Uuid;
 use gradient_ci::CiContext;
 use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::metrics::cache_traffic::CacheTraffic;
+use gradient_db::task_board::BuildStatusCountsCache;
 use gradient_db::{CacheDb, DbContext, DbMemory, Wakeups, WebDb, WorkerDb};
 use gradient_entity::ids::{CacheId, ProjectId};
 use gradient_entity::{MappingError, StorePathMapper};
@@ -41,6 +42,7 @@ pub struct InstanceMemory {
     pub cache_traffic: Arc<CacheTraffic>,
     pub build_progress: Arc<Latest<DerivationBuildId, BuildProgress>>,
     pub eval_progress: Arc<Latest<EvaluationId, EvaluationProgress>>,
+    pub build_status_counts: Arc<BuildStatusCountsCache>,
     pub github_app_install_url: Arc<tokio::sync::OnceCell<String>>,
     pub manifest_state: ManifestStateStore,
     pub pending_credentials: PendingCredentialsStore,
@@ -91,6 +93,10 @@ pub const EVAL_PROGRESS_TTL: Duration = Duration::from_secs(60);
 
 pub fn eval_progress() -> Arc<Latest<EvaluationId, EvaluationProgress>> {
     Arc::new(Latest::new(EVAL_PROGRESS_TTL))
+}
+
+pub fn build_status_counts() -> Arc<BuildStatusCountsCache> {
+    Arc::new(Latest::new(Duration::from_secs(600)))
 }
 
 impl AppState {
