@@ -165,6 +165,7 @@ impl ParsedDerivation {
     pub(super) async fn outputs(
         &self,
         result: BuildResultInner,
+        oom_kills: Option<u64>,
         updater: &mut JobUpdater,
         task_index: u32,
         drv_path: &str,
@@ -216,7 +217,7 @@ impl ParsedDerivation {
             BuildResultInner::Failure(f) => {
                 let msg = String::from_utf8_lossy(&f.error_msg).to_string();
                 warn!(drv = %drv_path, error = %msg, "build failed");
-                let kind = classify_build_error(&msg);
+                let kind = classify_build_error(&msg, oom_kills);
                 Err(BuildError::new(
                     kind,
                     anyhow::anyhow!("{}", gradient_sources::strip_nix_log_tail(&msg)),
@@ -354,6 +355,7 @@ pub async fn build_derivation(
             parsed
                 .outputs(
                     result.inner,
+                    result.oom_kills,
                     updater,
                     task_index,
                     &task.drv_path,
