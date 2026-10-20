@@ -9,8 +9,8 @@ use gradient_entity::{
     cluster_member, commit, derivation, derivation_build, derivation_dependency,
     derivation_feature, derivation_metric, derivation_output, dispatched_job, dispatched_job_phase,
     entry_point, eval_cache_store, evaluation, evaluation_flake_input_override,
-    evaluation_input_update, evaluation_metric, feature, project, project_cache, task,
-    task_trigger, user, worker_registration,
+    evaluation_input_update, evaluation_metric, feature, project, project_cache, task, task_action,
+    task_flake_input_override, task_trigger, user, worker_registration,
 };
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{DatabaseConnection, EntityTrait, IntoActiveModel};
@@ -40,6 +40,8 @@ pub(super) async fn all(shape: Shape, db: &DatabaseConnection) {
     insert!(db, project::Entity, shape.projects);
     insert!(db, task::Entity, shape.tasks);
     insert!(db, task_trigger::Entity, shape.triggers);
+    insert!(db, task_action::Entity, shape.actions);
+    insert!(db, task_flake_input_override::Entity, shape.tracked_inputs);
     insert!(db, commit::Entity, shape.commits);
     insert!(db, evaluation::Entity, shape.evaluations);
     insert!(db, derivation::Entity, shape.derivations);

@@ -15,6 +15,7 @@ use anyhow::Context;
 use axum::extract::State;
 use axum::{Extension, Json};
 use chrono::Utc;
+use gradient_ci::trigger::InputUpdateOutcome;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::ServerState;
 use gradient_db::lookup::by_ids;
@@ -303,7 +304,7 @@ pub async fn delete_one(
     operation_id = "testTaskTrigger",
     tag = "triggers",
     summary = "Manually fire trigger",
-    description = "Resolves the task HEAD and applies the trigger immediately, bypassing commit dedup. Returns the apply outcome.",
+    description = "Resolves the task HEAD and applies the trigger immediately, bypassing commit dedup. A task with an active `open_pr` action and tracked flake inputs starts only its input update. Returns the outcome.",
     params(TaskPath, ("id" = TaskTriggerId, Path)),
     responses((status = OK, description = "Trigger apply outcome", body = serde_json::Value), WebError)
 )]
@@ -340,47 +341,61 @@ pub async fn fire_now(
         .await
         .context("resolve the branch head")?;
 
-    if let Err(e) = gradient_ci::trigger::maybe_trigger_input_update(
+    let input_update = gradient_ci::trigger::maybe_trigger_input_update(
         &state.web_db,
         &proj,
         head.commit.clone(),
         Some(row.id),
     )
     .await
-    {
+    .unwrap_or_else(|e| {
         tracing::warn!(error = %e, trigger_id = %row.id, "manual input_update trigger failed");
-    }
+        InputUpdateOutcome::NotConfigured
+    });
 
-    let input = ApplyInput {
-        trigger_id: row.id,
-        trigger_type,
-        branch: head.branch,
-        commit_hash: head.commit,
-        commit_message: Some(commit_message),
-        author_name: Some(author_name),
-        manual: true,
-        gate_approval: None,
-        repository_override: None,
-        wildcard_override: None,
-        source_comment: None,
-        instance_max_storage_gb: state.config.cache.max_storage_gb,
+    let body = match input_update {
+        InputUpdateOutcome::NotConfigured => {
+            let input = ApplyInput {
+                trigger_id: row.id,
+                trigger_type,
+                branch: head.branch,
+                commit_hash: head.commit,
+                commit_message: Some(commit_message),
+                author_name: Some(author_name),
+                manual: true,
+                gate_approval: None,
+                repository_override: None,
+                wildcard_override: None,
+                source_comment: None,
+                instance_max_storage_gb: state.config.cache.max_storage_gb,
+            };
+            apply_now(&state, &scheduler, &proj, input).await?
+        }
+        InputUpdateOutcome::AlreadyRunning => {
+            serde_json::json!({ "outcome": "InputUpdateRunning" })
+        }
+        InputUpdateOutcome::Started(evaluations) => serde_json::json!({
+            "outcome": "InputUpdateStarted",
+            "evaluation_ids": evaluations,
+        }),
     };
 
-    let outcome = apply_trigger(&state.web_db, &proj, input)
+    stamp_last_fired(&state.web_db, &row).await;
+
+    Ok(ok_json(body))
+}
+
+async fn apply_now(
+    state: &ServerState,
+    scheduler: &Scheduler,
+    task: &MTask,
+    input: ApplyInput,
+) -> WebResult<serde_json::Value> {
+    let outcome = apply_trigger(&state.web_db, task, input)
         .await
         .context("apply the trigger")?;
 
-    {
-        let now = gradient_types::now();
-        let mut active: gradient_entity::task_trigger::ActiveModel = row.clone().into();
-        active.last_fired_at = Set(Some(now));
-        active.updated_at = Set(now);
-        if let Err(e) = gradient_db::triggers::update(&state.web_db, active).await {
-            tracing::warn!(error = %e, trigger_id = %row.id, "failed to stamp trigger last_fired_at");
-        }
-    }
-
-    let body = match outcome {
+    Ok(match outcome {
         ApplyOutcome::Created {
             evaluation: eval,
             aborted_evaluation,
@@ -402,7 +417,15 @@ pub async fn fire_now(
         ApplyOutcome::SkippedConcurrency => {
             serde_json::json!({ "outcome": "SkippedConcurrency" })
         }
-    };
+    })
+}
 
-    Ok(ok_json(body))
+async fn stamp_last_fired(db: &gradient_db::WebDb, row: &MTaskTrigger) {
+    let now = gradient_types::now();
+    let mut active: gradient_entity::task_trigger::ActiveModel = row.clone().into();
+    active.last_fired_at = Set(Some(now));
+    active.updated_at = Set(now);
+    if let Err(e) = gradient_db::triggers::update(db, active).await {
+        tracing::warn!(error = %e, trigger_id = %row.id, "failed to stamp trigger last_fired_at");
+    }
 }

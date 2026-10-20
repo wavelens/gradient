@@ -9748,7 +9748,7 @@ paths:
       tags:
       - triggers
       summary: Manually fire trigger
-      description: Resolves the task HEAD and applies the trigger immediately, bypassing commit dedup. Returns the apply outcome.
+      description: Resolves the task HEAD and applies the trigger immediately, bypassing commit dedup. A task with an active `open_pr` action and tracked flake inputs starts only its input update. Returns the outcome.
       operationId: testTaskTrigger
       parameters:
       - name: project

@@ -25,8 +25,8 @@ use gradient_entity::{
     cluster_job, cluster_member, commit, derivation, derivation_build, derivation_dependency,
     derivation_feature, derivation_metric, derivation_output, dispatched_job, dispatched_job_phase,
     entry_point, eval_cache_store, evaluation, evaluation_flake_input_override,
-    evaluation_input_update, evaluation_metric, feature, project, project_cache, task,
-    task_trigger, user, worker_registration,
+    evaluation_input_update, evaluation_metric, feature, project, project_cache, task, task_action,
+    task_flake_input_override, task_trigger, user, worker_registration,
 };
 use sea_orm::DatabaseConnection;
 use uuid::Uuid;
@@ -57,6 +57,8 @@ pub struct Shape {
     pub(super) assignments: Vec<dispatched_job::Model>,
     pub(super) attempts: Vec<build_attempt::Model>,
     pub(super) triggers: Vec<task_trigger::Model>,
+    pub(super) actions: Vec<task_action::Model>,
+    pub(super) tracked_inputs: Vec<task_flake_input_override::Model>,
     pub(super) clusters: Vec<cluster_job::Model>,
     pub(super) members: Vec<cluster_member::Model>,
     pub(super) cluster_attempts: Vec<cluster_attempt::Model>,
