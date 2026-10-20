@@ -5,6 +5,7 @@
  */
 
 { lib
+, cacert
 , craneLib
 , git
 , installShellFiles
@@ -119,6 +120,7 @@ craneLib.buildPackage (commonArgs // rec {
   passthru.tests = craneLib.cargoNextest (commonArgs // {
     inherit cargoArtifacts version;
     doInstallCargoArtifacts = false;
+    nativeCheckInputs = [ cacert ];
   });
 
   postInstall = lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
