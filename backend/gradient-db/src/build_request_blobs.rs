@@ -6,26 +6,11 @@
 
 use chrono::NaiveDateTime;
 use gradient_types::*;
-use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
-
-pub async fn of_project_with_hashes<C: ConnectionTrait>(
-    db: &C,
-    project: ProjectId,
-    hashes: Vec<Vec<u8>>,
-) -> Result<Vec<MBuildRequestBlob>, DbErr> {
-    EBuildRequestBlob::find()
-        .filter(
-            Condition::all()
-                .add(CBuildRequestBlob::Project.eq(project))
-                .add(CBuildRequestBlob::Hash.is_in(hashes)),
-        )
-        .all(db)
-        .await
-}
 
 pub async fn insert<C: ConnectionTrait>(
     db: &C,
@@ -34,12 +19,18 @@ pub async fn insert<C: ConnectionTrait>(
     blob.into_active_model().insert(db).await
 }
 
-pub async fn mark_used<C: ConnectionTrait>(
+pub async fn mark_stored_as_used<C: ConnectionTrait>(
     db: &C,
-    blob: MBuildRequestBlob,
+    project: ProjectId,
+    hashes: Vec<Vec<u8>>,
     at: NaiveDateTime,
-) -> Result<MBuildRequestBlob, DbErr> {
-    let mut active: ABuildRequestBlob = blob.into();
-    active.last_used_at = Set(at);
-    active.update(db).await
+) -> Result<Vec<Vec<u8>>, DbErr> {
+    let stored = EBuildRequestBlob::update_many()
+        .col_expr(CBuildRequestBlob::LastUsedAt, Expr::value(at))
+        .filter(CBuildRequestBlob::Project.eq(project))
+        .filter(CBuildRequestBlob::Hash.is_in(hashes))
+        .exec_with_returning(db)
+        .await?;
+
+    Ok(stored.into_iter().map(|blob| blob.hash).collect())
 }

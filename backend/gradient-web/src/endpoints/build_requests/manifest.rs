@@ -112,19 +112,16 @@ pub async fn post_manifest(
             .collect()
     };
 
-    let existing = gradient_db::build_request_blobs::of_project_with_hashes(
+    let now_ts = now();
+    let existing_set: HashSet<Vec<u8>> = gradient_db::build_request_blobs::mark_stored_as_used(
         &state.web_db,
         project.id,
         unique_hashes.clone(),
+        now_ts,
     )
-    .await?;
-
-    let existing_set: HashSet<Vec<u8>> = existing.iter().map(|b| b.hash.clone()).collect();
-
-    let now_ts = now();
-    for blob in &existing {
-        gradient_db::build_request_blobs::mark_used(&state.web_db, blob.clone(), now_ts).await?;
-    }
+    .await?
+    .into_iter()
+    .collect();
 
     let missing_hex: Vec<String> = unique_hashes
         .iter()
