@@ -41,7 +41,7 @@ With `postgres.enable`, host-independent defaults come from `mkDefault` entries.
 | `random_page_cost` | `1.1` | Matches SSD storage and keeps the planner on index-only scans of the graph tables |
 | `max_connections` | `200` | Covers the three server pools (56 connections by default), autovacuum and `psql` |
 | `max_locks_per_transaction` | `1024` | Graph writes lock every shared build they touch. The server logs warnings below `256` |
-| `wal_compression` | `lz4` | Shrinks the full page images in the write-ahead log |
+| `wal_compression` | `zstd` | Shrinks the full page images in the write-ahead log |
 | `wal_buffers` | `64MB` | Keeps large graph writes from flushing the write-ahead log mid-transaction |
 | `checkpoint_timeout` | `15min` | Fewer checkpoints mean fewer full page images after each one |
 | `synchronous_commit` | `off` | A commit no longer waits for the disk. A database crash loses at most the last second of commits, with no corruption |
