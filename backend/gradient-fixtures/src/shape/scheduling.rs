@@ -15,7 +15,8 @@ use gradient_entity::ids::{
     BuildAttemptId, CacheUpstreamId, ClusterAttemptId, ClusterJobId, ClusterMemberId, CommitId,
     DerivationFeatureId, DerivationMetricId, DispatchedJobId, DispatchedJobPhaseId,
     EvalCacheStoreId, EvaluationFlakeInputOverrideId, EvaluationId, EvaluationInputUpdateId,
-    EvaluationMetricId, FeatureId, ProjectId, TaskId, TaskTriggerId,
+    EvaluationMetricId, FeatureId, FlakeInputOverrideId, IntegrationId, ProjectId, TaskActionId,
+    TaskId, TaskTriggerId,
 };
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_entity::task_trigger::TriggerType;
@@ -23,8 +24,10 @@ use gradient_entity::{
     build_attempt, build_job, cache_upstream, cluster_attempt, cluster_job, cluster_member,
     derivation, derivation_build, derivation_feature, derivation_metric, dispatched_job,
     dispatched_job_phase, eval_cache_store, evaluation, evaluation_flake_input_override,
-    evaluation_input_update, evaluation_metric, feature, task_trigger,
+    evaluation_input_update, evaluation_metric, feature, task_action, task_flake_input_override,
+    task_trigger,
 };
+use gradient_types::{ActionConfig, ActionType, PatchGeneratorKind, PrGranularity, VerifyGate};
 
 use super::Shape;
 use crate::{rows, test_date};
@@ -106,6 +109,44 @@ impl Shape {
             created_at: test_date(),
             updated_at: test_date(),
         });
+        self
+    }
+
+    pub fn flake_update_pull_request(mut self, inputs: &[&str]) -> Self {
+        let task = self.tasks[self.current_task()].id;
+        let created_by = self.owner();
+        let config = ActionConfig::OpenPr {
+            integration_id: IntegrationId::now_v7(),
+            generator: PatchGeneratorKind::FlakeLock,
+            granularity: PrGranularity::PerRun,
+            verify_gate: VerifyGate::Build,
+            branch_pattern: "gradient/flake-lock-update".into(),
+            title_template: None,
+            body_template: None,
+            update_existing: true,
+        };
+        self.actions.push(task_action::Model {
+            id: TaskActionId::now_v7(),
+            task,
+            name: "flake-update".into(),
+            action_type: ActionType::OpenPr,
+            config: serde_json::to_value(config).expect("an open_pr config"),
+            events: serde_json::json!([]),
+            active: true,
+            last_fired_at: None,
+            created_by,
+            created_at: test_date(),
+            updated_at: test_date(),
+        });
+        self.tracked_inputs
+            .extend(inputs.iter().map(|input| task_flake_input_override::Model {
+                id: FlakeInputOverrideId::now_v7(),
+                task,
+                input_name: (*input).into(),
+                url: None,
+                created_at: test_date(),
+                updated_at: test_date(),
+            }));
         self
     }
 

@@ -314,7 +314,7 @@ async fn input_update_noop_without_open_pr_action() {
     let created = maybe_trigger_input_update(&db, &task, vec![0u8; 20], None)
         .await
         .unwrap();
-    assert!(created.is_empty());
+    assert_eq!(created, InputUpdateOutcome::NotConfigured);
 }
 
 #[tokio::test]
@@ -328,7 +328,7 @@ async fn input_update_noop_without_tracked_inputs() {
     let created = maybe_trigger_input_update(&db, &task, vec![0u8; 20], None)
         .await
         .unwrap();
-    assert!(created.is_empty());
+    assert_eq!(created, InputUpdateOutcome::NotConfigured);
 }
 
 #[tokio::test]
@@ -346,7 +346,7 @@ async fn input_update_pinned_override_blocks_run() {
     let created = maybe_trigger_input_update(&db, &task, vec![0u8; 20], None)
         .await
         .unwrap();
-    assert!(created.is_empty());
+    assert_eq!(created, InputUpdateOutcome::NotConfigured);
 }
 
 #[tokio::test]
@@ -374,5 +374,5 @@ async fn input_update_creates_eval_for_tracked_input() {
     let created = maybe_trigger_input_update(&db, &task, vec![0u8; 20], None)
         .await
         .unwrap();
-    assert_eq!(created, vec![eval_id]);
+    assert_eq!(created, InputUpdateOutcome::Started(vec![eval_id]));
 }

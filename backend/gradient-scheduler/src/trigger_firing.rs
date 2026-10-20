@@ -68,7 +68,8 @@ pub(crate) fn cron_due(
         .unwrap_or(false)
 }
 
-use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger, trigger::maybe_trigger_input_update};
+use gradient_ci::trigger::{InputUpdateOutcome, maybe_trigger_input_update};
+use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_db::deliveries::trigger_fire::{TriggerFire, enqueue_trigger_fires};
 use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::task_trigger as ept;
@@ -226,15 +227,19 @@ async fn apply_resolved_head(
     has_update: bool,
     head: BranchHead,
 ) {
-    if let Err(e) = maybe_trigger_input_update(
+    let input_update = maybe_trigger_input_update(
         &scheduler.db.worker_db,
         task,
         head.commit.clone(),
         Some(trig.id),
     )
     .await
-    {
+    .unwrap_or_else(|e| {
         warn!(error = %e, trigger_id = %trig.id, "input_update trigger failed");
+        InputUpdateOutcome::NotConfigured
+    });
+    if input_update.replaces_evaluation() {
+        return;
     }
 
     if has_update || matches!(cfg, TriggerConfig::Time { .. }) {

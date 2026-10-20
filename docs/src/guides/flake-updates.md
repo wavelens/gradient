@@ -56,7 +56,8 @@ Supported input types: `github`, `gitlab` and `git`, including `git` over SSH wi
 
 ## Update Run
 
-Every trigger fire and every click on **Start Evaluation** launches an update evaluation in addition to the normal one.
+- A trigger fire and a **Fire Now** click start the update evaluation alone.
+- Clicks on **Start Evaluation** start the update evaluation alongside the normal evaluation.
 
 ```mermaid
 flowchart LR

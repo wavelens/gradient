@@ -11,12 +11,25 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum InputUpdateOutcome {
+    NotConfigured,
+    AlreadyRunning,
+    Started(Vec<EvaluationId>),
+}
+
+impl InputUpdateOutcome {
+    pub fn replaces_evaluation(&self) -> bool {
+        !matches!(self, Self::NotConfigured)
+    }
+}
+
 pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
     db: &C,
     task: &MTask,
     base_commit_hash: Vec<u8>,
     trigger: Option<TaskTriggerId>,
-) -> Result<Vec<EvaluationId>, TriggerError> {
+) -> Result<InputUpdateOutcome, TriggerError> {
     let Some(action) = ETaskAction::find()
         .filter(CTaskAction::Task.eq(task.id))
         .filter(CTaskAction::Active.eq(true))
@@ -24,13 +37,13 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
         .one(db)
         .await?
     else {
-        return Ok(Vec::new());
+        return Ok(InputUpdateOutcome::NotConfigured);
     };
 
     let Ok(ActionConfig::OpenPr { granularity, .. }) =
         serde_json::from_value::<ActionConfig>(action.config.clone())
     else {
-        return Ok(Vec::new());
+        return Ok(InputUpdateOutcome::NotConfigured);
     };
 
     let overrides = ETaskFlakeInputOverride::find()
@@ -38,12 +51,12 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
         .all(db)
         .await?;
     if overrides.iter().any(|o| o.url.is_some()) {
-        return Ok(Vec::new());
+        return Ok(InputUpdateOutcome::NotConfigured);
     }
 
     let tracked: Vec<String> = overrides.into_iter().map(|o| o.input_name).collect();
     if tracked.is_empty() {
-        return Ok(Vec::new());
+        return Ok(InputUpdateOutcome::NotConfigured);
     }
 
     let active_codes: Vec<i32> = EvaluationStatus::ACTIVE
@@ -58,7 +71,7 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
         .one(db)
         .await?;
     if already_running.is_some() {
-        return Ok(Vec::new());
+        return Ok(InputUpdateOutcome::AlreadyRunning);
     }
 
     let base_commit: String = base_commit_hash
@@ -105,7 +118,7 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
         }
     }
 
-    Ok(created)
+    Ok(InputUpdateOutcome::Started(created))
 }
 
 /// The commit is blank because the PR commit does not exist until the branch is force-pushed.

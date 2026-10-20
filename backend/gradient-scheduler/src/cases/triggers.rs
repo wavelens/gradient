@@ -1183,6 +1183,41 @@ async fn t20_a_poll_of_the_default_branch_and_a_push_to_it_abort_each_other() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn t21_a_flake_update_task_fires_only_its_input_update() {
+    let (e0, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let repo = GitRepo::new();
+    let c0 = repo.commit("c0");
+    let c1 = repo.commit("c1");
+    repo.push("main", &c1);
+    let case = SchedulerCase::start(
+        polled(
+            e0,
+            t1,
+            &repo,
+            &c0,
+            EvaluationStatus::Completed,
+            ConcurrencyPolicy::SoftAbort,
+        )
+        .flake_update_pull_request(&["nixpkgs"]),
+    )
+    .await;
+
+    case.fire_once().await;
+    case.deliver_trigger_fires().await;
+
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    let kinds: Vec<_> = fresh.iter().map(|e| (e.kind, e.trigger)).collect();
+    assert_eq!(
+        kinds,
+        vec![(EvaluationKind::InputUpdate, Some(t1))],
+        "{fresh:?}"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
 fn due_polling(e0: EvaluationId, t1: TaskTriggerId, repo: &GitRepo) -> Shape {
     shape()
         .evaluation(e0)
