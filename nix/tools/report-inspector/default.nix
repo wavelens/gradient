@@ -41,7 +41,10 @@ python3Packages.buildPythonApplication {
   # The setuptools console script is only appending its own site-packages.
   # An ambient PYTHONPATH naming another build is winning the import with the wrong schema.
   # The devShell is exporting exactly that, hijacking every later build including `nix run`.
-  makeWrapperArgs = [ "--unset PYTHONPATH" ];
+  makeWrapperArgs = [
+    "--unset"
+    "PYTHONPATH"
+  ];
 
   nativeCheckInputs = [ python3Packages.pytestCheckHook ];
 
