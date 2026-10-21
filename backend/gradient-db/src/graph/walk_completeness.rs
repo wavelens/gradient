@@ -25,12 +25,22 @@ WITH RECURSIVE incomplete(id) AS (
     SELECT s.id FROM incomplete i, LATERAL (SELECT e.derivation AS id FROM derivation_dependency e
      WHERE e.dependency = i.id AND e.kind IN (0, 2) OFFSET 0) s),
 counts AS (
-    SELECT e.derivation AS id, count(*)::int AS n FROM derivation_dependency e
-    JOIN incomplete i ON i.id = e.dependency
-    WHERE e.kind IN (0, 2) GROUP BY e.derivation)
+    SELECT s.id, count(*)::int AS n FROM incomplete i, LATERAL (SELECT e.derivation AS id FROM derivation_dependency e
+     WHERE e.dependency = i.id AND e.kind IN (0, 2) OFFSET 0) s GROUP BY s.id)
 UPDATE derivation d SET unwalked_inputs = coalesce(c.n, 0)
 FROM derivation w LEFT JOIN counts c ON c.id = w.id
 WHERE d.id = w.id AND w.walked AND w.unwalked_inputs <> coalesce(c.n, 0)
+"#;
+
+const UNWALKED_INPUTS_DRIFTED_SQL: &str = r#"
+WITH marked_incomplete AS MATERIALIZED (
+    SELECT id, walked, unwalked_inputs FROM derivation WHERE NOT walked OR unwalked_inputs <> 0),
+counts AS (
+    SELECT s.id, count(*)::int AS n FROM marked_incomplete i, LATERAL (SELECT e.derivation AS id FROM derivation_dependency e
+     WHERE e.dependency = i.id AND e.kind IN (0, 2) OFFSET 0) s GROUP BY s.id)
+SELECT 1 FROM marked_incomplete i FULL JOIN counts c ON c.id = i.id
+WHERE i.id IS NULL OR (i.walked AND i.unwalked_inputs <> coalesce(c.n, 0))
+LIMIT 1
 "#;
 
 crate::sql! {
@@ -65,6 +75,11 @@ RETURNING d.id, x.was_complete, (d.walked AND d.unwalked_inputs = 0) AS complete
 
     UNWALK = "UPDATE derivation SET walked = false WHERE id = ANY($1)",
         params = [DerivationIds(64)];
+
+    UNWALKED_INPUTS_DRIFTED = UNWALKED_INPUTS_DRIFTED_SQL,
+        params = [],
+        tier = Sweep,
+        flags = [Walk];
 
     RECOUNT_WALK_COMPLETENESS = RECOUNT_WALK_COMPLETENESS_SQL,
         params = [],
@@ -148,14 +163,12 @@ pub async fn recount_walk_completeness<C>(db: &C) -> Result<u64, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let walk = crate::graph::walks::begin_walk(db, &RECOUNT_WALK_COMPLETENESS).await?;
-    let changed = walk
-        .execute_raw(RECOUNT_WALK_COMPLETENESS.stmt())
-        .await?
-        .rows_affected();
-    walk.commit().await?;
-
-    Ok(changed)
+    crate::graph::walks::recount_if_drifted(
+        db,
+        &UNWALKED_INPUTS_DRIFTED,
+        &RECOUNT_WALK_COMPLETENESS,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -385,22 +398,48 @@ mod tests {
             sql.contains("SELECT id FROM derivation WHERE NOT walked"),
             "{sql}"
         );
-        assert!(
-            sql.contains("JOIN incomplete i ON i.id = e.dependency"),
-            "{sql}"
-        );
-        // A joined step is merge-joining every edge once per level, ~190 s on prod.
-        // The fenced probe is reading only the edges into the frontier.
-        assert!(
-            sql.contains("SELECT s.id FROM incomplete i, LATERAL (SELECT e.derivation AS id")
-                && sql.contains("WHERE e.dependency = i.id AND e.kind IN (0, 2) OFFSET 0) s"),
-            "{sql}"
+        assert_eq!(
+            sql.matches("WHERE e.dependency = i.id AND e.kind IN (0, 2) OFFSET 0) s")
+                .count(),
+            2,
+            "the step and the counts probe only the edges out of the incomplete set: {sql}"
         );
         assert!(
             sql.contains(
                 "WHERE d.id = w.id AND w.walked AND w.unwalked_inputs <> coalesce(c.n, 0)"
             ),
             "{sql}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_drifted_counter_runs_the_full_recount_in_the_same_walk() {
+        let db = mock_db()
+            .append_exec_results([
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 0,
+                },
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 3,
+                },
+            ])
+            .append_query_results([vec![BTreeMap::from([(
+                "?column?".to_owned(),
+                Value::Int(Some(1)),
+            )])]])
+            .into_connection();
+
+        assert_eq!(recount_walk_completeness(&db).await.unwrap(), 3);
+        let log = raw_statements(db.into_transaction_log());
+        assert!(
+            log[1]
+                .sql
+                .contains("FROM marked_incomplete i FULL JOIN counts c")
+                && !log[1].sql.contains("RECURSIVE")
+                && log[2].sql.contains("WITH RECURSIVE incomplete(id) AS"),
+            "{log:?}"
         );
     }
 }
