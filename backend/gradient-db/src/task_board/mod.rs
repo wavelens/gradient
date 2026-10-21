@@ -229,10 +229,11 @@ crate::sql! {
             EvaluationId,
         ],
         tier = Bulk,
-        budget = crate::sql::Budget::bulk().buffers(200_000)
+        budget = crate::sql::Budget::bulk().buffers(300_000)
             .because("counts the closure of 64 entry points inside the fixture's largest \
                       evaluation, ~98k jobs; the planner underestimates a new evaluation and \
-                      reads its edge set by index probes, ~1.7 buffers per job"),
+                      reads its edge set by index probes, 1.4 to 2.4 buffers per job across \
+                      e2e runs"),
         flags = [Walk];
 }
 
