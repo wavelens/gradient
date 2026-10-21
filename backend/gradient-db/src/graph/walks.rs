@@ -39,6 +39,21 @@ where
     Ok(txn)
 }
 
+pub async fn recount_if_drifted<C>(db: &C, drifted: &Query, recount: &Query) -> Result<u64, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let walk = begin_walk(db, recount).await?;
+    let changed = if walk.query_one_raw(drifted.stmt()).await?.is_some() {
+        walk.execute_raw(recount.stmt()).await?.rows_affected()
+    } else {
+        0
+    };
+    walk.commit().await?;
+
+    Ok(changed)
+}
+
 pub enum ClosureDirection {
     Dependencies,
     WantedBy,

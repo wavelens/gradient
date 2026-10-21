@@ -48,21 +48,47 @@ fn complete_among_sql() -> String {
     )
 }
 
+fn runtime_dependents_counted(set: &str) -> String {
+    format!(
+        "counts AS (\
+             SELECT s.derivation, count(*)::int AS n FROM {set} u, \
+             LATERAL (SELECT e.derivation FROM derivation_dependency e \
+                      WHERE e.dependency = u.derivation AND e.kind IN (1, 2) OFFSET 0) s \
+             GROUP BY s.derivation)"
+    )
+}
+
 fn recount_sql() -> String {
     format!(
-        "WITH RECURSIVE incomplete(derivation) AS (\
-             SELECT db.derivation FROM derivation_build db WHERE NOT {present} \
-             UNION \
-             SELECT e.derivation FROM derivation_dependency e \
-             JOIN incomplete u ON u.derivation = e.dependency WHERE e.kind IN (1, 2)), \
-         counts AS (\
-             SELECT e.derivation, count(*)::int AS n FROM derivation_dependency e \
-             JOIN incomplete u ON u.derivation = e.dependency WHERE e.kind IN (1, 2) \
-             GROUP BY e.derivation) \
+        "WITH RECURSIVE {incomplete}, {counts} \
          UPDATE derivation_build db SET missing_runtime_deps = coalesce(c.n, 0) \
          FROM derivation_build b LEFT JOIN counts c ON c.derivation = b.derivation \
          WHERE db.id = b.id AND b.missing_runtime_deps <> coalesce(c.n, 0)",
+        incomplete = crate::graph::walks::bounded_dependency_closure_cte_body(
+            "incomplete",
+            &format!(
+                "SELECT db.derivation FROM derivation_build db WHERE NOT {}",
+                present_predicate("db")
+            ),
+            crate::graph::walks::ClosureDirection::WantedBy,
+            "e.kind IN (1, 2)",
+            None,
+        ),
+        counts = runtime_dependents_counted("incomplete"),
+    )
+}
+
+fn drifted_sql() -> String {
+    format!(
+        "WITH marked_incomplete AS MATERIALIZED (\
+             SELECT db.derivation, db.missing_runtime_deps FROM derivation_build db \
+             WHERE db.missing_runtime_deps <> 0 OR NOT {present}), \
+         {counts} \
+         SELECT 1 FROM marked_incomplete i FULL JOIN counts c ON c.derivation = i.derivation \
+         WHERE i.derivation IS NULL OR i.missing_runtime_deps <> coalesce(c.n, 0) \
+         LIMIT 1",
         present = present_predicate("db"),
+        counts = runtime_dependents_counted("marked_incomplete"),
     )
 }
 
@@ -73,6 +99,11 @@ crate::sql_fn! {
 
     CLOSURE_COMPLETE_AMONG = complete_among_sql,
         params = [DerivationIds(64)];
+
+    MISSING_RUNTIME_DEPS_DRIFTED = drifted_sql,
+        params = [],
+        tier = Sweep,
+        flags = [Walk];
 
     RECOUNT_MISSING_RUNTIME_DEPS = recount_sql,
         params = [],
@@ -349,14 +380,12 @@ pub async fn recount_missing_runtime_deps<C>(db: &C) -> Result<u64, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let walk = crate::graph::walks::begin_walk(db, &RECOUNT_MISSING_RUNTIME_DEPS).await?;
-    let changed = walk
-        .execute_raw(RECOUNT_MISSING_RUNTIME_DEPS.stmt())
-        .await?
-        .rows_affected();
-    walk.commit().await?;
-
-    Ok(changed)
+    crate::graph::walks::recount_if_drifted(
+        db,
+        &MISSING_RUNTIME_DEPS_DRIFTED,
+        &RECOUNT_MISSING_RUNTIME_DEPS,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -565,13 +594,53 @@ mod tests {
         assert!(sql.contains("WHERE NOT (EXISTS"), "{sql}");
         assert!(
             sql.contains(
-                "SELECT e.derivation FROM derivation_dependency e JOIN incomplete u ON u.derivation = e.dependency WHERE e.kind IN (1, 2)"
+                "LATERAL (SELECT e.derivation AS next FROM derivation_dependency e WHERE e.dependency = c.derivation AND e.kind IN (1, 2) OFFSET 0) s"
             ),
             "{sql}"
         );
         assert!(
+            sql.contains("FROM incomplete u, LATERAL (SELECT e.derivation FROM derivation_dependency e WHERE e.dependency = u.derivation AND e.kind IN (1, 2) OFFSET 0) s"),
+            "the counts probe only the edges out of the incomplete set: {sql}"
+        );
+        assert!(
             sql.contains("b.missing_runtime_deps <> coalesce(c.n, 0)"),
             "only a row that disagrees is rewritten: {sql}"
+        );
+    }
+
+    #[test]
+    fn the_drift_check_counts_from_what_the_counters_mark_incomplete() {
+        let sql = MISSING_RUNTIME_DEPS_DRIFTED.text();
+        assert!(!sql.contains("RECURSIVE"), "{sql}");
+        assert!(
+            sql.contains("WHERE db.missing_runtime_deps <> 0 OR NOT (EXISTS"),
+            "{sql}"
+        );
+        assert!(sql.contains("FROM marked_incomplete u, LATERAL ("), "{sql}");
+        assert!(
+            sql.contains(
+                "WHERE i.derivation IS NULL OR i.missing_runtime_deps <> coalesce(c.n, 0)"
+            ),
+            "a counted dependent the counters mark complete is drift too: {sql}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_clean_drift_check_skips_the_recount() {
+        let db = mock_db()
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .append_query_results([none()])
+            .into_connection();
+
+        assert_eq!(recount_missing_runtime_deps(&db).await.unwrap(), 0);
+        let log = raw_statements(db.into_transaction_log());
+        assert!(
+            log.iter()
+                .all(|s| !s.sql.contains("SET missing_runtime_deps")),
+            "{log:?}"
         );
     }
 }

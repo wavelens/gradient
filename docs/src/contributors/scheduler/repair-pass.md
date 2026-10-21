@@ -99,6 +99,8 @@ Changes to `evaluation.graph_version` can invalidate the per-entry-point status 
 | 10 | Count `Building` evaluations with `active_shared_builds = 0` (read-only) | `wedged_building_evals` |
 
 - **Repair scope:** pending shared builds, their direct dependencies, `fetchable` rows with `missing_runtime_deps > 0`, and terminal-success rows without a set `fetchable` flag. Every pass must log the scope size under the `scope` field.
+- Steps 1 and 2 first compare each counter with its direct inputs. The full recount can only start on a mismatch.
+- Agreeing counters already equal the recount result on the acyclic dependency graph.
 - Each chunk of 3 and 6 is its own transaction, with `lock_shared_builds` (ordered `FOR NO KEY UPDATE`) first and the recount second. A cancelled check can lose one chunk.
 - A recount can read one snapshot and spread nothing. A chain of drifted rows will converge one level per interval.
 - Drift counts are rows already repaired. A warning naming only those rows is a successful self-repair.
