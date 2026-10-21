@@ -7,7 +7,8 @@
 //! The sweep is the only backstop for the moved columns.
 //! `GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS = 0` is leaving them with none.
 //! A table-wide recount runs only after its drift check finds a counter its direct inputs contradict.
-//! The dependency graph is acyclic, so agreeing counters are already the recount's result.
+//! Skipping it is only correct without cycles: on a cycle, stuck counters agree with their inputs
+//! and the recount never runs to fix them.
 
 use crate::DbContext;
 use gradient_entity::evaluation::EvaluationStatus;
