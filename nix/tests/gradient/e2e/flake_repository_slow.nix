@@ -5,7 +5,7 @@
  */
 {
   description = "Test Repository for Gradient Build Server";
-  inputs.nixpkgs.url = "path:[nixpkgs]";
+  inputs.nixpkgs.url = "http://server/nixpkgs.tar.gz";
   outputs = { self, nixpkgs, ... }: let
     pkgs = import nixpkgs { system = "x86_64-linux"; };
     leaf = pkgs.runCommand "slow-leaf" { } "sleep 600; touch $out";

@@ -5,7 +5,7 @@
  */
 {
   description = "Test Repository for Gradient Build Server";
-  inputs.nixpkgs.url = "path:[nixpkgs]";
+  inputs.nixpkgs.url = "http://server/nixpkgs.tar.gz";
   outputs = { self, nixpkgs, ... }: let
     pkgs = import nixpkgs { system = "x86_64-linux"; };
     # Evaluation is running for hours in flat memory. Only an abort can end it.
