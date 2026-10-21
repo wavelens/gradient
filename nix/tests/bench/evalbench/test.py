@@ -175,6 +175,7 @@ def assert_captured(host, instrumented):
 start_all()
 banner("bring services up")
 server.wait_for_unit("gradient-server.service")
+server.wait_for_open_port(8088)
 wait_workers_ready()
 
 banner("seed the e2e repository")
