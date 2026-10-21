@@ -6,6 +6,7 @@ backend/test-store
 /gradjoeng/
 /hypervisor/
 /hosted/
+/search/
 
 # ---> Python
 # Byte-compiled / optimized / DLL files
