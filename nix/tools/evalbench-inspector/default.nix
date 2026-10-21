@@ -13,7 +13,10 @@ python3Packages.buildPythonApplication {
   # The report must render wherever a bundle is downloaded to. Only stdlib is allowed.
   dependencies = [ ];
 
-  makeWrapperArgs = [ "--unset PYTHONPATH" ];
+  makeWrapperArgs = [
+    "--unset"
+    "PYTHONPATH"
+  ];
 
   nativeCheckInputs = [ python3Packages.pytestCheckHook ];
 
