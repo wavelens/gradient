@@ -5,11 +5,8 @@
  */
 
 { self, pkgs, topology }: let
-  nixpkgsTarball = pkgs.runCommand "nixpkgs-tarball" { } ''
-    mkdir $out
-    tar -C ${self.inputs.nixpkgs} --transform 's,^\.,nixpkgs,S' --sort=name --mtime=@1 \
-      --owner=0 --group=0 --numeric-owner -czf $out/nixpkgs.tar.gz .
-  '';
+  e2e = ../../gradient/e2e;
+  nixpkgsTarball = import ../../harness/nixpkgs-tarball.nix { inherit pkgs; inherit (self.inputs) nixpkgs; };
 
   testStore = import ../../../scripts/store.nix {
     inherit pkgs;
@@ -180,6 +177,7 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
         nginx.virtualHosts."gradient.local" = {
           enableACME = lib.mkForce false;
           forceSSL = lib.mkForce false;
+          locations."= /nixpkgs.tar.gz".alias = nixpkgsTarball;
         };
 
         postgresql = {
@@ -213,18 +211,9 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
 
       systemd.tmpfiles.rules = [
         "d /var/lib/git 0755 git git"
-        "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
-        "L+ /var/lib/git/flake.lock 0755 git git - ${./flake_repository.lock}"
+        "L+ /var/lib/git/flake.nix 0755 git git - ${e2e}/flake_repository.nix"
+        "L+ /var/lib/git/flake.lock 0755 git git - ${e2e}/flake_repository.lock"
       ];
-
-      systemd.services.nixpkgs-tarball = {
-        wantedBy = [ "multi-user.target" ];
-        after = [ "network.target" ];
-        serviceConfig = {
-          ExecStart = "${pkgs.python3}/bin/python3 -m http.server 8088 --directory ${nixpkgsTarball}";
-          DynamicUser = true;
-        };
-      };
     };
   } // topo.nodes;
 
@@ -234,7 +223,6 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
     GIT          = "${lib.getExe pkgs.git}"
     API          = "http://gradient.local/api/v1"
     INSPECTOR    = "${lib.getExe (pkgs.callPackage ../../../tools/evalbench-inspector { })}"
-    NIXPKGS      = "${self.inputs.nixpkgs}"
     NIXPKGS_HASH = "${self.inputs.nixpkgs.narHash}"
     ${import ../../harness/prelude.nix { inherit lib; topology = topo; }}
     ${builtins.readFile ./summarize.py}

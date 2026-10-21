@@ -5,6 +5,8 @@
  */
 
 { self, pkgs, topology }: let
+  nixpkgsTarball = import ../../harness/nixpkgs-tarball.nix { inherit pkgs; inherit (self.inputs) nixpkgs; };
+
   testStore = import ../../../scripts/store.nix {
     inherit pkgs;
     skipDirectories = false;
@@ -238,6 +240,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             alias = "/srv/upstream/";
             extraConfig = "autoindex off;";
           };
+          locations."= /nixpkgs.tar.gz".alias = nixpkgsTarball;
         };
 
         postgresql = {
@@ -967,8 +970,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     server.succeed("cp /var/lib/git/{,test/}flake.nix")
     server.succeed("cp /var/lib/git/{,test/}flake.lock")
 
-    server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
-    server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.lock")
     server.succeed("sed -i 's#\\[hash\\]#${self.inputs.nixpkgs.narHash}#g' /var/lib/git/test/flake.lock")
 
     server.succeed(f"{GIT} -C /var/lib/git/test add flake.nix flake.lock")
@@ -1943,7 +1944,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         )
 
     server.succeed("cp /var/lib/git/flake-busywrap.nix /var/lib/git/test/flake.nix")
-    server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
     server.succeed(f"{GIT} -C /var/lib/git/test commit -am 'busywrap'")
     server.succeed("chown git:git -R /var/lib/git/test")
     eval4_id = wait_for_new_eval({eval_id, eval2_id, eval3_id})
@@ -2187,7 +2187,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     spin_evals = f"FROM evaluation WHERE NOT (id = ANY(string_to_array('{known}', ',')::uuid[]))"
     abort_since = server.succeed("date '+%F %T'").strip()
     server.succeed("cp /var/lib/git/flake-spin.nix /var/lib/git/test/flake.nix")
-    server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
     server.succeed(f"{GIT} -C /var/lib/git/test commit -am 'spin'")
     server.succeed("chown git:git -R /var/lib/git/test")
 
@@ -2236,7 +2235,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     known = sql("SELECT string_agg(id::text, ',') FROM evaluation;")
     slow_evals = f"SELECT id FROM evaluation WHERE NOT (id = ANY(string_to_array('{known}', ',')::uuid[]))"
     server.succeed("cp /var/lib/git/flake-slow.nix /var/lib/git/test/flake.nix")
-    server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
     server.succeed(f"{GIT} -C /var/lib/git/test commit -am 'slow'")
     server.succeed("chown git:git -R /var/lib/git/test")
 

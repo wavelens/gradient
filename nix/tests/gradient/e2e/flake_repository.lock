@@ -2,14 +2,13 @@
   "nodes": {
     "nixpkgs": {
       "locked": {
-        "lastModified": 0,
         "narHash": "[hash]",
-        "path": "[nixpkgs]",
-        "type": "path"
+        "type": "tarball",
+        "url": "http://server/nixpkgs.tar.gz"
       },
       "original": {
-        "path": "[nixpkgs]",
-        "type": "path"
+        "type": "tarball",
+        "url": "http://server/nixpkgs.tar.gz"
       }
     },
     "root": {
