@@ -877,10 +877,10 @@ fn build_eval_stats_report(
             .into_iter()
             .map(|c| EvalAttrCost {
                 attr: c.attr,
-                thunks: c.thunks,
-                fn_calls: c.fn_calls,
-                eval_ms: 0,
-                alloc_bytes: c.alloc_bytes,
+                thunks: c.cost.thunks,
+                fn_calls: c.cost.fn_calls,
+                eval_ms: c.cost.eval_ms,
+                alloc_bytes: c.cost.alloc_bytes,
             })
             .collect(),
         flake_nodes,

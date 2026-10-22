@@ -308,6 +308,7 @@ mod tests {
             drv_path: Some("aaaa-hello.drv".into()),
             references: vec!["/nix/store/bbbb-glibc".into()],
             error: None,
+            cost: None,
         }))
         .expect("serialize");
 
@@ -324,6 +325,7 @@ mod tests {
             drv_path: None,
             references: vec![],
             error: Some("boom".into()),
+            cost: None,
         }))
         .expect("serialize");
 

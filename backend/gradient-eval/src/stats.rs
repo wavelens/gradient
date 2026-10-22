@@ -35,3 +35,12 @@ impl StatsDelta {
         }
     }
 }
+
+#[derive(
+    Clone, Copy, Debug, Default, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize,
+)]
+#[rkyv(derive(Debug))]
+pub struct AttrCost {
+    pub stats: StatsDelta,
+    pub eval_ms: u64,
+}

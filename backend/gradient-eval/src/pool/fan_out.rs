@@ -10,7 +10,7 @@ use std::future::Future;
 use futures::stream::{FuturesUnordered, StreamExt};
 
 use crate::ipc::{AttrError, DiscoveryShard, ResolvedItem};
-use crate::stats::StatsDelta;
+use crate::stats::{AttrCost, StatsDelta};
 use crate::wildcard_walk::{parse_pattern, segments_to_pattern};
 
 use super::transport::Listing;
@@ -192,6 +192,8 @@ pub type FoundItems<'a> = &'a (dyn Fn(Vec<ResolvedItem>) + Send + Sync);
 pub struct CallStats {
     pub entry_point: String,
     pub stats: Option<StatsDelta>,
+    pub eval_ms: u64,
+    pub attrs: Vec<(String, AttrCost)>,
     pub rss: u64,
 }
 
