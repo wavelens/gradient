@@ -211,7 +211,11 @@ mod tests {
         let url = format!("http://localhost:{}/hook", server.address().port());
 
         let trusted = build_client().expect("client").get(&url).send().await;
-        let public = build_public_client().expect("client").get(&url).send().await;
+        let public = build_public_client()
+            .expect("client")
+            .get(&url)
+            .send()
+            .await;
 
         assert!(trusted.is_ok(), "{trusted:?}");
         let refused = format!("{:?}", public.expect_err("loopback target"));
