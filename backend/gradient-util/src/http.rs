@@ -219,6 +219,6 @@ mod tests {
 
         assert!(trusted.is_ok(), "{trusted:?}");
         let refused = format!("{:?}", public.expect_err("loopback target"));
-        assert!(refused.contains("resolves only to"), "{refused}");
+        assert!(refused.contains("InternalOnly"), "{refused}");
     }
 }
