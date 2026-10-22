@@ -34,6 +34,17 @@ pub(crate) struct ExecutorOk {
     pub(crate) response_body: Option<String>,
 }
 
+pub(crate) async fn read_capped(mut resp: reqwest::Response, max: usize) -> String {
+    let mut body = Vec::new();
+    while body.len() < max {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => body.extend_from_slice(&chunk),
+            Ok(None) | Err(_) => break,
+        }
+    }
+    truncate(String::from_utf8_lossy(&body).into_owned(), max)
+}
+
 pub(crate) fn truncate(mut s: String, max: usize) -> String {
     if s.len() > max {
         if let Some((idx, _)) = s.char_indices().take_while(|(i, _)| *i <= max).last() {

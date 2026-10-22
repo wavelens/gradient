@@ -6,7 +6,7 @@
 
 use super::sign;
 use crate::ActionError;
-use crate::actions::{MAX_BODY_BYTES, decrypt_secret_with_file, truncate};
+use crate::actions::{MAX_BODY_BYTES, decrypt_secret_with_file, read_capped, truncate};
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
 use gradient_types::ids::PendingDeliveryId;
@@ -40,7 +40,7 @@ pub async fn deliver(
     let result = post(ctx, hook, &event, &body, delivery).await;
     let duration_ms = i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX);
     let (response_status, response_body, error_message) = match result {
-        Ok((status, text)) => (Some(status), Some(truncate(text, MAX_BODY_BYTES)), None),
+        Ok((status, text)) => (Some(status), Some(text), None),
         Err(e) => (None, None, Some(format!("{e:#}"))),
     };
     let success = response_status.is_some_and(|s| (200..300).contains(&s));
@@ -79,8 +79,7 @@ async fn post(
     let secret = decrypt_secret_with_file(&ctx.db.config.secrets.crypt_file, &hook.secret)?;
     let signature = sign(secret.expose().as_bytes(), body.as_bytes())
         .ok_or_else(|| anyhow!("webhook secret cannot key an HMAC"))?;
-    let resp = ctx
-        .http
+    let resp = gradient_util::http::public_client()
         .post(&hook.url)
         .header("Content-Type", "application/json")
         .header("X-Gradient-Event", event)
@@ -91,7 +90,7 @@ async fn post(
         .await
         .context("send HTTP request")?;
     let status = i32::from(resp.status().as_u16());
-    Ok((status, resp.text().await.unwrap_or_default()))
+    Ok((status, read_capped(resp, MAX_BODY_BYTES).await))
 }
 
 async fn touch_last_fired(ctx: &CiContext, id: WebhookId) {
