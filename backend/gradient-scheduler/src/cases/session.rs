@@ -474,7 +474,7 @@ impl SchedulerCase {
         if !self.owns_remembered(worker, key).await {
             return;
         }
-        let _ = aliases::store_eval_stats(&self.scheduler, key, stats).await;
+        let _ = aliases::store_eval_stats(&self.scheduler, worker, key, stats).await;
     }
 
     pub async fn report_input_update_result(

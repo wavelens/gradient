@@ -33,10 +33,11 @@ pub(super) async fn store_scores(scheduler: &Scheduler, worker: &str, scores: Ve
 
 pub(super) async fn store_eval_stats(
     scheduler: &Scheduler,
+    worker: &str,
     key: &str,
     stats: EvalStatsReport,
 ) -> anyhow::Result<()> {
-    scheduler.record_eval_metrics(key, stats).await
+    scheduler.record_eval_metrics(worker, key, stats).await
 }
 
 pub(super) async fn store_eval_message(

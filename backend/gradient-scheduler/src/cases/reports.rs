@@ -1306,11 +1306,8 @@ async fn r19_an_eval_completion_moves_to_building_or_straight_to_the_verdict() {
     );
     case.check("step 1").await;
 
-    let stats = EvalStatsReport {
-        worker_id: W1.into(),
-        ..Default::default()
-    };
-    case.report_eval_stats(W1, &k1, stats).await;
+    case.report_eval_stats(W1, &k1, EvalStatsReport::default())
+        .await;
     let spans = vec![
         span(JobPhase::Fetch, 0, 1000),
         span(JobPhase::EvalFlake, 1000, 2000),
@@ -1428,7 +1425,6 @@ async fn r21_eval_stats_write_the_metric_and_only_the_closing_completion_adds_sp
         peak_rss_mb: 512,
         total_thunks: 1000,
         total_eval_ms: 900,
-        worker_id: W1.into(),
         ..Default::default()
     };
     case.report_eval_stats(W1, &k, stats).await;
