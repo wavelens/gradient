@@ -46,8 +46,8 @@ impl<S> Worker<S> {
 }
 
 impl Worker<Connected> {
-    pub async fn connect(config: WorkerConfig) -> Result<Self> {
-        let mut conn = ProtoConnection::open(&config.server_url).await?;
+    pub async fn connect(config: WorkerConfig, server_url: &str) -> Result<Self> {
+        let mut conn = ProtoConnection::open(server_url).await?;
         Self::setup_connection(&mut conn, &config).await?;
         let (executor, scorer) = Self::build_executor(&config).await?;
         Ok(Self::new_connected(config, conn, executor, scorer))
@@ -85,8 +85,8 @@ impl Worker<Connected> {
 impl Worker<Disconnected> {
     /// The server is holding no state for this worker after a restart.
     /// A reconnect must re-run the full handshake, capability advertisement and initial request.
-    pub async fn reconnect(&self) -> Result<ProtoConnection> {
-        let mut conn = ProtoConnection::open(&self.config.server_url).await?;
+    pub async fn reconnect(&self, server_url: &str) -> Result<ProtoConnection> {
+        let mut conn = ProtoConnection::open(server_url).await?;
         perform_setup(&mut conn, &self.config, Side::Reconnect).await?;
         Ok(conn)
     }

@@ -109,6 +109,15 @@ impl WorkerConfig {
         }
     }
 
+    pub fn outbound_server_url(&self) -> anyhow::Result<Option<String>> {
+        if self.server_url.is_none() && !self.discoverable {
+            anyhow::bail!(
+                "worker.serverUrl unset without worker.discoverable; set either to connect to a server"
+            );
+        }
+        Ok(self.server_url.clone())
+    }
+
     pub fn build_cores(&self) -> Option<NonZeroU32> {
         self.build.max_cores
     }
@@ -294,6 +303,26 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(cfg.accepted_server_tokens(), Some(vec![]));
+    }
+
+    #[test]
+    fn a_worker_without_server_url_needs_discoverable() {
+        let mut config = WorkerConfig::default();
+        let refused = config
+            .outbound_server_url()
+            .expect_err("a worker without any connection must be refused");
+        let message = refused.to_string();
+        assert!(message.contains("serverUrl"), "{message}");
+        assert!(message.contains("discoverable"), "{message}");
+
+        config.discoverable = true;
+        assert_eq!(config.outbound_server_url().expect("listener only"), None);
+
+        config.server_url = Some("ws://server/proto".to_owned());
+        assert_eq!(
+            config.outbound_server_url().expect("both directions"),
+            Some("ws://server/proto".to_owned())
+        );
     }
 
     #[test]

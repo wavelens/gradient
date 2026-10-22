@@ -314,7 +314,7 @@
 | `worker.maxLifetime` | null or (unsigned int) | `null` | `GRADIENT_WORKER_MAX_LIFETIME` | Seconds after start after which the worker drains, finishes its running jobs and exits. `null` keeps it running. |
 | `worker.peersFile` | null or path | `null` | `GRADIENT_WORKER_PEERS_FILE` | File of peer tokens for challenge-response authentication with the server, with `peer_id:token` per line and `#` starting a comment. ``` <uuid>:<token> *:<token> ``` Use peer ID `*` to match any UUID in the server's challenge. Tokens are 48 byte random secrets, for example from `openssl rand -base64 48`. Register them via the API through `POST /api/v1/projects/{project}/workers`. Set it to `null` for open mode without authentication; avoid that in a production setup. |
 | `worker.port` | port | `3100` | `GRADIENT_WORKER_PORT` | Port the worker listens on for incoming server connections. |
-| `worker.serverUrl` | null or string | `null` | `GRADIENT_WORKER_SERVER_URL` | WebSocket URL of the Gradient server's `/proto` endpoint. `null` keeps the worker waiting for the server to connect. |
+| `worker.serverUrl` | null or string | `null` | `GRADIENT_WORKER_SERVER_URL` | WebSocket URL of the Gradient server's `/proto` endpoint. `null` skips the outbound connection, leaving only incoming server connections through `worker.discoverable`. |
 | `worker.useTls` | bool | `true` | - | Whether to enable TLS. |
 | `worker.zone` | null or string | `null` | `GRADIENT_WORKER_ZONE` | Locality label advertised to the scheduler. A cluster job asking for one zone places every member on workers with the same label. `null` places the worker among the unlabelled workers. |
 
