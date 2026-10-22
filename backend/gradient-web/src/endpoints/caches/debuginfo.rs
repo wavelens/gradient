@@ -115,17 +115,13 @@ async fn fetch_from_upstream_caches(
     upstream_caches: &[UpstreamSource],
     build_id: &str,
 ) -> Option<DebugInfoRedirect> {
-    let pins = gradient_core::upstream::http1_pins();
     for upstream in upstream_caches {
         for key in [build_id.to_owned(), format!("{build_id}.debug")] {
             let url = format!("{}/debuginfo/{}", upstream.url.trim_end_matches('/'), key);
-            let Ok(response) = gradient_util::http1_fallback::get(
-                &url,
-                pins.wants_http1(upstream.id, upstream.http1_only),
-                pins.on_failure(upstream.id),
-                |r| r,
-            )
-            .await
+            let Ok(response) = gradient_util::http::upstream_download_client(upstream.http1_only)
+                .get(&url)
+                .send()
+                .await
             else {
                 continue;
             };

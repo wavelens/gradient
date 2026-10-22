@@ -261,6 +261,7 @@ impl<'a> StateApplicator<'a> {
                     display_name,
                     url,
                     public_key,
+                    http1_only,
                     active,
                 } => MCacheUpstream {
                     id: CacheUpstreamId::now_v7(),
@@ -270,6 +271,7 @@ impl<'a> StateApplicator<'a> {
                     kind: cache_upstream::CacheUpstreamKind::Http,
                     url: Some(url.clone()),
                     public_key: Some(public_key.clone()),
+                    http1_only: *http1_only,
                     active: *active,
                     ..Default::default()
                 }

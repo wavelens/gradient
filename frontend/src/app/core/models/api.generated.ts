@@ -68,6 +68,7 @@ export type AddUpstreamRequest = {
   display_name: string;
   url: string;
   public_key: string;
+  http1_only?: boolean;
   type: "http";
 } | {
   url: string;
@@ -1608,6 +1609,7 @@ export interface PatchUpstreamRequest {
   mode?: CacheSubscriptionMode | null;
   url?: string | null;
   public_key?: string | null;
+  http1_only?: boolean | null;
   active?: boolean | null;
 }
 

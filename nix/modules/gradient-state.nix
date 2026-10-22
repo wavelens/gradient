@@ -53,6 +53,15 @@
         '';
       };
 
+      http1_only = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Whether requests to the external Nix binary cache use HTTP/1.1 only. Enable this
+          for caches that break HTTP/2 transfers.
+        '';
+      };
+
       active = mkOption {
         type = types.bool;
         default = true;

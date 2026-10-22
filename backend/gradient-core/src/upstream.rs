@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use gradient_util::shutdown::CancellationToken;
 use gradient_util::sync::Mutex;
 use tokio::sync::Semaphore;
 
@@ -99,49 +98,6 @@ impl UpstreamBreakers {
 pub fn breakers() -> &'static UpstreamBreakers {
     static BREAKERS: OnceLock<UpstreamBreakers> = OnceLock::new();
     BREAKERS.get_or_init(UpstreamBreakers::new)
-}
-
-#[derive(Debug, Default)]
-pub struct Http1Pins {
-    pinned: Mutex<HashSet<CacheUpstreamId>>,
-    writer: OnceLock<tokio::sync::mpsc::UnboundedSender<CacheUpstreamId>>,
-}
-
-impl Http1Pins {
-    pub fn wants_http1(&self, id: CacheUpstreamId, stored: bool) -> bool {
-        stored || self.pinned.lock().contains(&id)
-    }
-
-    pub fn pin(&self, id: CacheUpstreamId) {
-        if !self.pinned.lock().insert(id) {
-            return;
-        }
-        tracing::warn!(upstream = %id, "upstream reset an HTTP/2 stream; asking it over HTTP/1.1");
-        if let Some(writer) = self.writer.get() {
-            let _ = writer.send(id);
-        }
-    }
-
-    pub fn on_failure(&'static self, id: CacheUpstreamId) -> impl FnOnce() + Send + 'static {
-        move || self.pin(id)
-    }
-}
-
-pub fn http1_pins() -> &'static Http1Pins {
-    static PINS: OnceLock<Http1Pins> = OnceLock::new();
-    PINS.get_or_init(Http1Pins::default)
-}
-
-pub async fn persist_http1_pins(db: gradient_db::WebDb, shutdown: CancellationToken) {
-    let (writer, mut pins) = tokio::sync::mpsc::unbounded_channel();
-    if http1_pins().writer.set(writer).is_err() {
-        return;
-    }
-    while let Some(Some(id)) = shutdown.run_until_cancelled(pins.recv()).await {
-        if let Err(e) = gradient_db::caches::upstream::pin_upstream_to_http1(db.inner(), id).await {
-            tracing::warn!(upstream = %id, error = %e, "failed to persist the HTTP/1.1 pin");
-        }
-    }
 }
 
 pub const PARALLEL_THRESHOLD: usize = 4;
@@ -245,13 +201,11 @@ async fn probe_one(
     };
     let narinfo_url = format!("{}/{}.narinfo", ep.url.trim_end_matches('/'), hash);
     let started = Instant::now();
-    let resp = gradient_util::http1_fallback::get(
-        &narinfo_url,
-        http1_pins().wants_http1(ep.id, ep.http1_only),
-        http1_pins().on_failure(ep.id),
-        |r| r.timeout(PROBE_TIMEOUT),
-    )
-    .await;
+    let resp = gradient_util::http::upstream_download_client(ep.http1_only)
+        .get(&narinfo_url)
+        .timeout(PROBE_TIMEOUT)
+        .send()
+        .await;
     let latency_ms = started.elapsed().as_secs_f64() * 1000.0;
 
     let out = match resp {
@@ -299,13 +253,11 @@ pub async fn fetch_narinfo_body(
         .filter(|u| breakers().allows(u.id))
         .map(|u| async move {
             let url = format!("{}/{}.narinfo", u.url.trim_end_matches('/'), path_hash);
-            let resp = gradient_util::http1_fallback::get(
-                &url,
-                http1_pins().wants_http1(u.id, u.http1_only),
-                http1_pins().on_failure(u.id),
-                |r| r.timeout(PROBE_TIMEOUT),
-            )
-            .await;
+            let resp = gradient_util::http::upstream_download_client(u.http1_only)
+                .get(&url)
+                .timeout(PROBE_TIMEOUT)
+                .send()
+                .await;
             let kind = match &resp {
                 Ok(r) if r.status().is_success() => SampleKind::Hit,
                 Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => SampleKind::Miss,
@@ -593,22 +545,11 @@ pub fn parse_upstream_narinfo(base_url: &str, store_path: &str, body: &str) -> O
 #[cfg(test)]
 mod tests {
     use super::{BREAKER_COOLDOWN, SampleKind, TRIP_AFTER, UpstreamBreakers, breakers};
-    use gradient_fixtures::mock::empty_db;
     use gradient_types::ids::CacheUpstreamId;
     use std::time::{Duration, Instant};
 
     fn upstream(n: u128) -> CacheUpstreamId {
         CacheUpstreamId::new(uuid::Uuid::from_u128(n))
-    }
-
-    #[tokio::test]
-    async fn pin_writer_drains_on_shutdown() {
-        let shutdown = gradient_util::shutdown::Shutdown::new();
-        let db = gradient_db::WebDb::new(empty_db());
-        shutdown.spawn(super::persist_http1_pins(db, shutdown.token()));
-        tokio::task::yield_now().await;
-
-        assert!(shutdown.cancel_and_drain(Duration::from_secs(1)).await);
     }
 
     #[test]

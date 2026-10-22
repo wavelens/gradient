@@ -4468,7 +4468,7 @@ paths:
       summary: Update upstream cache
       description: |-
         Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;
-        `url` and `public_key` may be updated. For internal upstream caches only `mode` and `display_name` apply.
+        `url`, `public_key` and `http1_only` may be updated. For internal upstream caches only `mode` and `display_name` apply.
         `active` toggles any upstream cache. An inactive upstream cache is kept but never queried.
         A state-managed cache accepts only `active`, and the next server start restores the declared value.
         Requires `manageUpstreamCaches`.
@@ -4517,7 +4517,7 @@ paths:
       description: |-
         Fetches the upstream cache's `nix-cache-info` twice in parallel, once over HTTP/1.1 only and once
         over HTTP/2 only, and reports each result. A probe passes on a 2xx body with a `StoreDir:` line.
-        Does not change the upstream cache's `http1_only` pin. Only `http` upstream caches can be tested.
+        Does not change the upstream cache's `http1_only` setting. Only `http` upstream caches can be tested.
         Requires `manageUpstreamCaches`; state-managed caches may be tested.
       operationId: testUpstreamCache
       parameters:
@@ -12893,6 +12893,8 @@ components:
             type: string
           public_key:
             type: string
+          http1_only:
+            type: boolean
           type:
             type: string
             enum:
@@ -17328,6 +17330,10 @@ components:
         public_key:
           type:
           - string
+          - 'null'
+        http1_only:
+          type:
+          - boolean
           - 'null'
         active:
           type:

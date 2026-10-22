@@ -181,19 +181,6 @@ pub async fn upstream_endpoints_for_project<C: ConnectionTrait>(
 }
 
 crate::sql! {
-    PIN_UPSTREAM_TO_HTTP1 = "UPDATE cache_upstream SET http1_only = true \
-             WHERE id = $1 AND NOT http1_only",
-        params = [NewUuid];
-}
-
-pub async fn pin_upstream_to_http1<C: ConnectionTrait>(db: &C, id: CacheUpstreamId) -> Result<()> {
-    db.execute_raw(PIN_UPSTREAM_TO_HTTP1.bind([id.into_inner().into()]))
-        .await?;
-
-    Ok(())
-}
-
-crate::sql! {
     UPSERT_UPSTREAM_METRIC = "INSERT INTO upstream_metric \
                  (id, upstream_url, bucket_time, latency_ms_sum, request_count, narinfo_hits, narinfo_misses) \
              VALUES (uuidv7(), $1, $2, $3, $4, $5, $6) \

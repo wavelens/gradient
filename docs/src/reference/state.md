@@ -136,6 +136,7 @@ services.gradient.state = {
 | `upstream_caches.*.active` | boolean | `true` | Whether the upstream cache is in use. Gradient keeps inactive upstream caches but never queries them. The UI can change this value, and the server restores it on the next start. |
 | `upstream_caches.*.cache_name` | null or string | `null` | Name of the internal Gradient cache to use. |
 | `upstream_caches.*.display_name` | null or string | `null` | Name shown in the UI for the upstream cache. |
+| `upstream_caches.*.http1_only` | boolean | `false` | Whether requests to the external Nix binary cache use HTTP/1.1 only. Enable this for caches that break HTTP/2 transfers. |
 | `upstream_caches.*.mode` | one of `ReadWrite` `ReadOnly` `WriteOnly` | `"ReadWrite"` | Access mode for an internal upstream cache. |
 | `upstream_caches.*.public_key` | null or string | `null` | Public key of the external Nix binary cache. Required for `external` upstream caches. |
 | `upstream_caches.*.type` | one of `internal` `external` | - | Kind of upstream: `internal` for another Gradient cache, `external` for a Nix binary cache URL. |

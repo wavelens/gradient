@@ -202,6 +202,8 @@ pub enum StateUpstream {
         display_name: String,
         url: String,
         public_key: String,
+        #[serde(default)]
+        http1_only: bool,
         #[serde(default = "default_true")]
         active: bool,
     },
@@ -337,6 +339,7 @@ fn default_upstream_caches() -> Vec<StateUpstream> {
         display_name: NIXOS_CACHE_NAME.to_string(),
         url: NIXOS_CACHE_URL.to_string(),
         public_key: NIXOS_CACHE_PUBLIC_KEY.to_string(),
+        http1_only: false,
         active: true,
     }]
 }
