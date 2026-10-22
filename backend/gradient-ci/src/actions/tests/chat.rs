@@ -125,7 +125,10 @@ async fn endless_response_body_is_read_only_up_to_the_cap() {
     std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept");
         let _ = stream.read(&mut [0u8; 4096]);
-        let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 1073741824\r\n\r\n");
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: 1073741824\r\n\r\n"
+        );
         let chunk = [b'x'; 8192];
         while stream.write_all(&chunk).is_ok() {}
     });
