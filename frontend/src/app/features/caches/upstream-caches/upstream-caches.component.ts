@@ -14,6 +14,7 @@ import {
   BadgeComponent,
   BadgeSeverity,
   ButtonComponent,
+  CheckboxComponent,
   DialogComponent,
   EmptyStateComponent,
   FormFieldComponent,
@@ -31,7 +32,7 @@ import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
-import { UpstreamCacheItem, CacheSubscriptionMode, ProtocolProbe } from '@core/models';
+import { UpstreamCacheItem, CacheSubscriptionMode, PatchUpstreamRequest, ProtocolProbe } from '@core/models';
 
 @Component({
   selector: 'app-upstream-caches',
@@ -43,6 +44,7 @@ import { UpstreamCacheItem, CacheSubscriptionMode, ProtocolProbe } from '@core/m
     FormsModule,
     DialogComponent,
     ButtonComponent,
+    CheckboxComponent,
     InputDirective,
     LoadingSpinnerComponent,
     WritableDirective,
@@ -104,6 +106,7 @@ export class UpstreamCachesComponent implements OnInit {
     display_name: '',
     url: '',
     public_key: '',
+    http1_only: false,
     remote_cache: '',
     api_key: '',
     mode: 'ReadWrite' as CacheSubscriptionMode,
@@ -114,6 +117,7 @@ export class UpstreamCachesComponent implements OnInit {
     mode: 'ReadWrite' as CacheSubscriptionMode,
     url: '',
     public_key: '',
+    http1_only: false,
   };
 
   readonly modes: { value: CacheSubscriptionMode; label: string }[] = [
@@ -170,7 +174,7 @@ export class UpstreamCachesComponent implements OnInit {
 
   openAddDialog(): void {
     this.upstreamType = 'internal';
-    this.upstreamForm = { cache_name: '', display_name: '', url: '', public_key: '', remote_cache: '', api_key: '', mode: 'ReadWrite' };
+    this.upstreamForm = { cache_name: '', display_name: '', url: '', public_key: '', http1_only: false, remote_cache: '', api_key: '', mode: 'ReadWrite' };
     this.addError.set(null);
     this.probeSuggestsProto.set(false);
     this.showAddDialog.set(true);
@@ -183,6 +187,7 @@ export class UpstreamCachesComponent implements OnInit {
       mode: upstream.mode,
       url: upstream.url ?? '',
       public_key: upstream.public_key ?? '',
+      http1_only: upstream.http1_only,
     };
     this.editError.set(null);
     this.showEditDialog.set(true);
@@ -198,7 +203,7 @@ export class UpstreamCachesComponent implements OnInit {
     this.editError.set(null);
     this.savingUpstream.set(true);
     const isExternal = !upstream.upstream_cache_id;
-    const data: { display_name?: string; mode?: CacheSubscriptionMode; url?: string; public_key?: string } = {
+    const data: PatchUpstreamRequest = {
       display_name: this.editForm.display_name || undefined,
     };
     if (!isExternal) {
@@ -206,6 +211,7 @@ export class UpstreamCachesComponent implements OnInit {
     } else {
       data.url = this.editForm.url || undefined;
       data.public_key = this.editForm.public_key || undefined;
+      data.http1_only = this.editForm.http1_only;
     }
     this.cachesService.updateUpstream(this.cacheName, upstream.id, data).subscribe({
       next: () => {
@@ -247,6 +253,7 @@ export class UpstreamCachesComponent implements OnInit {
           display_name: this.upstreamForm.display_name,
           url: this.upstreamForm.url,
           public_key: this.upstreamForm.public_key,
+          http1_only: this.upstreamForm.http1_only,
         });
     }
     obs.subscribe({

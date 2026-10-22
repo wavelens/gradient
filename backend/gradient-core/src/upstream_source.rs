@@ -12,9 +12,9 @@ use futures::stream::BoxStream;
 use gradient_entity::cache_upstream::{CacheUpstreamKind, Model as MCacheUpstream};
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::ids::CacheUpstreamId;
-use gradient_util::http::{HttpVersion, build_version_download_client};
+use gradient_util::http::{HttpVersion, build_version_download_client, upstream_download_client};
 
-use crate::upstream::{SampleKind, breakers, http1_pins};
+use crate::upstream::{SampleKind, breakers};
 
 const LOG_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const PROTOCOL_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -64,15 +64,12 @@ pub async fn fetch_from_upstream_caches(
             continue;
         }
         let url = format!("{}/{}", source.url.trim_end_matches('/'), path);
-        let response = gradient_util::http1_fallback::get(
-            &url,
-            http1_pins().wants_http1(source.id, source.http1_only),
-            http1_pins().on_failure(source.id),
-            |request| match timeout {
-                Some(t) => request.timeout(t),
-                None => request,
-            },
-        )
+        let request = upstream_download_client(source.http1_only).get(&url);
+        let response = match timeout {
+            Some(t) => request.timeout(t),
+            None => request,
+        }
+        .send()
         .await;
         let kind = match &response {
             Ok(r) if r.status().is_success() => SampleKind::Hit,
@@ -84,10 +81,7 @@ pub async fn fetch_from_upstream_caches(
             let response = response.ok()?;
             return Some(UpstreamObject {
                 content_length: response.content_length(),
-                body: gradient_util::http1_fallback::resumable_body(
-                    response,
-                    http1_pins().on_failure(source.id),
-                ),
+                body: response.bytes_stream().boxed(),
             });
         }
     }

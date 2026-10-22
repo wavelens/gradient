@@ -81,12 +81,13 @@ A miss count as final only after every upstream cache answered with `404` or wit
 
 **Breaker:** 3 consecutive errors trip an upstream for 60 s. Transport failures count, as do any status codes outside 2xx except 404. After the cooldown, requests pass again and a single further error trips the breaker again. A 404 counts as a miss and resets the error count. Breakers live process-wide and the cache narinfo endpoint shares them.
 
-**HTTP/1.1 pin:** requests offer HTTP/2. Some upstream caches negotiate HTTP/2 and then reset streams mid-body. A proxied NAR breaks after the `200` in that case. Nix reports this as `HTTP error 200 (curl error: Stream error in the HTTP/2 framing layer)`. The first HTTP/2 error from an upstream pins that upstream to HTTP/1.1 (`gradient-util/src/http1_fallback.rs`, `http1_pins` in `gradient-core/src/upstream.rs`).
+**HTTP/1.1 only:** requests offer HTTP/2 by default. Some upstream caches negotiate HTTP/2 and then reset streams mid-body. A NAR passed through then breaks after the `200`. Nix clients then see `HTTP error 200 (curl error: Stream error in the HTTP/2 framing layer)`.
 
-- The client re-sends the failed request over HTTP/1.1.
-- A cut-short body resumes over HTTP/1.1 with a `Range: bytes=<sent>-` header. Only a `206` with a `Content-Range` starting at that offset can splice in. Any other response ends the body with the original error.
-- The pin applies process-wide at once and persists in the `cache_upstream.http1_only` column. All later requests to that upstream use HTTP/1.1, including after a restart. The API returns the flag read-only. The upstream list shows an `HTTP/1.1` badge.
-- `POST /caches/{cache}/upstreams/{id}/test` (`probe_protocol` in `gradient-core/src/upstream_source.rs`) can fetch `nix-cache-info` twice. One request must use HTTP/1.1 only and one HTTP/2 only, each with its own single-protocol ALPN. The test leaves the pin untouched. A small `nix-cache-info` over HTTP/2 proves nothing about resets inside large NAR bodies.
+- The add and edit forms of an HTTP upstream cache write the `cache_upstream.http1_only` column.
+- Declared caches take the value from `http1_only` in `services.gradient.state`.
+- Requests to such an upstream cache use a client limited to the HTTP/1.1 ALPN (`upstream_download_client` in `gradient-util/src/http.rs`).
+- These upstream caches get an `HTTP/1.1` badge in the upstream list.
+- `POST /caches/{cache}/upstream-caches/{id}/test` (`probe_protocol` in `gradient-core/src/upstream_source.rs`) can fetch `nix-cache-info` twice. Both requests use a single-protocol ALPN, HTTP/1.1 only or HTTP/2 only. The test leaves `http1_only` untouched. A small `nix-cache-info` over HTTP/2 can prove nothing about resets inside large NAR bodies.
 
 ## Substitute Jobs
 

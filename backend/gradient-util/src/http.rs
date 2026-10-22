@@ -103,6 +103,22 @@ pub fn download_client() -> &'static reqwest::Client {
         .get_or_init(|| build_download_client().expect("failed to build the download HTTP client"))
 }
 
+fn http1_download_client() -> &'static reqwest::Client {
+    static HTTP1_DOWNLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    HTTP1_DOWNLOAD_CLIENT.get_or_init(|| {
+        build_version_download_client(HttpVersion::Http1)
+            .expect("failed to build the HTTP/1.1 download client")
+    })
+}
+
+pub fn upstream_download_client(http1_only: bool) -> &'static reqwest::Client {
+    if http1_only {
+        http1_download_client()
+    } else {
+        download_client()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -185,6 +185,18 @@ describe('UpstreamCachesComponent - protocol test', () => {
   });
 });
 
+describe('UpstreamCachesComponent - HTTP/1.1 only', () => {
+  it('saves HTTP/1.1 only from the edit form of an HTTP upstream cache', () => {
+    const updateUpstream = vi.fn().mockReturnValue(of('ok'));
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [httpUpstream], updateUpstream);
+    const component = fixture.componentInstance;
+    component.openEditDialog(httpUpstream);
+    component.editForm.http1_only = true;
+    component.saveUpstream();
+    expect(updateUpstream).toHaveBeenCalledWith('demo', 'u2', expect.objectContaining({ http1_only: true }));
+  });
+});
+
 describe('UpstreamCachesComponent - activation', () => {
   it('deactivates an active upstream cache without touching its other settings', () => {
     const updateUpstream = vi.fn().mockReturnValue(of('ok'));

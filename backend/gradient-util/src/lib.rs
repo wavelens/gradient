@@ -7,7 +7,6 @@
 pub mod debounce;
 pub mod glob;
 pub mod http;
-pub mod http1_fallback;
 pub mod http_validation;
 pub mod hydra;
 pub mod latest;

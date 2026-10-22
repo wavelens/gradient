@@ -620,6 +620,7 @@ fn export_upstream(
             display_name: u.display_name.clone(),
             url: u.url.clone()?,
             public_key: u.public_key.clone()?,
+            http1_only: u.http1_only,
             active: u.active,
         }),
         // GradientProto upstream caches have no `state` representation yet.
@@ -782,11 +783,12 @@ mod tests {
     }
 
     #[test]
-    fn disabled_upstream_survives_export_round_trip() {
+    fn disabled_http1_only_upstream_survives_export_round_trip() {
         let upstream = gradient_entity::cache_upstream::Model {
             kind: CacheUpstreamKind::Http,
             url: Some("https://cache.nixos.org".into()),
             public_key: Some("cache.nixos.org-1:abc".into()),
+            http1_only: true,
             active: false,
             ..Default::default()
         };
@@ -796,7 +798,11 @@ mod tests {
             serde_json::from_value(serde_json::to_value(&exported).unwrap()).unwrap();
         assert!(matches!(
             reread,
-            StateUpstream::External { active: false, .. }
+            StateUpstream::External {
+                active: false,
+                http1_only: true,
+                ..
+            }
         ));
 
         let declared: StateUpstream = serde_json::from_value(json!({
@@ -808,7 +814,11 @@ mod tests {
         .unwrap();
         assert!(matches!(
             declared,
-            StateUpstream::External { active: true, .. }
+            StateUpstream::External {
+                active: true,
+                http1_only: false,
+                ..
+            }
         ));
     }
 

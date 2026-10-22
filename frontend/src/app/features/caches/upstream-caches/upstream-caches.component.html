@@ -116,6 +116,9 @@
         <gr-form-field label="Public Key" for="edit-pubkey">
           <input grInput id="edit-pubkey" [(ngModel)]="editForm.public_key" />
         </gr-form-field>
+        <gr-form-field hint="For caches that break HTTP/2 transfers.">
+          <gr-checkbox inputId="edit-http1-only" [(ngModel)]="editForm.http1_only" [binary]="true" label="HTTP/1.1 only" />
+        </gr-form-field>
         <small class="text-secondary">External caches are always Read Only.</small>
       } @else {
         <gr-form-field label="Mode" for="edit-mode">
@@ -218,6 +221,9 @@
       </gr-form-field>
       <gr-form-field label="Public Key" for="up-pubkey">
         <input grInput id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" />
+      </gr-form-field>
+      <gr-form-field hint="For caches that break HTTP/2 transfers.">
+        <gr-checkbox inputId="up-http1-only" [(ngModel)]="upstreamForm.http1_only" [binary]="true" label="HTTP/1.1 only" />
       </gr-form-field>
       <small class="text-secondary">Http caches are always Read Only.</small>
   }

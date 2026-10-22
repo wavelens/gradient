@@ -38,6 +38,8 @@ pub enum AddUpstreamRequest {
         display_name: String,
         url: String,
         public_key: String,
+        #[serde(default)]
+        http1_only: bool,
     },
     GradientProto {
         url: String,
@@ -85,6 +87,7 @@ pub struct PatchUpstreamRequest {
     pub mode: Option<CacheSubscriptionMode>,
     pub url: Option<String>,
     pub public_key: Option<String>,
+    pub http1_only: Option<bool>,
     pub active: Option<bool>,
 }
 
@@ -95,6 +98,7 @@ fn patch_edits_managed_fields(body: &PatchUpstreamRequest) -> bool {
         || body.mode.is_some()
         || body.url.is_some()
         || body.public_key.is_some()
+        || body.http1_only.is_some()
 }
 
 fn validate_url(url: &str) -> Result<(), WebError> {
@@ -227,6 +231,7 @@ pub async fn put_cache_upstream(
             display_name,
             url,
             public_key,
+            http1_only,
         } => {
             validate_http(&url, &public_key)?;
             MCacheUpstream {
@@ -237,6 +242,7 @@ pub async fn put_cache_upstream(
                 kind: CacheUpstreamKind::Http,
                 url: Some(url.trim().to_string()),
                 public_key: Some(public_key),
+                http1_only,
                 ..Default::default()
             }
         }
@@ -279,7 +285,7 @@ pub async fn put_cache_upstream(
     operation_id = "patchUpstreamCache",
     tag = "caches",
     summary = "Update upstream cache",
-    description = "Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;\n`url` and `public_key` may be updated. For internal upstream caches only `mode` and `display_name` apply.\n`active` toggles any upstream cache. An inactive upstream cache is kept but never queried.\nA state-managed cache accepts only `active`, and the next server start restores the declared value.\nRequires `manageUpstreamCaches`.",
+    description = "Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;\n`url`, `public_key` and `http1_only` may be updated. For internal upstream caches only `mode` and `display_name` apply.\n`active` toggles any upstream cache. An inactive upstream cache is kept but never queried.\nA state-managed cache accepts only `active`, and the next server start restores the declared value.\nRequires `manageUpstreamCaches`.",
     params(CachePath, ("id" = CacheUpstreamId, Path)),
     request_body = PatchUpstreamRequest,
     responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
@@ -313,6 +319,9 @@ pub async fn patch_cache_upstream(
         }
         if let Some(key) = body.public_key {
             row.public_key = Set(Some(key));
+        }
+        if let Some(http1_only) = body.http1_only {
+            row.http1_only = Set(http1_only);
         }
     } else if let Some(mode) = body.mode {
         row.mode = Set(mode);
@@ -354,7 +363,7 @@ impl UpstreamTestResponse {
     operation_id = "testUpstreamCache",
     tag = "caches",
     summary = "Test an HTTP upstream cache over HTTP/1.1 and HTTP/2",
-    description = "Fetches the upstream cache's `nix-cache-info` twice in parallel, once over HTTP/1.1 only and once\nover HTTP/2 only, and reports each result. A probe passes on a 2xx body with a `StoreDir:` line.\nDoes not change the upstream cache's `http1_only` pin. Only `http` upstream caches can be tested.\nRequires `manageUpstreamCaches`; state-managed caches may be tested.",
+    description = "Fetches the upstream cache's `nix-cache-info` twice in parallel, once over HTTP/1.1 only and once\nover HTTP/2 only, and reports each result. A probe passes on a 2xx body with a `StoreDir:` line.\nDoes not change the upstream cache's `http1_only` setting. Only `http` upstream caches can be tested.\nRequires `manageUpstreamCaches`; state-managed caches may be tested.",
     params(CachePath, ("id" = CacheUpstreamId, Path)),
     responses((status = OK, description = "Test result", body = UpstreamTestResponse), WebError)
 )]
@@ -416,6 +425,7 @@ mod tests {
             serde_json::json!({ "mode": "ReadOnly" }),
             serde_json::json!({ "url": "https://x" }),
             serde_json::json!({ "public_key": "k:1" }),
+            serde_json::json!({ "http1_only": true }),
         ] {
             assert!(patch_edits_managed_fields(&patch(edit)));
         }

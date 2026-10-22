@@ -37,7 +37,9 @@ Caches declared in [`services.gradient.state`](../reference/state.md#cachesname)
 
 Use **Deactivate** to disable an upstream cache while keeping the entry. Use **Activate** to switch it back on. Inactive upstream caches keep their settings. Gradient never queries an inactive upstream cache. Paths then come from the remaining upstream caches. Declared caches also accept **Deactivate** and **Activate**. The next server start will restore the declared `active` value.
 
-Use **Test** on an HTTP upstream to fetch its `nix-cache-info` over HTTP/1.1 and over HTTP/2. The test reports each result. HTTP upstream caches with broken HTTP/2 transfers switch to HTTP/1.1 for good. Such upstream caches show an **HTTP/1.1** badge.
+Use **Test** on an HTTP upstream cache to fetch its `nix-cache-info` over HTTP/1.1 and over HTTP/2. Both results appear in a notification.
+
+Some HTTP upstream caches break HTTP/2 transfers. Enable **HTTP/1.1 only** in the add or edit form for such an upstream cache. Declared caches take the value from `http1_only`. These upstream caches show an **HTTP/1.1** badge.
 
 ## Pull-Through
 

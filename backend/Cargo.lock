@@ -3170,9 +3170,7 @@ name = "gradient-util"
 version = "2.0.1"
 dependencies = [
  "base64 0.23.1",
- "bytes",
  "futures",
- "h2",
  "hex",
  "prometheus",
  "ractor",
@@ -3188,7 +3186,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
- "wiremock",
 ]
 
 [[package]]
