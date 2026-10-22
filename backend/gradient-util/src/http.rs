@@ -66,6 +66,20 @@ pub fn build_client() -> reqwest::Result<reqwest::Client> {
         .build()
 }
 
+pub fn build_public_client() -> reqwest::Result<reqwest::Client> {
+    client_builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .dns_resolver(crate::http_validation::PublicResolver)
+        .no_proxy()
+        .build()
+}
+
+pub fn public_client() -> &'static reqwest::Client {
+    static PUBLIC_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    PUBLIC_CLIENT
+        .get_or_init(|| build_public_client().expect("failed to build the public HTTP client"))
+}
+
 /// Attic, Cachix and S3 gateways are answering a NAR GET with a 3xx to their object storage.
 /// reqwest is reporting an unfollowed 3xx as a successful empty body. Object GETs are carrying no
 /// credentials worth leaking through a redirect.
@@ -185,5 +199,22 @@ mod tests {
         };
 
         assert!(err.is_timeout(), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn public_client_refuses_a_name_that_resolves_to_loopback() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::any())
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let url = format!("http://localhost:{}/hook", server.address().port());
+
+        let trusted = build_client().expect("client").get(&url).send().await;
+        let public = build_public_client().expect("client").get(&url).send().await;
+
+        assert!(trusted.is_ok(), "{trusted:?}");
+        let refused = format!("{:?}", public.expect_err("loopback target"));
+        assert!(refused.contains("resolves only to"), "{refused}");
     }
 }

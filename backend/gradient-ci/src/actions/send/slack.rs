@@ -27,7 +27,7 @@ pub(crate) async fn execute_send_slack_message(
     let webhook =
         validate_webhook_url(&plain).map_err(|cause| ActionError::UrlRejected { cause })?;
     let summary = EventSummary::resolve(ctx, event, envelope).await?;
-    post_slack_message(&ctx.http, webhook, &summary).await
+    post_slack_message(gradient_util::http::public_client(), webhook, &summary).await
 }
 
 pub(crate) async fn post_slack_message(

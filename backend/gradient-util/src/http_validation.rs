@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
-/// Hostnames are passing validation unresolved. The caller is responsible for DNS resolution checks
-/// at delivery time.
+/// Hostnames are passing validation unresolved. [`PublicResolver`] is checking them at connect time.
 #[derive(Debug, thiserror::Error)]
 pub enum WebhookUrlError {
     #[error("Invalid URL: {0}")]
@@ -54,6 +53,41 @@ pub fn validate_webhook_url(url: &str) -> Result<reqwest::Url, WebhookUrlError> 
         }
     }
     Ok(parsed)
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0} resolves only to private/loopback/link-local/cloud-metadata addresses")]
+pub struct InternalOnly(String);
+
+fn public_addrs(
+    host: &str,
+    addrs: impl Iterator<Item = SocketAddr>,
+) -> Result<Vec<SocketAddr>, InternalOnly> {
+    let public: Vec<SocketAddr> = addrs.filter(|addr| !is_unsafe_ip(addr.ip())).collect();
+    if public.is_empty() {
+        return Err(InternalOnly(host.to_owned()));
+    }
+    Ok(public)
+}
+
+fn is_unsafe_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => is_unsafe_ipv4(&v4),
+        IpAddr::V6(v6) => is_unsafe_ipv6(&v6),
+    }
+}
+
+pub(crate) struct PublicResolver;
+
+impl reqwest::dns::Resolve for PublicResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_owned();
+        Box::pin(async move {
+            let resolved = tokio::net::lookup_host((host.as_str(), 0)).await?;
+            let public = public_addrs(&host, resolved)?;
+            Ok(Box::new(public.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
 }
 
 fn is_unsafe_ipv4(ip: &Ipv4Addr) -> bool {
@@ -174,5 +208,20 @@ mod tests {
         ] {
             assert!(validate_webhook_url(url).is_err(), "{url}");
         }
+    }
+
+    #[test]
+    fn public_addrs_drops_internal_addresses_of_a_mixed_resolution() {
+        let public: SocketAddr = "93.184.216.34:443".parse().unwrap();
+        let resolved = [
+            "10.0.0.5:443".parse().unwrap(),
+            public,
+            "[::1]:443".parse().unwrap(),
+            "169.254.169.254:443".parse().unwrap(),
+        ];
+
+        let kept = public_addrs("example.com", resolved.into_iter()).expect("one public address");
+
+        assert_eq!(kept, vec![public]);
     }
 }

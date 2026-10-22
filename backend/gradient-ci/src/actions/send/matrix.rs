@@ -47,7 +47,7 @@ pub(crate) async fn execute_send_matrix_message(
         access_token: &access_token,
     };
     post_matrix_message(
-        &ctx.http,
+        gradient_util::http::public_client(),
         &room,
         &matrix_txn_id(action, event, at),
         &summary,

@@ -6,7 +6,7 @@
 
 use crate::ActionError;
 use crate::actions::crypto::decrypt_with_server_key;
-use crate::actions::{ExecutorOk, MAX_BODY_BYTES, truncate};
+use crate::actions::{ExecutorOk, MAX_BODY_BYTES, read_capped};
 use crate::context::CiContext;
 use anyhow::{Context, Result};
 use serde_json::Value as JsonValue;
@@ -21,8 +21,7 @@ pub(crate) async fn execute_send_web_request(
     gradient_util::http_validation::validate_webhook_url(url)
         .map_err(|cause| ActionError::UrlRejected { cause })?;
     let body = serde_json::to_string(envelope).context("serialize webhook envelope")?;
-    let mut req = ctx
-        .http
+    let mut req = gradient_util::http::public_client()
         .post(url)
         .header("Content-Type", "application/json")
         .header("X-Gradient-Event", event)
@@ -36,9 +35,8 @@ pub(crate) async fn execute_send_web_request(
     }
     let resp = req.send().await.context("send HTTP request")?;
     let status = resp.status().as_u16() as i32;
-    let body = resp.text().await.unwrap_or_default();
     Ok(ExecutorOk {
         status_code: Some(status),
-        response_body: Some(truncate(body, MAX_BODY_BYTES)),
+        response_body: Some(read_capped(resp, MAX_BODY_BYTES).await),
     })
 }

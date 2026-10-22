@@ -19,12 +19,12 @@ pub(crate) use open_pr::execute_open_pr;
 pub(crate) use slack::execute_send_slack_message;
 pub(crate) use web_request::execute_send_web_request;
 
-use crate::actions::{ExecutorOk, MAX_BODY_BYTES, truncate};
+use crate::actions::{ExecutorOk, MAX_BODY_BYTES, read_capped, truncate};
 use anyhow::{Result, bail};
 
 pub(super) async fn chat_response(service: &str, resp: reqwest::Response) -> Result<ExecutorOk> {
     let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
+    let body = read_capped(resp, MAX_BODY_BYTES).await;
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
         bail!("{service} returned {status}: {}", truncate(body, 512));
     }

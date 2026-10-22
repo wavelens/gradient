@@ -7,6 +7,7 @@
 use crate::actions::send::matrix::{MatrixRoom, matrix_txn_id, post_matrix_message};
 use crate::actions::send::slack::post_slack_message;
 use crate::actions::summary::EventSummary;
+use crate::actions::{MAX_BODY_BYTES, read_capped};
 use gradient_types::TaskActionId;
 use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -113,6 +114,35 @@ async fn slack_rate_limit_is_retried_and_forbidden_is_recorded() {
         .unwrap();
     assert_eq!(ok.status_code, Some(403));
     assert_eq!(ok.response_body.as_deref(), Some("invalid_token"));
+}
+
+#[tokio::test]
+async fn endless_response_body_is_read_only_up_to_the_cap() {
+    use std::io::{Read as _, Write as _};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("local addr");
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let _ = stream.read(&mut [0u8; 4096]);
+        let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 1073741824\r\n\r\n");
+        let chunk = [b'x'; 8192];
+        while stream.write_all(&chunk).is_ok() {}
+    });
+    let resp = http()
+        .get(format!("http://{addr}/"))
+        .send()
+        .await
+        .expect("response");
+
+    let body = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        read_capped(resp, MAX_BODY_BYTES),
+    )
+    .await
+    .expect("stops at the cap instead of draining the body");
+
+    assert_eq!(body.len(), MAX_BODY_BYTES);
 }
 
 #[test]
