@@ -122,9 +122,7 @@ impl WorkerPoolResolver {
     fn observe(&self, calls: Vec<CallStats>) {
         let mut stats = self.stats.lock();
         for call in calls {
-            if let Some(delta) = call.stats {
-                stats.observe(&call.entry_point, delta, call.rss);
-            }
+            stats.observe(call);
         }
     }
 }

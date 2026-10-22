@@ -14,7 +14,7 @@ flowchart LR
 ## Subprocess IPC
 
 - **Frames:** each frame start with a `u32` little-endian length prefix, followed by an rkyv payload (`gradient-eval/src/ipc.rs`).
-- **Version byte:** before the first frame, subprocesses write `EVAL_IPC_VERSION` (currently 12). A binary swapped mid-evaluation then fail the handshake instead of sending undecodable frames.
+- **Version byte:** before the first frame, subprocesses write `EVAL_IPC_VERSION` (currently 13). A binary swapped mid-evaluation then fail the handshake instead of sending undecodable frames.
 - **Fetch byte:** parents reply with one byte. Subprocesses given `1` ask the parent for [missing inputs](#missing-inputs). Subprocesses given `0` let Nix download them.
 - **Responses:** each request pair with one response. `Stats` ticks and [build requests](#import-from-derivation) can arrive before that response. `List` responses carry the derivation path of every attribute found, resolved in the subprocess that forced the attribute.
 - **Shards:** `Plan` can split each include at its first wildcard.

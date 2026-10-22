@@ -15,6 +15,7 @@ mod workers;
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Instant;
 
 use anyhow::Result;
 
@@ -303,6 +304,7 @@ impl EvalPool {
             &lock(&self.patterns),
         );
         let mut worker = self.workers.acquire().await?;
+        let started = Instant::now();
         match worker
             .list(
                 repository.to_string(),
@@ -324,11 +326,18 @@ impl EvalPool {
                 if rss > self.workers.max_rss() {
                     worker.mark_dead();
                 }
+                let attrs = listing
+                    .items
+                    .iter()
+                    .filter_map(|item| item.cost.map(|cost| (item.attr.clone(), cost)))
+                    .collect();
                 Ok((
                     listing,
                     CallStats {
                         entry_point: bucket,
                         stats,
+                        eval_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                        attrs,
                         rss,
                     },
                 ))
@@ -400,6 +409,7 @@ mod tests {
                     drv_path: Some("/nix/store/aaaa-hello.drv".into()),
                     references: vec![],
                     error: None,
+                    cost: None,
                 }],
                 deferred: vec![],
                 warnings: vec![],
@@ -424,6 +434,57 @@ mod tests {
 
         assert_eq!(lock(&found).len(), 1);
         assert!(discovery.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn each_listed_attribute_reports_its_own_cost() {
+        let cost = |thunks| crate::stats::AttrCost {
+            stats: crate::stats::StatsDelta {
+                nr_thunks: thunks,
+                ..Default::default()
+            },
+            eval_ms: thunks / 10,
+        };
+        let item = |attr: &str, thunks| ResolvedItem {
+            attr: attr.into(),
+            drv_path: Some(format!("/nix/store/aaaa-{attr}.drv")),
+            references: vec![],
+            error: None,
+            cost: Some(cost(thunks)),
+        };
+        let pool = pool(1);
+        pool.workers.push_for_test(replying_worker(
+            &EvalResponse::ListOk {
+                items: vec![item("hydraJobs.a", 600), item("hydraJobs.b", 300)],
+                deferred: vec![],
+                warnings: vec![],
+                errors: vec![],
+                stats: Some(cost(1000).stats),
+            },
+            "costed-list",
+        ));
+
+        let discovery = pool
+            .list_attrs(
+                "repo".into(),
+                vec!["hydraJobs.a".into()],
+                &[],
+                &RefuseDependencies("the test"),
+                &|_| {},
+            )
+            .await
+            .expect("list");
+
+        let charged: Vec<(&str, u64, u64)> = discovery
+            .calls
+            .iter()
+            .flat_map(|call| &call.attrs)
+            .map(|(attr, cost)| (attr.as_str(), cost.stats.nr_thunks, cost.eval_ms))
+            .collect();
+        assert_eq!(
+            charged,
+            vec![("hydraJobs.a", 600, 60), ("hydraJobs.b", 300, 30)]
+        );
     }
 
     #[tokio::test]

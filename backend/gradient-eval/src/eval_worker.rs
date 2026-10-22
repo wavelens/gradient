@@ -7,6 +7,7 @@
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Instant;
 use tracing::{error, trace};
 
 use crate::flake_walk::FlakeWalker;
@@ -15,6 +16,7 @@ use crate::ipc::{
     EVAL_IPC_VERSION, EvalRequest, EvalResponse, ResolvedItem, decode_request, read_frame,
 };
 use crate::nix_eval::{FetchHook, NixEvaluator, RealiseHook, StatsReader};
+use crate::stats::{AttrCost, StatsDelta};
 
 pub(crate) struct ParentPipe<R, W> {
     reader: Mutex<R>,
@@ -236,7 +238,12 @@ fn answer_requests<R: Read, W: Write>(
                             walker.discover_split(&wildcards, only.as_deref())?;
                         let items = attrs
                             .into_iter()
-                            .map(|attr| resolve_item(walker, attr))
+                            .map(|attr| {
+                                measured(
+                                    || read_stats(ev, collect_stats),
+                                    || resolve_item(walker, attr),
+                                )
+                            })
                             .collect();
                         Ok((items, deferred, errors))
                     })
@@ -346,6 +353,21 @@ impl<'ev> WalkerCache<'ev> {
     }
 }
 
+fn measured(
+    read_stats: impl Fn() -> Option<nix_bindings::EvalStats>,
+    resolve: impl FnOnce() -> ResolvedItem,
+) -> ResolvedItem {
+    let before = read_stats();
+    let started = Instant::now();
+    let mut item = resolve();
+    let eval_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    item.cost = before.zip(read_stats()).map(|(before, after)| AttrCost {
+        stats: StatsDelta::between(&after, &before),
+        eval_ms,
+    });
+    item
+}
+
 fn resolve_item(walker: &FlakeWalker<'_>, attr: String) -> ResolvedItem {
     match walker.resolve(&attr) {
         Ok((drv, references)) => ResolvedItem {
@@ -353,12 +375,14 @@ fn resolve_item(walker: &FlakeWalker<'_>, attr: String) -> ResolvedItem {
             drv_path: Some(drv),
             references,
             error: None,
+            cost: None,
         },
         Err(e) => ResolvedItem {
             attr,
             drv_path: None,
             references: vec![],
             error: Some(format!("{e:#}")),
+            cost: None,
         },
     }
 }
@@ -600,6 +624,34 @@ mod tests {
             pipe.read_frame().is_err(),
             "a broken pipe ends the request loop"
         );
+    }
+
+    fn unresolved(attr: &str) -> ResolvedItem {
+        ResolvedItem {
+            attr: attr.into(),
+            drv_path: None,
+            references: vec![],
+            error: None,
+            cost: None,
+        }
+    }
+
+    #[test]
+    fn an_attribute_is_charged_the_counters_spent_resolving_it() {
+        let counter = std::cell::Cell::new(100);
+        let read = || {
+            Some(nix_bindings::EvalStats {
+                nr_thunks: counter.get(),
+                ..Default::default()
+            })
+        };
+
+        let item = measured(read, || {
+            counter.set(160);
+            unresolved("packages.x86_64-linux.hello")
+        });
+
+        assert_eq!(item.cost.map(|c| c.stats.nr_thunks), Some(60));
     }
 
     #[test]
