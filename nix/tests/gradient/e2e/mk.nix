@@ -137,10 +137,10 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
       };
 
       networking.hosts = {
-        # `hook.local` is phase 14's webhook target, a name and not `127.0.0.1`.
-        # `validate_webhook_url` is rejecting every loopback and private literal.
-        # Every address in a NixOS VM network is one of those.
-        "127.0.0.1" = [ "gradient.local" "hook.local" ];
+        # Phase 14's webhook target must resolve to a public address, and the
+        # VM network's `2001:db8::/32` is the only range the outbound guard allows.
+        "127.0.0.1" = [ "gradient.local" ];
+        "${config.networking.primaryIPv6Address}" = [ "hook.local" ];
       };
 
       services = {
@@ -2552,13 +2552,16 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert len(action_id) == 36, f"the state-declared probe action is missing: {action_id}"
 
     server.succeed("cat > /root/hook.py <<'PY'\n"
+                   "import socket\n"
                    "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
                    "class H(BaseHTTPRequestHandler):\n"
                    "    def do_POST(self):\n"
                    "        n = int(self.headers.get('Content-Length', 0))\n"
                    "        open('/root/hook.log', 'ab').write(self.rfile.read(n) + b'\\n')\n"
                    "        self.send_response(200); self.end_headers()\n"
-                   "HTTPServer(('127.0.0.1', 8099), H).serve_forever()\n"
+                   "class S(HTTPServer):\n"
+                   "    address_family = socket.AF_INET6\n"
+                   "S(('::', 8099), H).serve_forever()\n"
                    "PY")
     server.succeed("systemd-run --unit hook-probe ${pkgs.python3}/bin/python3 /root/hook.py")
 
