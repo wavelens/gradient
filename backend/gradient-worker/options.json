@@ -4,8 +4,8 @@
     "field": "server_url",
     "flag": "server-url",
     "env": "GRADIENT_WORKER_SERVER_URL",
-    "type": "String",
-    "description": "WebSocket URL of the Gradient server's `/proto` endpoint. `null` keeps the worker\nwaiting for the server to connect.",
+    "type": "Option<String>",
+    "description": "WebSocket URL of the Gradient server's `/proto` endpoint. `null` skips the outbound\nconnection, leaving only incoming server connections through\n{option}`services.gradient.worker.discoverable`.",
     "default": null,
     "values": []
   },

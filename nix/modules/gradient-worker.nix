@@ -15,6 +15,7 @@
     examples = {
       endpoint = "10.0.0.7:7000";
       id = "550e8400-e29b-41d4-a716-446655440001";
+      serverUrl = "wss://gradient.example.com/proto";
       zone = "fra1";
       log.traceDir = "/var/lib/gradient-worker/trace";
     };
@@ -27,7 +28,6 @@
       [ "sshBin" ]
       [ "evalSubprocess" ]
       [ "evalDriver" ]
-      [ "serverUrl" ]
       [ "system" "architectures" ]
       [ "system" "features" ]
       [ "nixDaemon" "maxConnections" ]
@@ -124,16 +124,6 @@ in {
       description = ''
         Domain of the worker's reverse proxy virtual host. Only applies with a reverse proxy
         enabled.
-      '';
-    };
-
-    serverUrl = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      example = "wss://gradient.example.com/proto";
-      description = ''
-        WebSocket URL of the Gradient server's `/proto` endpoint. `null` keeps the worker
-        waiting for the server to connect.
       '';
     };
 
@@ -304,6 +294,10 @@ in {
 
   config = lib.mkIf cfg.enable {
     assertions = [
+      {
+        assertion = cfg.serverUrl != null || cfg.discoverable;
+        message = "services.gradient.worker: serverUrl unset without discoverable, set either to connect to a server";
+      }
       {
         assertion = cfg.capabilities.federate -> cfg.discoverable;
         message = "services.gradient.worker: capabilities.federate and discoverable together, enable both";

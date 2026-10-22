@@ -15,9 +15,10 @@ use gradient_derive::config_group;
 #[derive(Parser, Debug, Clone)]
 #[command(name = "gradient-worker", about = "Gradient build worker")]
 pub struct WorkerConfig {
-    /// WebSocket URL of the Gradient server's `/proto` endpoint. `null` keeps the worker
-    /// waiting for the server to connect.
-    pub server_url: String,
+    /// WebSocket URL of the Gradient server's `/proto` endpoint. `null` skips the outbound
+    /// connection, leaving only incoming server connections through
+    /// {option}`services.gradient.worker.discoverable`.
+    pub server_url: Option<String>,
 
     /// Peer-to-token mappings for challenge-response authentication.
     /// Each line holds one `peer_id:token` pair.
@@ -130,7 +131,7 @@ pub struct WorkerConfig {
 impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
-            server_url: String::new(),
+            server_url: None,
             peers: None,
             peers_file: None,
             base_dir: PathBuf::from("/var/lib/gradient-worker"),

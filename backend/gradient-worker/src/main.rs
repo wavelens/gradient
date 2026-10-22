@@ -73,6 +73,7 @@ fn main() -> Result<()> {
     }
 
     config.memory_guard()?;
+    let server_url = config.outbound_server_url()?;
     exit_clock::clock();
 
     // The crypto provider, before the first TLS handshake, for rustls 0.23 (#232).
@@ -80,11 +81,11 @@ fn main() -> Result<()> {
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
-        info!(server_url = %config.server_url, "gradient-worker starting");
+        info!(server_url = ?server_url, "gradient-worker starting");
 
-        if !config.server_url.contains("proto") {
+        if let Some(url) = server_url.as_deref().filter(|url| !url.contains("proto")) {
             warn!(
-                server_url = %config.server_url,
+                server_url = %url,
                 "server URL does not contain 'proto'; expected the server's /proto WebSocket endpoint (e.g. wss://gradient.example.com/proto)"
             );
         }
@@ -148,98 +149,129 @@ fn main() -> Result<()> {
         }
 
         sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
-        let mut backoff = INITIAL_BACKOFF;
-        let limits = config.exit_limits();
-
-        let initial = tokio::select! {
-            _ = stop.cancelled() => None,
-            () = exit_deadline(limits) => None,
-            w = async {
-                loop {
-                    match Worker::connect(config.clone()).await {
-                        Ok(w) => break w,
-                        Err(e) => {
-                            error!(
-                                error = %e,
-                                delay_secs = backoff.as_secs(),
-                                "connection failed; retrying"
-                            );
-                            tokio::time::sleep(backoff).await;
-                            backoff = (backoff * 2).min(MAX_BACKOFF);
-                        }
-                    }
-                }
-            } => Some(w),
-        };
-        let Some(mut worker) = initial else {
-            info!("shutdown requested or exit limit reached during initial connect");
-            wait_for_inbound_sessions(&sessions).await;
-            return Ok(());
-        };
-        backoff = INITIAL_BACKOFF;
-
-        let executor_handle = worker.executor_handle();
-
-        loop {
-            let (disconnected, outcome) = worker.run(stop.clone()).await;
-
-            if stop.is_cancelled() {
-                info!("worker stopped or reached an exit limit; tearing down");
-                drop(disconnected);
-                wait_for_inbound_sessions(&sessions).await;
-                executor_handle.shutdown().await;
-                return Ok(());
-            }
-
-            let session_end = match outcome {
-                Ok(outcome) => {
-                    match outcome {
-                        RunOutcome::Drained => warn!(
-                            delay_secs = backoff.as_secs(),
-                            "server drained the session; reconnecting until it is back"
-                        ),
-                        RunOutcome::Refused => warn!(
-                            delay_secs = backoff.as_secs(),
-                            "server refused the session; backing off"
-                        ),
-                        RunOutcome::CleanDisconnect => {
-                            warn!(delay_secs = backoff.as_secs(), "connection closed; reconnecting")
-                        }
-                    }
-                    SessionEnd::from(outcome)
-                }
-                Err(e) => {
-                    error!(error = %e, delay_secs = backoff.as_secs(), "dispatch loop error; reconnecting");
-                    SessionEnd::Served
-                }
-            };
-
-            let reconnected = tokio::select! {
-                _ = stop.cancelled() => None,
-                () = exit_deadline(limits) => None,
-                conn = retry_reconnect(
-                    async || disconnected.reconnect().await,
-                    |delay| tokio::time::sleep(delay),
-                    backoff,
-                    MAX_BACKOFF,
-                ) => Some(conn),
-            };
-            match reconnected {
-                Some(conn) => {
-                    info!("reconnected successfully");
-                    worker = disconnected.into_connected(conn);
-                    backoff =
-                        backoff_after_session(backoff, session_end, INITIAL_BACKOFF, MAX_BACKOFF);
-                }
-                None => {
-                    info!("shutdown requested or exit limit reached during reconnect");
-                    wait_for_inbound_sessions(&sessions).await;
-                    executor_handle.shutdown().await;
-                    return Ok(());
-                }
+        match server_url {
+            Some(server_url) => run_outbound(config, &server_url, stop, &sessions).await,
+            None => {
+                serve_incoming_only(&stop, &sessions, config.exit_limits()).await;
+                Ok(())
             }
         }
     })
+}
+
+async fn serve_incoming_only(
+    stop: &CancellationToken,
+    sessions: &TaskTracker,
+    limits: exit_clock::ExitLimits,
+) {
+    info!("no server URL; serving incoming server connections only");
+    tokio::select! {
+        _ = stop.cancelled() => {}
+        () = exit_deadline(limits) => {}
+    }
+    info!("shutdown requested or exit limit reached");
+    wait_for_inbound_sessions(sessions).await;
+}
+
+async fn run_outbound(
+    config: WorkerConfig,
+    server_url: &str,
+    stop: CancellationToken,
+    sessions: &TaskTracker,
+) -> Result<()> {
+    let mut backoff = INITIAL_BACKOFF;
+    let limits = config.exit_limits();
+
+    let initial = tokio::select! {
+        _ = stop.cancelled() => None,
+        () = exit_deadline(limits) => None,
+        w = async {
+            loop {
+                match Worker::connect(config.clone(), server_url).await {
+                    Ok(w) => break w,
+                    Err(e) => {
+                        error!(
+                            error = %e,
+                            delay_secs = backoff.as_secs(),
+                            "connection failed; retrying"
+                        );
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(MAX_BACKOFF);
+                    }
+                }
+            }
+        } => Some(w),
+    };
+    let Some(mut worker) = initial else {
+        info!("shutdown requested or exit limit reached during initial connect");
+        wait_for_inbound_sessions(sessions).await;
+        return Ok(());
+    };
+    backoff = INITIAL_BACKOFF;
+
+    let executor_handle = worker.executor_handle();
+
+    loop {
+        let (disconnected, outcome) = worker.run(stop.clone()).await;
+
+        if stop.is_cancelled() {
+            info!("worker stopped or reached an exit limit; tearing down");
+            drop(disconnected);
+            wait_for_inbound_sessions(sessions).await;
+            executor_handle.shutdown().await;
+            return Ok(());
+        }
+
+        let session_end = match outcome {
+            Ok(outcome) => {
+                match outcome {
+                    RunOutcome::Drained => warn!(
+                        delay_secs = backoff.as_secs(),
+                        "server drained the session; reconnecting until it is back"
+                    ),
+                    RunOutcome::Refused => warn!(
+                        delay_secs = backoff.as_secs(),
+                        "server refused the session; backing off"
+                    ),
+                    RunOutcome::CleanDisconnect => {
+                        warn!(
+                            delay_secs = backoff.as_secs(),
+                            "connection closed; reconnecting"
+                        )
+                    }
+                }
+                SessionEnd::from(outcome)
+            }
+            Err(e) => {
+                error!(error = %e, delay_secs = backoff.as_secs(), "dispatch loop error; reconnecting");
+                SessionEnd::Served
+            }
+        };
+
+        let reconnected = tokio::select! {
+            _ = stop.cancelled() => None,
+            () = exit_deadline(limits) => None,
+            conn = retry_reconnect(
+                async || disconnected.reconnect(server_url).await,
+                |delay| tokio::time::sleep(delay),
+                backoff,
+                MAX_BACKOFF,
+            ) => Some(conn),
+        };
+        match reconnected {
+            Some(conn) => {
+                info!("reconnected successfully");
+                worker = disconnected.into_connected(conn);
+                backoff = backoff_after_session(backoff, session_end, INITIAL_BACKOFF, MAX_BACKOFF);
+            }
+            None => {
+                info!("shutdown requested or exit limit reached during reconnect");
+                wait_for_inbound_sessions(sessions).await;
+                executor_handle.shutdown().await;
+                return Ok(());
+            }
+        }
+    }
 }
 
 fn install_signal_handler(stop: CancellationToken) {
