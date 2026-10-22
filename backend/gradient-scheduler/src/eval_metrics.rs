@@ -19,6 +19,7 @@ use crate::Scheduler;
 impl Scheduler {
     pub async fn record_eval_metrics(
         &self,
+        worker_id: &str,
         job_id: &str,
         report: EvalStatsReport,
     ) -> anyhow::Result<()> {
@@ -73,7 +74,7 @@ impl Scheduler {
             peak_heap_mb: report.peak_heap_mb as i64,
             peak_rss_mb: report.peak_rss_mb as i64,
             total_eval_ms: report.total_eval_ms as i64,
-            worker_id: report.worker_id,
+            worker_id: worker_id.to_owned(),
             created_at: gradient_types::now(),
             ..Default::default()
         }
