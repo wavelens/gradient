@@ -57,6 +57,7 @@
       test-topologies = import ./nix/tests/harness/check.nix { inherit pkgs; inherit (pkgs) lib; };
       evalbench-summarize = import ./nix/tests/bench/evalbench/check.nix { inherit pkgs; };
       evalbench-multinode-report = import ./nix/tests/bench/evalbench-multinode/check.nix { inherit pkgs; };
+      reuse = import ./nix/tests/reuse.nix { inherit pkgs; inherit (pkgs) lib; };
     };
 
     packages = rec {
