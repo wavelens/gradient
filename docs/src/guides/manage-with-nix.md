@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Manage Gradient with Nix
 
 A Nix setup can declare users, projects, tasks and caches under `services.gradient.state`. A good starting point is a setup created in the UI. See [Declarative State](../concepts/declarative-state.md) for how declared and UI-created entities coexist.

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Federation
 
 The `gradient-proxy` service can join pools of workers to customers' Gradient servers. Customers (tenants) see the proxy as one worker. Both legs of the proxy use this protocol. The proxy is an authority to its own workers and a worker to every tenant's server.

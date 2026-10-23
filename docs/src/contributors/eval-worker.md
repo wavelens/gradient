@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Eval Worker Setup
 
 Flake evaluations take place in a pool of `--eval-subprocess` processes driving the embedded Nix C API. The pool can split one evaluation into shards. The pool can spread those shards across its subprocesses. The pool can size itself to the host's memory. Results land in a local eval cache per locked flake. Workers share new cache rows with the fleet through the server. See [Shared Eval Cache](#shared-eval-cache). Repeat evaluations of the same locked flake hit the cache on most runs.

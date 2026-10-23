@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Tune Evaluation Speed
 
 Two factors control evaluation speed. First, the evaluator pool has to fit the cores and memory of the worker. Second, every attribute that adds evaluation overhead has to be found and excluded.

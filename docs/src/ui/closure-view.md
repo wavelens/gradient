@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Closure View
 
 The Closure View show where the size of a build output originate, drawn as a Sankey diagram of the closure. Use it to trim ISOs, netboot images and container layers. Open the closure of the newest build with **View Closure** on an entry point's metrics page.

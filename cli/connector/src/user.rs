@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use crate::api::{
     ApiKeyInfo, AuditLogEntry, CreateApiKeyRequest, PatchUserSettingsRequest, SessionInfo,
     UserInfoResponse, UserSearchResult,

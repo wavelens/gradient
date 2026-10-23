@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Quick Start
 
 A running Gradient instance with its own worker, on one NixOS host. [Standalone](standalone.md) has a first try without a NixOS host.

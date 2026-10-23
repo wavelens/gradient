@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Installation
 
 This guide covers a production setup: managed secrets, a database of choice, and TLS that matches the network layer in front of the server. It builds on the [Quick Start](quick-start.md) configuration.

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Report a Bug with a Diagnostic Report
 
 A diagnostic report is a single SQLite file that describes a stuck or failed evaluation. Attach it to a [bug report](https://github.com/wavelens/gradient/issues). Maintainers can diagnose the problem from the file alone and need no access to the instance.

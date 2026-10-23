@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Evaluation Wildcards
 
 Each task lists attribute paths, separated by commas. Gradient builds the flake outputs that these paths select. By default the list contains `packages.x86_64-linux.**`.
