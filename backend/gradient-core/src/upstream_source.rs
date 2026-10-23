@@ -289,6 +289,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fetch_upstream_log_decodes_zstd_content_encoding() {
+        let server = MockServer::start().await;
+        let body = b"Sourcing python-build-hook\nRunning pythonBuildPhase\n";
+        let encoded = zstd::encode_all(&body[..], 1).unwrap();
+        Mock::given(method("GET"))
+            .and(path(format!("/log/{DRV}")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-encoding", "zstd")
+                    .set_body_bytes(encoded),
+            )
+            .mount(&server)
+            .await;
+
+        let log = fetch_upstream_log(&[source(28, server.uri())], DRV).await;
+
+        assert_eq!(log.as_deref(), Some(std::str::from_utf8(body).unwrap()));
+    }
+
+    #[tokio::test]
     async fn a_redirected_log_is_followed() {
         let target = log_upstream(Some("from storage\n")).await;
         let front = MockServer::start().await;
