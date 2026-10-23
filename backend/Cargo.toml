@@ -141,7 +141,7 @@ http                 = { version = "1.4", default-features = false }
 http-body-util       = { version = "0.1", default-features = false }
 jsonwebtoken         = { version = "11.0", default-features = false, features = ["aws_lc_rs"] }
 lettre               = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "rustls-native-certs", "aws-lc-rs"] }
-reqwest              = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "stream", "charset", "http2", "multipart", "brotli", "gzip", "deflate"] }
+reqwest              = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "stream", "charset", "http2", "multipart", "brotli", "gzip", "deflate", "zstd"] }
 tower                = { version = "0.5", default-features = false }
 tower-http           = { version = "0.7", default-features = false, features = ["cors", "request-id", "trace"] }
 tower_governor       = { version = "0.8", default-features = false, features = ["axum"] }
