@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Diagnostic Reports
 
 A diagnostic report is one SQLite file with tables never shown in the UI. These are assignment conditions on `derivation_build`, the attempt history behind a self-heal loop, disconnect reasons, upstream probe metrics and the resolved server settings. Generation and attachment are part of [Report a Bug](../guides/diagnostic-report.md). The file's contents and the way to read the data are the topic of this page.

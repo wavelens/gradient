@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Authentication
 
 Every HTTP request carries one of four credentials: a session JWT, an API key, a download token, or an OIDC sign-in. Worker authentication on `/proto` works differently and is documented in [Connection](../proto/connection.md).

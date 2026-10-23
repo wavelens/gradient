@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
 site_name: Gradient
 site_description: Nix-CI for Teams
 site_url: https://wavelens.github.io/gradient

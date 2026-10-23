@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { describe, expect, it } from 'vitest';
 import { alignSeries, windowBuckets } from './storage-chart';
 import { LabelledSeries } from '@core/models';

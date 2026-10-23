@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Notify with Actions
 
 Actions send notifications when evaluation or build events occur. Examples: a mail to the team on every failed build, a web request on each successful build, or a Matrix or Slack message.

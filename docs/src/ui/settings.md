@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Settings
 
 Settings exist on three levels: user, project and cache. When an entity comes from a [Nix declaration](../guides/manage-with-nix.md), its fields appear disabled and carry the hint **Managed by Nix**.

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # NAR Storage
 
 NAR objects live in dedicated storage. This page describes where they reside, how writes reach that storage, and how the storage and database stay in sync. [Cache Serving](cache-serving.md) handles delivery of NARs to clients.

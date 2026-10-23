@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Database Migrations
 
 [SeaORM migrations](https://www.sea-ql.org/SeaORM/docs/migration/setting-up-migration/) power schema changes in Gradient. The migration files live in `backend/gradient-migration/src/` and get registered in that crate's `lib.rs`. At server start, the migrator checks the `seaql_migrations` table and applies every migration not yet recorded there.
