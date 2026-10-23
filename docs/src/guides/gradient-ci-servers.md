@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Connect Gradient.CI Servers
 
 servers.gradient.ci sells build capacity. A single pasted token connects that capacity to the IDE. One connection can serve a single project or an entire team.

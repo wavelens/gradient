@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Configuration
 
 The `services.gradient` NixOS module exposes one option per setting. The definitions come from `nix/modules`. Each option maps to a CLI flag and an environment variable with the same name.

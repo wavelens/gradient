@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Monitor Gradient
 
 Gradient reports server metrics that Prometheus or any OpenTelemetry collector can consume. The metrics cover workers, the queue, build and evaluation counts, cache size and HTTP traffic. The [Job Board](../ui/job-board.md) can display the same data inside Gradient. Use the setup below to feed dashboards and alerts that already exist.
