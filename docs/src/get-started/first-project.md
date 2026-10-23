@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # First Project
 
 A flake built by Gradient, with the outputs in a binary cache.

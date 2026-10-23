@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Standalone
 
 Standalone mode runs the whole Gradient stack on one machine. This setup suits personal projects and evaluation. Server, web UI, PostgreSQL and worker all live in a single container or VM.

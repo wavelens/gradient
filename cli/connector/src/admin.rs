@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use crate::api::{GithubAppManifestRequest, GithubAppManifestResponse, ManifestResult, WorkerInfo};
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;

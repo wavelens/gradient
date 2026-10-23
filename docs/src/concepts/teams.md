@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Teams
 
 A **team** bundles users and workers into one unit. A single grant on a project or cache then applies to all members of that team. Teams never own projects or caches.

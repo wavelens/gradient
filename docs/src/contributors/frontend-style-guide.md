@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Frontend Style Guide
 
 A design system page at `/styleguide` renders every shared primitive, colour role and layout pattern in the browser. Check it for an existing primitive before building a new one.

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Add a Remote Worker
 
 A remote worker is an extra machine that can evaluate and build for a project. It can run alongside the local worker or take over from it.

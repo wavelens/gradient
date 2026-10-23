@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 .timeline {
   --timeline-line: 0.25rem;
   --timeline-dot: 1.1rem;

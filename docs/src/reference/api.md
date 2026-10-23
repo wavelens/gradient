@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # API
 
 The REST API at `https://gradient.example.com/api/v1` powers both the web UI and the CLI. Every endpoint, with parameters and responses, appears in the OpenAPI spec.

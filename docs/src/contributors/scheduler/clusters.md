@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Cluster Jobs
 
 Cluster jobs group existing jobs. Those jobs start together on separate workers. Evaluation jobs, build jobs, and the nodes of an exec job can join as members. Groups start in full or not at all. Members stay regular jobs and carry a reference to their cluster. Every try of the whole group counts as a cluster *attempt*.

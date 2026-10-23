@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Update Flake Inputs
 
 Pull requests carry `flake.lock` bumps. Successful builds of the updated flake precede them.

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Queueing and Counters
 
 A shared build (`derivation_build`) moves from `Created` to `Queued` once its queue conditions hold. Counters tell an evaluation to keep waiting. Every queue condition reads maintained columns, so the event that changes a fact must update the column as well. A consistency check acts as the only backstop against missed updates.
