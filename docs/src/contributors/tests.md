@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Tests
 
 Test structure and the patterns new tests follow. The source tree is the catalogue of individual tests, and per-test lists fall behind the code.

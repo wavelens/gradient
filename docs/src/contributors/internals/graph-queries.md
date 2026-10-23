@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Graph Queries
 
 The dependency graph can be queried with SQL. Recursive walks traverse it, a fence bounds their cost, and dedicated indexes serve them. This file also documents counter updates, instance metrics and the graph API.

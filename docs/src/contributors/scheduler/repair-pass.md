@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Repair Pass
 
 Some graph state sits beyond the reach of any event. The `repair_build_graph` function heals that state. Background loops in the scheduler re-drive what a lost message left behind.

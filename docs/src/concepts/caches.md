@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Caches
 
 Gradient includes a own Nix binary cache. A **cache** stores build outputs so any machine with `nix` can substitute from it.

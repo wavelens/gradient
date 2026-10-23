@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Declarative State
 
 Gradient supports declaring State in Nix under `services.gradient.state`. Each startup applies this state to the server. Entities that come from Nix appear as read-only in the UI, so the Nix configuration acts as the single source of truth.

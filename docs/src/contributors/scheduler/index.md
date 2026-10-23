@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Scheduler
 
 The path from an evaluated derivation to a finished, cached build. Every derivation is built once globally, as one *shared build*. The pages are following a shared build from creation to assignment.

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Eval Benchmark
 
 `gradient-evalbench` can measure how much eval time the server and the eval worker each take. The benchmark uses a NixOS VM test on the e2e hello flake with four passes. Every pass leaves one capture bundle in the output directory. Open a bundle in a viewer to drill into the details.
