@@ -16,6 +16,14 @@ Jobs beyond the Nix sandbox.
 
     Workers that build outside the sandbox. Integration testing with network access, real hardware or deployment credentials.
 
+-   :material-clipboard-list: **SBOM Support**
+
+    A CycloneDX software bill of materials for every build. License audits and vulnerability scanners get the full runtime closure.
+
+-   :material-graph-outline: **Dynamic Derivations and Recursive Nix**
+
+    Builds generate derivations at build time. Dynamic derivations and nested Nix invocations inside a build both count. Gradient can build and cache each generated derivation like any other.
+
 </div>
 
 </div>
