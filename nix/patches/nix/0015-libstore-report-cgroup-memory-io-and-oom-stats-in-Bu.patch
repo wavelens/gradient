@@ -1,27 +1,31 @@
-From 6033fa639dd6e21500e89410b55bd122c8cb4df4 Mon Sep 17 00:00:00 2001
+From eb08d42fad5b3b183c58588dbeb0086df9414535 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
-Date: Sun, 4 Oct 2026 11:05:44 +0200
-Subject: [PATCH 18/18] libstore: report cgroup memory, io and oom stats in
+Date: Sun, 4 Oct 2026 11:04:27 +0200
+Subject: [PATCH] libstore: report cgroup memory, io and oom stats in
  BuildResult
 
 Read memory.peak, the rbytes/wbytes sums of io.stat and the oom_kill
-count of memory.events from the build cgroup next to cpu.stat. When the
-build-resource-usage worker protocol feature is negotiated, BuildResult
-carries memoryPeak, ioReadBytes, ioWriteBytes and oomKills after
-cpuSystem, each as an optional 64-bit number.
+count of memory.events from the build cgroup next to cpu.stat.
 ---
  .../json/schema/build-result-v1.yaml          | 28 +++++++++
+ src/json-schema-checks/meson.build            |  1 +
+ src/libstore-tests/build-result.cc            | 18 ++++++
+ .../data/build-result/out-of-memory.json      | 15 +++++
  src/libstore/build-result.cc                  | 15 +++++
  .../include/nix/store/build-result.hh         |  7 +++
- .../include/nix/store/worker-protocol.hh      |  8 +++
  .../linux/build/linux-derivation-builder.cc   |  4 ++
- src/libstore/worker-protocol.cc               | 37 ++++++++++++
+ src/libutil-tests/linux/cgroup.cc             | 59 +++++++++++++++++++
+ src/libutil-tests/linux/meson.build           |  3 +
+ src/libutil-tests/meson.build                 |  4 ++
  src/libutil/linux/cgroup.cc                   | 59 ++++++++++++++-----
  src/libutil/linux/include/nix/util/cgroup.hh  |  1 +
- 8 files changed, 143 insertions(+), 16 deletions(-)
+ 12 files changed, 198 insertions(+), 16 deletions(-)
+ create mode 100644 src/libstore-tests/data/build-result/out-of-memory.json
+ create mode 100644 src/libutil-tests/linux/cgroup.cc
+ create mode 100644 src/libutil-tests/linux/meson.build
 
 diff --git a/doc/manual/source/protocols/json/schema/build-result-v1.yaml b/doc/manual/source/protocols/json/schema/build-result-v1.yaml
-index d0d8d8a..696f956 100644
+index d0d8d8a0c..696f95687 100644
 --- a/doc/manual/source/protocols/json/schema/build-result-v1.yaml
 +++ b/doc/manual/source/protocols/json/schema/build-result-v1.yaml
 @@ -49,6 +49,34 @@ properties:
@@ -59,8 +63,70 @@ index d0d8d8a..696f956 100644
  "$defs":
    success:
      type: object
+diff --git a/src/json-schema-checks/meson.build b/src/json-schema-checks/meson.build
+index 66dc9b758..ef18f9180 100644
+--- a/src/json-schema-checks/meson.build
++++ b/src/json-schema-checks/meson.build
+@@ -192,6 +192,7 @@ schemas += [
+       'success.json',
+       'output-rejected.json',
+       'not-deterministic.json',
++      'out-of-memory.json',
+     ],
+   },
+   # Match exact variant
+diff --git a/src/libstore-tests/build-result.cc b/src/libstore-tests/build-result.cc
+index a1d8ddee6..4d9bb924a 100644
+--- a/src/libstore-tests/build-result.cc
++++ b/src/libstore-tests/build-result.cc
+@@ -92,6 +92,24 @@ INSTANTIATE_TEST_SUITE_P(
+                 .cpuUser = std::chrono::microseconds(500s),
+                 .cpuSystem = std::chrono::microseconds(604s),
+             },
++        },
++        std::pair{
++            "out-of-memory",
++            BuildResult{
++                .inner{BuildResult::Failure{{
++                    .status = BuildResult::Failure::PermanentFailure,
++                    .msg = HintFmt("builder was killed"),
++                }}},
++                .timesBuilt = 1,
++                .startTime = 30,
++                .stopTime = 50,
++                .cpuUser = std::chrono::seconds(500),
++                .cpuSystem = std::chrono::seconds(604),
++                .memoryPeak = 1073741824,
++                .ioReadBytes = 4096,
++                .ioWriteBytes = 8192,
++                .oomKills = 1,
++            },
+         }));
+ 
+ } // namespace nix
+diff --git a/src/libstore-tests/data/build-result/out-of-memory.json b/src/libstore-tests/data/build-result/out-of-memory.json
+new file mode 100644
+index 000000000..7e0ba9da0
+--- /dev/null
++++ b/src/libstore-tests/data/build-result/out-of-memory.json
+@@ -0,0 +1,15 @@
++{
++  "cpuSystem": 604000000,
++  "cpuUser": 500000000,
++  "errorMsg": "builder was killed",
++  "ioReadBytes": 4096,
++  "ioWriteBytes": 8192,
++  "isNonDeterministic": false,
++  "memoryPeak": 1073741824,
++  "oomKills": 1,
++  "startTime": 30,
++  "status": "PermanentFailure",
++  "stopTime": 50,
++  "success": false,
++  "timesBuilt": 1
++}
 diff --git a/src/libstore/build-result.cc b/src/libstore/build-result.cc
-index c9d78e5..021971f 100644
+index c9d78e5cc..021971f84 100644
 --- a/src/libstore/build-result.cc
 +++ b/src/libstore/build-result.cc
 @@ -127,6 +127,15 @@ static BuildResult::Failure::Status failureStatusFromString(std::string_view str
@@ -100,7 +166,7 @@ index c9d78e5..021971f 100644
      // Determine success or failure based on success field
      bool success = getBoolean(valueAt(json, "success"));
 diff --git a/src/libstore/include/nix/store/build-result.hh b/src/libstore/include/nix/store/build-result.hh
-index 808fcc8..5be5749 100644
+index 808fcc829..5be5749a2 100644
 --- a/src/libstore/include/nix/store/build-result.hh
 +++ b/src/libstore/include/nix/store/build-result.hh
 @@ -193,6 +193,13 @@ struct BuildResult
@@ -117,34 +183,8 @@ index 808fcc8..5be5749 100644
      bool operator==(const BuildResult &) const noexcept;
      std::strong_ordering operator<=>(const BuildResult &) const noexcept;
  };
-diff --git a/src/libstore/include/nix/store/worker-protocol.hh b/src/libstore/include/nix/store/worker-protocol.hh
-index d09d304..55ae493 100644
---- a/src/libstore/include/nix/store/worker-protocol.hh
-+++ b/src/libstore/include/nix/store/worker-protocol.hh
-@@ -135,6 +135,12 @@ struct WorkerProto
-      */
-     static constexpr std::string_view featureDisableSetOptions = "disable-set-options";
- 
-+    /**
-+     * Feature for transmitting the peak memory, block I/O and
-+     * out-of-memory kill count of a build in `BuildResult`.
-+     */
-+    static constexpr std::string_view featureBuildResourceUsage = "build-resource-usage";
-+
-     /**
-      * A unidirectional read connection, to be used by the read half of the
-      * canonical serializers below.
-@@ -349,6 +355,8 @@ DECLARE_WORKER_SERIALISER(std::optional<TrustedFlag>);
- template<>
- DECLARE_WORKER_SERIALISER(std::optional<std::chrono::microseconds>);
- template<>
-+DECLARE_WORKER_SERIALISER(std::optional<uint64_t>);
-+template<>
- DECLARE_WORKER_SERIALISER(WorkerProto::ClientHandshakeInfo);
- 
- template<>
 diff --git a/src/libstore/linux/build/linux-derivation-builder.cc b/src/libstore/linux/build/linux-derivation-builder.cc
-index d8376da..2262779 100644
+index d8376dae2..226277953 100644
 --- a/src/libstore/linux/build/linux-derivation-builder.cc
 +++ b/src/libstore/linux/build/linux-derivation-builder.cc
 @@ -949,6 +949,10 @@ void ChrootLinuxDerivationBuilder::killSandbox(bool getStats)
@@ -158,77 +198,97 @@ index d8376da..2262779 100644
          }
          return;
      }
-diff --git a/src/libstore/worker-protocol.cc b/src/libstore/worker-protocol.cc
-index 37aa4e3..c82c37c 100644
---- a/src/libstore/worker-protocol.cc
-+++ b/src/libstore/worker-protocol.cc
-@@ -29,6 +29,7 @@ const WorkerProto::Version WorkerProto::latest = {
-                 WorkerProto::featureRealisationWithPath,
-             },
-             std::string{WorkerProto::featureDeleteDeadSpecificReferrers},
-+            std::string{WorkerProto::featureBuildResourceUsage},
-         },
- };
- 
-@@ -191,6 +192,30 @@ void WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::write(
-     }
- }
- 
-+std::optional<uint64_t>
-+WorkerProto::Serialise<std::optional<uint64_t>>::read(const StoreDirConfig & store, WorkerProto::ReadConn conn)
+diff --git a/src/libutil-tests/linux/cgroup.cc b/src/libutil-tests/linux/cgroup.cc
+new file mode 100644
+index 000000000..a4b165bd0
+--- /dev/null
++++ b/src/libutil-tests/linux/cgroup.cc
+@@ -0,0 +1,59 @@
++#include <gtest/gtest.h>
++
++#include "nix/util/cgroup.hh"
++#include "nix/util/file-system.hh"
++
++namespace nix::linux {
++
++TEST(getCgroupStats, readsResourceUsage)
 +{
-+    auto tag = readNum<uint8_t>(conn.from);
-+    switch (tag) {
-+    case 0:
-+        return std::nullopt;
-+    case 1:
-+        return readNum<uint64_t>(conn.from);
-+    default:
-+        throw Error("Invalid optional tag from remote");
-+    }
++    auto cgroup = createTempDir();
++    AutoDelete delCgroup(cgroup, /*recursive=*/true);
++
++    writeFile(cgroup / "cpu.stat", "usage_usec 3000\nuser_usec 2000\nsystem_usec 1000\nnr_periods 0\n");
++    writeFile(cgroup / "memory.peak", "1073741824\n");
++    writeFile(
++        cgroup / "io.stat",
++        "259:0 rbytes=4096 wbytes=8192 rios=1 wios=2 dbytes=0 dios=0\n"
++        "8:0 rbytes=100 wbytes=200 rios=1 wios=1 dbytes=0 dios=0\n");
++    writeFile(cgroup / "memory.events", "low 0\nhigh 0\nmax 7\noom 3\noom_kill 2\noom_group_kill 0\n");
++
++    auto stats = getCgroupStats(cgroup);
++
++    EXPECT_EQ(stats.cpuUser, std::chrono::microseconds(2000));
++    EXPECT_EQ(stats.cpuSystem, std::chrono::microseconds(1000));
++    EXPECT_EQ(stats.memoryPeak, 1073741824u);
++    EXPECT_EQ(stats.ioReadBytes, 4196u);
++    EXPECT_EQ(stats.ioWriteBytes, 8392u);
++    EXPECT_EQ(stats.oomKills, 2u);
 +}
 +
-+void WorkerProto::Serialise<std::optional<uint64_t>>::write(
-+    const StoreDirConfig & store, WorkerProto::WriteConn conn, const std::optional<uint64_t> & optValue)
++TEST(getCgroupStats, emptyIoStatMeansNoIo)
 +{
-+    if (!optValue.has_value()) {
-+        conn.to << uint8_t{0};
-+    } else {
-+        conn.to << uint8_t{1} << *optValue;
-+    }
++    auto cgroup = createTempDir();
++    AutoDelete delCgroup(cgroup, /*recursive=*/true);
++
++    writeFile(cgroup / "io.stat", "");
++
++    auto stats = getCgroupStats(cgroup);
++
++    EXPECT_EQ(stats.ioReadBytes, 0u);
++    EXPECT_EQ(stats.ioWriteBytes, 0u);
 +}
 +
- DerivedPath WorkerProto::Serialise<DerivedPath>::read(const StoreDirConfig & store, WorkerProto::ReadConn conn)
- {
-     auto s = readString(conn.from);
-@@ -264,6 +289,12 @@ BuildResult WorkerProto::Serialise<BuildResult>::read(const StoreDirConfig & sto
-         res.cpuUser = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
-         res.cpuSystem = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
-     }
-+    if (conn.version.features.contains(WorkerProto::featureBuildResourceUsage)) {
-+        res.memoryPeak = WorkerProto::Serialise<std::optional<uint64_t>>::read(store, conn);
-+        res.ioReadBytes = WorkerProto::Serialise<std::optional<uint64_t>>::read(store, conn);
-+        res.ioWriteBytes = WorkerProto::Serialise<std::optional<uint64_t>>::read(store, conn);
-+        res.oomKills = WorkerProto::Serialise<std::optional<uint64_t>>::read(store, conn);
-+    }
++TEST(getCgroupStats, missingFilesMeanUnknown)
++{
++    auto cgroup = createTempDir();
++    AutoDelete delCgroup(cgroup, /*recursive=*/true);
++
++    auto stats = getCgroupStats(cgroup);
++
++    EXPECT_EQ(stats.cpuUser, std::nullopt);
++    EXPECT_EQ(stats.cpuSystem, std::nullopt);
++    EXPECT_EQ(stats.memoryPeak, std::nullopt);
++    EXPECT_EQ(stats.ioReadBytes, std::nullopt);
++    EXPECT_EQ(stats.ioWriteBytes, std::nullopt);
++    EXPECT_EQ(stats.oomKills, std::nullopt);
++}
++
++} // namespace nix::linux
+diff --git a/src/libutil-tests/linux/meson.build b/src/libutil-tests/linux/meson.build
+new file mode 100644
+index 000000000..0a7dffba6
+--- /dev/null
++++ b/src/libutil-tests/linux/meson.build
+@@ -0,0 +1,3 @@
++sources += files(
++  'cgroup.cc',
++)
+diff --git a/src/libutil-tests/meson.build b/src/libutil-tests/meson.build
+index 1a5b24761..d9a3b2760 100644
+--- a/src/libutil-tests/meson.build
++++ b/src/libutil-tests/meson.build
+@@ -107,6 +107,10 @@ if host_machine.system() != 'windows'
+   subdir('unix')
+ endif
  
-     if (conn.version.features.contains(WorkerProto::featureRealisationWithPath)) {
-         success.builtOutputs = WorkerProto::Serialise<std::map<OutputName, UnkeyedRealisation>>::read(store, conn);
-@@ -315,6 +346,12 @@ void WorkerProto::Serialise<BuildResult>::write(
-             WorkerProto::write(store, conn, res.cpuUser);
-             WorkerProto::write(store, conn, res.cpuSystem);
-         }
-+        if (conn.version.features.contains(WorkerProto::featureBuildResourceUsage)) {
-+            WorkerProto::write(store, conn, res.memoryPeak);
-+            WorkerProto::write(store, conn, res.ioReadBytes);
-+            WorkerProto::write(store, conn, res.ioWriteBytes);
-+            WorkerProto::write(store, conn, res.oomKills);
-+        }
++if host_machine.system() == 'linux'
++  subdir('linux')
++endif
++
+ include_dirs = [ include_directories('.') ]
  
-         if (conn.version.features.contains(WorkerProto::featureRealisationWithPath)) {
-             WorkerProto::write(store, conn, builtOutputs);
+ 
 diff --git a/src/libutil/linux/cgroup.cc b/src/libutil/linux/cgroup.cc
-index 9ebc3ab..5a2fac9 100644
+index 9ebc3ab77..5a2fac9ea 100644
 --- a/src/libutil/linux/cgroup.cc
 +++ b/src/libutil/linux/cgroup.cc
 @@ -49,30 +49,57 @@ StringMap getCgroups(const std::filesystem::path & cgroupFile)
@@ -306,7 +366,7 @@ index 9ebc3ab..5a2fac9 100644
  }
  
 diff --git a/src/libutil/linux/include/nix/util/cgroup.hh b/src/libutil/linux/include/nix/util/cgroup.hh
-index 7b50ffe..ced9c77 100644
+index 7b50ffe8d..ced9c770e 100644
 --- a/src/libutil/linux/include/nix/util/cgroup.hh
 +++ b/src/libutil/linux/include/nix/util/cgroup.hh
 @@ -17,6 +17,7 @@ StringMap getCgroups(const std::filesystem::path & cgroupFile);
@@ -317,6 +377,3 @@ index 7b50ffe..ced9c77 100644
  };
  
  /**
--- 
-2.55.0
-

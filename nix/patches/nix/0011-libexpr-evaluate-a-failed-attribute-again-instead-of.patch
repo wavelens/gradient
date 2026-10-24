@@ -1,0 +1,257 @@
+From 1f517fa14680eda7c1b95d184a0dd76284d792c8 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sun, 25 Oct 2026 00:55:49 +0200
+Subject: [PATCH] libexpr: evaluate a failed attribute again instead of caching
+ the failure
+
+A failure recorded in the evaluation cache stays with the flake until
+the cache file is deleted, although many failures do not repeat: an
+interrupted import from derivation, an evaluator that ran out of memory,
+a network error while fetching. The CLI already evaluated a cached
+failure again to show the real error, so the row only saved a second
+failing evaluation.
+
+Drop the Failed rows and the CachedEvalError they were reported with.
+Rows written by older versions are read as absent.
+---
+ src/libexpr-tests/eval-cache.cc            | 11 +++++
+ src/libexpr/eval-cache.cc                  | 53 +---------------------
+ src/libexpr/include/nix/expr/eval-cache.hh | 42 ++---------------
+ src/nix/main.cc                            | 10 +---
+ 4 files changed, 19 insertions(+), 97 deletions(-)
+
+diff --git a/src/libexpr-tests/eval-cache.cc b/src/libexpr-tests/eval-cache.cc
+index e2cfb8ea8..c671e4f2d 100644
+--- a/src/libexpr-tests/eval-cache.cc
++++ b/src/libexpr-tests/eval-cache.cc
+@@ -215,4 +215,15 @@ TEST_F(EvalCacheTest, concurrentCachesOfOneFlakeAllWrite)
+     EXPECT_EQ(rootLoads, 0) << "every evaluator's writes reached the shared cache file";
+ }
+ 
++TEST_F(EvalCacheTest, failedAttributeIsEvaluatedAgain)
++{
++    auto fp = hashString(HashAlgorithm::SHA256, "eval-cache-test-6");
++    Value vBroken = eval(R"({ x = throw "boom"; })");
++    Value vFixed = eval(R"({ x = "ok"; })");
++
++    EXPECT_THROW(makeCache(fp, vBroken)->getRoot()->getAttr("x")->getString(), EvalError);
++    EXPECT_THROW(makeCache(fp, vBroken)->getRoot()->getAttr("x")->getString(), EvalError);
++    EXPECT_EQ(makeCache(fp, vFixed)->getRoot()->getAttr("x")->getString(), "ok");
++}
++
+ } // namespace nix
+diff --git a/src/libexpr/eval-cache.cc b/src/libexpr/eval-cache.cc
+index 56d09f86c..3b8b6e7dc 100644
+--- a/src/libexpr/eval-cache.cc
++++ b/src/libexpr/eval-cache.cc
+@@ -12,30 +12,6 @@
+ 
+ namespace nix::eval_cache {
+ 
+-void CachedEvalError::anchor() {}
+-
+-CachedEvalError::CachedEvalError(ref<AttrCursor> cursor, Symbol attr)
+-    : CloneableError(cursor->root->state, "cached failure of attribute '%s'", cursor->getAttrPathStr(attr))
+-    , cursor(cursor)
+-    , attr(attr)
+-{
+-}
+-
+-void CachedEvalError::force()
+-{
+-    auto & v = cursor->forceValue();
+-
+-    if (v.type() == nAttrs) {
+-        auto a = v.attrs()->get(this->attr);
+-
+-        state.forceValue(*a->value, a->pos);
+-    }
+-
+-    // Shouldn't happen.
+-    throw EvalError(
+-        state, "evaluation of cached failed attribute '%s' unexpectedly succeeded", cursor->getAttrPathStr(attr));
+-}
+-
+ static const char * schema = R"sql(
+ create table if not exists Attributes (
+     parent      integer not null,
+@@ -290,20 +266,6 @@ struct AttrDb
+         });
+     }
+ 
+-    AttrId setFailed(AttrKey key)
+-    {
+-        return doSQLite([&](State & state) {
+-            state.insertAttribute.use()
+-                .apply(key.first)
+-                .apply(symbols[key.second])
+-                .apply(AttrType::Failed)
+-                .apply(0, false)
+-                .exec();
+-
+-            return state.db.getLastInsertedRowId();
+-        });
+-    }
+-
+     std::optional<std::pair<AttrId, AttrValue>> getAttr(AttrKey key)
+     {
+         auto state(_state->lock());
+@@ -344,7 +306,7 @@ struct AttrDb
+         case AttrType::Misc:
+             return {{rowId, misc_t()}};
+         case AttrType::Failed:
+-            return {{rowId, failed_t()}};
++            return {};
+         default:
+             throw Error("unexpected type in evaluation cache");
+         }
+@@ -436,8 +398,6 @@ void AttrCursor::fetchCachedValue()
+ {
+     if (!cachedValue)
+         cachedValue = root->db->getAttr(getKey());
+-    if (cachedValue && std::get_if<failed_t>(&cachedValue->second) && parent)
+-        throw CachedEvalError(parent->first, parent->second);
+ }
+ 
+ AttrPath AttrCursor::getAttrPath() const
+@@ -473,14 +433,7 @@ Value & AttrCursor::forceValue()
+ 
+     auto & v = getValue();
+ 
+-    try {
+-        root->state.forceValue(v, noPos);
+-    } catch (EvalError &) {
+-        debug("setting '%s' to failed", getAttrPathStr());
+-        if (root->db)
+-            cachedValue = {root->db->setFailed(getKey()), failed_t()};
+-        throw;
+-    }
++    root->state.forceValue(v, noPos);
+ 
+     if (root->db && (!cachedValue || std::get_if<placeholder_t>(&cachedValue->second))) {
+         if (v.type() == nString)
+@@ -527,8 +480,6 @@ std::shared_ptr<AttrCursor> AttrCursor::maybeGetAttr(Symbol name)
+                 if (attr) {
+                     if (std::get_if<missing_t>(&attr->second))
+                         return nullptr;
+-                    else if (std::get_if<failed_t>(&attr->second))
+-                        throw CachedEvalError(ref(shared_from_this()), name);
+                     else
+                         return std::make_shared<AttrCursor>(
+                             root, std::make_pair(ref(shared_from_this()), name), nullptr, std::move(attr));
+diff --git a/src/libexpr/include/nix/expr/eval-cache.hh b/src/libexpr/include/nix/expr/eval-cache.hh
+index 8f7042c83..37084f143 100644
+--- a/src/libexpr/include/nix/expr/eval-cache.hh
++++ b/src/libexpr/include/nix/expr/eval-cache.hh
+@@ -14,28 +14,9 @@ namespace nix::eval_cache {
+ struct AttrDb;
+ class AttrCursor;
+ 
+-struct CachedEvalError : CloneableError<CachedEvalError, EvalError>
+-{
+-private:
+-    void anchor() override;
+-public:
+-    const ref<AttrCursor> cursor;
+-    const Symbol attr;
+-
+-    CachedEvalError(ref<AttrCursor> cursor, Symbol attr);
+-
+-    /**
+-     * Evaluate this attribute, which should result in a regular
+-     * `EvalError` exception being thrown.
+-     */
+-    [[noreturn]]
+-    void force();
+-};
+-
+ class EvalCache : public std::enable_shared_from_this<EvalCache>
+ {
+     friend class AttrCursor;
+-    friend struct CachedEvalError;
+ 
+     std::shared_ptr<AttrDb> db;
+     EvalState & state;
+@@ -66,6 +47,7 @@ enum AttrType {
+     String = 2,
+     Missing = 3,
+     Misc = 4,
++    /* Written by older versions of Nix, read as an absent row. */
+     Failed = 5,
+     Bool = 6,
+     ListOfStrings = 7,
+@@ -81,9 +63,6 @@ struct missing_t
+ struct misc_t
+ {};
+ 
+-struct failed_t
+-{};
+-
+ struct int_t
+ {
+     NixInt x;
+@@ -93,22 +72,13 @@ typedef uint64_t AttrId;
+ typedef std::pair<AttrId, Symbol> AttrKey;
+ typedef std::pair<std::string, NixStringContext> string_t;
+ 
+-typedef std::variant<
+-    std::vector<Symbol>,
+-    string_t,
+-    placeholder_t,
+-    missing_t,
+-    misc_t,
+-    failed_t,
+-    bool,
+-    int_t,
+-    std::vector<std::string>>
+-    AttrValue;
++typedef std::
++    variant<std::vector<Symbol>, string_t, placeholder_t, missing_t, misc_t, bool, int_t, std::vector<std::string>>
++        AttrValue;
+ 
+ class AttrCursor : public std::enable_shared_from_this<AttrCursor>
+ {
+     friend class EvalCache;
+-    friend struct CachedEvalError;
+ 
+     ref<EvalCache> root;
+     using Parent = std::optional<std::pair<ref<AttrCursor>, Symbol>>;
+@@ -122,9 +92,7 @@ class AttrCursor : public std::enable_shared_from_this<AttrCursor>
+ 
+     /**
+      * If `cachedValue` is unset, try to initialize it from the
+-     * database. It is not an error if it does not exist. Throw a
+-     * `CachedEvalError` exception if it does exist but has type
+-     * `AttrType::Failed`.
++     * database. It is not an error if it does not exist.
+      */
+     void fetchCachedValue();
+ 
+diff --git a/src/nix/main.cc b/src/nix/main.cc
+index 963bc07ce..f9ec6093b 100644
+--- a/src/nix/main.cc
++++ b/src/nix/main.cc
+@@ -19,7 +19,6 @@
+ #include "nix/util/terminal.hh"
+ #include "nix/util/users.hh"
+ #include "nix/cmd/network-proxy.hh"
+-#include "nix/expr/eval-cache.hh"
+ #include "nix/flake/flake.hh"
+ #include "nix/flake/settings.hh"
+ 
+@@ -577,14 +576,7 @@ void mainWrapped(int argc, char ** argv)
+         evalSettings.pureEval = false;
+     }
+ 
+-    try {
+-        args.command->second->run();
+-    } catch (eval_cache::CachedEvalError & e) {
+-        /* Evaluate the original attribute that resulted in this
+-           cached error so that we can show the original error to the
+-           user. */
+-        e.force();
+-    }
++    args.command->second->run();
+ }
+ 
+ } // namespace nix

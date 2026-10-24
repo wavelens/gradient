@@ -1,15 +1,20 @@
-From 510a241f9fb9b261a7a5547ed351c9106b36e04a Mon Sep 17 00:00:00 2001
+From 364c569a42a3e3c9ef9a87c95b88c6d7c904ce61 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sat, 13 Jun 2026 17:41:03 +0200
-Subject: [PATCH 03/13] libflake-c: expose nix_locked_flake_get_fingerprint
+Subject: [PATCH] libflake-c: expose nix_locked_flake_get_fingerprint
 
+The fingerprint is the key under which Nix caches the evaluation of a
+locked flake. A C API consumer that keeps evaluation results of its own
+needs the same key to tell whether a locked flake is the one it already
+has results for.
 ---
- src/libflake-c/nix_api_flake.cc | 19 +++++++++++++++++++
- src/libflake-c/nix_api_flake.h  | 23 +++++++++++++++++++++++
- 2 files changed, 42 insertions(+)
+ src/libflake-c/nix_api_flake.cc     | 19 +++++++++
+ src/libflake-c/nix_api_flake.h      | 23 +++++++++++
+ src/libflake-tests/nix_api_flake.cc | 63 +++++++++++++++++++++++++++++
+ 3 files changed, 105 insertions(+)
 
 diff --git a/src/libflake-c/nix_api_flake.cc b/src/libflake-c/nix_api_flake.cc
-index 5bdd0213b..a7c0c5270 100644
+index cbf5430f5..089fd6d6b 100644
 --- a/src/libflake-c/nix_api_flake.cc
 +++ b/src/libflake-c/nix_api_flake.cc
 @@ -7,8 +7,10 @@
@@ -23,7 +28,7 @@ index 5bdd0213b..a7c0c5270 100644
  
  extern "C" {
  
-@@ -208,4 +210,21 @@ nix_value * nix_locked_flake_get_output_attrs(
+@@ -209,4 +211,21 @@ nix_value * nix_locked_flake_get_output_attrs(
      NIXC_CATCH_ERRS_NULL
  }
  
@@ -46,10 +51,10 @@ index 5bdd0213b..a7c0c5270 100644
 +
  } // extern "C"
 diff --git a/src/libflake-c/nix_api_flake.h b/src/libflake-c/nix_api_flake.h
-index 3c3208be3..88501409d 100644
+index a3221e676..baa0e1d32 100644
 --- a/src/libflake-c/nix_api_flake.h
 +++ b/src/libflake-c/nix_api_flake.h
-@@ -237,6 +237,29 @@ void nix_flake_reference_free(nix_flake_reference * store);
+@@ -239,6 +239,29 @@ void nix_flake_reference_free(nix_flake_reference * store);
  nix_value * nix_locked_flake_get_output_attrs(
      nix_c_context * context, nix_flake_settings * settings, EvalState * evalState, nix_locked_flake * lockedFlake);
  
@@ -79,3 +84,77 @@ index 3c3208be3..88501409d 100644
  #ifdef __cplusplus
  } // extern "C"
  #endif
+diff --git a/src/libflake-tests/nix_api_flake.cc b/src/libflake-tests/nix_api_flake.cc
+index 063dfc4d7..772cf4cd7 100644
+--- a/src/libflake-tests/nix_api_flake.cc
++++ b/src/libflake-tests/nix_api_flake.cc
+@@ -168,6 +168,69 @@ TEST_F(nix_api_store_test, nix_api_load_flake)
+     nix_flake_settings_free(settings);
+ }
+ 
++TEST_F(nix_api_store_test, nix_api_locked_flake_get_fingerprint)
++{
++    auto tmpDir = nix::createTempDir();
++    nix::AutoDelete delTmpDir(tmpDir, true);
++
++    nix::writeFile(tmpDir / "flake.nix", R"(
++        {
++            outputs = { ... }: { hello = "potato"; };
++        }
++    )");
++
++    nix_libstore_init(ctx);
++    assert_ctx_ok();
++    nix_libexpr_init(ctx);
++    assert_ctx_ok();
++
++    auto fetchSettings = nix_fetchers_settings_new(ctx);
++    auto settings = nix_flake_settings_new(ctx);
++    auto * builder = nix_eval_state_builder_new(ctx, store);
++    nix_flake_settings_add_to_eval_state_builder(ctx, settings, builder);
++    auto state = nix_eval_state_build(ctx, builder);
++    nix_eval_state_builder_free(builder);
++    assert_ctx_ok();
++
++    auto parseFlags = nix_flake_reference_parse_flags_new(ctx, settings);
++    nix_flake_reference_parse_flags_set_base_directory(
++        ctx, parseFlags, tmpDir.string().c_str(), tmpDir.string().size());
++    std::string fragment;
++    nix_flake_reference * flakeRef = nullptr;
++    nix_flake_reference_and_fragment_from_string(
++        ctx, fetchSettings, settings, parseFlags, ".", 1, &flakeRef, OBSERVE_STRING(fragment));
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, flakeRef);
++
++    auto lockFlags = nix_flake_lock_flags_new(ctx, settings);
++    auto locked = nix_flake_lock(ctx, fetchSettings, settings, state, lockFlags, flakeRef);
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, locked);
++
++    std::string fp1;
++    auto r1 = nix_locked_flake_get_fingerprint(ctx, store, fetchSettings, locked, OBSERVE_STRING(fp1));
++    assert_ctx_ok();
++    ASSERT_EQ(NIX_OK, r1);
++
++    std::string fp2;
++    auto r2 = nix_locked_flake_get_fingerprint(ctx, store, fetchSettings, locked, OBSERVE_STRING(fp2));
++    assert_ctx_ok();
++    ASSERT_EQ(NIX_OK, r2);
++    ASSERT_EQ(fp1, fp2);
++
++    if (!fp1.empty()) {
++        ASSERT_EQ(64u, fp1.size());
++        ASSERT_EQ(fp1.find_first_not_of("0123456789abcdef"), std::string::npos);
++    }
++
++    nix_flake_lock_flags_free(lockFlags);
++    nix_flake_reference_free(flakeRef);
++    nix_flake_reference_parse_flags_free(parseFlags);
++    nix_locked_flake_free(locked);
++    nix_state_free(state);
++    nix_flake_settings_free(settings);
++}
++
+ TEST_F(nix_api_store_test, nix_api_load_flake_with_flags)
+ {
+     nix_libstore_init(ctx);

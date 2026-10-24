@@ -1,26 +1,31 @@
-From be7bc78d606e196a1a7d5421e66cebc15d9139ea Mon Sep 17 00:00:00 2001
+From 2092cf93a57cc6706bcc273007b5aedcccfe3a59 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sat, 13 Jun 2026 17:48:24 +0200
-Subject: [PATCH 04/13] libstore-c: expose nix_store_add_temp_root and
+Subject: [PATCH] libstore-c: expose nix_store_add_temp_root and
  nix_store_add_perm_root
 
+A C API consumer that evaluates and then builds in separate steps has
+no way to keep the store paths it holds on to alive across a garbage
+collection. Expose the temporary roots of `Store` and the permanent
+roots of `LocalFSStore`; the latter fails on a store without a local
+filesystem.
 ---
- src/libstore-c/nix_api_store.cc | 34 +++++++++++++++++++++++++++++++++
- src/libstore-c/nix_api_store.h  | 30 +++++++++++++++++++++++++++++
- 2 files changed, 64 insertions(+)
+ src/libstore-c/nix_api_store.cc     | 32 +++++++++++++++
+ src/libstore-c/nix_api_store.h      | 30 ++++++++++++++
+ src/libstore-tests/nix_api_store.cc | 64 +++++++++++++++++++++++++++++
+ 3 files changed, 126 insertions(+)
 
 diff --git a/src/libstore-c/nix_api_store.cc b/src/libstore-c/nix_api_store.cc
-index c0b296254..e4c2af119 100644
+index fbb3c4185..276164012 100644
 --- a/src/libstore-c/nix_api_store.cc
 +++ b/src/libstore-c/nix_api_store.cc
-@@ -100,6 +100,40 @@ nix_store_get_version(nix_c_context * context, Store * store, nix_get_string_cal
+@@ -99,6 +99,38 @@ nix_store_get_version(nix_c_context * context, Store * store, nix_get_string_cal
      NIXC_CATCH_ERRS
  }
  
 +nix_err nix_store_add_temp_root(nix_c_context * context, Store * store, const StorePath * path)
 +{
-+    if (context)
-+        context->last_err_code = NIX_OK;
++    nix_clear_err(context);
 +    try {
 +        store->ptr->addTempRoot(path->path);
 +    }
@@ -35,15 +40,14 @@ index c0b296254..e4c2af119 100644
 +    nix_get_string_callback callback,
 +    void * user_data)
 +{
-+    if (context)
-+        context->last_err_code = NIX_OK;
++    nix_clear_err(context);
 +    try {
 +        if (!gcRoot)
 +            throw nix::UsageError("gcRoot must not be null");
 +
 +        auto localStore = store->ptr.dynamic_pointer_cast<nix::LocalFSStore>();
 +        if (!localStore)
-+            throw nix::UsageError("store does not support permanent GC roots (not a local filesystem store)");
++            throw nix::Error("store does not support permanent GC roots: not a local filesystem store");
 +
 +        auto resultPath = localStore->addPermRoot(path->path, std::filesystem::path(gcRoot));
 +        return call_nix_get_string_callback(resultPath.string(), callback, user_data);
@@ -95,3 +99,82 @@ index e60a7d6c0..ebade943f 100644
  /**
   * @brief Create a `nix_derivation` from a JSON representation of that derivation.
   *
+diff --git a/src/libstore-tests/nix_api_store.cc b/src/libstore-tests/nix_api_store.cc
+index 0162684da..663e008fc 100644
+--- a/src/libstore-tests/nix_api_store.cc
++++ b/src/libstore-tests/nix_api_store.cc
+@@ -1,5 +1,7 @@
+ #include <fstream>
++#include <unistd.h>
+ 
++#include <gmock/gmock.h>
+ #include <nlohmann/json.hpp>
+ 
+ #include "nix_api_util.h"
+@@ -977,4 +979,66 @@ TEST_F(nix_api_store_test, nix_derivation_clone)
+     nix_derivation_free(drv2);
+ }
+ 
++TEST_F(nix_api_store_test, nix_store_add_temp_root)
++{
++    StorePath * path = nix_store_parse_path(ctx, store, (nixStoreDir + PATH_SUFFIX).c_str());
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, path);
++
++    auto ret = nix_store_add_temp_root(ctx, store, path);
++    assert_ctx_ok();
++    ASSERT_EQ(NIX_OK, ret);
++
++    auto tempRoots = nix::readFile(nixStateDir + "/temproots/" + std::to_string(getpid()));
++    ASSERT_NE(tempRoots.find(nixStoreDir + PATH_SUFFIX), std::string::npos);
++
++    nix_store_path_free(path);
++}
++
++TEST_F(nix_api_store_test, nix_store_add_perm_root)
++{
++    StorePath * path = nix_store_parse_path(ctx, store, (nixStoreDir + PATH_SUFFIX).c_str());
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, path);
++
++    auto tmpDir = nix::createTempDir();
++    nix::AutoDelete delTmpDir(tmpDir, true);
++    auto gcRoot = tmpDir / "gcroot";
++
++    std::string rootOut;
++    auto ret = nix_store_add_perm_root(ctx, store, path, gcRoot.string().c_str(), OBSERVE_STRING(rootOut));
++    assert_ctx_ok();
++    ASSERT_EQ(NIX_OK, ret);
++    ASSERT_EQ(gcRoot.string(), rootOut);
++    ASSERT_EQ(nixStoreDir + PATH_SUFFIX, std::filesystem::read_symlink(gcRoot).string());
++
++    nix_store_path_free(path);
++}
++
++TEST_F(nix_api_util_context, nix_store_add_perm_root_fails_without_local_store)
++{
++    Store * store = nix_store_open(ctx, "dummy://", nullptr);
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, store);
++
++    std::string storeDir;
++    nix_store_get_storedir(ctx, store, OBSERVE_STRING(storeDir));
++    assert_ctx_ok();
++
++    StorePath * path = nix_store_parse_path(ctx, store, (storeDir + PATH_SUFFIX).c_str());
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, path);
++
++    auto tmpDir = nix::createTempDir();
++    nix::AutoDelete delTmpDir(tmpDir, true);
++
++    std::string rootOut;
++    auto ret = nix_store_add_perm_root(ctx, store, path, (tmpDir / "gcroot").string().c_str(), OBSERVE_STRING(rootOut));
++    ASSERT_EQ(NIX_ERR_NIX_ERROR, ret);
++    ASSERT_THAT(nix_err_msg(nullptr, ctx, nullptr), testing::HasSubstr("not a local filesystem store"));
++
++    nix_store_path_free(path);
++    nix_store_free(store);
++}
++
+ } // namespace nixC

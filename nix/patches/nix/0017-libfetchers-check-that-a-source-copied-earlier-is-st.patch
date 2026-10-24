@@ -1,15 +1,21 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 3f7eaf3c197f2fdd63d3873019a04d17600b960a Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Mon, 5 Oct 2026 00:56:03 +0200
 Subject: [PATCH] libfetchers: check that a source copied earlier is still in
  the store
 
+fetchToStore() remembers the store path a source was copied to for the
+lifetime of the fetcher settings and returns it without asking the
+store. An evaluator that lives longer than one evaluation can see that
+path garbage-collected in between and then hands out a path that no
+longer exists. Root the path and check it before trusting the memo; a
+path that is gone is copied again.
 ---
  src/libfetchers/fetch-to-store.cc | 13 +++++++++++--
  1 file changed, 11 insertions(+), 2 deletions(-)
 
 diff --git a/src/libfetchers/fetch-to-store.cc b/src/libfetchers/fetch-to-store.cc
-index acedca6..95b4d80 100644
+index 085c97da7..3685e1696 100644
 --- a/src/libfetchers/fetch-to-store.cc
 +++ b/src/libfetchers/fetch-to-store.cc
 @@ -55,8 +55,17 @@ std::pair<StorePath, Hash> fetchToStore2(
@@ -32,6 +38,3 @@ index acedca6..95b4d80 100644
      }
  
      std::optional<fetchers::Cache::Key> cacheKey;
--- 
-2.55.0
-
