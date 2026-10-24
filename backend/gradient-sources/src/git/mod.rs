@@ -59,17 +59,6 @@ pub async fn head_commit(
         .await
 }
 
-#[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
-pub async fn resolve_head(
-    ctx: &DbContext,
-    task: &MTask,
-    branch: Option<&str>,
-) -> Result<(BranchHead, String, String), SourceError> {
-    let (_has_update, head) = check_task_updates(ctx, task, branch).await?;
-    let commit = get_commit_info(ctx, task, &head.commit).await?;
-    Ok((head, commit.message, commit.author_name))
-}
-
 #[instrument(skip(ctx, project), fields(project_id = %project.id, repository = %url))]
 pub async fn resolve_remote_ref(
     ctx: &DbContext,

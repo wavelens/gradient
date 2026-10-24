@@ -22,7 +22,7 @@ use gradient_db::DbContext;
 use gradient_db::lookup::by_ids;
 use gradient_entity::evaluation::WalkMode;
 use gradient_scheduler::Scheduler;
-use gradient_sources::resolve_head;
+use gradient_sources::head_commit;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -405,7 +405,7 @@ pub(super) async fn fire(
         .ok()
         .and_then(|cfg| cfg.manual_branch().map(str::to_owned));
 
-    let (head, commit_message, author_name) = resolve_head(db, task, branch.as_deref())
+    let (branch, head) = head_commit(db, task, branch.as_deref())
         .await
         .map_err(|e| SharedRefusal::RepositoryStateFetchFailed {
             reason: e.to_string(),
@@ -414,7 +414,7 @@ pub(super) async fn fire(
     let input_update = gradient_ci::trigger::maybe_trigger_input_update(
         &db.web_db,
         task,
-        head.commit.clone(),
+        head.hash.clone(),
         Some(trigger.id),
     )
     .await
@@ -428,10 +428,10 @@ pub(super) async fn fire(
             let input = ApplyInput {
                 trigger_id: trigger.id,
                 trigger_type: trigger.trigger_type,
-                branch: head.branch,
-                commit_hash: head.commit,
-                commit_message: Some(commit_message),
-                author_name: Some(author_name),
+                branch,
+                commit_hash: head.hash,
+                commit_message: Some(head.message),
+                author_name: Some(head.author_name),
                 manual: true,
                 gate_approval: None,
                 repository_override: None,

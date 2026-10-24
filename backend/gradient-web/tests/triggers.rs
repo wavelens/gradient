@@ -372,7 +372,7 @@ async fn fire_now_on_inactive_trigger_returns_400() {
     );
 }
 
-// `fire_now` is not integration-tested here because `resolve_head` is making real git network
+// `fire_now` is not integration-tested here because `head_commit` is making real git network
 // requests.
 
 #[tokio::test]
