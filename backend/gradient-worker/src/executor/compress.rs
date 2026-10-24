@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Every job kind is ending in this push of only its own outputs.
-//! Nothing below an output is looked at.
+//! Every job kind is ending in this push of its own outputs and of the uncached paths they refer to.
+//! Only a recursive Nix build leaves such paths; nothing else would ever upload them.
 //! The gate that dispatched the job made its build closure complete in our cache first.
 //! The server is requesting a substitute's runtime references itself.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Result;
 use gradient_util::store_path::nix_store_path;
@@ -36,27 +36,7 @@ pub async fn push_outputs(
     }
 
     updater.report_stage(BuildStage::Upload).await?;
-    let paths: Vec<String> = outputs
-        .iter()
-        .map(|o| nix_store_path(&o.store_path))
-        .collect();
-    let sizes: Vec<Option<u64>> = outputs.iter().map(|o| o.source.nar_size()).collect();
-    let entries = super::query_fetched_paths(updater, paths, sizes).await?;
-    let mut sources: HashMap<String, OutputNar<'_>> = outputs
-        .into_iter()
-        .map(|o| (nix_store_path(&o.store_path), o))
-        .collect();
-    let pending: Vec<(CachedPath, OutputNar<'_>)> = entries
-        .into_iter()
-        .filter(|cp| !cp.cached)
-        .filter_map(|cp| {
-            sources
-                .remove(&nix_store_path(&cp.path))
-                .map(|output| (cp, output))
-        })
-        .collect();
-
-    let resolved = ResolvedMeta::of(&pending).await;
+    let (pending, resolved) = uncached_closure(updater, outputs).await?;
     let (mut progress, tallies) = upload_progress(updater, &pending, &resolved);
     let uploads = pending
         .into_iter()
@@ -75,6 +55,77 @@ pub async fn push_outputs(
         build.finish().await;
     }
     uploaded
+}
+
+type Pending<'a> = Vec<(CachedPath, OutputNar<'a>)>;
+
+async fn uncached_closure<'a>(
+    updater: &JobUpdater,
+    outputs: Vec<OutputNar<'a>>,
+) -> Result<(Pending<'a>, ResolvedMeta)> {
+    let mut seen: HashSet<String> = outputs
+        .iter()
+        .map(|o| nix_store_path(&o.store_path))
+        .collect();
+    let mut pending = Vec::new();
+    let mut resolved = ResolvedMeta::default();
+    let mut frontier = outputs;
+    while !frontier.is_empty() {
+        let found = uncached(updater, frontier).await?;
+        let found_meta = ResolvedMeta::of(&found).await;
+        frontier = unseen_references(&found, &found_meta, &mut seen);
+        resolved.0.extend(found_meta.0);
+        pending.extend(found);
+    }
+    Ok((pending, resolved))
+}
+
+async fn uncached<'a>(updater: &JobUpdater, outputs: Vec<OutputNar<'a>>) -> Result<Pending<'a>> {
+    let paths: Vec<String> = outputs
+        .iter()
+        .map(|o| nix_store_path(&o.store_path))
+        .collect();
+    let sizes: Vec<Option<u64>> = outputs.iter().map(|o| o.source.nar_size()).collect();
+    let entries = super::query_fetched_paths(updater, paths, sizes).await?;
+    let mut sources: HashMap<String, OutputNar<'a>> = outputs
+        .into_iter()
+        .map(|o| (nix_store_path(&o.store_path), o))
+        .collect();
+    Ok(entries
+        .into_iter()
+        .filter(|cp| !cp.cached)
+        .filter_map(|cp| {
+            sources
+                .remove(&nix_store_path(&cp.path))
+                .map(|output| (cp, output))
+        })
+        .collect())
+}
+
+fn unseen_references<'a>(
+    found: &Pending<'a>,
+    meta: &ResolvedMeta,
+    seen: &mut HashSet<String>,
+) -> Vec<OutputNar<'a>> {
+    found
+        .iter()
+        .filter_map(|(cached, output)| match output.source {
+            NarSource::Path { meta: Some(store) } => Some((cached, output, store)),
+            _ => None,
+        })
+        .flat_map(|(cached, output, store)| {
+            meta.references(&cached.path)
+                .iter()
+                .map(|reference| nix_store_path(reference))
+                .filter(|reference| seen.insert(reference.clone()))
+                .map(move |store_path| OutputNar {
+                    build_id: output.build_id.clone(),
+                    store_path,
+                    source: NarSource::Path { meta: Some(store) },
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn upload_progress(
@@ -106,9 +157,16 @@ fn upload_progress(
     (progress, tallies)
 }
 
+#[derive(Default)]
 struct ResolvedMeta(HashMap<String, PathMeta>);
 
 impl ResolvedMeta {
+    fn references(&self, store_path: &str) -> &[String] {
+        self.0
+            .get(&nix_store_path(store_path))
+            .map_or(&[], |meta| meta.references.as_slice())
+    }
+
     async fn of(pending: &[(CachedPath, OutputNar<'_>)]) -> Self {
         let lookups = pending
             .iter()
@@ -416,6 +474,124 @@ mod tests {
             opened,
             vec![raw_path],
             "only the uncached output is streamed"
+        );
+        pump.abort();
+    }
+
+    #[tokio::test]
+    async fn uncached_paths_an_output_refers_to_are_pushed_with_it() {
+        use gradient_worker_client::nar::{PathMeta, PathMetaSource};
+
+        let path = |name: &str| format!("/nix/store/{}-{name}", "q".repeat(32));
+        let (output, produced, nested, input) =
+            (path("out"), path("produced"), path("nested"), path("input"));
+
+        struct Store(HashMap<String, Vec<String>>);
+
+        #[async_trait::async_trait]
+        impl PathMetaSource for Store {
+            async fn path_meta(&self, store_path: &str) -> Option<PathMeta> {
+                Some(PathMeta {
+                    nar_size: Some(1),
+                    references: self.0.get(store_path)?.clone(),
+                    ..Default::default()
+                })
+            }
+        }
+
+        let store: &'static Store = Box::leak(Box::new(Store(HashMap::from([
+            (
+                output.clone(),
+                vec![output.clone(), produced.clone(), input.clone()],
+            ),
+            (produced.clone(), vec![nested.clone(), input.clone()]),
+            (nested.clone(), vec![]),
+            (input.clone(), vec![]),
+        ]))));
+
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+        let cached_input = input.clone();
+        let server_task = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            let mut queried: Vec<Vec<String>> = Vec::new();
+            let mut opened: Vec<String> = Vec::new();
+            while opened.len() < 3 {
+                match sc.recv().await.unwrap() {
+                    ClientMessage::CacheQuery {
+                        query_id, paths, ..
+                    } => {
+                        queried.push(paths.clone());
+                        let cached = paths
+                            .into_iter()
+                            .map(|p| CachedPath {
+                                cached: p == cached_input,
+                                ..uncached(&p)
+                            })
+                            .collect();
+                        sc.send(ServerMessage::CacheStatus { query_id, cached })
+                            .await
+                            .unwrap();
+                    }
+                    ClientMessage::UploadRequest {
+                        request_id,
+                        object: UploadObject::Nar { store_path },
+                        ..
+                    } => {
+                        opened.push(store_path);
+                        sc.send(ServerMessage::UploadGrant {
+                            request_id,
+                            target: GrantTarget::Passthrough { resume_offset: 0 },
+                        })
+                        .await
+                        .unwrap();
+                    }
+                    _ => {}
+                }
+            }
+            (queried, opened)
+        });
+
+        let conn = ProtoConnection::open(&url).await.unwrap();
+        let (writer, reader, _flush) = conn.split();
+        let uploads = UploadClient::new(writer.clone(), 8);
+        let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let mut updater = updater(
+            "job-recursive-nix",
+            writer,
+            cache_waiters.clone(),
+            uploads.clone(),
+        );
+        let pump = pump(reader, cache_waiters, uploads);
+        let (_tx, abort) = crate::executor::AbortSignal::channel();
+
+        let push = tokio::spawn(async move {
+            let _ = push_outputs(
+                &mut updater,
+                vec![OutputNar {
+                    build_id: "b1".to_owned(),
+                    store_path: output.clone(),
+                    source: NarSource::Path { meta: Some(store) },
+                }],
+                &abort,
+            )
+            .await;
+        });
+
+        let (queried, mut opened) = server_task.await.unwrap();
+        push.abort();
+        opened.sort_unstable();
+        let mut expected = vec![path("out"), path("produced"), path("nested")];
+        expected.sort_unstable();
+        assert_eq!(opened, expected);
+        assert_eq!(
+            queried,
+            vec![
+                vec![path("out")],
+                vec![path("produced"), path("input")],
+                vec![path("nested")],
+            ],
+            "a cached reference is not followed"
         );
         pump.abort();
     }
