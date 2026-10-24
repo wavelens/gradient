@@ -52,9 +52,14 @@ mod tests {
             .append_query_results([vec![previous.clone()]])
             .into_connection();
 
-        copy_entry_points(&db, &[previous], EvaluationId::now_v7(), gradient_types::now())
-            .await
-            .unwrap();
+        copy_entry_points(
+            &db,
+            &[previous],
+            EvaluationId::now_v7(),
+            gradient_types::now(),
+        )
+        .await
+        .unwrap();
 
         let log = raw_statements(db.into_transaction_log());
         assert!(

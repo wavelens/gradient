@@ -71,12 +71,7 @@ pub fn component_hashes(
 ) -> Vec<String> {
     let mut hashes: BTreeSet<String> = reached.keys().cloned().collect();
     hashes.extend(entry_points.iter().map(|ep| ep.hash.clone()));
-    hashes.extend(
-        reached
-            .values()
-            .flat_map(references)
-            .map(|(hash, _)| hash),
-    );
+    hashes.extend(reached.values().flat_map(references).map(|(hash, _)| hash));
     hashes.into_iter().collect()
 }
 
@@ -390,7 +385,11 @@ mod tests {
     fn a_dependency_has_no_license() {
         let doc = cyclonedx(&hello_with_zlib());
 
-        assert!(component(&doc, &format!("{GLIBC}-glibc-2.40")).get("licenses").is_none());
+        assert!(
+            component(&doc, &format!("{GLIBC}-glibc-2.40"))
+                .get("licenses")
+                .is_none()
+        );
     }
 
     #[test]

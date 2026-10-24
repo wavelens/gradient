@@ -141,7 +141,10 @@ mod tests {
     #[tokio::test]
     async fn entry_point_outputs_decode_the_stored_licenses() {
         let row = BTreeMap::from([
-            ("attr".to_owned(), Value::from("packages.x86_64-linux.hello")),
+            (
+                "attr".to_owned(),
+                Value::from("packages.x86_64-linux.hello"),
+            ),
             (
                 "licenses".to_owned(),
                 Value::from(serde_json::json!([{"id": "GPL-3.0-or-later"}, {"name": "unfree"}])),
@@ -149,9 +152,13 @@ mod tests {
             ("hash".to_owned(), Value::from("abc")),
             ("package".to_owned(), Value::from("hello-2.12.1")),
         ]);
-        let db = mock_db().append_query_results([vec![row]]).into_connection();
+        let db = mock_db()
+            .append_query_results([vec![row]])
+            .into_connection();
 
-        let outputs = entry_point_outputs(&db, EvaluationId::now_v7()).await.unwrap();
+        let outputs = entry_point_outputs(&db, EvaluationId::now_v7())
+            .await
+            .unwrap();
 
         assert_eq!(
             outputs[0].licenses,
@@ -181,7 +188,10 @@ mod tests {
         let b = "1123456789abcdfghijklmnpqrsvwxyz";
         let src = "2123456789abcdfghijklmnpqrsvwxyz";
         let reached = HashMap::from([
-            (a.to_owned(), path(a, &format!("{a}-pkg {b}-pkg {src}-script.sh"))),
+            (
+                a.to_owned(),
+                path(a, &format!("{a}-pkg {b}-pkg {src}-script.sh")),
+            ),
             (b.to_owned(), path(b, "")),
         ]);
 
@@ -195,7 +205,9 @@ mod tests {
             ("name".to_owned(), Value::from("hello-2.12.1")),
             ("pname".to_owned(), Value::from("hello")),
         ]);
-        let db = mock_db().append_query_results([vec![row]]).into_connection();
+        let db = mock_db()
+            .append_query_results([vec![row]])
+            .into_connection();
 
         let names = derivation_names(&db, &["abc".to_owned()]).await.unwrap();
 

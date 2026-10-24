@@ -13,9 +13,9 @@ use gradient_sources::{
     AttrError, DerivationResolver, EvalDependencies, FlakeDiscovery, FoundDerivations, Resolved,
     ResolvedDerivation,
 };
-use gradient_wire::types::License;
 use gradient_util::store_path::nix_store_path;
 use gradient_util::sync::Mutex;
+use gradient_wire::types::License;
 use std::sync::Arc;
 
 use super::eval_stats::{EvalStatsAccumulator, EvalStatsTotals};
