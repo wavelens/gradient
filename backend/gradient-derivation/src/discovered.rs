@@ -29,12 +29,8 @@ pub fn discovered_derivation(
     let input_sources = drv.input_sources.clone();
 
     let meta = drv.build_meta();
-    let name = drv
-        .environment
-        .get("name")
-        .map(String::as_str)
-        .unwrap_or("");
-    let pname = crate::derive_pname(drv.environment.get("pname").map(String::as_str), name);
+    let name = drv.attr_string("name").unwrap_or_default();
+    let pname = crate::derive_pname(drv.attr_string("pname").as_deref(), &name);
     DiscoveredDerivation {
         attr: attr.unwrap_or_default(),
         drv_path,
@@ -85,6 +81,27 @@ mod tests {
         );
 
         assert_eq!(discovered.input_sources, drv.input_sources);
+    }
+
+    #[test]
+    fn a_structured_attrs_derivation_reports_its_pname() {
+        let drv = crate::Derivation {
+            outputs: vec![],
+            input_derivations: vec![],
+            input_sources: vec![],
+            system: "x86_64-linux".into(),
+            builder: "/bin/sh".into(),
+            args: vec![],
+            environment: std::collections::HashMap::from([(
+                "__json".to_owned(),
+                r#"{"name":"hello-2.12.3","pname":"hello"}"#.to_owned(),
+            )]),
+        };
+
+        let discovered =
+            discovered_derivation(None, "/nix/store/[hash114]-hello-2.12.3.drv".into(), &drv);
+
+        assert_eq!(discovered.pname.as_deref(), Some("hello"));
     }
 
     #[test]

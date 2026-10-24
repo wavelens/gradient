@@ -112,11 +112,8 @@ pub fn load_store(dir: &Path) -> StoreFixture {
             is_fixed_output: drv.build_meta().is_fixed_output,
             allow_substitutes: drv.allow_substitutes(),
             pname: gradient_derivation::derive_pname(
-                drv.environment.get("pname").map(String::as_str),
-                drv.environment
-                    .get("name")
-                    .map(String::as_str)
-                    .unwrap_or(""),
+                drv.attr_string("pname").as_deref(),
+                &drv.attr_string("name").unwrap_or_default(),
             ),
             ifd: false,
             licenses: vec![],

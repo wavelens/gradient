@@ -98,6 +98,13 @@ impl Derivation {
         }
     }
 
+    pub fn attr_string(&self, key: &str) -> Option<String> {
+        match self.structured_attrs() {
+            Some(attrs) => attrs.get(key)?.as_str().map(str::to_owned),
+            None => self.environment.get(key).cloned(),
+        }
+    }
+
     pub fn requested_output_paths<'d>(
         &'d self,
         requested: &'d [String],
