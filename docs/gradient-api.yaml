@@ -9092,10 +9092,13 @@ paths:
       - tasks
       summary: Trigger evaluation
       description: |-
-        Queues a new evaluation for the task and returns its UUID in `message`,
-        so a caller can follow the run it just started (`GET /evals/{id}`, or the
-        `GET /evals/{id}/live` stream). `POST /evals/{evaluation}/retry` re-runs
-        the failed builds of a finished evaluation.
+        Fires the task's default trigger and returns the UUID of the evaluation it
+        started in `message`, so a caller can follow the run (`GET /evals/{id}`, or the
+        `GET /evals/{id}/live` stream). The default trigger decides the branch and the
+        task's concurrency policy decides what happens to a running evaluation.
+        A `commit` instead evaluates that commit alongside the task's own runs.
+        `POST /evals/{evaluation}/retry` re-runs the failed builds of a finished
+        evaluation.
 
         Returns `400` with `code: "repository_unreachable"` when the repository
         cannot be fetched (DNS failure, authentication failure, unreachable host,
@@ -9743,6 +9746,48 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/tasks/{project}/{task}/triggers/{id}/default:
+    post:
+      tags:
+      - triggers
+      summary: Make trigger the default
+      description: The default trigger decides the branch of `POST /tasks/{project}/{task}/evaluate`. The previous default trigger stops being the default.
+      operationId: setDefaultTaskTrigger
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/TaskTriggerId'
+      responses:
+        '200':
+          description: Trigger updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/TriggerOut'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/tasks/{project}/{task}/triggers/{id}/test:
     post:
       tags:
@@ -9779,7 +9824,8 @@ paths:
                 properties:
                   error:
                     type: boolean
-                  message: {}
+                  message:
+                    $ref: '#/components/schemas/FireOutcome'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -15540,6 +15586,56 @@ components:
       - all
       - failing
       - starred
+    FireOutcome:
+      oneOf:
+      - type: object
+        required:
+        - evaluation_id
+        - outcome
+        properties:
+          evaluation_id:
+            $ref: '#/components/schemas/EvaluationId'
+          outcome:
+            type: string
+            enum:
+            - Created
+      - type: object
+        required:
+        - outcome
+        properties:
+          outcome:
+            type: string
+            enum:
+            - SkippedSameCommit
+      - type: object
+        required:
+        - outcome
+        properties:
+          outcome:
+            type: string
+            enum:
+            - SkippedConcurrency
+      - type: object
+        required:
+        - outcome
+        properties:
+          outcome:
+            type: string
+            enum:
+            - InputUpdateRunning
+      - type: object
+        required:
+        - evaluation_ids
+        - outcome
+        properties:
+          evaluation_ids:
+            type: array
+            items:
+              $ref: '#/components/schemas/EvaluationId'
+          outcome:
+            type: string
+            enum:
+            - InputUpdateStarted
     FlakeGraphNode:
       type: object
       required:
@@ -19154,6 +19250,7 @@ components:
       - type
       - config
       - active
+      - is_default
       - created_at
       - updated_at
       properties:
@@ -19165,6 +19262,8 @@ components:
           $ref: '#/components/schemas/TriggerType'
         config: {}
         active:
+          type: boolean
+        is_default:
           type: boolean
         last_fired_at:
           type:

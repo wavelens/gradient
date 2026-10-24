@@ -99,12 +99,14 @@ impl Shape {
         last_fired_at: Option<NaiveDateTime>,
     ) -> Self {
         let task = self.tasks[self.current_task()].id;
+        let is_default = !self.triggers.iter().any(|t| t.task == task);
         self.triggers.push(task_trigger::Model {
             id,
             task,
             trigger_type: kind,
             config,
             active,
+            is_default,
             last_fired_at,
             created_at: test_date(),
             updated_at: test_date(),

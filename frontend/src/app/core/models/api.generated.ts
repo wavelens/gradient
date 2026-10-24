@@ -964,6 +964,20 @@ export type FileTree = {
 
 export type Filter = "all" | "failing" | "starred";
 
+export type FireOutcome = {
+  evaluation_id: EvaluationId;
+  outcome: "Created";
+} | {
+  outcome: "SkippedSameCommit";
+} | {
+  outcome: "SkippedConcurrency";
+} | {
+  outcome: "InputUpdateRunning";
+} | {
+  evaluation_ids: EvaluationId[];
+  outcome: "InputUpdateStarted";
+};
+
 export interface FlakeGraphNode {
   path: string;
   parent?: string | null;
@@ -2275,6 +2289,7 @@ export interface TriggerOut {
   type: TriggerType;
   config: unknown;
   active: boolean;
+  is_default: boolean;
   last_fired_at?: string | null;
   created_at: string;
   updated_at: string;

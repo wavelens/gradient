@@ -88,6 +88,7 @@ services.gradient.state = {
 | `triggers.*.active` | bool | `true` | Whether this trigger is active. |
 | `triggers.*.config` | attribute set | `{ }` | Configuration specific to the trigger type. |
 | `triggers.*.integration` | null or string | `null` | Name of an inbound integration in the same project that backs this trigger. |
+| `triggers.*.is_default` | bool | `false` | Whether the trigger is the default trigger of the task. The first trigger is the default when no trigger sets the flag. |
 | `triggers.*.type` | one of `polling` `reporter_push` `reporter_pull_request` `time` | - | The kind of trigger, which determines the expected `config` and how the trigger fires. |
 | `wildcard` | string | `"packages.x86_64-linux.**"` | Comma-separated Nix attribute paths to evaluate from the flake. A `*` segment matches any attribute name, `**` also matches a nested set below it, and `x86_64-*` matches part of a name. A pattern prefixed with `!` excludes matching paths. See [Evaluation Wildcards](wildcards.md). |
 
@@ -204,7 +205,7 @@ Each worker registration has the following options.
 | `reporter_pull_request` | Inbound integration | `branches`, `actions` (default `opened`, `synchronize`, `reopened`), `require_approval` (default `true`: pull requests from non-writers wait for a maintainer's approval) |
 | `time` | - | `cron` with six UTC fields, `sec min hour dom mon dow`, for example `"0 0 2 * * *"` |
 
-Setting `triggers = null` keeps the current triggers in place. A new task without a `triggers` key starts with no triggers. An empty list count as invalid configuration.
+`triggers = null` leaves the current triggers in place. New tasks without a `triggers` key start with a polling trigger as the default. An empty list or two default triggers count as invalid configuration.
 
 ## Action Types
 

@@ -10,7 +10,7 @@ use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult,
-    IntoActiveModel, QueryFilter, Value,
+    IntoActiveModel, QueryFilter, Value, sea_query::Expr,
 };
 
 pub async fn of_task<C: ConnectionTrait>(db: &C, task: TaskId) -> Result<Vec<MTaskTrigger>, DbErr> {
@@ -30,6 +30,33 @@ pub async fn by_id_in_task<C: ConnectionTrait>(
         .filter(CTaskTrigger::Task.eq(task))
         .one(db)
         .await
+}
+
+pub async fn default_of_task<C: ConnectionTrait>(
+    db: &C,
+    task: TaskId,
+) -> Result<Option<MTaskTrigger>, DbErr> {
+    ETaskTrigger::find()
+        .filter(CTaskTrigger::Task.eq(task))
+        .filter(CTaskTrigger::IsDefault.eq(true))
+        .one(db)
+        .await
+}
+
+pub async fn make_default<C: ConnectionTrait>(
+    db: &C,
+    trigger: MTaskTrigger,
+) -> Result<MTaskTrigger, DbErr> {
+    ETaskTrigger::update_many()
+        .col_expr(CTaskTrigger::IsDefault, Expr::value(false))
+        .filter(CTaskTrigger::Task.eq(trigger.task))
+        .filter(CTaskTrigger::IsDefault.eq(true))
+        .exec(db)
+        .await?;
+    let mut active: ATaskTrigger = trigger.into();
+    active.is_default = Set(true);
+    active.updated_at = Set(gradient_types::now());
+    active.update(db).await
 }
 
 pub async fn insert<C: ConnectionTrait>(

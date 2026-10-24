@@ -9,6 +9,7 @@ import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
   DeletedResponse,
+  FireOutcome,
   TriggerOut,
   CreateTriggerRequest,
   UpdateTriggerRequest,
@@ -42,7 +43,11 @@ export class TriggersService {
     return this.api.delete<DeletedResponse>(`${this.base(project, proj)}/${id}`);
   }
 
-  fireNow(project: string, proj: string, id: string): Observable<boolean> {
-    return this.api.post<boolean>(`${this.base(project, proj)}/${id}/test`);
+  fireNow(project: string, proj: string, id: string): Observable<FireOutcome> {
+    return this.api.post<FireOutcome>(`${this.base(project, proj)}/${id}/test`);
+  }
+
+  setDefault(project: string, proj: string, id: string): Observable<TriggerOut> {
+    return this.api.post<TriggerOut>(`${this.base(project, proj)}/${id}/default`);
   }
 }

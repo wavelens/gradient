@@ -2321,7 +2321,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     ) == "2", "the eviction took a path the live closure still reaches"
     assert runtime_drift() == 0, "complete-closure counter disagrees with its recount after the eviction"
 
-    sql("DELETE FROM task_trigger;")
+    sql("UPDATE task_trigger SET active = false;")
     hello_drv = sql(f"SELECT id FROM derivation WHERE hash = '{drv_hash}';")
     assert hello_drv, "hello's derivation row is gone before this phase deleted anything"
     hello_paths = [h for h in (store_hash, drv_hash)

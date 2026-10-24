@@ -22,7 +22,7 @@ pub use self::error::StoreDaemonError;
 pub use self::evaluator::*;
 pub use self::git::{
     BranchHead, HeadCommit, accept_cert, check_task_updates, checkout_commit,
-    fetch_options_with_ssh, get_commit_info, head_commit, resolve_head, resolve_remote_ref,
+    fetch_options_with_ssh, get_commit_info, head_commit, resolve_remote_ref,
 };
 pub use self::secret::{decrypt_secret, encrypt_secret};
 pub use self::ssh_key::{decrypt_ssh_private_key, format_public_key, generate_ssh_key};

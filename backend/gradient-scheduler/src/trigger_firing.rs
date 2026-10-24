@@ -72,6 +72,7 @@ use gradient_ci::trigger::{InputUpdateOutcome, maybe_trigger_input_update};
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_db::deliveries::trigger_fire::{TriggerFire, enqueue_trigger_fires};
 use gradient_db::{DbContext, WorkerDb};
+use gradient_entity::evaluation::WalkMode;
 use gradient_entity::task_trigger as ept;
 use gradient_sources::{BranchHead, check_task_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
@@ -270,6 +271,8 @@ async fn apply_to_task(
             repository_override: None,
             wildcard_override: None,
             source_comment: None,
+            started_by: None,
+            walk_mode: WalkMode::Pruned,
             instance_max_storage_gb: scheduler.db.config.cache.max_storage_gb,
         },
     )

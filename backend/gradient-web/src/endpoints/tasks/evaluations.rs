@@ -5,6 +5,7 @@
  */
 
 use super::refusal::TaskRefusal;
+use super::triggers::{FireOutcome, FireRequest, fire};
 use super::{
     BuildStatusCounts, EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary,
     FailedAttributeSummary, PaginatedEntryPoints, QueueSummary, TaskDetailsResponse,
@@ -22,18 +23,20 @@ use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{Readable, Requires, TaskScope, can};
 use crate::store_paths::original_text;
+use anyhow::Context;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::{InstanceMemory, ServerState};
-use gradient_db::WebDb;
 use gradient_db::evaluations::TaskEvaluationFilter;
 use gradient_db::lookup::{by_id, by_ids, get_any_project_by_name};
+use gradient_db::{DbContext, WebDb};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_entity::evaluation_message::MessageLevel;
-use gradient_sources::{get_commit_info, head_commit};
+use gradient_scheduler::Scheduler;
+use gradient_sources::get_commit_info;
 use gradient_storage::NarStore;
 use gradient_storage::nar_extract::{
     ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
@@ -188,97 +191,100 @@ fn first_line_truncated(s: &str, max: usize) -> Option<String> {
     operation_id = "triggerEvaluation",
     tag = "tasks",
     summary = "Trigger evaluation",
-    description = "Queues a new evaluation for the task and returns its UUID in `message`,\nso a caller can follow the run it just started (`GET /evals/{id}`, or the\n`GET /evals/{id}/live` stream). `POST /evals/{evaluation}/retry` re-runs\nthe failed builds of a finished evaluation.\n\nReturns `400` with `code: \"repository_unreachable\"` when the repository\ncannot be fetched (DNS failure, authentication failure, unreachable host,\nbad URL, …) - the message includes the underlying git error.",
+    description = "Fires the task's default trigger and returns the UUID of the evaluation it\nstarted in `message`, so a caller can follow the run (`GET /evals/{id}`, or the\n`GET /evals/{id}/live` stream). The default trigger decides the branch and the\ntask's concurrency policy decides what happens to a running evaluation.\nA `commit` instead evaluates that commit alongside the task's own runs.\n`POST /evals/{evaluation}/retry` re-runs the failed builds of a finished\nevaluation.\n\nReturns `400` with `code: \"repository_unreachable\"` when the repository\ncannot be fetched (DNS failure, authentication failure, unreachable host,\nbad URL, …) - the message includes the underlying git error.",
     params(TaskPath),
     request_body = Option<EvaluateRequest>,
     responses((status = OK, description = "Evaluation UUID", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn post_task_evaluate(
     TaskScope { task, user, db, .. }: TaskScope<Requires<can::TriggerEvaluation>>,
-    state: State<Arc<ServerState>>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
     body: Option<Json<EvaluateRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let walk_mode = body.as_ref().and_then(|b| b.walk).unwrap_or_default();
+    let body = body.map(|Json(b)| b).unwrap_or_default();
+    let attr = parse_evaluate_attr(body.attr.as_deref())?;
+    let walk_mode = body.walk.unwrap_or_default();
 
-    let pinned = body
-        .as_ref()
-        .and_then(|b| b.commit.as_deref())
-        .map(|commit| {
-            hex_to_vec(commit)
-                .ok()
-                .filter(|h| h.len() == COMMIT_HASH_BYTES)
-                .ok_or(TaskRefusal::InvalidCommitHash)
-        })
-        .transpose()?;
-
-    let attr = body
-        .as_ref()
-        .and_then(|b| b.attr.as_deref())
-        .map(|a| {
-            a.parse::<Wildcard>()
-                .map(|w| w.to_string())
-                .map_err(|e| TaskRefusal::InvalidAttr {
-                    reason: e.to_string(),
-                })
-        })
-        .transpose()?;
-
-    let pinned_run = pinned.is_some();
-
-    let (branch, commit_hash, commit_message, author_name) = match pinned {
-        Some(commit_hash) => {
-            let commit = get_commit_info(&db, &task, &commit_hash)
-                .await
-                .map_err(|e| TaskRefusal::CommitLookupFailed {
-                    reason: e.to_string(),
-                })?;
-            (
-                branch_key::NO_BRANCH.to_owned(),
-                commit_hash,
-                commit.message,
-                commit.author_name,
-            )
-        }
+    let evaluation = match body.commit.as_deref() {
+        Some(commit) => evaluate_commit(&db, &task, user.id, commit, attr, walk_mode).await?,
         None => {
-            let (branch, head) = head_commit(&db, &task, None).await.map_err(|e| {
-                SharedRefusal::RepositoryStateFetchFailed {
-                    reason: e.to_string(),
-                }
-            })?;
-            let commit_hash = head.hash;
-
-            if let Err(e) = gradient_ci::trigger::maybe_trigger_input_update(
-                &state.web_db,
-                &task,
-                commit_hash.clone(),
-                None,
-            )
-            .await
-            {
-                tracing::warn!(error = %e, task = %task.name, "manual input_update trigger failed");
-            }
-
-            (branch, commit_hash, head.message, head.author_name)
+            let request = FireRequest {
+                started_by: Some(user.id),
+                walk_mode,
+                wildcard_override: attr,
+            };
+            evaluate_default_trigger(&db, &scheduler, &task, request).await?
         }
     };
 
-    // A pinned run is an out-of-band request, typically from a deployment tool. Marking it
-    // concurrent is keeping it from queueing behind or aborting the task's own CI run.
-    let concurrent = pinned_run;
+    Ok(ok_json(evaluation.to_string()))
+}
+
+fn parse_evaluate_attr(attr: Option<&str>) -> WebResult<Option<String>> {
+    attr.map(|a| {
+        a.parse::<Wildcard>().map(|w| w.to_string()).map_err(|e| {
+            TaskRefusal::InvalidAttr {
+                reason: e.to_string(),
+            }
+            .into()
+        })
+    })
+    .transpose()
+}
+
+async fn evaluate_default_trigger(
+    db: &DbContext,
+    scheduler: &Scheduler,
+    task: &MTask,
+    request: FireRequest,
+) -> WebResult<EvaluationId> {
+    let trigger = gradient_db::triggers::default_of_task(&db.web_db, task.id)
+        .await?
+        .context("the task has no default trigger")?;
+
+    match fire(db, scheduler, task, &trigger, request).await? {
+        FireOutcome::Created { evaluation_id } => Ok(evaluation_id),
+        FireOutcome::InputUpdateStarted { evaluation_ids } if !evaluation_ids.is_empty() => {
+            Ok(evaluation_ids[0])
+        }
+        _ => Err(TaskRefusal::EvaluationInProgress.into()),
+    }
+}
+
+// A pinned run is an out-of-band request, typically from a deployment tool. Marking it
+// concurrent is keeping it from queueing behind or aborting the task's own CI run.
+async fn evaluate_commit(
+    db: &DbContext,
+    task: &MTask,
+    started_by: UserId,
+    commit: &str,
+    attr: Option<String>,
+    walk_mode: WalkMode,
+) -> WebResult<EvaluationId> {
+    let commit_hash = hex_to_vec(commit)
+        .ok()
+        .filter(|h| h.len() == COMMIT_HASH_BYTES)
+        .ok_or(TaskRefusal::InvalidCommitHash)?;
+
+    let commit = get_commit_info(db, task, &commit_hash).await.map_err(|e| {
+        TaskRefusal::CommitLookupFailed {
+            reason: e.to_string(),
+        }
+    })?;
 
     let eval = gradient_ci::trigger_evaluation(
-        &state.web_db,
-        &task,
+        &db.web_db,
+        task,
         commit_hash,
-        Some(commit_message),
-        Some(author_name),
+        Some(commit.message),
+        Some(commit.author_name),
         None,
-        concurrent,
-        branch,
+        true,
+        branch_key::NO_BRANCH.to_owned(),
         None,
         attr,
         None,
-        Some(user.id),
+        Some(started_by),
         walk_mode,
     )
     .await
@@ -289,18 +295,14 @@ pub async fn post_task_evaluate(
         gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
     })?;
 
-    let eval = gradient_ci::park_if_no_cache(&state.web_db, eval, task.project).await?;
-    let eval = gradient_ci::park_if_storage_full(
-        &state.web_db,
-        eval,
-        task.project,
-        state.config.cache.max_storage_gb,
-    )
-    .await?;
-    let eval = gradient_ci::park_if_no_workers(&state.web_db, eval, task.project).await?;
-    state.record_evaluation_created(&eval).await;
+    let max_storage_gb = db.config.cache.max_storage_gb;
+    let eval = gradient_ci::park_if_no_cache(&db.web_db, eval, task.project).await?;
+    let eval =
+        gradient_ci::park_if_storage_full(&db.web_db, eval, task.project, max_storage_gb).await?;
+    let eval = gradient_ci::park_if_no_workers(&db.web_db, eval, task.project).await?;
+    db.record_evaluation_created(&eval).await;
 
-    Ok(ok_json(eval.id.to_string()))
+    Ok(eval.id)
 }
 
 #[utoipa::path(

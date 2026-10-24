@@ -100,6 +100,19 @@ impl TriggerConfig {
         }
     }
 
+    pub fn manual_branch(&self) -> Option<&str> {
+        match self {
+            Self::Polling { branch, .. } => branch.as_deref(),
+            Self::ReporterPush { branches, .. } | Self::ReporterPullRequest { branches, .. } => {
+                branches
+                    .iter()
+                    .map(String::as_str)
+                    .find(|b| !b.contains(['*', '?', '[']))
+            }
+            Self::Time { .. } => None,
+        }
+    }
+
     pub fn to_db_json(&self) -> serde_json::Value {
         let mut v = serde_json::to_value(self)
             .expect("a TriggerConfig is a derived enum of strings and numbers");
@@ -139,6 +152,28 @@ mod tests {
         assert_eq!(db["branch"], serde_json::json!("develop"));
         let parsed = TriggerConfig::parse_row(TriggerType::Polling, &db).unwrap();
         assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn manual_branch_skips_glob_patterns() {
+        let cfg = TriggerConfig::ReporterPush {
+            integration_id: IntegrationId::nil(),
+            branches: vec!["release/*".into(), "feat-[ab]".into(), "develop".into()],
+            tags: vec![],
+            releases_only: false,
+        };
+        assert_eq!(cfg.manual_branch(), Some("develop"));
+    }
+
+    #[test]
+    fn manual_branch_without_a_literal_branch_is_the_default_branch() {
+        let cfg = TriggerConfig::ReporterPullRequest {
+            integration_id: IntegrationId::nil(),
+            branches: vec!["*".into()],
+            actions: vec![],
+            require_approval: true,
+        };
+        assert_eq!(cfg.manual_branch(), None);
     }
 
     #[test]
