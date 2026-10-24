@@ -16,6 +16,7 @@ pub mod repair;
 pub mod runtime_can_start;
 pub mod runtime_closure;
 pub mod runtime_dependencies;
+pub mod sbom;
 pub mod shared_build_guard;
 pub mod walk_completeness;
 pub mod walks;
