@@ -105,7 +105,10 @@ impl DerivationResolver for FakeDerivationResolver {
                 let resolved = drv_paths
                     .get(&(repository.clone(), attr.clone()))
                     .cloned()
-                    .map(|p| (p, vec![]))
+                    .map(|drv_path| gradient_sources::Resolved {
+                        drv_path,
+                        licenses: vec![],
+                    })
                     .ok_or_else(|| anyhow!("no fake drv path for {}#{}", repository, attr));
                 (attr, resolved)
             })

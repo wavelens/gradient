@@ -2978,6 +2978,7 @@ dependencies = [
  "gradient-derivation",
  "gradient-types",
  "gradient-util",
+ "gradient-wire",
  "harmonia-file-nar",
  "harmonia-store-path",
  "harmonia-store-remote",

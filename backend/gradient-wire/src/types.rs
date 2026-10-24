@@ -309,6 +309,15 @@ pub struct DiscoveredDerivation {
     pub pname: Option<String>,
     #[proto(32, default)]
     pub ifd: bool,
+    #[proto(37, default)]
+    pub licenses: Vec<License>,
+}
+
+#[derive(Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum License {
+    Spdx { id: String },
+    Name { name: String },
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Eq)]

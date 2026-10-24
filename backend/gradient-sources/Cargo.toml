@@ -22,6 +22,7 @@ gradient-types = { workspace = true }
 gradient-derivation = { workspace = true }
 gradient-db    = { workspace = true }
 gradient-util  = { workspace = true }
+gradient-wire  = { workspace = true }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }

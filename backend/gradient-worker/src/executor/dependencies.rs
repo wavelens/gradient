@@ -246,6 +246,7 @@ async fn import_derivation(
         drv_path: drv_path.clone(),
         attr,
         ifd: true,
+        licenses: vec![],
     };
     let mut abort = imports.abort.clone();
     walk_and_publish(&imports, vec![root], &mut abort)
