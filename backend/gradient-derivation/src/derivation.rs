@@ -193,92 +193,21 @@ fn parse_string(s: &str) -> Result<(String, &str)> {
 }
 
 fn comma(s: &str) -> Result<&str> {
-    let s = s.trim_start();
-    s.strip_prefix(',')
-        .ok_or_else(|| anyhow!("expected ','"))
-        .map(|r| r.trim_start())
+    expect(s, ',', "','").map(str::trim_start)
 }
 
-fn parse_outputs(s: &str) -> Result<(Vec<DerivationOutput>, &str)> {
-    let s = s.trim_start();
-    let mut s = s
-        .strip_prefix('[')
-        .ok_or_else(|| anyhow!("expected '[' for outputs"))?;
-    let mut outputs = Vec::new();
-    loop {
-        s = s.trim_start();
-        if let Some(r) = s.strip_prefix(']') {
-            return Ok((outputs, r));
-        }
-        if let Some(r) = s.strip_prefix(',') {
-            s = r.trim_start();
-        }
-        if let Some(r) = s.strip_prefix(']') {
-            return Ok((outputs, r));
-        }
-
-        s = s
-            .strip_prefix('(')
-            .ok_or_else(|| anyhow!("expected '(' for output entry"))?;
-        let (name, r) = parse_string(s)?;
-        s = comma(r)?;
-        let (path, r) = parse_string(s)?;
-        s = comma(r)?;
-        let (hash_algo, r) = parse_string(s)?;
-        s = comma(r)?;
-        let (hash, r) = parse_string(s)?;
-        s = r.trim_start();
-        s = s
-            .strip_prefix(')')
-            .ok_or_else(|| anyhow!("expected ')' to close output entry"))?;
-        outputs.push(DerivationOutput {
-            name,
-            path,
-            hash_algo,
-            hash,
-        });
-    }
+fn expect<'a>(s: &'a str, token: char, what: &str) -> Result<&'a str> {
+    s.trim_start()
+        .strip_prefix(token)
+        .ok_or_else(|| anyhow!("expected {what}"))
 }
 
-pub type InputDrv = (String, Vec<String>);
-
-fn parse_input_drvs(s: &str) -> Result<(Vec<InputDrv>, &str)> {
-    let s = s.trim_start();
-    let mut s = s
-        .strip_prefix('[')
-        .ok_or_else(|| anyhow!("expected '[' for inputDrvs"))?;
-    let mut drvs = Vec::new();
-    loop {
-        s = s.trim_start();
-        if let Some(r) = s.strip_prefix(']') {
-            return Ok((drvs, r));
-        }
-        if let Some(r) = s.strip_prefix(',') {
-            s = r.trim_start();
-        }
-        if let Some(r) = s.strip_prefix(']') {
-            return Ok((drvs, r));
-        }
-
-        s = s
-            .strip_prefix('(')
-            .ok_or_else(|| anyhow!("expected '(' for inputDrv entry"))?;
-        let (path, r) = parse_string(s)?;
-        s = comma(r)?;
-        let (outputs, r) = parse_string_list(s)?;
-        s = r.trim_start();
-        s = s
-            .strip_prefix(')')
-            .ok_or_else(|| anyhow!("expected ')' to close inputDrv entry"))?;
-        drvs.push((path, outputs));
-    }
-}
-
-fn parse_string_list(s: &str) -> Result<(Vec<String>, &str)> {
-    let s = s.trim_start();
-    let mut s = s
-        .strip_prefix('[')
-        .ok_or_else(|| anyhow!("expected '[' for string list"))?;
+fn parse_list<'a, T>(
+    s: &'a str,
+    what: &str,
+    mut item: impl FnMut(&'a str) -> Result<(T, &'a str)>,
+) -> Result<(Vec<T>, &'a str)> {
+    let mut s = expect(s, '[', &format!("'[' for {what}"))?;
     let mut items = Vec::new();
     loop {
         s = s.trim_start();
@@ -291,42 +220,121 @@ fn parse_string_list(s: &str) -> Result<(Vec<String>, &str)> {
         if let Some(r) = s.strip_prefix(']') {
             return Ok((items, r));
         }
-        let (item, r) = parse_string(s)?;
+        let (parsed, r) = item(s)?;
+        items.push(parsed);
         s = r;
-        items.push(item);
     }
 }
 
-fn parse_env(s: &str) -> Result<(HashMap<String, String>, &str)> {
-    let s = s.trim_start();
-    let mut s = s
-        .strip_prefix('[')
-        .ok_or_else(|| anyhow!("expected '[' for env list"))?;
-    let mut map = HashMap::new();
-    loop {
-        s = s.trim_start();
-        if let Some(r) = s.strip_prefix(']') {
-            return Ok((map, r));
-        }
-        if let Some(r) = s.strip_prefix(',') {
-            s = r.trim_start();
-        }
-        if let Some(r) = s.strip_prefix(']') {
-            return Ok((map, r));
-        }
+fn parse_outputs(s: &str) -> Result<(Vec<DerivationOutput>, &str)> {
+    parse_list(s, "outputs", |s| {
+        let s = expect(s, '(', "'(' for output entry")?;
+        let (name, r) = parse_string(s)?;
+        let (path, r) = parse_string(comma(r)?)?;
+        let (hash_algo, r) = parse_string(comma(r)?)?;
+        let (hash, r) = parse_string(comma(r)?)?;
+        let r = expect(r, ')', "')' to close output entry")?;
+        let output = DerivationOutput {
+            name,
+            path,
+            hash_algo,
+            hash,
+        };
+        Ok((output, r))
+    })
+}
 
-        s = s
-            .strip_prefix('(')
-            .ok_or_else(|| anyhow!("expected '(' for env entry"))?;
-        let (key, r) = parse_string(s)?;
-        s = comma(r)?;
-        let (value, r) = parse_string(s)?;
-        s = r.trim_start();
-        s = s
-            .strip_prefix(')')
-            .ok_or_else(|| anyhow!("expected ')' to close env entry"))?;
-        map.insert(key, value);
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InputDrv {
+    pub path: String,
+    pub outputs: Vec<String>,
+    pub produced: Vec<ProducedDrv>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProducedDrv {
+    pub output: String,
+    pub outputs: Vec<String>,
+    pub produced: Vec<ProducedDrv>,
+}
+
+impl InputDrv {
+    pub fn new(path: impl Into<String>, outputs: Vec<String>) -> Self {
+        Self {
+            path: path.into(),
+            outputs,
+            produced: Vec::new(),
+        }
     }
+}
+
+fn parse_input_drvs(s: &str) -> Result<(Vec<InputDrv>, &str)> {
+    parse_list(s, "inputDrvs", |s| {
+        let s = expect(s, '(', "'(' for inputDrv entry")?;
+        let (path, r) = parse_string(s)?;
+        let ((outputs, produced), r) = parse_wanted_outputs(comma(r)?)?;
+        let r = expect(r, ')', "')' to close inputDrv entry")?;
+        let input = InputDrv {
+            path,
+            outputs,
+            produced,
+        };
+        Ok((input, r))
+    })
+}
+
+type WantedOutputs = (Vec<String>, Vec<ProducedDrv>);
+
+fn parse_wanted_outputs(s: &str) -> Result<(WantedOutputs, &str)> {
+    let Some(s) = s.trim_start().strip_prefix('(') else {
+        let (outputs, r) = parse_string_list(s)?;
+        return Ok(((outputs, Vec::new()), r));
+    };
+    let (outputs, r) = parse_string_list(s)?;
+    let (produced, r) = parse_list(comma(r)?, "produced derivations", |s| {
+        let s = expect(s, '(', "'(' for a produced derivation")?;
+        let (output, r) = parse_string(s)?;
+        let ((outputs, produced), r) = parse_wanted_outputs(comma(r)?)?;
+        let r = expect(r, ')', "')' to close a produced derivation")?;
+        let drv = ProducedDrv {
+            output,
+            outputs,
+            produced,
+        };
+        Ok((drv, r))
+    })?;
+    let r = expect(r, ')', "')' to close wanted outputs")?;
+    Ok(((outputs, produced), r))
+}
+
+fn parse_string_list(s: &str) -> Result<(Vec<String>, &str)> {
+    parse_list(s, "string list", parse_string)
+}
+
+fn parse_env(s: &str) -> Result<(HashMap<String, String>, &str)> {
+    let (entries, r) = parse_list(s, "env list", |s| {
+        let s = expect(s, '(', "'(' for env entry")?;
+        let (key, r) = parse_string(s)?;
+        let (value, r) = parse_string(comma(r)?)?;
+        let r = expect(r, ')', "')' to close env entry")?;
+        Ok(((key, value), r))
+    })?;
+    Ok((entries.into_iter().collect(), r))
+}
+
+fn strip_header(content: &str) -> Result<&str> {
+    if let Some(s) = content.strip_prefix("Derive(") {
+        return Ok(s);
+    }
+    let s = content.strip_prefix("DrvWithVersion(").ok_or_else(|| {
+        anyhow!("not a derivation file: does not start with 'Derive(' or 'DrvWithVersion('")
+    })?;
+    let (version, r) = parse_string(s)?;
+    anyhow::ensure!(
+        version == "xp-dyn-drv",
+        "unsupported derivation version '{version}'"
+    );
+    comma(r)
 }
 
 pub fn parse_drv(content: &[u8]) -> Result<Derivation> {
@@ -334,9 +342,7 @@ pub fn parse_drv(content: &[u8]) -> Result<Derivation> {
         .map_err(|e| anyhow!("drv is not valid UTF-8: {}", e))?
         .trim();
 
-    let mut s = content
-        .strip_prefix("Derive(")
-        .ok_or_else(|| anyhow!("not a derivation file: does not start with 'Derive('"))?;
+    let mut s = strip_header(content)?;
 
     let (outputs, r) = parse_outputs(s)?;
     s = comma(r)?;
@@ -379,8 +385,10 @@ mod tests {
         assert_eq!(drv.outputs[0].name, "out");
         assert_eq!(drv.outputs[0].path, "/nix/store/abc-hello");
         assert_eq!(drv.input_derivations.len(), 1);
-        assert_eq!(drv.input_derivations[0].0, "/nix/store/xyz.drv");
-        assert_eq!(drv.input_derivations[0].1, vec!["out"]);
+        assert_eq!(
+            drv.input_derivations,
+            vec![InputDrv::new("/nix/store/xyz.drv", vec!["out".into()])]
+        );
         assert_eq!(drv.input_sources, vec!["/nix/store/src"]);
         assert_eq!(drv.environment["name"], "hello");
 
@@ -460,6 +468,48 @@ mod tests {
             Some("gcc-wrapper".into())
         );
         assert_eq!(derive_pname(Some(""), "hello-1.0"), Some("hello".into()));
+    }
+
+    #[test]
+    fn a_dynamic_derivation_reads_the_derivations_its_inputs_produce() {
+        let drv = parse_drv(br#"DrvWithVersion("xp-dyn-drv",[("out","","r:sha256","")],[("/nix/store/dddddddddddddddddddddddddddddddd-make-drv.drv",(["lib"],[("out",(["out"],[("out",["dev"])])),("tool",["bin"])])),("/nix/store/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr-plain.drv",["out"])],["/nix/store/i24f448731b7npq79sjjdvm0prk29zzy-src"],"x86_64-linux","/bin/sh",[],[("name","myapp-0.1.0")])"#).unwrap();
+
+        let produced = |output: &str, outputs: &[&str], produced| ProducedDrv {
+            output: output.into(),
+            outputs: outputs.iter().map(|&o| o.into()).collect(),
+            produced,
+        };
+        assert_eq!(
+            drv.input_derivations,
+            vec![
+                InputDrv {
+                    path: "/nix/store/dddddddddddddddddddddddddddddddd-make-drv.drv".into(),
+                    outputs: vec!["lib".into()],
+                    produced: vec![
+                        produced("out", &["out"], vec![produced("out", &["dev"], vec![])]),
+                        produced("tool", &["bin"], vec![]),
+                    ],
+                },
+                InputDrv::new(
+                    "/nix/store/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr-plain.drv",
+                    vec!["out".into()]
+                ),
+            ]
+        );
+        assert_eq!(
+            drv.input_sources,
+            vec!["/nix/store/i24f448731b7npq79sjjdvm0prk29zzy-src"]
+        );
+        assert_eq!(drv.outputs[0].hash_algo, "r:sha256");
+        assert_eq!(drv.environment["name"], "myapp-0.1.0");
+    }
+
+    #[test]
+    fn an_unknown_derivation_version_is_rejected() {
+        let err =
+            parse_drv(br#"DrvWithVersion("xp-future",[],[],[],"x86_64-linux","/bin/sh",[],[])"#)
+                .unwrap_err();
+        assert!(format!("{err:#}").contains("xp-future"), "{err:#}");
     }
 
     #[test]

@@ -24,7 +24,7 @@ pub fn discovered_derivation(
     let dependencies: Vec<String> = drv
         .input_derivations
         .iter()
-        .map(|(p, _)| p.clone())
+        .map(|input| input.path.clone())
         .collect();
 
     let input_sources = drv.input_sources.clone();

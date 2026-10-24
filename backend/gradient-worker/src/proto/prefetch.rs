@@ -288,9 +288,13 @@ impl<'a> InputPrefetcher<'a> {
     async fn enumerate_inputs(&self) -> Result<HashSet<String>> {
         let drv = read_local_drv(&self.drv_path).await?;
         let mut wanted: HashSet<String> = drv.input_sources.iter().cloned().collect();
-        for (input_drv_path, outputs) in &drv.input_derivations {
-            let input_drv = read_local_drv(input_drv_path).await?;
-            wanted.extend(input_drv.requested_output_paths(outputs).map(str::to_owned));
+        for input in &drv.input_derivations {
+            let input_drv = read_local_drv(&input.path).await?;
+            wanted.extend(
+                input_drv
+                    .requested_output_paths(&input.outputs)
+                    .map(str::to_owned),
+            );
         }
 
         Ok(wanted)

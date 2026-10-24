@@ -23,7 +23,7 @@ use tracing::warn;
 pub(crate) fn drv_closure_seeds(drv: &gradient_derivation::Derivation) -> Vec<String> {
     drv.input_derivations
         .iter()
-        .map(|(drv_path, _)| drv_path)
+        .map(|input| &input.path)
         .chain(&drv.input_sources)
         .cloned()
         .collect()

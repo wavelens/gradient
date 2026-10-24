@@ -122,9 +122,9 @@ pub async fn closure(
                 "{path} is content-addressed, not supported over SSH"
             );
 
-            for (input, _) in &drv.input_derivations {
-                if seen.insert(input.clone()) {
-                    frontier.push(input.clone());
+            for input in &drv.input_derivations {
+                if seen.insert(input.path.clone()) {
+                    frontier.push(input.path.clone());
                 }
             }
 
@@ -394,7 +394,7 @@ mod tests {
             }],
             input_derivations: inputs
                 .iter()
-                .map(|i| (path(i), vec!["out".into()]))
+                .map(|i| gradient_derivation::InputDrv::new(path(i), vec!["out".into()]))
                 .collect(),
             input_sources: vec![],
             system: "x86_64-linux".into(),
