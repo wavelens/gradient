@@ -14,7 +14,7 @@ use crate::stats::{AttrCost, StatsDelta};
 
 /// The version must be bumped whenever the frame layout or a type's rkyv shape changes.
 /// A mismatch can only happen when the binary is replaced mid-run.
-pub const EVAL_IPC_VERSION: u8 = 13;
+pub const EVAL_IPC_VERSION: u8 = 14;
 
 pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
 
@@ -139,6 +139,16 @@ pub enum EvalResponse {
     },
 }
 
+#[derive(
+    Debug, Clone, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize,
+)]
+#[rkyv(derive(Debug))]
+#[serde(untagged)]
+pub enum License {
+    Spdx { id: String },
+    Name { name: String },
+}
+
 #[derive(Debug, Clone, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize)]
 #[rkyv(derive(Debug))]
 pub struct ResolvedItem {
@@ -146,7 +156,7 @@ pub struct ResolvedItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drv_path: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub references: Vec<String>,
+    pub licenses: Vec<License>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
