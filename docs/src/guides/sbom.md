@@ -1,53 +1,56 @@
 # Export a Software Bill of Materials
 
-Software bills of materials (SBOMs) cover every package inside the outputs of a task. Gradient can export the SBOM as a CycloneDX 1.6 JSON file. Scanners and license audits use the file.
+All packages in build outputs appear in a software bill of materials (SBOM). Gradient can export the SBOM as a CycloneDX 1.6 JSON file. Scanners use the file. License audits use the file.
 
 **Requirements:**
 
-- An evaluation that completed on a [task](../concepts/projects-and-tasks.md)
-- A [cache](../concepts/caches.md) with task outputs
+- A build with the status `Completed` or `Substituted`
+- A [cache](../concepts/caches.md) with the build outputs
 
 ## 1. Download the SBOM
 
-=== "UI"
+=== "Task Page"
 
-    Go to the task page. Click the three-dot menu in the evaluation panel. Select **SBOM**.
+    Go to the task page. Find a package. Open its three-dot menu. Pick **SBOM**.
+
+=== "Log Page"
+
+    Builds on the log page have three-dot menus. Open one. Select **SBOM**.
 
 === "API"
 
     ```sh
     curl -sOJ -H "Authorization: Bearer $TOKEN" \
-      "https://gradient.example.com/api/v1/tasks/$PROJECT/$TASK/sbom"
+      "https://gradient.example.com/api/v1/builds/$BUILD_ID/sbom"
     ```
 
-- The task's latest completed evaluation produced this file.
+- The menu entry stays grey until the build has outputs.
 - Public projects need no token.
 
 ## 2. Read the Contents
 
 | Field | Content |
 |---|---|
-| `metadata.component` | The task as `<project>/<task>`, with the evaluated commit as version |
-| `components` | Every store path in the runtime closure of the entry point outputs |
-| `name`, `version`, `purl` | Package name and version from the derivation, e.g. `pkg:nix/hello@2.12.1` |
+| `metadata.component` | The derivation name of the build, with the evaluated commit as version |
+| `components` | Every store path in the runtime closure of the build outputs |
+| `name`, `version`, `purl` | Package name and version from the derivation, e.g. `pkg:nix/hello@2.12.3` |
 | `hashes` | The SHA-256 NAR hash |
 | `licenses` | The `meta.license` of an entry point, as an SPDX id where Nix knows one |
 | `properties` | `nix:store_path`, `nix:nar_size` and the `nix:attribute` of an entry point |
 | `dependencies` | Runtime references between the store paths |
 
-- Compilers and other build-time dependencies never make it into the file.
-- Only entry points get a `meta.license` lookup from Gradient. Dependencies arrive with no license.
-- Packages with their own entry point carry a license in the SBOM.
+- Compilers don't land in the file. Neither do other build-time dependencies.
+- Only entry points get a `meta.license` from Gradient. Dependencies show up with no license.
 
 !!! note "Incomplete SBOM"
     Gradient knows the references of a path only after the path reached the cache. A path missing from the cache appears without hashes and dependencies. The `compositions` entry then says `incomplete` and the property `gradient:complete` is `false`.
 
 ## Verify Deployment
 
-Downloads carry the name `<project>-<task>-sbom.cdx.json`. The CycloneDX CLI can validate that file against the schema.
+Browsers save `<derivation name>-sbom.cdx.json`. The CycloneDX CLI can validate that file against the schema.
 
 ```sh
-nix shell nixpkgs#cyclonedx-cli -c cyclonedx validate --input-file acme-demo-sbom.cdx.json
+nix shell nixpkgs#cyclonedx-cli -c cyclonedx validate --input-file hello-2.12.3-sbom.cdx.json
 ```
 
 ## Next steps
