@@ -185,6 +185,17 @@ in {
             default = !cfg.reverseProxy.caddy.enable;
             defaultText = lib.literalExpression "!config.services.gradient.reverseProxy.caddy.enable";
           };
+          useACMEHost = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            description = ''
+              Host of an existing ACME certificate, passed to
+              {option}`services.nginx.virtualHosts.<name>.useACMEHost`. Nginx reuses it instead of
+              requesting a new certificate. `null` keeps certificate management with Nginx. Exclusive
+              with {option}`services.gradient.reverseProxy.nginx.manageTls`. Has no effect with
+              {option}`services.gradient.useTls` disabled.
+            '';
+          };
 
           manageTls = lib.mkOption {
             type = lib.types.bool;
@@ -526,6 +537,9 @@ in {
     } {
       assertion = !(cfg.reverseProxy.nginx.enable && cfg.reverseProxy.caddy.enable);
       message = "You can only use one reverse proxy at a time";
+    } {
+      assertion = !(cfg.reverseProxy.nginx.manageTls && cfg.reverseProxy.nginx.useACMEHost != null);
+      message = "Nginx managed TLS and externally managed ACME hosts are exclusive";
     }];
 
     networking.firewall.allowedTCPPorts = lib.mkIf (cfg.ssh.enable && cfg.ssh.openFirewall) [ cfg.ssh.port ];
@@ -684,8 +698,9 @@ in {
       nginx = lib.mkIf cfg.reverseProxy.nginx.enable {
         enable = true;
         virtualHosts."${cfg.domain}" = {
+          inherit (cfg.reverseProxy.nginx) useACMEHost;
           enableACME = lib.mkDefault (cfg.useTls && cfg.reverseProxy.nginx.manageTls);
-          forceSSL = lib.mkDefault (cfg.useTls && cfg.reverseProxy.nginx.manageTls);
+          forceSSL = lib.mkDefault (cfg.useTls && (cfg.reverseProxy.nginx.manageTls || cfg.reverseProxy.nginx.useACMEHost != null));
           http2 = true;
           http3 = lib.mkDefault cfg.useQuic;
           locations = {
