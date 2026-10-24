@@ -9497,6 +9497,41 @@ paths:
       security:
       - {}
       - bearerAuth: []
+  /api/v1/tasks/{project}/{task}/sbom:
+    get:
+      tags:
+      - tasks
+      summary: Download the task's SBOM
+      description: |-
+        CycloneDX 1.6 JSON of the runtime closure of the entry point outputs of the
+        task's latest completed evaluation. Licenses come from `meta.license` and are
+        known for entry points only. Paths missing from the cache are listed without
+        hashes or dependencies and the document is then marked `incomplete`.
+        Returns `404` when the task has no completed evaluation.
+      operationId: getTaskSbom
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: CycloneDX SBOM
+          content:
+            application/vnd.cyclonedx+json:
+              schema:
+                $ref: '#/components/schemas/Binary'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
   /api/v1/tasks/{project}/{task}/transfer:
     post:
       tags:
