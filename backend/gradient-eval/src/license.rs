@@ -35,12 +35,14 @@ fn read_licenses(cursor: &AttrCursor, state: &EvalState) -> Result<Vec<License>>
         return Ok(Vec::new());
     };
 
-    if let Ok(name) = license.string() {
-        return Ok(vec![License::Name { name }]);
-    }
-
+    // The eval cache stores the children of an attrset only and a string read
+    // on a cached attrset forces the whole flake again.
     if let Ok(Some(found)) = cached_fields(&license) {
         return Ok(vec![found]);
+    }
+
+    if let Ok(name) = license.string() {
+        return Ok(vec![License::Name { name }]);
     }
 
     let value = license.value(state)?;

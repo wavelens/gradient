@@ -5,9 +5,10 @@
  */
 
 use gradient_entity::entry_point::Licenses;
-use sea_orm::{ConnectionTrait, DbErr, FromQueryResult};
-use std::collections::HashMap;
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, QueryFilter};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
+use crate::graph::runtime_closure::parse_reference_hash;
 use gradient_types::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
@@ -49,6 +50,55 @@ pub async fn entry_point_outputs<C: ConnectionTrait>(
     EntryPointOutput::find_by_statement(ENTRY_POINT_OUTPUTS.bind([evaluation.into_inner().into()]))
         .all(db)
         .await
+}
+
+pub async fn with_referenced_paths<C: ConnectionTrait>(
+    db: &C,
+    mut reached: HashMap<String, MCachedPath>,
+) -> Result<HashMap<String, MCachedPath>, DbErr> {
+    let mut absent: HashSet<String> = HashSet::new();
+    loop {
+        let missing: Vec<String> = missing_references(&reached)
+            .into_iter()
+            .filter(|hash| !absent.contains(hash))
+            .collect();
+        if missing.is_empty() {
+            return Ok(reached);
+        }
+
+        let found = crate::fetch_in_chunks(&missing, |chunk| async move {
+            ECachedPath::find()
+                .filter(CCachedPath::Hash.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await?;
+        let found: HashSet<String> = found
+            .into_iter()
+            .map(|path| {
+                let hash = path.hash.clone();
+                reached.insert(hash.clone(), path);
+                hash
+            })
+            .collect();
+        absent.extend(missing.into_iter().filter(|hash| !found.contains(hash)));
+    }
+}
+
+pub fn missing_references(reached: &HashMap<String, MCachedPath>) -> Vec<String> {
+    reached
+        .values()
+        .flat_map(|path| {
+            path.references
+                .as_deref()
+                .unwrap_or_default()
+                .split_whitespace()
+                .filter_map(parse_reference_hash)
+        })
+        .filter(|hash| !reached.contains_key(hash))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 pub async fn derivation_names<C: ConnectionTrait>(
@@ -114,6 +164,28 @@ mod tests {
                 },
             ])
         );
+    }
+
+    fn path(hash: &str, references: &str) -> MCachedPath {
+        MCachedPath {
+            hash: hash.into(),
+            package: format!("{hash}-pkg"),
+            references: Some(references.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn only_references_outside_the_closure_are_missing() {
+        let a = "0123456789abcdfghijklmnpqrsvwxyz";
+        let b = "1123456789abcdfghijklmnpqrsvwxyz";
+        let src = "2123456789abcdfghijklmnpqrsvwxyz";
+        let reached = HashMap::from([
+            (a.to_owned(), path(a, &format!("{a}-pkg {b}-pkg {src}-script.sh"))),
+            (b.to_owned(), path(b, "")),
+        ]);
+
+        assert_eq!(missing_references(&reached), vec![src.to_owned()]);
     }
 
     #[tokio::test]
