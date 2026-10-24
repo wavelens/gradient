@@ -16,6 +16,7 @@ mod host_key;
 mod ingest;
 mod listener;
 mod nar;
+mod read_log;
 mod roots;
 mod server;
 mod session;

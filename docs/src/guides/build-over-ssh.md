@@ -71,6 +71,7 @@ nix.gradient-ssh = {
 | Copy in | `nix copy --to ssh-ng://myproject@ci.example.com ./result` |
 | Build host | `nixos-rebuild switch --build-host ssh-ng://myproject@ci.example.com` |
 | Remote store | `nix build --eval-store auto --store ssh-ng://myproject@ci.example.com .#hello` |
+| Build log | `ssh -p 2222 myproject@ci.example.com nix log /nix/store/...-hello.drv` |
 
 - Read requests can be answered from the caches the project subscribed to.
 - Copied paths enter the project's caches with a signature, like build outputs.
@@ -80,7 +81,8 @@ nix.gradient-ssh = {
 - Builds continue after a disconnect. Evaluations finish together with their last build.
 - The Nix output lists missing systems as long as no connected worker can build them.
 - Aborting an evaluation fails every unfinished build with an error, e.g. after [5 minutes without a matching worker](../concepts/evaluations-and-builds.md).
-- Build logs stream back like local build logs. Log lines of `nix build -L` start with the package name.
+- Build logs flow back the same way local logs do. Package names lead every log line from `nix build -L`.
+- Stored logs for a derivation or for a derivation output come from `nix log`, `nix-store --read-log` and `nix-store -l`. Upstream caches provide fallback.
 
 ## Verify Deployment
 
@@ -93,6 +95,7 @@ Expected output: the store URL and `Trusted: 0`. Build requests appear in the UI
 ## Limits
 
 - `ssh://` has no support in Gradient. Use `--build-host` with the `ssh-ng://` prefix instead.
+- The Nix client can't run `nix log --store ssh-ng://`. Use an SSH command to run `nix log` instead.
 - Content-addressed derivations have no support in Gradient.
 - Pass `--eval-store auto` to `nix build --store`. Gradient rejects evaluation writes.
 

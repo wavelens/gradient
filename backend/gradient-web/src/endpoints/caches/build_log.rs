@@ -13,11 +13,8 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_core::ServerState;
-use gradient_core::upstream_source::{fetch_upstream_log, substitution_sources};
-use gradient_db::WebDb;
-use gradient_db::caches::upstream::pull_through_upstream_caches;
-use gradient_storage::LogStorage;
-use gradient_types::{OriginalStorePath, StorePathMapper};
+use gradient_core::build_logs::{BuildLog, find_build_log};
+use gradient_types::OriginalStorePath;
 use std::sync::Arc;
 
 /// A pull-through cache is substituting paths it never built (#547). The upstream caches are asked
@@ -49,66 +46,22 @@ pub async fn log(
     )
     .await?;
 
-    let mapper = state.cache_mapper(ctx.cache.id);
-    if let Some(body) = local_log(&state.web_db, &state.log_storage, &ctx, &mapper, &drv).await? {
-        return log_response(body, "HIT");
-    }
-
-    let upstream_caches = pull_through_upstream_caches(&state.web_db, &ctx.cache).await?;
-    match fetch_upstream_log(&substitution_sources(&upstream_caches), &drv).await {
-        Some(body) => log_response(body, "MISS"),
-        None => Err(WebError::not_found(Resource::Log)),
-    }
-}
-
-/// Failed builds are not excluded on purpose. A rebuild that failed after the first success is
-/// still carrying the most recent log.
-async fn local_log(
-    db: &WebDb,
-    log_storage: &Arc<dyn LogStorage>,
-    ctx: &CacheContext,
-    mapper: &StorePathMapper,
-    drv: &str,
-) -> WebResult<Option<String>> {
-    let Ok(original) = OriginalStorePath::parse(drv) else {
-        return Ok(None);
-    };
-    let stored = mapper.inbound(&original);
-    let Some(drv_name) = stored
-        .name()
-        .strip_suffix(".drv")
-        .filter(|name| !name.is_empty())
-    else {
-        return Ok(None);
-    };
-
-    let Some(derivation) = gradient_db::cached_paths::derivation_signed_in_cache(
-        db,
-        ctx.cache.id,
-        stored.hash(),
-        drv_name,
+    let not_found = || WebError::not_found(Resource::Log);
+    let drv = OriginalStorePath::parse(&drv).map_err(|_| not_found())?;
+    let found = find_build_log(
+        &state.web_db,
+        state.log_storage.as_ref(),
+        std::slice::from_ref(&ctx.cache),
+        &state.cache_mapper(ctx.cache.id),
+        &drv,
     )
-    .await?
-    else {
-        return Ok(None);
-    };
+    .await?;
 
-    let Some(shared_build) = gradient_db::derivation_builds::by_derivation(db, derivation).await?
-    else {
-        return Ok(None);
-    };
-
-    let Some(key) =
-        gradient_db::scheduling::build_attempt::latest_attempt_id(db, shared_build.id).await?
-    else {
-        return Ok(None);
-    };
-
-    Ok(log_storage
-        .read(key)
-        .await
-        .ok()
-        .filter(|body| !body.is_empty()))
+    match found {
+        Some(BuildLog::Stored(body)) => log_response(body, "HIT"),
+        Some(BuildLog::Upstream(body)) => log_response(body, "MISS"),
+        None => Err(not_found()),
+    }
 }
 
 fn log_response(body: String, cache_status: &'static str) -> WebResult<Response> {
