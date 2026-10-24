@@ -10,9 +10,10 @@ use gradient_derivation::{Derivation, parse_drv};
 use gradient_eval::ipc::ResolvedItem;
 use gradient_eval::pool::{CallStats, EvalPool, EvalPoolConfig, LiveThunks, MemoryGuard};
 use gradient_sources::{
-    AttrError, DerivationResolver, EvalDependencies, FlakeDiscovery, FoundDerivations,
+    AttrError, DerivationResolver, EvalDependencies, FlakeDiscovery, FoundDerivations, Resolved,
     ResolvedDerivation,
 };
+use gradient_wire::types::License;
 use gradient_util::store_path::nix_store_path;
 use gradient_util::sync::Mutex;
 use std::sync::Arc;
@@ -41,12 +42,22 @@ impl gradient_eval::pool::EvalDependencies for SourceDependencies<'_> {
 
 fn item_to_resolved(item: ResolvedItem) -> ResolvedDerivation {
     let result = match (item.drv_path, item.error) {
-        (Some(drv), _) => Ok((drv, item.references)),
+        (Some(drv_path), _) => Ok(Resolved {
+            drv_path,
+            licenses: item.licenses.into_iter().map(wire_license).collect(),
+        }),
         (None, Some(msg)) => Err(anyhow::anyhow!(msg)),
         (None, None) => Err(anyhow::anyhow!("eval worker returned empty result")),
     };
 
     (item.attr, result)
+}
+
+fn wire_license(license: gradient_eval::ipc::License) -> License {
+    match license {
+        gradient_eval::ipc::License::Spdx { id } => License::Spdx { id },
+        gradient_eval::ipc::License::Name { name } => License::Name { name },
+    }
 }
 
 fn attr_error(error: gradient_eval::ipc::AttrError) -> AttrError {

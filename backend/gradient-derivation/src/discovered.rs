@@ -50,6 +50,7 @@ pub fn discovered_derivation(
         allow_substitutes: drv.allow_substitutes(),
         pname,
         ifd: false,
+        licenses: Vec::new(),
     }
 }
 

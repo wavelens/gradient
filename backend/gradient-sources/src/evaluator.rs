@@ -7,7 +7,15 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_derivation::Derivation;
-pub type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
+use gradient_wire::types::License;
+
+pub type ResolvedDerivation = (String, Result<Resolved>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Resolved {
+    pub drv_path: String,
+    pub licenses: Vec<License>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AttrError {

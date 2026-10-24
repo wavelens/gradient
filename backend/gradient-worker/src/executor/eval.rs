@@ -18,11 +18,11 @@ use futures::future::BoxFuture;
 use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
 use gradient_eval::pool::MemoryGuard;
-use gradient_sources::{AttrError, DerivationResolver, FlakeDiscovery, ResolvedDerivation};
+use gradient_sources::{AttrError, DerivationResolver, FlakeDiscovery, Resolved, ResolvedDerivation};
 use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
 };
-use gradient_wire::types::{EvalMessageLevel, attr_eval_source};
+use gradient_wire::types::{EvalMessageLevel, License, attr_eval_source};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
@@ -488,6 +488,7 @@ pub(super) struct Root {
     pub(super) drv_path: String,
     pub(super) attr: String,
     pub(super) ifd: bool,
+    pub(super) licenses: Vec<License>,
 }
 
 enum Queued {
@@ -513,8 +514,10 @@ impl Queued {
                 drv_path,
                 attr,
                 ifd,
+                licenses,
             }) => DiscoveredDerivation {
                 ifd,
+                licenses,
                 ..gradient_derivation::discovered_derivation(Some(attr), drv_path, drv)
             },
             Queued::Dependency(drv_path) => {
@@ -556,11 +559,12 @@ impl FoundAttrs {
     fn take(&mut self, (attr, resolved): ResolvedDerivation) -> Option<Root> {
         self.attrs += 1;
         match resolved {
-            Ok((drv_path, _refs)) => {
+            Ok(Resolved { drv_path, licenses }) => {
                 let root = Root {
                     drv_path,
                     attr,
                     ifd: false,
+                    licenses,
                 };
                 self.roots.push(root.clone());
                 Some(root)
@@ -1809,7 +1813,13 @@ mod tests {
             _: &dyn gradient_sources::EvalDependencies,
             found: gradient_sources::FoundDerivations<'_>,
         ) -> Result<FlakeDiscovery> {
-            found(vec![("hello".into(), Ok((self.drv_path.clone(), vec![])))]);
+            found(vec![(
+                "hello".into(),
+                Ok(Resolved {
+                    drv_path: self.drv_path.clone(),
+                    licenses: vec![gpl()],
+                }),
+            )]);
             self.walked.notified().await;
             Ok(FlakeDiscovery::default())
         }
@@ -1871,6 +1881,47 @@ mod tests {
             reporter.all_eval_derivations().len(),
             fixture.derivations.len()
         );
+    }
+
+    fn gpl() -> License {
+        License::Spdx {
+            id: "GPL-3.0-or-later".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn only_the_root_carries_its_licenses() {
+        let fixture = load_store(&fixture_dir());
+        let walked = Arc::new(tokio::sync::Notify::new());
+        let resolver = WaitsForTheWalk {
+            drv_path: fixture.entry_point.clone(),
+            walked: Arc::clone(&walked),
+        };
+        let drv_reader = SignalsReads {
+            drvs: FakeDrvReader::from_raw_drvs(fixture.raw_drvs.clone()),
+            walked,
+        };
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &make_flake_job("https://example.com/repo"),
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
+
+        for d in reporter.all_eval_derivations() {
+            let expected = if d.drv_path == fixture.entry_point {
+                vec![gpl()]
+            } else {
+                vec![]
+            };
+            assert_eq!(d.licenses, expected, "{}", d.drv_path);
+        }
     }
 
     fn numbered_drv(n: usize) -> String {
@@ -1962,6 +2013,7 @@ mod tests {
                 drv_path: root.clone(),
                 attr: "root".into(),
                 ifd: false,
+                licenses: vec![],
             }],
             &mut never_abort(),
         )
@@ -2035,6 +2087,7 @@ mod tests {
                 drv_path: DYNAMIC.into(),
                 attr: "dynamic".into(),
                 ifd: false,
+                licenses: vec![],
             }],
             &mut never_abort(),
         )
