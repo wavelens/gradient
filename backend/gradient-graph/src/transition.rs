@@ -147,8 +147,9 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
         Transition::RequeueImports {
             evaluation,
             derivations,
+            without_output_paths,
         } => {
-            requeue_imports(ctx, evaluation, &derivations).await?;
+            requeue_imports(ctx, evaluation, &derivations, &without_output_paths).await?;
             Ok(TransitionReport::default())
         }
         Transition::AbortBuild {
@@ -559,11 +560,20 @@ async fn requeue_imports(
     ctx: &DbContext,
     evaluation: EvaluationId,
     derivations: &[DerivationId],
+    without_output_paths: &[DerivationId],
 ) -> Result<()> {
-    let changes =
+    let mut changes =
         gradient_db::graph::promotion::requeue_failed_import_closure(&ctx.worker_db, derivations)
             .await
             .context("requeue the failed closure of an import")?;
+    changes.extend(
+        gradient_db::graph::runtime_can_start::reset_builds_without_output_paths(
+            &ctx.worker_db,
+            without_output_paths,
+        )
+        .await
+        .context("rebuild the imports without a recorded output path")?,
+    );
     emit_transition_effects(ctx, &changes).await?;
 
     let thawed: Vec<DerivationId> = changes

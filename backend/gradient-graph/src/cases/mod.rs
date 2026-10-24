@@ -571,6 +571,7 @@ impl Case {
         self.transition(Transition::RequeueImports {
             evaluation,
             derivations,
+            without_output_paths: Vec::new(),
         })
         .await
     }

@@ -356,24 +356,51 @@ async fn retire_shared_builds(
     let lock = lock_shared_builds(txn, &scope).await?;
     let mut transitions = crate::graph::can_start::lost_fetchability(&lock).await?;
 
-    if !gone.is_empty() {
-        let reset = crate::graph::promotion::returned_transitions(
-            txn.query_all_raw(RESET_UNCACHED_PRODUCERS.bind([ids(gone)]))
-                .await?,
-        );
-        let thawed: Vec<DerivationId> = reset.iter().map(|c| c.derivation).collect();
-        transitions.extend(reset);
-        if !thawed.is_empty() {
-            let thawed_lock =
-                crate::graph::can_start::lock_seed_shared_builds(txn, &thawed).await?;
-            crate::graph::can_start::seed_blocking_deps(&thawed_lock).await?;
-            transitions.extend(crate::graph::can_start::settle_created(txn, &thawed).await?);
-        }
-    }
-
+    transitions.extend(reset_uncached_producers(txn, gone).await?);
     transitions.extend(crate::graph::can_start::unpromote_drv_owners(txn, hashes).await?);
 
     Ok(transitions)
+}
+
+async fn reset_uncached_producers(
+    txn: &DatabaseTransaction,
+    producers: &[DerivationId],
+) -> Result<Vec<crate::status::TransitionChange>, DbErr> {
+    if producers.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut reset = crate::graph::promotion::returned_transitions(
+        txn.query_all_raw(RESET_UNCACHED_PRODUCERS.bind([ids(producers)]))
+            .await?,
+    );
+    let thawed: Vec<DerivationId> = reset.iter().map(|c| c.derivation).collect();
+    if !thawed.is_empty() {
+        let thawed_lock = crate::graph::can_start::lock_seed_shared_builds(txn, &thawed).await?;
+        crate::graph::can_start::seed_blocking_deps(&thawed_lock).await?;
+        reset.extend(crate::graph::can_start::settle_created(txn, &thawed).await?);
+    }
+
+    Ok(reset)
+}
+
+pub async fn reset_builds_without_output_paths<C>(
+    db: &C,
+    producers: &[DerivationId],
+) -> Result<Vec<crate::status::TransitionChange>, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    if producers.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let txn = db.begin().await?;
+    let _lock = lock_shared_builds(&txn, producers).await?;
+    let reset = reset_uncached_producers(&txn, producers).await?;
+    txn.commit().await?;
+
+    Ok(reset)
 }
 
 pub async fn recount_missing_runtime_deps<C>(db: &C) -> Result<u64, DbErr>

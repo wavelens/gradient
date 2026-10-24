@@ -83,21 +83,14 @@ impl Scheduler {
             Ok(builds) => builds,
             Err(outcome) => return Ok(Err(outcome)),
         };
-        if !builds
-            .iter()
-            .any(|(_, row)| BuildStatus::REQUEUEABLE.contains(&row.status))
-        {
+        let Some(requeue) = requeue_of(evaluation, &builds) else {
             return Ok(Ok(builds));
-        }
+        };
 
-        let derivations = builds.iter().map(|(_, row)| row.derivation).collect();
         self.graph
-            .transition(Transition::RequeueImports {
-                evaluation,
-                derivations,
-            })
+            .transition(requeue)
             .await
-            .context("requeue the failed builds of an import")?;
+            .context("requeue the builds of an import")?;
         self.imported_builds(evaluation, drv_paths).await
     }
 
@@ -370,6 +363,35 @@ impl Scheduler {
 
         Ok(())
     }
+}
+
+fn requeue_of(
+    evaluation: EvaluationId,
+    builds: &[(ImportedBuild, ImportBuild)],
+) -> Option<Transition> {
+    let failed = builds
+        .iter()
+        .any(|(_, row)| BuildStatus::REQUEUEABLE.contains(&row.status));
+    let without_output_paths: Vec<DerivationId> = builds
+        .iter()
+        .filter(|(_, row)| row.finished_without_output_path())
+        .map(|(_, row)| row.derivation)
+        .collect();
+    if !failed && without_output_paths.is_empty() {
+        return None;
+    }
+
+    let derivations = if failed {
+        builds.iter().map(|(_, row)| row.derivation).collect()
+    } else {
+        Vec::new()
+    };
+
+    Some(Transition::RequeueImports {
+        evaluation,
+        derivations,
+        without_output_paths,
+    })
 }
 
 fn unbuildable_reason(unmet: &UnmetRequirement) -> String {
