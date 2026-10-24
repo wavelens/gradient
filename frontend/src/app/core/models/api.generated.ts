@@ -1442,6 +1442,11 @@ export interface NixPathInfo {
   CA?: string | null;
 }
 
+export interface NixRealisation {
+  outPath: string;
+  signatures: string[];
+}
+
 export interface OnlineWorkerLoad {
   online: number;
   busy_pct: number;

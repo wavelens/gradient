@@ -19,6 +19,7 @@ use gradient_sources::StoreDaemonError;
 use gradient_util::store_path::strip_store_prefix;
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_store_content_address::{ContentAddress, make_store_path_from_ca};
+use harmonia_store_derivation::realisation::{DrvOutput, Realisation, UnkeyedRealisation};
 use harmonia_store_path::{StoreDir, StorePath, StorePathName};
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
@@ -27,6 +28,7 @@ use sha2::{Digest as _, Sha256};
 use tracing::{debug, warn};
 
 use gradient_wire::traits::WorkerStore;
+use gradient_wire::types::Realisation as WireRealisation;
 use gradient_worker_client::nar::{PathMeta, PathMetaSource};
 
 const POOL_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(600);
@@ -167,6 +169,19 @@ impl LocalNixStore {
         })
     }
 
+    pub async fn register_realisations(&self, realisations: &[WireRealisation]) -> Result<()> {
+        for realisation in realisations {
+            let realisation = daemon_realisation(realisation)?;
+            let mut guard = self.acquire().await?;
+            guard
+                .execute(|client| async move { client.register_drv_output(&realisation).await })
+                .await
+                .map_err(|e| anyhow::anyhow!("register_drv_output failed: {e}"))?;
+        }
+
+        Ok(())
+    }
+
     pub async fn add_indirect_root(&self, gcroot_symlink: &std::path::Path) -> Result<()> {
         let bytes = bytes::Bytes::copy_from_slice(gcroot_symlink.as_os_str().as_encoded_bytes());
 
@@ -184,6 +199,32 @@ impl LocalNixStore {
 }
 
 const DAEMON_LOOKUPS: usize = 32;
+
+fn parse_store_path(path: &str) -> Result<StorePath> {
+    StorePath::from_base_path(strip_store_prefix(path)).map_err(|cause| {
+        StoreDaemonError::InvalidStorePath {
+            path: path.to_owned(),
+            cause,
+        }
+        .into()
+    })
+}
+
+fn daemon_realisation(realisation: &WireRealisation) -> Result<Realisation> {
+    Ok(Realisation {
+        key: DrvOutput {
+            drv_path: parse_store_path(&realisation.drv_path)?,
+            output_name: realisation
+                .output
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid output name {}: {e}", realisation.output))?,
+        },
+        value: UnkeyedRealisation {
+            out_path: parse_store_path(&realisation.path)?,
+            signatures: BTreeSet::new(),
+        },
+    })
+}
 
 #[async_trait]
 impl WorkerStore for LocalNixStore {

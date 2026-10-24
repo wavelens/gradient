@@ -13,6 +13,7 @@ mod order;
 mod passthrough;
 mod probe;
 mod queue;
+mod realisation;
 mod retire;
 mod scenarios;
 mod sharing;
@@ -471,9 +472,18 @@ impl Case {
     }
 
     pub async fn build_output(&self, path: &str, substituted: bool) -> TransitionReport {
+        self.built_outputs(path, Vec::new(), substituted).await
+    }
+
+    pub async fn built_outputs(
+        &self,
+        path: &str,
+        outputs: Vec<gradient_wire::types::BuildOutput>,
+        substituted: bool,
+    ) -> TransitionReport {
         self.transition(Transition::BuildOutput {
             shared_build: self.sb(path).await.id,
-            outputs: Vec::new(),
+            outputs,
             metrics: None,
             substituted,
         })

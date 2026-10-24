@@ -48,7 +48,7 @@ pub async fn output_hashes_for_drvs<C: ConnectionTrait>(
     })
     .await?
     .into_iter()
-    .map(|o| o.hash)
+    .filter_map(|o| o.hash)
     .collect())
 }
 

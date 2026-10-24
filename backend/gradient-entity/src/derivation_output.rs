@@ -14,10 +14,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{DerivationId, DerivationOutputId};
 
-/// This `hash` sentinel is written for an output store path the evaluator could not parse, e.g. a
-/// floating CA output before its build. Nothing is rewriting it later.
-pub const UNKNOWN_OUTPUT_HASH: &str = "unknown";
-
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "derivation_output")]
 pub struct Model {
@@ -25,8 +21,8 @@ pub struct Model {
     pub id: DerivationOutputId,
     pub derivation: DerivationId,
     pub name: String,
-    pub hash: String,
-    pub package: String,
+    pub hash: Option<String>,
+    pub package: Option<String>,
     pub ca: Option<String>,
     pub nar_size: Option<i64>,
     pub external_url: Option<String>,
@@ -36,6 +32,7 @@ pub struct Model {
     #[sea_orm(column_name = "references_list")]
     pub references: Option<String>,
     pub deriver: Option<String>,
+    pub path_known_after_build: bool,
     pub created_at: NaiveDateTime,
 }
 
@@ -52,3 +49,10 @@ pub enum Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl Model {
+    pub fn store_path(&self) -> Option<crate::store_path::StorePath> {
+        let (hash, package) = (self.hash.as_ref()?, self.package.as_ref()?);
+        Some(crate::store_path::StorePath::from_stored(hash, package))
+    }
+}

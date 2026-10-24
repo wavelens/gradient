@@ -2084,6 +2084,7 @@ mod tests {
                     timeout_secs: None,
                     max_silent_secs: None,
                     build_cores: None,
+                    input_realisations: Vec::new(),
                 }],
                 requirement: BuildRequirement {
                     architecture: architecture.into(),

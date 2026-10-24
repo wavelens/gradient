@@ -28,6 +28,7 @@ mod count;
 mod eval_metrics;
 mod job_handlers;
 mod ram_shortage;
+mod realisations;
 mod scoring;
 mod supersede;
 pub mod trigger_firing;

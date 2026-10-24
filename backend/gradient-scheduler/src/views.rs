@@ -197,6 +197,7 @@ mod tests {
                     timeout_secs: None,
                     max_silent_secs: None,
                     build_cores: None,
+                    input_realisations: Vec::new(),
                 }],
                 requirement: gradient_wire::types::BuildRequirement {
                     architecture: "x86_64-linux".into(),

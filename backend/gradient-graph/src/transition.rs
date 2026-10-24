@@ -391,7 +391,12 @@ async fn build_output(
         };
 
         let row_id = row.id;
+        let unrealised = row.hash.is_none();
         let mut active = row.into_active_model();
+        if unrealised {
+            record_realised_path(&mut active, output);
+        }
+
         if let BuildOutputMetadata::Available {
             nar_size,
             nar_hash: _,
@@ -449,6 +454,18 @@ async fn build_output(
     }
 
     Ok(())
+}
+
+fn record_realised_path(active: &mut ADerivationOutput, output: &BuildOutput) {
+    match StorePath::parse_stored(&output.store_path) {
+        Ok(path) => {
+            active.hash = Set(Some(path.hash().to_owned()));
+            active.package = Set(Some(path.name().to_owned()));
+        }
+        Err(e) => {
+            warn!(store_path = %output.store_path, error = %e, "the realised output path does not parse");
+        }
+    }
 }
 
 async fn report_missing_artefacts(

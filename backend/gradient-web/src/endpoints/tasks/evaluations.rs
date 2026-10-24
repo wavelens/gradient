@@ -31,7 +31,6 @@ use gradient_db::WebDb;
 use gradient_db::evaluations::TaskEvaluationFilter;
 use gradient_db::lookup::{by_id, by_ids, get_any_project_by_name};
 use gradient_entity::build::BuildStatus;
-use gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH;
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_sources::{get_commit_info, head_commit};
@@ -577,12 +576,12 @@ fn output_paths_by_derivation(
     let mut out: HashMap<DerivationId, BTreeMap<String, String>> = HashMap::new();
 
     for row in rows {
-        if row.hash == UNKNOWN_OUTPUT_HASH {
+        let Some(path) = row.store_path() else {
             continue;
-        }
+        };
         out.entry(row.derivation)
             .or_default()
-            .insert(row.name.clone(), StorePath::from(row.clone()).full());
+            .insert(row.name.clone(), path.full());
     }
 
     out
@@ -778,18 +777,12 @@ async fn serve_hydra_artifact(
         let output = build_outputs
             .iter()
             .find(|o| o.id == product.derivation_output);
-        let output_root = match output {
-            Some(o) => StorePath::from(o.clone()).full(),
-            None => {
-                tracing::warn!(%filename, "build_product references unknown output");
-                continue;
-            }
-        };
-
-        let hash = output.map(|o| o.hash.as_str()).unwrap_or("");
-        if hash.is_empty() {
+        let Some(output_path) = output.and_then(MDerivationOutput::store_path) else {
+            tracing::warn!(%filename, "build_product references an unknown or unrealised output");
             continue;
-        }
+        };
+        let output_root = output_path.full();
+        let hash = output_path.hash();
 
         let prefix = format!("{}/", output_root);
         let rel = product
@@ -977,8 +970,18 @@ mod search_tests {
             id: DerivationOutputId::now_v7(),
             derivation: drv,
             name: name.into(),
-            hash: hash.into(),
-            package: package.into(),
+            hash: Some(hash.into()),
+            package: Some(package.into()),
+            ..Default::default()
+        }
+    }
+
+    fn unrealised_row(drv: DerivationId, name: &str) -> MDerivationOutput {
+        MDerivationOutput {
+            id: DerivationOutputId::now_v7(),
+            derivation: drv,
+            name: name.into(),
+            path_known_after_build: true,
             ..Default::default()
         }
     }
@@ -1005,7 +1008,7 @@ mod search_tests {
     fn unresolved_output_paths_are_omitted() {
         let drv = DerivationId::now_v7();
         let rows = vec![
-            output_row(drv, "out", UNKNOWN_OUTPUT_HASH, "hello"),
+            unrealised_row(drv, "out"),
             output_row(drv, "dev", "bbbb", "hello-dev"),
         ];
 
@@ -1018,7 +1021,7 @@ mod search_tests {
     #[test]
     fn derivation_with_no_resolvable_output_is_absent_entirely() {
         let drv = DerivationId::now_v7();
-        let rows = vec![output_row(drv, "out", UNKNOWN_OUTPUT_HASH, "hello")];
+        let rows = vec![unrealised_row(drv, "out")];
 
         assert!(output_paths_by_derivation(&rows).is_empty());
     }

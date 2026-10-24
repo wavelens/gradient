@@ -175,7 +175,7 @@ impl Shape {
         let mut hashes = vec![derivation.hash.clone()];
         for output in self.outputs.iter_mut().filter(|o| o.derivation == id) {
             output.created_at = at;
-            hashes.push(output.hash.clone());
+            hashes.extend(output.hash.clone());
         }
         for path in &mut self.cached_paths {
             if hashes.contains(&path.hash) {
@@ -195,7 +195,7 @@ impl Shape {
         let declared = self
             .outputs
             .iter()
-            .find(|o| o.derivation == derivation && o.hash == hash);
+            .find(|o| o.derivation == derivation && o.hash.as_deref() == Some(hash));
         if let Some(declared) = declared {
             assert_eq!(
                 declared.name, name,
@@ -206,8 +206,8 @@ impl Shape {
                 id: DerivationOutputId::now_v7(),
                 derivation,
                 name: name.into(),
-                hash: hash.into(),
-                package: output_package(&self.derivations[at].name, name),
+                hash: Some(hash.into()),
+                package: Some(output_package(&self.derivations[at].name, name)),
                 created_at: test_date(),
                 ..Default::default()
             };
@@ -362,8 +362,14 @@ impl Shape {
             .iter()
             .position(|o| o.derivation == derivation)
             .unwrap_or_else(|| panic!("cached output of {path}: declare its output first"));
-        let hash = self.outputs[output].hash.clone();
-        let package = self.outputs[output].package.clone();
+        let hash = self.outputs[output]
+            .hash
+            .clone()
+            .expect("a realised output");
+        let package = self.outputs[output]
+            .package
+            .clone()
+            .expect("a realised output");
         self.cached_path = Some(self.stored_path(&hash, &package));
         self
     }
@@ -619,7 +625,10 @@ fn output_package(derivation: &str, output: &str) -> String {
 }
 
 fn known_upstream(output: &mut derivation_output::Model) {
-    output.external_url = Some(format!("https://upstream.invalid/nar/{}.nar", output.hash));
+    output.external_url = Some(format!(
+        "https://upstream.invalid/nar/{}.nar",
+        output.hash.as_deref().unwrap_or_default()
+    ));
     output.nar_hash = Some("sha256:def".into());
     output.nar_size = Some(5);
 }
@@ -777,8 +786,14 @@ mod tests {
             .await;
 
         let (out, dev) = (db.output_of(A, "out").await, db.output_of(A, "dev").await);
-        assert_eq!((out.hash.as_str(), out.package.as_str()), (A_OUT, "a"));
-        assert_eq!((dev.hash.as_str(), dev.package.as_str()), (A_DEV, "a-dev"));
+        assert_eq!(
+            (out.hash.as_deref(), out.package.as_deref()),
+            (Some(A_OUT), Some("a"))
+        );
+        assert_eq!(
+            (dev.hash.as_deref(), dev.package.as_deref()),
+            (Some(A_DEV), Some("a-dev"))
+        );
         assert!(out.external_url.is_some() && dev.external_url.is_some());
         db.finish().await;
     }

@@ -117,7 +117,7 @@ pub async fn output_sizes_by_drv<C: ConnectionTrait>(
     let missing_hashes: Vec<String> = outputs
         .iter()
         .filter(|o| o.nar_size.is_none())
-        .map(|o| o.hash.clone())
+        .filter_map(|o| o.hash.clone())
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
@@ -136,10 +136,11 @@ pub async fn output_sizes_by_drv<C: ConnectionTrait>(
 
     let mut by_drv: HashMap<DerivationId, i64> = HashMap::new();
     for o in outputs {
-        if let Some(size) = o
-            .nar_size
-            .or_else(|| cached_size_by_hash.get(&o.hash).copied())
-        {
+        if let Some(size) = o.nar_size.or_else(|| {
+            o.hash
+                .as_ref()
+                .and_then(|h| cached_size_by_hash.get(h).copied())
+        }) {
             *by_drv.entry(o.derivation).or_insert(0) += size;
         }
     }

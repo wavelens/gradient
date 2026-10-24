@@ -184,7 +184,11 @@ impl TestDatabase {
     }
 
     pub async fn output_stored(&self, path: &str, name: &str) -> bool {
-        let hash = self.output_of(path, name).await.hash;
+        let hash = self
+            .output_of(path, name)
+            .await
+            .hash
+            .expect("a realised output");
         self.cached_path(&hash)
             .await
             .is_some_and(|stored| stored.file_hash.is_some())

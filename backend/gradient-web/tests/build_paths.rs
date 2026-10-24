@@ -61,8 +61,8 @@ fn build_rows() -> DatabaseConnection {
         .append_query_results([vec![gradient_entity::derivation_output::Model {
             derivation: derivation_id(),
             name: "out".into(),
-            hash: EXAMPLE_STORED_HASH.into(),
-            package: "hello".into(),
+            hash: Some(EXAMPLE_STORED_HASH.into()),
+            package: Some("hello".into()),
             ..Default::default()
         }]])
         .append_query_results([Vec::<gradient_entity::build_attempt::Model>::new()])

@@ -337,8 +337,8 @@ mod tests {
             id: DerivationOutputId::now_v7(),
             derivation,
             name: "out".into(),
-            hash: hash.into(),
-            package: "foo".into(),
+            hash: Some(hash.into()),
+            package: Some("foo".into()),
             nar_size,
             created_at: now(),
             ..Default::default()

@@ -314,8 +314,10 @@ async fn extend_with_persisted_upstream(
         }
     };
 
-    let by_hash: HashMap<String, gradient_entity::derivation_output::Model> =
-        rows.into_iter().map(|r| (r.hash.clone(), r)).collect();
+    let by_hash: HashMap<String, gradient_entity::derivation_output::Model> = rows
+        .into_iter()
+        .filter_map(|r| Some((r.hash.clone()?, r)))
+        .collect();
 
     for (hash, path) in uncached_pairs {
         let Some(row) = by_hash.get(hash) else {

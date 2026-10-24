@@ -114,6 +114,8 @@ pub struct BuildSpec {
     pub max_silent_secs: Option<u64>,
     #[proto(34, default)]
     pub build_cores: Option<u32>,
+    #[proto(36, default)]
+    pub input_realisations: Vec<Realisation>,
 }
 
 #[derive(Proto, Debug, Clone, Copy, PartialEq, Eq)]
@@ -311,7 +313,10 @@ pub struct DiscoveredDerivation {
 
 #[derive(Proto, Debug, Clone, PartialEq, Eq)]
 pub enum ImportOutcome {
-    Completed,
+    Completed {
+        #[proto(36, default)]
+        realisations: Vec<Realisation>,
+    },
     Failed {
         drv_path: String,
         build_id: String,
@@ -320,6 +325,13 @@ pub enum ImportOutcome {
     Unknown {
         drv_path: String,
     },
+}
+
+#[derive(Proto, Debug, Clone, PartialEq, Eq, Default)]
+pub struct Realisation {
+    pub drv_path: String,
+    pub output: String,
+    pub path: String,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Eq)]

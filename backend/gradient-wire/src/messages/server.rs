@@ -268,7 +268,9 @@ mod job_id_tests {
         let m = ServerMessage::ImportResult {
             job_id: "j".into(),
             request_id: "r".into(),
-            outcome: ImportOutcome::Completed,
+            outcome: ImportOutcome::Completed {
+                realisations: Vec::new(),
+            },
         };
         assert_eq!(m.job_id(), Some("j"));
         assert_eq!(m.variant_name(), "ImportResult");

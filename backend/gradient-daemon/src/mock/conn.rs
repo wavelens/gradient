@@ -585,9 +585,13 @@ impl DaemonStore for MockConn {
 
     fn register_drv_output<'a>(
         &'a mut self,
-        _realisation: &'a Realisation,
+        realisation: &'a Realisation,
     ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
-        ready(Err(self.unimplemented(Operation::RegisterDrvOutput))).empty_logs()
+        let result = self.journal_only(
+            "register_drv_output",
+            vec![realisation.value.out_path.to_string()],
+        );
+        ready(result).empty_logs()
     }
 
     fn query_realisation<'a>(

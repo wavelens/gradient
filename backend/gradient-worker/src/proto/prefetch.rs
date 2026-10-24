@@ -12,7 +12,7 @@ use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
 use gradient_util::store_path::nix_store_path;
 use gradient_wire::CachedPathInfo;
-use gradient_wire::messages::{BuildSpec, CachedPath, EvalMessageLevel, QueryMode};
+use gradient_wire::messages::{BuildSpec, CachedPath, EvalMessageLevel, QueryMode, Realisation};
 use gradient_wire::types::{BuildProgressPhase, JobPhase};
 use tracing::{debug, error, warn};
 
@@ -232,6 +232,7 @@ struct InputPrefetcher<'a> {
     store: &'a LocalNixStore,
     drv_path: String,
     build_id: String,
+    input_realisations: &'a [Realisation],
     updater: &'a JobUpdater,
 }
 
@@ -241,6 +242,7 @@ impl<'a> InputPrefetcher<'a> {
             store,
             drv_path: task.drv_path.clone(),
             build_id: task.build_id.clone(),
+            input_realisations: &task.input_realisations,
             updater,
         }
     }
@@ -250,6 +252,7 @@ impl<'a> InputPrefetcher<'a> {
             store,
             drv_path: label.clone(),
             build_id: label,
+            input_realisations: &[],
             updater,
         }
     }
@@ -296,6 +299,7 @@ impl<'a> InputPrefetcher<'a> {
                     .map(str::to_owned),
             );
         }
+        wanted.extend(self.input_realisations.iter().map(|r| r.path.clone()));
 
         Ok(wanted)
     }
@@ -460,7 +464,18 @@ impl<'a> InputPrefetcher<'a> {
 
     async fn run(&mut self, progress: &mut Progress<impl ProgressSink>) -> Result<Prefetched> {
         self.ensure_self_drv_present(progress).await?;
+        let prefetched = self.fetch_missing_inputs(progress).await?;
+        self.store
+            .register_realisations(self.input_realisations)
+            .await
+            .context("register the realised paths of content-addressed inputs")?;
+        Ok(prefetched)
+    }
 
+    async fn fetch_missing_inputs(
+        &mut self,
+        progress: &mut Progress<impl ProgressSink>,
+    ) -> Result<Prefetched> {
         let wanted = self.enumerate_inputs().await?;
         if wanted.is_empty() {
             return Ok(Prefetched::default());

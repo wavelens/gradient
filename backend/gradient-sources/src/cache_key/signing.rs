@@ -5,7 +5,7 @@
  */
 
 use super::format::decrypt_signing_key;
-use super::narinfo;
+use super::{narinfo, realisation};
 use crate::{SourceError, cache_key_host};
 use base64::{Engine, engine::general_purpose};
 use ed25519_compact::SecretKey;
@@ -48,6 +48,13 @@ impl CacheSigner {
     ) -> String {
         let raw = self.sign_fingerprint(store_path, nar_hash, nar_size, references);
         let sig_b64 = general_purpose::STANDARD.encode(raw);
+        format!("{}-{}:{}", self.base_url, self.cache_name, sig_b64)
+    }
+
+    pub fn sign_realisation(&self, drv_path: &str, output: &str, out_path: &str) -> String {
+        let fingerprint = realisation::fingerprint(drv_path, output, out_path);
+        let sig = self.secret_key.sign(fingerprint.as_bytes(), None);
+        let sig_b64 = general_purpose::STANDARD.encode(*sig);
         format!("{}-{}:{}", self.base_url, self.cache_name, sig_b64)
     }
 

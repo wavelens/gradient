@@ -14,7 +14,8 @@ pub use crate::types::{
     DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalMessageLevel,
     EvalProgress, EvalStatsReport, FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource,
     FlakeStep, GradientCapabilities, InputFetch, InputFetchState, InputUpdateSpec, Job,
-    JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode, RequiredPath,
+    JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode, Realisation,
+    RequiredPath,
 };
 pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, UploadMetadata,

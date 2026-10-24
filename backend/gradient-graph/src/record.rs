@@ -321,12 +321,7 @@ impl BatchWriter<'_> {
                 continue;
             };
             for output in &d.outputs {
-                let (hash, package) = output_hash_name(&output.path).unwrap_or_else(|| {
-                    (
-                        gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH.to_owned(),
-                        output.name.clone(),
-                    )
-                });
+                let (hash, package) = output_hash_name(&output.path).unzip();
                 outputs.push(
                     MDerivationOutput {
                         id: DerivationOutputId::now_v7(),
@@ -334,6 +329,7 @@ impl BatchWriter<'_> {
                         name: output.name.clone(),
                         hash,
                         package,
+                        path_known_after_build: output.path.is_empty(),
                         created_at: now,
                         ..Default::default()
                     }
@@ -1113,7 +1109,7 @@ pub(crate) async fn apply_upstream_hits(
         by_shared_build
             .entry(o.derivation)
             .or_default()
-            .push(hits.contains_key(&o.hash) || cached.contains(&o.id));
+            .push(o.hash.as_ref().is_some_and(|h| hits.contains_key(h)) || cached.contains(&o.id));
     }
 
     let served: Vec<DerivationId> = touched
@@ -1205,7 +1201,7 @@ async fn persist_narinfo(
 ) -> Result<()> {
     let mut learned: Vec<(DerivationId, Vec<String>)> = Vec::new();
     for o in rows {
-        let Some(hit) = hits.get(&o.hash) else {
+        let Some(hit) = o.hash.as_ref().and_then(|h| hits.get(h)) else {
             continue;
         };
 
@@ -1232,7 +1228,7 @@ async fn persist_narinfo(
         }
 
         if let Err(e) = am.update(db).await {
-            error!(hash = %o.hash, error = %e, "failed to persist upstream availability");
+            error!(hash = ?o.hash, error = %e, "failed to persist upstream availability");
         }
     }
 

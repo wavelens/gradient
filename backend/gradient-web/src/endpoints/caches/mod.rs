@@ -15,6 +15,7 @@ pub(crate) mod narinfo;
 pub(crate) mod narlist;
 pub(crate) mod nars;
 pub(crate) mod proto;
+pub(crate) mod realisation;
 mod refusal;
 pub(crate) mod serve;
 pub mod subscriptions;

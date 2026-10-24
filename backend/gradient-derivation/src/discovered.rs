@@ -14,7 +14,6 @@ pub fn discovered_derivation(
     let outputs: Vec<DerivationOutput> = drv
         .outputs
         .iter()
-        .filter(|o| !o.path.is_empty())
         .map(|o| DerivationOutput {
             name: o.name.clone(),
             path: o.path.clone(),
@@ -85,5 +84,37 @@ mod tests {
         );
 
         assert_eq!(discovered.input_sources, drv.input_sources);
+    }
+
+    #[test]
+    fn a_content_addressed_output_is_reported_without_a_path() {
+        let drv = crate::Derivation {
+            outputs: vec![crate::DerivationOutput {
+                name: "out".into(),
+                path: String::new(),
+                hash_algo: "r:sha256".into(),
+                hash: String::new(),
+            }],
+            input_derivations: vec![],
+            input_sources: vec![],
+            system: "x86_64-linux".into(),
+            builder: "/bin/sh".into(),
+            args: vec![],
+            environment: std::collections::HashMap::new(),
+        };
+
+        let discovered = discovered_derivation(
+            None,
+            "/nix/store/dddddddddddddddddddddddddddddddd-ca.drv".into(),
+            &drv,
+        );
+
+        assert_eq!(
+            discovered.outputs,
+            vec![DerivationOutput {
+                name: "out".into(),
+                path: String::new(),
+            }]
+        );
     }
 }

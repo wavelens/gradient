@@ -13,8 +13,8 @@ use gradient_types::ids::ProjectId;
 use gradient_types::{MappingError, StorePathMapper};
 use gradient_wire::messages::{BuildFailureKind, ClientMessage, ServerMessage};
 use gradient_wire::types::{
-    FlakeSource, ImportOutcome, InputOutcome, Job, JobCandidate, JobUpdateKind, UploadMetadata,
-    UploadObject,
+    FlakeSource, ImportOutcome, InputOutcome, Job, JobCandidate, JobUpdateKind, Realisation,
+    UploadMetadata, UploadObject,
 };
 use serde_json::Value;
 
@@ -211,6 +211,7 @@ fn outbound_fields(
                     for output in &mut spec.outputs {
                         paths.path(&mut output.path)?;
                     }
+                    outbound_realisations(&mut spec.input_realisations, paths)?;
                 }
             }
             Job::Flake(flake) => {
@@ -240,12 +241,27 @@ fn outbound_fields(
             outcome: ImportOutcome::Failed { drv_path, .. } | ImportOutcome::Unknown { drv_path },
             ..
         } => paths.path(drv_path)?,
+        ServerMessage::ImportResult {
+            outcome: ImportOutcome::Completed { realisations },
+            ..
+        } => outbound_realisations(realisations, paths)?,
         ServerMessage::FetchInput { request, .. } => paths.json_store_path(request)?,
         ServerMessage::InputResult {
             outcome: InputOutcome::Fetched { response },
             ..
         } => paths.json_store_path(response)?,
         _ => {}
+    }
+    Ok(())
+}
+
+fn outbound_realisations(
+    realisations: &mut [Realisation],
+    paths: &TextMapper<Infallible>,
+) -> Result<(), Infallible> {
+    for realisation in realisations {
+        paths.path(&mut realisation.drv_path)?;
+        paths.path(&mut realisation.path)?;
     }
     Ok(())
 }
@@ -548,6 +564,11 @@ mod tests {
                     timeout_secs: None,
                     max_silent_secs: None,
                     build_cores: None,
+                    input_realisations: vec![Realisation {
+                        drv_path: format!("/nix/store/{S}-dep.drv"),
+                        output: "out".into(),
+                        path: format!("/nix/store/{S}-dep"),
+                    }],
                 }],
                 requirement: Default::default(),
             }),
@@ -562,6 +583,14 @@ mod tests {
         };
         assert_eq!(job.builds[0].drv_path, format!("{O}-a.drv"));
         assert_eq!(job.builds[0].outputs[0].path, format!("/nix/store/{O}-a"));
+        assert_eq!(
+            job.builds[0].input_realisations,
+            vec![Realisation {
+                drv_path: format!("/nix/store/{O}-dep.drv"),
+                output: "out".into(),
+                path: format!("/nix/store/{O}-dep"),
+            }]
+        );
     }
 
     #[test]

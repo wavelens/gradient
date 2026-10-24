@@ -450,6 +450,7 @@ pub(crate) fn cache_routes() -> OpenApiRouter<Arc<ServerState>> {
         .routes(routes!(caches::narinfo::nix_cache_info))
         .routes(routes!(caches::debuginfo::debuginfo))
         .routes(routes!(caches::narinfo::path))
+        .routes(routes!(caches::realisation::realisation))
         .routes(routes!(caches::nar::nar));
     optionally_secured(
         wildcard(router, routes!(caches::nar::upstream_nar)),

@@ -245,7 +245,7 @@ mod tests {
         let output = gradient_entity::derivation_output::Model {
             id: DerivationOutputId::now_v7(),
             derivation: producer,
-            hash: hash.to_string(),
+            hash: Some(hash.to_string()),
             ..Default::default()
         };
         let producer_row =
@@ -358,7 +358,7 @@ mod tests {
         let output = gradient_entity::derivation_output::Model {
             id: DerivationOutputId::now_v7(),
             derivation: DerivationId::now_v7(),
-            hash: hash.to_string(),
+            hash: Some(hash.to_string()),
             ..Default::default()
         };
         let db = mock_db()
@@ -399,7 +399,7 @@ mod tests {
         let output = gradient_entity::derivation_output::Model {
             id: DerivationOutputId::now_v7(),
             derivation: producer,
-            hash: hash.to_string(),
+            hash: Some(hash.to_string()),
             ..Default::default()
         };
         let drv_row =
