@@ -123,6 +123,8 @@
     ) task.actions
   ) cfg.state.tasks);
 in {
+  disabledModules = [ "services/continuous-integration/gradient/default.nix" ];
+
   imports = [
     ./gradient-state.nix
     ./gradient-worker.nix

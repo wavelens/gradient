@@ -43,6 +43,8 @@
   logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
   environmentValue = value: if lib.isBool value then lib.boolToString value else lib.mapNullable toString value;
 in {
+  disabledModules = [ "services/continuous-integration/gradient/worker.nix" ];
+
   imports = [
     { options.services.gradient.worker = workerOptions.options; }
   ];
