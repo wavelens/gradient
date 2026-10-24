@@ -16,8 +16,8 @@ use gradient_wire::types::{
 };
 
 use super::{
-    CaseShapes, P, P_OUT, SchedulerCase, X, X_OUT, Y, Y_OUT, attr_of, drv, drv_path, eval_key,
-    failure, output_nar, w_all, with_attr, with_ifd, with_output, without_offers,
+    CaseShapes, P, P_OUT, SchedulerCase, X, X_OUT, Y, Y_OUT, attr_of, build_output, drv, drv_path,
+    eval_key, failure, output_nar, w_all, with_attr, with_ifd, with_output, without_offers,
 };
 use crate::job_handlers::import::NO_ENTRY_POINT;
 
@@ -180,6 +180,81 @@ async fn f03b_a_completed_import_names_the_paths_its_build_realised() {
         "after 1: signals(W1)"
     );
     case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn f03c_a_substituted_import_without_its_output_path_is_rebuilt_before_the_answer() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        importing(e1, &[X], BuildStatus::Created)
+            .derivation(X)
+            .output_option(X_OUT, |o| {
+                o.path_known_after_build = true;
+                o.hash = None;
+                o.package = None;
+            })
+            .build_status(BuildStatus::Substituted),
+    )
+    .await;
+    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
+    case.connect(W2, w_all(), &[]).await;
+    let x = case.key(X).await;
+    assert_eq!(
+        case.output_of(X, "out").await.hash,
+        None,
+        "after 0: output(X,out).hash"
+    );
+
+    case.import_request(W1, &eval_key(e1), "r1", &[drv_path(X)])
+        .await;
+    assert_eq!(
+        case.sb(X).await.status,
+        BuildStatus::Queued,
+        "after 1: sb(X).status"
+    );
+    assert_eq!(case.signals(W1), vec![], "after 1: signals(W1)");
+    assert_eq!(case.import_waits(), 1, "after 1: import wait open");
+    case.check("step 1").await;
+
+    case.admit_startable_moves().await;
+    case.offers_full(W2).await;
+    case.score_all(W2).await;
+    let a2 = case
+        .request_job(W2, JobKind::Build)
+        .await
+        .expect("after 2: W2 gets build:X")
+        .assignment_id();
+    case.report_building(W2, &x).await;
+    let realised = build_output(X, X_OUT);
+    case.report_build_output(W2, &x, vec![realised.clone()], true, None)
+        .await;
+    case.commit_nar(output_nar(X, X_OUT)).await;
+    case.complete(W2, &x, a2, Vec::new(), 5).await;
+    case.build_assign_pass(false, false).await;
+    assert_eq!(
+        case.output_of(X, "out").await.hash.as_deref(),
+        Some(X_OUT),
+        "after 2: output(X,out).hash"
+    );
+    assert_eq!(
+        without_offers(case.signals(W1)),
+        vec![answer(
+            e1,
+            "r1",
+            ImportOutcome::Completed {
+                realisations: vec![Realisation {
+                    drv_path: drv_path(X),
+                    output: "out".into(),
+                    path: realised.store_path,
+                }]
+            }
+        )],
+        "after 2: signals(W1)"
+    );
+    case.signals(W2);
+    case.check("step 2").await;
 
     case.finish().await;
 }

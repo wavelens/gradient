@@ -171,6 +171,7 @@ pub enum Transition {
     RequeueImports {
         evaluation: EvaluationId,
         derivations: Vec<DerivationId>,
+        without_output_paths: Vec<DerivationId>,
     },
     NotEnoughResources {
         shortages: Vec<RamShortage>,
