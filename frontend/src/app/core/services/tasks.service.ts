@@ -125,10 +125,6 @@ export class TasksService {
     });
     return this.api.getBlob(`evals/${evaluationId}/report?${query}`);
   }
-
-  downloadSbom(project: string, task: string): Observable<HttpResponse<Blob>> {
-    return this.api.getBlob(`tasks/${project}/${task}/sbom`);
-  }
 }
 
 export interface ReportOptions {

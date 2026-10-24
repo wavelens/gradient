@@ -6,7 +6,7 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { provideHttpClient } from '@angular/common/http';
+import { HttpHeaders, HttpResponse, provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EvaluationLogComponent } from './evaluation-log.component';
 import { EvaluationsService } from '@core/services/evaluations.service';
@@ -375,7 +375,7 @@ describe('EvaluationLogComponent', () => {
     it('offers graph, job, artefacts and log download for an assigned build', () => {
       const { cmp } = setup();
       const items = open(cmp, target({ dispatched_job: 'job-1', has_artefacts: true }));
-      expect([...items.keys()]).toEqual(['Graph', 'Show Job', 'Artefacts', 'Download Log']);
+      expect([...items.keys()]).toEqual(['Graph', 'Show Job', 'Artefacts', 'Download Log', 'SBOM']);
       expect(items.get('Graph')!.routerLink).toEqual(['/project', 'proj', 'graph', 'b1']);
       expect(items.get('Graph')!.queryParams).toEqual({ evalId: 'eval-1' });
       expect(items.get('Show Job')!.routerLink).toEqual(['/board', 'jobs', 'job-1']);
@@ -398,6 +398,37 @@ describe('EvaluationLogComponent', () => {
       expect(open(cmp, target({ status: 'Queued' })).get('Download Log')!.disabled).toBe(true);
     });
 
+    it('greys out the sbom until the build has outputs', () => {
+      const { cmp } = setup();
+      expect(open(cmp, target({ status: 'Building' })).get('SBOM')!.disabled).toBe(true);
+      expect(open(cmp, target({ status: 'Failed' })).get('SBOM')!.disabled).toBe(true);
+      expect(open(cmp, target({ status: 'Substituted' })).get('SBOM')!.disabled).toBe(false);
+    });
+
+    it('downloads the sbom of the build under the server filename', () => {
+      const { cmp } = setup();
+      const download = vi.spyOn(TestBed.inject(EvaluationsService), 'downloadBuildSbom').mockReturnValue(of(
+        new HttpResponse({
+          body: new Blob(['{}']),
+          headers: new HttpHeaders({ 'content-disposition': 'attachment; filename="hello-1.0-sbom.cdx.json"' }),
+        }),
+      ));
+      const objectUrls = URL as unknown as Record<string, unknown>;
+      objectUrls['createObjectURL'] = () => 'blob:sbom';
+      objectUrls['revokeObjectURL'] = () => undefined;
+      const clicked: HTMLAnchorElement[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+        clicked.push(this);
+      });
+
+      open(cmp, target()).get('SBOM')!.command!();
+
+      expect(download).toHaveBeenCalledWith('b1');
+      expect(clicked[0].download).toBe('hello-1.0-sbom.cdx.json');
+      delete objectUrls['createObjectURL'];
+      delete objectUrls['revokeObjectURL'];
+    });
+
     it('opens on a right-click anywhere on the build row, for that row', () => {
       const { fixture, cmp } = setup();
       fixture.detectChanges();
@@ -411,7 +442,7 @@ describe('EvaluationLogComponent', () => {
 
       expect(cmp.contextBuild()!.id).toBe('b2');
       const labels = Array.from(document.querySelectorAll('.gr-menu__item span:last-child')).map((e) => e.textContent);
-      expect(labels).toEqual(['Graph', 'Show Job', 'Artefacts', 'Download Log']);
+      expect(labels).toEqual(['Graph', 'Show Job', 'Artefacts', 'Download Log', 'SBOM']);
     });
 
     it('opens the same menu from the row\'s three dots, without selecting the row', () => {

@@ -11,7 +11,7 @@ import { HttpHeaders, HttpResponse, provideHttpClient } from '@angular/common/ht
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { vi } from 'vitest';
 import { BehaviorSubject, NEVER, Subject, of, throwError } from 'rxjs';
-import { TaskDetailComponent, filenameFromDisposition } from './task-detail.component';
+import { TaskDetailComponent } from './task-detail.component';
 import { TasksService } from '@core/services/tasks.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -923,7 +923,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('offers the logs first, then metrics and the diagnostic report', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'superuser');
     const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics', 'Prioritize', 'Full rewalk', 'SBOM', 'Diagnostic report']);
+    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics', 'Prioritize', 'Full rewalk', 'Diagnostic report']);
   });
 
   it('points the logs entry at the selected evaluation', () => {
@@ -947,7 +947,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('hides the diagnostic report from anonymous visitors', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'anonymous');
     const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics', 'SBOM']);
+    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics']);
   });
 
   it('opens the dialog from the menu command', () => {
@@ -977,19 +977,13 @@ describe('TaskDetailComponent diagnostic report', () => {
   });
 });
 
-describe('TaskDetailComponent sbom', () => {
+describe('TaskDetailComponent package sbom', () => {
+  const access = { managed: false, canEdit: true, canTrigger: true };
   const objectUrls = URL as unknown as Record<string, unknown>;
-  const sbom = (headers: Record<string, string> = {}) =>
-    of(new HttpResponse({ body: new Blob(['{}']), headers: new HttpHeaders(headers) }));
 
-  function saved(): HTMLAnchorElement[] {
-    objectUrls['createObjectURL'] = () => 'blob:sbom';
-    objectUrls['revokeObjectURL'] = () => undefined;
-    const clicked: HTMLAnchorElement[] = [];
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
-      clicked.push(this);
-    });
-    return clicked;
+  function sbomItem(fixture: ComponentFixture<TaskDetailComponent>, ep: EntryPointSummary) {
+    fixture.componentInstance.openPkgMenu(new Event('click'), ep, 'e1', { toggle: () => {} });
+    return fixture.componentInstance.pkgMenuModel().find(i => i.label === 'SBOM');
   }
 
   afterEach(() => {
@@ -997,54 +991,46 @@ describe('TaskDetailComponent sbom', () => {
     delete objectUrls['revokeObjectURL'];
   });
 
-  it('downloads the task sbom under the server filename', () => {
-    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'anonymous');
-    const download = vi.fn(() => sbom({ 'content-disposition': 'attachment; filename="acme-demo-sbom.cdx.json"' }));
-    (tasksService as unknown as Record<string, unknown>)['downloadSbom'] = download;
-    const clicked = saved();
+  it('no longer offers an sbom for the whole evaluation', () => {
+    const { fixture } = setup(access);
+    expect(menuLabels(fixture)).not.toContain('SBOM');
+  });
 
-    const item = fixture.componentInstance.panelMenuModel().find(i => i.label === 'SBOM');
-    expect(item?.icon).toBe('inventory_2');
+  it('greys out the sbom of an entry point without outputs', () => {
+    const { fixture } = setup(access);
+    expect(sbomItem(fixture, { ...epSummary('hello'), build_status: 'Building' })?.disabled).toBe(true);
+  });
+
+  it('downloads the sbom of a built entry point under the server filename', () => {
+    const { fixture, evaluationsService } = setup(access, {}, 'anonymous');
+    const download = vi.fn(() => of(new HttpResponse({
+      body: new Blob(['{}']),
+      headers: new HttpHeaders({ 'content-disposition': 'attachment; filename="hello-2.12.3-sbom.cdx.json"' }),
+    })));
+    (evaluationsService as unknown as Record<string, unknown>)['downloadBuildSbom'] = download;
+    objectUrls['createObjectURL'] = () => 'blob:sbom';
+    objectUrls['revokeObjectURL'] = () => undefined;
+    const clicked: HTMLAnchorElement[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(this);
+    });
+
+    const item = sbomItem(fixture, epSummary('hello'));
+    expect(item?.disabled).toBe(false);
     item!.command!();
 
-    expect(download).toHaveBeenCalledWith('acme', 'demo');
-    expect(clicked[0].download).toBe('acme-demo-sbom.cdx.json');
+    expect(download).toHaveBeenCalledWith('b-hello');
+    expect(clicked[0].download).toBe('hello-2.12.3-sbom.cdx.json');
   });
 
-  it('falls back to the project and task name without a server filename', () => {
-    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
-    (tasksService as unknown as Record<string, unknown>)['downloadSbom'] = () => sbom();
-    const clicked = saved();
+  it('shows the error when the download fails', () => {
+    const { fixture, evaluationsService } = setup(access);
+    (evaluationsService as unknown as Record<string, unknown>)['downloadBuildSbom'] =
+      () => throwError(() => new Error('Build not found'));
 
-    fixture.componentInstance.downloadSbom();
+    sbomItem(fixture, epSummary('hello'))!.command!();
 
-    expect(clicked[0].download).toBe('acme-demo-sbom.cdx.json');
-  });
-
-  it('shows the error when there is no completed evaluation', () => {
-    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
-    (tasksService as unknown as Record<string, unknown>)['downloadSbom'] =
-      () => throwError(() => new Error('Evaluation not found'));
-
-    fixture.componentInstance.downloadSbom();
-
-    expect(fixture.componentInstance.errorMessage()).toBe('Evaluation not found');
-  });
-});
-
-describe('filenameFromDisposition', () => {
-  it('prefers the server filename, which names the evaluation and date', () => {
-    expect(
-      filenameFromDisposition(
-        'attachment; filename="gradient-report-01a05a38-2026-09-01.db"',
-        'fallback.db',
-      ),
-    ).toBe('gradient-report-01a05a38-2026-09-01.db');
-  });
-
-  it('falls back when the header is absent or unparseable', () => {
-    expect(filenameFromDisposition(null, 'fallback.db')).toBe('fallback.db');
-    expect(filenameFromDisposition('attachment', 'fallback.db')).toBe('fallback.db');
+    expect(fixture.componentInstance.errorMessage()).toBe('Build not found');
   });
 });
 
