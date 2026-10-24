@@ -1,19 +1,19 @@
-From ef85fe76c5212dfb9d4d3fe71935331c8963c1cb Mon Sep 17 00:00:00 2001
+From aef7c68c5e6061066f4f5a667a56945caddd0193 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
-Date: Sun, 4 Oct 2026 11:05:44 +0200
-Subject: [PATCH 17/18] libstore: keep build statistics in
- DerivationTrampolineGoal results
+Date: Sun, 4 Oct 2026 11:04:22 +0200
+Subject: [PATCH] libstore: keep build statistics in DerivationTrampolineGoal
+ results
 
 The trampoline goal rebuilt its result from the status and outputs
 only, so timesBuilt, startTime, stopTime, cpuUser and cpuSystem never
 reached clients of Worker::buildDerivation, e.g. daemon clients using
 BuildDerivation.
 ---
- src/libstore/build/derivation-trampoline-goal.cc | 12 +++++++++---
- 1 file changed, 9 insertions(+), 3 deletions(-)
+ src/libstore/build/derivation-trampoline-goal.cc | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
 
 diff --git a/src/libstore/build/derivation-trampoline-goal.cc b/src/libstore/build/derivation-trampoline-goal.cc
-index 14864ed..1c34798 100644
+index 14864ed05..726a2dc6b 100644
 --- a/src/libstore/build/derivation-trampoline-goal.cc
 +++ b/src/libstore/build/derivation-trampoline-goal.cc
 @@ -184,6 +184,7 @@ Goal::Co DerivationTrampolineGoal::haveDerivation(StorePath drvPath, Derivation
@@ -33,7 +33,7 @@ index 14864ed..1c34798 100644
      /* Aggregate the status code. If some outputs we already valid, but we had
         to build/substitute the other ones, report it as the smallest common
         denominator. */
-@@ -224,8 +223,15 @@ Goal::Co DerivationTrampolineGoal::haveDerivation(StorePath drvPath, Derivation
+@@ -224,8 +223,16 @@ Goal::Co DerivationTrampolineGoal::haveDerivation(StorePath drvPath, Derivation
          return toPriority(a) < toPriority(b);
      };
  
@@ -42,6 +42,7 @@ index 14864ed..1c34798 100644
 +    const auto & mostWork = *std::ranges::min_element(concreteDrvGoals, compareSuccesses, [](const GoalPtr & goal) {
 +        return goal->buildResult.tryGetSuccess()->status;
 +    });
++
 +    buildResult = mostWork->buildResult;
 +
      co_return doneSuccess({
@@ -50,6 +51,3 @@ index 14864ed..1c34798 100644
          .builtOutputs = std::move(outputs),
      });
  }
--- 
-2.55.0
-

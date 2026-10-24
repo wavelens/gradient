@@ -1,0 +1,646 @@
+From c01de1eea0010c14f9131f9232455ce1b4bd091c Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sun, 25 Oct 2026 00:49:01 +0200
+Subject: [PATCH] libflake-c: expose the evaluation cache of a locked flake
+
+The `nix` command walks the outputs of a flake through `AttrCursor`, so
+an attribute it has seen before costs no evaluation. A C API consumer
+that enumerates the same outputs had to evaluate them every time.
+
+nix_eval_cache_open() opens the cache of a locked flake and
+nix_attr_cursor walks it, with the getters AttrCursor has for the
+values the cache can hold. nix_attr_cursor_force_value() returns any
+other value for the regular value API. nix_eval_cache_checkpoint()
+folds the write-ahead log into the database file, for a consumer that
+copies the file elsewhere.
+---
+ src/libexpr/eval-cache.cc                     |  12 ++
+ src/libexpr/include/nix/expr/eval-cache.hh    |   8 +
+ src/libflake-c/meson.build                    |   3 +
+ src/libflake-c/nix_api_eval_cache.cc          | 157 +++++++++++++++
+ src/libflake-c/nix_api_eval_cache.h           | 180 ++++++++++++++++++
+ src/libflake-c/nix_api_eval_cache_internal.hh |  13 ++
+ src/libflake-tests/meson.build                |   1 +
+ src/libflake-tests/nix_api_eval_cache.cc      | 168 ++++++++++++++++
+ 8 files changed, 542 insertions(+)
+ create mode 100644 src/libflake-c/nix_api_eval_cache.cc
+ create mode 100644 src/libflake-c/nix_api_eval_cache.h
+ create mode 100644 src/libflake-c/nix_api_eval_cache_internal.hh
+ create mode 100644 src/libflake-tests/nix_api_eval_cache.cc
+
+diff --git a/src/libexpr/eval-cache.cc b/src/libexpr/eval-cache.cc
+index 7422cd095..695ee875a 100644
+--- a/src/libexpr/eval-cache.cc
++++ b/src/libexpr/eval-cache.cc
+@@ -373,6 +373,18 @@ ref<AttrCursor> EvalCache::getRoot()
+     return make_ref<AttrCursor>(ref(shared_from_this()), std::nullopt);
+ }
+ 
++void EvalCache::checkpoint()
++{
++    if (!db || db->failed)
++        return;
++    auto state(db->_state->lock());
++    try {
++        state->db.exec("pragma wal_checkpoint(passive);");
++    } catch (...) {
++        ignoreExceptionExceptInterrupt();
++    }
++}
++
+ AttrCursor::AttrCursor(
+     ref<EvalCache> root, Parent parent, Value * value, std::optional<std::pair<AttrId, AttrValue>> && cachedValue)
+     : root(root)
+diff --git a/src/libexpr/include/nix/expr/eval-cache.hh b/src/libexpr/include/nix/expr/eval-cache.hh
+index 0feb7d564..8f7042c83 100644
+--- a/src/libexpr/include/nix/expr/eval-cache.hh
++++ b/src/libexpr/include/nix/expr/eval-cache.hh
+@@ -50,6 +50,14 @@ public:
+     EvalCache(std::optional<std::reference_wrapper<const Hash>> useCache, EvalState & state, RootLoader rootLoader);
+ 
+     ref<AttrCursor> getRoot();
++
++    /**
++     * Fold the WAL into the main `.sqlite` file with a PASSIVE checkpoint, so
++     * a reader of the database file alone (without its `-wal` sidecar) sees
++     * the writes so far. Does not block on concurrent connections. No-op
++     * without a cache.
++     */
++    void checkpoint();
+ };
+ 
+ enum AttrType {
+diff --git a/src/libflake-c/meson.build b/src/libflake-c/meson.build
+index 4fef3ea00..d4b79cd5a 100644
+--- a/src/libflake-c/meson.build
++++ b/src/libflake-c/meson.build
+@@ -34,12 +34,15 @@ subdir('nix-meson-build-support/subprojects')
+ subdir('nix-meson-build-support/common')
+ 
+ sources = files(
++  'nix_api_eval_cache.cc',
+   'nix_api_flake.cc',
+ )
+ 
+ include_dirs = [ include_directories('.') ]
+ 
+ headers = files(
++  'nix_api_eval_cache.h',
++  'nix_api_eval_cache_internal.hh',
+   'nix_api_flake.h',
+   'nix_api_flake_internal.hh',
+ )
+diff --git a/src/libflake-c/nix_api_eval_cache.cc b/src/libflake-c/nix_api_eval_cache.cc
+new file mode 100644
+index 000000000..859e77565
+--- /dev/null
++++ b/src/libflake-c/nix_api_eval_cache.cc
+@@ -0,0 +1,157 @@
++#include <string>
++
++#include "nix_api_eval_cache.h"
++#include "nix_api_eval_cache_internal.hh"
++#include "nix_api_util.h"
++#include "nix_api_util_internal.h"
++#include "nix_api_expr_internal.h"
++#include "nix_api_flake_internal.hh"
++
++#include "nix/flake/flake.hh"
++#include "nix/expr/eval-cache.hh"
++#include "nix/store/store-api.hh"
++
++extern "C" {
++
++nix_eval_cache * nix_eval_cache_open(nix_c_context * context, EvalState * state, nix_locked_flake * locked_flake)
++{
++    nix_clear_err(context);
++    try {
++        auto cache = nix::flake::openEvalCache(state->state, locked_flake->lockedFlake);
++        return new nix_eval_cache{cache};
++    }
++    NIXC_CATCH_ERRS_NULL
++}
++
++void nix_eval_cache_free(nix_eval_cache * cache)
++{
++    delete cache;
++}
++
++nix_attr_cursor * nix_eval_cache_get_root(nix_c_context * context, nix_eval_cache * cache)
++{
++    nix_clear_err(context);
++    try {
++        return new nix_attr_cursor{cache->cache->getRoot()};
++    }
++    NIXC_CATCH_ERRS_NULL
++}
++
++nix_err nix_eval_cache_checkpoint(nix_c_context * context, nix_eval_cache * cache)
++{
++    nix_clear_err(context);
++    try {
++        cache->cache->checkpoint();
++    }
++    NIXC_CATCH_ERRS
++}
++
++nix_attr_cursor * nix_attr_cursor_maybe_get_attr(nix_c_context * context, nix_attr_cursor * cursor, const char * name)
++{
++    nix_clear_err(context);
++    try {
++        auto child = cursor->cursor->maybeGetAttr(std::string_view(name));
++        if (!child)
++            return nullptr;
++        return new nix_attr_cursor{nix::ref<nix::eval_cache::AttrCursor>(child)};
++    }
++    NIXC_CATCH_ERRS_NULL
++}
++
++void nix_attr_cursor_free(nix_attr_cursor * cursor)
++{
++    delete cursor;
++}
++
++nix_err nix_attr_cursor_get_attrs(
++    nix_c_context * context,
++    EvalState * state,
++    nix_attr_cursor * cursor,
++    void (*callback)(const char * name, void * user_data),
++    void * user_data)
++{
++    nix_clear_err(context);
++    try {
++        auto attrs = cursor->cursor->getAttrs();
++        for (auto & sym : attrs) {
++            std::string name(std::string_view(state->state.symbols[sym]));
++            callback(name.c_str(), user_data);
++        }
++    }
++    NIXC_CATCH_ERRS
++}
++
++nix_err nix_attr_cursor_is_derivation(nix_c_context * context, nix_attr_cursor * cursor, bool * out)
++{
++    nix_clear_err(context);
++    try {
++        *out = cursor->cursor->isDerivation();
++    }
++    NIXC_CATCH_ERRS
++}
++
++nix_err nix_attr_cursor_get_drv_path(
++    nix_c_context * context,
++    EvalState * state,
++    nix_attr_cursor * cursor,
++    nix_get_string_callback callback,
++    void * user_data)
++{
++    nix_clear_err(context);
++    try {
++        auto drvPath = cursor->cursor->forceDerivation();
++        return call_nix_get_string_callback(state->state.store->printStorePath(drvPath), callback, user_data);
++    }
++    NIXC_CATCH_ERRS
++}
++
++nix_err nix_attr_cursor_get_string(
++    nix_c_context * context, nix_attr_cursor * cursor, nix_get_string_callback callback, void * user_data)
++{
++    nix_clear_err(context);
++    try {
++        return call_nix_get_string_callback(cursor->cursor->getString(), callback, user_data);
++    }
++    NIXC_CATCH_ERRS
++}
++
++nix_err nix_attr_cursor_get_bool(nix_c_context * context, nix_attr_cursor * cursor, bool * out)
++{
++    nix_clear_err(context);
++    try {
++        *out = cursor->cursor->getBool();
++    }
++    NIXC_CATCH_ERRS
++}
++
++nix_err nix_attr_cursor_get_list_of_strings(
++    nix_c_context * context,
++    nix_attr_cursor * cursor,
++    void (*callback)(const char * value, void * user_data),
++    void * user_data)
++{
++    nix_clear_err(context);
++    try {
++        auto list = cursor->cursor->getListOfStrings();
++        for (auto & s : list)
++            callback(s.c_str(), user_data);
++    }
++    NIXC_CATCH_ERRS
++}
++
++nix_value * nix_attr_cursor_force_value(nix_c_context * context, EvalState * state, nix_attr_cursor * cursor)
++{
++    nix_clear_err(context);
++    try {
++        auto & v = cursor->cursor->forceValue();
++        nix_value * ret = new (state->state.mem.allocBytes(sizeof(nix_value))) nix_value{
++            .value = &v,
++            .mem = &state->state.mem,
++        };
++        nix_gc_incref(nullptr, ret);
++        return ret;
++    }
++    NIXC_CATCH_ERRS_NULL
++}
++
++} // extern "C"
+diff --git a/src/libflake-c/nix_api_eval_cache.h b/src/libflake-c/nix_api_eval_cache.h
+new file mode 100644
+index 000000000..0c56b6c1d
+--- /dev/null
++++ b/src/libflake-c/nix_api_eval_cache.h
+@@ -0,0 +1,180 @@
++#ifndef NIX_API_EVAL_CACHE_H
++#define NIX_API_EVAL_CACHE_H
++/** @addtogroup libflake
++ * @{
++ */
++/** @file
++ * @brief Bindings to the evaluation cache of a locked flake
++ *
++ * A cursor walks the output attributes of a locked flake the way the `nix`
++ * command does: attributes already in the on-disk cache are read from there,
++ * the rest are evaluated and cached. A flake whose source is not locked has no
++ * cache and is always evaluated.
++ */
++
++#include "nix_api_util.h"
++#include "nix_api_expr.h"
++#include "nix_api_flake.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++// cffi start
++
++/**
++ * @brief An open evaluation cache for a locked flake.
++ * @see nix_eval_cache_open
++ * @see nix_eval_cache_free
++ */
++typedef struct nix_eval_cache nix_eval_cache;
++
++/**
++ * @brief A cursor into the attribute tree of an evaluation cache.
++ * @see nix_eval_cache_get_root
++ * @see nix_attr_cursor_free
++ */
++typedef struct nix_attr_cursor nix_attr_cursor;
++
++/**
++ * @brief Open the evaluation cache for a locked flake.
++ * @param[out] context Optional, stores error information
++ * @param[in] state The eval state to evaluate the flake in
++ * @param[in] locked_flake The locked flake to open the cache for
++ * @return A new nix_eval_cache or NULL on failure. Free with nix_eval_cache_free.
++ */
++nix_eval_cache * nix_eval_cache_open(nix_c_context * context, EvalState * state, nix_locked_flake * locked_flake);
++
++/**
++ * @brief Release the resources associated with a nix_eval_cache. Does not fail.
++ */
++void nix_eval_cache_free(nix_eval_cache * cache);
++
++/**
++ * @brief Get a cursor pointing at the root of the cache's attribute tree.
++ * @param[out] context Optional, stores error information
++ * @param[in] cache The evaluation cache
++ * @return A new nix_attr_cursor or NULL on failure. Free with nix_attr_cursor_free.
++ */
++nix_attr_cursor * nix_eval_cache_get_root(nix_c_context * context, nix_eval_cache * cache);
++
++/**
++ * @brief Fold the cache's WAL into the main `.sqlite` file (PASSIVE checkpoint).
++ *
++ * Makes the writes so far visible to a reader of the database file alone
++ * (without its `-wal` sidecar). Does not block on concurrent connections.
++ * @param[out] context Optional, stores error information
++ * @param[in] cache The evaluation cache
++ * @return NIX_OK on success.
++ */
++nix_err nix_eval_cache_checkpoint(nix_c_context * context, nix_eval_cache * cache);
++
++/**
++ * @brief Descend into a child attribute by name.
++ * @param[out] context Optional, stores error information
++ * @param[in] cursor The parent cursor
++ * @param[in] name The attribute name to look up
++ * @return A new nix_attr_cursor, or NULL if the attribute is missing or on
++ * failure. Check the context to distinguish a missing attribute from an error.
++ * Free the result with nix_attr_cursor_free.
++ */
++nix_attr_cursor * nix_attr_cursor_maybe_get_attr(nix_c_context * context, nix_attr_cursor * cursor, const char * name);
++
++/**
++ * @brief Release the resources associated with a nix_attr_cursor. Does not fail.
++ */
++void nix_attr_cursor_free(nix_attr_cursor * cursor);
++
++/**
++ * @brief Enumerate the attribute names of the attrset at the cursor.
++ * @param[out] context Optional, stores error information
++ * @param[in] state The eval state, used to resolve symbols to names
++ * @param[in] cursor The cursor, which must point at an attrset
++ * @param[in] callback Called once per attribute name
++ * @param[in] user_data Optional, passed to the callback
++ * @return NIX_OK on success.
++ */
++nix_err nix_attr_cursor_get_attrs(
++    nix_c_context * context,
++    EvalState * state,
++    nix_attr_cursor * cursor,
++    void (*callback)(const char * name, void * user_data),
++    void * user_data);
++
++/**
++ * @brief Determine whether the cursor points at a derivation.
++ * @param[out] context Optional, stores error information
++ * @param[in] cursor The cursor
++ * @param[out] out Set to whether the attrset is a derivation
++ * @return NIX_OK on success.
++ */
++nix_err nix_attr_cursor_is_derivation(nix_c_context * context, nix_attr_cursor * cursor, bool * out);
++
++/**
++ * @brief Force the derivation at the cursor and report its `.drv` store path.
++ * @param[out] context Optional, stores error information
++ * @param[in] state The eval state, whose store is used to print the path
++ * @param[in] cursor The cursor, which must point at a derivation
++ * @param[in] callback Called with the store path string
++ * @param[in] user_data Optional, passed to the callback
++ * @return NIX_OK on success.
++ */
++nix_err nix_attr_cursor_get_drv_path(
++    nix_c_context * context,
++    EvalState * state,
++    nix_attr_cursor * cursor,
++    nix_get_string_callback callback,
++    void * user_data);
++
++/**
++ * @brief Read the string value at the cursor.
++ * @param[out] context Optional, stores error information
++ * @param[in] cursor The cursor, which must point at a string
++ * @param[in] callback Called with the string value
++ * @param[in] user_data Optional, passed to the callback
++ * @return NIX_OK on success.
++ */
++nix_err nix_attr_cursor_get_string(
++    nix_c_context * context, nix_attr_cursor * cursor, nix_get_string_callback callback, void * user_data);
++
++/**
++ * @brief Read the boolean value at the cursor.
++ * @param[out] context Optional, stores error information
++ * @param[in] cursor The cursor, which must point at a bool
++ * @param[out] out Set to the boolean value
++ * @return NIX_OK on success.
++ */
++nix_err nix_attr_cursor_get_bool(nix_c_context * context, nix_attr_cursor * cursor, bool * out);
++
++/**
++ * @brief Read a list of strings at the cursor.
++ * @param[out] context Optional, stores error information
++ * @param[in] cursor The cursor, which must point at a list of strings
++ * @param[in] callback Called once per list element
++ * @param[in] user_data Optional, passed to the callback
++ * @return NIX_OK on success.
++ */
++nix_err nix_attr_cursor_get_list_of_strings(
++    nix_c_context * context,
++    nix_attr_cursor * cursor,
++    void (*callback)(const char * value, void * user_data),
++    void * user_data);
++
++/**
++ * @brief Evaluate the attribute at the cursor and return its value.
++ *
++ * For a value the cache cannot hold, such as an attrset or a function.
++ * @param[out] context Optional, stores error information
++ * @param[in] state The eval state that owns the value
++ * @param[in] cursor The cursor
++ * @return The forced value, or NULL on failure. Release with nix_value_decref.
++ */
++nix_value * nix_attr_cursor_force_value(nix_c_context * context, EvalState * state, nix_attr_cursor * cursor);
++
++// cffi end
++#ifdef __cplusplus
++} // extern "C"
++#endif
++/**
++ * @}
++ */
++#endif // NIX_API_EVAL_CACHE_H
+diff --git a/src/libflake-c/nix_api_eval_cache_internal.hh b/src/libflake-c/nix_api_eval_cache_internal.hh
+new file mode 100644
+index 000000000..e448ae9f2
+--- /dev/null
++++ b/src/libflake-c/nix_api_eval_cache_internal.hh
+@@ -0,0 +1,13 @@
++#pragma once
++
++#include "nix/expr/eval-cache.hh"
++
++struct nix_eval_cache
++{
++    nix::ref<nix::eval_cache::EvalCache> cache;
++};
++
++struct nix_attr_cursor
++{
++    nix::ref<nix::eval_cache::AttrCursor> cursor;
++};
+diff --git a/src/libflake-tests/meson.build b/src/libflake-tests/meson.build
+index 00b592195..c1be5e28e 100644
+--- a/src/libflake-tests/meson.build
++++ b/src/libflake-tests/meson.build
+@@ -37,6 +37,7 @@ subdir('nix-meson-build-support/common')
+ 
+ sources = files(
+   'flakeref.cc',
++  'nix_api_eval_cache.cc',
+   'nix_api_flake.cc',
+   'url-name.cc',
+ )
+diff --git a/src/libflake-tests/nix_api_eval_cache.cc b/src/libflake-tests/nix_api_eval_cache.cc
+new file mode 100644
+index 000000000..ae7b1fa07
+--- /dev/null
++++ b/src/libflake-tests/nix_api_eval_cache.cc
+@@ -0,0 +1,168 @@
++#include <gtest/gtest.h>
++#include <algorithm>
++#include <filesystem>
++#include <string>
++#include <vector>
++
++#include "nix/util/file-system.hh"
++#include "nix_api_store.h"
++#include "nix_api_util.h"
++#include "nix_api_expr.h"
++#include "nix_api_value.h"
++#include "nix_api_flake.h"
++#include "nix_api_eval_cache.h"
++#include "nix/util/tests/string_callback.hh"
++#include "nix/store/tests/nix_api_store.hh"
++#include "nix/util/tests/nix_api_util.hh"
++#include "nix_api_fetchers.h"
++
++namespace nixC {
++
++static void collect_name_cb(const char * name, void * user_data)
++{
++    static_cast<std::vector<std::string> *>(user_data)->emplace_back(name);
++}
++
++TEST_F(nix_api_store_test, nix_api_eval_cache_walk)
++{
++    auto tmpDir = nix::createTempDir();
++    nix::AutoDelete delTmpDir(tmpDir, true);
++
++    nix::writeFile(tmpDir / "flake.nix", R"(
++        {
++            outputs = { ... }: {
++                packages.x86_64-linux.hello = derivation {
++                    name = "hello";
++                    system = "x86_64-linux";
++                    builder = "/bin/sh";
++                };
++            };
++        }
++    )");
++
++    nix_setting_set(ctx, "experimental-features", "flakes");
++    assert_ctx_ok();
++
++    nix_libstore_init(ctx);
++    assert_ctx_ok();
++    nix_libexpr_init(ctx);
++    assert_ctx_ok();
++
++    auto fetchSettings = nix_fetchers_settings_new(ctx);
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, fetchSettings);
++
++    auto settings = nix_flake_settings_new(ctx);
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, settings);
++
++    nix_eval_state_builder * builder = nix_eval_state_builder_new(ctx, store);
++    ASSERT_NE(nullptr, builder);
++    assert_ctx_ok();
++
++    nix_flake_settings_add_to_eval_state_builder(ctx, settings, builder);
++    assert_ctx_ok();
++
++    nix_eval_state_builder_set_setting(ctx, builder, "eval-cache", "true");
++    assert_ctx_ok();
++    nix_eval_state_builder_set_setting(ctx, builder, "pure-eval", "true");
++    assert_ctx_ok();
++
++    auto state = nix_eval_state_build(ctx, builder);
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, state);
++
++    nix_eval_state_builder_free(builder);
++
++    auto parseFlags = nix_flake_reference_parse_flags_new(ctx, settings);
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, parseFlags);
++
++    auto r0 = nix_flake_reference_parse_flags_set_base_directory(
++        ctx, parseFlags, tmpDir.string().c_str(), tmpDir.string().size());
++    assert_ctx_ok();
++    ASSERT_EQ(NIX_OK, r0);
++
++    std::string fragment;
++    nix_flake_reference * flakeReference = nullptr;
++    nix_flake_reference_and_fragment_from_string(
++        ctx, fetchSettings, settings, parseFlags, ".", 1, &flakeReference, OBSERVE_STRING(fragment));
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, flakeReference);
++
++    nix_flake_reference_parse_flags_free(parseFlags);
++
++    auto lockFlags = nix_flake_lock_flags_new(ctx, settings);
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, lockFlags);
++
++    auto lockedFlake = nix_flake_lock(ctx, fetchSettings, settings, state, lockFlags, flakeReference);
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, lockedFlake);
++
++    nix_flake_lock_flags_free(lockFlags);
++
++    auto cache = nix_eval_cache_open(ctx, state, lockedFlake);
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, cache);
++
++    auto root = nix_eval_cache_get_root(ctx, cache);
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, root);
++
++    auto packages = nix_attr_cursor_maybe_get_attr(ctx, root, "packages");
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, packages);
++
++    auto system = nix_attr_cursor_maybe_get_attr(ctx, packages, "x86_64-linux");
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, system);
++
++    std::vector<std::string> names;
++    auto rNames = nix_attr_cursor_get_attrs(ctx, state, system, collect_name_cb, &names);
++    assert_ctx_ok();
++    ASSERT_EQ(NIX_OK, rNames);
++    ASSERT_NE(std::find(names.begin(), names.end(), "hello"), names.end());
++
++    auto hello = nix_attr_cursor_maybe_get_attr(ctx, system, "hello");
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, hello);
++
++    bool isDrv = false;
++    auto rIsDrv = nix_attr_cursor_is_derivation(ctx, hello, &isDrv);
++    assert_ctx_ok();
++    ASSERT_EQ(NIX_OK, rIsDrv);
++    ASSERT_TRUE(isDrv);
++
++    std::string drvPath;
++    auto rDrv = nix_attr_cursor_get_drv_path(ctx, state, hello, OBSERVE_STRING(drvPath));
++    assert_ctx_ok();
++    ASSERT_EQ(NIX_OK, rDrv);
++    ASSERT_FALSE(drvPath.empty());
++    ASSERT_TRUE(drvPath.size() >= 4 && drvPath.compare(drvPath.size() - 4, 4, ".drv") == 0);
++
++    auto missing = nix_attr_cursor_maybe_get_attr(ctx, system, "nonexistent");
++    assert_ctx_ok();
++    ASSERT_EQ(nullptr, missing);
++
++    auto helloValue = nix_attr_cursor_force_value(ctx, state, hello);
++    assert_ctx_ok();
++    ASSERT_NE(nullptr, helloValue);
++    ASSERT_EQ(NIX_TYPE_ATTRS, nix_get_type(ctx, helloValue));
++    nix_value_decref(ctx, helloValue);
++
++    ASSERT_EQ(NIX_OK, nix_eval_cache_checkpoint(ctx, cache));
++    assert_ctx_ok();
++
++    nix_attr_cursor_free(hello);
++    nix_attr_cursor_free(system);
++    nix_attr_cursor_free(packages);
++    nix_attr_cursor_free(root);
++    nix_eval_cache_free(cache);
++    nix_locked_flake_free(lockedFlake);
++    nix_flake_reference_free(flakeReference);
++    nix_state_free(state);
++    nix_flake_settings_free(settings);
++}
++
++} // namespace nixC

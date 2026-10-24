@@ -1,30 +1,38 @@
-From a98b0e3cb35cf77d3c553faaaaaffb55c4bd3f69 Mon Sep 17 00:00:00 2001
+From b3bd518d9a4c28af40688633f877028e1063bbd3 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Thu, 8 Oct 2026 11:03:35 +0200
-Subject: [PATCH] feat(libexpr): let the embedder realise import from
- derivation
+Subject: [PATCH] libexpr: let the embedder realise an import from derivation
 
-EvalSettings::realiseHook replaces the buildPaths call of realiseContext when set, and nix_eval_state_builder_set_realise_hook installs a C callback as that hook. An embedder can then build an imported derivation elsewhere and only needs its outputs valid in the evaluation store on return. With a hook set, the failure memo stays off: the embedder decides how long a failure holds, since its evaluator process can outlive the evaluation.
+An embedder with a build system of its own, such as a CI, has no say in
+how an import from derivation is built: realiseContext() always builds
+through the store. EvalSettings::realiseHook replaces that build when
+set, and nix_eval_state_builder_set_realise_hook() installs a C
+callback as the hook. The embedder only has to make the outputs valid
+in the evaluation store before it returns.
+
+With a hook set, the failed-realisation memo stays off: the embedder
+decides how long a failure holds, since its evaluator can outlive one
+evaluation.
 ---
- src/libexpr-c/nix_api_expr.cc                 | 24 +++++++++++++++
- src/libexpr-c/nix_api_expr.h                  | 29 +++++++++++++++++++
- src/libexpr/include/nix/expr/eval-settings.hh | 10 +++++++
- src/libexpr/primops.cc                        |  7 +++--
- 4 files changed, 68 insertions(+), 2 deletions(-)
+ src/libexpr-c/nix_api_expr.cc                 | 23 ++++++++++++
+ src/libexpr-c/nix_api_expr.h                  | 29 +++++++++++++++
+ src/libexpr-tests/nix_api_expr.cc             | 35 +++++++++++++++++++
+ src/libexpr/include/nix/expr/eval-settings.hh | 10 ++++++
+ src/libexpr/primops.cc                        |  7 ++--
+ 5 files changed, 102 insertions(+), 2 deletions(-)
 
 diff --git a/src/libexpr-c/nix_api_expr.cc b/src/libexpr-c/nix_api_expr.cc
-index eb73eea51..612cc3c84 100644
+index 5b5859ee7..7b6f34069 100644
 --- a/src/libexpr-c/nix_api_expr.cc
 +++ b/src/libexpr-c/nix_api_expr.cc
-@@ -197,6 +197,30 @@ nix_err nix_eval_state_builder_set_setting(
+@@ -205,6 +205,29 @@ nix_err nix_eval_state_builder_set_setting(
      NIXC_CATCH_ERRS
  }
  
 +nix_err nix_eval_state_builder_set_realise_hook(
 +    nix_c_context * context, nix_eval_state_builder * builder, nix_realise_hook hook, void * user_data)
 +{
-+    if (context)
-+        context->last_err_code = NIX_OK;
++    nix_clear_err(context);
 +    try {
 +        builder->settings.realiseHook =
 +            [hook, user_data, store = builder->store](const std::vector<nix::DerivedPath::Built> & drvs) {
@@ -48,7 +56,7 @@ index eb73eea51..612cc3c84 100644
  {
      if (context)
 diff --git a/src/libexpr-c/nix_api_expr.h b/src/libexpr-c/nix_api_expr.h
-index 44fc445df..1578539ea 100644
+index 6091282fb..877dbcad6 100644
 --- a/src/libexpr-c/nix_api_expr.h
 +++ b/src/libexpr-c/nix_api_expr.h
 @@ -245,6 +245,35 @@ nix_err nix_eval_state_builder_set_lookup_path(
@@ -87,6 +95,50 @@ index 44fc445df..1578539ea 100644
  /**
   * @brief Create a new Nix language evaluator state
   * @ingroup libexpr_init
+diff --git a/src/libexpr-tests/nix_api_expr.cc b/src/libexpr-tests/nix_api_expr.cc
+index 8ffa8ea49..dbf45cbaa 100644
+--- a/src/libexpr-tests/nix_api_expr.cc
++++ b/src/libexpr-tests/nix_api_expr.cc
+@@ -722,4 +722,39 @@ TEST_F(nix_api_expr_test, nix_eval_state_get_stats)
+     ASSERT_GE(after.nr_lookups, before.nr_lookups);
+ }
+ 
++static nix_err
++recordingRealiseHook(void * user_data, nix_c_context * context, const char ** derived_paths, size_t count)
++{
++    auto & seen = *static_cast<std::vector<std::string> *>(user_data);
++    for (size_t i = 0; i < count; i++)
++        seen.emplace_back(derived_paths[i]);
++    return nix_set_err_msg(context, NIX_ERR_UNKNOWN, "left to the embedder");
++}
++
++TEST_F(nix_api_expr_test, nix_eval_state_builder_set_realise_hook)
++{
++    std::vector<std::string> seen;
++    auto builder = nix_eval_state_builder_new(ctx, store);
++    assert_ctx_ok();
++    ASSERT_EQ(NIX_OK, nix_eval_state_builder_set_realise_hook(ctx, builder, recordingRealiseHook, &seen));
++    assert_ctx_ok();
++    auto hookedState = nix_eval_state_build(ctx, builder);
++    assert_ctx_ok();
++    nix_eval_state_builder_free(builder);
++
++    auto imported = nix_alloc_value(ctx, hookedState);
++    auto err = nix_expr_eval_from_string(
++        ctx,
++        hookedState,
++        R"(import (derivation { name = "broken"; system = "x86_64-linux"; builder = "/bin/sh"; }))",
++        ".",
++        imported);
++    ASSERT_EQ(NIX_ERR_NIX_ERROR, err);
++    ASSERT_THAT(nix_err_msg(nullptr, ctx, nullptr), testing::HasSubstr("left to the embedder"));
++    ASSERT_THAT(seen, testing::ElementsAre(testing::EndsWith("-broken.drv^out")));
++
++    nix_value_decref(ctx, imported);
++    nix_state_free(hookedState);
++}
++
+ } // namespace nixC
 diff --git a/src/libexpr/include/nix/expr/eval-settings.hh b/src/libexpr/include/nix/expr/eval-settings.hh
 index d8a1fb973..f9ae78427 100644
 --- a/src/libexpr/include/nix/expr/eval-settings.hh
@@ -116,11 +168,11 @@ index d8a1fb973..f9ae78427 100644
          Enable built-in functions that allow executing native code.
  
 diff --git a/src/libexpr/primops.cc b/src/libexpr/primops.cc
-index f8c309fc8..3d4bf6240 100644
+index 5bcbbc288..9846cecf8 100644
 --- a/src/libexpr/primops.cc
 +++ b/src/libexpr/primops.cc
-@@ -139,9 +139,12 @@ StringMap EvalState::realiseContext(const NixStringContext & context, StorePathS
-     }
+@@ -137,9 +137,12 @@ StringMap EvalState::realiseContext(const NixStringContext & context, StorePathS
+             std::rethrow_exception(*failed);
  
      try {
 -        buildStore->buildPaths(buildReqs, bmNormal, store);
@@ -131,9 +183,6 @@ index f8c309fc8..3d4bf6240 100644
      } catch (Error &) {
 -        if (drvs.size() == 1)
 +        if (drvs.size() == 1 && !settings.realiseHook)
-             failedRealisations.insert_or_assign(drvs.front().drvPath->getBaseStorePath(), std::current_exception());
+             failedRealisations->insert_or_assign(drvs.front().drvPath->getBaseStorePath(), std::current_exception());
          throw;
      }
--- 
-2.55.0
-

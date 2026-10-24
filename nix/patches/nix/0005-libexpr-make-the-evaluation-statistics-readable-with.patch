@@ -1,0 +1,117 @@
+From b7c6cf29489211c57bdcbcf548ecc4d29a675415 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sun, 25 Oct 2026 00:47:29 +0200
+Subject: [PATCH] libexpr: make the evaluation statistics readable without
+ printing them
+
+printStatistics() built the JSON and wrote it in one go, so an embedder
+had no way to read the statistics. Split the JSON out into
+getStatisticsJSON(), and add getStats() for the counters alone, cheap
+enough to read around every evaluation.
+---
+ src/libexpr/eval.cc                  | 34 ++++++++++++++++++++++++----
+ src/libexpr/include/nix/expr/eval.hh | 22 ++++++++++++++++++
+ 2 files changed, 51 insertions(+), 5 deletions(-)
+
+diff --git a/src/libexpr/eval.cc b/src/libexpr/eval.cc
+index 79652ee34..2b35e7f7a 100644
+--- a/src/libexpr/eval.cc
++++ b/src/libexpr/eval.cc
+@@ -3049,7 +3049,7 @@ void EvalState::maybePrintStats()
+     }
+ }
+ 
+-void EvalState::printStatistics()
++nlohmann::json EvalState::getStatisticsJSON()
+ {
+     std::chrono::microseconds cpuTimeDuration = getCpuUserTime();
+     float cpuTime = std::chrono::duration_cast<std::chrono::duration<float>>(cpuTimeDuration).count();
+@@ -3071,10 +3071,6 @@ void EvalState::printStatistics()
+     auto gcCycles = getGCCycles();
+ #endif
+ 
+-    auto outPath = getEnv("NIX_SHOW_STATS_PATH").value_or("-");
+-    std::fstream fs;
+-    if (outPath != "-")
+-        fs.open(outPath, std::fstream::out);
+     json topObj = json::object();
+     topObj["cpuTime"] = cpuTime;
+     topObj["time"] = {
+@@ -3173,9 +3169,37 @@ void EvalState::printStatistics()
+         auto & list = topObj["symbols"];
+         symbols.dump([&](std::string_view s) { list.emplace_back(s); });
+     }
++
++    return topObj;
++}
++
++EvalState::Stats EvalState::getStats()
++{
++    Stats s{};
++    s.nrThunks = nrThunks.load();
++    s.nrFunctionCalls = nrFunctionCalls.load();
++    s.nrPrimOpCalls = nrPrimOpCalls.load();
++    s.nrLookups = nrLookups.load();
++    s.nrOpUpdates = nrOpUpdates.load();
++#if NIX_USE_BOEHMGC
++    GC_word heapSize = 0, totalBytes = 0;
++    GC_get_heap_usage_safe(&heapSize, 0, 0, 0, &totalBytes);
++    s.gcHeapSize = (uint64_t) heapSize;
++    s.gcTotalBytes = (uint64_t) totalBytes;
++#endif
++    return s;
++}
++
++void EvalState::printStatistics()
++{
++    json topObj = getStatisticsJSON();
++
++    auto outPath = getEnv("NIX_SHOW_STATS_PATH").value_or("-");
+     if (outPath == "-") {
+         std::cerr << topObj.dump(2) << std::endl;
+     } else {
++        std::fstream fs;
++        fs.open(outPath, std::fstream::out);
+         fs << topObj.dump(2) << std::endl;
+     }
+ }
+diff --git a/src/libexpr/include/nix/expr/eval.hh b/src/libexpr/include/nix/expr/eval.hh
+index 34c2bef98..8a810932d 100644
+--- a/src/libexpr/include/nix/expr/eval.hh
++++ b/src/libexpr/include/nix/expr/eval.hh
+@@ -24,6 +24,8 @@
+ #include <boost/unordered/unordered_flat_map.hpp>
+ #include <boost/unordered/concurrent_flat_map_fwd.hpp>
+ 
++#include <nlohmann/json_fwd.hpp>
++
+ #include <map>
+ #include <optional>
+ #include <functional>
+@@ -1043,6 +1045,26 @@ public:
+      */
+     void maybePrintStats();
+ 
++    /**
++     * The statistics that `printStatistics()` writes, without the I/O.
++     * Cheap; does not run a GC first.
++     */
++    nlohmann::json getStatisticsJSON();
++
++    /**
++     * The cumulative evaluation counters and the heap size, cheap enough
++     * to read before and after every evaluation. The counters only count
++     * while `Counter::enabled` is set; the GC fields are zero without
++     * Boehm GC.
++     */
++    struct Stats
++    {
++        uint64_t nrThunks, nrFunctionCalls, nrPrimOpCalls, nrLookups, nrOpUpdates;
++        uint64_t gcHeapSize, gcTotalBytes;
++    };
++
++    Stats getStats();
++
+     /**
+      * Print statistics, unconditionally, cheaply, without performing a GC first.
+      */

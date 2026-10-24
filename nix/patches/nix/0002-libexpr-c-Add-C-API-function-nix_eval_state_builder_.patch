@@ -1,4 +1,4 @@
-From f1828b59cdf91a656b88196864828f990009d9b3 Mon Sep 17 00:00:00 2001
+From 6bff370e0aa1e3095e9907a7ec6e5977db2ff258 Mon Sep 17 00:00:00 2001
 From: adisbladis <adisbladis@gmail.com>
 Date: Wed, 22 Jul 2026 19:59:00 +0200
 Subject: [PATCH] libexpr-c: Add C API function
@@ -35,7 +35,7 @@ index 2387ee8c3..9c6bcefc3 100644
  {
      if (context)
 diff --git a/src/libexpr-c/nix_api_expr.h b/src/libexpr-c/nix_api_expr.h
-index 0326e7bec..2fce9eab6 100644
+index fc61cb5f3..fca88e5c0 100644
 --- a/src/libexpr-c/nix_api_expr.h
 +++ b/src/libexpr-c/nix_api_expr.h
 @@ -229,6 +229,21 @@ nix_err nix_eval_state_builder_load(nix_c_context * context, nix_eval_state_buil

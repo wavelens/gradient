@@ -1,0 +1,503 @@
+From 233adce9b327c013a8333f0cb9eb4230cfe78c10 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sun, 25 Oct 2026 00:49:45 +0200
+Subject: [PATCH] libexpr: memoize rooted paths in the evaluation cache and
+ batch validity checks
+
+Once addTempRoot succeeded and the path was confirmed valid on the eval
+store, the temporary root pins it for the lifetime of the store handle,
+so re-rooting and re-validating it is a redundant round-trip. Track such
+paths in EvalState::rootedValidPaths, root and check the remaining
+context paths of a cached string with one addTempRoots and one
+queryValidPaths instead of a pair of calls per path, and seed the memo
+from derivationStrict where writeDerivation has just rooted and
+registered the path.
+
+On a daemon store this drops the dominant per-.drv AddTempRoot and
+IsValidPath round-trip pairs during cached-string reads (~10x fewer hot
+daemon ops on a cold flake walk that re-reads its own cache entries).
+---
+ src/libexpr-tests/eval-cache.cc               | 189 ++++++++++++++++++
+ src/libexpr-tests/meson.build                 |   1 +
+ src/libexpr/eval-cache.cc                     |  21 +-
+ src/libexpr/eval.cc                           |   1 +
+ src/libexpr/include/nix/expr/eval.hh          |   9 +
+ src/libexpr/primops.cc                        |   6 +
+ .../nix/store/tests/forwarding-store.hh       | 124 ++++++++++++
+ .../include/nix/store/tests/meson.build       |   1 +
+ 8 files changed, 346 insertions(+), 6 deletions(-)
+ create mode 100644 src/libexpr-tests/eval-cache.cc
+ create mode 100644 src/libstore-test-support/include/nix/store/tests/forwarding-store.hh
+
+diff --git a/src/libexpr-tests/eval-cache.cc b/src/libexpr-tests/eval-cache.cc
+new file mode 100644
+index 000000000..9d484ff5b
+--- /dev/null
++++ b/src/libexpr-tests/eval-cache.cc
+@@ -0,0 +1,189 @@
++#include <gmock/gmock.h>
++#include <gtest/gtest.h>
++
++#include "nix/expr/eval-cache.hh"
++#include "nix/expr/tests/libexpr.hh"
++#include "nix/store/globals.hh"
++#include "nix/store/store-open.hh"
++#include "nix/store/tests/forwarding-store.hh"
++#include "nix/util/callback.hh"
++#include "nix/util/environment-variables.hh"
++#include "nix/util/file-system.hh"
++#include "nix/util/finally.hh"
++
++namespace nix {
++
++using namespace eval_cache;
++
++/**
++ * A store that records every GC-root and validity operation, i.e. the
++ * operations that become daemon round-trips with a `RemoteStore`. All
++ * paths are valid unless listed in `invalidPaths`.
++ */
++struct CountingStore : ForwardingStore
++{
++    std::vector<StorePath> tempRoots;
++    std::vector<StorePath> validityChecks;
++    std::vector<StorePathSet> validityBatches;
++    StorePathSet invalidPaths;
++
++    using ForwardingStore::ForwardingStore;
++
++    void reset()
++    {
++        tempRoots.clear();
++        validityChecks.clear();
++        validityBatches.clear();
++    }
++
++    void addTempRoot(const StorePath & path) override
++    {
++        tempRoots.push_back(path);
++    }
++
++    bool isValidPathUncached(const StorePath & path) override
++    {
++        validityChecks.push_back(path);
++        return !invalidPaths.count(path);
++    }
++
++    StorePathSet queryValidPaths(const StorePathSet & paths, SubstituteFlag maybeSubstitute) override
++    {
++        validityBatches.push_back(paths);
++        StorePathSet res;
++        for (auto & path : paths)
++            if (!invalidPaths.count(path))
++                res.insert(path);
++        return res;
++    }
++};
++
++class EvalCacheTest : public LibExprTest
++{
++protected:
++    ref<CountingStore> counting;
++
++    EvalCacheTest()
++        : EvalCacheTest(make_ref<CountingStore>(openStore("dummy://?read-only=false")))
++    {
++    }
++
++    EvalCacheTest(ref<CountingStore> counting)
++        : LibExprTest(
++              counting,
++              [](bool & readOnlyMode) {
++                  EvalSettings settings{readOnlyMode};
++                  settings.nixPath = {};
++                  return settings;
++              })
++        , counting(counting)
++    {
++        setEnv("XDG_CACHE_HOME", createTempDir().c_str());
++    }
++
++    ref<EvalCache> makeCache(const Hash & fingerprint, Value & vRoot)
++    {
++        return make_ref<EvalCache>(std::cref(fingerprint), state, [&vRoot]() { return &vRoot; });
++    }
++};
++
++static constexpr std::string_view ctxExpr = R"({
++  x = builtins.appendContext "foo" {
++    "/nix/store/00000000000000000000000000000001-ctx-a" = { path = true; };
++    "/nix/store/00000000000000000000000000000002-ctx-b" = { path = true; };
++    "/nix/store/00000000000000000000000000000003-ctx-c" = { path = true; };
++  };
++})";
++
++TEST_F(EvalCacheTest, cachedStringContextValidationIsBatchedAndMemoized)
++{
++    auto fp = hashString(HashAlgorithm::SHA256, "eval-cache-test-1");
++    Value vRoot = eval(std::string(ctxExpr));
++
++    makeCache(fp, vRoot)->getRoot()->getAttr("x")->getStringWithContext();
++
++    counting->reset();
++    auto cache2 = makeCache(fp, vRoot);
++    auto s = cache2->getRoot()->getAttr("x")->getStringWithContext();
++    EXPECT_EQ(s.first, "foo");
++    EXPECT_EQ(s.second.size(), 3);
++    EXPECT_EQ(counting->tempRoots.size(), 3) << "each context path is rooted exactly once";
++    EXPECT_EQ(counting->validityBatches.size(), 1) << "validity is checked with one batched queryValidPaths";
++    EXPECT_EQ(counting->validityChecks.size(), 0) << "no per-path validity round-trips";
++
++    counting->reset();
++    auto s2 = cache2->getRoot()->getAttr("x")->getStringWithContext();
++    EXPECT_EQ(s2.first, "foo");
++    EXPECT_EQ(counting->tempRoots.size(), 0) << "already-rooted paths are not re-rooted";
++    EXPECT_EQ(counting->validityBatches.size(), 0);
++    EXPECT_EQ(counting->validityChecks.size(), 0);
++}
++
++TEST_F(EvalCacheTest, invalidContextPathStillForcesRegeneration)
++{
++    auto fp = hashString(HashAlgorithm::SHA256, "eval-cache-test-2");
++    Value vRoot = eval(std::string(ctxExpr));
++
++    makeCache(fp, vRoot)->getRoot()->getAttr("x")->getStringWithContext();
++
++    StorePath invalid{"00000000000000000000000000000002-ctx-b"};
++    counting->invalidPaths.insert(invalid);
++
++    counting->reset();
++    auto cache2 = makeCache(fp, vRoot);
++    auto s = cache2->getRoot()->getAttr("x")->getStringWithContext();
++    EXPECT_EQ(s.first, "foo");
++    EXPECT_EQ(s.second.size(), 3);
++
++    counting->reset();
++    auto s2 = cache2->getRoot()->getAttr("x")->getStringWithContext();
++    EXPECT_EQ(s2.first, "foo");
++    bool rechecked = false;
++    for (auto & batch : counting->validityBatches)
++        rechecked |= batch.count(invalid) > 0;
++    for (auto & path : counting->validityChecks)
++        rechecked |= path == invalid;
++    EXPECT_TRUE(rechecked) << "a path that failed validation must not be memoized as valid";
++}
++
++TEST_F(EvalCacheTest, forceDerivationRootsAndValidatesOnlyOnce)
++{
++    bool oldReadOnly = settings.readOnlyMode;
++    settings.readOnlyMode = false;
++    Finally restore([&]() { settings.readOnlyMode = oldReadOnly; });
++
++    Value vRoot = eval(R"({ drvPath = "/nix/store/00000000000000000000000000000004-foo.drv"; })");
++    auto cache = make_ref<EvalCache>(std::nullopt, state, [&]() { return &vRoot; });
++
++    counting->reset();
++    cache->getRoot()->forceDerivation();
++    EXPECT_EQ(counting->tempRoots.size(), 1);
++    EXPECT_EQ(counting->validityChecks.size() + counting->validityBatches.size(), 1);
++
++    counting->reset();
++    cache->getRoot()->forceDerivation();
++    EXPECT_EQ(counting->tempRoots.size(), 0) << "second forceDerivation reuses the memoized root";
++    EXPECT_EQ(counting->validityChecks.size(), 0);
++    EXPECT_EQ(counting->validityBatches.size(), 0);
++}
++
++TEST_F(EvalCacheTest, writeDerivationSeedsRootedPathMemo)
++{
++    bool oldReadOnly = settings.readOnlyMode;
++    settings.readOnlyMode = false;
++    Finally restore([&]() { settings.readOnlyMode = oldReadOnly; });
++
++    Value vRoot = eval(R"(
++      let d = builtins.derivationStrict { name = "t"; system = "x86_64-linux"; builder = "/bin/sh"; };
++      in { drvPath = d.drvPath; }
++    )");
++    auto cache = make_ref<EvalCache>(std::nullopt, state, [&]() { return &vRoot; });
++
++    counting->reset();
++    auto drvPath = cache->getRoot()->forceDerivation();
++    EXPECT_TRUE(drvPath.isDerivation());
++    EXPECT_EQ(counting->tempRoots.size(), 0) << "derivationStrict seeds the memo, so forceDerivation roots nothing";
++    EXPECT_EQ(counting->validityChecks.size() + counting->validityBatches.size(), 0);
++}
++
++} // namespace nix
+diff --git a/src/libexpr-tests/meson.build b/src/libexpr-tests/meson.build
+index 50d158209..88e89bbf7 100644
+--- a/src/libexpr-tests/meson.build
++++ b/src/libexpr-tests/meson.build
+@@ -49,6 +49,7 @@ subdir('nix-meson-build-support/common')
+ sources = files(
+   'derived-path.cc',
+   'error_traces.cc',
++  'eval-cache.cc',
+   'eval.cc',
+   'json.cc',
+   'lazy-fetcher-attr.cc',
+diff --git a/src/libexpr/eval-cache.cc b/src/libexpr/eval-cache.cc
+index e0c76f96e..3cb2afb63 100644
+--- a/src/libexpr/eval-cache.cc
++++ b/src/libexpr/eval-cache.cc
+@@ -8,6 +8,8 @@
+ // Need specialization involving `SymbolStr` just in this one module.
+ #include "nix/util/strings-inline.hh"
+ 
++#include <boost/unordered/concurrent_flat_set.hpp>
++
+ namespace nix::eval_cache {
+ 
+ void CachedEvalError::anchor() {}
+@@ -635,6 +637,7 @@ string_t AttrCursor::getStringWithContext()
+         if (cachedValue && !std::get_if<placeholder_t>(&cachedValue->second)) {
+             if (auto s = std::get_if<string_t>(&cachedValue->second)) {
+                 bool valid = true;
++                StorePathSet toCheck;
+                 for (auto & c : s->second) {
+                     const StorePath & path = std::visit(
+                         overloaded{
+@@ -645,11 +648,16 @@ string_t AttrCursor::getStringWithContext()
+                             [&](const NixStringContextElem::Opaque & o) -> const StorePath & { return o.path; },
+                         },
+                         c.raw);
+-                    root->state.store->addTempRoot(path);
+-                    if (!root->state.store->isValidPath(path)) {
+-                        valid = false;
+-                        break;
+-                    }
++                    if (!root->state.rootedValidPaths->contains(path))
++                        toCheck.insert(path);
++                }
++                if (!toCheck.empty()) {
++                    for (auto & path : toCheck)
++                        root->state.store->addTempRoot(path);
++                    auto validPaths = root->state.store->queryValidPaths(toCheck);
++                    for (auto & path : validPaths)
++                        root->state.rootedValidPaths->insert(path);
++                    valid = validPaths.size() == toCheck.size();
+                 }
+                 if (valid) {
+                     debug("using cached string attribute '%s'", getAttrPathStr());
+@@ -790,7 +798,7 @@ StorePath AttrCursor::forceDerivation()
+     auto aDrvPath = getAttr(root->state.s.drvPath);
+     auto drvPath = root->state.store->parseStorePath(aDrvPath->getString());
+     drvPath.requireDerivation();
+-    if (!settings.readOnlyMode) {
++    if (!settings.readOnlyMode && !root->state.rootedValidPaths->contains(drvPath)) {
+         root->state.store->addTempRoot(drvPath);
+         if (!root->state.store->isValidPath(drvPath)) {
+             /* The eval cache contains 'drvPath', but the actual path has
+@@ -800,6 +808,7 @@ StorePath AttrCursor::forceDerivation()
+                 throw Error(
+                     "don't know how to recreate store derivation '%s'!", root->state.store->printStorePath(drvPath));
+         }
++        root->state.rootedValidPaths->insert(drvPath);
+     }
+     return drvPath;
+ }
+diff --git a/src/libexpr/eval.cc b/src/libexpr/eval.cc
+index 2b35e7f7a..1867f4da4 100644
+--- a/src/libexpr/eval.cc
++++ b/src/libexpr/eval.cc
+@@ -306,6 +306,7 @@ EvalState::EvalState(
+     , debugRepl(nullptr)
+     , debugStop(false)
+     , trylevel(0)
++    , rootedValidPaths(make_ref<decltype(rootedValidPaths)::element_type>())
+     , importResolutionCache(make_ref<decltype(importResolutionCache)::element_type>())
+     , fileEvalCache(make_ref<decltype(fileEvalCache)::element_type>())
+     , positionToDocComment(make_ref<decltype(positionToDocComment)::element_type>())
+diff --git a/src/libexpr/include/nix/expr/eval.hh b/src/libexpr/include/nix/expr/eval.hh
+index 8a810932d..6e9675c9e 100644
+--- a/src/libexpr/include/nix/expr/eval.hh
++++ b/src/libexpr/include/nix/expr/eval.hh
+@@ -23,6 +23,7 @@
+ 
+ #include <boost/unordered/unordered_flat_map.hpp>
+ #include <boost/unordered/concurrent_flat_map_fwd.hpp>
++#include <boost/unordered/concurrent_flat_set_fwd.hpp>
+ 
+ #include <nlohmann/json_fwd.hpp>
+ 
+@@ -467,6 +468,14 @@ public:
+      */
+     std::map<const Hash, ref<eval_cache::EvalCache>> evalCaches;
+ 
++    /**
++     * Store paths for which a temporary GC root has been added on `store`
++     * and that were valid at that moment. Since the temporary root pins
++     * such a path for the lifetime of the store handle, re-rooting and
++     * re-validating it would be a redundant store round-trip.
++     */
++    const ref<boost::concurrent_flat_set<StorePath>> rootedValidPaths;
++
+ private:
+ 
+     /**
+diff --git a/src/libexpr/primops.cc b/src/libexpr/primops.cc
+index 46ef49a36..5c71cae2f 100644
+--- a/src/libexpr/primops.cc
++++ b/src/libexpr/primops.cc
+@@ -22,6 +22,7 @@
+ 
+ #include <boost/container/small_vector.hpp>
+ #include <boost/unordered/concurrent_flat_map.hpp>
++#include <boost/unordered/concurrent_flat_set.hpp>
+ #include <boost/unordered/unordered_flat_map.hpp>
+ #include <nlohmann/json.hpp>
+ 
+@@ -1860,6 +1861,11 @@ static void derivationStrictInternal(EvalState & state, std::string_view drvName
+         settings.readOnlyMode ? computeStorePath(*state.store, drv) : state.store->writeDerivation(drv, state.repair);
+     auto drvPathS = state.store->printStorePath(drvPath);
+ 
++    /* writeDerivation just rooted and registered the path, so validity
++       checks against it (e.g. AttrCursor::forceDerivation) can be elided. */
++    if (!settings.readOnlyMode)
++        state.rootedValidPaths->insert(drvPath);
++
+     printMsg(lvlChatty, "instantiated '%1%' -> '%2%'", drvName, drvPathS);
+ 
+     /* Optimisation, but required in read-only mode! because in that
+diff --git a/src/libstore-test-support/include/nix/store/tests/forwarding-store.hh b/src/libstore-test-support/include/nix/store/tests/forwarding-store.hh
+new file mode 100644
+index 000000000..02422d9eb
+--- /dev/null
++++ b/src/libstore-test-support/include/nix/store/tests/forwarding-store.hh
+@@ -0,0 +1,124 @@
++#pragma once
++///@file
++
++#include "nix/store/store-api.hh"
++#include "nix/util/callback.hh"
++
++namespace nix {
++
++/**
++ * A store that hands every operation to another store. A test derives
++ * from it and overrides the few operations it wants to observe or
++ * replace, while the rest keep working.
++ */
++struct ForwardingStore : Store
++{
++    ref<Store> inner;
++
++    ForwardingStore(ref<Store> inner)
++        : Store{inner->config}
++        , inner(inner)
++    {
++    }
++
++    void anchor() override {}
++
++    std::optional<TrustedFlag> isTrustedClient() override
++    {
++        return inner->isTrustedClient();
++    }
++
++    std::optional<StorePath> queryPathFromHashPart(const std::string & hashPart) override
++    {
++        return inner->queryPathFromHashPart(hashPart);
++    }
++
++    void addToStore(const ValidPathInfo & info, Source & narSource, RepairFlag repair, CheckSigsFlag checkSigs) override
++    {
++        inner->addToStore(info, narSource, repair, checkSigs);
++    }
++
++    StorePath addToStoreFromDump(
++        Source & dump,
++        std::string_view name,
++        FileSerialisationMethod dumpMethod,
++        ContentAddressMethod hashMethod,
++        HashAlgorithm hashAlgo,
++        const StorePathSet & references,
++        RepairFlag repair) override
++    {
++        return inner->addToStoreFromDump(dump, name, dumpMethod, hashMethod, hashAlgo, references, repair);
++    }
++
++    StorePath writeDerivation(const Derivation & drv, RepairFlag repair) override
++    {
++        return inner->writeDerivation(drv, repair);
++    }
++
++    Derivation readDerivation(const StorePath & drvPath) override
++    {
++        return inner->readDerivation(drvPath);
++    }
++
++    Derivation readInvalidDerivation(const StorePath & drvPath) override
++    {
++        return inner->readInvalidDerivation(drvPath);
++    }
++
++    ref<SourceAccessor> getFSAccessor(bool requireValidPath) override
++    {
++        return inner->getFSAccessor(requireValidPath);
++    }
++
++    std::shared_ptr<SourceAccessor> getFSAccessor(const StorePath & path, bool requireValidPath) override
++    {
++        return inner->getFSAccessor(path, requireValidPath);
++    }
++
++    StorePathSet queryValidPaths(const StorePathSet & paths, SubstituteFlag maybeSubstitute) override
++    {
++        return inner->queryValidPaths(paths, maybeSubstitute);
++    }
++
++    void addTempRoot(const StorePath & path) override
++    {
++        inner->addTempRoot(path);
++    }
++
++
++protected:
++
++    bool isValidPathUncached(const StorePath & path) override
++    {
++        return inner->isValidPath(path);
++    }
++
++    void queryPathInfoUncached(
++        const StorePath & path, Callback<std::shared_ptr<const ValidPathInfo>> callback) noexcept override
++    {
++        try {
++            callback(inner->queryPathInfo(path).get_ptr());
++        } catch (InvalidPath &) {
++            callback(nullptr);
++        } catch (...) {
++            callback.rethrow();
++        }
++    }
++
++    void queryRealisationUncached(
++        const DrvOutput & drvOutput, Callback<std::shared_ptr<const UnkeyedRealisation>> callback) noexcept override
++    {
++        try {
++            callback(inner->queryRealisation(drvOutput));
++        } catch (...) {
++            callback.rethrow();
++        }
++    }
++
++    void registerDrvOutput(const Realisation & output) override
++    {
++        inner->registerDrvOutput(output);
++    }
++};
++
++} // namespace nix
+diff --git a/src/libstore-test-support/include/nix/store/tests/meson.build b/src/libstore-test-support/include/nix/store/tests/meson.build
+index 8d844d24e..7e0d1cb89 100644
+--- a/src/libstore-test-support/include/nix/store/tests/meson.build
++++ b/src/libstore-test-support/include/nix/store/tests/meson.build
+@@ -4,6 +4,7 @@ include_dirs = [ include_directories('../../..') ]
+ 
+ headers = files(
+   'derived-path.hh',
++  'forwarding-store.hh',
+   'https-store.hh',
+   'libstore-network.hh',
+   'libstore.hh',
