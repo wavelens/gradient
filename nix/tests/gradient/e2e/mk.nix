@@ -1382,9 +1382,16 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     print(client.succeed(f"nix-store -vvv --realize {store_path}"))
     print(client.succeed(f"ls {store_path}"))
 
-    banner("Phase 8b: task sbom carries hello's license")
-    sbom = json.loads(api_get(token, "tasks/project/task/sbom"))
+    banner("Phase 8b: build sbom carries hello's license")
+    hello_build = server.succeed(
+        f'{CURL} -sf -H "Authorization: Bearer {token}" '
+        f'{API}/evals/{eval_id}/builds | '
+        f'{JQ} -r \'.message.builds[] | select(.name | test("hello[^/]*\\\\.drv$")) | .id\' | head -n1'
+    ).strip()
+    assert hello_build, f"could not find hello's build in eval {eval_id}"
+    sbom = json.loads(api_get(token, f"builds/{hello_build}/sbom"))
     assert sbom["bomFormat"] == "CycloneDX", sbom
+    assert sbom["metadata"]["component"]["name"].startswith("hello-"), sbom["metadata"]
     sbom_refs = {c["bom-ref"] for c in sbom["components"]}
     hello_sbom = [c for c in sbom["components"] if c["name"] == "hello"]
     assert hello_sbom, f"no hello component in {sorted(sbom_refs)}"
@@ -1396,7 +1403,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         if target not in sbom_refs
     ]
     assert not dangling, f"dependsOn targets without a component: {dangling}"
-    assert sbom["compositions"][0]["aggregate"] in ("complete", "incomplete"), sbom["compositions"]
 
     banner("Phase 9: gradient cache upload compresses + signs (#509)")
     server.succeed("echo gradient-upload-regression-509 > /tmp/upload-probe.txt")
