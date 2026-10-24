@@ -11,7 +11,7 @@ use axum::body::Body;
 use axum::http::{StatusCode, header};
 use axum::response::Response;
 use gradient_db::graph::runtime_closure::runtime_closure_reachable;
-use gradient_db::graph::sbom::{derivation_names, entry_point_outputs};
+use gradient_db::graph::sbom::{derivation_names, entry_point_outputs, with_referenced_paths};
 use gradient_db::lookup::by_id;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
@@ -50,6 +50,7 @@ pub async fn get_task_sbom(
     let entry_points = entry_point_outputs(&db.web_db, evaluation.id).await?;
     let seeds: Vec<String> = entry_points.iter().map(|ep| ep.hash.clone()).collect();
     let reached = runtime_closure_reachable(&db.web_db, &seeds).await?;
+    let reached = with_referenced_paths(&db.web_db, reached).await?;
     let names = derivation_names(&db.web_db, &component_hashes(&entry_points, &reached)).await?;
 
     let input = SbomInput {

@@ -261,24 +261,21 @@ fn dependencies(input: &SbomInput, components: &BTreeMap<String, Component<'_>>)
         .collect();
 
     let mut dependencies = vec![json!({ "ref": TASK_REF, "dependsOn": entry_points })];
-    dependencies.extend(components.values().map(|component| {
-        let depends_on: BTreeSet<String> = component
-            .cached
-            .map(references)
-            .unwrap_or_default()
+    dependencies.extend(components.values().filter_map(|component| {
+        let depends_on: BTreeSet<String> = references(component.cached?)
             .iter()
             .filter_map(|(hash, _)| bom_ref(hash))
             .collect();
-        json!({ "ref": component.bom_ref(), "dependsOn": depends_on })
+        Some(json!({ "ref": component.bom_ref(), "dependsOn": depends_on }))
     }));
     dependencies
 }
 
 fn composition(uncached: Vec<String>) -> Value {
     if uncached.is_empty() {
-        json!({ "aggregate": "complete", "assemblies": [TASK_REF] })
+        json!({ "aggregate": "complete", "dependencies": [TASK_REF] })
     } else {
-        json!({ "aggregate": "incomplete", "assemblies": uncached })
+        json!({ "aggregate": "incomplete", "dependencies": uncached })
     }
 }
 
@@ -362,14 +359,16 @@ mod tests {
             .unwrap_or_else(|| panic!("no component {bom_ref} in {doc}"))
     }
 
-    fn depends_on(doc: &Value, bom_ref: &str) -> Value {
+    fn dependency<'a>(doc: &'a Value, bom_ref: &str) -> Option<&'a Value> {
         doc["dependencies"]
             .as_array()
             .unwrap()
             .iter()
             .find(|d| d["ref"] == bom_ref)
-            .unwrap()["dependsOn"]
-            .clone()
+    }
+
+    fn depends_on(doc: &Value, bom_ref: &str) -> Value {
+        dependency(doc, bom_ref).unwrap()["dependsOn"].clone()
     }
 
     #[test]
@@ -415,9 +414,9 @@ mod tests {
         let zlib = component(&doc, &zlib_ref);
 
         assert!(zlib.get("hashes").is_none());
-        assert_eq!(depends_on(&doc, &zlib_ref), json!([]));
+        assert!(dependency(&doc, &zlib_ref).is_none(), "{doc}");
         assert_eq!(doc["compositions"][0]["aggregate"], "incomplete");
-        assert_eq!(doc["compositions"][0]["assemblies"], json!([zlib_ref]));
+        assert_eq!(doc["compositions"][0]["dependencies"], json!([zlib_ref]));
         assert_eq!(doc["metadata"]["properties"][0]["value"], "false");
     }
 
