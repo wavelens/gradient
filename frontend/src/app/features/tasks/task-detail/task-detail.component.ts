@@ -594,6 +594,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
              disabled: this.starting() || this.evaluationQueued(),
              command: () => this.startEvaluation('full') }]
         : []),
+      { label: 'SBOM', icon: 'inventory_2', command: () => this.downloadSbom() },
       ...(this.authService.isAuthenticated()
         ? [{ label: 'Diagnostic report', icon: 'bug_report', disabled: !selected,
              command: () => this.reportDialogOpen.set(true) }]
@@ -669,7 +670,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         this.reportBusy.set(false);
         this.reportDialogOpen.set(false);
         if (response.body) {
-          this.saveReport(response.body, filenameFromDisposition(
+          this.saveFile(response.body, filenameFromDisposition(
             response.headers.get('content-disposition'),
             `gradient-report-${evaluation.id.split('-')[0]}.db`,
           ));
@@ -682,7 +683,21 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     });
   }
 
-  private saveReport(blob: Blob, filename: string): void {
+  downloadSbom(): void {
+    this.tasksService.downloadSbom(this.projectName, this.taskName).subscribe({
+      next: response => {
+        if (response.body) {
+          this.saveFile(response.body, filenameFromDisposition(
+            response.headers.get('content-disposition'),
+            `${this.projectName}-${this.taskName}-sbom.cdx.json`,
+          ));
+        }
+      },
+      error: (e: Error) => this.errorMessage.set(e.message),
+    });
+  }
+
+  private saveFile(blob: Blob, filename: string): void {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;

@@ -7,7 +7,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ActivatedRoute, ParamMap, Router, convertToParamMap, provideRouter } from '@angular/router';
-import { provideHttpClient } from '@angular/common/http';
+import { HttpHeaders, HttpResponse, provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { vi } from 'vitest';
 import { BehaviorSubject, NEVER, Subject, of, throwError } from 'rxjs';
@@ -923,7 +923,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('offers the logs first, then metrics and the diagnostic report', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'superuser');
     const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics', 'Prioritize', 'Full rewalk', 'Diagnostic report']);
+    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics', 'Prioritize', 'Full rewalk', 'SBOM', 'Diagnostic report']);
   });
 
   it('points the logs entry at the selected evaluation', () => {
@@ -947,7 +947,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('hides the diagnostic report from anonymous visitors', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'anonymous');
     const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics']);
+    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics', 'SBOM']);
   });
 
   it('opens the dialog from the menu command', () => {
@@ -974,6 +974,61 @@ describe('TaskDetailComponent diagnostic report', () => {
     c.setReportOption('include_identities', true);
     expect(c.reportOptions().include_identities).toBe(true);
     expect(c.reportOptions().include_packages).toBe(true);
+  });
+});
+
+describe('TaskDetailComponent sbom', () => {
+  const objectUrls = URL as unknown as Record<string, unknown>;
+  const sbom = (headers: Record<string, string> = {}) =>
+    of(new HttpResponse({ body: new Blob(['{}']), headers: new HttpHeaders(headers) }));
+
+  function saved(): HTMLAnchorElement[] {
+    objectUrls['createObjectURL'] = () => 'blob:sbom';
+    objectUrls['revokeObjectURL'] = () => undefined;
+    const clicked: HTMLAnchorElement[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(this);
+    });
+    return clicked;
+  }
+
+  afterEach(() => {
+    delete objectUrls['createObjectURL'];
+    delete objectUrls['revokeObjectURL'];
+  });
+
+  it('downloads the task sbom under the server filename', () => {
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'anonymous');
+    const download = vi.fn(() => sbom({ 'content-disposition': 'attachment; filename="acme-demo-sbom.cdx.json"' }));
+    (tasksService as unknown as Record<string, unknown>)['downloadSbom'] = download;
+    const clicked = saved();
+
+    const item = fixture.componentInstance.panelMenuModel().find(i => i.label === 'SBOM');
+    expect(item?.icon).toBe('inventory_2');
+    item!.command!();
+
+    expect(download).toHaveBeenCalledWith('acme', 'demo');
+    expect(clicked[0].download).toBe('acme-demo-sbom.cdx.json');
+  });
+
+  it('falls back to the project and task name without a server filename', () => {
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
+    (tasksService as unknown as Record<string, unknown>)['downloadSbom'] = () => sbom();
+    const clicked = saved();
+
+    fixture.componentInstance.downloadSbom();
+
+    expect(clicked[0].download).toBe('acme-demo-sbom.cdx.json');
+  });
+
+  it('shows the error when there is no completed evaluation', () => {
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
+    (tasksService as unknown as Record<string, unknown>)['downloadSbom'] =
+      () => throwError(() => new Error('Evaluation not found'));
+
+    fixture.componentInstance.downloadSbom();
+
+    expect(fixture.componentInstance.errorMessage()).toBe('Evaluation not found');
   });
 });
 
