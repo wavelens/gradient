@@ -187,7 +187,7 @@ async fn f03b_a_completed_import_names_the_paths_its_build_realised() {
 #[tokio::test]
 async fn f03c_a_substituted_import_without_its_output_path_is_rebuilt_before_the_answer() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(
+    let case = SchedulerCase::start_with_unstored_outputs(
         importing(e1, &[X], BuildStatus::Created)
             .derivation(X)
             .output_option(X_OUT, |o| {
@@ -196,6 +196,7 @@ async fn f03c_a_substituted_import_without_its_output_path_is_rebuilt_before_the
                 o.package = None;
             })
             .build_status(BuildStatus::Substituted),
+        1,
     )
     .await;
     evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
@@ -214,6 +215,7 @@ async fn f03c_a_substituted_import_without_its_output_path_is_rebuilt_before_the
         BuildStatus::Queued,
         "after 1: sb(X).status"
     );
+    case.set_unstored_outputs(0);
     assert_eq!(case.signals(W1), vec![], "after 1: signals(W1)");
     assert_eq!(case.import_waits(), 1, "after 1: import wait open");
     case.check("step 1").await;
