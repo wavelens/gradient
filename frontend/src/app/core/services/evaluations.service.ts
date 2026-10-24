@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { HttpResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
@@ -62,6 +63,10 @@ export class EvaluationsService {
 
   getBuild(buildId: string): Observable<BuildWithOutputs> {
     return this.api.get<BuildWithOutputs>(`builds/${buildId}`);
+  }
+
+  downloadBuildSbom(buildId: string): Observable<HttpResponse<Blob>> {
+    return this.api.getBlob(`builds/${buildId}/sbom`);
   }
 
   prioritizeBuild(buildId: string): Observable<string> {

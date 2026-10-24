@@ -64,6 +64,7 @@ import {
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent } from '@shared/ui';
 import { buildDuration, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress } from '@shared/evaluation';
 import { environment } from '@environments/environment';
+import { saveResponse } from '@shared/download';
 
 
 @Component({
@@ -195,6 +196,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         icon: 'download',
         disabled: ['Created', 'Queued'].includes(build.status),
         command: () => void this.downloadLog(build),
+      },
+      {
+        label: 'SBOM',
+        icon: 'description',
+        disabled: !['Completed', 'Substituted'].includes(build.status),
+        command: () => this.downloadSbom(build),
       },
       ...(this.canPrioritize(build)
         ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up', command: () => this.prioritizeBuild(build) }]
@@ -1504,7 +1511,18 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     URL.revokeObjectURL(url);
   }
 
-  canPrioritize(build: BuildItem): boolean {
+  downloadSbom(build: BuildItem): void {
+    this.evalService.downloadBuildSbom(build.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: response => saveResponse(response, `${this.buildFileName(build.name)}-sbom.cdx.json`),
+      error: (error: Error) => this.messageService.add({
+        severity: 'error',
+        summary: 'SBOM download failed',
+        detail: error?.message,
+      }),
+    });
+  }
+
+    canPrioritize(build: BuildItem): boolean {
     return this.authService.user()?.superuser === true && canPrioritizeBuild(build);
   }
 

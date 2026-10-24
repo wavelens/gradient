@@ -33,6 +33,7 @@ import {
   TooltipDirective,
 } from '@gradient/ui/ui';
 import { EvalStatusBadgeComponent, inputFetchRows, SegmentedBarComponent, StarButtonComponent, StatusIconComponent, ThunkProgressComponent } from '@shared/ui';
+import { saveResponse } from '@shared/download';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
@@ -594,7 +595,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
              disabled: this.starting() || this.evaluationQueued(),
              command: () => this.startEvaluation('full') }]
         : []),
-      { label: 'SBOM', icon: 'inventory_2', command: () => this.downloadSbom() },
       ...(this.authService.isAuthenticated()
         ? [{ label: 'Diagnostic report', icon: 'bug_report', disabled: !selected,
              command: () => this.reportDialogOpen.set(true) }]
@@ -669,12 +669,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       next: response => {
         this.reportBusy.set(false);
         this.reportDialogOpen.set(false);
-        if (response.body) {
-          this.saveFile(response.body, filenameFromDisposition(
-            response.headers.get('content-disposition'),
-            `gradient-report-${evaluation.id.split('-')[0]}.db`,
-          ));
-        }
+        saveResponse(response, `gradient-report-${evaluation.id.split('-')[0]}.db`);
       },
       error: (e: Error) => {
         this.reportBusy.set(false);
@@ -683,27 +678,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     });
   }
 
-  downloadSbom(): void {
-    this.tasksService.downloadSbom(this.projectName, this.taskName).subscribe({
-      next: response => {
-        if (response.body) {
-          this.saveFile(response.body, filenameFromDisposition(
-            response.headers.get('content-disposition'),
-            `${this.projectName}-${this.taskName}-sbom.cdx.json`,
-          ));
-        }
-      },
+  private downloadSbom(ep: EntryPointSummary): void {
+    this.evaluationsService.downloadBuildSbom(ep.build_id).subscribe({
+      next: response => saveResponse(response, `${ep.derivation_path.replace(/\.drv$/, '')}-sbom.cdx.json`),
       error: (e: Error) => this.errorMessage.set(e.message),
     });
-  }
-
-  private saveFile(blob: Blob, filename: string): void {
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(url);
   }
 
   private buildPkgMenu(ep: EntryPointSummary, evalId: string): MenuItem[] {
@@ -725,6 +704,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         label: 'View closure', icon: 'hub', disabled: !built,
         routerLink: built ? ['/project', this.projectName, 'closure', 'build', ep.build_id] : undefined,
       },
+      { label: 'SBOM', icon: 'inventory_2', disabled: !built, command: () => this.downloadSbom(ep) },
       {
         label: 'Entry-point metrics', icon: 'show_chart',
         routerLink: ['/project', this.projectName, 'task', this.taskName, 'entry-point-metrics'],
@@ -786,10 +766,4 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.barCountsByEntryPoint.set(ep, c);
     return c;
   }
-}
-
-/// Prefer the server's filename, since it names the evaluation and the date.
-export function filenameFromDisposition(header: string | null, fallback: string): string {
-  const match = header?.match(/filename="([^"]+)"/);
-  return match?.[1] ?? fallback;
 }
