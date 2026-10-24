@@ -43,8 +43,8 @@ pub fn stored_derivation(
     for output in drv.outputs.iter_mut().filter(|o| !o.path.is_empty()) {
         output.path = mapper.inbound_text(&output.path)?;
     }
-    for (input, _) in &mut drv.input_derivations {
-        *input = mapper.inbound_text(input)?;
+    for input in &mut drv.input_derivations {
+        input.path = mapper.inbound_text(&input.path)?;
     }
     for source in &mut drv.input_sources {
         *source = mapper.inbound_text(source)?;
@@ -89,7 +89,7 @@ impl StoredPathInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_derivation::DerivationOutput;
+    use gradient_derivation::{DerivationOutput, InputDrv};
     use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
     use gradient_types::CacheId;
     use std::sync::Arc;
@@ -106,7 +106,10 @@ mod tests {
         };
         let drv = Derivation {
             outputs: vec![output(format!("/nix/store/{o}-hello"))],
-            input_derivations: vec![(format!("/nix/store/{o}-dep.drv"), vec!["out".into()])],
+            input_derivations: vec![InputDrv::new(
+                format!("/nix/store/{o}-dep.drv"),
+                vec!["out".into()],
+            )],
             input_sources: vec![format!("/nix/store/{o}-src")],
             system: "x86_64-linux".into(),
             builder: format!("/nix/store/{o}-bash/bin/bash"),
@@ -122,7 +125,10 @@ mod tests {
         );
         assert_eq!(
             stored.input_derivations,
-            vec![(format!("/nix/store/{s}-dep.drv"), vec!["out".to_owned()])]
+            vec![InputDrv::new(
+                format!("/nix/store/{s}-dep.drv"),
+                vec!["out".to_owned()]
+            )]
         );
         assert_eq!(stored.input_sources, vec![format!("/nix/store/{s}-src")]);
         assert_eq!(stored.builder, format!("/nix/store/{o}-bash/bin/bash"));

@@ -733,9 +733,9 @@ impl<'a> ClosureWalker<'a> {
     ) -> Vec<String> {
         let mut new_deps: Vec<String> = Vec::new();
         for (drv, _) in parsed {
-            for (input_drv, _) in &drv.input_derivations {
-                if !self.visited.contains(input_drv.as_str()) {
-                    new_deps.push(input_drv.clone());
+            for input in &drv.input_derivations {
+                if !self.visited.contains(input.path.as_str()) {
+                    new_deps.push(input.path.clone());
                 }
             }
         }

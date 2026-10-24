@@ -77,7 +77,7 @@ pub fn load_store(dir: &Path) -> StoreFixture {
         let dep_paths: Vec<String> = drv
             .input_derivations
             .iter()
-            .map(|(p, _)| p.clone())
+            .map(|input| input.path.clone())
             .collect();
 
         for dep in &dep_paths {
