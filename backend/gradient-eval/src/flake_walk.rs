@@ -14,9 +14,16 @@ use nix_bindings::flake::{
 };
 use nix_bindings::{Context, EvalState, Store};
 
-use crate::ipc::{AttrError, DiscoveryShard};
+use crate::ipc::{AttrError, DiscoveryShard, License};
+use crate::license::licenses_of;
 use crate::strip_nix_store_prefix;
 use crate::wildcard_walk::{self, WalkNode};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Resolved {
+    pub drv_path: String,
+    pub licenses: Vec<License>,
+}
 
 pub struct FlakeWalker<'a> {
     cache: EvalCache,
@@ -99,7 +106,7 @@ impl<'a> FlakeWalker<'a> {
     }
 
     #[tracing::instrument(level = "debug", skip_all, fields(attr = attr_path))]
-    pub fn resolve(&self, attr_path: &str) -> Result<(String, Vec<String>)> {
+    pub fn resolve(&self, attr_path: &str) -> Result<Resolved> {
         let (_, segs) = wildcard_walk::parse_pattern(attr_path);
         let mut cursor = self.cache.root()?;
         for seg in &segs {
@@ -112,7 +119,10 @@ impl<'a> FlakeWalker<'a> {
             .drv_path(self.state)
             .with_context(|| format!("resolve drvPath of '{attr_path}'"))?;
 
-        Ok((strip_nix_store_prefix(&drv), vec![]))
+        Ok(Resolved {
+            drv_path: strip_nix_store_prefix(&drv),
+            licenses: licenses_of(&cursor, self.state),
+        })
     }
 
     pub fn checkpoint_cache(&self) -> Result<()> {

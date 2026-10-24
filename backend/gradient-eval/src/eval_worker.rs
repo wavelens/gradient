@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 use tracing::{error, trace};
 
-use crate::flake_walk::FlakeWalker;
+use crate::flake_walk::{FlakeWalker, Resolved};
 use crate::frames::Frames;
 use crate::ipc::{
     EVAL_IPC_VERSION, EvalRequest, EvalResponse, ResolvedItem, decode_request, read_frame,
@@ -370,17 +370,17 @@ fn measured(
 
 fn resolve_item(walker: &FlakeWalker<'_>, attr: String) -> ResolvedItem {
     match walker.resolve(&attr) {
-        Ok((drv, references)) => ResolvedItem {
+        Ok(Resolved { drv_path, licenses }) => ResolvedItem {
             attr,
-            drv_path: Some(drv),
-            references,
+            drv_path: Some(drv_path),
+            licenses,
             error: None,
             cost: None,
         },
         Err(e) => ResolvedItem {
             attr,
             drv_path: None,
-            references: vec![],
+            licenses: vec![],
             error: Some(format!("{e:#}")),
             cost: None,
         },
@@ -630,7 +630,7 @@ mod tests {
         ResolvedItem {
             attr: attr.into(),
             drv_path: None,
-            references: vec![],
+            licenses: vec![],
             error: None,
             cost: None,
         }

@@ -407,7 +407,7 @@ mod tests {
                 items: vec![ResolvedItem {
                     attr: "packages.x86_64-linux.hello".into(),
                     drv_path: Some("/nix/store/aaaa-hello.drv".into()),
-                    references: vec![],
+                    licenses: vec![],
                     error: None,
                     cost: None,
                 }],
@@ -448,7 +448,7 @@ mod tests {
         let item = |attr: &str, thunks| ResolvedItem {
             attr: attr.into(),
             drv_path: Some(format!("/nix/store/aaaa-{attr}.drv")),
-            references: vec![],
+            licenses: vec![],
             error: None,
             cost: Some(cost(thunks)),
         };
