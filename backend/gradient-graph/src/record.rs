@@ -14,8 +14,8 @@ use gradient_db::{
 };
 use gradient_entity::StorePath;
 use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::entry_point::{self, Licenses};
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_types::*;
 use gradient_wire::types::{DiscoveredDerivation, License};

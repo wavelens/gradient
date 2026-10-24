@@ -18,7 +18,9 @@ use futures::future::BoxFuture;
 use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
 use gradient_eval::pool::MemoryGuard;
-use gradient_sources::{AttrError, DerivationResolver, FlakeDiscovery, Resolved, ResolvedDerivation};
+use gradient_sources::{
+    AttrError, DerivationResolver, FlakeDiscovery, Resolved, ResolvedDerivation,
+};
 use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
 };

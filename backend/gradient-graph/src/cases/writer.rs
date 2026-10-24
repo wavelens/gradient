@@ -12,9 +12,9 @@ use gradient_db::{DbContext, MissingRow};
 use gradient_entity::StorePathError;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation;
+use gradient_entity::entry_point::{License, Licenses};
 use gradient_entity::ids::{DispatchedJobId, EvaluationId};
 use gradient_fixtures::shape::shape;
-use gradient_entity::entry_point::{License, Licenses};
 use gradient_wire::types::{self, DiscoveredDerivation};
 use sea_orm::ConnectionTrait;
 
