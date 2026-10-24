@@ -228,7 +228,11 @@ crate::sql_fn! {
         Some("'11111111-1111-1111-1111-111111111111'"),
     ),
         params = [],
-        tier = Bulk;
+        tier = Bulk,
+        budget = crate::sql::Budget::bulk().buffers(120_000)
+            .because("reads every build attempt finished in the last 24 hours and probes its \
+                      later attempts and build jobs; in e2e the window holds the whole fixture, \
+                      observed 59_860");
 }
 
 pub struct DurationCount {
