@@ -73,6 +73,7 @@ nav:
       - Monitor Gradient: guides/monitoring.md
       - Tune Evaluation Speed: guides/tune-evaluations.md
       - Export an SBOM: guides/sbom.md
+      - Use Dynamic Derivations: guides/dynamic-derivations.md
       - Report a Bug: guides/diagnostic-report.md
   - Using the UI:
       - Dashboard: ui/dashboard.md
