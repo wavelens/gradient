@@ -1382,6 +1382,22 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     print(client.succeed(f"nix-store -vvv --realize {store_path}"))
     print(client.succeed(f"ls {store_path}"))
 
+    banner("Phase 8b: task sbom carries hello's license")
+    sbom = json.loads(api_get(token, "tasks/project/task/sbom"))
+    assert sbom["bomFormat"] == "CycloneDX", sbom
+    sbom_refs = {c["bom-ref"] for c in sbom["components"]}
+    hello_sbom = [c for c in sbom["components"] if c["name"] == "hello"]
+    assert hello_sbom, f"no hello component in {sorted(sbom_refs)}"
+    assert hello_sbom[0]["licenses"] == [{"license": {"id": "GPL-3.0-or-later"}}], hello_sbom[0]
+    assert {"name": "nix:store_path", "value": store_path} in hello_sbom[0]["properties"], hello_sbom[0]
+    dangling = [
+        (d["ref"], target)
+        for d in sbom["dependencies"] for target in d["dependsOn"]
+        if target not in sbom_refs
+    ]
+    assert not dangling, f"dependsOn targets without a component: {dangling}"
+    assert sbom["compositions"][0]["aggregate"] in ("complete", "incomplete"), sbom["compositions"]
+
     banner("Phase 9: gradient cache upload compresses + signs (#509)")
     server.succeed("echo gradient-upload-regression-509 > /tmp/upload-probe.txt")
     upload_path = server.succeed("nix-store --add /tmp/upload-probe.txt").strip()
