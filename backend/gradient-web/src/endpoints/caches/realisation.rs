@@ -15,6 +15,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_sources::CacheSigner;
 use gradient_types::*;
 use serde::{Deserialize, Serialize};
@@ -66,7 +67,7 @@ pub async fn realisation(
             .await?
             .and_then(|row| row.store_path())
             .or_not_found(Resource::Path)?;
-    require_in_cache(&state, &ctx.cache, &out_path).await?;
+    require_in_cache(&state.web_db, &ctx.cache, &out_path).await?;
 
     let signer = CacheSigner::from_cache(
         &state.config.secrets.crypt_file,
@@ -83,12 +84,12 @@ pub async fn realisation(
     }))
 }
 
-async fn require_in_cache(state: &ServerState, cache: &MCache, path: &StorePath) -> WebResult<()> {
-    let cached = gradient_db::cached_paths::by_hash(&state.web_db, path.hash())
+async fn require_in_cache(web_db: &WebDb, cache: &MCache, path: &StorePath) -> WebResult<()> {
+    let cached = gradient_db::cached_paths::by_hash(web_db, path.hash())
         .await?
         .filter(|row| row.is_fully_cached())
         .or_not_found(Resource::Path)?;
-    gradient_db::cached_paths::signature_in_cache(&state.web_db, cached.id, cache.id)
+    gradient_db::cached_paths::signature_in_cache(web_db, cached.id, cache.id)
         .await?
         .or_not_found(Resource::Path)?;
     Ok(())
