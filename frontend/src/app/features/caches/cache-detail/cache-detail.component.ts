@@ -110,7 +110,7 @@ export class CacheDetailComponent implements OnInit {
 
   nixConfSnippet = computed(() => {
     const keys = this.trustedPublicKeys();
-    return `substituters = ${this.cacheUrl}\ntrusted-public-keys = ${keys.length ? keys.join(' ') : '<unavailable>'}`;
+    return `extra-substituters = ${this.cacheUrl}\nextra-trusted-public-keys = ${keys.length ? keys.join(' ') : '<unavailable>'}`;
   });
 
   get installNetrcCommand(): string {
