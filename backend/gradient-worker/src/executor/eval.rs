@@ -9,7 +9,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Instant;
 
-use super::dependencies::EvalDependencySource;
+use super::dependencies::{EvalDependencySource, Imports};
 use super::progress_report::{ChangeReporter, thunk_progress};
 use crate::nix::wildcard_walk;
 use crate::worker_pool::WorkerPoolResolver;
@@ -503,8 +503,12 @@ impl Queued {
         }
     }
 
-    fn discovered(self, drv: &gradient_derivation::Derivation) -> DiscoveredDerivation {
-        match self {
+    fn discovered(
+        self,
+        drv: &gradient_derivation::Derivation,
+        produced: Vec<String>,
+    ) -> DiscoveredDerivation {
+        let mut discovered = match self {
             Queued::Root(Root {
                 drv_path,
                 attr,
@@ -516,19 +520,20 @@ impl Queued {
             Queued::Dependency(drv_path) => {
                 gradient_derivation::discovered_derivation(None, drv_path, drv)
             }
-        }
+        };
+        discovered.dependencies.extend(produced);
+        discovered
     }
 }
 
 pub(super) async fn walk_and_publish(
-    drv_reader: &dyn DrvReader,
-    reporter: &dyn JobReporter,
+    imports: &Imports<'_>,
     roots: Vec<Root>,
     abort: &mut super::AbortSignal,
 ) -> Result<()> {
     let (flushes, published) = mpsc::channel(PUBLISH_BACKLOG);
     let walk = async {
-        let mut walker = ClosureWalker::new(drv_reader, reporter, flushes);
+        let mut walker = ClosureWalker::new(imports.clone(), flushes);
         roots.into_iter().for_each(|root| walker.add_root(root));
         while walker.has_work_left() {
             walker.advance_walk(abort).await?;
@@ -536,7 +541,7 @@ pub(super) async fn walk_and_publish(
         walker.completed();
         walker.flush().await
     };
-    tokio::try_join!(walk, publish(reporter, published))?;
+    tokio::try_join!(walk, publish(imports.reporter, published))?;
     Ok(())
 }
 
@@ -574,8 +579,7 @@ impl FoundAttrs {
 type KnownAnswer = (Vec<String>, HashSet<String>);
 
 struct ClosureWalker<'a> {
-    drv_reader: &'a dyn DrvReader,
-    reporter: &'a dyn JobReporter,
+    imports: Imports<'a>,
     known_queries: FuturesOrdered<BoxFuture<'a, KnownAnswer>>,
     batch: Vec<DiscoveredDerivation>,
     visited: HashSet<String>,
@@ -588,14 +592,9 @@ struct ClosureWalker<'a> {
 }
 
 impl<'a> ClosureWalker<'a> {
-    fn new(
-        drv_reader: &'a dyn DrvReader,
-        reporter: &'a dyn JobReporter,
-        flushes: mpsc::Sender<Flush>,
-    ) -> Self {
+    fn new(imports: Imports<'a>, flushes: mpsc::Sender<Flush>) -> Self {
         Self {
-            drv_reader,
-            reporter,
+            imports,
             known_queries: FuturesOrdered::new(),
             batch: Vec::new(),
             visited: HashSet::new(),
@@ -705,16 +704,17 @@ impl<'a> ClosureWalker<'a> {
     #[tracing::instrument(name = "wave", level = "debug", skip_all, fields(pending = self.pending.len()))]
     async fn process_wave(&mut self, wave: Vec<Queued>) -> Result<()> {
         let parsed_drvs = self.parse_while_asking(&wave).await?;
-        let new_deps = self.unvisited_inputs(&parsed_drvs);
+        let produced = produced_drvs(&self.imports, &parsed_drvs).await?;
+        let new_deps = self.unvisited_inputs(&parsed_drvs, &produced);
         self.ask_known(new_deps);
-        self.record_wave(wave, parsed_drvs).await
+        self.record_wave(wave, parsed_drvs, produced).await
     }
 
     async fn parse_while_asking(
         &mut self,
         wave: &[Queued],
     ) -> Result<Vec<(gradient_derivation::Derivation, u64)>> {
-        let drv_reader = self.drv_reader;
+        let drv_reader = self.imports.drv_reader;
         let parse = parse_drv_wave(drv_reader, wave);
         tokio::pin!(parse);
         loop {
@@ -730,15 +730,16 @@ impl<'a> ClosureWalker<'a> {
     fn unvisited_inputs(
         &mut self,
         parsed: &[(gradient_derivation::Derivation, u64)],
+        produced: &[Vec<String>],
     ) -> Vec<String> {
-        let mut new_deps: Vec<String> = Vec::new();
-        for (drv, _) in parsed {
-            for input in &drv.input_derivations {
-                if !self.visited.contains(input.path.as_str()) {
-                    new_deps.push(input.path.clone());
-                }
-            }
-        }
+        let inputs = parsed
+            .iter()
+            .flat_map(|(drv, _)| drv.input_derivations.iter().map(|input| &input.path))
+            .chain(produced.iter().flatten());
+        let mut new_deps: Vec<String> = inputs
+            .filter(|path| !self.visited.contains(path.as_str()))
+            .cloned()
+            .collect();
         new_deps.sort_unstable();
         new_deps.dedup();
         self.visited.extend(new_deps.iter().cloned());
@@ -746,7 +747,7 @@ impl<'a> ClosureWalker<'a> {
     }
 
     fn ask_known(&mut self, deps: Vec<String>) {
-        let reporter = self.reporter;
+        let reporter = self.imports.reporter;
         self.known_queries.push_back(Box::pin(async move {
             if deps.is_empty() {
                 return (deps, HashSet::new());
@@ -780,13 +781,15 @@ impl<'a> ClosureWalker<'a> {
         &mut self,
         wave: Vec<Queued>,
         parsed_drvs: Vec<(gradient_derivation::Derivation, u64)>,
+        produced: Vec<Vec<String>>,
     ) -> Result<()> {
-        for (queued, (drv, nar_size)) in wave.into_iter().zip(parsed_drvs) {
+        for ((queued, (drv, nar_size)), produced) in wave.into_iter().zip(parsed_drvs).zip(produced)
+        {
             self.paths
                 .push((queued.drv_path().to_owned(), Some(nar_size)));
             self.paths
                 .extend(drv.input_sources.iter().map(|src| (src.clone(), None)));
-            self.batch.push(queued.discovered(&drv));
+            self.batch.push(queued.discovered(&drv, produced));
             self.walked += 1;
 
             if self.walked.is_multiple_of(500) {
@@ -805,6 +808,19 @@ impl<'a> ClosureWalker<'a> {
 
         Ok(())
     }
+}
+
+async fn produced_drvs(
+    imports: &Imports<'_>,
+    parsed: &[(gradient_derivation::Derivation, u64)],
+) -> Result<Vec<Vec<String>>> {
+    futures::future::try_join_all(
+        parsed
+            .iter()
+            .map(|(drv, _)| imports.produced_by_inputs(drv)),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("resolving a dynamic derivation input failed: {e}"))
 }
 
 async fn report_failed_attrs(updater: &mut dyn JobReporter, failed: &[AttrError]) -> Result<()> {
@@ -942,19 +958,19 @@ async fn discover_and_walk(
 ) -> Result<Streamed> {
     let (found_tx, mut found_rx) = mpsc::unbounded_channel();
     let (flushes, published) = mpsc::channel(PUBLISH_BACKLOG);
+    let imports = Imports::new(reporter, drv_reader, abort.clone());
     let discovery = async {
         Ok(discover(
             resolver,
-            drv_reader,
+            &imports,
             job,
             local_flake_path,
-            reporter,
             abort.clone(),
             found_tx,
         )
         .await)
     };
-    let walk = ClosureWalker::new(drv_reader, reporter, flushes).walk_found(&mut found_rx, abort);
+    let walk = ClosureWalker::new(imports.clone(), flushes).walk_found(&mut found_rx, abort);
     let ((listed, (found, mut rest)), mut pushed) = tokio::try_join!(
         async { tokio::try_join!(discovery, walk) },
         publish(reporter, published),
@@ -970,10 +986,9 @@ async fn discover_and_walk(
 
 async fn discover(
     resolver: &dyn DerivationResolver,
-    drv_reader: &dyn DrvReader,
+    imports: &Imports<'_>,
     job: &FlakeJob,
     local_flake_path: Option<&str>,
-    reporter: &dyn JobReporter,
     mut abort: super::AbortSignal,
     found: mpsc::UnboundedSender<ResolvedDerivation>,
 ) -> Result<FlakeDiscovery> {
@@ -981,7 +996,7 @@ async fn discover(
     let eval_overrides = eval_input_overrides(job, local_flake_path);
     debug!(repo = %repo, "listing flake derivations");
 
-    let imports = EvalDependencySource::new(reporter, drv_reader, abort.clone());
+    let imports = EvalDependencySource::new(imports.clone());
     let send = move |resolved: Vec<ResolvedDerivation>| {
         for derivation in resolved {
             let _ = found.send(derivation);
@@ -1055,6 +1070,7 @@ mod tests {
     use super::*;
     use gradient_test_support::fakes::derivation_resolver::FakeDerivationResolver;
     use gradient_test_support::prelude::*;
+    use gradient_wire::types::{ImportOutcome, Realisation};
     use std::path::PathBuf;
 
     fn fixture_dir() -> PathBuf {
@@ -1939,9 +1955,9 @@ mod tests {
         let reporter =
             RecordingJobReporter::new().with_known_query_delay(std::time::Duration::from_secs(1));
 
+        let reader = FakeDrvReader::from_raw_drvs(drvs);
         walk_and_publish(
-            &FakeDrvReader::from_raw_drvs(drvs),
-            &reporter,
+            &Imports::new(&reporter, &reader, never_abort()),
             vec![Root {
                 drv_path: root.clone(),
                 attr: "root".into(),
@@ -1967,5 +1983,83 @@ mod tests {
         let peak = reporter.peak_known_queries_in_flight();
         assert!(peak > 1, "the walk waited on every answer alone");
         assert!(peak <= KNOWN_QUERIES_IN_FLIGHT, "{peak} queries in flight");
+    }
+
+    const DYNAMIC: &str = "/nix/store/ddddddddddddddddddddddddddddddd1-dynamic.drv";
+    const MAKER: &str = "/nix/store/ddddddddddddddddddddddddddddddd2-maker.drv";
+    const PRODUCED: &str = "/nix/store/ddddddddddddddddddddddddddddddd3-produced.drv";
+    const PRODUCED_INPUT: &str = "/nix/store/ddddddddddddddddddddddddddddddd4-input.drv";
+
+    fn leaf_drv(name: &str, inputs: &str) -> Vec<u8> {
+        format!(
+            r#"Derive([("out","/nix/store/fffffffffffffffffffffffffffffff1-{name}","","")],[{inputs}],[],"x86_64-linux","/bin/sh",[],[("name","{name}")])"#
+        )
+        .into_bytes()
+    }
+
+    fn dynamic_drvs() -> FakeDrvReader {
+        FakeDrvReader::new()
+            .with_drv(
+                DYNAMIC,
+                format!(
+                    r#"DrvWithVersion("xp-dyn-drv",[("out","","r:sha256","")],[("{MAKER}",([],[("out",["out"])]))],[],"x86_64-linux","/bin/sh",[],[("name","dynamic")])"#
+                )
+                .into_bytes(),
+            )
+            .with_drv(
+                MAKER,
+                br#"Derive([("out","","text:sha256","")],[],[],"x86_64-linux","/bin/sh",[],[("name","maker")])"#.to_vec(),
+            )
+            .with_drv(PRODUCED, leaf_drv("produced", &format!(r#"("{PRODUCED_INPUT}",["out"])"#)))
+            .with_drv(PRODUCED_INPUT, leaf_drv("input", ""))
+    }
+
+    #[tokio::test]
+    async fn a_dynamic_input_is_built_and_the_derivation_it_produces_is_walked() {
+        let realised = Realisation {
+            drv_path: MAKER.into(),
+            output: "out".into(),
+            path: PRODUCED.into(),
+        };
+        let reporter = RecordingJobReporter::new().with_import_outcome(
+            MAKER,
+            ImportOutcome::Completed {
+                realisations: vec![realised.clone()],
+            },
+        );
+        let reader = dynamic_drvs();
+
+        walk_and_publish(
+            &Imports::new(&reporter, &reader, never_abort()),
+            vec![Root {
+                drv_path: DYNAMIC.into(),
+                attr: "dynamic".into(),
+                ifd: false,
+            }],
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
+
+        let walked = reporter.all_eval_derivations();
+        let dynamic = walked
+            .iter()
+            .find(|d| d.drv_path == DYNAMIC)
+            .expect("the dynamic derivation is reported");
+        assert_eq!(
+            dynamic.dependencies,
+            vec![MAKER.to_owned(), PRODUCED.to_owned()]
+        );
+        for path in [PRODUCED, PRODUCED_INPUT] {
+            assert!(
+                walked.iter().any(|d| d.drv_path == path),
+                "{path} is walked: {walked:?}"
+            );
+        }
+        assert!(
+            reporter.events().iter().any(|e| matches!(e,
+                ReportedEvent::RealisationsRegistered { realisations } if realisations == std::slice::from_ref(&realised))),
+            "the realised derivation is registered locally"
+        );
     }
 }
