@@ -825,7 +825,6 @@ mod shared {
     use std::collections::BTreeSet;
 
     use chrono::NaiveDateTime;
-    use gradient_db::graph::consistency::ConsistencyReport;
     use gradient_entity::build::BuildStatus;
     use gradient_entity::build_attempt::AttemptFailureReason;
     use gradient_entity::ids::{DerivationId, EvaluationId};
@@ -900,15 +899,7 @@ mod shared {
     pub(crate) const BUILDER_EXIT: Option<AttemptFailureReason> =
         Some(AttemptFailureReason::BuilderNonzero);
 
-    pub(crate) fn assert_only_unstored_outputs(
-        report: ConsistencyReport,
-        unstored: i64,
-        after: &str,
-    ) {
-        let unbacked = report.unbacked_trusted_outputs;
-        assert_eq!(unbacked, unstored, "{after}: {report:?}");
-        assert_eq!(report.total(), unstored, "{after}: {report:?}");
-    }
+    pub(crate) use crate::testing::assert_only_unstored_outputs;
 
     pub(crate) fn t0() -> NaiveDateTime {
         test_date() + chrono::Duration::days(30)

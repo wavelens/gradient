@@ -92,6 +92,12 @@ pub async fn zero_drift(ctx: &DbContext, after: &str) {
     assert_eq!(report.total(), 0, "drift after {after}: {report:?}");
 }
 
+pub fn assert_only_unstored_outputs(report: ConsistencyReport, unstored: i64, after: &str) {
+    let unbacked = report.unbacked_trusted_outputs;
+    assert_eq!(unbacked, unstored, "{after}: {report:?}");
+    assert_eq!(report.total(), unstored, "{after}: {report:?}");
+}
+
 async fn assert_declared_statuses(db: &TestDatabase, declared: Vec<(String, BuildStatus)>) {
     for (derivation, status) in declared {
         let settled = db.shared_build(&derivation).await.status;

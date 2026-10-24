@@ -27,7 +27,7 @@ mod triggers;
 mod workers;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::AtomicI64;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -78,6 +78,7 @@ pub(crate) struct SchedulerCase {
     connected_workers: Mutex<HashSet<String>>,
     connected_on_any_instance: Arc<Mutex<HashSet<String>>>,
     observed: Mutex<Observed>,
+    unstored_outputs: AtomicI64,
     secret: Arc<NamedTempFile>,
     probe: crate::probe::UpstreamProbe,
 }
@@ -106,6 +107,28 @@ impl SchedulerCase {
         shape: Shape,
         config: impl FnOnce(&mut RuntimeConfig) + 'static,
     ) -> Self {
+        let case = Self::start_seeded(shape, config).await;
+        case.assert_drift("the seed").await;
+        case
+    }
+
+    pub async fn start_with_unstored_outputs(shape: Shape, unstored: i64) -> Self {
+        let case = Self::start_seeded(shape, |_| {}).await;
+        case.set_unstored_outputs(unstored);
+        case.assert_drift("the seed").await;
+        case
+    }
+
+    pub fn set_unstored_outputs(&self, unstored: i64) {
+        self.unstored_outputs.store(unstored, Ordering::SeqCst);
+    }
+
+    async fn assert_drift(&self, after: &str) {
+        let unstored = self.unstored_outputs.load(Ordering::SeqCst);
+        testing::assert_only_unstored_outputs(testing::drift(&self.ctx).await, unstored, after);
+    }
+
+    async fn start_seeded(shape: Shape, config: impl FnOnce(&mut RuntimeConfig) + 'static) -> Self {
         let started_at = Utc::now();
         let declared = shape.declared_statuses();
         let db = shape.into_database().await;
@@ -117,9 +140,7 @@ impl SchedulerCase {
         testing::settle_seed(&instance.ctx, &db, declared).await;
         enter_queued_builds(&instance.ctx, &db, None).await;
 
-        let case = Self::spawn(Arc::new(db), instance, graph, secret, Arc::default()).await;
-        testing::zero_drift(&case.ctx, "the seed").await;
-        case
+        Self::spawn(Arc::new(db), instance, graph, secret, Arc::default()).await
     }
 
     pub async fn second_instance(&self) -> SchedulerCase {
@@ -180,6 +201,7 @@ impl SchedulerCase {
             connected_workers: Mutex::default(),
             connected_on_any_instance,
             observed,
+            unstored_outputs: AtomicI64::new(0),
             secret,
             probe,
         }
@@ -230,7 +252,7 @@ impl SchedulerCase {
 
     async fn check_rows(&self, after: &str) {
         self.settled().await;
-        testing::zero_drift(&self.ctx, after).await;
+        self.assert_drift(after).await;
 
         let rows = Rows::read(&self.db).await;
         rows.assert_invariants(after);
