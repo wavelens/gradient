@@ -23,13 +23,33 @@ use std::sync::Arc;
 use super::EvalAccessContext;
 use super::types::MakeEvaluationRequest;
 
+async fn load_abortable_evaluation(
+    db: &gradient_db::WebDb,
+    user: &MUser,
+    api_key: &MaybeApiKey,
+    evaluation_id: EvaluationId,
+) -> WebResult<EvalAccessContext> {
+    if user.superuser {
+        return EvalAccessContext::load_unguarded(db, evaluation_id).await;
+    }
+
+    let api_key_ref = api_key.as_ref();
+    let ctx = EvalAccessContext::load(db, evaluation_id, &Some(user.clone()), api_key_ref).await?;
+    // Mutations require explicit project membership even on a public project.
+    if !is_project_member(db, user.id, ctx.project_id, api_key_ref).await? {
+        return Err(WebError::not_found(Resource::Evaluation));
+    }
+
+    Ok(ctx)
+}
+
 #[utoipa::path(
     post,
     path = "/evals/{evaluation}",
     operation_id = "postEvaluation",
     tag = "evals",
     summary = "Evaluation action",
-    description = "Performs an action on the evaluation. Currently the only supported action is\n`\"abort\"`, which cancels all in-progress and queued builds.",
+    description = "Performs an action on the evaluation. Currently the only supported action is\n`\"abort\"`, which cancels all in-progress and queued builds. Requires project membership or a superuser.",
     params(("evaluation" = EvaluationId, Path)),
     request_body = MakeEvaluationRequest,
     responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
@@ -42,19 +62,7 @@ pub async fn post_evaluation(
     Path(evaluation_id): Path<EvaluationId>,
     Json(body): Json<MakeEvaluationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let api_key_ref = api_key.as_ref();
-    let ctx = EvalAccessContext::load(
-        &state.web_db,
-        evaluation_id,
-        &Some(user.clone()),
-        api_key_ref,
-    )
-    .await?;
-
-    // Mutations require explicit project membership even on a public project.
-    if !is_project_member(&state.web_db, user.id, ctx.project_id, api_key_ref).await? {
-        return Err(WebError::not_found(Resource::Evaluation));
-    }
+    let ctx = load_abortable_evaluation(&state.web_db, &user, &api_key, evaluation_id).await?;
 
     if body.method == "abort" {
         scheduler.abort_evaluation(ctx.evaluation).await;
