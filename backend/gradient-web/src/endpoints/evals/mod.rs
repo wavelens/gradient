@@ -42,12 +42,34 @@ pub(super) struct EvalAccessContext {
 }
 
 impl EvalAccessContext {
+    pub(super) async fn load_unguarded(db: &WebDb, evaluation_id: EvaluationId) -> WebResult<Self> {
+        Ok(Self::with_project(db, evaluation_id).await?.0)
+    }
+
     pub(super) async fn load(
         db: &WebDb,
         evaluation_id: EvaluationId,
         maybe_user: &Option<MUser>,
         api_key: Option<&ApiKeyContext>,
     ) -> WebResult<Self> {
+        let (ctx, project) = Self::with_project(db, evaluation_id).await?;
+
+        let can_access = if project.public {
+            true
+        } else {
+            match maybe_user {
+                Some(user) => is_project_member(db, user.id, project.id, api_key).await?,
+                None => false,
+            }
+        };
+        if !can_access {
+            return Err(WebError::not_found(Resource::Evaluation));
+        }
+
+        Ok(ctx)
+    }
+
+    async fn with_project(db: &WebDb, evaluation_id: EvaluationId) -> WebResult<(Self, MProject)> {
         let evaluation = require::<EEvaluation>(db, evaluation_id).await?;
 
         let task_id = evaluation.task.ok_or_else(|| {
@@ -63,31 +85,18 @@ impl EvalAccessContext {
             WebError::data_inconsistency(Resource::Evaluation)
         })?;
         let project_id = task.project;
-        let task_name = Some(task.name);
-        let task_display_name = Some(task.display_name);
 
         let project = by_id::<EProject, _>(db, project_id).await?.ok_or_else(|| {
             tracing::warn!(%project_id, "Project not found");
             WebError::data_inconsistency(Resource::Project)
         })?;
 
-        let can_access = if project.public {
-            true
-        } else {
-            match maybe_user {
-                Some(user) => is_project_member(db, user.id, project.id, api_key).await?,
-                None => false,
-            }
-        };
-        if !can_access {
-            return Err(WebError::not_found(Resource::Evaluation));
-        }
-
-        Ok(Self {
+        let ctx = Self {
             evaluation,
             project_id,
-            task_name,
-            task_display_name,
-        })
+            task_name: Some(task.name),
+            task_display_name: Some(task.display_name),
+        };
+        Ok((ctx, project))
     }
 }

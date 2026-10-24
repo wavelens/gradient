@@ -10,6 +10,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { BoardService, AssignedJobDetail, InstanceContextView, Windowed } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
+import { AuthService } from '@core/services/auth.service';
 import {
   ButtonComponent,
   DialogComponent,
@@ -40,7 +41,7 @@ interface RuleRow {
   standalone: true,
   imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LabelHelpComponent],
   template: `
-    <a routerLink="/board/live" class="back">← Live Jobs</a>
+    <a routerLink="/board/live" class="back">Back to Live Jobs</a>
 
     @if (job(); as j) {
       <header class="head">
@@ -48,9 +49,15 @@ interface RuleRow {
           <span class="kind" [class.build]="j.kind === 1">{{ j.kind === 1 ? 'build' : 'eval' }}</span>
           <h1>{{ j.passed_over ? 'Passed over' : 'Assigned job' }}</h1>
         </div>
-        <div class="total">
-          <span class="label">Total score</span>
-          <span class="value">{{ j.score | number: '1.2-2' }}</span>
+        <div class="head-actions phone-icon-buttons">
+          @if (canAbort()) {
+            <button grButton label="Abort" icon="close" severity="danger" size="small"
+                    [loading]="aborting()" [disabled]="aborting()" (click)="abortOpen.set(true)"></button>
+          }
+          <div class="total">
+            <span class="label">Total score</span>
+            <span class="value">{{ j.score | number: '1.2-2' }}</span>
+          </div>
         </div>
       </header>
 
@@ -334,6 +341,24 @@ interface RuleRow {
         <button grButton label="Close" severity="secondary" (click)="buildDialog.set(false)"></button>
       </div>
     </gr-dialog>
+
+    <gr-dialog
+      header="Abort job"
+      [visible]="abortOpen()"
+      (visibleChange)="!$event && !aborting() && abortOpen.set(false)"
+      width="400px"
+    >
+      <p>Do you really want to abort the {{ job()?.kind === 1 ? 'build' : 'evaluation' }}?</p>
+      @if (abortError()) {
+        <p class="muted">{{ abortError() }}</p>
+      }
+      <div grDialogFooter>
+        <button grButton label="Cancel" severity="secondary" [disabled]="aborting()"
+                (click)="abortOpen.set(false)"></button>
+        <button grButton label="Abort" severity="danger" [loading]="aborting()"
+                [disabled]="aborting()" (click)="abortJob()"></button>
+      </div>
+    </gr-dialog>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './job-detail.component.scss',
@@ -342,6 +367,7 @@ export class BoardJobDetailComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private board = inject(BoardService);
   private evaluations = inject(EvaluationsService);
+  private auth = inject(AuthService);
   private destroyRef = inject(DestroyRef);
 
   job = signal<AssignedJobDetail | null>(null);
@@ -353,6 +379,15 @@ export class BoardJobDetailComponent implements OnInit {
   buildDialog = signal(false);
   buildLoading = signal(false);
   buildError = signal<string | null>(null);
+  abortOpen = signal(false);
+  aborting = signal(false);
+  abortError = signal<string | null>(null);
+
+  canAbort = computed(() => {
+    const j = this.job();
+    if (!j || j.passed_over || j.finished_at || this.auth.user()?.superuser !== true) return false;
+    return j.kind !== 1 || !!j.build_id;
+  });
 
   protected readonly formatBytes = formatBytes;
   protected readonly formatMegabytes = formatMegabytes;
@@ -447,6 +482,27 @@ export class BoardJobDetailComponent implements OnInit {
         else this.notFound.set(true);
       },
       error: () => this.notFound.set(true),
+    });
+  }
+
+  abortJob(): void {
+    const j = this.job();
+    if (!j) return;
+    this.aborting.set(true);
+    this.abortError.set(null);
+    const request = j.kind === 1 && j.build_id
+      ? this.evaluations.abortBuild(j.build_id)
+      : this.evaluations.abortEvaluation(j.evaluation_id);
+    request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.aborting.set(false);
+        this.abortOpen.set(false);
+        this.loadJob(j.id);
+      },
+      error: (error: Error) => {
+        this.aborting.set(false);
+        this.abortError.set(error?.message || 'Failed to abort the job.');
+      },
     });
   }
 

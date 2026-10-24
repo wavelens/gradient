@@ -66,6 +66,8 @@ Open a job from **Live Jobs** to see five sections.
 
 A slow job's timeline shows where the time went. The score explains why the server picked that worker.
 
+**Abort** can halt a running job in any project for a superuser.
+
 ??? note "Timeline Phases"
     | Phase | Meaning |
     |---|---|

@@ -33,13 +33,26 @@ async fn load_member_build(
     Ok(ctx)
 }
 
+async fn load_abortable_build(
+    db: &WebDb,
+    user: &MUser,
+    api_key: &MaybeApiKey,
+    build_id: BuildJobId,
+) -> WebResult<BuildAccessContext> {
+    if user.superuser {
+        return BuildAccessContext::load_unguarded(db, build_id).await;
+    }
+
+    load_member_build(db, user, api_key, build_id).await
+}
+
 #[utoipa::path(
     post,
     path = "/builds/{build}/abort",
     operation_id = "abortBuild",
     tag = "builds",
     summary = "Abort build",
-    description = "Stops a created, queued or running build of a running evaluation. The build becomes `Aborted` and its dependents in the evaluation become `DependencyFailed`. The evaluation no longer waits for them, and no heal of the evaluation queues them again. A later evaluation builds them again. Requires project membership. Answers 409 when the evaluation has finished, the build has another status, or another running evaluation still needs the build.",
+    description = "Stops a created, queued or running build of a running evaluation. The build becomes `Aborted` and its dependents in the evaluation become `DependencyFailed`. The evaluation no longer waits for them, and no heal of the evaluation queues them again. A later evaluation builds them again. Requires project membership or a superuser. Answers 409 when the evaluation has finished, the build has another status, or another running evaluation still needs the build.",
     params(("build" = BuildJobId, Path)),
     responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
 )]
@@ -50,7 +63,7 @@ pub async fn post_build_abort(
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = load_member_build(&state.web_db, &user, &api_key, build_id).await?;
+    let ctx = load_abortable_build(&state.web_db, &user, &api_key, build_id).await?;
 
     scheduler
         .abort_build(ctx.build_job.evaluation, ctx.shared_build.id)
