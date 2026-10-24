@@ -31,6 +31,22 @@ pub fn nix32_encode(bytes: &[u8]) -> String {
     out
 }
 
+pub fn nix32_decode(text: &str) -> Option<Vec<u8>> {
+    let mut bytes = vec![0u8; text.len() * 5 / 8];
+    for (n, c) in text.bytes().rev().enumerate() {
+        let digit = u16::try_from(NIX32_CHARS.iter().position(|&x| x == c)?).ok()?;
+        let (i, j) = (n * 5 / 8, n * 5 % 8);
+        let [low, high] = (digit << j).to_le_bytes();
+        *bytes.get_mut(i)? |= low;
+        match bytes.get_mut(i + 1) {
+            Some(next) => *next |= high,
+            None if high != 0 => return None,
+            None => {}
+        }
+    }
+    Some(bytes)
+}
+
 const HASH_ALGOS: &[&str] = &["sha256", "blake3"];
 
 pub fn normalize_nar_hash(hash: &str) -> String {
@@ -115,6 +131,19 @@ mod tests {
         for (bytes, expected) in cases {
             assert_eq!(nix32_encode(bytes), *expected);
         }
+    }
+
+    #[test]
+    fn nix32_decode_reverses_the_known_vectors() {
+        assert_eq!(
+            nix32_decode(EMPTY_SHA256_NIX32).as_deref(),
+            Some(&EMPTY_SHA256[..])
+        );
+        assert_eq!(
+            nix32_decode(BLAKE3_ABC_NIX32).as_deref(),
+            Some(&BLAKE3_ABC[..])
+        );
+        assert_eq!(nix32_decode("e"), None);
     }
 
     #[test]

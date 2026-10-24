@@ -318,6 +318,7 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(tasks::evaluations::get_task_details))
                 .routes(routes!(tasks::evaluations::get_task_entry_points))
                 .routes(routes!(tasks::metrics::get_task_metrics))
+                .routes(routes!(tasks::sbom::get_task_sbom))
                 .routes(routes!(tasks::metrics::get_entry_point_metrics))
                 .routes(routes!(tasks::evaluations::get_entry_point_download))
                 .routes(routes!(badges::get_task_badge))
