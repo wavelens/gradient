@@ -11,7 +11,7 @@ use fixtures::{
     input, make_commit, make_eval, make_task_with_concurrency, make_task_with_last_eval,
     one_active_per_branch_violation, with_eval_worker, with_storage_not_full, with_writable_cache,
 };
-use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_fixtures::mock::{empty_db, mock_db};
 use gradient_types::triggers::TriggerType;
 use gradient_types::*;
@@ -420,6 +420,8 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
         repository_override: None,
         wildcard_override: None,
         source_comment: None,
+        started_by: None,
+        walk_mode: WalkMode::Pruned,
         instance_max_storage_gb: 0,
     };
     let res = apply_trigger(&db, &task, applied).await.unwrap();

@@ -17,13 +17,13 @@ import {
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
-  EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
   PageLayoutComponent,
   SelectComponent,
+  TooltipDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
@@ -91,8 +91,8 @@ const DEFAULT_FORM: TriggerFormState = {
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
-    EmptyStateComponent,
     BadgeComponent,
+    TooltipDirective,
   ],
   templateUrl: './task-triggers.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -111,6 +111,7 @@ export class TaskTriggersComponent implements OnInit {
     () =>
       this.firingId() !== null ||
       this.deletingId() !== null ||
+      this.makingDefaultId() !== null ||
       this.accessSvc.shouldDisableInput(this.access()),
   );
 
@@ -126,6 +127,7 @@ export class TaskTriggersComponent implements OnInit {
   loading = signal(true);
   saving = signal(false);
   deletingId = signal<string | null>(null);
+  makingDefaultId = signal<string | null>(null);
   firingId = signal<string | null>(null);
   fireSuccessId = signal<string | null>(null);
 
@@ -301,6 +303,17 @@ export class TaskTriggersComponent implements OnInit {
         this.loadTriggers();
       },
       error: () => this.deletingId.set(null),
+    });
+  }
+
+  makeDefault(id: string): void {
+    this.makingDefaultId.set(id);
+    this.triggersService.setDefault(this.projectName, this.taskName, id).subscribe({
+      next: () => {
+        this.makingDefaultId.set(null);
+        this.loadTriggers();
+      },
+      error: () => this.makingDefaultId.set(null),
     });
   }
 

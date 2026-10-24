@@ -42,6 +42,7 @@ impl<'a> StateApplicator<'a> {
 
             let now = now();
 
+            let created = existing_task.is_none();
             let task_row = if let Some(existing) = existing_task {
                 let task_id = existing.id;
                 let mut proj: task::ActiveModel = existing.into();
@@ -91,7 +92,12 @@ impl<'a> StateApplicator<'a> {
                 inserted
             };
 
-            if let Some(triggers) = &state_task.triggers {
+            let triggers = match &state_task.triggers {
+                Some(triggers) => Some(triggers.clone()),
+                None if created => Some(vec![StateTrigger::default_polling()]),
+                None => None,
+            };
+            if let Some(triggers) = &triggers {
                 let inbound_integrations_by_name =
                     inbound_integrations_by_name(self.db, project_id).await?;
                 let outbound_integrations_by_name =
@@ -319,9 +325,13 @@ pub(crate) async fn apply_task_triggers<C: ConnectionTrait>(
     }
 
     let mut desired_by_key: HashMap<String, (TriggerConfig, bool)> = HashMap::new();
+    let mut default_key = None;
     for t in desired {
         let cfg = build_trigger_config(t, inbound_by_name, outbound_by_name)?;
         let key = trigger_key(&cfg);
+        if t.is_default || default_key.is_none() {
+            default_key = Some(key.clone());
+        }
         desired_by_key.insert(key, (cfg, t.active));
     }
 
@@ -340,11 +350,12 @@ pub(crate) async fn apply_task_triggers<C: ConnectionTrait>(
 
     let now = gradient_types::now();
 
+    let mut kept: HashMap<String, MTaskTrigger> = HashMap::new();
     for (key, (cfg, active)) in &desired_by_key {
         if existing_by_key.contains_key(key) {
             continue;
         }
-        MTaskTrigger {
+        let inserted = MTaskTrigger {
             id: TaskTriggerId::now_v7(),
             task: task.id,
             trigger_type: cfg.trigger_type(),
@@ -357,19 +368,30 @@ pub(crate) async fn apply_task_triggers<C: ConnectionTrait>(
         .into_active_model()
         .insert(db)
         .await?;
+        kept.insert(key.clone(), inserted);
     }
 
     for (key, row) in existing_by_key {
-        if let Some((_, active)) = desired_by_key.get(&key) {
-            if row.active != *active {
-                let mut a: ATaskTrigger = row.into();
-                a.active = Set(*active);
-                a.updated_at = Set(now);
-                a.update(db).await?;
-            }
-        } else {
+        let Some((_, active)) = desired_by_key.get(&key) else {
             ETaskTrigger::delete_by_id(row.id).exec(db).await?;
-        }
+            continue;
+        };
+        let row = if row.active != *active {
+            let mut a: ATaskTrigger = row.into();
+            a.active = Set(*active);
+            a.updated_at = Set(now);
+            a.update(db).await?
+        } else {
+            row
+        };
+        kept.insert(key, row);
+    }
+
+    let default_trigger = default_key
+        .and_then(|key| kept.remove(&key))
+        .context("the default trigger was not applied")?;
+    if !default_trigger.is_default {
+        gradient_db::triggers::make_default(db, default_trigger).await?;
     }
 
     Ok(())
@@ -702,6 +724,7 @@ mod trigger_helper_tests {
             integration: None,
             config: serde_json::json!({ "interval_secs": interval_secs }),
             active: true,
+            is_default: false,
         }
     }
 
@@ -729,6 +752,7 @@ mod trigger_helper_tests {
             integration: None,
             config: serde_json::Value::Null,
             active: true,
+            is_default: false,
         };
         let cfg = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap();
         assert_eq!(
@@ -759,6 +783,7 @@ mod trigger_helper_tests {
             integration: None,
             config: serde_json::json!({ "cron": "0 0 2 * * *" }),
             active: true,
+            is_default: false,
         };
         let cfg = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap();
         assert_eq!(
@@ -776,6 +801,7 @@ mod trigger_helper_tests {
             integration: None,
             config: serde_json::json!({}),
             active: true,
+            is_default: false,
         };
         let err =
             build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap_err();
@@ -789,6 +815,7 @@ mod trigger_helper_tests {
             integration: None,
             config: serde_json::json!({}),
             active: true,
+            is_default: false,
         };
         let err =
             build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap_err();
@@ -802,6 +829,7 @@ mod trigger_helper_tests {
             integration: Some("github-app".into()),
             config: serde_json::json!({}),
             active: true,
+            is_default: false,
         };
         let err =
             build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap_err();
@@ -823,6 +851,7 @@ mod trigger_helper_tests {
             integration: Some("gh".into()),
             config: serde_json::json!({ "branches": ["main"], "tags": [], "releases_only": false }),
             active: true,
+            is_default: false,
         };
         let cfg = build_trigger_config(&t, &integrations, &empty_integrations()).unwrap();
         assert_eq!(
@@ -858,6 +887,7 @@ mod trigger_helper_tests {
             integration: Some("forgejo-status-reports".into()),
             config: serde_json::json!({}),
             active: true,
+            is_default: false,
         };
 
         let err = build_trigger_config(&t, &empty_integrations(), &outbound).unwrap_err();

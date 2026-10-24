@@ -54,6 +54,8 @@ pub struct ApplyInput {
     pub repository_override: Option<String>,
     pub wildcard_override: Option<String>,
     pub source_comment: Option<serde_json::Value>,
+    pub started_by: Option<UserId>,
+    pub walk_mode: WalkMode,
     pub instance_max_storage_gb: u32,
 }
 
@@ -91,8 +93,8 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         input.repository_override,
         input.wildcard_override,
         input.source_comment,
-        None,
-        WalkMode::Pruned,
+        input.started_by,
+        input.walk_mode,
     )
     .await
     {

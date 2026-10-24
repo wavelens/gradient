@@ -357,7 +357,7 @@
         description = ''
           Evaluation triggers of the task: polling, Git host push, Git host pull request or cron schedule.
           `null` leaves existing triggers untouched, and a new task declared with `null`
-          starts with none. An empty list is rejected.
+          starts with a polling trigger as its default trigger. An empty list is rejected.
         '';
       };
 
@@ -579,7 +579,17 @@
       active = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the trigger is active. Gradient keeps inactive triggers but never fires them.";
+        description = "Whether the trigger is active. Gradient keeps inactive triggers but never fires them automatically.";
+      };
+
+      is_default = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Whether the trigger is the default trigger of the task. The "Start Evaluation" button
+          and the evaluate API fire the default trigger. At most one trigger of a task sets this
+          flag, and the first trigger is the default when none does.
+        '';
       };
     };
   });

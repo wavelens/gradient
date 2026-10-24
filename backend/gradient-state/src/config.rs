@@ -69,7 +69,7 @@ pub struct StateTask {
     pub created_by: String,
     #[serde(default = "default_keep_evaluations")]
     pub keep_evaluations: i32,
-    /// `None` for the existing triggers. `Some([])` is an error, with at least a trigger per task.
+    /// `None` keeps the existing triggers. `Some([])` is an error, with at least a trigger per task.
     #[serde(default)]
     pub triggers: Option<Vec<StateTrigger>>,
     #[serde(default)]
@@ -117,6 +117,20 @@ pub struct StateTrigger {
     pub config: serde_json::Value,
     #[serde(default = "default_active")]
     pub active: bool,
+    #[serde(default)]
+    pub is_default: bool,
+}
+
+impl StateTrigger {
+    pub fn default_polling() -> Self {
+        Self {
+            trigger_type: TriggerType::Polling,
+            integration: None,
+            config: serde_json::json!({ "interval_secs": 300 }),
+            active: true,
+            is_default: true,
+        }
+    }
 }
 
 fn default_active() -> bool {

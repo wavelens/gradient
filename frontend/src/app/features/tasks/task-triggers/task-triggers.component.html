@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" title="Triggers" subtitle="Conditions that automatically start an evaluation">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Triggers" subtitle="Conditions that start an evaluation. Start Evaluation uses the default trigger.">
   <button slot="actions"
       *appWritable="access()"
       grButton
@@ -16,79 +16,83 @@
   @if (loading()) {
     <gr-loading-spinner message="Loading triggers..." />
   } @else {
-    @if (triggers().length === 0) {
-      <gr-empty-state icon="schedule_send" title="No triggers configured" message="Create a trigger to automatically start evaluations on a schedule, push event, or pull request.">
-        <button slot="action"
-          *appWritable="access()"
-          grButton
-          label="New Trigger"
-          icon="add"
-          (click)="startCreate()"
-          [appManagedDisable]="access()"
-          ></button>
-      </gr-empty-state>
-    } @else {
-      <div class="triggers-list">
-        @for (trigger of triggers(); track trigger.id) {
-          <div class="trigger-row">
-            <div class="trigger-header">
-              <div class="trigger-info">
-                <gr-badge [severity]="typeSeverity(trigger.type)">{{ typeLabel(trigger.type) }}</gr-badge>
-                <div>
-                  <div class="trigger-summary">{{ configSummary(trigger) }}</div>
-                  <div class="trigger-meta text-secondary">
-                    <gr-badge [severity]="trigger.active ? 'success' : 'warning'">
-                      {{ trigger.active ? 'Active' : 'Inactive' }}
-                    </gr-badge>
-                    <span>Last fired: {{ relativeTime(trigger.last_fired_at) }}</span>
-                    @if (fireSuccessId() === trigger.id) {
-                      <span class="fire-success">
-                        <gr-icon name="check_circle" size="sm" />
-                        Evaluation queued
-                      </span>
-                    }
-                  </div>
+    <div class="triggers-list">
+      @for (trigger of triggers(); track trigger.id) {
+        <div class="trigger-row">
+          <div class="trigger-header">
+            <div class="trigger-info">
+              <gr-badge [severity]="typeSeverity(trigger.type)">{{ typeLabel(trigger.type) }}</gr-badge>
+              <div>
+                <div class="trigger-summary">{{ configSummary(trigger) }}</div>
+                <div class="trigger-meta text-secondary">
+                  @if (trigger.is_default) {
+                    <gr-badge severity="info" grTooltip="Start Evaluation uses this trigger">Default</gr-badge>
+                  }
+                  <gr-badge [severity]="trigger.active ? 'success' : 'warning'">
+                    {{ trigger.active ? 'Active' : 'Inactive' }}
+                  </gr-badge>
+                  <span>Last fired: {{ relativeTime(trigger.last_fired_at) }}</span>
+                  @if (fireSuccessId() === trigger.id) {
+                    <span class="fire-success">
+                      <gr-icon name="check_circle" size="sm" />
+                      Evaluation queued
+                    </span>
+                  }
                 </div>
               </div>
-              <div class="trigger-actions">
-                <button
-                  *appWritable="triggerAccess()"
-                  grButton
-                  label="Fire Now"
-                  icon="play_arrow"
-                  severity="secondary"
-                  size="small"
-                  [loading]="firingId() === trigger.id"
-                  [disabled]="triggerRowDisabled()"
-                  (click)="fireNow(trigger.id)"
-                ></button>
-                <button
-                  *appWritable="access()"
-                  grButton
-                  label="Edit"
-                  icon="edit"
-                  severity="secondary"
-                  size="small"
-                  [disabled]="rowDisabled()"
-                  (click)="startEdit(trigger)"
-                ></button>
+            </div>
+            <div class="trigger-actions">
+              <button
+                *appWritable="triggerAccess()"
+                grButton
+                label="Fire Now"
+                icon="play_arrow"
+                severity="secondary"
+                size="small"
+                [loading]="firingId() === trigger.id"
+                [disabled]="triggerRowDisabled()"
+                (click)="fireNow(trigger.id)"
+              ></button>
+              @if (!trigger.is_default) {
                 <button
                   *appWritable="access()"
                   grButton
-                  label="Delete"
-                  icon="delete"
-                  severity="danger"
+                  label="Make Default"
+                  icon="star"
+                  severity="secondary"
                   size="small"
-                  [loading]="deletingId() === trigger.id"
+                  [loading]="makingDefaultId() === trigger.id"
                   [disabled]="rowDisabled()"
-                  (click)="deleteTrigger(trigger.id)"
+                  (click)="makeDefault(trigger.id)"
                 ></button>
-              </div>
+              }
+              <button
+                *appWritable="access()"
+                grButton
+                label="Edit"
+                icon="edit"
+                severity="secondary"
+                size="small"
+                [disabled]="rowDisabled()"
+                (click)="startEdit(trigger)"
+              ></button>
+              <button
+                *appWritable="access()"
+                grButton
+                label="Delete"
+                icon="delete"
+                severity="danger"
+                size="small"
+                [loading]="deletingId() === trigger.id"
+                [disabled]="rowDisabled() || trigger.is_default"
+                [grTooltip]="trigger.is_default ? 'Make another trigger the default first' : ''"
+                (click)="deleteTrigger(trigger.id)"
+              ></button>
             </div>
           </div>
-        }
-      </div>
-    }
+        </div>
+      }
+    </div>
   }
 </gr-page-layout>
 

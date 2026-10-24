@@ -415,8 +415,8 @@ describe('TaskDetailComponent evaluation menu', () => {
     });
   });
 
-  it('holds the full rewalk while an evaluation is in progress', () => {
-    const { fixture } = setup(trigger, { primaryStatus: 'Building' });
+  it('holds the full rewalk while an evaluation is queued', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Queued' });
     expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Full rewalk')?.disabled).toBe(true);
   });
 
@@ -439,19 +439,17 @@ describe('TaskDetailComponent evaluation menu', () => {
 });
 
 describe('TaskDetailComponent - in-progress state (#452)', () => {
-  it('disables Start Evaluation while an evaluation is in progress', () => {
-    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Fetching' });
+  it('disables Start Evaluation while the latest evaluation is queued', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Queued' });
     const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
     expect(startBtn).not.toBeNull();
     expect(startBtn!.disabled).toBe(true);
-    expect(fixture.componentInstance.evaluationInProgress()).toBe(true);
   });
 
-  it('enables Start Evaluation once the latest evaluation finished', () => {
-    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Completed' });
+  it('enables Start Evaluation while the latest evaluation runs', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Fetching' });
     const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
     expect(startBtn!.disabled).toBe(false);
-    expect(fixture.componentInstance.evaluationInProgress()).toBe(false);
   });
 
   it('shows the eval status badge in the title while in progress', () => {

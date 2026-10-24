@@ -19,6 +19,8 @@ pub(crate) enum TaskRefusal {
     InvalidTriggerConfig(String),
     #[error("trigger is inactive")]
     InactiveTrigger,
+    #[error("the default trigger cannot be deleted, make another trigger the default first")]
+    DefaultTriggerDeletion,
     #[error("{0}")]
     InvalidRepositoryUrl(String),
     #[error("{0}")]
@@ -99,7 +101,7 @@ impl Refusal for TaskRefusal {
             | Self::AttrNotConcrete
             | Self::UnknownEvaluationStatus { .. } => RefusalStatus::BadRequest,
             Self::TransferNotPermitted => RefusalStatus::Forbidden,
-            Self::ActionNameTaken => RefusalStatus::Conflict,
+            Self::ActionNameTaken | Self::DefaultTriggerDeletion => RefusalStatus::Conflict,
             Self::TeamWithoutProjectAccess { .. }
             | Self::InvalidWebhookUrl(_)
             | Self::EmptyAccessToken

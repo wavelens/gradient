@@ -9,10 +9,10 @@ use super::refusal::TaskRefusal;
 use crate::api_spec::TaskPath;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{Member, Requires, TaskScope, can};
 use anyhow::Context;
-use axum::extract::State;
 use axum::{Extension, Json};
 use chrono::Utc;
 use gradient_ci::trigger::InputUpdateOutcome;
@@ -20,12 +20,13 @@ use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::ServerState;
 use gradient_db::DbContext;
 use gradient_db::lookup::by_ids;
+use gradient_entity::evaluation::WalkMode;
 use gradient_scheduler::Scheduler;
 use gradient_sources::resolve_head;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::ConnectionTrait;
+use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -38,6 +39,7 @@ pub fn router() -> OpenApiRouter<Arc<ServerState>> {
         .routes(routes!(list, create))
         .routes(routes!(read, update, delete_one))
         .routes(routes!(fire_now))
+        .routes(routes!(set_default))
 }
 
 #[derive(Serialize, Debug, ToSchema)]
@@ -67,6 +69,7 @@ pub struct TriggerOut {
     pub trigger_type: TriggerType,
     pub config: serde_json::Value,
     pub active: bool,
+    pub is_default: bool,
     pub last_fired_at: Option<chrono::NaiveDateTime>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
@@ -84,6 +87,7 @@ impl TriggerOut {
             trigger_type: m.trigger_type,
             config: m.config,
             active: m.active,
+            is_default: m.is_default,
             last_fired_at: m.last_fired_at,
             created_at: m.created_at,
             updated_at: m.updated_at,
@@ -294,9 +298,62 @@ pub async fn delete_one(
         .await?
         .or_not_found(Resource::Trigger)?;
 
+    if row.is_default {
+        return Err(TaskRefusal::DefaultTriggerDeletion.into());
+    }
+
     gradient_db::triggers::delete(&db.web_db, row).await?;
 
     Ok(ok_json(DeletedResponse::deleted()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/{id}/default",
+    operation_id = "setDefaultTaskTrigger",
+    tag = "triggers",
+    summary = "Make trigger the default",
+    description = "The default trigger decides the branch of `POST /tasks/{project}/{task}/evaluate`. The previous default trigger stops being the default.",
+    params(TaskPath, ("id" = TaskTriggerId, Path)),
+    responses((status = OK, description = "Trigger updated", body = TriggerOut), WebError)
+)]
+pub async fn set_default(
+    TaskScope {
+        task: proj,
+        db,
+        params,
+        ..
+    }: TaskScope<Requires<can::ManageTriggers>>,
+) -> WebResult<Json<BaseResponse<TriggerOut>>> {
+    let id: TaskTriggerId = params.param("id")?;
+
+    let row = gradient_db::triggers::by_id_in_task(&db.web_db, proj.id, id)
+        .await?
+        .or_not_found(Resource::Trigger)?;
+
+    let txn = db.web_db.begin().await?;
+    let updated = gradient_db::triggers::make_default(&txn, row).await?;
+    txn.commit().await?;
+
+    let integrations =
+        load_integrations_for_triggers(&db.web_db, std::slice::from_ref(&updated)).await?;
+    Ok(ok_json(TriggerOut::build(updated, &integrations)))
+}
+
+#[derive(Serialize, Debug, ToSchema)]
+#[serde(tag = "outcome")]
+pub enum FireOutcome {
+    Created { evaluation_id: EvaluationId },
+    SkippedSameCommit,
+    SkippedConcurrency,
+    InputUpdateRunning,
+    InputUpdateStarted { evaluation_ids: Vec<EvaluationId> },
+}
+
+pub(super) struct FireRequest {
+    pub started_by: Option<UserId>,
+    pub walk_mode: WalkMode,
+    pub wildcard_override: Option<String>,
 }
 
 #[utoipa::path(
@@ -307,21 +364,21 @@ pub async fn delete_one(
     summary = "Manually fire trigger",
     description = "Resolves the task HEAD and applies the trigger immediately, bypassing commit dedup. A task with an active `open_pr` action and tracked flake inputs starts only its input update. Returns the outcome.",
     params(TaskPath, ("id" = TaskTriggerId, Path)),
-    responses((status = OK, description = "Trigger apply outcome", body = serde_json::Value), WebError)
+    responses((status = OK, description = "Trigger apply outcome", body = FireOutcome), WebError)
 )]
 pub async fn fire_now(
     TaskScope {
         task: proj,
+        user,
         db,
         params,
         ..
     }: TaskScope<Requires<can::TriggerEvaluation>>,
-    state: State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
+) -> WebResult<Json<BaseResponse<FireOutcome>>> {
     let id: TaskTriggerId = params.param("id")?;
 
-    let row = gradient_db::triggers::by_id_in_task(&state.web_db, proj.id, id)
+    let row = gradient_db::triggers::by_id_in_task(&db.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::Trigger)?;
 
@@ -329,36 +386,48 @@ pub async fn fire_now(
         return Err(TaskRefusal::InactiveTrigger.into());
     }
 
-    let trigger_type = row.trigger_type;
+    let request = FireRequest {
+        started_by: Some(user.id),
+        walk_mode: WalkMode::Pruned,
+        wildcard_override: None,
+    };
+    Ok(ok_json(fire(&db, &scheduler, &proj, &row, request).await?))
+}
 
-    let branch_for_fire: Option<String> = TriggerConfig::parse_row(row.trigger_type, &row.config)
+pub(super) async fn fire(
+    db: &DbContext,
+    scheduler: &Scheduler,
+    task: &MTask,
+    trigger: &MTaskTrigger,
+    request: FireRequest,
+) -> WebResult<FireOutcome> {
+    let branch = TriggerConfig::parse_row(trigger.trigger_type, &trigger.config)
         .ok()
-        .and_then(|cfg| match cfg {
-            TriggerConfig::Polling { branch, .. } => branch,
-            _ => None,
-        });
+        .and_then(|cfg| cfg.manual_branch().map(str::to_owned));
 
-    let (head, commit_message, author_name) = resolve_head(&db, &proj, branch_for_fire.as_deref())
+    let (head, commit_message, author_name) = resolve_head(db, task, branch.as_deref())
         .await
-        .context("resolve the branch head")?;
+        .map_err(|e| SharedRefusal::RepositoryStateFetchFailed {
+            reason: e.to_string(),
+        })?;
 
     let input_update = gradient_ci::trigger::maybe_trigger_input_update(
-        &state.web_db,
-        &proj,
+        &db.web_db,
+        task,
         head.commit.clone(),
-        Some(row.id),
+        Some(trigger.id),
     )
     .await
     .unwrap_or_else(|e| {
-        tracing::warn!(error = %e, trigger_id = %row.id, "manual input_update trigger failed");
+        tracing::warn!(error = %e, trigger_id = %trigger.id, "manual input_update trigger failed");
         InputUpdateOutcome::NotConfigured
     });
 
-    let body = match input_update {
+    let outcome = match input_update {
         InputUpdateOutcome::NotConfigured => {
             let input = ApplyInput {
-                trigger_id: row.id,
-                trigger_type,
+                trigger_id: trigger.id,
+                trigger_type: trigger.trigger_type,
                 branch: head.branch,
                 commit_hash: head.commit,
                 commit_message: Some(commit_message),
@@ -366,24 +435,23 @@ pub async fn fire_now(
                 manual: true,
                 gate_approval: None,
                 repository_override: None,
-                wildcard_override: None,
+                wildcard_override: request.wildcard_override,
                 source_comment: None,
-                instance_max_storage_gb: state.config.cache.max_storage_gb,
+                started_by: request.started_by,
+                walk_mode: request.walk_mode,
+                instance_max_storage_gb: db.config.cache.max_storage_gb,
             };
-            apply_now(&db, &scheduler, &proj, input).await?
+            apply_now(db, scheduler, task, input).await?
         }
-        InputUpdateOutcome::AlreadyRunning => {
-            serde_json::json!({ "outcome": "InputUpdateRunning" })
+        InputUpdateOutcome::AlreadyRunning => FireOutcome::InputUpdateRunning,
+        InputUpdateOutcome::Started(evaluation_ids) => {
+            FireOutcome::InputUpdateStarted { evaluation_ids }
         }
-        InputUpdateOutcome::Started(evaluations) => serde_json::json!({
-            "outcome": "InputUpdateStarted",
-            "evaluation_ids": evaluations,
-        }),
     };
 
-    stamp_last_fired(&state.web_db, &row).await;
+    stamp_last_fired(&db.web_db, trigger).await;
 
-    Ok(ok_json(body))
+    Ok(outcome)
 }
 
 async fn apply_now(
@@ -391,7 +459,7 @@ async fn apply_now(
     scheduler: &Scheduler,
     task: &MTask,
     input: ApplyInput,
-) -> WebResult<serde_json::Value> {
+) -> WebResult<FireOutcome> {
     let outcome = apply_trigger(&db.web_db, task, input)
         .await
         .context("apply the trigger")?;
@@ -409,15 +477,12 @@ async fn apply_now(
             }
 
             db.record_evaluation_created(&eval).await;
-            serde_json::json!({
-                "outcome": "Created",
-                "evaluation_id": eval.id,
-            })
+            FireOutcome::Created {
+                evaluation_id: eval.id,
+            }
         }
-        ApplyOutcome::SkippedSameCommit => serde_json::json!({ "outcome": "SkippedSameCommit" }),
-        ApplyOutcome::SkippedConcurrency => {
-            serde_json::json!({ "outcome": "SkippedConcurrency" })
-        }
+        ApplyOutcome::SkippedSameCommit => FireOutcome::SkippedSameCommit,
+        ApplyOutcome::SkippedConcurrency => FireOutcome::SkippedConcurrency,
     })
 }
 
