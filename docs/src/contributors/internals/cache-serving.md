@@ -53,6 +53,18 @@ sequenceDiagram
 - The `X-Cache` header read `HIT` for a local narinfo and `MISS` for an upstream one.
 - Caches with `pull_through` off skip the upstream lookup (`pull_through_upstream_caches` in `gradient-db/src/caches/upstream.rs`). Narinfo, upstream NAR, debug info and build log requests then answer `404` on a miss.
 
+## Realisations
+
+**Response:** Requests to `GET /cache/{cache}/build-trace-v2/{drv}/{output}.doi` return the output path that a build realised for a content-addressed derivation.
+
+```json
+{"outPath": "<hash>-<name>", "signatures": ["<cache key name>:<signature>"]}
+```
+
+- These rows originate in `derivation_output` with `path_known_after_build` set and a recorded `hash`.
+- The out path must belong to this cache, like a narinfo.
+- Answers carry a signature from the cache key.
+
 ## Debug Info
 
 **Response:** The `GET /cache/{cache}/debuginfo/{build_id}` route mirrors Nix's `index-debug-info` format.
