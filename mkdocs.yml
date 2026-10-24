@@ -72,6 +72,7 @@ nav:
       - Connect an AI Assistant: guides/mcp.md
       - Monitor Gradient: guides/monitoring.md
       - Tune Evaluation Speed: guides/tune-evaluations.md
+      - Export an SBOM: guides/sbom.md
       - Report a Bug: guides/diagnostic-report.md
   - Using the UI:
       - Dashboard: ui/dashboard.md
