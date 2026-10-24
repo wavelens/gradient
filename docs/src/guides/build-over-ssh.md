@@ -96,7 +96,7 @@ Expected output: the store URL and `Trusted: 0`. Build requests appear in the UI
 
 - `ssh://` has no support in Gradient. Use `--build-host` with the `ssh-ng://` prefix instead.
 - The Nix client can't run `nix log --store ssh-ng://`. Use an SSH command to run `nix log` instead.
-- Content-addressed derivations have no support in Gradient.
+- [Content-addressed derivations](dynamic-derivations.md) and [dynamic derivations](dynamic-derivations.md) don't work over SSH.
 - Pass `--eval-store auto` to `nix build --store`. Gradient rejects evaluation writes.
 
 ## Next Steps
