@@ -12,11 +12,11 @@ use crate::graph::runtime_closure::parse_reference_hash;
 use gradient_types::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
-pub struct EntryPointOutput {
-    pub attr: String,
-    pub licenses: Licenses,
+pub struct RootOutput {
     pub hash: String,
     pub package: String,
+    pub attr: Option<String>,
+    pub licenses: Licenses,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,23 +33,29 @@ struct NamedOutput {
 }
 
 crate::sql! {
-    ENTRY_POINT_OUTPUTS = "SELECT ep.eval AS attr, ep.licenses, o.hash, o.package \
-        FROM entry_point ep JOIN derivation_output o ON o.derivation = ep.derivation \
-        WHERE ep.evaluation = $1 AND o.hash IS NOT NULL AND o.package IS NOT NULL",
-        params = [EvaluationId];
+    BUILD_OUTPUTS = "SELECT o.hash, o.package, ep.eval AS attr, \
+        COALESCE(ep.licenses, '[]'::jsonb) AS licenses \
+        FROM derivation_output o LEFT JOIN entry_point ep \
+        ON ep.derivation = o.derivation AND ep.evaluation = $1 \
+        WHERE o.derivation = $2 AND o.hash IS NOT NULL AND o.package IS NOT NULL",
+        params = [EvaluationId, DerivationId];
     DERIVATION_NAMES = "SELECT DISTINCT ON (o.hash) o.hash, d.name, d.pname \
         FROM derivation_output o JOIN derivation d ON d.id = o.derivation \
-        WHERE o.hash = ANY($1)",
+        WHERE o.hash = ANY($1) ORDER BY o.hash, d.pname IS NULL",
         params = [CachedPathHashes(64)];
 }
 
-pub async fn entry_point_outputs<C: ConnectionTrait>(
+pub async fn build_outputs<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
-) -> Result<Vec<EntryPointOutput>, DbErr> {
-    EntryPointOutput::find_by_statement(ENTRY_POINT_OUTPUTS.bind([evaluation.into_inner().into()]))
-        .all(db)
-        .await
+    derivation: DerivationId,
+) -> Result<Vec<RootOutput>, DbErr> {
+    RootOutput::find_by_statement(BUILD_OUTPUTS.bind([
+        evaluation.into_inner().into(),
+        derivation.into_inner().into(),
+    ]))
+    .all(db)
+    .await
 }
 
 pub async fn with_referenced_paths<C: ConnectionTrait>(
@@ -139,7 +145,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[tokio::test]
-    async fn entry_point_outputs_decode_the_stored_licenses() {
+    async fn build_outputs_decode_the_stored_licenses() {
         let row = BTreeMap::from([
             (
                 "attr".to_owned(),
@@ -156,7 +162,7 @@ mod tests {
             .append_query_results([vec![row]])
             .into_connection();
 
-        let outputs = entry_point_outputs(&db, EvaluationId::now_v7())
+        let outputs = build_outputs(&db, EvaluationId::now_v7(), DerivationId::now_v7())
             .await
             .unwrap();
 

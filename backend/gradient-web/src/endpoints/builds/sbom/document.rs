@@ -6,9 +6,9 @@
 
 use chrono::NaiveDateTime;
 use gradient_db::graph::runtime_closure::parse_reference_hash;
-use gradient_db::graph::sbom::{DerivationName, EntryPointOutput};
+use gradient_db::graph::sbom::{DerivationName, RootOutput};
 use gradient_entity::entry_point::License;
-use gradient_types::ids::EvaluationId;
+use gradient_types::ids::BuildJobId;
 use gradient_types::{MCachedPath, StorePathMapper};
 use gradient_util::nix_hash::{nix32_decode, normalize_nar_hash, strip_hash_algo};
 use serde_json::{Value, json};
@@ -16,14 +16,14 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::store_paths::original_text;
 
-const TASK_REF: &str = "task";
+const ROOT_REF: &str = "root";
 
 pub struct SbomInput {
-    pub task: String,
-    pub evaluation: EvaluationId,
+    pub subject: String,
+    pub serial: BuildJobId,
     pub commit: Option<String>,
     pub created_at: NaiveDateTime,
-    pub entry_points: Vec<EntryPointOutput>,
+    pub roots: Vec<RootOutput>,
     pub reached: HashMap<String, MCachedPath>,
     pub names: HashMap<String, DerivationName>,
 }
@@ -53,7 +53,7 @@ pub fn cyclonedx(input: &SbomInput) -> Value {
     json!({
         "bomFormat": "CycloneDX",
         "specVersion": "1.6",
-        "serialNumber": format!("urn:uuid:{}", input.evaluation),
+        "serialNumber": format!("urn:uuid:{}", input.serial),
         "version": 1,
         "metadata": metadata(input, uncached.is_empty()),
         "components": components
@@ -66,19 +66,19 @@ pub fn cyclonedx(input: &SbomInput) -> Value {
 }
 
 pub fn component_hashes(
-    entry_points: &[EntryPointOutput],
+    roots: &[RootOutput],
     reached: &HashMap<String, MCachedPath>,
 ) -> Vec<String> {
     let mut hashes: BTreeSet<String> = reached.keys().cloned().collect();
-    hashes.extend(entry_points.iter().map(|ep| ep.hash.clone()));
+    hashes.extend(roots.iter().map(|root| root.hash.clone()));
     hashes.extend(reached.values().flat_map(references).map(|(hash, _)| hash));
     hashes.into_iter().collect()
 }
 
 pub fn with_original_hashes(mut input: SbomInput, mapper: &StorePathMapper) -> SbomInput {
     let original = |text: String| original_text(mapper, text);
-    for ep in &mut input.entry_points {
-        ep.hash = original(std::mem::take(&mut ep.hash));
+    for root in &mut input.roots {
+        root.hash = original(std::mem::take(&mut root.hash));
     }
     input.reached = input
         .reached
@@ -110,14 +110,14 @@ fn components(input: &SbomInput) -> BTreeMap<String, Component<'_>> {
     for (hash, package) in input.reached.values().flat_map(references) {
         add(&mut components, &hash, &package, None);
     }
-    for ep in &input.entry_points {
-        add(&mut components, &ep.hash, &ep.package, None);
+    for root in &input.roots {
+        add(&mut components, &root.hash, &root.package, None);
     }
 
-    for ep in &input.entry_points {
-        let component = components.get_mut(&ep.hash).expect("added above");
-        component.attributes.insert(ep.attr.clone());
-        for license in &ep.licenses.0 {
+    for root in &input.roots {
+        let component = components.get_mut(&root.hash).expect("added above");
+        component.attributes.extend(root.attr.clone());
+        for license in &root.licenses.0 {
             if !component.licenses.contains(license) {
                 component.licenses.push(license.clone());
             }
@@ -158,13 +158,13 @@ fn references(path: &MCachedPath) -> Vec<(String, String)> {
 }
 
 fn metadata(input: &SbomInput, complete: bool) -> Value {
-    let mut task = json!({
+    let mut subject = json!({
         "type": "application",
-        "bom-ref": TASK_REF,
-        "name": input.task,
+        "bom-ref": ROOT_REF,
+        "name": input.subject,
     });
     if let Some(commit) = &input.commit {
-        task["version"] = json!(commit);
+        subject["version"] = json!(commit);
     }
 
     json!({
@@ -174,7 +174,7 @@ fn metadata(input: &SbomInput, complete: bool) -> Value {
             "name": "gradient",
             "version": env!("CARGO_PKG_VERSION"),
         }]},
-        "component": task,
+        "component": subject,
         "properties": [{ "name": "gradient:complete", "value": complete.to_string() }],
     })
 }
@@ -249,13 +249,13 @@ fn license_json(license: &License) -> Value {
 
 fn dependencies(input: &SbomInput, components: &BTreeMap<String, Component<'_>>) -> Vec<Value> {
     let bom_ref = |hash: &str| components.get(hash).map(Component::bom_ref);
-    let entry_points: BTreeSet<String> = input
-        .entry_points
+    let roots: BTreeSet<String> = input
+        .roots
         .iter()
-        .filter_map(|ep| bom_ref(&ep.hash))
+        .filter_map(|root| bom_ref(&root.hash))
         .collect();
 
-    let mut dependencies = vec![json!({ "ref": TASK_REF, "dependsOn": entry_points })];
+    let mut dependencies = vec![json!({ "ref": ROOT_REF, "dependsOn": roots })];
     dependencies.extend(components.values().filter_map(|component| {
         let depends_on: BTreeSet<String> = references(component.cached?)
             .iter()
@@ -268,7 +268,7 @@ fn dependencies(input: &SbomInput, components: &BTreeMap<String, Component<'_>>)
 
 fn composition(uncached: Vec<String>) -> Value {
     if uncached.is_empty() {
-        json!({ "aggregate": "complete", "dependencies": [TASK_REF] })
+        json!({ "aggregate": "complete", "dependencies": [ROOT_REF] })
     } else {
         json!({ "aggregate": "incomplete", "dependencies": uncached })
     }
@@ -304,9 +304,9 @@ mod tests {
         }
     }
 
-    fn hello_output() -> EntryPointOutput {
-        EntryPointOutput {
-            attr: "packages.x86_64-linux.hello".into(),
+    fn hello_output() -> RootOutput {
+        RootOutput {
+            attr: Some("packages.x86_64-linux.hello".into()),
             licenses: Licenses(vec![License::Spdx {
                 id: "GPL-3.0-or-later".into(),
             }]),
@@ -317,11 +317,11 @@ mod tests {
 
     fn input(reached: Vec<MCachedPath>) -> SbomInput {
         SbomInput {
-            task: "project/task".into(),
-            evaluation: EvaluationId::now_v7(),
+            subject: "hello-2.12.1".into(),
+            serial: BuildJobId::now_v7(),
             commit: Some("abc".into()),
             created_at: gradient_types::now(),
-            entry_points: vec![hello_output()],
+            roots: vec![hello_output()],
             reached: reached.into_iter().map(|p| (p.hash.clone(), p)).collect(),
             names: HashMap::from([
                 (HELLO.to_owned(), named("hello-2.12.1", "hello")),
@@ -382,6 +382,28 @@ mod tests {
     }
 
     #[test]
+    fn a_build_outside_the_entry_points_is_the_root_without_a_license() {
+        let mut input = input(vec![cached(HELLO, "hello-2.12.1", &[])]);
+        input.roots[0].attr = None;
+        input.roots[0].licenses = Licenses::default();
+        let doc = cyclonedx(&input);
+        let hello_ref = format!("{HELLO}-hello-2.12.1");
+        let hello = component(&doc, &hello_ref);
+
+        assert!(hello.get("licenses").is_none(), "{hello}");
+        assert!(
+            !hello["properties"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["name"] == "nix:attribute"),
+            "{hello}"
+        );
+        assert_eq!(depends_on(&doc, ROOT_REF), json!([hello_ref]));
+        assert_eq!(doc["metadata"]["component"]["name"], "hello-2.12.1");
+    }
+
+    #[test]
     fn a_dependency_has_no_license() {
         let doc = cyclonedx(&hello_with_zlib());
 
@@ -401,7 +423,7 @@ mod tests {
             json!([format!("{GLIBC}-glibc-2.40"), format!("{ZLIB}-zlib-1.3")])
         );
         assert_eq!(
-            depends_on(&doc, TASK_REF),
+            depends_on(&doc, ROOT_REF),
             json!([format!("{HELLO}-hello-2.12.1")])
         );
     }
