@@ -22,6 +22,7 @@ pub(super) async fn copy_entry_points<C: ConnectionTrait>(
             evaluation: new_eval_id,
             derivation: prev_ep.derivation,
             eval: prev_ep.eval.clone(),
+            licenses: prev_ep.licenses.clone(),
             created_at: now,
             ..Default::default()
         }
@@ -31,4 +32,36 @@ pub(super) async fn copy_entry_points<C: ConnectionTrait>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_entity::entry_point::{License, Licenses};
+    use gradient_fixtures::mock::{mock_db, raw_statements};
+
+    #[tokio::test]
+    async fn a_restart_keeps_the_licenses() {
+        let previous = MEntryPoint {
+            licenses: Licenses(vec![License::Name {
+                name: "unfree".into(),
+            }]),
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_query_results([vec![previous.clone()]])
+            .into_connection();
+
+        copy_entry_points(&db, &[previous], EvaluationId::now_v7(), gradient_types::now())
+            .await
+            .unwrap();
+
+        let log = raw_statements(db.into_transaction_log());
+        assert!(
+            log.iter()
+                .any(|s| s.sql.contains("INSERT INTO \"entry_point\"")
+                    && format!("{:?}", s.values).contains("unfree")),
+            "{log:?}"
+        );
+    }
 }

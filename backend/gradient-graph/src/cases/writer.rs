@@ -14,7 +14,8 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation;
 use gradient_entity::ids::{DispatchedJobId, EvaluationId};
 use gradient_fixtures::shape::shape;
-use gradient_wire::types::DiscoveredDerivation;
+use gradient_entity::entry_point::{License, Licenses};
+use gradient_wire::types::{self, DiscoveredDerivation};
 use sea_orm::ConnectionTrait;
 
 use super::{
@@ -371,5 +372,25 @@ async fn m08_a_commit_outside_the_transaction_of_the_writer_is_refused() {
     let stored = case.find_cached_path(B_OUT).await;
     assert_eq!(stored, None, "after 1: no cached_path(B_OUT)");
     case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn m09_an_entry_point_keeps_the_licenses_of_its_attribute() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(shape().evaluation(e1)).await;
+    let licensed = DiscoveredDerivation {
+        licenses: vec![types::License::Spdx { id: "MIT".into() }],
+        ..entry_point(A, A_OUT, "pkg.a")
+    };
+
+    case.walk(case.tasked(e1, vec![licensed]).await).await;
+
+    let points = case.entry_points(e1).await;
+    assert_eq!(
+        points.iter().map(|p| &p.licenses).collect::<Vec<_>>(),
+        vec![&Licenses(vec![License::Spdx { id: "MIT".into() }])],
+        "after 1: licenses of pkg.a"
+    );
     case.finish().await;
 }

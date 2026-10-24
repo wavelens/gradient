@@ -23,6 +23,18 @@ pub struct Model {
     pub repo_check_id: Option<i64>,
     pub dep_counts_version: Option<i64>,
     pub dep_counts_computed_at: Option<NaiveDateTime>,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub licenses: Licenses,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
+pub struct Licenses(pub Vec<License>);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum License {
+    Spdx { id: String },
+    Name { name: String },
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

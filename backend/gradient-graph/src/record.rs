@@ -15,9 +15,10 @@ use gradient_db::{
 use gradient_entity::StorePath;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::entry_point::{self, Licenses};
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_types::*;
-use gradient_wire::types::DiscoveredDerivation;
+use gradient_wire::types::{DiscoveredDerivation, License};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
     QueryFilter, Value,
@@ -898,6 +899,7 @@ impl BatchWriter<'_> {
                         evaluation: self.evaluation_id,
                         derivation: drv_id,
                         eval: d.attr.clone(),
+                        licenses: entry_point_licenses(&d.licenses),
                         created_at: now,
                         ..Default::default()
                     }
@@ -918,6 +920,18 @@ impl BatchWriter<'_> {
 
         entry_point_drvs
     }
+}
+
+fn entry_point_licenses(licenses: &[License]) -> Licenses {
+    Licenses(
+        licenses
+            .iter()
+            .map(|license| match license {
+                License::Spdx { id } => entry_point::License::Spdx { id: id.clone() },
+                License::Name { name } => entry_point::License::Name { name: name.clone() },
+            })
+            .collect(),
+    )
 }
 
 fn insert_entry_points(rows: Vec<AEntryPoint>) -> sea_orm::InsertMany<AEntryPoint> {
