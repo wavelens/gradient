@@ -245,7 +245,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
- "syn 3.0.9",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2216,7 +2216,7 @@ dependencies = [
 [[package]]
 name = "nix-bindings"
 version = "0.2352.0"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Fnix-2.35.3#109cb88a1f8d3189cf0e8b7399afe01ef4916be2"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Fnix-2.35.3#35fe73004066858e1c5a3c798766ca7a67d26944"
 dependencies = [
  "nix-bindings-sys",
 ]
@@ -2224,7 +2224,7 @@ dependencies = [
 [[package]]
 name = "nix-bindings-sys"
 version = "0.2352.0"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Fnix-2.35.3#109cb88a1f8d3189cf0e8b7399afe01ef4916be2"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Fnix-2.35.3#35fe73004066858e1c5a3c798766ca7a67d26944"
 dependencies = [
  "bindgen",
  "cc",
@@ -3749,7 +3749,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
