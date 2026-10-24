@@ -12,6 +12,7 @@ pub mod log;
 pub mod log_chunks;
 pub mod query;
 mod refusal;
+pub mod sbom;
 
 pub use self::actions::{post_build_abort, post_build_prioritize, post_build_retry};
 pub use self::closure::{
