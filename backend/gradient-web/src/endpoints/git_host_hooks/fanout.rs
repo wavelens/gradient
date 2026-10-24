@@ -11,6 +11,7 @@ use gradient_ci::CiContext;
 use gradient_ci::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, parse_owner_repo};
 use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
+use gradient_entity::evaluation::WalkMode;
 use gradient_entity::task_trigger as ept;
 use gradient_git_host::ParsedMergeGroupEvent;
 use gradient_scheduler::Scheduler;
@@ -354,6 +355,8 @@ where
             repository_override: repository_override.clone(),
             wildcard_override: wildcard_override.clone(),
             source_comment: source_comment.clone(),
+            started_by: None,
+            walk_mode: WalkMode::Pruned,
             instance_max_storage_gb: ci.db.config.cache.max_storage_gb,
         };
 

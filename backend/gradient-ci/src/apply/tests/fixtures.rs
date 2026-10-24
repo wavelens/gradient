@@ -5,7 +5,7 @@
  */
 
 use super::super::ApplyInput;
-use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_fixtures::rows::worker_registration;
 use gradient_types::ids::{CacheId, ProjectCacheId, UserId};
 use gradient_types::triggers::TriggerType;
@@ -76,6 +76,8 @@ pub fn input(trig: TaskTriggerId, ttype: TriggerType, hash: Vec<u8>, manual: boo
         repository_override: None,
         wildcard_override: None,
         source_comment: None,
+        started_by: None,
+        walk_mode: WalkMode::Pruned,
         instance_max_storage_gb: 0,
     }
 }

@@ -131,3 +131,19 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(fireBtn!.disabled).toBe(false);
   });
 });
+
+describe('TaskTriggersComponent - default trigger', () => {
+  it('disables Delete and hides Make Default on the default trigger', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [{ ...trigger, is_default: true }]);
+    const deleteBtn = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;
+    expect(deleteBtn!.disabled).toBe(true);
+    expect(findByText(fixture.nativeElement, 'make default')).toBeNull();
+  });
+
+  it('offers Make Default on every other trigger', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [{ ...trigger, is_default: false }]);
+    const deleteBtn = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;
+    expect(deleteBtn!.disabled).toBe(false);
+    expect(findByText(fixture.nativeElement, 'make default')).not.toBeNull();
+  });
+});

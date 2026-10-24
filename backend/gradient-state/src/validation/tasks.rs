@@ -76,6 +76,14 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             }
         }
 
+        let default_triggers = task.triggers.iter().flatten().filter(|t| t.is_default);
+        if default_triggers.count() > 1 {
+            errors.push(
+                format!("tasks.{}.triggers", task.name),
+                "at most one trigger can have `is_default` set",
+            );
+        }
+
         // Reporter triggers are resolving `integration` against inbound integrations at apply time.
         // A missing, outbound or mistyped reference must fail validation here instead of mid-apply
         // (#332).

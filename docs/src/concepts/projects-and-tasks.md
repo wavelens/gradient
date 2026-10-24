@@ -32,6 +32,15 @@ flowchart LR
 | Flake Input Overrides | Replace a flake input for every evaluation, e.g. a newer nixpkgs |
 | Keep Evaluations | How many finished evaluations stay, 30 by default |
 
+## Default Trigger
+
+Exactly one trigger per task is the default trigger. The "Start Evaluation" button and the API start fire the default trigger.
+
+- **Branch**: The configured branch of a polling trigger, or the first push or pull request branch without glob characters. Otherwise the default branch of the remote.
+- **Inactive**: An inactive default trigger can still fire on a manual start, but never on its own.
+- **Deletion**: Locked until "Make Default" on another trigger.
+- **New Tasks**: New tasks start with a polling trigger as the default.
+
 ## Concurrency
 
 Each task allows one active evaluation per branch. A trigger that fires while the same branch already has an evaluation in progress follows the task's concurrency policy. Evaluations on other branches continue unaffected.
@@ -41,7 +50,8 @@ Each task allows one active evaluation per branch. A trigger that fires while th
 | Push | Pushed branch or tag |
 | Pull request | Pull request number, shared by every push to the pull request |
 | Polling | Polled branch, or the default branch of the remote without a configured branch |
-| Cron schedule, manual start, API | Default branch of the remote |
+| Cron schedule | Default branch of the remote |
+| Manual start, API | Branch of the [default trigger](#default-trigger) |
 
 Polls, cron schedules, manual starts and API starts resolve the default branch name on the remote. A push to `main` and a poll of the default branch `main` therefore share one branch.
 

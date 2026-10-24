@@ -100,6 +100,23 @@ fn state_task_keep_evaluations_zero_rejected_by_validator() {
 }
 
 #[test]
+fn state_task_with_two_default_triggers_rejected() {
+    let mut cfg = reporter_cfg("github", "{}");
+    let task = cfg.tasks.get_mut("web").unwrap();
+    let triggers = task.triggers.as_mut().unwrap();
+    triggers[0].is_default = true;
+    triggers.push(crate::StateTrigger::default_polling());
+    let v = cfg.validate();
+    assert!(
+        v.errors
+            .iter()
+            .any(|e| e.field == "tasks.web.triggers" && e.message.contains("is_default")),
+        "expected a second default trigger to be rejected, got: {:?}",
+        v.errors
+    );
+}
+
+#[test]
 fn state_reporter_trigger_accepts_declared_inbound_integration() {
     let integrations = r#"{
         "git-host": { "name": "git-host", "project": "acme", "kind": "inbound", "git_host_type": "forgejo", "created_by": "alice" }

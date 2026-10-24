@@ -320,6 +320,29 @@ async fn delete_trigger_not_found_returns_404() {
 }
 
 #[tokio::test]
+async fn delete_default_trigger_returns_409() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let tid = trigger_id();
+
+    let default_trigger = task_trigger::Model {
+        is_default: true,
+        ..polling_trigger_row()
+    };
+
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![default_trigger]]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .delete(&format!("{}/{}", BASE_URL, tid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn fire_now_on_inactive_trigger_returns_400() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
@@ -378,6 +401,7 @@ async fn create_task_seeds_default_polling_trigger() {
         task: task_id(),
         config: serde_json::json!({"interval_secs": 300}),
         active: true,
+        is_default: true,
         created_at: test_date(),
         updated_at: test_date(),
         ..Default::default()

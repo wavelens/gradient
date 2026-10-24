@@ -507,6 +507,7 @@ fn export_trigger(
         integration,
         config: serde_json::Value::Object(config),
         active: t.active,
+        is_default: t.is_default,
     })
 }
 

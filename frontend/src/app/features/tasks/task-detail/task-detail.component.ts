@@ -162,6 +162,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return !!e && isRunningEvaluationStatus(e.status);
   });
 
+  evaluationQueued = computed(() => this.latestEvaluation()?.status === 'Queued');
+
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
@@ -589,7 +591,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         : []),
       ...(this.canTrigger()
         ? [{ label: 'Full rewalk', icon: 'account_tree',
-             disabled: this.starting() || this.evaluationInProgress(),
+             disabled: this.starting() || this.evaluationQueued(),
              command: () => this.startEvaluation('full') }]
         : []),
       ...(this.authService.isAuthenticated()

@@ -261,6 +261,7 @@ pub async fn put(
         trigger_type: TriggerType::Polling,
         config: default_cfg.to_db_json(),
         active: true,
+        is_default: true,
         created_at: now,
         updated_at: now,
         ..Default::default()

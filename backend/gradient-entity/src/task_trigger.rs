@@ -50,6 +50,7 @@ pub struct Model {
     pub trigger_type: TriggerType,
     pub config: Json,
     pub active: bool,
+    pub is_default: bool,
     pub last_fired_at: Option<NaiveDateTime>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,

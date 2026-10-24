@@ -6,6 +6,7 @@
 
 use gradient_ci::ApplyInput;
 use gradient_db::WorkerDb;
+use gradient_entity::evaluation::WalkMode;
 use gradient_entity::ids::DispatchedJobId;
 use gradient_entity::ids::TaskTriggerId;
 use gradient_entity::task_trigger::TriggerType;
@@ -81,6 +82,8 @@ pub(super) fn trigger_input(
         repository_override: None,
         wildcard_override: None,
         source_comment: None,
+        started_by: None,
+        walk_mode: WalkMode::Pruned,
         instance_max_storage_gb,
     }
 }
