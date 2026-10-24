@@ -11803,6 +11803,41 @@ paths:
       security:
       - {}
       - cacheBasic: []
+  /cache/{cache}/build-trace-v2/{drv}/{output}:
+    get:
+      tags:
+      - nix-cache
+      summary: Realisation
+      description: The output path a build realised for an output of a content-addressed derivation, signed with the cache key. `{drv}` is the derivation base name and `{output}` the output name with a `.doi` suffix.
+      operationId: getRealisation
+      parameters:
+      - name: cache
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: drv
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: output
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Realisation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NixRealisation'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - cacheBasic: []
   /cache/{cache}/debuginfo/{build_id}:
     get:
       tags:
@@ -16823,6 +16858,18 @@ components:
           type:
           - string
           - 'null'
+    NixRealisation:
+      type: object
+      required:
+      - outPath
+      - signatures
+      properties:
+        outPath:
+          type: string
+        signatures:
+          type: array
+          items:
+            type: string
     OnlineWorkerLoad:
       type: object
       required:

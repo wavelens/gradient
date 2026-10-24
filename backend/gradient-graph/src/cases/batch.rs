@@ -87,7 +87,11 @@ async fn b01_a_first_batch_writes_its_graph_rows_and_leaves_the_unwanted_stub_sk
     let kind = case.edge_kind(A, B).await;
     assert_eq!(kind, Some(EdgeKind::Buildtime), "after 1: edge(A,B).kind");
     let output = case.output_of(A, "out").await;
-    assert_eq!(output.hash, A_OUT, "after 1: output(A,out).hash");
+    assert_eq!(
+        output.hash.as_deref(),
+        Some(A_OUT),
+        "after 1: output(A,out).hash"
+    );
     let stored = case.output_stored(A, "out").await;
     assert_eq!(
         (stored, output.external_url),

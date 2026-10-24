@@ -263,7 +263,7 @@ impl Shape {
         let at = self
             .outputs
             .iter()
-            .position(|o| o.derivation == derivation && o.hash == hash)
+            .position(|o| o.derivation == derivation && o.hash.as_deref() == Some(hash))
             .unwrap_or_else(|| panic!("declare output {hash} first"));
         change(&mut self.outputs[at]);
         self

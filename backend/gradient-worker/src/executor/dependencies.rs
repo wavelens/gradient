@@ -14,7 +14,7 @@ use gradient_sources::EvalDependencies;
 use gradient_util::store_path::strip_store_prefix;
 use gradient_util::sync::Mutex;
 use gradient_wire::traits::InputProgressSink;
-use gradient_wire::types::{ImportOutcome, InputOutcome};
+use gradient_wire::types::{ImportOutcome, InputOutcome, Realisation};
 
 use super::AbortSignal;
 use super::eval::{Root, walk_and_publish};
@@ -215,10 +215,9 @@ async fn import_derivation(
         .await
         .map_err(|e| format!("import request for '{drv_path}' failed: {e:#}"))?;
     match outcome {
-        ImportOutcome::Completed => reporter
-            .pull_paths(output_paths(&drv))
-            .await
-            .map_err(|e| format!("pulling the outputs of import '{drv_path}' failed: {e:#}")),
+        ImportOutcome::Completed { realisations } => {
+            pull_outputs(reporter, &drv_path, &drv, realisations).await
+        }
         ImportOutcome::Failed {
             drv_path,
             build_id,
@@ -231,6 +230,28 @@ async fn import_derivation(
             Err(format!("the server does not know import '{drv_path}'"))
         }
     }
+}
+
+async fn pull_outputs(
+    reporter: &dyn JobReporter,
+    drv_path: &str,
+    drv: &Derivation,
+    realisations: Vec<Realisation>,
+) -> Result<(), String> {
+    let mut paths = output_paths(drv);
+    paths.extend(realisations.iter().map(|r| r.path.clone()));
+    reporter
+        .pull_paths(paths)
+        .await
+        .map_err(|e| format!("pulling the outputs of import '{drv_path}' failed: {e:#}"))?;
+    if realisations.is_empty() {
+        return Ok(());
+    }
+
+    reporter
+        .register_realisations(realisations)
+        .await
+        .map_err(|e| format!("registering the outputs of import '{drv_path}' failed: {e:#}"))
 }
 
 async fn read_drv(drv_reader: &dyn DrvReader, drv_path: &str) -> Result<Derivation, String> {

@@ -11,7 +11,7 @@ use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, DiscoveredDerivation, EvalMessageLevel, QueryMode,
 };
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter};
-use gradient_wire::types::{EvalProgress, ImportOutcome, InputOutcome};
+use gradient_wire::types::{EvalProgress, ImportOutcome, InputOutcome, Realisation};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -34,6 +34,9 @@ pub enum ReportedEvent {
     },
     PathsPulled {
         paths: Vec<String>,
+    },
+    RealisationsRegistered {
+        realisations: Vec<Realisation>,
     },
     ImportRequested {
         drv_paths: Vec<String>,
@@ -301,11 +304,18 @@ impl JobReporter for RecordingJobReporter {
         Ok(())
     }
 
+    async fn register_realisations(&self, realisations: Vec<Realisation>) -> Result<()> {
+        self.record(ReportedEvent::RealisationsRegistered { realisations });
+        Ok(())
+    }
+
     async fn request_import(&self, drv_paths: Vec<String>) -> Result<ImportOutcome> {
         let outcome = drv_paths
             .iter()
             .find_map(|p| self.import_outcomes.get(p).cloned())
-            .unwrap_or(ImportOutcome::Completed);
+            .unwrap_or(ImportOutcome::Completed {
+                realisations: Vec::new(),
+            });
         self.record(ReportedEvent::ImportRequested { drv_paths });
         Ok(outcome)
     }

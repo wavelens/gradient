@@ -37,6 +37,7 @@ impl Scheduler {
             worker: worker_id.to_owned(),
             job_id: job_id.to_owned(),
             request_id: request_id.clone(),
+            derivations: Vec::new(),
             outcome,
         };
         let builds = match self
@@ -138,6 +139,7 @@ impl Scheduler {
 
             builds.push((
                 ImportedBuild {
+                    derivation: row.derivation,
                     derivation_build: row.derivation_build,
                     build_id: row.build_id,
                     drv_path: drv_path.clone(),
@@ -311,9 +313,13 @@ impl Scheduler {
         !self.import_waits.is_empty().await
     }
 
-    async fn answer_imports(&self, answers: Vec<ImportAnswer>) {
+    async fn answer_imports(&self, mut answers: Vec<ImportAnswer>) {
         if answers.is_empty() {
             return;
+        }
+
+        if let Err(e) = self.add_realisations(&mut answers).await {
+            warn!(error = %e, "completed imports are answered without their realised outputs");
         }
 
         let signals = answers
@@ -335,6 +341,34 @@ impl Scheduler {
         {
             warn!(error = %e, "import results did not reach the scheduler");
         }
+    }
+
+    async fn add_realisations(&self, answers: &mut [ImportAnswer]) -> Result<()> {
+        let completed: Vec<DerivationId> = answers
+            .iter()
+            .filter(|a| matches!(a.outcome, ImportOutcome::Completed { .. }))
+            .flat_map(|a| a.derivations.iter().copied())
+            .collect();
+        if completed.is_empty() {
+            return Ok(());
+        }
+
+        let realised =
+            crate::realisations::realisations_by_derivation(&self.db.worker_db, &completed).await?;
+        for answer in answers {
+            if let ImportOutcome::Completed { realisations } = &mut answer.outcome {
+                realisations.extend(
+                    answer
+                        .derivations
+                        .iter()
+                        .filter_map(|d| realised.get(d))
+                        .flatten()
+                        .cloned(),
+                );
+            }
+        }
+
+        Ok(())
     }
 }
 

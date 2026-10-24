@@ -22,6 +22,7 @@ mod m20261016_000001_metric_pname_without_version;
 mod m20261016_000002_team_webhooks;
 mod m20261018_000000_worker_network_capability;
 mod m20261019_000000_eval_cache_per_cache;
+mod m20261024_000000_output_path_known_after_build;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -61,6 +62,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261016_000002_team_webhooks::Migration),
             Box::new(m20261018_000000_worker_network_capability::Migration),
             Box::new(m20261019_000000_eval_cache_per_cache::Migration),
+            Box::new(m20261024_000000_output_path_known_after_build::Migration),
         ]
     }
 }

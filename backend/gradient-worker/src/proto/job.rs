@@ -29,8 +29,8 @@ use crate::proto::progress::{
 };
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter};
 use gradient_wire::types::{
-    BuildProgressPhase, BuildStage, GrantTarget, ImportOutcome, InputOutcome, UploadMetadata,
-    UploadObject,
+    BuildProgressPhase, BuildStage, GrantTarget, ImportOutcome, InputOutcome, Realisation,
+    UploadMetadata, UploadObject,
 };
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
@@ -553,6 +553,14 @@ impl JobReporter for JobUpdater {
         };
 
         crate::proto::prefetch::pull_cached(&store, paths, self).await
+    }
+
+    async fn register_realisations(&self, realisations: Vec<Realisation>) -> Result<()> {
+        let Some(store) = self.store.clone() else {
+            return Ok(());
+        };
+
+        store.register_realisations(&realisations).await
     }
 
     #[tracing::instrument(level = "debug", skip_all, fields(job_id = %self.job_id, paths = drv_paths.len()))]

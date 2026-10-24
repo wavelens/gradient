@@ -14,6 +14,7 @@ use gradient_wire::types::ImportOutcome;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedBuild {
+    pub derivation: DerivationId,
     pub derivation_build: DerivationBuildId,
     pub build_id: BuildJobId,
     pub drv_path: String,
@@ -34,6 +35,7 @@ pub struct ImportAnswer {
     pub worker: String,
     pub job_id: String,
     pub request_id: String,
+    pub derivations: Vec<DerivationId>,
     pub outcome: ImportOutcome,
 }
 
@@ -43,6 +45,7 @@ impl ImportAnswer {
             worker: wait.worker,
             job_id: wait.job_id,
             request_id: wait.request_id,
+            derivations: wait.builds.iter().map(|b| b.derivation).collect(),
             outcome,
         }
     }
@@ -231,7 +234,9 @@ fn outcome(
         }
     }
 
-    Some(failed.unwrap_or(ImportOutcome::Completed))
+    Some(failed.unwrap_or(ImportOutcome::Completed {
+        realisations: Vec::new(),
+    }))
 }
 
 #[cfg(test)]
@@ -240,6 +245,7 @@ mod tests {
 
     fn imported(drv_path: &str) -> ImportedBuild {
         ImportedBuild {
+            derivation: DerivationId::now_v7(),
             derivation_build: DerivationBuildId::now_v7(),
             build_id: BuildJobId::now_v7(),
             drv_path: drv_path.to_owned(),
@@ -308,7 +314,12 @@ mod tests {
 
         statuses.insert(b.derivation_build, BuildStatus::Completed);
         let answers = waits.settle(&statuses);
-        assert_eq!(answers[0].outcome, ImportOutcome::Completed);
+        assert_eq!(
+            answers[0].outcome,
+            ImportOutcome::Completed {
+                realisations: Vec::new()
+            }
+        );
         assert_eq!(
             (answers[0].worker.as_str(), answers[0].request_id.as_str()),
             ("w1", "r1")

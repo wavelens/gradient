@@ -59,7 +59,10 @@ impl OutputArtefacts {
         products: Vec<ProductArtefact>,
     ) -> Self {
         Self {
-            store_path: original_text(mapper, StorePath::from(output.clone()).base()),
+            store_path: output
+                .store_path()
+                .map(|p| original_text(mapper, p.base()))
+                .unwrap_or_default(),
             name: output.name,
             products,
         }

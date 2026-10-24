@@ -28,7 +28,8 @@ use crate::build_history::BuildHistory;
 use crate::jobs::PendingBuildJob;
 use gradient_pool::estimate::{BuildEstimate, GroupKey};
 use gradient_wire::types::{
-    BuildJob, BuildRequirement, BuildSpec, BuildSpecKind, CacheInfo, DerivationOutput, RequiredPath,
+    BuildJob, BuildRequirement, BuildSpec, BuildSpecKind, CacheInfo, DerivationOutput, Realisation,
+    RequiredPath,
 };
 
 use super::{ASSIGN_BUDGET, ASSIGN_TICK, STARTABLE_RESYNC};
@@ -223,6 +224,7 @@ struct BuildAssignMaps {
     feature_names: HashMap<FeatureId, String>,
     dep_counts: HashMap<DerivationId, u32>,
     direct_inputs: HashMap<DerivationId, Vec<RequiredPath>>,
+    input_realisations: HashMap<DerivationId, Vec<Realisation>>,
     self_outputs: HashMap<DerivationId, Vec<DerivationOutput>>,
     output_nar_sizes: HashMap<DerivationId, Option<u64>>,
     closure_sizes: HashMap<DerivationId, Option<i64>>,
@@ -412,7 +414,7 @@ impl BuildAssignMaps {
 
         let output_hashes: Vec<String> = outputs_by_drv
             .values()
-            .flat_map(|v| v.iter().map(|o| o.hash.clone()))
+            .flat_map(|v| v.iter().filter_map(|o| o.hash.clone()))
             .collect::<HashSet<String>>()
             .into_iter()
             .collect();
@@ -447,15 +449,23 @@ impl BuildAssignMaps {
                     continue;
                 };
                 for o in outputs {
-                    let cache_info = cache_info_by_hash.get(&o.hash).cloned();
+                    let Some(path) = o.store_path() else {
+                        continue;
+                    };
+                    let cache_info = o
+                        .hash
+                        .as_ref()
+                        .and_then(|h| cache_info_by_hash.get(h))
+                        .cloned();
                     paths.push(RequiredPath {
-                        path: StorePath::from(o.clone()).full(),
+                        path: path.full(),
                         cache_info,
                     });
                 }
             }
             direct_inputs.insert(*drv_id, paths);
         }
+        let input_realisations = input_realisations(db, &deps_by_drv, &dep_drv_ids).await?;
 
         let mut self_outputs: HashMap<DerivationId, Vec<DerivationOutput>> = HashMap::new();
         let mut output_nar_sizes: HashMap<DerivationId, Option<u64>> = HashMap::new();
@@ -467,7 +477,7 @@ impl BuildAssignMaps {
         })
         .await?
         {
-            let path = StorePath::from(o.clone()).full();
+            let path = o.store_path().map(|p| p.full()).unwrap_or_default();
             let size = output_nar_sizes.entry(o.derivation).or_insert(Some(0));
             *size = size.zip(o.nar_size).map(|(sum, n)| sum + n.max(0) as u64);
             self_outputs
@@ -493,6 +503,7 @@ impl BuildAssignMaps {
             feature_names,
             dep_counts,
             direct_inputs,
+            input_realisations,
             self_outputs,
             output_nar_sizes,
             closure_sizes,
@@ -599,6 +610,11 @@ impl BuildAssignMaps {
                     self.config.default_max_silent_secs,
                 ),
                 build_cores: None,
+                input_realisations: self
+                    .input_realisations
+                    .get(&shared_build.derivation)
+                    .cloned()
+                    .unwrap_or_default(),
             }],
             requirement,
         };
@@ -655,6 +671,27 @@ impl BuildAssignMaps {
 enum AssignOutcome {
     Assign(String, Box<PendingBuildJob>),
     Skip(&'static str),
+}
+
+async fn input_realisations(
+    db: &WorkerDb,
+    deps_by_drv: &HashMap<DerivationId, Vec<DerivationId>>,
+    dep_drv_ids: &[DerivationId],
+) -> anyhow::Result<HashMap<DerivationId, Vec<Realisation>>> {
+    let realised = crate::realisations::realisations_by_derivation(db, dep_drv_ids).await?;
+    Ok(deps_by_drv
+        .iter()
+        .map(|(drv, deps)| {
+            let realisations: Vec<Realisation> = deps
+                .iter()
+                .filter_map(|dep| realised.get(dep))
+                .flatten()
+                .cloned()
+                .collect();
+            (*drv, realisations)
+        })
+        .filter(|(_, realisations)| !realisations.is_empty())
+        .collect())
 }
 
 async fn load_closure_sizes(

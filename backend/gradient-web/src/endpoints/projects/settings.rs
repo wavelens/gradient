@@ -337,7 +337,7 @@ async fn enqueue_backfill_signatures(db: &WebDb, project_id: ProjectId, cache_id
             return;
         }
     };
-    let hashes: Vec<String> = outputs.into_iter().map(|o| o.hash).collect();
+    let hashes: Vec<String> = outputs.into_iter().filter_map(|o| o.hash).collect();
     let stored = match gradient_db::cached_paths::stored_by_hash(db, &hashes).await {
         Ok(v) => v,
         Err(e) => {

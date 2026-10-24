@@ -441,13 +441,22 @@ mod tests {
         assert!(deliver_import_result(
             &waiters,
             "r2",
-            ImportOutcome::Completed
+            ImportOutcome::Completed {
+                realisations: Vec::new()
+            }
         ));
-        assert_eq!(rx_b.try_recv(), Ok(ImportOutcome::Completed));
+        assert_eq!(
+            rx_b.try_recv(),
+            Ok(ImportOutcome::Completed {
+                realisations: Vec::new()
+            })
+        );
         assert!(!deliver_import_result(
             &waiters,
             "r2",
-            ImportOutcome::Completed
+            ImportOutcome::Completed {
+                realisations: Vec::new()
+            }
         ));
 
         forget_import_waiters_for_job(&waiters, "job-A");

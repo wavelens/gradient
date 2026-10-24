@@ -11,7 +11,9 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{DispatchedJobId, EvaluationId};
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_pool::session_port::SessionSignal;
-use gradient_wire::types::{BuildFailureKind, DiscoveredDerivation, ImportOutcome, JobKind};
+use gradient_wire::types::{
+    BuildFailureKind, DiscoveredDerivation, ImportOutcome, JobKind, Realisation,
+};
 
 use super::{
     CaseShapes, P, P_OUT, SchedulerCase, X, X_OUT, Y, Y_OUT, attr_of, drv, drv_path, eval_key,
@@ -129,7 +131,52 @@ async fn f03_an_import_of_a_completed_build_answers_completed_at_once() {
         .await;
     assert_eq!(
         case.signals(W1),
-        vec![answer(e1, "r1", ImportOutcome::Completed)],
+        vec![answer(
+            e1,
+            "r1",
+            ImportOutcome::Completed {
+                realisations: Vec::new()
+            }
+        )],
+        "after 1: signals(W1)"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn f03b_a_completed_import_names_the_paths_its_build_realised() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        importing(e1, &[X], BuildStatus::Created)
+            .derivation(X)
+            .output_option(X_OUT, |o| o.path_known_after_build = true)
+            .build_status(BuildStatus::Completed)
+            .cached_output(X),
+    )
+    .await;
+    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
+
+    case.import_request(W1, &eval_key(e1), "r1", &[drv_path(X)])
+        .await;
+    let realised = Realisation {
+        drv_path: drv_path(X),
+        output: "out".into(),
+        path: format!(
+            "/nix/store/{X_OUT}-{}",
+            case.output_of(X, "out").await.package.unwrap_or_default()
+        ),
+    };
+    assert_eq!(
+        case.signals(W1),
+        vec![answer(
+            e1,
+            "r1",
+            ImportOutcome::Completed {
+                realisations: vec![realised]
+            }
+        )],
         "after 1: signals(W1)"
     );
     case.check("step 1").await;
@@ -159,7 +206,13 @@ async fn f04_an_import_of_a_running_build_waits_and_answers_completed_exactly_on
     case.build_assign_pass(false, false).await;
     assert_eq!(
         without_offers(case.signals(W1)),
-        vec![answer(e1, "r1", ImportOutcome::Completed)],
+        vec![answer(
+            e1,
+            "r1",
+            ImportOutcome::Completed {
+                realisations: Vec::new()
+            }
+        )],
         "after 4: signals(W1)"
     );
     case.check("step 4").await;
@@ -220,7 +273,13 @@ async fn f05_an_import_of_an_aborted_build_requeues_it_and_answers_after_the_reb
     );
     assert_eq!(
         without_offers(case.signals(W1)),
-        vec![answer(e1, "r1", ImportOutcome::Completed)],
+        vec![answer(
+            e1,
+            "r1",
+            ImportOutcome::Completed {
+                realisations: Vec::new()
+            }
+        )],
         "after 2: signals(W1)"
     );
     case.signals(W2);
@@ -544,7 +603,13 @@ async fn f10_a_lost_evaluating_worker_gets_no_answer_and_the_rerun_gets_a_fresh_
     case.build_assign_pass(false, false).await;
     assert_eq!(
         without_offers(case.signals(W3)),
-        vec![answer(e1, "r1", ImportOutcome::Completed)],
+        vec![answer(
+            e1,
+            "r1",
+            ImportOutcome::Completed {
+                realisations: Vec::new()
+            }
+        )],
         "after 4: signals(W3)"
     );
     let lost = case.signals(W1);

@@ -303,15 +303,16 @@ pub(crate) async fn plan_probes(
             unaskable.insert(o.derivation);
             continue;
         };
+        let Some(path) = o.store_path() else {
+            continue;
+        };
+        let hash = path.hash().to_owned();
         by_evaluation
             .entry(evaluation.id)
             .or_insert_with(|| (evaluation.clone(), HashMap::new()))
             .1
-            .insert(o.hash.clone(), StorePath::from(o.clone()));
-        plan.owners
-            .entry(o.hash.clone())
-            .or_default()
-            .push(o.derivation);
+            .insert(hash.clone(), path);
+        plan.owners.entry(hash).or_default().push(o.derivation);
     }
 
     let recorded: HashSet<DerivationId> = outputs.iter().map(|o| o.derivation).collect();

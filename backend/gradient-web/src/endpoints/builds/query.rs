@@ -90,8 +90,11 @@ pub async fn get_build(
     let mapper = state.project_mapper(ctx.project.id).await?;
     let mut outputs = HashMap::new();
     for output in derivation_outputs {
-        let path = StorePath::from(output.clone()).base();
-        outputs.insert(output.name, original_text(&mapper, path));
+        let path = output
+            .store_path()
+            .map(|p| original_text(&mapper, p.base()))
+            .unwrap_or_default();
+        outputs.insert(output.name, path);
     }
 
     let attempt = latest_attempt(&state.web_db, shared_build.id)

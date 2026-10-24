@@ -7,6 +7,7 @@
 mod format;
 mod generate;
 mod narinfo;
+mod realisation;
 mod signing;
 mod verification;
 

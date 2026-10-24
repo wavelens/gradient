@@ -115,8 +115,11 @@ async fn product_response(
 ) -> WebResult<Option<Response>> {
     tracing::debug!(%build_id, %filename, product_path = %product.path, "Found matching build_product, fetching from NAR");
 
-    let hash = output.hash.as_str();
-    let output_root = StorePath::from(output.clone()).full();
+    let Some(output_path) = output.store_path() else {
+        return Ok(None);
+    };
+    let hash = output_path.hash();
+    let output_root = output_path.full();
     let rel = relative_in_output(&product.path, &output_root);
 
     let stream = match nar_storage.get_stream(hash).await {
