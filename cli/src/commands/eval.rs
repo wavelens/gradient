@@ -7,7 +7,7 @@
 use crate::commands::attr_spec;
 use clap::Args;
 use etcetera::base_strategy::{BaseStrategy, choose_base_strategy};
-use gradient_eval::ipc::ResolvedItem;
+use gradient_eval::ipc::{License, ResolvedItem};
 use gradient_eval::pool::{
     EvalPool, EvalPoolConfig, MemoryGuard, RefuseDependencies, default_workers,
 };
@@ -48,7 +48,7 @@ pub struct Job {
     #[serde(rename = "drvPath", skip_serializing_if = "Option::is_none")]
     pub drv_path: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub references: Vec<String>,
+    pub licenses: Vec<License>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -59,7 +59,7 @@ impl Job {
             attr_path: gradient_eval::wildcard_walk::parse_pattern(&item.attr).1,
             attr: item.attr,
             drv_path: item.drv_path.map(|drv| gradient_eval::nix_store_path(&drv)),
-            references: item.references,
+            licenses: item.licenses,
             error: item.error,
         }
     }
@@ -69,7 +69,7 @@ impl Job {
             attr_path: gradient_eval::wildcard_walk::parse_pattern(&attr).1,
             attr,
             drv_path: None,
-            references: vec![],
+            licenses: vec![],
             error: Some(error),
         }
     }
@@ -306,7 +306,9 @@ mod tests {
         let line = serde_json::to_string(&Job::from_item(ResolvedItem {
             attr: "packages.x86_64-linux.hello".into(),
             drv_path: Some("aaaa-hello.drv".into()),
-            references: vec!["/nix/store/bbbb-glibc".into()],
+            licenses: vec![License::Spdx {
+                id: "GPL-3.0-or-later".into(),
+            }],
             error: None,
             cost: None,
         }))
@@ -314,7 +316,7 @@ mod tests {
 
         assert_eq!(
             line,
-            r#"{"attr":"packages.x86_64-linux.hello","attrPath":["packages","x86_64-linux","hello"],"drvPath":"/nix/store/aaaa-hello.drv","references":["/nix/store/bbbb-glibc"]}"#
+            r#"{"attr":"packages.x86_64-linux.hello","attrPath":["packages","x86_64-linux","hello"],"drvPath":"/nix/store/aaaa-hello.drv","licenses":[{"id":"GPL-3.0-or-later"}]}"#
         );
     }
 
@@ -323,7 +325,7 @@ mod tests {
         let line = serde_json::to_string(&Job::from_item(ResolvedItem {
             attr: "packages.x86_64-linux.broken".into(),
             drv_path: None,
-            references: vec![],
+            licenses: vec![],
             error: Some("boom".into()),
             cost: None,
         }))
