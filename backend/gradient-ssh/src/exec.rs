@@ -6,6 +6,7 @@
 
 use crate::build_log::PlainLog;
 use crate::commands::Command;
+use crate::read_log::read_log;
 use crate::roots::Roots;
 use crate::session::Session;
 use crate::store::SshBackend;
@@ -67,7 +68,11 @@ struct Output {
 
 impl Output {
     async fn stdout(&self, text: String) {
-        let _ = self.handle.data(self.id, format!("{text}\n")).await;
+        self.print(format!("{text}\n")).await;
+    }
+
+    async fn print(&self, text: String) {
+        let _ = self.handle.data(self.id, text).await;
     }
 
     async fn stderr(&self, text: String) {
@@ -141,9 +146,29 @@ pub async fn run(
         Command::Build { derivations } => {
             realise(&output, &session, &roots, &derivations, None).await
         }
+        Command::ReadLog { path } => print_log(&output, &session, &path).await,
     };
 
     output.finish(status).await;
+}
+
+async fn print_log(output: &Output, session: &Session, path: &str) -> u32 {
+    match read_log(session, path).await {
+        Ok(Some(log)) => {
+            output.print(log).await;
+            0
+        }
+        Ok(None) => {
+            output
+                .stderr(format!("error: build log of '{path}' is not available"))
+                .await;
+            1
+        }
+        Err(error) => {
+            output.stderr(format!("error: {error}")).await;
+            1
+        }
+    }
 }
 
 async fn realise(

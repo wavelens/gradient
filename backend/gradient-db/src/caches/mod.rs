@@ -24,6 +24,13 @@ pub async fn by_name<C: ConnectionTrait>(db: &C, name: &str) -> Result<Option<MC
     ECache::find().filter(CCache::Name.eq(name)).one(db).await
 }
 
+pub async fn by_ids<C: ConnectionTrait>(db: &C, ids: &[CacheId]) -> Result<Vec<MCache>, DbErr> {
+    ECache::find()
+        .filter(CCache::Id.is_in(ids.iter().copied()))
+        .all(db)
+        .await
+}
+
 pub async fn lock_for_admin_change<C: ConnectionTrait>(
     db: &C,
     cache: CacheId,

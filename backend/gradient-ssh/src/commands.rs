@@ -23,6 +23,9 @@ pub enum Command {
     RemoveDir {
         path: String,
     },
+    ReadLog {
+        path: String,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -75,6 +78,15 @@ pub fn parse(line: &str) -> Result<Command, CommandError> {
                 add_root,
             })
         }
+        ["nix-store", "--read-log" | "-l", path] if is_store_path(path) => Ok(Command::ReadLog {
+            path: path.to_string(),
+        }),
+        ["nix", rest @ ..] if rest.contains(&"log") => match store_path_arguments(rest)[..] {
+            [path] => Ok(Command::ReadLog {
+                path: path.to_string(),
+            }),
+            _ => Err(unsupported()),
+        },
         ["nix", rest @ ..] if rest.contains(&"build") => {
             let (derivations, _) = derivations_and_root(rest);
             if derivations.is_empty() {
@@ -85,6 +97,18 @@ pub fn parse(line: &str) -> Result<Command, CommandError> {
         }
         _ => Err(unsupported()),
     }
+}
+
+fn is_store_path(path: &str) -> bool {
+    path.starts_with("/nix/store/") && !path.split('/').any(|part| part == "..")
+}
+
+fn store_path_arguments<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    let (positional, _) = positional_and_root(args);
+    positional
+        .into_iter()
+        .filter(|arg| is_store_path(arg))
+        .collect()
 }
 
 fn without_env_wrapper<'a>(args: &'a [&'a str]) -> &'a [&'a str] {
@@ -114,7 +138,19 @@ fn is_tmp(path: &str) -> bool {
 }
 
 fn derivations_and_root(args: &[&str]) -> (Vec<String>, Option<String>) {
-    let mut derivations = Vec::new();
+    let (positional, add_root) = positional_and_root(args);
+    let derivations = positional
+        .into_iter()
+        .map(|arg| arg.strip_suffix("^*").unwrap_or(arg))
+        .filter(|path| path.starts_with("/nix/store/") && path.ends_with(".drv"))
+        .map(str::to_string)
+        .collect();
+
+    (derivations, add_root)
+}
+
+fn positional_and_root<'a>(args: &[&'a str]) -> (Vec<&'a str>, Option<String>) {
+    let mut positional = Vec::new();
     let mut add_root = None;
     let mut i = 0;
     while i < args.len() {
@@ -126,17 +162,13 @@ fn derivations_and_root(args: &[&str]) -> (Vec<String>, Option<String>) {
             "--option" => i += 3,
             flag if VALUE_FLAGS.contains(&flag) => i += 2,
             arg => {
-                let path = arg.strip_suffix("^*").unwrap_or(arg);
-                if path.starts_with("/nix/store/") && path.ends_with(".drv") {
-                    derivations.push(path.to_string());
-                }
-
+                positional.push(arg);
                 i += 1;
             }
         }
     }
 
-    (derivations, add_root)
+    (positional, add_root)
 }
 
 #[cfg(test)]
@@ -243,6 +275,36 @@ mod tests {
                 add_root: Some("/tmp/a.b/c".into())
             })
         );
+    }
+
+    #[test]
+    fn every_log_command_reads_the_log_of_one_store_path() {
+        let read_log = Ok(Command::ReadLog { path: DRV.into() });
+        assert_eq!(parse(&format!("nix log {DRV}")), read_log);
+        assert_eq!(
+            parse(&format!(
+                "nix --extra-experimental-features 'nix-command flakes' log {DRV} --option a b"
+            )),
+            read_log
+        );
+        assert_eq!(parse(&format!("nix-store --read-log {DRV}")), read_log);
+        assert_eq!(parse(&format!("nix-store -l {DRV}")), read_log);
+    }
+
+    #[test]
+    fn a_log_command_outside_the_store_or_with_many_paths_is_unsupported() {
+        assert!(matches!(
+            parse("nix-store -l /etc/passwd"),
+            Err(CommandError::Unsupported(_))
+        ));
+        assert!(matches!(
+            parse("nix log nixpkgs#hello"),
+            Err(CommandError::Unsupported(_))
+        ));
+        assert!(matches!(
+            parse(&format!("nix log {DRV} {DRV}")),
+            Err(CommandError::Unsupported(_))
+        ));
     }
 
     #[test]
