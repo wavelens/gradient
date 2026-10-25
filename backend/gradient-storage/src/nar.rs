@@ -6,11 +6,13 @@
 
 use crate::HotNarCache;
 use crate::admission::ObjectKey;
+use crate::eval_cache_segment::eval_cache_segment_prefix;
 use crate::timed::{OpGuard, TimedStore, watch_stream};
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
+use gradient_types::ids::CacheId;
 use gradient_util::telemetry::{GAUGES, STATS};
 use gradient_wire::constants::{BULK_CHUNK_SIZE, MULTIPART_NAR_BYTES, PRESIGN_TTL};
 use object_store::{ClientOptions, ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
@@ -652,6 +654,38 @@ impl NarStore {
         Ok(keys)
     }
 
+    pub async fn list_eval_cache_segments(
+        &self,
+        cache: CacheId,
+        fingerprint: &str,
+    ) -> Result<Vec<(String, u64)>> {
+        let listed = self.eval_cache_path(&eval_cache_segment_prefix(cache, fingerprint));
+        let mut stream = self.inner.list(Some(&listed));
+        let mut segments = Vec::new();
+        while let Some(item) = stream.next().await {
+            let meta = item.context("list eval cache segments")?;
+            let location = meta.location.to_string();
+            if let Some(key) = location.strip_prefix(self.prefix.as_str()) {
+                segments.push((key.to_owned(), meta.size));
+            }
+        }
+
+        segments.sort_unstable();
+        Ok(segments)
+    }
+
+    pub async fn delete_eval_cache_segments(
+        &self,
+        cache: CacheId,
+        fingerprint: &str,
+    ) -> Result<()> {
+        for (key, _) in self.list_eval_cache_segments(cache, fingerprint).await? {
+            self.delete_eval_cache(&key).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn list_blobs(&self) -> Result<Vec<(uuid::Uuid, [u8; 32])>> {
         let prefix = Path::from(format!("{}build-request-blobs", self.prefix));
         let mut stream = self.inner.list(Some(&prefix));
@@ -825,6 +859,7 @@ impl NarStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::eval_cache_segment::eval_cache_segment_key;
     use futures::TryStreamExt as _;
     use tempfile::TempDir;
 
@@ -1040,6 +1075,95 @@ mod tests {
         assert_eq!(
             store.get_eval_cache("eval-cache/b/fp").await.expect("get"),
             Some(b"blob".to_vec())
+        );
+    }
+
+    async fn put_segment(
+        store: &NarStore,
+        cache: CacheId,
+        fingerprint: &str,
+        len: usize,
+    ) -> String {
+        let key = eval_cache_segment_key(cache, fingerprint, uuid::Uuid::now_v7());
+        store
+            .put_eval_cache(&key, vec![0; len])
+            .await
+            .expect("put segment");
+        key
+    }
+
+    #[tokio::test]
+    async fn segments_list_in_key_order_with_sizes() {
+        let (_d, store) = local_store();
+        let cache = CacheId::now_v7();
+        let keys = [
+            eval_cache_segment_key(cache, "fp", uuid::Uuid::now_v7()),
+            eval_cache_segment_key(cache, "fp", uuid::Uuid::now_v7()),
+            eval_cache_segment_key(cache, "fp", uuid::Uuid::now_v7()),
+        ];
+        for (index, len) in [(2, 30), (0, 10), (1, 20)] {
+            store
+                .put_eval_cache(&keys[index], vec![0; len])
+                .await
+                .expect("put segment");
+        }
+
+        assert_eq!(
+            store
+                .list_eval_cache_segments(cache, "fp")
+                .await
+                .expect("list"),
+            vec![
+                (keys[0].clone(), 10),
+                (keys[1].clone(), 20),
+                (keys[2].clone(), 30),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn segments_of_other_fingerprints_and_caches_are_not_listed() {
+        let (_d, store) = local_store();
+        let cache = CacheId::now_v7();
+        let mine = put_segment(&store, cache, "fp", 4).await;
+        put_segment(&store, cache, "fp2", 4).await;
+        put_segment(&store, CacheId::now_v7(), "fp", 4).await;
+
+        assert_eq!(
+            store
+                .list_eval_cache_segments(cache, "fp")
+                .await
+                .expect("list"),
+            vec![(mine, 4)]
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_segments_removes_only_that_fingerprint() {
+        let (_d, store) = local_store();
+        let cache = CacheId::now_v7();
+        put_segment(&store, cache, "fp", 4).await;
+        put_segment(&store, cache, "fp", 4).await;
+        let kept = put_segment(&store, cache, "fp2", 4).await;
+
+        store
+            .delete_eval_cache_segments(cache, "fp")
+            .await
+            .expect("delete");
+
+        assert!(
+            store
+                .list_eval_cache_segments(cache, "fp")
+                .await
+                .expect("list")
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .list_eval_cache_segments(cache, "fp2")
+                .await
+                .expect("list"),
+            vec![(kept, 4)]
         );
     }
 
