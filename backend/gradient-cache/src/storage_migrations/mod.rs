@@ -8,6 +8,7 @@
 //! schema. Apply them in order and before any deep GC unit.
 
 mod eval_cache_per_cache;
+mod eval_cache_segments;
 
 use crate::units::{Step, next_unit};
 use anyhow::{Context, Result};
@@ -27,7 +28,10 @@ pub(crate) trait StorageMigration: Send + Sync {
 }
 
 fn migrations() -> Vec<Box<dyn StorageMigration>> {
-    vec![Box::new(eval_cache_per_cache::EvalCachePerCache)]
+    vec![
+        Box::new(eval_cache_per_cache::EvalCachePerCache),
+        Box::new(eval_cache_segments::EvalCacheSegments),
+    ]
 }
 
 pub(super) async fn step(db: &DbContext) -> Result<Step> {

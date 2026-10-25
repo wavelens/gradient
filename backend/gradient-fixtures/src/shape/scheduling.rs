@@ -344,7 +344,7 @@ impl Shape {
             id: EvalCacheStoreId::now_v7(),
             cache,
             fingerprint: fingerprint.into(),
-            storage_path: format!("eval-cache/{cache}/{fingerprint}"),
+            storage_path: format!("eval-cache-segments/{cache}/{fingerprint}"),
             size_bytes: 1,
             created_at: test_date(),
             updated_at: test_date(),
