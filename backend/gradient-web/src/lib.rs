@@ -32,18 +32,20 @@ pub mod scope;
 mod store_paths;
 
 use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, MatchedPath};
+use axum::extract::connect_info::MockConnectInfo;
+use axum::extract::{ConnectInfo, DefaultBodyLimit, MatchedPath};
 use axum::{Router, middleware};
 use bytes::Bytes;
 use governor::middleware::NoOpMiddleware;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use http::{HeaderMap, HeaderValue, Request, Response};
-use std::net::{IpAddr, Ipv4Addr};
+use ipnet::IpNet;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use tower_governor::GovernorLayer;
 use tower_governor::errors::GovernorError;
 use tower_governor::governor::{GovernorConfig, GovernorConfigBuilder};
-use tower_governor::key_extractor::{KeyExtractor, SmartIpKeyExtractor};
+use tower_governor::key_extractor::KeyExtractor;
 use tower_http::classify::ServerErrorsFailureClass;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::request_id::{
@@ -62,17 +64,23 @@ use std::sync::Arc;
 
 const NAR_UPLOAD_CHUNK_LIMIT: usize = 64 * 1024 * 1024;
 
-#[derive(Debug, Clone, Copy)]
-struct SmartIpOrFallback;
+#[derive(Debug, Clone)]
+struct ClientIpKey {
+    trusted_proxies: Arc<[IpNet]>,
+}
 
-impl KeyExtractor for SmartIpOrFallback {
+impl KeyExtractor for ClientIpKey {
     type Key = IpAddr;
 
     fn extract<T>(&self, req: &Request<T>) -> Result<Self::Key, GovernorError> {
-        match SmartIpKeyExtractor.extract(req) {
-            Ok(ip) => Ok(ip),
-            Err(_) => Ok(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
-        }
+        let extensions = req.extensions();
+        let peer = extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|c| c.0)
+            .or_else(|| extensions.get::<MockConnectInfo<SocketAddr>>().map(|m| m.0));
+        Ok(peer.map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |peer| {
+            client_ip::resolve_client_ip(req.headers(), peer.ip(), &self.trusted_proxies)
+        }))
     }
 }
 
@@ -88,13 +96,14 @@ impl MakeRequestId for MakeRequestUuid {
 }
 
 fn rate_limit(
+    key: &ClientIpKey,
     refill: Duration,
     burst: u32,
-) -> Result<Arc<GovernorConfig<SmartIpOrFallback, NoOpMiddleware>>, InitError> {
+) -> Result<Arc<GovernorConfig<ClientIpKey, NoOpMiddleware>>, InitError> {
     let config = GovernorConfigBuilder::default()
         .period(refill)
         .burst_size(burst)
-        .key_extractor(SmartIpOrFallback)
+        .key_extractor(key.clone())
         .finish()
         .ok_or_else(|| InitError::NetworkConfig("invalid rate-limit configuration".into()))?;
 
@@ -186,6 +195,11 @@ pub fn create_router_with_scheduler(
                 tracing::debug!(error = ?error, "request failed")
             },
         );
+
+    let key = ClientIpKey {
+        trusted_proxies: state.config.network.trusted_proxies.clone().into(),
+    };
+    let rate_limit = |refill, burst| rate_limit(&key, refill, burst);
 
     let limits = routes::BodyLimits::from_config(&state.config);
     let (auth_api, _) = routes::auth_api(&limits).split_for_parts();
@@ -302,7 +316,13 @@ pub fn create_router_with_scheduler(
         app = app.merge(metrics_route);
     }
 
-    let nar_cache_limit = || rate_limit(Duration::from_millis(20), 3000);
+    let http = &state.config.http;
+    let nar_cache_limit = || {
+        rate_limit(
+            Duration::from_secs(1) / http.cache_requests_per_second.get(),
+            http.cache_request_burst.get(),
+        )
+    };
     let (cache_routes, _) = routes::cache_routes().split_for_parts();
     let cache_routes = cache_routes.route_layer(GovernorLayer::new(nar_cache_limit()?));
 

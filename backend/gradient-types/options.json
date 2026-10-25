@@ -416,6 +416,26 @@
     "values": []
   },
   {
+    "group": "http",
+    "field": "cache_requests_per_second",
+    "flag": "http-cache-requests-per-second",
+    "env": "GRADIENT_HTTP_CACHE_REQUESTS_PER_SECOND",
+    "type": "NonZeroU32",
+    "description": "Sustained requests per second each client IP can make to the binary cache (`narinfo`,\nNAR and cache proto endpoints). Nix asks for one narinfo per path of a closure.",
+    "default": "1000",
+    "values": []
+  },
+  {
+    "group": "http",
+    "field": "cache_request_burst",
+    "flag": "http-cache-request-burst",
+    "env": "GRADIENT_HTTP_CACHE_REQUEST_BURST",
+    "type": "NonZeroU32",
+    "description": "Requests each client IP can make to the binary cache in a burst before\n{option}`services.gradient.http.cacheRequestsPerSecond` applies.",
+    "default": "20000",
+    "values": []
+  },
+  {
     "group": "proto",
     "field": "discoverable",
     "flag": "proto-discoverable",

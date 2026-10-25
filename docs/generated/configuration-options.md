@@ -111,6 +111,8 @@
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
+| `http.cacheRequestBurst` | positive int | `20000` | `GRADIENT_HTTP_CACHE_REQUEST_BURST` | Requests each client IP can make to the binary cache in a burst before `http.cacheRequestsPerSecond` applies. |
+| `http.cacheRequestsPerSecond` | positive int | `1000` | `GRADIENT_HTTP_CACHE_REQUESTS_PER_SECOND` | Sustained requests per second each client IP can make to the binary cache (`narinfo`, NAR and cache proto endpoints). Nix asks for one narinfo per path of a closure. |
 | `http.localIps` | list of string | `[ "192.168.0.0/16" "172.16.0.0/12" "100.64.0.0/10" "10.0.0.0/8" "fc00::/7" ]` | `GRADIENT_HTTP_LOCAL_IPS` | Clients in these CIDR ranges receive a cache's `local_priority`, if set and non-zero. |
 | `http.maxRequestSize` | positive int | `2097152` | `GRADIENT_HTTP_MAX_REQUEST_SIZE` | Maximum HTTP request body size in bytes for most endpoints, to keep an unbounded body from exhausting server memory. Build request blob uploads use a fixed 20 MiB cap. |
 | `http.maxSourceUploadSize` | positive int | `536870912` | `GRADIENT_HTTP_MAX_SOURCE_UPLOAD_SIZE` | Maximum size in bytes of a source upload to `POST /build-requests/source` (as sent by `gradient build`) and of a chunked manifest in total. The built-in reverse proxies raise their body size limit to fit it. |

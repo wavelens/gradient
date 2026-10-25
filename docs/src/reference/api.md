@@ -88,5 +88,7 @@ Cache endpoints live at the root of the host, with no `/api/v1` prefix. Private 
 
 - A request for an unknown key answers with `404`, and Nix then tries the next substituter.
 - `log` and `debuginfo` fall back to upstream caches for substituted paths.
+- Every client IP can make 1000 `narinfo` and NAR requests per second, after a burst of 20000. The options `http.cacheRequestsPerSecond` and `http.cacheRequestBurst` can raise both limits.
+- Requests over a limit receive `429`. Clients behind one proxy share a single limit unless the proxy is in `http.trustedProxies`.
 - `ls`, `serve` and `log` have a rate limit that refills at one request per 333 ms, about 180 per minute.
 - The burst allowance is 180 for `ls` and `serve`, and 900 for `log`.
