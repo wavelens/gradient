@@ -8,6 +8,7 @@ pub mod admission;
 pub mod context;
 pub mod debug_info;
 pub mod digest;
+pub mod eval_cache_segment;
 pub mod hot;
 mod layout;
 pub mod log;
