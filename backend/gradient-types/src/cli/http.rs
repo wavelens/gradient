@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU32, NonZeroUsize};
 
 use clap::Args;
 use gradient_derive::config_group;
@@ -35,6 +35,16 @@ pub struct HttpArgs {
         default_value = "192.168.0.0/16,172.16.0.0/12,100.64.0.0/10,10.0.0.0/8,fc00::/7"
     )]
     pub local_ips: Vec<String>,
+
+    /// Sustained requests per second each client IP can make to the binary cache (`narinfo`,
+    /// NAR and cache proto endpoints). Nix asks for one narinfo per path of a closure.
+    #[arg(default_value = "1000")]
+    pub cache_requests_per_second: NonZeroU32,
+
+    /// Requests each client IP can make to the binary cache in a burst before
+    /// {option}`services.gradient.http.cacheRequestsPerSecond` applies.
+    #[arg(default_value = "20000")]
+    pub cache_request_burst: NonZeroU32,
 }
 
 #[derive(Debug, thiserror::Error)]
