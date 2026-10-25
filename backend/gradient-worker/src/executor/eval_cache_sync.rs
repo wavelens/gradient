@@ -22,6 +22,7 @@ create table if not exists Attributes (parent integer not null, name text, type 
 create table if not exists gradient_changed_attribute (attribute integer primary key);
 create table if not exists gradient_applying (one integer);
 create table if not exists gradient_applied_segment (key text primary key);
+create table if not exists gradient_unsent_segment (id integer primary key, bytes blob not null);
 create trigger if not exists gradient_record_inserted_attribute after insert on Attributes
     when not exists (select 1 from gradient_applying)
     begin insert or ignore into gradient_changed_attribute (attribute) values (new.rowid); end;
@@ -45,6 +46,13 @@ select attribute, parent, name, type, value, context from chain order by attribu
 
 pub struct EvalCacheFile {
     conn: Connection,
+}
+
+pub fn is_busy(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<rusqlite::Error>()
+        .and_then(rusqlite::Error::sqlite_error_code)
+        == Some(rusqlite::ErrorCode::DatabaseBusy)
 }
 
 pub fn open(path: &Path) -> Result<EvalCacheFile> {
@@ -72,15 +80,37 @@ struct Link {
 }
 
 impl EvalCacheFile {
-    pub fn export_changes(&mut self) -> Result<Vec<Vec<u8>>> {
+    pub fn export_changes(&mut self) -> Result<Vec<(i64, Vec<u8>)>> {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let rows = changed_rows(&tx)?;
-        let segments = segments_of(rows)?;
         tx.execute("delete from gradient_changed_attribute", [])?;
+        let mut unsent = Vec::new();
+        for segment in segments_of(rows)? {
+            tx.prepare_cached("insert into gradient_unsent_segment (bytes) values (?1)")?
+                .execute([&segment])?;
+            unsent.push((tx.last_insert_rowid(), segment));
+        }
+
         tx.commit()?;
-        Ok(segments)
+        Ok(unsent)
+    }
+
+    pub fn unsent_segments(&self) -> Result<Vec<(i64, Vec<u8>)>> {
+        let mut statement = self
+            .conn
+            .prepare("select id, bytes from gradient_unsent_segment order by id")?;
+        let unsent = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<(i64, Vec<u8>)>>>()?;
+        Ok(unsent)
+    }
+
+    pub fn mark_sent(&mut self, id: i64) -> Result<()> {
+        self.conn
+            .execute("delete from gradient_unsent_segment where id = ?1", [id])?;
+        Ok(())
     }
 
     pub fn apply(&mut self, key: &str, rows: &[EvalCacheRow]) -> Result<()> {
@@ -100,6 +130,11 @@ impl EvalCacheFile {
         tx.execute("delete from gradient_applying", [])?;
         tx.commit()?;
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_busy_timeout(&self, timeout: Duration) {
+        self.conn.busy_timeout(timeout).unwrap();
     }
 
     pub fn applied_keys(&self) -> Result<HashSet<String>> {
@@ -343,7 +378,7 @@ mod tests {
             .export_changes()
             .unwrap()
             .iter()
-            .flat_map(|segment| decode(segment).unwrap())
+            .flat_map(|(_, segment)| decode(segment).unwrap())
             .collect();
         rows.sort_by(|a, b| a.path.cmp(&b.path));
         rows
@@ -508,8 +543,8 @@ mod tests {
         let segments = file.export_changes().unwrap();
 
         assert_eq!(segments.len(), 2);
-        assert!(segments.iter().all(|s| s.len() <= SEGMENT_MAX_BYTES));
-        let rows: usize = segments.iter().map(|s| decode(s).unwrap().len()).sum();
+        assert!(segments.iter().all(|(_, s)| s.len() <= SEGMENT_MAX_BYTES));
+        let rows: usize = segments.iter().map(|(_, s)| decode(s).unwrap().len()).sum();
         assert_eq!(rows, 10);
     }
 }

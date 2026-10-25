@@ -8,13 +8,12 @@ use std::collections::{HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use super::dependencies::{EvalDependencySource, Imports};
-use super::eval_cache_sync::{self, EvalCacheFile};
+use super::eval_cache_sharing::{EVAL_CACHE_FLUSH_INTERVAL, share_eval_cache};
 use super::progress_report::{ChangeReporter, thunk_progress};
 use crate::nix::wildcard_walk;
-use crate::proto::job::PulledSegments;
 use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
 use futures::future::BoxFuture;
@@ -24,14 +23,11 @@ use gradient_eval::pool::MemoryGuard;
 use gradient_sources::{
     AttrError, DerivationResolver, FlakeDiscovery, Resolved, ResolvedDerivation,
 };
-use gradient_storage::eval_cache_segment::decode;
-use gradient_util::sync::Mutex;
 use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
 };
 use gradient_wire::types::{EvalMessageLevel, License, attr_eval_source};
 use tokio::sync::mpsc;
-use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
 
 fn abort_err() -> anyhow::Error {
@@ -181,8 +177,6 @@ pub fn required_local_source(source: &FlakeSource) -> Option<&str> {
 
 const EVAL_BATCH_SIZE: usize = 50;
 
-pub const EVAL_CACHE_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
-
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn evaluate_derivations(
     evaluator: &WorkerEvaluator,
@@ -195,7 +189,10 @@ pub async fn evaluate_derivations(
     let start = Instant::now();
     let eval_overrides = eval_input_overrides(job, local_flake_path);
     let mut sharing = match eval_cache_fingerprint(evaluator, repo, &eval_overrides).await {
-        Some(fingerprint) => share_eval_cache(evaluator, updater, fingerprint).await,
+        Some(fingerprint) => {
+            let path = PathBuf::from(eval_cache_path(evaluator, &fingerprint));
+            share_eval_cache(path, updater, fingerprint).await
+        }
         None => None,
     };
 
@@ -282,155 +279,6 @@ async fn eval_cache_fingerprint(
             warn!(error = %e, "eval-cache fingerprint failed; evaluating local-only");
             None
         })
-}
-
-async fn share_eval_cache(
-    evaluator: &WorkerEvaluator,
-    updater: &JobUpdater,
-    fingerprint: String,
-) -> Option<EvalCacheSharing> {
-    let path = PathBuf::from(eval_cache_path(evaluator, &fingerprint));
-    let file = match blocking(move || eval_cache_sync::open(&path)).await {
-        Ok(file) => Arc::new(Mutex::new(file)),
-        Err(e) => {
-            warn!(error = %e, "opening the eval cache failed; evaluating local-only");
-            return None;
-        }
-    };
-
-    pull_segments(&file, updater, &fingerprint).await;
-    let upload = SegmentUpload {
-        updater: updater.concurrent(),
-        fingerprint,
-    };
-    Some(EvalCacheSharing::new(file, Arc::new(upload)))
-}
-
-type SharedEvalCacheFile = Arc<Mutex<EvalCacheFile>>;
-
-async fn blocking<T: Send + 'static>(
-    work: impl FnOnce() -> Result<T> + Send + 'static,
-) -> Result<T> {
-    tokio::task::spawn_blocking(work)
-        .await
-        .context("eval cache task panicked")?
-}
-
-async fn on_file<T: Send + 'static>(
-    file: &SharedEvalCacheFile,
-    work: impl FnOnce(&mut EvalCacheFile) -> Result<T> + Send + 'static,
-) -> Result<T> {
-    let file = Arc::clone(file);
-    blocking(move || work(&mut file.lock())).await
-}
-
-async fn pull_segments(file: &SharedEvalCacheFile, updater: &JobUpdater, fingerprint: &str) {
-    let applied = match on_file(file, |file| file.applied_keys()).await {
-        Ok(keys) => keys.into_iter().collect(),
-        Err(e) => {
-            warn!(error = %e, "reading the applied eval cache segments failed; evaluating local-only");
-            return;
-        }
-    };
-
-    let pulled = match updater.pull_eval_cache(fingerprint, applied).await {
-        Ok(pulled) => pulled,
-        Err(e) => {
-            warn!(error = %e, "eval-cache pull failed; evaluating local-only");
-            return;
-        }
-    };
-
-    if let Err(e) = on_file(file, move |file| apply_pulled(file, pulled)).await {
-        warn!(error = %e, "applying the pulled eval cache segments failed");
-    }
-}
-
-fn apply_pulled(file: &mut EvalCacheFile, pulled: PulledSegments) -> Result<()> {
-    for (key, bytes) in &pulled.segments {
-        if let Err(e) = decode(bytes).and_then(|rows| file.apply(key, &rows)) {
-            warn!(%key, error = %e, "skipping an eval cache segment");
-        }
-    }
-
-    file.forget_keys_except(&pulled.keys)
-}
-
-#[async_trait::async_trait]
-trait SegmentSink: Send + Sync {
-    async fn push(&self, segment: Vec<u8>) -> Result<()>;
-}
-
-struct SegmentUpload {
-    updater: JobUpdater,
-    fingerprint: String,
-}
-
-#[async_trait::async_trait]
-impl SegmentSink for SegmentUpload {
-    async fn push(&self, segment: Vec<u8>) -> Result<()> {
-        self.updater
-            .push_eval_cache_segment(&self.fingerprint, segment)
-            .await
-    }
-}
-
-struct EvalCacheSharing {
-    file: SharedEvalCacheFile,
-    sink: Arc<dyn SegmentSink>,
-    unsent: Vec<Vec<u8>>,
-}
-
-impl EvalCacheSharing {
-    fn new(file: SharedEvalCacheFile, sink: Arc<dyn SegmentSink>) -> Self {
-        Self {
-            file,
-            sink,
-            unsent: Vec::new(),
-        }
-    }
-
-    async fn beside_flusher<T>(
-        &mut self,
-        interval: Duration,
-        evaluation: impl Future<Output = T>,
-    ) -> T {
-        let (stop, stopped) = oneshot::channel::<()>();
-        let evaluation = async move {
-            let out = evaluation.await;
-            drop(stop);
-            out
-        };
-        let (out, ()) = tokio::join!(evaluation, self.flush_every(interval, stopped));
-        out
-    }
-
-    async fn flush_every(&mut self, interval: Duration, mut stopped: oneshot::Receiver<()>) {
-        loop {
-            tokio::select! {
-                biased;
-                _ = &mut stopped => return,
-                () = tokio::time::sleep(interval) => self.flush().await,
-            }
-        }
-    }
-
-    async fn flush(&mut self) {
-        match on_file(&self.file, EvalCacheFile::export_changes).await {
-            Ok(segments) => self.unsent.extend(segments),
-            Err(e) => warn!(error = %e, "eval cache export failed; trying again at the next flush"),
-        }
-
-        let mut failed = Vec::new();
-        for segment in std::mem::take(&mut self.unsent) {
-            if let Err(e) = self.sink.push(segment.clone()).await {
-                warn!(error = %e, "eval cache segment push failed; trying again at the next flush");
-                failed.push(segment);
-            }
-        }
-
-        self.unsent = failed;
-    }
 }
 
 fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
@@ -1161,7 +1009,6 @@ async fn finish_evaluation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_storage::eval_cache_segment::{ATTR_FULL_ATTRS, EvalCacheRow, encode};
     use gradient_test_support::fakes::derivation_resolver::FakeDerivationResolver;
     use gradient_test_support::prelude::*;
     use gradient_wire::types::{ImportOutcome, Realisation};
@@ -1206,94 +1053,6 @@ mod tests {
 
         assert!(is_corrupt_eval_cache_error(&msg));
         assert_eq!(corrupt_eval_cache(&msg).unwrap().fingerprint, fp);
-    }
-
-    fn cache_row(path: &[&str], kind: u8) -> EvalCacheRow {
-        EvalCacheRow {
-            path: path.iter().map(|part| (*part).to_owned()).collect(),
-            kind,
-            value: None,
-            context: None,
-        }
-    }
-
-    #[test]
-    fn a_bad_segment_is_skipped_and_not_marked_applied() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut file = eval_cache_sync::open(&dir.path().join("fp.sqlite")).unwrap();
-        let good = encode(&[cache_row(&["a"], ATTR_FULL_ATTRS)]).unwrap();
-        let mut bad = encode(&[cache_row(&["b"], ATTR_FULL_ATTRS)]).unwrap();
-        bad.truncate(bad.len() / 2);
-        let pulled = PulledSegments {
-            keys: vec!["good".to_owned(), "bad".to_owned()],
-            segments: vec![("good".to_owned(), good), ("bad".to_owned(), bad)],
-        };
-
-        apply_pulled(&mut file, pulled).unwrap();
-
-        assert_eq!(
-            file.applied_keys().unwrap(),
-            HashSet::from(["good".to_owned()])
-        );
-    }
-
-    #[derive(Default)]
-    struct RecordingSink {
-        pushed: Mutex<Vec<Vec<u8>>>,
-    }
-
-    #[async_trait::async_trait]
-    impl SegmentSink for RecordingSink {
-        async fn push(&self, segment: Vec<u8>) -> Result<()> {
-            self.pushed.lock().push(segment);
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn the_final_flush_pushes_rows_written_after_the_last_tick() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("fp.sqlite");
-        let file = Arc::new(Mutex::new(eval_cache_sync::open(&path).unwrap()));
-        let sink = Arc::new(RecordingSink::default());
-        let mut sharing = EvalCacheSharing::new(file, sink.clone());
-        let nix = rusqlite::Connection::open(&path).unwrap();
-        nix.busy_timeout(Duration::from_secs(30)).unwrap();
-        let write = |parent: i64, name: &str, kind: u8| {
-            nix.execute(
-                "insert or replace into Attributes(parent, name, type, value) values (?, ?, ?, ?)",
-                rusqlite::params![parent, name, kind, None::<String>],
-            )
-            .unwrap();
-            nix.last_insert_rowid()
-        };
-        let root = write(0, "", ATTR_FULL_ATTRS);
-
-        sharing
-            .beside_flusher(Duration::from_millis(50), async {
-                write(root, "before", ATTR_FULL_ATTRS);
-                tokio::time::sleep(Duration::from_millis(150)).await;
-                write(root, "after", ATTR_FULL_ATTRS);
-            })
-            .await;
-        sharing.flush().await;
-
-        let mut paths: Vec<Vec<String>> = sink
-            .pushed
-            .lock()
-            .iter()
-            .flat_map(|segment| decode(segment).unwrap())
-            .map(|row| row.path)
-            .collect();
-        paths.sort();
-        assert_eq!(
-            paths,
-            vec![
-                Vec::<String>::new(),
-                vec!["after".to_owned()],
-                vec!["before".to_owned()],
-            ]
-        );
     }
 
     #[test]
