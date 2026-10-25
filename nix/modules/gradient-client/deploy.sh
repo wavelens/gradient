@@ -18,8 +18,8 @@ resolve() {
   local evaluation entry_points evaluation_id evaluation_status path status current
 
   evaluation=$(api "${GRADIENT_API_URL}/tasks/${GRADIENT_TASK}/evaluations?limit=1") || { echo "wait"; return; }
-  evaluation_id=$(echo "$evaluation" | jq -r '.message[0].id // empty')
-  evaluation_status=$(echo "$evaluation" | jq -r '.message[0].status // empty')
+  evaluation_id=$(jq -r '.message[0].id // empty' <<< "$evaluation")
+  evaluation_status=$(jq -r '.message[0].status // empty' <<< "$evaluation")
 
   if [[ -z "$evaluation_id" ]]; then
     echo "done task ${GRADIENT_TASK} has no evaluations"
@@ -30,10 +30,11 @@ resolve() {
 
   # Output paths are written at evaluation time from the resolved .drv. The deployment is
   # identifiable before its build. Entry points are absent until derivations are resolved.
-  path=$(echo "$entry_points" | jq -r --arg re "$GRADIENT_SYSTEM_PATH_REGEX" \
-    'first(.message.entry_points[] | select((.outputs.out // "") | test($re))) | .outputs.out // empty')
-  status=$(echo "$entry_points" | jq -r --arg re "$GRADIENT_SYSTEM_PATH_REGEX" \
-    'first(.message.entry_points[] | select((.outputs.out // "") | test($re))) | .build_status // empty')
+  IFS=$'\t' read -r path status < <(
+    jq -r --arg re "$GRADIENT_SYSTEM_PATH_REGEX" \
+      'first(.message.entry_points[] | select((.outputs.out // "") | test($re))) | [(.outputs.out // ""), (.build_status // "")] | @tsv' \
+      <<< "$entry_points"
+  )
 
   if [[ -n "$path" ]]; then
     current=$(readlink /run/current-system || true)
