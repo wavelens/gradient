@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use gradient_storage::PartialWriter;
 use gradient_storage::admission::{ObjectKey, UploadPermit};
-use gradient_types::ids::ProjectId;
+use gradient_types::ids::{CacheId, ProjectId};
 use gradient_wire::types::{UploadMetadata, UploadObject};
 
 pub(in crate::handler) enum Transfer {
@@ -42,11 +42,13 @@ pub(in crate::handler) struct Queued {
     pub job_id: String,
     pub project: ProjectId,
     pub object: UploadObject,
+    pub segment_cache: Option<CacheId>,
     pub size: u64,
 }
 
 pub(in crate::handler) struct Granted {
     pub key: ObjectKey,
+    pub segment_cache: Option<CacheId>,
     pub job_id: String,
     pub project: ProjectId,
     pub object: UploadObject,
@@ -85,6 +87,7 @@ impl UploadTable {
         job_id: String,
         project: ProjectId,
         object: UploadObject,
+        segment_cache: Option<CacheId>,
         size: u64,
     ) -> bool {
         if self.entries.contains_key(&id) {
@@ -96,6 +99,7 @@ impl UploadTable {
                 job_id,
                 project,
                 object,
+                segment_cache,
                 size,
             }),
         );
@@ -227,11 +231,12 @@ mod tests {
         let (_session, permit) = permit(&admission, 1).await;
         let mut table = UploadTable::default();
         let start = Instant::now();
-        assert!(table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), 10));
+        assert!(table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), None, 10));
         table.grant(
             1,
             Granted {
                 key: ObjectKey::Nar("a".repeat(32)),
+                segment_cache: None,
                 job_id: "build:1".into(),
                 project: ProjectId::nil(),
                 object: nar(0),
@@ -270,11 +275,12 @@ mod tests {
         let (_session, permit) = permit(&admission, 1).await;
         let mut table = UploadTable::default();
         let start = Instant::now();
-        table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), 10);
+        table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), None, 10);
         table.grant(
             1,
             Granted {
                 key: ObjectKey::Nar("a".repeat(32)),
+                segment_cache: None,
                 job_id: "build:1".into(),
                 project: ProjectId::nil(),
                 object: nar(0),
@@ -300,16 +306,16 @@ mod tests {
     #[test]
     fn a_duplicate_request_id_is_refused() {
         let mut table = UploadTable::default();
-        assert!(table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), 1));
-        assert!(!table.queue(1, "build:1".into(), ProjectId::nil(), nar(1), 1));
+        assert!(table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), None, 1));
+        assert!(!table.queue(1, "build:1".into(), ProjectId::nil(), nar(1), None, 1));
     }
 
     #[test]
     fn forgetting_a_job_returns_only_its_requests() {
         let mut table = UploadTable::default();
-        table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), 1);
-        table.queue(2, "build:2".into(), ProjectId::nil(), nar(1), 1);
-        table.queue(3, "build:1".into(), ProjectId::nil(), nar(2), 1);
+        table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), None, 1);
+        table.queue(2, "build:2".into(), ProjectId::nil(), nar(1), None, 1);
+        table.queue(3, "build:1".into(), ProjectId::nil(), nar(2), None, 1);
         let mut ids: Vec<u64> = table
             .forget_job("build:1")
             .into_iter()

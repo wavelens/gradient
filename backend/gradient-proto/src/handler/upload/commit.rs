@@ -10,7 +10,7 @@ use gradient_db::{DbContext, WorkerDb};
 use gradient_storage::NarStore;
 use gradient_storage::admission::{ObjectKey, UploadPermit};
 use gradient_types::RuntimeConfig;
-use gradient_types::ids::ProjectId;
+use gradient_types::ids::{CacheId, ProjectId};
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::types::{NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
@@ -29,6 +29,7 @@ pub(super) struct Commit {
     pub request_id: u64,
     pub project: ProjectId,
     pub key: ObjectKey,
+    pub segment_cache: Option<CacheId>,
     pub object: UploadObject,
     pub transfer: Transfer,
     pub metadata: UploadMetadata,
@@ -53,7 +54,8 @@ pub(super) async fn run(c: Commit) {
         Ok(metadata) => {
             let mut permit = c.permit;
             permit.release_budget();
-            let outcome = record(&c.handles, c.project, &c.object, &metadata).await;
+            let outcome =
+                record(&c.handles, c.project, c.segment_cache, &c.object, &metadata).await;
             if matches!(outcome, UploadOutcome::Ok) {
                 permit.committed();
             }
@@ -131,15 +133,21 @@ async fn place(
 async fn record(
     handles: &SessionHandles,
     project_id: ProjectId,
+    segment_cache: Option<CacheId>,
     object: &UploadObject,
     metadata: &UploadMetadata,
 ) -> UploadOutcome {
-    match (object, metadata) {
-        (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta)) => {
+    match (object, metadata, segment_cache) {
+        (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta), _) => {
             record_nar(handles, project_id, store_path, meta).await
         }
-        (UploadObject::EvalCacheSegment { fingerprint }, UploadMetadata::EvalCache { .. }) => {
-            record_eval_cache_segment(handles, project_id, fingerprint).await
+        (
+            UploadObject::EvalCacheSegment { fingerprint },
+            UploadMetadata::EvalCache { .. },
+            Some(cache),
+        ) => record_eval_cache_segment(handles, project_id, cache, fingerprint).await,
+        (UploadObject::EvalCacheSegment { .. }, _, None) => {
+            rejected("the upload holds no eval cache".into())
         }
         _ => UploadOutcome::Ok,
     }
@@ -180,18 +188,19 @@ async fn record_nar(
 async fn record_eval_cache_segment(
     handles: &SessionHandles,
     project_id: ProjectId,
+    cache: CacheId,
     fingerprint: &str,
 ) -> UploadOutcome {
     let db = &handles.db.worker_db;
-    let writable = match project_write_caches(db, project_id).await {
-        Ok(writable) => writable,
-        Err(e) => return retry(format!("looking up the writable caches: {e}")),
-    };
-    let Some((&cache, copies)) = writable.split_first() else {
-        return rejected("the project has no writable cache".into());
+    let copies: Vec<CacheId> = match project_write_caches(db, project_id).await {
+        Ok(writable) => writable.into_iter().filter(|&c| c != cache).collect(),
+        Err(e) => {
+            warn!(%project_id, error = %e, "writable caches lookup failed; recording without copies");
+            Vec::new()
+        }
     };
 
-    match record_segment(db, cache, fingerprint, copies).await {
+    match record_segment(db, cache, fingerprint, &copies).await {
         Ok(()) => UploadOutcome::Ok,
         Err(e) => retry(format!("recording the eval cache segment: {e}")),
     }
@@ -334,6 +343,7 @@ mod tests {
             request_id: 1,
             project: ProjectId::nil(),
             key: ObjectKey::Nar("c".repeat(32)),
+            segment_cache: None,
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
@@ -380,6 +390,7 @@ mod tests {
             request_id: 1,
             project: ProjectId::nil(),
             key: ObjectKey::Nar("c".repeat(32)),
+            segment_cache: None,
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
@@ -481,6 +492,7 @@ mod tests {
             request_id: 1,
             project: ProjectId::nil(),
             key: ObjectKey::Nar("c".repeat(32)),
+            segment_cache: None,
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
@@ -541,6 +553,7 @@ mod tests {
             request_id: 1,
             project: ProjectId::nil(),
             key: ObjectKey::Nar("c".repeat(32)),
+            segment_cache: None,
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
