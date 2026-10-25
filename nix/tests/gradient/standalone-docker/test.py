@@ -50,7 +50,7 @@ gateway = machine.succeed(
 eval_id = create_personal_project(machine, BASE, token, f"git://{gateway}/personal")
 wait_for_green_evaluation(machine, BASE, token, eval_id)
 
-machine.succeed("docker rm -f gradient")
+machine.succeed("docker stop -t 120 gradient && docker rm gradient")
 start_container()
 token = login(machine, BASE, password)
 status = api(machine, BASE, "GET", f"evals/{eval_id}", token)["status"]
