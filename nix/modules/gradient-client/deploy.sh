@@ -21,7 +21,7 @@ resolve() {
   evaluation_id=$(echo "$evaluation" | jq -r '.message[0].id // empty')
   evaluation_status=$(echo "$evaluation" | jq -r '.message[0].status // empty')
 
-  if [ -z "$evaluation_id" ]; then
+  if [[ -z "$evaluation_id" ]]; then
     echo "done task ${GRADIENT_TASK} has no evaluations"
     return
   fi
@@ -35,9 +35,9 @@ resolve() {
   status=$(echo "$entry_points" | jq -r --arg re "$GRADIENT_SYSTEM_PATH_REGEX" \
     'first(.message.entry_points[] | select((.outputs.out // "") | test($re))) | .build_status // empty')
 
-  if [ -n "$path" ]; then
+  if [[ -n "$path" ]]; then
     current=$(readlink /run/current-system || true)
-    if [ "$path" = "$current" ]; then
+    if [[ "$path" == "$current" ]]; then
       echo "done system is already up-to-date with $path"
       return
     fi
@@ -100,12 +100,12 @@ if settle; then
   exit 0
 fi
 
-if [ "${GRADIENT_WAIT_FOR_BUILD}" != 1 ]; then
+if [[ "${GRADIENT_WAIT_FOR_BUILD}" != 1 ]]; then
   echo "Nothing deployable yet for task ${GRADIENT_TASK}; not waiting"
   exit 0
 fi
 
-if [ "${GRADIENT_WEBSOCKETS}" = 1 ]; then
+if [[ "${GRADIENT_WEBSOCKETS}" == 1 ]]; then
   echo "Task ${GRADIENT_TASK} is still building; following ${GRADIENT_LIVE_URL}"
 
   while true; do
