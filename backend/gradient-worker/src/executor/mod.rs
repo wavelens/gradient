@@ -11,6 +11,7 @@ pub mod compress;
 mod dependencies;
 mod download;
 pub mod eval;
+pub mod eval_cache_sync;
 pub(crate) mod failure;
 pub mod fetch;
 pub(crate) mod input_fetch;
