@@ -4,18 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_db::cache_paths::project_write_caches;
 use gradient_db::{DbContext, WorkerDb};
 use gradient_storage::NarStore;
-use gradient_storage::admission::UploadPermit;
+use gradient_storage::admission::{ObjectKey, UploadPermit};
 use gradient_types::RuntimeConfig;
-use gradient_types::ids::{CacheId, ProjectId};
+use gradient_types::ids::ProjectId;
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::types::{NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
 
 use super::super::SessionHandles;
-use super::super::eval_cache::eval_cache_key;
 use super::super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
 use super::super::socket::{ProtoWriter, send_server_msg};
 use super::super::store_paths::{inbound_upload_metadata, unmapped_project};
@@ -28,6 +26,7 @@ pub(super) struct Commit {
     pub peer_id: String,
     pub request_id: u64,
     pub project: ProjectId,
+    pub key: ObjectKey,
     pub object: UploadObject,
     pub transfer: Transfer,
     pub metadata: UploadMetadata,
@@ -42,26 +41,17 @@ pub(super) async fn run(c: Commit) {
         Ok(mapper) => inbound_upload_metadata(c.metadata, &mapper).map_err(|e| e.to_string()),
         Err(e) => Err(unmapped_project(&e)),
     };
-    let writable = match &c.object {
-        UploadObject::EvalCache { .. } => {
-            project_write_caches(&c.handles.db.worker_db, c.project).await
-        }
-        UploadObject::Nar { .. } => Ok(Vec::new()),
-    };
-    let placed = match (metadata, writable) {
-        (Ok(metadata), Ok(writable)) => {
-            place(&c.handles.db, &writable, &c.object, c.transfer, &metadata)
-                .await
-                .map(|()| (metadata, writable))
-        }
-        (Err(reason), _) => Err(rejected(reason)),
-        (_, Err(e)) => Err(retry(format!("looking up the writable caches: {e}"))),
+    let placed = match metadata {
+        Ok(metadata) => place(&c.handles.db, &c.key, &c.object, c.transfer, &metadata)
+            .await
+            .map(|()| metadata),
+        Err(reason) => Err(rejected(reason)),
     };
     let outcome = match placed {
-        Ok((metadata, writable)) => {
+        Ok(metadata) => {
             let mut permit = c.permit;
             permit.release_budget();
-            let outcome = record(&c.handles, c.project, &writable, &c.object, &metadata).await;
+            let outcome = record(&c.handles, c.project, &c.object, &metadata).await;
             if matches!(outcome, UploadOutcome::Ok) {
                 permit.committed();
             }
@@ -99,7 +89,7 @@ fn rejected(reason: String) -> UploadOutcome {
 #[tracing::instrument(name = "place_upload", level = "debug", skip_all)]
 async fn place(
     db: &DbContext,
-    writable: &[CacheId],
+    key: &ObjectKey,
     object: &UploadObject,
     transfer: Transfer,
     metadata: &UploadMetadata,
@@ -125,12 +115,11 @@ async fn place(
                 }
             }
         }
-        (UploadObject::EvalCache { fingerprint }, UploadMetadata::EvalCache { size_bytes }) => {
-            let Some(&target) = writable.first() else {
-                return Err(rejected("the project has no writable cache".into()));
+        (UploadObject::EvalCacheSegment { .. }, UploadMetadata::EvalCache { size_bytes }) => {
+            let ObjectKey::EvalCache(key) = key else {
+                return Err(rejected("the upload holds no eval cache key".into()));
             };
-            let key = eval_cache_key(target, fingerprint);
-            place_eval_cache(&db.storage.nar_storage, &key, transfer, *size_bytes).await
+            place_eval_cache(&db.storage.nar_storage, key, transfer, *size_bytes).await
         }
         _ => Err(rejected("metadata does not match the upload object".into())),
     }
@@ -140,47 +129,35 @@ async fn place(
 async fn record(
     handles: &SessionHandles,
     project_id: ProjectId,
-    writable: &[CacheId],
     object: &UploadObject,
     metadata: &UploadMetadata,
 ) -> UploadOutcome {
-    match (object, metadata) {
-        (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta)) => {
-            let record = NarUploadRecord {
-                file_hash: &meta.file_hash,
-                file_size: meta.file_size as i64,
-                nar_size: meta.nar_size as i64,
-                nar_hash: &meta.nar_hash,
-                references: &meta.references,
-                deriver: meta.deriver.as_deref(),
-                ca: meta.ca.as_deref(),
-                confirmed: true,
-            };
-            if let Err(e) =
-                mark_nar_stored(&handles.graph, &handles.db, project_id, store_path, &record).await
-            {
-                return retry(format!("recording {store_path} in the cache index: {e:#}"));
-            }
-            let _ = record_nar_push_metric(
-                &handles.db.worker_db,
-                &handles.cache_traffic,
-                project_id,
-                meta.file_size as i64,
-            )
-            .await;
+    if let (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta)) = (object, metadata) {
+        let record = NarUploadRecord {
+            file_hash: &meta.file_hash,
+            file_size: meta.file_size as i64,
+            nar_size: meta.nar_size as i64,
+            nar_hash: &meta.nar_hash,
+            references: &meta.references,
+            deriver: meta.deriver.as_deref(),
+            ca: meta.ca.as_deref(),
+            confirmed: true,
+        };
+        if let Err(e) =
+            mark_nar_stored(&handles.graph, &handles.db, project_id, store_path, &record).await
+        {
+            return retry(format!("recording {store_path} in the cache index: {e:#}"));
         }
-        (UploadObject::EvalCache { fingerprint }, UploadMetadata::EvalCache { size_bytes }) => {
-            super::super::eval_cache::record_eval_cache(
-                &handles.db.worker_db,
-                &handles.db.storage.nar_storage,
-                writable,
-                fingerprint,
-                *size_bytes,
-            )
-            .await;
-        }
-        _ => {}
+
+        let _ = record_nar_push_metric(
+            &handles.db.worker_db,
+            &handles.cache_traffic,
+            project_id,
+            meta.file_size as i64,
+        )
+        .await;
     }
+
     UploadOutcome::Ok
 }
 
@@ -286,7 +263,7 @@ mod tests {
     use super::*;
     use gradient_core::ServerState;
     use gradient_fixtures::mock::{empty_db, mock_db};
-    use gradient_storage::admission::{Admitted, ObjectKey};
+    use gradient_storage::admission::Admitted;
     use gradient_test_support::state::test_state;
     use std::sync::Arc;
 
@@ -320,6 +297,7 @@ mod tests {
             peer_id: "w1".into(),
             request_id: 1,
             project: ProjectId::nil(),
+            key: ObjectKey::Nar("c".repeat(32)),
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
@@ -365,6 +343,7 @@ mod tests {
             peer_id: "w1".into(),
             request_id: 1,
             project: ProjectId::nil(),
+            key: ObjectKey::Nar("c".repeat(32)),
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
@@ -419,7 +398,7 @@ mod tests {
 
         place(
             &state.db(),
-            &[],
+            &ObjectKey::Nar(hash.clone()),
             &UploadObject::Nar {
                 store_path: format!("/nix/store/{hash}-p"),
             },
@@ -465,6 +444,7 @@ mod tests {
             peer_id: "w1".into(),
             request_id: 1,
             project: ProjectId::nil(),
+            key: ObjectKey::Nar("c".repeat(32)),
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
@@ -524,6 +504,7 @@ mod tests {
             peer_id: "w1".into(),
             request_id: 1,
             project: ProjectId::nil(),
+            key: ObjectKey::Nar("c".repeat(32)),
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },

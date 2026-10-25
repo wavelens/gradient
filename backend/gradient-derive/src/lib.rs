@@ -40,6 +40,7 @@ struct Versions {
     default: bool,
     oldest: Option<u16>,
     removed: Vec<Removed>,
+    removed_at: Option<u16>,
 }
 
 fn versions(attrs: &[Attribute]) -> syn::Result<Versions> {
@@ -73,14 +74,18 @@ fn parse_versions(input: ParseStream, out: &mut Versions) -> syn::Result<()> {
                     let content;
                     syn::parenthesized!(content in input);
                     let until = content.parse::<LitInt>()?.base10_parse()?;
-                    content.parse::<Token![,]>()?;
-                    let ty = content.parse()?;
-                    out.removed.push(Removed { until, ty });
+                    if content.is_empty() {
+                        out.removed_at = Some(until);
+                    } else {
+                        content.parse::<Token![,]>()?;
+                        let ty = content.parse()?;
+                        out.removed.push(Removed { until, ty });
+                    }
                 }
                 _ => {
                     return Err(syn::Error::new(
                         word.span(),
-                        "expected a version, `default`, `oldest = N` or `removed(N, Type)`",
+                        "expected a version, `default`, `oldest = N`, `removed(N)` or `removed(N, Type)`",
                     ));
                 }
             }
@@ -112,7 +117,7 @@ fn fields(fields: &Fields) -> syn::Result<Vec<Field>> {
                 return Err(syn::Error::new_spanned(f, "`oldest` belongs on the type"));
             }
 
-            if !v.removed.is_empty() {
+            if !v.removed.is_empty() || v.removed_at.is_some() {
                 return Err(syn::Error::new_spanned(
                     f,
                     "`removed` belongs on the struct or variant that lost the field",
@@ -291,7 +296,7 @@ fn enum_body(name: &Ident, data: &syn::DataEnum) -> syn::Result<Body> {
         if v.default || v.oldest.is_some() {
             return Err(syn::Error::new_spanned(
                 variant,
-                "a variant takes only its version and `removed(N, Type)`",
+                "a variant takes only its version, `removed(N)` and `removed(N, Type)`",
             ));
         }
 
@@ -317,6 +322,7 @@ fn enum_body(name: &Ident, data: &syn::DataEnum) -> syn::Result<Body> {
             v.removed
                 .iter()
                 .map(|r| r.until)
+                .chain(v.removed_at)
                 .map(|until| quote!(#until)),
         );
         let pat = pattern(quote!(Self::#ident), &fs, &variant.fields);
@@ -330,21 +336,31 @@ fn enum_body(name: &Ident, data: &syn::DataEnum) -> syn::Result<Body> {
                 }
             }
         });
-        let guard = (since > 0).then(|| quote!(if version >= #since));
+        let refuse_newer_peer = v.removed_at.map(|until| {
+            quote! {
+                if version >= #until {
+                    return Err(#codec::EncodeError::RemovedForPeer { variant: #variant_label, until: #until, version });
+                }
+            }
+        });
+        let present = match (since > 0, v.removed_at) {
+            (_, Some(until)) => quote!(if (#since..#until).contains(&version)),
+            (true, None) => quote!(if version >= #since),
+            (false, None) => TokenStream::new(),
+        };
         encode_arms.push(quote! {
-            #pat => { #refuse_older_peer #codec::put_varint(out, #tag); #encode #encode_removed }
+            #pat => { #refuse_older_peer #refuse_newer_peer #codec::put_varint(out, #tag); #encode #encode_removed }
         });
         decode_arms.push(quote! {
-            #tag #guard => { #decode #decode_removed Ok(#pat) }
+            #tag #present => { #decode #decode_removed Ok(#pat) }
         });
-        describe_arms.push(when_present(
-            since,
-            quote! {
+        describe_arms.push(quote! {
+            #present {
                 #codec::push_separator(out, &mut first);
                 out.push_str(#shape_label);
                 #describe
-            },
-        ));
+            }
+        });
     }
 
     let ty = name.to_string();
@@ -384,7 +400,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let top = versions(&input.attrs)?;
     let removed_on_enum = matches!(input.data, Data::Enum(_)) && !top.removed.is_empty();
-    if top.since != 0 || top.default || removed_on_enum {
+    if top.since != 0 || top.default || removed_on_enum || top.removed_at.is_some() {
         return Err(syn::Error::new_spanned(
             name,
             "only `oldest = N` belongs on the type, plus `removed(N, Type)` on a struct",

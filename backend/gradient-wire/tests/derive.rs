@@ -89,6 +89,20 @@ enum HeartbeatAfterTrim {
     Load { cpu: u32, upload: Option<f32> },
 }
 
+#[derive(Proto, Debug, Clone, PartialEq)]
+#[proto(oldest = 27)]
+enum Replaced {
+    Kept,
+    #[proto(removed(28))]
+    Old {
+        url: String,
+    },
+    #[proto(28)]
+    New {
+        urls: Vec<String>,
+    },
+}
+
 fn at<T: Proto>(value: &T, version: u16) -> Bytes {
     to_bytes(value, version).expect("encodes")
 }
@@ -232,4 +246,29 @@ fn the_shape_leaves_out_names_and_versions_the_peer_lacks() {
     let mut new = String::new();
     Message::describe(28, &mut new);
     assert_eq!(new, "[0:{str},1:{},2:{{str,seq<str>}},3:{str}]");
+}
+
+#[test]
+fn a_removed_variant_stays_for_older_peers_only() {
+    let old = Replaced::Old { url: "u".into() };
+    assert_eq!(from_bytes::<Replaced>(at(&old, 27), 27), Ok(old.clone()));
+    assert_eq!(shape::<Replaced>(27), "[0:{},1:{str}]");
+    assert_eq!(shape::<Replaced>(28), "[0:{},2:{seq<str>}]");
+    assert_eq!((Replaced::OLDEST, Replaced::NEWEST), (27, 28));
+    assert_eq!(
+        to_bytes(&old, 28),
+        Err(EncodeError::RemovedForPeer {
+            variant: "Old",
+            until: 28,
+            version: 28
+        })
+    );
+    assert!(matches!(
+        from_bytes::<Replaced>(at(&old, 27), 28),
+        Err(DecodeError::UnknownVariant {
+            tag: 1,
+            version: 28,
+            ..
+        })
+    ));
 }

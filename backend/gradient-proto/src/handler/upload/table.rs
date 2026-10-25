@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use gradient_storage::PartialWriter;
-use gradient_storage::admission::UploadPermit;
+use gradient_storage::admission::{ObjectKey, UploadPermit};
 use gradient_types::ids::ProjectId;
 use gradient_wire::types::{UploadMetadata, UploadObject};
 
@@ -46,6 +46,7 @@ pub(in crate::handler) struct Queued {
 }
 
 pub(in crate::handler) struct Granted {
+    pub key: ObjectKey,
     pub job_id: String,
     pub project: ProjectId,
     pub object: UploadObject,
@@ -189,7 +190,7 @@ impl UploadTable {
 mod tests {
     use super::*;
     use gradient_storage::PartialStore;
-    use gradient_storage::admission::{Admitted, Limits, ObjectKey, UploadAdmission};
+    use gradient_storage::admission::{Admitted, Limits, UploadAdmission};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -230,6 +231,7 @@ mod tests {
         table.grant(
             1,
             Granted {
+                key: ObjectKey::Nar("a".repeat(32)),
                 job_id: "build:1".into(),
                 project: ProjectId::nil(),
                 object: nar(0),
@@ -272,6 +274,7 @@ mod tests {
         table.grant(
             1,
             Granted {
+                key: ObjectKey::Nar("a".repeat(32)),
                 job_id: "build:1".into(),
                 project: ProjectId::nil(),
                 object: nar(0),

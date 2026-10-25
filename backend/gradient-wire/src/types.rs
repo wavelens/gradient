@@ -185,13 +185,33 @@ pub struct CacheInfo {
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum EvalCachePullOutcome {
     Miss,
+    #[proto(removed(38))]
     Presigned {
         url: String,
     },
+    #[proto(removed(38))]
     Inline {
         total_bytes: u64,
         stream_token: String,
     },
+    #[proto(38)]
+    Segments {
+        keys: Vec<String>,
+        fetch: Vec<SegmentFetch>,
+        stream_token: Option<String>,
+    },
+}
+
+#[derive(Proto, Debug, Clone, PartialEq)]
+pub struct SegmentFetch {
+    pub key: String,
+    pub source: SegmentSource,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq)]
+pub enum SegmentSource {
+    Presigned { url: String },
+    Inline { size_bytes: u64 },
 }
 
 #[derive(Proto, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -217,8 +237,17 @@ pub struct CompletedMultipart {
 
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum UploadObject {
-    Nar { store_path: String },
-    EvalCache { fingerprint: String },
+    Nar {
+        store_path: String,
+    },
+    #[proto(removed(38))]
+    EvalCache {
+        fingerprint: String,
+    },
+    #[proto(38)]
+    EvalCacheSegment {
+        fingerprint: String,
+    },
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]

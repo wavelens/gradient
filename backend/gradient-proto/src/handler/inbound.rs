@@ -384,8 +384,9 @@ impl<'a> InboundContext<'a> {
             ClientMessage::EvalCachePull {
                 job_id,
                 fingerprint,
+                applied,
             } => {
-                self.on_eval_cache_pull(job_id, fingerprint).await;
+                self.on_eval_cache_pull(job_id, fingerprint, applied).await;
                 true
             }
             msg @ (ClientMessage::CacheQuery { .. }
@@ -607,7 +608,12 @@ impl<'a> InboundContext<'a> {
         });
     }
 
-    async fn on_eval_cache_pull(&mut self, job_id: String, fingerprint: String) {
+    async fn on_eval_cache_pull(
+        &mut self,
+        job_id: String,
+        fingerprint: String,
+        applied: Vec<String>,
+    ) {
         let db = &self.handles.db.worker_db;
         let readable = match self.active.job_project(self.scheduler, &job_id).await {
             Some(project) => project_read_caches(db, project).await.unwrap_or_else(|e| {
@@ -617,12 +623,12 @@ impl<'a> InboundContext<'a> {
             None => Vec::new(),
         };
         handle_eval_cache_pull(
-            db,
             &self.handles.db.storage.nar_storage,
             self.writer,
             &readable,
             job_id,
             fingerprint,
+            applied,
         )
         .await;
     }
