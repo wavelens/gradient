@@ -125,7 +125,6 @@ in {
         // config.networking.proxy.envVars
         // {
           GRADIENT_API_URL = apiUrl;
-          GRADIENT_API_KEY_FILE = cfg.apiKeyFile;
           GRADIENT_DEPLOY_FOR = cfg.deployFor;
           GRADIENT_LIVE_URL = liveUrl;
           GRADIENT_POLL_INTERVAL_SEC = toString cfg.pollIntervalSec;

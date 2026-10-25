@@ -5,7 +5,10 @@ if ! curl --silent --fail --max-time 5 --output /dev/null "${GRADIENT_API_URL}/h
   exit 1
 fi
 
-API_KEY=$(cat "${GRADIENT_API_KEY_FILE}")
+if ! API_KEY=$(<"${GRADIENT_API_KEY}"); then
+  echo "Error: cannot read API key credential ${GRADIENT_API_KEY}"
+  exit 1
+fi
 
 api() {
   curl --silent --fail --max-time 10 --header "Authorization: Bearer $API_KEY" "$@"
