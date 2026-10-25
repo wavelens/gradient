@@ -102,6 +102,7 @@ mod tests {
         let pull = ClientMessage::EvalCachePull {
             job_id: "j1".into(),
             fingerprint: "f".into(),
+            applied: Vec::new(),
         };
         assert!(matches!(
             refusal(&pull, "no job").as_slice(),

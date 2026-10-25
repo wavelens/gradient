@@ -19,6 +19,12 @@ pub enum EncodeError {
         since: u16,
         version: u16,
     },
+    #[error("{variant} was removed in protocol {until}, the peer speaks {version}")]
+    RemovedForPeer {
+        variant: &'static str,
+        until: u16,
+        version: u16,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

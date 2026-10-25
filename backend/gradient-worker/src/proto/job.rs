@@ -146,11 +146,12 @@ impl JobUpdater {
             .send(ClientMessage::EvalCachePull {
                 job_id: self.job_id.clone(),
                 fingerprint: fingerprint.to_owned(),
+                applied: Vec::new(),
             })
             .await?;
 
         match pending.await_outcome().await? {
-            EvalCachePullOutcome::Miss => Ok(None),
+            EvalCachePullOutcome::Miss | EvalCachePullOutcome::Segments { .. } => Ok(None),
             EvalCachePullOutcome::Presigned { url } => {
                 let bytes = gradient_worker_client::http::client()
                     .get(&url)

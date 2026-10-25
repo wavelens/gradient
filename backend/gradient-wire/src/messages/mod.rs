@@ -18,8 +18,8 @@ pub use crate::types::{
     RequiredPath,
 };
 pub use crate::types::{
-    CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, UploadMetadata,
-    UploadObject, UploadOutcome,
+    CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, SegmentFetch,
+    SegmentSource, UploadMetadata, UploadObject, UploadOutcome,
 };
 pub use client::ClientMessage;
 pub use server::{FailedPeer, ServerMessage};

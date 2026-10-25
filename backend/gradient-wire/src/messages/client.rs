@@ -132,6 +132,8 @@ pub enum ClientMessage {
     EvalCachePull {
         job_id: String,
         fingerprint: String,
+        #[proto(38, default)]
+        applied: Vec<String>,
     },
 
     RequestJob {

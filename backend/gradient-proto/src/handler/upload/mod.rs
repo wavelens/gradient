@@ -10,12 +10,14 @@ mod table;
 use std::time::{Duration, Instant};
 
 use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey};
+use gradient_storage::eval_cache_segment::{SEGMENT_MAX_BYTES, eval_cache_segment_key};
 use gradient_storage::{NarStore, PartialStore, StorageTarget, upload_lease};
 use gradient_types::StorePath;
 use gradient_types::ids::ProjectId;
 use gradient_wire::messages::{ServerMessage, is_small_upload};
 use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
+use uuid::Uuid;
 
 use super::inbound::InboundContext;
 use super::socket::send_server_msg;
@@ -75,8 +77,30 @@ impl InboundContext<'_> {
                         .await;
                 }
             },
-            UploadObject::EvalCache { fingerprint } => {
-                match self.eval_cache_target(project, fingerprint, size).await {
+            UploadObject::EvalCache { .. } => {
+                return self
+                    .settle(
+                        request_id,
+                        UploadOutcome::Rejected {
+                            reason: "whole eval cache blobs are no longer accepted".into(),
+                        },
+                    )
+                    .await;
+            }
+            UploadObject::EvalCacheSegment { .. } if size > SEGMENT_MAX_BYTES as u64 => {
+                return self
+                    .settle(
+                        request_id,
+                        UploadOutcome::Rejected {
+                            reason: format!(
+                                "eval cache segment of {size} bytes exceeds {SEGMENT_MAX_BYTES}"
+                            ),
+                        },
+                    )
+                    .await;
+            }
+            UploadObject::EvalCacheSegment { fingerprint } => {
+                match self.eval_cache_target(project, fingerprint).await {
                     Some(key) => ObjectKey::EvalCache(key),
                     None => return self.grant(request_id, GrantTarget::Skip).await,
                 }
@@ -141,6 +165,7 @@ impl InboundContext<'_> {
                         uploads.table.grant(
                             id,
                             Granted {
+                                key,
                                 job_id: queued.job_id,
                                 project: queued.project,
                                 object: queued.object,
@@ -170,12 +195,7 @@ impl InboundContext<'_> {
         }
     }
 
-    async fn eval_cache_target(
-        &self,
-        project: ProjectId,
-        fingerprint: &str,
-        size: u64,
-    ) -> Option<String> {
+    async fn eval_cache_target(&self, project: ProjectId, fingerprint: &str) -> Option<String> {
         let db = &self.handles.db.worker_db;
         let writable = gradient_db::cache_paths::project_write_caches(db, project)
             .await
@@ -184,9 +204,7 @@ impl InboundContext<'_> {
                 Vec::new()
             });
         let &target = writable.first()?;
-        super::eval_cache::accepts_push(db, &writable, fingerprint, size)
-            .await
-            .then(|| super::eval_cache::eval_cache_key(target, fingerprint))
+        Some(eval_cache_segment_key(target, fingerprint, Uuid::now_v7()))
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
@@ -341,6 +359,7 @@ impl InboundContext<'_> {
             peer_id: self.peer_id.to_owned(),
             request_id,
             project: granted.project,
+            key: granted.key,
             object: granted.object,
             transfer: granted.transfer,
             metadata,
