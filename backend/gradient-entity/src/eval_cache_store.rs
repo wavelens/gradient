@@ -21,6 +21,7 @@ pub struct Model {
     pub size_bytes: i64,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    pub purged_at: Option<NaiveDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
