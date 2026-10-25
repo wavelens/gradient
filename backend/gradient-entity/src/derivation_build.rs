@@ -25,6 +25,7 @@ pub struct Model {
     /// before that. Descending earlier would dispatch build inputs that a passthrough would make
     /// pointless. A job already handed to a worker cannot be recalled.
     pub probed: bool,
+    pub probed_at: Option<NaiveDateTime>,
     pub substituted: bool,
     pub fetchable: bool,
     pub blocking_deps: i32,

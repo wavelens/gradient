@@ -81,7 +81,7 @@ pub(super) fn requeue_failed_shared_builds_sql() -> String {
         r#"
         {ctes}
         UPDATE derivation_build db
-        SET status = {created}, attempt = 0,
+        SET status = {created}, attempt = 0{FORGET_STALE_UPSTREAM_MISS},
             updated_at = (now() AT TIME ZONE 'UTC')
         WHERE db.derivation = ANY($1) AND db.status IN ({requeueable})
           AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)
@@ -121,7 +121,8 @@ where
     Ok(returned_transitions(rows))
 }
 
-const KEEP_UPSTREAM_ANSWER: &str = "";
+const FORGET_STALE_UPSTREAM_MISS: &str = ", probed = (db.probed AND (db.cache_available \
+     OR COALESCE(db.probed_at > (now() AT TIME ZONE 'UTC') - interval '1 hour', false)))";
 const FORGET_UPSTREAM_MISS: &str = ", probed = (db.probed AND db.cache_available)";
 
 /// Drive the write from every failed shared build. A probe per closure member is a second walk.
@@ -170,7 +171,7 @@ fn requeue_failed_closure_fresh_sql() -> String {
         "{},\n    {}\n{}",
         eval_closure_cte(),
         kept_failed_cte_body(),
-        requeue_closure_update(SKIP_KEPT, KEEP_UPSTREAM_ANSWER),
+        requeue_closure_update(SKIP_KEPT, FORGET_STALE_UPSTREAM_MISS),
     )
 }
 
@@ -191,7 +192,7 @@ pub(super) fn requeue_failed_closure_blocked_sql() -> String {
             &format!(
                 "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked){SKIP_KEPT}"
             ),
-            KEEP_UPSTREAM_ANSWER,
+            FORGET_STALE_UPSTREAM_MISS,
         ),
     )
 }
@@ -272,7 +273,7 @@ pub(super) fn requeue_failed_import_closure_sql() -> String {
         requeue_ctes("SELECT unnest($1::uuid[])"),
         requeue_closure_update(
             "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)",
-            KEEP_UPSTREAM_ANSWER,
+            FORGET_STALE_UPSTREAM_MISS,
         ),
     )
 }
@@ -435,20 +436,22 @@ mod tests {
     }
 
     #[test]
-    fn only_a_user_retry_asks_the_upstream_caches_again() {
+    fn a_user_retry_asks_the_upstream_caches_again_and_a_requeue_after_an_hour() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
         let forgets_the_miss = "attempt = 0, probed = (db.probed AND db.cache_available),";
         for sql in [requeue_failed_closure_all_sql(), retry_build_closure_sql()] {
-            let sql = sql.split_whitespace().collect::<Vec<_>>().join(" ");
-            assert!(sql.contains(forgets_the_miss), "{sql}");
+            assert!(norm(sql.clone()).contains(forgets_the_miss), "{sql}");
         }
 
+        let forgets_a_stale_miss = "attempt = 0, probed = (db.probed AND (db.cache_available \
+             OR COALESCE(db.probed_at > (now() AT TIME ZONE 'UTC') - interval '1 hour', false))),";
         for sql in [
             requeue_failed_closure_fresh_sql(),
             requeue_failed_closure_blocked_sql(),
             requeue_failed_shared_builds_sql(),
             requeue_failed_import_closure_sql(),
         ] {
-            assert!(!sql.contains("probed"), "{sql}");
+            assert!(norm(sql.clone()).contains(forgets_a_stale_miss), "{sql}");
         }
     }
 

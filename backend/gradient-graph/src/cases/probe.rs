@@ -17,7 +17,7 @@ use super::{
     A, A_OUT, A_OUT2, B, B_OUT, Case, F_OUT, F1, F2, R, R_OUT, UNKNOWN_OUT, as_set, drv, narinfo,
     with_output,
 };
-use crate::messages::UpstreamHit;
+use crate::messages::{Transition, UpstreamHit};
 
 async fn hit_on_a(case: &Case) -> BTreeSet<DerivationId> {
     case.upstream_hits(&[(A_OUT, narinfo(&[(A_OUT, "a")]))])
@@ -573,4 +573,52 @@ async fn p10_a_hit_on_an_output_in_our_cache_writes_nothing_and_makes_no_passthr
     assert!(gained.is_empty(), "after 1: result == []: {gained:?}");
     case.zero_drift("step 1").await;
     case.finish().await;
+}
+
+#[tokio::test]
+async fn p11_a_new_evaluation_asks_the_upstream_caches_again_about_a_miss_older_than_an_hour() {
+    for (age, asks_again) in [
+        (chrono::Duration::hours(2), true),
+        (chrono::Duration::minutes(10), false),
+    ] {
+        let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let case = Case::start(
+            shape()
+                .evaluation(e1)
+                .evaluation_status(EvaluationStatus::Failed)
+                .derivation(A)
+                .walked()
+                .entry_point("pkg.a")
+                .job()
+                .probed()
+                .drv_cached()
+                .output(A_OUT)
+                .build_status(BuildStatus::FailedPermanent)
+                .attempt(
+                    AttemptOutcome::Failed,
+                    Some(AttemptFailureReason::BuilderNonzero),
+                )
+                .evaluation(e2)
+                .evaluation_status(EvaluationStatus::EvaluatingDerivation)
+                .derivation(A)
+                .entry_point("pkg.a")
+                .job(),
+        )
+        .await;
+        let probed_at = chrono::Utc::now().naive_utc() - age;
+        case.override_sb(A, |build| build.probed_at = Some(probed_at))
+            .await;
+
+        case.transition(Transition::EvalStreamCompleted { evaluation: e2 })
+            .await;
+
+        let a = case.sb(A).await;
+        assert_eq!(
+            (a.status == BuildStatus::FailedPermanent, a.probed),
+            (false, !asks_again),
+            "after 1 ({age}): sb(A) still failed, probed"
+        );
+        case.zero_drift("step 1").await;
+        case.finish().await;
+    }
 }

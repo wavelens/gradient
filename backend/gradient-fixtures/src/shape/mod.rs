@@ -269,6 +269,7 @@ impl Shape {
     pub fn probed(mut self) -> Self {
         let at = self.current_derivation();
         self.shared_builds[at].probed = true;
+        self.shared_builds[at].probed_at = Some(chrono::Utc::now().naive_utc());
         self
     }
 
