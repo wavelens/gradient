@@ -3090,6 +3090,7 @@ dependencies = [
  "hex",
  "object_store",
  "reqwest",
+ "rkyv",
  "tar",
  "tempfile",
  "thiserror 2.0.21",
