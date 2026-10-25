@@ -304,9 +304,9 @@ async fn eval_failed(
     Ok(())
 }
 
-/// The shared blob's existence is acting as the circuit breaker.
-/// The first corrupt failure is purging the blob and re-queuing the evaluation.
-/// A recurring corruption is finding no blob and failing the evaluation instead of looping.
+/// The shared row's existence is acting as the circuit breaker.
+/// The first corrupt failure is purging the segments and re-queuing the evaluation.
+/// A recurring corruption is finding no row and failing the evaluation instead of looping.
 async fn heal_corrupt_eval_cache(
     ctx: &DbContext,
     evaluation_id: EvaluationId,
@@ -329,15 +329,15 @@ async fn heal_corrupt_eval_cache(
         if let Err(e) = ctx
             .storage
             .nar_storage
-            .delete_eval_cache(&row.storage_path)
+            .delete_eval_cache_segments(row.cache, &row.fingerprint)
             .await
         {
-            warn!(key = %row.storage_path, error = %e, "failed to delete corrupt eval-cache object");
+            warn!(key = %row.storage_path, error = %e, "failed to delete corrupt eval-cache segments");
         }
     }
 
     requeue_evaluation(ctx, evaluation_id).await?;
-    info!(%evaluation_id, %fingerprint, "purged corrupt eval-cache blob; re-queued eval for fresh evaluation");
+    info!(%evaluation_id, %fingerprint, "purged corrupt eval-cache segments; re-queued eval for fresh evaluation");
     Ok(true)
 }
 
