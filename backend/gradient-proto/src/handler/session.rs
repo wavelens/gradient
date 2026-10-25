@@ -294,7 +294,7 @@ pub(crate) async fn handle_socket(
     origin: SessionOrigin,
 ) {
     let dialed_by_server = matches!(origin, SessionOrigin::ServerDialed(_));
-    info!(dialed_by_server, "WebSocket connection opened");
+    debug!(dialed_by_server, "WebSocket connection opened");
     let session = ProtoSession::new(socket, handles, Arc::clone(&scheduler));
     let session = match tokio::time::timeout(HANDSHAKE_TIMEOUT, session.handshake(&origin)).await {
         Ok(Some(s)) => s,

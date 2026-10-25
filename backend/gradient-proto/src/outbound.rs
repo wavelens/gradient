@@ -18,7 +18,7 @@ use gradient_wire::Rejection;
 use gradient_wire::session::handshake::DialerCredentials;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 use crate::handler::{SessionHandles, SessionOrigin, SessionsHandle, handle_socket};
 use gradient_scheduler::Scheduler;
@@ -358,7 +358,7 @@ async fn dial(
 
     match tokio::time::timeout(DIAL_TIMEOUT, gradient_wire::client::dial(&url)).await {
         Ok(Ok(socket)) => {
-            info!(%worker_id, %url, "outbound connection established");
+            debug!(%worker_id, %url, "outbound connection established");
             handle_socket(
                 socket,
                 handles.clone(),
@@ -367,7 +367,7 @@ async fn dial(
                 SessionOrigin::ServerDialed(target),
             )
             .await;
-            info!(%worker_id, "outbound connection closed");
+            debug!(%worker_id, "outbound connection closed");
         }
         Ok(Err(e)) => {
             error!(%worker_id, %url, error = %e, "outbound connection failed");
