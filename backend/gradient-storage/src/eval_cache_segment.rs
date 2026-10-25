@@ -11,6 +11,7 @@ use rkyv::rancor::Error as RkyvError;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
+use std::io::Read as _;
 use tracing::warn;
 use uuid::Uuid;
 
@@ -21,6 +22,8 @@ pub const ATTR_FAILED: u8 = 5;
 pub const SEGMENT_MAX_BYTES: usize = 8 * 1024 * 1024;
 
 const SEGMENT_FORMAT: u8 = 1;
+
+const DECOMPRESSED_MAX_BYTES: usize = 16 * SEGMENT_MAX_BYTES;
 
 #[derive(Debug, Clone, PartialEq, Eq, Archive, Serialize, Deserialize)]
 pub struct EvalCacheRow {
@@ -83,7 +86,16 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<EvalCacheRow>> {
         bail!("unknown eval cache segment format {format}");
     }
 
-    let archive = zstd::stream::decode_all(compressed).context("decompress eval cache segment")?;
+    let mut archive = Vec::new();
+    zstd::stream::read::Decoder::new(compressed)
+        .context("open eval cache segment")?
+        .take(DECOMPRESSED_MAX_BYTES as u64 + 1)
+        .read_to_end(&mut archive)
+        .context("decompress eval cache segment")?;
+    if archive.len() > DECOMPRESSED_MAX_BYTES {
+        bail!("eval cache segment inflates past {DECOMPRESSED_MAX_BYTES} bytes");
+    }
+
     rkyv::from_bytes::<Vec<EvalCacheRow>, RkyvError>(&archive).context("read eval cache segment")
 }
 
@@ -179,5 +191,20 @@ mod tests {
         wrong[0] = 0xff;
         assert!(decode(&wrong).is_err());
         assert!(decode(&bytes[..bytes.len() / 2]).is_err());
+    }
+
+    #[test]
+    fn decode_rejects_a_segment_that_inflates_past_the_cap() {
+        use std::io::Write as _;
+
+        let mut encoder = zstd::stream::write::Encoder::new(vec![SEGMENT_FORMAT], 1).unwrap();
+        let zeros = vec![0u8; 1024 * 1024];
+        for _ in 0..=DECOMPRESSED_MAX_BYTES / zeros.len() {
+            encoder.write_all(&zeros).unwrap();
+        }
+        let bomb = encoder.finish().unwrap();
+
+        let error = decode(&bomb).unwrap_err().to_string();
+        assert!(error.contains("inflates past"), "{error}");
     }
 }
