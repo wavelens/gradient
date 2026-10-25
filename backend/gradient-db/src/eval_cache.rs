@@ -144,58 +144,47 @@ pub async fn apply_compaction(
         return Ok(());
     };
 
-    let mut holders = vec![cache];
     for &copy in copies {
-        match replace_segments(nar_storage, &key, copy, fingerprint).await {
-            Ok(()) => holders.push(copy),
-            Err(e) => {
-                warn!(%copy, %fingerprint, error = %e, "copying the compacted eval cache failed")
-            }
+        if let Err(e) = add_to_copy(db, nar_storage, &key, copy, fingerprint).await {
+            warn!(%copy, %fingerprint, error = %e, "copying the compacted eval cache failed");
         }
     }
 
-    record_compacted(db, &holders, fingerprint, size).await?;
+    record_compacted(db, cache, fingerprint, size).await?;
     Ok(())
 }
 
-async fn replace_segments(
+async fn add_to_copy(
+    db: &impl ConnectionTrait,
     nar_storage: &NarStore,
     compacted: &str,
     copy: CacheId,
     fingerprint: &str,
 ) -> Result<()> {
-    let stale = nar_storage
-        .list_eval_cache_segments(copy, fingerprint)
-        .await?;
     let target = eval_cache_segment_key(copy, fingerprint, Uuid::now_v7());
     nar_storage.copy_eval_cache(compacted, &target).await?;
-    for (key, _) in stale {
-        nar_storage.delete_eval_cache(&key).await?;
-    }
-
+    record_segment(db, copy, fingerprint, &[]).await?;
     Ok(())
 }
 
 async fn record_compacted(
     db: &impl ConnectionTrait,
-    caches: &[CacheId],
+    cache: CacheId,
     fingerprint: &str,
     size_bytes: i64,
 ) -> Result<(), DbErr> {
     let now = gradient_types::now();
-    let rows = caches.iter().map(|&cache| {
-        MEvalCacheStore {
-            id: EvalCacheStoreId::now_v7(),
-            cache,
-            fingerprint: fingerprint.to_owned(),
-            storage_path: eval_cache_segment_prefix(cache, fingerprint),
-            size_bytes,
-            created_at: now,
-            updated_at: now,
-        }
-        .into_active_model()
-    });
-    EEvalCacheStore::insert_many(rows)
+    let row = MEvalCacheStore {
+        id: EvalCacheStoreId::now_v7(),
+        cache,
+        fingerprint: fingerprint.to_owned(),
+        storage_path: eval_cache_segment_prefix(cache, fingerprint),
+        size_bytes,
+        created_at: now,
+        updated_at: now,
+        ..Default::default()
+    };
+    EEvalCacheStore::insert(row.into_active_model())
         .on_conflict(
             OnConflict::columns([
                 eval_cache_store::Column::Cache,
@@ -301,13 +290,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compaction_replaces_the_segments_of_each_copy() {
+    async fn compaction_never_deletes_segments_in_a_copy_cache() {
         let (cache, copy) = (CacheId::now_v7(), CacheId::now_v7());
         let dir = tempfile::TempDir::new().unwrap();
         let store = NarStore::local(dir.path()).unwrap();
         put_segment(&store, cache, &[row("a", 2, "x")]).await;
-        let stale = put_segment(&store, copy, &[row("a", ATTR_PLACEHOLDER, "")]).await;
-        let db = one_exec();
+        let foreign = put_segment(&store, copy, &[row("b", 2, "y")]).await;
+        let db = mock_db()
+            .append_exec_results([exec_ok(), exec_ok(), exec_ok()])
+            .into_connection();
 
         let plan = plan_compaction(&store, cache, "fp").await.unwrap();
         apply_compaction(&db, &store, cache, "fp", &[copy], plan)
@@ -315,15 +306,21 @@ mod tests {
             .unwrap();
 
         let keys = listed(&store, copy).await;
-        assert_eq!(keys.len(), 1, "{keys:?}");
-        assert_ne!(keys[0], stale);
-        let bytes = store.get_eval_cache(&keys[0]).await.unwrap().unwrap();
+        assert_eq!(keys.len(), 2, "{keys:?}");
+        assert!(keys.contains(&foreign), "{keys:?}");
+        let added = keys.iter().find(|key| **key != foreign).unwrap();
+        let bytes = store.get_eval_cache(added).await.unwrap().unwrap();
         assert_eq!(decode(&bytes).unwrap(), vec![row("a", 2, "x")]);
-        let upsert = &raw_statements(db.into_transaction_log())[0];
-        let values = format!("{:?}", upsert.values);
+        let statements = raw_statements(db.into_transaction_log());
+        let enqueue = statements
+            .iter()
+            .find(|s| s.sql.contains("ON CONFLICT (kind, key)"))
+            .expect("a compaction of the copy cache is enqueued");
+        let values = enqueue.values.clone().unwrap().0;
+        assert_eq!(values[2], Value::String(Some(format!("{copy}/fp"))));
         assert!(
-            values.contains(&cache.to_string()) && values.contains(&copy.to_string()),
-            "{values}"
+            format!("{:?}", values[3]).contains(r#"\"copies\":[]"#),
+            "{values:?}"
         );
     }
 
