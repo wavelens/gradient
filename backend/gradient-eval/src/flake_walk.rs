@@ -124,10 +124,6 @@ impl<'a> FlakeWalker<'a> {
             licenses: licenses_of(&cursor, self.state),
         })
     }
-
-    pub fn checkpoint_cache(&self) -> Result<()> {
-        self.cache.checkpoint().context("checkpoint eval cache")
-    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

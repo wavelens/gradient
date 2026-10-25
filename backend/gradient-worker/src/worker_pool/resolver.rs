@@ -116,14 +116,6 @@ impl WorkerPoolResolver {
         self.pool.fingerprint(repository, overrides).await
     }
 
-    pub async fn checkpoint_cache(
-        &self,
-        repository: String,
-        overrides: &[(String, String)],
-    ) -> Result<()> {
-        self.pool.checkpoint(repository, overrides).await
-    }
-
     pub fn take_eval_stats(&self) -> EvalStatsTotals {
         self.pool.live_thunks().reset();
         let acc = std::mem::take(&mut *self.stats.lock());

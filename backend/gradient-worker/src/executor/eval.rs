@@ -6,12 +6,15 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::num::NonZeroUsize;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::dependencies::{EvalDependencySource, Imports};
+use super::eval_cache_sync::{self, EvalCacheFile};
 use super::progress_report::{ChangeReporter, thunk_progress};
 use crate::nix::wildcard_walk;
+use crate::proto::job::PulledSegments;
 use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
 use futures::future::BoxFuture;
@@ -21,11 +24,14 @@ use gradient_eval::pool::MemoryGuard;
 use gradient_sources::{
     AttrError, DerivationResolver, FlakeDiscovery, Resolved, ResolvedDerivation,
 };
+use gradient_storage::eval_cache_segment::decode;
+use gradient_util::sync::Mutex;
 use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
 };
 use gradient_wire::types::{EvalMessageLevel, License, attr_eval_source};
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
 
 fn abort_err() -> anyhow::Error {
@@ -74,30 +80,6 @@ fn corrupt_eval_cache(msg: &str) -> Option<CorruptEvalCache> {
         return None;
     }
     eval_cache_fingerprint_from_error(msg).map(|fingerprint| CorruptEvalCache { fingerprint })
-}
-
-fn is_shareable_eval_cache(bytes: &[u8]) -> bool {
-    const SQLITE_MAGIC: &[u8] = b"SQLite format 3\0";
-
-    if !bytes.starts_with(SQLITE_MAGIC) {
-        warn!(
-            len = bytes.len(),
-            "eval-cache blob is not a SQLite database; not pushing"
-        );
-        return false;
-    }
-
-    let has_schema = bytes
-        .windows(b"CREATE TABLE".len())
-        .any(|w| w.eq_ignore_ascii_case(b"CREATE TABLE"));
-    if !has_schema {
-        warn!(
-            len = bytes.len(),
-            "eval-cache blob carries no schema; not pushing"
-        );
-    }
-
-    has_schema
 }
 
 async fn delete_eval_cache_blob(sqlite_path: &str) {
@@ -199,6 +181,8 @@ pub fn required_local_source(source: &FlakeSource) -> Option<&str> {
 
 const EVAL_BATCH_SIZE: usize = 50;
 
+pub const EVAL_CACHE_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
+
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn evaluate_derivations(
     evaluator: &WorkerEvaluator,
@@ -210,73 +194,45 @@ pub async fn evaluate_derivations(
     let repo = build_flake_url(job, local_flake_path);
     let start = Instant::now();
     let eval_overrides = eval_input_overrides(job, local_flake_path);
-
-    let fingerprint = if evaluator.eval_cache_share {
-        match evaluator
-            .resolver
-            .fingerprint(repo.clone(), &eval_overrides)
-            .await
-        {
-            Ok(fp) => fp,
-            Err(e) => {
-                warn!(error = %e, "eval-cache fingerprint failed; evaluating local-only");
-                None
-            }
-        }
-    } else {
-        None
+    let mut sharing = match eval_cache_fingerprint(evaluator, repo, &eval_overrides).await {
+        Some(fingerprint) => share_eval_cache(evaluator, updater, fingerprint).await,
+        None => None,
     };
-
-    let cache_path = fingerprint.as_ref().map(|fp| {
-        format!(
-            "{}/eval-cache-v6/{fp}.sqlite",
-            evaluator.resolver.eval_cache_dir()
-        )
-    });
-
-    if let (Some(fp), Some(path)) = (fingerprint.as_ref(), cache_path.as_ref()) {
-        match updater.pull_eval_cache(fp).await {
-            Ok(Some(bytes)) => {
-                if let Err(e) = write_eval_cache_blob(path, &bytes).await {
-                    warn!(error = %e, %path, "failed to stage pulled eval-cache blob");
-                }
-            }
-            Ok(None) => {}
-            Err(e) => warn!(error = %e, "eval-cache pull failed; evaluating local-only"),
-        }
-    }
 
     let thunks = evaluator.resolver.live_thunks();
     thunks.reset();
     let sink = updater.eval_progress_sink();
     let snapshot = || thunk_progress(thunks.total());
     let mut reporter = ChangeReporter::default();
-    let evaluated = tokio::select! {
-        evaluated = evaluate_derivations_with(
-            &*evaluator.resolver,
-            &FsDrvReader,
-            job,
-            local_flake_path,
-            updater,
-            abort,
-        ) => evaluated,
-        never = reporter.run(&*sink, snapshot) => match never {},
+    let evaluation = async {
+        tokio::select! {
+            evaluated = evaluate_derivations_with(
+                &*evaluator.resolver,
+                &FsDrvReader,
+                job,
+                local_flake_path,
+                updater,
+                abort,
+            ) => evaluated,
+            never = reporter.run(&*sink, snapshot) => match never {},
+        }
+    };
+    let evaluated = match sharing.as_mut() {
+        Some(sharing) => {
+            sharing
+                .beside_flusher(EVAL_CACHE_FLUSH_INTERVAL, evaluation)
+                .await
+        }
+        None => evaluation.await,
     };
     reporter.flush(&*sink, &snapshot).await;
-    let EvalOutcome {
-        flake_nodes,
-        cacheable,
-    } = match evaluated {
+    let EvalOutcome { flake_nodes } = match evaluated {
         Ok(outcome) => outcome,
         Err(e) => {
             if let Some(corrupt) = e.downcast_ref::<CorruptEvalCache>() {
-                let path = format!(
-                    "{}/eval-cache-v6/{}.sqlite",
-                    evaluator.resolver.eval_cache_dir(),
-                    corrupt.fingerprint
-                );
+                drop(sharing);
                 warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt; dropping local blob + recycling eval workers");
-                delete_eval_cache_blob(&path).await;
+                delete_eval_cache_blob(&eval_cache_path(evaluator, &corrupt.fingerprint)).await;
                 evaluator.resolver.release_evaluators().await;
             }
             return Err(e);
@@ -295,53 +251,186 @@ pub async fn evaluate_derivations(
         }
     }
 
-    // An eval that discovered nothing is leaving an empty cache. Sharing it would poison
-    // every later eval of the same flake with a schemaless blob.
-    if !cacheable {
-        debug!("evaluation produced no derivations; keeping its eval-cache local");
-        return Ok(());
-    }
-
-    if cache_path.is_some()
-        && let Err(e) = evaluator
-            .resolver
-            .checkpoint_cache(repo.clone(), &eval_overrides)
-            .await
-    {
-        warn!(error = %e, "eval-cache checkpoint failed; pushing as-is");
-    }
-
-    if let (Some(fp), Some(path)) = (fingerprint.as_ref(), cache_path.as_ref())
-        && let Ok(bytes) = tokio::fs::read(path).await
-        && is_shareable_eval_cache(&bytes)
-        && let Err(e) = updater.push_eval_cache(fp, bytes).await
-    {
-        warn!(error = %e, "eval-cache push failed; continuing");
+    if let Some(sharing) = sharing.as_mut() {
+        sharing.flush().await;
     }
 
     Ok(())
 }
 
-/// A previous evaluation of the same flake is leaving `-wal`/`-shm` sidecars next to the blob.
-/// SQLite is reading them as part of whatever main file it finds. Staging over them would mix
-/// server pages with pages from the last local eval. The sidecars are removed before the bytes
-/// land.
-async fn write_eval_cache_blob(path: &str, bytes: &[u8]) -> Result<()> {
-    if let Some(parent) = std::path::Path::new(path).parent() {
-        tokio::fs::create_dir_all(parent).await?;
+fn eval_cache_path(evaluator: &WorkerEvaluator, fingerprint: &str) -> String {
+    format!(
+        "{}/eval-cache-v6/{fingerprint}.sqlite",
+        evaluator.resolver.eval_cache_dir()
+    )
+}
+
+async fn eval_cache_fingerprint(
+    evaluator: &WorkerEvaluator,
+    repo: String,
+    overrides: &[(String, String)],
+) -> Option<String> {
+    if !evaluator.eval_cache_share {
+        return None;
     }
 
-    for suffix in ["-wal", "-shm"] {
-        let sidecar = format!("{path}{suffix}");
-        match tokio::fs::remove_file(&sidecar).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => warn!(path = %sidecar, error = %e, "failed to drop stale eval-cache sidecar"),
+    evaluator
+        .resolver
+        .fingerprint(repo, overrides)
+        .await
+        .unwrap_or_else(|e| {
+            warn!(error = %e, "eval-cache fingerprint failed; evaluating local-only");
+            None
+        })
+}
+
+async fn share_eval_cache(
+    evaluator: &WorkerEvaluator,
+    updater: &JobUpdater,
+    fingerprint: String,
+) -> Option<EvalCacheSharing> {
+    let path = PathBuf::from(eval_cache_path(evaluator, &fingerprint));
+    let file = match blocking(move || eval_cache_sync::open(&path)).await {
+        Ok(file) => Arc::new(Mutex::new(file)),
+        Err(e) => {
+            warn!(error = %e, "opening the eval cache failed; evaluating local-only");
+            return None;
+        }
+    };
+
+    pull_segments(&file, updater, &fingerprint).await;
+    let upload = SegmentUpload {
+        updater: updater.concurrent(),
+        fingerprint,
+    };
+    Some(EvalCacheSharing::new(file, Arc::new(upload)))
+}
+
+type SharedEvalCacheFile = Arc<Mutex<EvalCacheFile>>;
+
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .context("eval cache task panicked")?
+}
+
+async fn on_file<T: Send + 'static>(
+    file: &SharedEvalCacheFile,
+    work: impl FnOnce(&mut EvalCacheFile) -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let file = Arc::clone(file);
+    blocking(move || work(&mut file.lock())).await
+}
+
+async fn pull_segments(file: &SharedEvalCacheFile, updater: &JobUpdater, fingerprint: &str) {
+    let applied = match on_file(file, |file| file.applied_keys()).await {
+        Ok(keys) => keys.into_iter().collect(),
+        Err(e) => {
+            warn!(error = %e, "reading the applied eval cache segments failed; evaluating local-only");
+            return;
+        }
+    };
+
+    let pulled = match updater.pull_eval_cache(fingerprint, applied).await {
+        Ok(pulled) => pulled,
+        Err(e) => {
+            warn!(error = %e, "eval-cache pull failed; evaluating local-only");
+            return;
+        }
+    };
+
+    if let Err(e) = on_file(file, move |file| apply_pulled(file, pulled)).await {
+        warn!(error = %e, "applying the pulled eval cache segments failed");
+    }
+}
+
+fn apply_pulled(file: &mut EvalCacheFile, pulled: PulledSegments) -> Result<()> {
+    for (key, bytes) in &pulled.segments {
+        if let Err(e) = decode(bytes).and_then(|rows| file.apply(key, &rows)) {
+            warn!(%key, error = %e, "skipping an eval cache segment");
         }
     }
 
-    tokio::fs::write(path, bytes).await?;
-    Ok(())
+    file.forget_keys_except(&pulled.keys)
+}
+
+#[async_trait::async_trait]
+trait SegmentSink: Send + Sync {
+    async fn push(&self, segment: Vec<u8>) -> Result<()>;
+}
+
+struct SegmentUpload {
+    updater: JobUpdater,
+    fingerprint: String,
+}
+
+#[async_trait::async_trait]
+impl SegmentSink for SegmentUpload {
+    async fn push(&self, segment: Vec<u8>) -> Result<()> {
+        self.updater
+            .push_eval_cache_segment(&self.fingerprint, segment)
+            .await
+    }
+}
+
+struct EvalCacheSharing {
+    file: SharedEvalCacheFile,
+    sink: Arc<dyn SegmentSink>,
+    unsent: Vec<Vec<u8>>,
+}
+
+impl EvalCacheSharing {
+    fn new(file: SharedEvalCacheFile, sink: Arc<dyn SegmentSink>) -> Self {
+        Self {
+            file,
+            sink,
+            unsent: Vec::new(),
+        }
+    }
+
+    async fn beside_flusher<T>(
+        &mut self,
+        interval: Duration,
+        evaluation: impl Future<Output = T>,
+    ) -> T {
+        let (stop, stopped) = oneshot::channel::<()>();
+        let evaluation = async move {
+            let out = evaluation.await;
+            drop(stop);
+            out
+        };
+        let (out, ()) = tokio::join!(evaluation, self.flush_every(interval, stopped));
+        out
+    }
+
+    async fn flush_every(&mut self, interval: Duration, mut stopped: oneshot::Receiver<()>) {
+        loop {
+            tokio::select! {
+                biased;
+                _ = &mut stopped => return,
+                () = tokio::time::sleep(interval) => self.flush().await,
+            }
+        }
+    }
+
+    async fn flush(&mut self) {
+        match on_file(&self.file, EvalCacheFile::export_changes).await {
+            Ok(segments) => self.unsent.extend(segments),
+            Err(e) => warn!(error = %e, "eval cache export failed; trying again at the next flush"),
+        }
+
+        let mut failed = Vec::new();
+        for segment in std::mem::take(&mut self.unsent) {
+            if let Err(e) = self.sink.push(segment.clone()).await {
+                warn!(error = %e, "eval cache segment push failed; trying again at the next flush");
+                failed.push(segment);
+            }
+        }
+
+        self.unsent = failed;
+    }
 }
 
 fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
@@ -845,7 +934,6 @@ async fn report_failed_attrs(updater: &mut dyn JobReporter, failed: &[AttrError]
 #[derive(Debug)]
 pub struct EvalOutcome {
     pub flake_nodes: Vec<FlakeOutputNode>,
-    pub cacheable: bool,
 }
 
 fn flake_kind(attr: &str) -> &'static str {
@@ -1067,13 +1155,13 @@ async fn finish_evaluation(
 
     Ok(EvalOutcome {
         flake_nodes: flake_nodes_from_roots(&found.roots),
-        cacheable: !found.roots.is_empty(),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_storage::eval_cache_segment::{ATTR_FULL_ATTRS, EvalCacheRow, encode};
     use gradient_test_support::fakes::derivation_resolver::FakeDerivationResolver;
     use gradient_test_support::prelude::*;
     use gradient_wire::types::{ImportOutcome, Realisation};
@@ -1120,26 +1208,92 @@ mod tests {
         assert_eq!(corrupt_eval_cache(&msg).unwrap().fingerprint, fp);
     }
 
-    #[test]
-    fn a_schemaless_blob_is_not_shareable() {
-        let mut header_only = b"SQLite format 3\0".to_vec();
-        header_only.resize(4096, 0);
-
-        assert!(!is_shareable_eval_cache(&header_only));
-        assert!(!is_shareable_eval_cache(b""));
-        assert!(!is_shareable_eval_cache(b"not a database at all"));
+    fn cache_row(path: &[&str], kind: u8) -> EvalCacheRow {
+        EvalCacheRow {
+            path: path.iter().map(|part| (*part).to_owned()).collect(),
+            kind,
+            value: None,
+            context: None,
+        }
     }
 
     #[test]
-    fn a_blob_with_a_schema_is_shareable() {
-        let mut blob = b"SQLite format 3\0".to_vec();
-        blob.resize(4096, 0);
-        blob.extend_from_slice(
-            b"CREATE TABLE Attributes (parent integer, name text, type integer, value text)",
-        );
-        blob.resize(8192, 0);
+    fn a_bad_segment_is_skipped_and_not_marked_applied() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut file = eval_cache_sync::open(&dir.path().join("fp.sqlite")).unwrap();
+        let good = encode(&[cache_row(&["a"], ATTR_FULL_ATTRS)]).unwrap();
+        let mut bad = encode(&[cache_row(&["b"], ATTR_FULL_ATTRS)]).unwrap();
+        bad.truncate(bad.len() / 2);
+        let pulled = PulledSegments {
+            keys: vec!["good".to_owned(), "bad".to_owned()],
+            segments: vec![("good".to_owned(), good), ("bad".to_owned(), bad)],
+        };
 
-        assert!(is_shareable_eval_cache(&blob));
+        apply_pulled(&mut file, pulled).unwrap();
+
+        assert_eq!(
+            file.applied_keys().unwrap(),
+            HashSet::from(["good".to_owned()])
+        );
+    }
+
+    #[derive(Default)]
+    struct RecordingSink {
+        pushed: Mutex<Vec<Vec<u8>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl SegmentSink for RecordingSink {
+        async fn push(&self, segment: Vec<u8>) -> Result<()> {
+            self.pushed.lock().push(segment);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn the_final_flush_pushes_rows_written_after_the_last_tick() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fp.sqlite");
+        let file = Arc::new(Mutex::new(eval_cache_sync::open(&path).unwrap()));
+        let sink = Arc::new(RecordingSink::default());
+        let mut sharing = EvalCacheSharing::new(file, sink.clone());
+        let nix = rusqlite::Connection::open(&path).unwrap();
+        nix.busy_timeout(Duration::from_secs(30)).unwrap();
+        let write = |parent: i64, name: &str, kind: u8| {
+            nix.execute(
+                "insert or replace into Attributes(parent, name, type, value) values (?, ?, ?, ?)",
+                rusqlite::params![parent, name, kind, None::<String>],
+            )
+            .unwrap();
+            nix.last_insert_rowid()
+        };
+        let root = write(0, "", ATTR_FULL_ATTRS);
+
+        sharing
+            .beside_flusher(Duration::from_millis(50), async {
+                write(root, "before", ATTR_FULL_ATTRS);
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                write(root, "after", ATTR_FULL_ATTRS);
+            })
+            .await;
+        sharing.flush().await;
+
+        let mut paths: Vec<Vec<String>> = sink
+            .pushed
+            .lock()
+            .iter()
+            .flat_map(|segment| decode(segment).unwrap())
+            .map(|row| row.path)
+            .collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec![
+                Vec::<String>::new(),
+                vec!["after".to_owned()],
+                vec!["before".to_owned()],
+            ]
+        );
     }
 
     #[test]

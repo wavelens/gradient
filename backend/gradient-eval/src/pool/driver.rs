@@ -82,13 +82,6 @@ pub async fn run_eval_driver(
                 .fingerprint(repository, input_overrides)
                 .await
                 .map(|fingerprint| json!({"kind": "fingerprint_ok", "fingerprint": fingerprint})),
-            EvalRequest::Checkpoint {
-                repository,
-                input_overrides,
-            } => worker
-                .checkpoint(repository, input_overrides)
-                .await
-                .map(|()| json!({"kind": "checkpoint_ok"})),
             EvalRequest::FetchInput { .. } => {
                 Err(anyhow::anyhow!("the eval driver does not fetch inputs"))
             }

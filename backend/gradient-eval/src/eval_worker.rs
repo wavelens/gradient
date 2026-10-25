@@ -277,18 +277,6 @@ fn answer_requests<R: Read, W: Write>(
                         .map(|fingerprint| EvalResponse::FingerprintOk { fingerprint }),
                 )
             }),
-            EvalRequest::Checkpoint {
-                repository,
-                input_overrides,
-            } => with_evaluator(evaluator, |ev| {
-                or_err(
-                    walkers
-                        .with(ev, &repository, &input_overrides, |walker| {
-                            walker.checkpoint_cache()
-                        })
-                        .map(|()| EvalResponse::CheckpointOk),
-                )
-            }),
         };
 
         trace!(kind = response_kind(&resp), "eval worker sending response");
@@ -394,7 +382,6 @@ fn response_kind(resp: &EvalResponse) -> String {
         EvalResponse::FingerprintOk { fingerprint } => {
             format!("FingerprintOk({})", fingerprint.is_some())
         }
-        EvalResponse::CheckpointOk => "CheckpointOk".to_string(),
         EvalResponse::FetchOk { response } => format!("FetchOk({response})"),
         EvalResponse::Stats { delta } => format!("Stats({} thunks)", delta.nr_thunks),
         EvalResponse::NeedsBuild { derived_paths } => {
