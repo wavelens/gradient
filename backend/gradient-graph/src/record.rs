@@ -84,7 +84,8 @@ WHERE db.derivation = l.derivation
         params = [DerivationIds(64), Ints(3600, 64), Ints(600, 64)];
 
     MARK_PROBED = r#"
-UPDATE derivation_build db SET probed = true, updated_at = (now() AT TIME ZONE 'UTC')
+UPDATE derivation_build db
+SET probed = true, probed_at = (now() AT TIME ZONE 'UTC'), updated_at = (now() AT TIME ZONE 'UTC')
 WHERE db.derivation = ANY($1::uuid[]) AND NOT db.probed
   AND EXISTS (SELECT 1 FROM derivation w WHERE w.id = db.derivation AND w.walked)
   AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)

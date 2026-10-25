@@ -29,7 +29,8 @@ Probe work happens over HTTP, in `gradient-scheduler/src/probe.rs`. The loop is 
 - **Descent:** each round answer can update the needs-build marks and hand back the next level directly. One pass can follow the closure down instead of one level per tick.
 - **Look-Ahead:** a round can also ask about the unanswered dependencies of the wanted shared builds. A miss makes these dependencies needed, and the next level then costs no extra round. Only the dependencies of an upstream hit go unused.
 - **Recovery check:** every walked shared build needing a build, with `probed = false` set. The check must cover a process stopped between a commit and the channel send.
-- **Retry:** `probed` is the only memory of an answer. User retries of an evaluation or a build clear the flag on every requeued shared build missing from the caches. The probe can then ask again.
+- **Retry:** `probed` and `probed_at` hold the answer. User retries of an evaluation or a build clear the flag on every requeued shared build missing from the caches. The probe can then ask again.
+- **Stale Miss:** an upstream cache can gain a missed path later. Every other requeue can clear the flag on a miss older than one hour.
 
 ## One Round
 

@@ -30,6 +30,7 @@ fn without_identity(build: derivation_build::Model) -> derivation_build::Model {
         derivation: Default::default(),
         created_at: test_date(),
         updated_at: test_date(),
+        probed_at: None,
         queued_at: None,
         ready_at: None,
         dispatched_at: None,

@@ -64,6 +64,7 @@ Builds belong to a derivation, not to an evaluation. Every evaluation that needs
 - **Retry** on a failed or aborted build queues the build again, together with the dependents that failed through it. This queueing happens inside the running evaluation.
 - **Retry** on a finished evaluation starts a new evaluation of the same commit. That new evaluation queues all failed builds again.
 - Both kinds of retry query the [upstream caches](caches.md#upstream-types) again. A worker can then substitute a build found there.
+- A new evaluation can query the upstream caches again about a failed build, one hour after the last query.
 - A new evaluation can queue every failed build it needs again. The task option **Retry failed builds on new evaluation** (`retry_failed_builds`, on by default) can keep permanent failures failed until a retry instead.
 
 ## Imported Derivations
