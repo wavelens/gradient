@@ -19,6 +19,11 @@ crate::sql! {
          ON CONFLICT (kind, key) WHERE delivered_at IS NULL AND failed_at IS NULL DO NOTHING",
         params = [NewUuid, Int(3), Text("pending-delivery-gate-probe"), Text("{}")];
 
+    PENDING_DELIVERY_ENQUEUE_AFTER = "INSERT INTO pending_delivery (id, kind, key, payload, created_at, next_attempt_at) \
+         VALUES ($1, $2::smallint, $3, $4::jsonb, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC') + make_interval(secs => $5::int)) \
+         ON CONFLICT (kind, key) WHERE delivered_at IS NULL AND failed_at IS NULL DO NOTHING",
+        params = [NewUuid, Int(7), Text("pending-delivery-gate-probe"), Text("{}"), Int(900)];
+
     PENDING_DELIVERY_ENQUEUE_MANY = "INSERT INTO pending_delivery (id, kind, key, payload, created_at, next_attempt_at) \
          SELECT r.id, $2::smallint, r.key, r.payload::jsonb, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC') \
          FROM unnest($1::uuid[], $3::text[], $4::text[]) AS r(id, key, payload) \
@@ -30,7 +35,7 @@ crate::sql! {
              SELECT id FROM pending_delivery \
              WHERE delivered_at IS NULL AND failed_at IS NULL \
                AND next_attempt_at <= (now() AT TIME ZONE 'UTC') \
-               AND kind IN (2, 3, 4, 5, 6) \
+               AND kind IN (2, 3, 4, 5, 6, 7) \
              ORDER BY next_attempt_at, id LIMIT $1 FOR UPDATE SKIP LOCKED) \
          RETURNING o.id, o.kind, o.key, o.payload, o.attempts",
         params = [Int(8), Int(CLAIM_LEASE_SECS)];
@@ -83,6 +88,25 @@ pub async fn enqueue<C: ConnectionTrait>(
         Value::SmallInt(Some(i16::from(kind))),
         Value::String(Some(key)),
         Value::String(Some(payload.to_string())),
+    ]))
+    .await?;
+
+    Ok(())
+}
+
+pub async fn enqueue_after<C: ConnectionTrait>(
+    db: &C,
+    kind: PendingDeliveryKind,
+    key: String,
+    payload: serde_json::Value,
+    delay: Duration,
+) -> Result<(), DbErr> {
+    db.execute_raw(PENDING_DELIVERY_ENQUEUE_AFTER.bind([
+        Value::Uuid(Some(PendingDeliveryId::now_v7().into_inner())),
+        Value::SmallInt(Some(i16::from(kind))),
+        Value::String(Some(key)),
+        Value::String(Some(payload.to_string())),
+        Value::BigInt(Some(delay.as_secs() as i64)),
     ]))
     .await?;
 

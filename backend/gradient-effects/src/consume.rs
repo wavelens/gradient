@@ -16,7 +16,7 @@ use gradient_db::deliveries::pending::{Outcome, PendingDelivery, PendingDelivery
 use gradient_db::deliveries::trigger_fire::TriggerFire;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::events::{Envelope, Event, evaluation};
-use gradient_types::ids::{BuildAttemptId, TaskActionId, WebhookId};
+use gradient_types::ids::{BuildAttemptId, CacheId, TaskActionId, WebhookId};
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
 use serde_json::Value as JsonValue;
@@ -31,12 +31,23 @@ pub async fn consume(ctx: &EffectsCtx, row: &PendingDelivery) -> Outcome {
         PendingDeliveryKind::ActionDelivery => deliver_action(ctx, row).await,
         PendingDeliveryKind::WebhookDelivery => deliver_webhook(ctx, row).await,
         PendingDeliveryKind::TriggerFire => fire_trigger(ctx, row).await,
+        PendingDeliveryKind::EvalCacheCompact => compact_eval_cache(ctx, row).await,
     };
 
     match result {
         Ok(()) => Outcome::Delivered,
         Err(e) => Outcome::Retry(format!("{e:#}")),
     }
+}
+
+async fn compact_eval_cache(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
+    let cache = CacheId::new(uuid_field(row, "cache")?);
+    let fingerprint = field(row, "fingerprint")?
+        .as_str()
+        .ok_or_else(|| anyhow!("pending delivery payload fingerprint is not a string"))?;
+    let copies: Vec<CacheId> = serde_json::from_value(field(row, "copies")?.clone())
+        .context("decode the caches that hold a copy")?;
+    gradient_db::eval_cache::compact(&ctx.db(), cache, fingerprint, &copies).await
 }
 
 fn field<'a>(row: &'a PendingDelivery, name: &str) -> Result<&'a JsonValue> {

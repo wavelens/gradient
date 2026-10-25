@@ -40,6 +40,8 @@ pub enum PendingDeliveryKind {
     WebhookDelivery = 5,
     #[sea_orm(num_value = 6)]
     TriggerFire = 6,
+    #[sea_orm(num_value = 7)]
+    EvalCacheCompact = 7,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]

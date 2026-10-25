@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::cache_paths::project_write_caches;
+use gradient_db::eval_cache::record_segment;
 use gradient_db::{DbContext, WorkerDb};
 use gradient_storage::NarStore;
 use gradient_storage::admission::{ObjectKey, UploadPermit};
@@ -132,33 +134,67 @@ async fn record(
     object: &UploadObject,
     metadata: &UploadMetadata,
 ) -> UploadOutcome {
-    if let (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta)) = (object, metadata) {
-        let record = NarUploadRecord {
-            file_hash: &meta.file_hash,
-            file_size: meta.file_size as i64,
-            nar_size: meta.nar_size as i64,
-            nar_hash: &meta.nar_hash,
-            references: &meta.references,
-            deriver: meta.deriver.as_deref(),
-            ca: meta.ca.as_deref(),
-            confirmed: true,
-        };
-        if let Err(e) =
-            mark_nar_stored(&handles.graph, &handles.db, project_id, store_path, &record).await
-        {
-            return retry(format!("recording {store_path} in the cache index: {e:#}"));
+    match (object, metadata) {
+        (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta)) => {
+            record_nar(handles, project_id, store_path, meta).await
         }
+        (UploadObject::EvalCacheSegment { fingerprint }, UploadMetadata::EvalCache { .. }) => {
+            record_eval_cache_segment(handles, project_id, fingerprint).await
+        }
+        _ => UploadOutcome::Ok,
+    }
+}
 
-        let _ = record_nar_push_metric(
-            &handles.db.worker_db,
-            &handles.cache_traffic,
-            project_id,
-            meta.file_size as i64,
-        )
-        .await;
+async fn record_nar(
+    handles: &SessionHandles,
+    project_id: ProjectId,
+    store_path: &str,
+    meta: &NarUploadMetadata,
+) -> UploadOutcome {
+    let record = NarUploadRecord {
+        file_hash: &meta.file_hash,
+        file_size: meta.file_size as i64,
+        nar_size: meta.nar_size as i64,
+        nar_hash: &meta.nar_hash,
+        references: &meta.references,
+        deriver: meta.deriver.as_deref(),
+        ca: meta.ca.as_deref(),
+        confirmed: true,
+    };
+    if let Err(e) =
+        mark_nar_stored(&handles.graph, &handles.db, project_id, store_path, &record).await
+    {
+        return retry(format!("recording {store_path} in the cache index: {e:#}"));
     }
 
+    let _ = record_nar_push_metric(
+        &handles.db.worker_db,
+        &handles.cache_traffic,
+        project_id,
+        meta.file_size as i64,
+    )
+    .await;
     UploadOutcome::Ok
+}
+
+async fn record_eval_cache_segment(
+    handles: &SessionHandles,
+    project_id: ProjectId,
+    fingerprint: &str,
+) -> UploadOutcome {
+    let db = &handles.db.worker_db;
+    let writable = match project_write_caches(db, project_id).await {
+        Ok(writable) => writable,
+        Err(e) => return retry(format!("looking up the writable caches: {e}")),
+    };
+    let Some((&cache, copies)) = writable.split_first() else {
+        return rejected("the project has no writable cache".into());
+    };
+
+    match record_segment(db, cache, fingerprint, copies).await {
+        Ok(()) => UploadOutcome::Ok,
+        Err(e) => retry(format!("recording the eval cache segment: {e}")),
+    }
 }
 
 async fn place_passed_through(
