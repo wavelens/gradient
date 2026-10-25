@@ -17,12 +17,12 @@ use gradient_worker_client::correlation::{
     AssignmentHandle, CacheWaiters, ImportWaiters, InputWaiters, KnownDerivationWaiters,
     cache_query_with_timeout, known_derivations_with_timeout,
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::count::clamp_to_u32;
 use crate::executor::timeline::{JobTimeline, PhaseGuard};
 use crate::nix::store::LocalNixStore;
-use crate::proto::eval_cache_recv::EvalCacheReceiver;
+use crate::proto::eval_cache_recv::{EvalCacheReceiver, PendingPull};
 use crate::proto::prefetch::MissingInputs;
 use crate::proto::progress::{
     BuildProgressSink, EvalProgressSender, Progress, Tally, count_delivery,
@@ -30,7 +30,7 @@ use crate::proto::progress::{
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter};
 use gradient_wire::types::{
     BuildProgressPhase, BuildStage, GrantTarget, ImportOutcome, InputOutcome, Realisation,
-    UploadMetadata, UploadObject,
+    SegmentFetch, SegmentSource, UploadMetadata, UploadObject,
 };
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
@@ -81,6 +81,78 @@ async fn passthrough_blob(
             is_final: true,
         })
         .await
+}
+
+#[derive(Debug, Default)]
+pub struct PulledSegments {
+    pub keys: Vec<String>,
+    pub segments: Vec<(String, Vec<u8>)>,
+}
+
+async fn fetch_segments(
+    fetch: Vec<SegmentFetch>,
+    pending: &mut PendingPull,
+) -> Vec<(String, Vec<u8>)> {
+    let presigned = futures::future::join_all(fetch.iter().filter_map(|f| match &f.source {
+        SegmentSource::Presigned { url } => Some(download_segment(url)),
+        SegmentSource::Inline { .. } => None,
+    }));
+    let inline = async {
+        let mut streamed = Vec::new();
+        for f in &fetch {
+            if let SegmentSource::Inline { size_bytes } = f.source {
+                streamed.push(inline_segment(pending, size_bytes).await);
+            }
+        }
+
+        streamed
+    };
+    let (downloaded, streamed) = tokio::join!(presigned, inline);
+
+    let mut downloaded = downloaded.into_iter();
+    let mut streamed = streamed.into_iter();
+    fetch
+        .into_iter()
+        .filter_map(|f| {
+            let fetched = match f.source {
+                SegmentSource::Presigned { .. } => downloaded.next(),
+                SegmentSource::Inline { .. } => streamed.next(),
+            }?;
+            match fetched {
+                Ok(bytes) => Some((f.key, bytes)),
+                Err(e) => {
+                    warn!(key = %f.key, error = %e, "eval cache segment fetch failed; skipping it");
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+async fn inline_segment(pending: &mut PendingPull, size_bytes: u64) -> Result<Vec<u8>> {
+    let bytes = pending.await_inline_segment().await?;
+    if bytes.len() as u64 != size_bytes {
+        bail!(
+            "inline eval cache segment holds {} bytes, {size_bytes} announced",
+            bytes.len()
+        );
+    }
+
+    Ok(bytes)
+}
+
+async fn download_segment(url: &str) -> Result<Vec<u8>> {
+    Ok(gradient_worker_client::http::client()
+        .get(url)
+        .send()
+        .await
+        .with_context(|| format!("eval-cache GET {url}"))?
+        .error_for_status()
+        .with_context(|| format!("eval-cache GET {url} returned non-2xx"))?
+        .bytes()
+        .await
+        .with_context(|| format!("read eval-cache body of {url}"))?
+        .to_vec())
 }
 
 impl JobUpdater {
@@ -139,47 +211,38 @@ impl JobUpdater {
         }
     }
 
-    pub async fn pull_eval_cache(&self, fingerprint: &str) -> Result<Option<Vec<u8>>> {
+    pub async fn pull_eval_cache(
+        &self,
+        fingerprint: &str,
+        applied: Vec<String>,
+    ) -> Result<PulledSegments> {
         let mut guard = self.phase(JobPhase::EvalCachePull);
         let mut pending = self.eval_cache_recv.register_pull(&self.job_id);
         self.writer
             .send(ClientMessage::EvalCachePull {
                 job_id: self.job_id.clone(),
                 fingerprint: fingerprint.to_owned(),
-                applied: Vec::new(),
+                applied,
             })
             .await?;
 
-        match pending.await_outcome().await? {
-            EvalCachePullOutcome::Miss | EvalCachePullOutcome::Segments { .. } => Ok(None),
-            EvalCachePullOutcome::Presigned { url } => {
-                let bytes = gradient_worker_client::http::client()
-                    .get(&url)
-                    .send()
-                    .await
-                    .with_context(|| format!("eval-cache GET {url}"))?
-                    .error_for_status()
-                    .with_context(|| format!("eval-cache GET {url} returned non-2xx"))?
-                    .bytes()
-                    .await
-                    .with_context(|| format!("read eval-cache body of {url}"))?
-                    .to_vec();
-                guard.record(0, bytes.len() as u64);
-                Ok(Some(bytes))
-            }
-            EvalCachePullOutcome::Inline { total_bytes, .. } => {
-                let bytes = pending.await_inline(total_bytes).await?;
-                guard.record(0, bytes.len() as u64);
-                Ok(Some(bytes))
-            }
-        }
+        let (keys, fetch) = match pending.await_outcome().await? {
+            EvalCachePullOutcome::Miss => return Ok(PulledSegments::default()),
+            EvalCachePullOutcome::Segments { keys, fetch, .. } => (keys, fetch),
+            other => bail!("a segment pull cannot be answered with {other:?}"),
+        };
+
+        let segments = fetch_segments(fetch, &mut pending).await;
+        let bytes = segments.iter().map(|(_, s)| s.len() as u64).sum();
+        guard.record(clamp_to_u32(segments.len()), bytes);
+        Ok(PulledSegments { keys, segments })
     }
 
-    pub async fn push_eval_cache(&self, fingerprint: &str, bytes: Vec<u8>) -> Result<()> {
+    pub async fn push_eval_cache_segment(&self, fingerprint: &str, bytes: Vec<u8>) -> Result<()> {
         let size_bytes = bytes.len() as u64;
         let mut guard = self.phase(JobPhase::EvalCachePush);
-        guard.record(0, size_bytes);
-        let object = UploadObject::EvalCache {
+        guard.record(1, size_bytes);
+        let object = UploadObject::EvalCacheSegment {
             fingerprint: fingerprint.to_owned(),
         };
         let mut upload = self.uploads.start(&self.job_id, object, size_bytes).await?;

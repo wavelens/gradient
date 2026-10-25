@@ -9,20 +9,22 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use gradient_wire::messages::{EvalCachePullOutcome, TRANSFER_TIMEOUT};
-use tokio::sync::oneshot;
+use gradient_wire::messages::{EvalCachePullOutcome, SegmentSource, TRANSFER_TIMEOUT};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, warn};
 
+type SegmentBytes = Result<Vec<u8>, String>;
+
 enum Pending {
-    /// The dispatch loop is moving this to `PullStream` on `Inline` before waking the waiter. The
-    /// chunks are following the result immediately.
     Pull {
         result_tx: oneshot::Sender<EvalCachePullOutcome>,
-        bytes_tx: oneshot::Sender<Result<Vec<u8>, String>>,
+        segments_tx: mpsc::UnboundedSender<SegmentBytes>,
     },
     PullStream {
+        remaining: usize,
         buf: Vec<u8>,
-        bytes_tx: oneshot::Sender<Result<Vec<u8>, String>>,
+        broken: Option<String>,
+        segments_tx: mpsc::UnboundedSender<SegmentBytes>,
     },
 }
 
@@ -39,7 +41,7 @@ pub struct EvalCacheReceiver {
 pub struct PendingPull {
     job_id: String,
     result_rx: oneshot::Receiver<EvalCachePullOutcome>,
-    bytes_rx: oneshot::Receiver<Result<Vec<u8>, String>>,
+    segments_rx: mpsc::UnboundedReceiver<SegmentBytes>,
     recv: EvalCacheReceiver,
 }
 
@@ -62,33 +64,35 @@ impl PendingPull {
         }
     }
 
-    pub async fn await_inline(self, total_bytes: u64) -> Result<Vec<u8>> {
-        match tokio::time::timeout(TRANSFER_TIMEOUT, self.bytes_rx).await {
-            Ok(Ok(Ok(bytes))) => {
-                if bytes.len() as u64 != total_bytes {
-                    return Err(anyhow::anyhow!(
-                        "assembled eval-cache blob {} bytes != advertised {}",
-                        bytes.len(),
-                        total_bytes
-                    ));
-                }
-
-                Ok(bytes)
-            }
-            Ok(Ok(Err(reason))) => Err(anyhow::anyhow!("eval-cache inline pull failed: {reason}")),
-            Ok(Err(_)) => Err(anyhow::anyhow!(
-                "eval-cache inline waiter dropped (job_id={})",
+    pub async fn await_inline_segment(&mut self) -> Result<Vec<u8>> {
+        match tokio::time::timeout(TRANSFER_TIMEOUT, self.segments_rx.recv()).await {
+            Ok(Some(Ok(bytes))) => Ok(bytes),
+            Ok(Some(Err(reason))) => Err(anyhow::anyhow!(
+                "eval-cache inline segment failed: {reason}"
+            )),
+            Ok(None) => Err(anyhow::anyhow!(
+                "eval-cache inline stream closed (job_id={})",
                 self.job_id
             )),
             Err(_) => {
                 self.recv.forget_job(&self.job_id);
                 Err(anyhow::anyhow!(
-                    "eval-cache inline pull for job_id={} timed out after {}s",
+                    "eval-cache inline segment for job_id={} timed out after {}s",
                     self.job_id,
                     TRANSFER_TIMEOUT.as_secs(),
                 ))
             }
         }
+    }
+}
+
+fn inline_segments(outcome: &EvalCachePullOutcome) -> usize {
+    match outcome {
+        EvalCachePullOutcome::Segments { fetch, .. } => fetch
+            .iter()
+            .filter(|f| matches!(f.source, SegmentSource::Inline { .. }))
+            .count(),
+        _ => 0,
     }
 }
 
@@ -99,18 +103,18 @@ impl EvalCacheReceiver {
 
     pub fn register_pull(&self, job_id: &str) -> PendingPull {
         let (result_tx, result_rx) = oneshot::channel();
-        let (bytes_tx, bytes_rx) = oneshot::channel();
+        let (segments_tx, segments_rx) = mpsc::unbounded_channel();
         self.inner.lock().pending.insert(
             job_id.to_owned(),
             Pending::Pull {
                 result_tx,
-                bytes_tx,
+                segments_tx,
             },
         );
         PendingPull {
             job_id: job_id.to_owned(),
             result_rx,
-            bytes_rx,
+            segments_rx,
             recv: self.clone(),
         }
     }
@@ -120,19 +124,21 @@ impl EvalCacheReceiver {
         match g.pending.remove(job_id) {
             Some(Pending::Pull {
                 result_tx,
-                bytes_tx,
+                segments_tx,
             }) => {
-                if let EvalCachePullOutcome::Inline { total_bytes, .. } = &outcome {
+                let remaining = inline_segments(&outcome);
+                if remaining > 0 {
                     g.pending.insert(
                         job_id.to_owned(),
                         Pending::PullStream {
-                            buf: Vec::with_capacity(
-                                usize::try_from(*total_bytes).unwrap_or(usize::MAX),
-                            ),
-                            bytes_tx,
+                            remaining,
+                            buf: Vec::new(),
+                            broken: None,
+                            segments_tx,
                         },
                     );
                 }
+
                 drop(g);
                 if result_tx.send(outcome).is_err() {
                     debug!(%job_id, "eval-cache pull waiter went away before delivery");
@@ -144,33 +150,44 @@ impl EvalCacheReceiver {
 
     pub fn deliver_pull_chunk(&self, job_id: &str, data: &[u8], offset: u64, is_final: bool) {
         let mut g = self.inner.lock();
-        let Some(Pending::PullStream { buf, .. }) = g.pending.get_mut(job_id) else {
+        let Some(Pending::PullStream {
+            remaining,
+            buf,
+            broken,
+            segments_tx,
+        }) = g.pending.get_mut(job_id)
+        else {
             warn!(%job_id, "EvalCacheChunk with no inline pull stream - discarding");
             return;
         };
 
-        if offset != buf.len() as u64 {
-            let expected = buf.len() as u64;
-            if let Some(Pending::PullStream { bytes_tx, .. }) = g.pending.remove(job_id)
-                && bytes_tx
-                    .send(Err(format!(
-                        "non-contiguous eval-cache chunk: offset {offset} != expected {expected}"
-                    )))
-                    .is_err()
-            {
-                debug!(%job_id, "eval-cache inline waiter went away before error delivery");
-            }
+        if broken.is_none() && offset != buf.len() as u64 {
+            *broken = Some(format!(
+                "non-contiguous eval-cache chunk: offset {offset} != expected {}",
+                buf.len()
+            ));
+        }
 
+        if broken.is_none() {
+            buf.extend_from_slice(data);
+        }
+
+        if !is_final {
             return;
         }
 
-        buf.extend_from_slice(data);
-
-        if is_final
-            && let Some(Pending::PullStream { buf, bytes_tx }) = g.pending.remove(job_id)
-            && bytes_tx.send(Ok(buf)).is_err()
-        {
+        let segment = match broken.take() {
+            Some(reason) => Err(reason),
+            None => Ok(std::mem::take(buf)),
+        };
+        buf.clear();
+        if segments_tx.send(segment).is_err() {
             debug!(%job_id, "eval-cache inline waiter went away before delivery");
+        }
+
+        *remaining -= 1;
+        if *remaining == 0 {
+            g.pending.remove(job_id);
         }
     }
 
@@ -187,112 +204,65 @@ mod tests {
     )]
 
     use super::*;
+    use gradient_wire::messages::SegmentFetch;
+
+    fn segments(inline: &[&str]) -> EvalCachePullOutcome {
+        EvalCachePullOutcome::Segments {
+            keys: inline.iter().map(|key| (*key).to_owned()).collect(),
+            fetch: inline
+                .iter()
+                .map(|key| SegmentFetch {
+                    key: (*key).to_owned(),
+                    source: SegmentSource::Inline { size_bytes: 0 },
+                })
+                .collect(),
+            stream_token: Some("ec-fp".into()),
+        }
+    }
 
     #[tokio::test]
-    async fn inline_chunks_assemble_in_order() {
+    async fn inline_segments_arrive_back_to_back() {
         let r = EvalCacheReceiver::new();
         let mut pull = r.register_pull("j");
-        r.deliver_pull_result(
-            "j",
-            EvalCachePullOutcome::Inline {
-                total_bytes: 9,
-                stream_token: "t".into(),
-            },
-        );
-        let outcome = pull.await_outcome().await.unwrap();
-        let total = match outcome {
-            EvalCachePullOutcome::Inline { total_bytes, .. } => total_bytes,
-            other => panic!("expected Inline, got {other:?}"),
-        };
+        r.deliver_pull_result("j", segments(&["a", "b"]));
+        pull.await_outcome().await.unwrap();
 
-        let r2 = r.clone();
-        let task = tokio::spawn(async move { pull.await_inline(total).await });
-        tokio::task::yield_now().await;
-        r2.deliver_pull_chunk("j", b"abc", 0, false);
-        r2.deliver_pull_chunk("j", b"def", 3, false);
-        r2.deliver_pull_chunk("j", b"ghi", 6, true);
-        assert_eq!(task.await.unwrap().unwrap(), b"abcdefghi");
+        r.deliver_pull_chunk("j", b"abc", 0, false);
+        r.deliver_pull_chunk("j", b"def", 3, true);
+        r.deliver_pull_chunk("j", b"ghi", 0, true);
+
+        assert_eq!(pull.await_inline_segment().await.unwrap(), b"abcdef");
+        assert_eq!(pull.await_inline_segment().await.unwrap(), b"ghi");
+        assert!(pull.await_inline_segment().await.is_err());
     }
 
     #[tokio::test]
     async fn chunks_delivered_before_the_waiter_wakes_are_kept() {
         let r = EvalCacheReceiver::new();
         let mut pull = r.register_pull("j");
-        r.deliver_pull_result(
-            "j",
-            EvalCachePullOutcome::Inline {
-                total_bytes: 6,
-                stream_token: "t".into(),
-            },
-        );
+        r.deliver_pull_result("j", segments(&["a"]));
         r.deliver_pull_chunk("j", b"abc", 0, false);
         r.deliver_pull_chunk("j", b"def", 3, true);
 
         pull.await_outcome().await.unwrap();
-        assert_eq!(pull.await_inline(6).await.unwrap(), b"abcdef");
+        assert_eq!(pull.await_inline_segment().await.unwrap(), b"abcdef");
     }
 
     #[tokio::test]
-    async fn single_final_chunk_delivers() {
+    async fn a_non_contiguous_chunk_fails_only_its_segment() {
         let r = EvalCacheReceiver::new();
         let mut pull = r.register_pull("j");
-        r.deliver_pull_result(
-            "j",
-            EvalCachePullOutcome::Inline {
-                total_bytes: 5,
-                stream_token: "t".into(),
-            },
-        );
+        r.deliver_pull_result("j", segments(&["a", "b"]));
         pull.await_outcome().await.unwrap();
 
-        let r2 = r.clone();
-        let task = tokio::spawn(async move { pull.await_inline(5).await });
-        tokio::task::yield_now().await;
-        r2.deliver_pull_chunk("j", b"hello", 0, true);
-        assert_eq!(task.await.unwrap().unwrap(), b"hello");
-    }
+        r.deliver_pull_chunk("j", b"abc", 0, false);
+        r.deliver_pull_chunk("j", b"def", 99, false);
+        r.deliver_pull_chunk("j", b"", 6, true);
+        r.deliver_pull_chunk("j", b"next", 0, true);
 
-    #[tokio::test]
-    async fn non_contiguous_chunk_fails_waiter() {
-        let r = EvalCacheReceiver::new();
-        let mut pull = r.register_pull("j");
-        r.deliver_pull_result(
-            "j",
-            EvalCachePullOutcome::Inline {
-                total_bytes: 6,
-                stream_token: "t".into(),
-            },
-        );
-        pull.await_outcome().await.unwrap();
-
-        let r2 = r.clone();
-        let task = tokio::spawn(async move { pull.await_inline(6).await });
-        tokio::task::yield_now().await;
-        r2.deliver_pull_chunk("j", b"abc", 0, false);
-        r2.deliver_pull_chunk("j", b"def", 99, true);
-        let err = task.await.unwrap().unwrap_err().to_string();
+        let err = pull.await_inline_segment().await.unwrap_err().to_string();
         assert!(err.contains("non-contiguous"), "got: {err}");
-    }
-
-    #[tokio::test]
-    async fn size_mismatch_fails() {
-        let r = EvalCacheReceiver::new();
-        let mut pull = r.register_pull("j");
-        r.deliver_pull_result(
-            "j",
-            EvalCachePullOutcome::Inline {
-                total_bytes: 10,
-                stream_token: "t".into(),
-            },
-        );
-        pull.await_outcome().await.unwrap();
-
-        let r2 = r.clone();
-        let task = tokio::spawn(async move { pull.await_inline(10).await });
-        tokio::task::yield_now().await;
-        r2.deliver_pull_chunk("j", b"short", 0, true);
-        let err = task.await.unwrap().unwrap_err().to_string();
-        assert!(err.contains("!= advertised"), "got: {err}");
+        assert_eq!(pull.await_inline_segment().await.unwrap(), b"next");
     }
 
     #[tokio::test]

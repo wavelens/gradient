@@ -435,26 +435,6 @@ impl EvalWorker {
         .await
     }
 
-    pub(super) async fn checkpoint(
-        &mut self,
-        repository: String,
-        input_overrides: Vec<(String, String)>,
-    ) -> Result<()> {
-        self.call(
-            EvalRequest::Checkpoint {
-                repository,
-                input_overrides,
-            },
-            "Checkpoint",
-            &RefuseDependencies("the eval-cache checkpoint"),
-            |resp| match resp {
-                EvalResponse::CheckpointOk => Ok(()),
-                other => Err(Box::new(other)),
-            },
-        )
-        .await
-    }
-
     pub async fn fetch(
         &mut self,
         request: String,

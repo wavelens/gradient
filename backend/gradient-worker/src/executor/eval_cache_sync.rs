@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![allow(dead_code, reason = "the evaluation starts syncing in the next commit")]
-
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Duration;

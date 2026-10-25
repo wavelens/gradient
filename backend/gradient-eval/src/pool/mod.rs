@@ -364,21 +364,6 @@ impl EvalPool {
             }
         }
     }
-
-    pub async fn checkpoint(
-        &self,
-        repository: String,
-        overrides: &[(String, String)],
-    ) -> Result<()> {
-        let mut worker = self.workers.acquire().await?;
-        match worker.checkpoint(repository, overrides.to_vec()).await {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                worker.mark_dead();
-                Err(e)
-            }
-        }
-    }
 }
 
 #[cfg(test)]
