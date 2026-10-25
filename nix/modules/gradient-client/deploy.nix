@@ -122,7 +122,18 @@ in {
           GRADIENT_API_KEY = "%d/gradient_api_key";
         }
         // config.nix.envVars
-        // config.networking.proxy.envVars;
+        // config.networking.proxy.envVars
+        // {
+          GRADIENT_API_URL = apiUrl;
+          GRADIENT_API_KEY_FILE = cfg.apiKeyFile;
+          GRADIENT_DEPLOY_FOR = cfg.deployFor;
+          GRADIENT_LIVE_URL = liveUrl;
+          GRADIENT_POLL_INTERVAL_SEC = toString cfg.pollIntervalSec;
+          GRADIENT_SYSTEM_PATH_REGEX = systemPathRegex;
+          GRADIENT_TASK = cfg.task;
+          GRADIENT_WAIT_FOR_BUILD = if cfg.waitForBuild then "1" else "0";
+          GRADIENT_WEBSOCKETS = if cfg.websockets then "1" else "0";
+        };
 
         path = with pkgs; [
           coreutils
@@ -146,145 +157,7 @@ in {
           TimeoutStartSec = lib.mkIf cfg.waitForBuild "infinity";
         };
 
-        script = /* bash */ ''
-          if ! curl --silent --fail --max-time 5 --output /dev/null "${apiUrl}/health"; then
-            echo "Error: cannot connect to ${apiUrl}/health"
-            exit 1
-          fi
-
-          API_KEY=$(cat ${cfg.apiKeyFile})
-
-          api() {
-            curl --silent --fail --max-time 10 --header "Authorization: Bearer $API_KEY" "$@"
-          }
-
-          resolve() {
-            local evaluation entry_points evaluation_id evaluation_status path status current
-
-            evaluation=$(api "${apiUrl}/tasks/${cfg.task}/evaluations?limit=1") || { echo "wait"; return; }
-            evaluation_id=$(echo "$evaluation" | jq -r '.message[0].id // empty')
-            evaluation_status=$(echo "$evaluation" | jq -r '.message[0].status // empty')
-
-            if [ -z "$evaluation_id" ]; then
-              echo "done task ${cfg.task} has no evaluations"
-              return
-            fi
-
-            entry_points=$(api "${apiUrl}/tasks/${cfg.task}/entry-points?evaluation_id=$evaluation_id&limit=500") || { echo "wait"; return; }
-
-            # Output paths are written at evaluation time from the resolved .drv. The deployment is
-            # identifiable before its build. Entry points are absent until derivations are resolved.
-            path=$(echo "$entry_points" | jq -r --arg re '${systemPathRegex}' \
-              'first(.message.entry_points[] | select((.outputs.out // "") | test($re))) | .outputs.out // empty')
-            status=$(echo "$entry_points" | jq -r --arg re '${systemPathRegex}' \
-              'first(.message.entry_points[] | select((.outputs.out // "") | test($re))) | .build_status // empty')
-
-            if [ -n "$path" ]; then
-              current=$(readlink /run/current-system || true)
-              if [ "$path" = "$current" ]; then
-                echo "done system is already up-to-date with $path"
-                return
-              fi
-
-              case "$status" in
-                Completed|Substituted)
-                  echo "deploy $path"
-                  return
-                  ;;
-                FailedPermanent|FailedTimeout|DependencyFailed|Aborted)
-                  echo "done build of $path finished $status"
-                  return
-                  ;;
-              esac
-            fi
-
-            case "$evaluation_status" in
-              Completed|Failed|Aborted)
-                echo "done evaluation $evaluation_id finished: $evaluation_status without a deployment for ${cfg.deployFor}"
-                ;;
-              *)
-                echo "wait"
-                ;;
-            esac
-          }
-
-          die() {
-            echo "Error: $1"
-            exit 1
-          }
-
-          deploy() {
-            echo "New deployment found: $1"
-
-            nix-store --realize "$1" || die "cannot fetch $1 from a substituter"
-            nix-env -p /nix/var/nix/profiles/system --set "$1" || die "cannot set the profile to $1"
-            "$1/bin/switch-to-configuration" switch || die "switching to $1 failed"
-
-            echo "Deployment to $1 completed successfully"
-          }
-
-          settle() {
-            local verdict
-            verdict=$(resolve)
-
-            case "$verdict" in
-              "deploy "*)
-                deploy "''${verdict#deploy }"
-                ;;
-              "done "*)
-                echo "''${verdict#done }"
-                ;;
-              *)
-                return 1
-                ;;
-            esac
-          }
-
-          if settle; then
-            exit 0
-          fi
-        ''
-        + lib.optionalString (!cfg.waitForBuild) ''
-          echo "Nothing deployable yet for task ${cfg.task}; not waiting"
-          exit 0
-        ''
-        + lib.optionalString (cfg.waitForBuild && cfg.websockets) ''
-          echo "Task ${cfg.task} is still building; following ${liveUrl}"
-
-          while true; do
-            exec 3< <(websocat -U --text --no-close --ping-interval 30 --ping-timeout 90 \
-              -H="Authorization: Bearer $API_KEY" "${liveUrl}" </dev/null)
-            stream=$!
-
-            # The socket only reports transitions after the connect. A reconnect gap replays
-            # nothing, and every connect must settle again.
-            if settle; then
-              exit 0
-            fi
-
-            while read -r _event <&3; do
-              if settle; then
-                exit 0
-              fi
-            done
-
-            exec 3<&-
-            kill "$stream" 2>/dev/null || true
-            wait "$stream" 2>/dev/null || true
-            sleep 30
-          done
-        ''
-        + lib.optionalString (cfg.waitForBuild && !cfg.websockets) ''
-          echo "Task ${cfg.task} is still building; re-checking every ${toString cfg.pollIntervalSec}s"
-
-          while true; do
-            sleep ${toString cfg.pollIntervalSec}
-
-            if settle; then
-              exit 0
-            fi
-          done
-        '';
+        script = builtins.readFile ./deploy.sh;
       };
 
       timers.gradient-deploy = {
