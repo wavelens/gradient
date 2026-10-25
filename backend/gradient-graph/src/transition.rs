@@ -304,9 +304,10 @@ async fn eval_failed(
     Ok(())
 }
 
-/// The shared row's existence is acting as the circuit breaker.
-/// The first corrupt failure is purging the segments and re-queuing the evaluation.
-/// A recurring corruption is finding no row and failing the evaluation instead of looping.
+const HEAL_WINDOW: chrono::Duration = chrono::Duration::hours(1);
+
+/// A purge within the last `HEAL_WINDOW` is acting as the circuit breaker: workers push segments
+/// during the requeued evaluation, so a recurring corruption fails instead of purging in a loop.
 async fn heal_corrupt_eval_cache(
     ctx: &DbContext,
     evaluation_id: EvaluationId,
@@ -316,12 +317,15 @@ async fn heal_corrupt_eval_cache(
         .filter(CEvalCacheStore::Fingerprint.eq(fingerprint))
         .all(&ctx.worker_db)
         .await?;
-    if rows.is_empty() {
-        warn!(%evaluation_id, %fingerprint, "corrupt eval-cache recurred with no shared blob to purge; failing eval");
+    let now = gradient_types::now();
+    if rows.is_empty() || purged_recently(&rows, now) {
+        warn!(%evaluation_id, %fingerprint, "corrupt eval-cache recurred after a recent purge; failing eval");
         return Ok(false);
     }
 
-    EEvalCacheStore::delete_many()
+    EEvalCacheStore::update_many()
+        .col_expr(CEvalCacheStore::PurgedAt, Expr::value(now))
+        .col_expr(CEvalCacheStore::SizeBytes, Expr::value(0i64))
         .filter(CEvalCacheStore::Fingerprint.eq(fingerprint))
         .exec(&ctx.worker_db)
         .await?;
@@ -339,6 +343,12 @@ async fn heal_corrupt_eval_cache(
     requeue_evaluation(ctx, evaluation_id).await?;
     info!(%evaluation_id, %fingerprint, "purged corrupt eval-cache segments; re-queued eval for fresh evaluation");
     Ok(true)
+}
+
+fn purged_recently(rows: &[MEvalCacheStore], now: chrono::NaiveDateTime) -> bool {
+    rows.iter()
+        .filter_map(|row| row.purged_at)
+        .any(|purged_at| purged_at > now - HEAL_WINDOW)
 }
 
 async fn requeue_evaluation(ctx: &DbContext, evaluation_id: EvaluationId) -> Result<()> {

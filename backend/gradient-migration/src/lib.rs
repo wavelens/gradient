@@ -26,6 +26,7 @@ mod m20261024_000000_output_path_known_after_build;
 mod m20261024_000001_default_trigger;
 mod m20261024_000002_entry_point_licenses;
 mod m20261025_000000_derivation_build_probed_at;
+mod m20261026_000000_eval_cache_purged_at;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -69,6 +70,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261024_000001_default_trigger::Migration),
             Box::new(m20261024_000002_entry_point_licenses::Migration),
             Box::new(m20261025_000000_derivation_build_probed_at::Migration),
+            Box::new(m20261026_000000_eval_cache_purged_at::Migration),
         ]
     }
 }

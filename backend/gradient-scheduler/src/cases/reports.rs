@@ -950,7 +950,7 @@ async fn r14_a_canceled_eval_job_puts_the_evaluation_back_to_queued() {
 }
 
 #[tokio::test]
-async fn r15_a_corrupt_eval_cache_purges_the_blob_and_requeues_then_fails() {
+async fn a_corruption_within_the_heal_window_fails_instead_of_healing_again() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(
         shape()
@@ -966,7 +966,9 @@ async fn r15_a_corrupt_eval_cache_purges_the_blob_and_requeues_then_fails() {
     case.check("step 0").await;
 
     case.fail(W1, &k, a1, corrupt()).await;
-    assert!(case.eval_cache("F").await.is_none(), "after 1: no row F");
+    let row = case.eval_cache("F").await.expect("after 1: row F kept");
+    assert!(row.purged_at.is_some(), "after 1: row F purged");
+    assert_eq!(row.size_bytes, 0, "after 1: row F emptied");
     assert_eq!(
         case.evaluation(e1).await.status,
         EvaluationStatus::Queued,
@@ -979,36 +981,66 @@ async fn r15_a_corrupt_eval_cache_purges_the_blob_and_requeues_then_fails() {
     );
     case.check("step 1").await;
 
-    case.assign_queued_evals().await;
-    case.offers_delta(W1).await;
-    case.score_all(W1).await;
-    let a2 = case
-        .request_job(W1, JobKind::Flake)
-        .await
-        .expect("after 2: W1 gets eval:E1 again")
-        .assignment_id();
-    case.advance_evaluation(W1, &k, EvaluationStatus::EvaluatingDerivation)
-        .await;
-    case.check("step 2").await;
-
+    set_purged_at(&case, "F", Duration::from_secs(2 * 3600)).await;
+    let a2 = evaluate_again(&case, &k).await;
     case.fail(W1, &k, a2, corrupt()).await;
     assert_eq!(
         case.evaluation(e1).await.status,
+        EvaluationStatus::Queued,
+        "after 2: a purge 2 h ago heals again"
+    );
+    case.check("step 2").await;
+
+    set_purged_at(&case, "F", Duration::from_secs(60)).await;
+    let a3 = evaluate_again(&case, &k).await;
+    case.fail(W1, &k, a3, corrupt()).await;
+    assert_eq!(
+        case.evaluation(e1).await.status,
         EvaluationStatus::Failed,
-        "after 3: evaluation(E1).status"
+        "after 3: a purge 1 min ago fails the evaluation"
     );
     assert!(
         has_error(&case, e1).await,
         "after 3: evaluation_message(E1) has an Error"
     );
     assert_eq!(
-        case.assignment_outcomes(&k).await.get(1).cloned(),
-        Some((a2, Some(DispatchedJobOutcome::Failed))),
-        "after 3: dj(eval:E1)[1]"
+        case.assignment_outcomes(&k).await.get(2).cloned(),
+        Some((a3, Some(DispatchedJobOutcome::Failed))),
+        "after 3: dj(eval:E1)[2]"
     );
     case.check("step 3").await;
 
     case.finish().await;
+}
+
+async fn evaluate_again(case: &SchedulerCase, key: &str) -> DispatchedJobId {
+    case.assign_queued_evals().await;
+    case.offers_delta(W1).await;
+    case.score_all(W1).await;
+    let assignment = case
+        .request_job(W1, JobKind::Flake)
+        .await
+        .expect("W1 gets the evaluation again")
+        .assignment_id();
+    case.advance_evaluation(W1, key, EvaluationStatus::EvaluatingDerivation)
+        .await;
+    assignment
+}
+
+async fn set_purged_at(case: &SchedulerCase, fingerprint: &str, ago: Duration) {
+    use sea_orm::sea_query::Expr;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let purged_at = gradient_types::now() - chrono::Duration::from_std(ago).unwrap();
+    gradient_entity::eval_cache_store::Entity::update_many()
+        .col_expr(
+            gradient_entity::eval_cache_store::Column::PurgedAt,
+            Expr::value(purged_at),
+        )
+        .filter(gradient_entity::eval_cache_store::Column::Fingerprint.eq(fingerprint))
+        .exec(&case.db.connection())
+        .await
+        .expect("the purge time writes");
 }
 
 #[tokio::test]

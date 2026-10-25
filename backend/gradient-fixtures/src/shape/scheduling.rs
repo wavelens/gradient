@@ -348,6 +348,7 @@ impl Shape {
             size_bytes: 1,
             created_at: test_date(),
             updated_at: test_date(),
+            purged_at: None,
         });
         self
     }
