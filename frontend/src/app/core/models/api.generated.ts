@@ -2424,6 +2424,10 @@ export type WaitingReason = {
 } | {
   pending_shared_builds: number;
   kind: "graph_stuck";
+} | {
+  pending_shared_builds: number;
+  failing_upstream_caches: string[];
+  kind: "upstream_caches";
 };
 
 export type WalkMode = "pruned" | "full";

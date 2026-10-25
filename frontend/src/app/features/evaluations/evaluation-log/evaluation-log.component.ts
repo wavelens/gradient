@@ -1665,6 +1665,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         const buildWord = reason.pending_shared_builds === 1 ? 'build is' : 'builds are';
         return `Workers are available, but ${reason.pending_shared_builds} ${buildWord} blocked on dependencies. Recovering automatically.`;
       }
+      case 'upstream_caches': {
+        const buildWord = reason.pending_shared_builds === 1 ? 'build waits' : 'builds wait';
+        const failing = reason.failing_upstream_caches.length > 0
+          ? ` Not answering: ${reason.failing_upstream_caches.join(', ')}.`
+          : '';
+        return `${reason.pending_shared_builds} ${buildWord} for an answer from the upstream caches.${failing}`;
+      }
     }
   }
 
@@ -1680,6 +1687,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       case 'cache_storage_full': return 'Cache Storage Full';
       case 'draining': return 'Instance Draining';
       case 'graph_stuck': return 'Recovering Build Graph';
+      case 'upstream_caches': return 'Waiting for Upstream Caches';
       default: return 'Waiting for Workers';
     }
   }

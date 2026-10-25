@@ -355,6 +355,19 @@ describe('EvaluationLogComponent', () => {
         'Workers are available, but 9 builds are blocked on dependencies. Recovering automatically.',
       );
     });
+
+    it('titles and names the upstream caches an evaluation waits for', () => {
+      const { cmp } = setup();
+      const reason = {
+        kind: 'upstream_caches' as const,
+        pending_shared_builds: 14,
+        failing_upstream_caches: ['https://attic.example/lantian'],
+      };
+      expect(cmp.waitingTitle(reason)).toBe('Waiting for Upstream Caches');
+      expect(cmp.formatWaitingReason(reason)).toBe(
+        '14 builds wait for an answer from the upstream caches. Not answering: https://attic.example/lantian.',
+      );
+    });
   });
 
   // Every per-build action lives in the sidebar's right-click menu, so the model

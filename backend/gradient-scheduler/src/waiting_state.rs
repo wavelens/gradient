@@ -431,7 +431,8 @@ async fn assess_buildability(
         EvaluationStatus::Waiting
     };
     let reason = if matches!(target, EvaluationStatus::Waiting) {
-        Some(checker.compute_waiting_reason(&pending, worker_caps))
+        let reason = checker.compute_waiting_reason(&pending, worker_caps);
+        Some(waiting_on_upstream_caches(db, evaluation_id, &pending, reason).await?)
     } else {
         None
     };
@@ -452,6 +453,30 @@ async fn assess_buildability(
         reason,
         pending: pending_count,
     }))
+}
+
+/// A shared build without an upstream answer cannot start, whatever workers are connected.
+async fn waiting_on_upstream_caches(
+    db: &WorkerDb,
+    evaluation_id: EvaluationId,
+    pending: &[MDerivationBuild],
+    reason: WaitingReason,
+) -> Result<WaitingReason> {
+    let unanswered = pending.iter().filter(|a| !a.probed).count();
+    if unanswered == 0
+        || !matches!(&reason, WaitingReason::Workers { unmet, .. } if unmet.is_empty())
+    {
+        return Ok(reason);
+    }
+
+    let failing =
+        gradient_db::caches::upstream::failing_upstreams_for_evaluation(db, evaluation_id)
+            .await
+            .context("read the upstream caches failing to answer")?;
+    Ok(WaitingReason::upstream_caches(
+        u32::try_from(unanswered).unwrap_or(u32::MAX),
+        failing,
+    ))
 }
 
 impl WaitingRefresh<'_> {

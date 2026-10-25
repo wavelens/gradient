@@ -79,7 +79,11 @@ fn in_build_phase(eval: &MEvaluation) -> bool {
             eval.waiting_reason
                 .as_ref()
                 .and_then(WaitingReason::from_json),
-            Some(WaitingReason::Workers { .. } | WaitingReason::GraphStuck { .. })
+            Some(
+                WaitingReason::Workers { .. }
+                    | WaitingReason::GraphStuck { .. }
+                    | WaitingReason::UpstreamCaches { .. }
+            )
         ),
         _ => false,
     }
