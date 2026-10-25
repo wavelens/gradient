@@ -38,6 +38,10 @@ pub enum WaitingReason {
     GraphStuck {
         pending_shared_builds: u32,
     },
+    UpstreamCaches {
+        pending_shared_builds: u32,
+        failing_upstream_caches: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -96,6 +100,16 @@ impl WaitingReason {
     pub fn graph_stuck(pending_shared_builds: u32) -> Self {
         Self::GraphStuck {
             pending_shared_builds,
+        }
+    }
+
+    pub fn upstream_caches(
+        pending_shared_builds: u32,
+        failing_upstream_caches: Vec<String>,
+    ) -> Self {
+        Self::UpstreamCaches {
+            pending_shared_builds,
+            failing_upstream_caches,
         }
     }
 

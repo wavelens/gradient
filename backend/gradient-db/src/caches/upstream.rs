@@ -14,7 +14,7 @@ use gradient_entity::project_cache::{
 };
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 
-use gradient_types::ids::{CacheId, CacheUpstreamId, ProjectId};
+use gradient_types::ids::{CacheId, CacheUpstreamId, EvaluationId, ProjectId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpstreamEndpoint {
@@ -178,6 +178,32 @@ pub async fn upstream_endpoints_for_project<C: ConnectionTrait>(
         .collect();
 
     Ok(endpoints)
+}
+
+crate::sql! {
+    FAILING_UPSTREAMS_FOR_EVALUATION = "SELECT cu.url AS url \
+         FROM cache_upstream cu \
+         JOIN project_cache oc ON oc.cache = cu.cache \
+         JOIN upstream_metric um ON um.upstream_url = cu.url \
+              AND um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '5 minutes' \
+         WHERE oc.project = (SELECT t.project FROM evaluation e JOIN task t ON t.id = e.task WHERE e.id = $1) \
+               AND oc.mode <> 2 AND cu.kind = 2 AND cu.mode <> 2 AND cu.active AND cu.url IS NOT NULL \
+         GROUP BY cu.url \
+         HAVING SUM(um.request_count) > SUM(um.narinfo_hits + um.narinfo_misses) \
+         ORDER BY cu.url",
+        params = [EvaluationId];
+}
+
+pub async fn failing_upstreams_for_evaluation<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<Vec<String>> {
+    Ok(db
+        .query_all_raw(FAILING_UPSTREAMS_FOR_EVALUATION.bind([evaluation.into_inner().into()]))
+        .await?
+        .into_iter()
+        .filter_map(|r| r.try_get("", "url").ok())
+        .collect())
 }
 
 crate::sql! {

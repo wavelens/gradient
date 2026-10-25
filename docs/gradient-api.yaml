@@ -19683,6 +19683,24 @@ components:
             type: string
             enum:
             - graph_stuck
+      - type: object
+        required:
+        - pending_shared_builds
+        - failing_upstream_caches
+        - kind
+        properties:
+          pending_shared_builds:
+            type: integer
+            format: int32
+            minimum: 0
+          failing_upstream_caches:
+            type: array
+            items:
+              type: string
+          kind:
+            type: string
+            enum:
+            - upstream_caches
     WalkMode:
       type: string
       enum:

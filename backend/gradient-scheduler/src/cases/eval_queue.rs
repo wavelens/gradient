@@ -968,3 +968,33 @@ async fn q19_a_fetching_evaluation_of_an_ssh_repository_waits_on_secrets() {
 
     case.finish().await;
 }
+
+#[tokio::test]
+async fn q20_a_build_without_an_upstream_answer_waits_for_the_upstream_caches() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(A)
+            .walked()
+            .entry_point(&attr_of(A))
+            .job()
+            .output(A_OUT),
+    )
+    .await;
+    case.connect(W1, w_all(), &[]).await;
+
+    case.refresh_waiting_state().await;
+    assert_eq!(
+        waiting_state(&case, e1).await,
+        (
+            EvaluationStatus::Waiting,
+            Some(WaitingReason::upstream_caches(1, Vec::new())),
+        ),
+        "after 1: evaluation(E1)"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
