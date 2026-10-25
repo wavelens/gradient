@@ -46,7 +46,7 @@ pub fn eval_cache_segment_key(cache: CacheId, fingerprint: &str, segment: Uuid) 
     )
 }
 
-pub(crate) fn eval_cache_segment_prefix(cache: CacheId, fingerprint: &str) -> String {
+pub fn eval_cache_segment_prefix(cache: CacheId, fingerprint: &str) -> String {
     format!("eval-cache-segments/{cache}/{fingerprint}")
 }
 

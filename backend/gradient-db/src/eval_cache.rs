@@ -1,0 +1,354 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use std::time::Duration;
+
+use anyhow::Result;
+use gradient_entity::eval_cache_store;
+use gradient_storage::NarStore;
+use gradient_storage::eval_cache_segment::{
+    decode, encode, eval_cache_segment_key, eval_cache_segment_prefix, merge_segments,
+};
+use gradient_types::ids::{CacheId, EvalCacheStoreId};
+use gradient_types::{EEvalCacheStore, MEvalCacheStore};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ConnectionTrait, DbErr, EntityTrait, IntoActiveModel};
+use tracing::warn;
+use uuid::Uuid;
+
+use crate::DbContext;
+use crate::deliveries::pending::{PendingDeliveryKind, enqueue_after};
+
+pub const COMPACTION_DELAY: Duration = Duration::from_secs(15 * 60);
+
+pub struct CompactionPlan {
+    listed: Vec<String>,
+    merged: Option<Vec<u8>>,
+}
+
+pub async fn record_segment(
+    db: &impl ConnectionTrait,
+    cache: CacheId,
+    fingerprint: &str,
+    copies: &[CacheId],
+) -> Result<(), DbErr> {
+    let now = gradient_types::now();
+    let row = MEvalCacheStore {
+        id: EvalCacheStoreId::now_v7(),
+        cache,
+        fingerprint: fingerprint.to_owned(),
+        storage_path: eval_cache_segment_prefix(cache, fingerprint),
+        created_at: now,
+        updated_at: now,
+        ..Default::default()
+    };
+    EEvalCacheStore::insert(row.into_active_model())
+        .on_conflict(
+            OnConflict::columns([
+                eval_cache_store::Column::Cache,
+                eval_cache_store::Column::Fingerprint,
+            ])
+            .do_nothing()
+            .to_owned(),
+        )
+        .exec_without_returning(db)
+        .await?;
+
+    enqueue_after(
+        db,
+        PendingDeliveryKind::EvalCacheCompact,
+        format!("{cache}/{fingerprint}"),
+        serde_json::json!({ "cache": cache, "fingerprint": fingerprint, "copies": copies }),
+        COMPACTION_DELAY,
+    )
+    .await
+}
+
+pub async fn compact(
+    ctx: &DbContext,
+    cache: CacheId,
+    fingerprint: &str,
+    copies: &[CacheId],
+) -> Result<()> {
+    let nar_storage = &ctx.storage.nar_storage;
+    let plan = plan_compaction(nar_storage, cache, fingerprint).await?;
+    apply_compaction(
+        &ctx.worker_db,
+        nar_storage,
+        cache,
+        fingerprint,
+        copies,
+        plan,
+    )
+    .await
+}
+
+pub async fn plan_compaction(
+    nar_storage: &NarStore,
+    cache: CacheId,
+    fingerprint: &str,
+) -> Result<CompactionPlan> {
+    let listed: Vec<String> = nar_storage
+        .list_eval_cache_segments(cache, fingerprint)
+        .await?
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect();
+
+    let mut segments = Vec::with_capacity(listed.len());
+    for key in &listed {
+        let Some(bytes) = nar_storage.get_eval_cache(key).await? else {
+            continue;
+        };
+
+        match decode(&bytes) {
+            Ok(rows) => segments.push(rows),
+            Err(e) => warn!(%key, error = %e, "dropping an undecodable eval cache segment"),
+        }
+    }
+
+    let merged = if segments.is_empty() {
+        None
+    } else {
+        Some(encode(&merge_segments(segments))?)
+    };
+    Ok(CompactionPlan { listed, merged })
+}
+
+pub async fn apply_compaction(
+    db: &impl ConnectionTrait,
+    nar_storage: &NarStore,
+    cache: CacheId,
+    fingerprint: &str,
+    copies: &[CacheId],
+    plan: CompactionPlan,
+) -> Result<()> {
+    let compacted = match plan.merged {
+        Some(bytes) => {
+            let key = eval_cache_segment_key(cache, fingerprint, Uuid::now_v7());
+            let size = bytes.len() as i64;
+            nar_storage.put_eval_cache(&key, bytes).await?;
+            Some((key, size))
+        }
+        None => None,
+    };
+
+    for key in &plan.listed {
+        nar_storage.delete_eval_cache(key).await?;
+    }
+
+    let Some((key, size)) = compacted else {
+        return Ok(());
+    };
+
+    let mut holders = vec![cache];
+    for &copy in copies {
+        match replace_segments(nar_storage, &key, copy, fingerprint).await {
+            Ok(()) => holders.push(copy),
+            Err(e) => {
+                warn!(%copy, %fingerprint, error = %e, "copying the compacted eval cache failed")
+            }
+        }
+    }
+
+    record_compacted(db, &holders, fingerprint, size).await?;
+    Ok(())
+}
+
+async fn replace_segments(
+    nar_storage: &NarStore,
+    compacted: &str,
+    copy: CacheId,
+    fingerprint: &str,
+) -> Result<()> {
+    let stale = nar_storage
+        .list_eval_cache_segments(copy, fingerprint)
+        .await?;
+    let target = eval_cache_segment_key(copy, fingerprint, Uuid::now_v7());
+    nar_storage.copy_eval_cache(compacted, &target).await?;
+    for (key, _) in stale {
+        nar_storage.delete_eval_cache(&key).await?;
+    }
+
+    Ok(())
+}
+
+async fn record_compacted(
+    db: &impl ConnectionTrait,
+    caches: &[CacheId],
+    fingerprint: &str,
+    size_bytes: i64,
+) -> Result<(), DbErr> {
+    let now = gradient_types::now();
+    let rows = caches.iter().map(|&cache| {
+        MEvalCacheStore {
+            id: EvalCacheStoreId::now_v7(),
+            cache,
+            fingerprint: fingerprint.to_owned(),
+            storage_path: eval_cache_segment_prefix(cache, fingerprint),
+            size_bytes,
+            created_at: now,
+            updated_at: now,
+        }
+        .into_active_model()
+    });
+    EEvalCacheStore::insert_many(rows)
+        .on_conflict(
+            OnConflict::columns([
+                eval_cache_store::Column::Cache,
+                eval_cache_store::Column::Fingerprint,
+            ])
+            .update_columns([
+                eval_cache_store::Column::StoragePath,
+                eval_cache_store::Column::SizeBytes,
+                eval_cache_store::Column::UpdatedAt,
+            ])
+            .to_owned(),
+        )
+        .exec_without_returning(db)
+        .await?;
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::mock::{exec_ok, mock_db, raw_statements};
+    use gradient_storage::eval_cache_segment::{ATTR_PLACEHOLDER, EvalCacheRow};
+    use sea_orm::{DatabaseConnection, Value};
+
+    fn row(path: &str, kind: u8, value: &str) -> EvalCacheRow {
+        EvalCacheRow {
+            path: vec![path.to_owned()],
+            kind,
+            value: Some(value.to_owned()),
+            context: None,
+        }
+    }
+
+    async fn put_segment(store: &NarStore, cache: CacheId, rows: &[EvalCacheRow]) -> String {
+        let key = eval_cache_segment_key(cache, "fp", Uuid::now_v7());
+        store
+            .put_eval_cache(&key, encode(rows).unwrap())
+            .await
+            .unwrap();
+        key
+    }
+
+    async fn listed(store: &NarStore, cache: CacheId) -> Vec<String> {
+        store
+            .list_eval_cache_segments(cache, "fp")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect()
+    }
+
+    fn one_exec() -> DatabaseConnection {
+        mock_db().append_exec_results([exec_ok()]).into_connection()
+    }
+
+    #[tokio::test]
+    async fn compaction_merges_segments_into_one() {
+        let cache = CacheId::now_v7();
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = NarStore::local(dir.path()).unwrap();
+        put_segment(&store, cache, &[row("a", ATTR_PLACEHOLDER, "")]).await;
+        put_segment(&store, cache, &[row("a", 2, "x")]).await;
+        put_segment(
+            &store,
+            cache,
+            &[row("a", ATTR_PLACEHOLDER, ""), row("b", 2, "y")],
+        )
+        .await;
+
+        let plan = plan_compaction(&store, cache, "fp").await.unwrap();
+        apply_compaction(&one_exec(), &store, cache, "fp", &[], plan)
+            .await
+            .unwrap();
+
+        let keys = listed(&store, cache).await;
+        assert_eq!(keys.len(), 1, "{keys:?}");
+        let bytes = store.get_eval_cache(&keys[0]).await.unwrap().unwrap();
+        assert_eq!(
+            decode(&bytes).unwrap(),
+            vec![row("a", 2, "x"), row("b", 2, "y")]
+        );
+    }
+
+    #[tokio::test]
+    async fn compaction_keeps_a_segment_written_after_listing() {
+        let cache = CacheId::now_v7();
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = NarStore::local(dir.path()).unwrap();
+        let early = put_segment(&store, cache, &[row("a", 2, "x")]).await;
+
+        let plan = plan_compaction(&store, cache, "fp").await.unwrap();
+        let late = put_segment(&store, cache, &[row("b", 2, "y")]).await;
+        apply_compaction(&one_exec(), &store, cache, "fp", &[], plan)
+            .await
+            .unwrap();
+
+        let keys = listed(&store, cache).await;
+        assert_eq!(keys.len(), 2, "{keys:?}");
+        assert!(keys.contains(&late), "{keys:?}");
+        assert!(!keys.contains(&early), "{keys:?}");
+    }
+
+    #[tokio::test]
+    async fn compaction_replaces_the_segments_of_each_copy() {
+        let (cache, copy) = (CacheId::now_v7(), CacheId::now_v7());
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = NarStore::local(dir.path()).unwrap();
+        put_segment(&store, cache, &[row("a", 2, "x")]).await;
+        let stale = put_segment(&store, copy, &[row("a", ATTR_PLACEHOLDER, "")]).await;
+        let db = one_exec();
+
+        let plan = plan_compaction(&store, cache, "fp").await.unwrap();
+        apply_compaction(&db, &store, cache, "fp", &[copy], plan)
+            .await
+            .unwrap();
+
+        let keys = listed(&store, copy).await;
+        assert_eq!(keys.len(), 1, "{keys:?}");
+        assert_ne!(keys[0], stale);
+        let bytes = store.get_eval_cache(&keys[0]).await.unwrap().unwrap();
+        assert_eq!(decode(&bytes).unwrap(), vec![row("a", 2, "x")]);
+        let upsert = &raw_statements(db.into_transaction_log())[0];
+        let values = format!("{:?}", upsert.values);
+        assert!(
+            values.contains(&cache.to_string()) && values.contains(&copy.to_string()),
+            "{values}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_push_enqueues_compaction_deduplicated_and_delayed() {
+        let (cache, copy) = (CacheId::now_v7(), CacheId::now_v7());
+        let db = mock_db()
+            .append_exec_results([exec_ok(), exec_ok()])
+            .into_connection();
+
+        record_segment(&db, cache, "fp", &[copy]).await.unwrap();
+
+        let statements = raw_statements(db.into_transaction_log());
+        assert_eq!(statements.len(), 2, "{statements:?}");
+        let enqueue = &statements[1];
+        assert!(
+            enqueue.sql.contains("ON CONFLICT (kind, key)"),
+            "{}",
+            enqueue.sql
+        );
+        let values = enqueue.values.clone().unwrap().0;
+        assert_eq!(values[2], Value::String(Some(format!("{cache}/fp"))));
+        assert_eq!(
+            values[4],
+            Value::BigInt(Some(COMPACTION_DELAY.as_secs() as i64))
+        );
+    }
+}
