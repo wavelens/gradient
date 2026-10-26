@@ -461,7 +461,7 @@ pub struct BuildMetrics {
     pub cpu_core_score: Option<u32>,
 }
 
-#[derive(Proto, Debug, Clone, PartialEq, Default)]
+#[derive(Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Default)]
 pub struct EvalAttrCost {
     pub attr: String,
     pub thunks: u64,
@@ -470,7 +470,7 @@ pub struct EvalAttrCost {
     pub alloc_bytes: u64,
 }
 
-#[derive(Proto, Debug, Clone, PartialEq, Default)]
+#[derive(Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Default)]
 pub struct FlakeOutputNode {
     pub path: String,
     pub parent: Option<String>,
@@ -480,7 +480,7 @@ pub struct FlakeOutputNode {
     pub drv_path: Option<String>,
 }
 
-#[derive(Proto, Debug, Clone, PartialEq, Default)]
+#[derive(Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Default)]
 pub struct EvalStatsReport {
     pub total_thunks: u64,
     pub fn_calls: u64,
@@ -499,14 +499,14 @@ pub struct EvalStatsReport {
     pub subtrees: Vec<EvalSubtreeCost>,
 }
 
-#[derive(Proto, Debug, Clone, PartialEq, Default)]
+#[derive(Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Default)]
 pub struct EvalSetCost {
     pub path: Vec<String>,
     pub startup_ms: Option<u64>,
     pub peak_rss_mb: u64,
 }
 
-#[derive(Proto, Debug, Clone, PartialEq, Default)]
+#[derive(Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Default)]
 pub struct EvalSubtreeCost {
     pub path: Vec<String>,
     pub attrs: u64,

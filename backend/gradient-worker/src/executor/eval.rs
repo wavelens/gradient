@@ -918,10 +918,7 @@ pub async fn evaluate_derivations_with(
 
 pub(super) enum Listing {
     Wildcards,
-    Given {
-        shards: Vec<ShardSpec>,
-        excludes: Vec<String>,
-    },
+    Given(Vec<ShardSpec>),
 }
 
 pub(super) struct ShardOutcome {
@@ -950,10 +947,6 @@ pub(super) async fn plan_shards_with(
     unless_aborted(&mut abort.clone(), planned).await
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the same evaluation inputs as a whole evaluation, plus the shard"
-)]
 pub(super) async fn evaluate_shard_with(
     resolver: &dyn DerivationResolver,
     drv_reader: &dyn DrvReader,
@@ -962,9 +955,8 @@ pub(super) async fn evaluate_shard_with(
     updater: &mut dyn JobReporter,
     abort: &super::AbortSignal,
     shards: Vec<ShardSpec>,
-    excludes: Vec<String>,
 ) -> Result<ShardOutcome> {
-    let listing = Listing::Given { shards, excludes };
+    let listing = Listing::Given(shards);
     let streamed = discover_and_walk(
         resolver,
         drv_reader,
@@ -1067,9 +1059,16 @@ async fn discover(
                     )
                     .await
             }
-            Listing::Given { shards, excludes } => {
+            Listing::Given(shards) => {
                 resolver
-                    .list_given_shards(repo, shards, &excludes, &eval_overrides, &imports, &send)
+                    .list_given_shards(
+                        repo,
+                        shards,
+                        &job.wildcards,
+                        &eval_overrides,
+                        &imports,
+                        &send,
+                    )
                     .await
             }
         }

@@ -103,6 +103,7 @@ id_newtype!(EntryPointId);
 id_newtype!(EntryPointDepCountId);
 id_newtype!(EntryPointMessageId);
 id_newtype!(EvalCacheStoreId);
+id_newtype!(EvalCostReportId);
 id_newtype!(EvalSetCostId);
 id_newtype!(EvalShardId);
 id_newtype!(EvalSubtreeCostId);

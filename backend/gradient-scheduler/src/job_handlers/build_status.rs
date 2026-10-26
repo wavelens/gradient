@@ -175,6 +175,7 @@ impl Scheduler {
                     };
                 }
 
+                self.fold_eval_stats(j.evaluation_id, j.task_id).await;
                 let r = self.complete_eval_stream(j.evaluation_id).await;
                 if worker_idle {
                     self.build_kick.kick();
@@ -260,6 +261,7 @@ impl Scheduler {
     ) -> Result<()> {
         match job {
             PendingJob::Eval(j) => {
+                self.fold_eval_stats(j.evaluation_id, j.task_id).await;
                 let r = self
                     .graph
                     .transition(Transition::EvalFailed {
