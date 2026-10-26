@@ -49,6 +49,13 @@ pub(super) struct JobRegistry {
     done_tx: mpsc::UnboundedSender<JobDone>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Readoption {
+    Readopted,
+    Aborting,
+    NotRunning,
+}
+
 pub(super) struct Registered {
     pub(super) assignment_id: AssignmentHandle,
     pub(super) abort: AbortSignal,
@@ -101,13 +108,14 @@ impl JobRegistry {
         }
     }
 
-    pub(super) fn readopt(&self, job_id: &str, assignment_id: &str) -> bool {
+    pub(super) fn readopt(&self, job_id: &str, assignment_id: &str) -> Readoption {
         match self.running.get(job_id) {
+            Some(job) if *job.abort.borrow() => Readoption::Aborting,
             Some(job) => {
                 job.assignment_id.set(assignment_id.to_owned());
-                true
+                Readoption::Readopted
             }
-            None => false,
+            None => Readoption::NotRunning,
         }
     }
 
@@ -409,7 +417,7 @@ mod tests {
             log(),
         );
 
-        assert!(jobs.readopt("job-1", "dispatch-2"));
+        assert_eq!(jobs.readopt("job-1", "dispatch-2"), Readoption::Readopted);
 
         assert_eq!(
             registered.assignment_id.get(),
@@ -426,9 +434,31 @@ mod tests {
             registered.abort.is_aborted(),
             "the first task still hears the abort"
         );
-        assert!(
-            !jobs.readopt("job-9", "dispatch-3"),
+        assert_eq!(
+            jobs.readopt("job-9", "dispatch-3"),
+            Readoption::NotRunning,
             "an unknown job is a fresh assignment"
+        );
+    }
+
+    #[test]
+    fn an_aborted_job_assigned_again_is_refused_and_keeps_its_assignment_id() {
+        let (mut jobs, _done_rx) = registry();
+        let registered = jobs.register(
+            "job-1".to_owned(),
+            JobKind::Build,
+            "dispatch-1".to_owned(),
+            None,
+            log(),
+        );
+        assert!(jobs.abort("job-1"));
+
+        assert_eq!(jobs.readopt("job-1", "dispatch-2"), Readoption::Aborting);
+
+        assert_eq!(
+            registered.assignment_id.get(),
+            "dispatch-1",
+            "the aborted task must not report under the new assignment"
         );
     }
 

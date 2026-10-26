@@ -30,7 +30,7 @@ use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
 use gradient_worker_client::correlation::AssignmentHandle;
 
 use super::cluster::{ClusterChannels, ClusterHolds, HeldJob};
-use super::jobs::{WorkerJobs, report_when_drained};
+use super::jobs::{Readoption, WorkerJobs, report_when_drained};
 use super::scoring::spawn_scoring_task;
 
 const STOP_BUDGET: Duration = Duration::from_secs(5);
@@ -580,16 +580,31 @@ impl MessageLoopState {
         job: Job,
         cluster: Option<ClusterMembership>,
     ) -> Result<()> {
-        if self.jobs.registry.lock().readopt(&job_id, &assignment_id) {
-            warn!(%job_id, dispatch = %assignment_id, "job assigned again while still running; reporting under the new dispatch id");
-            self.writer
-                .send(ClientMessage::AssignJobResponse {
-                    job_id,
-                    accepted: true,
-                    reason: None,
-                })
-                .await?;
-            return Ok(());
+        let readoption = self.jobs.registry.lock().readopt(&job_id, &assignment_id);
+        match readoption {
+            Readoption::Readopted => {
+                warn!(%job_id, dispatch = %assignment_id, "job assigned again while still running; reporting under the new dispatch id");
+                self.writer
+                    .send(ClientMessage::AssignJobResponse {
+                        job_id,
+                        accepted: true,
+                        reason: None,
+                    })
+                    .await?;
+                return Ok(());
+            }
+            Readoption::Aborting => {
+                warn!(%job_id, dispatch = %assignment_id, "rejecting assigned job - its aborted run has not stopped yet");
+                self.writer
+                    .send(ClientMessage::AssignJobResponse {
+                        job_id,
+                        accepted: false,
+                        reason: Some("an aborted run of this job is still stopping".to_owned()),
+                    })
+                    .await?;
+                return Ok(());
+            }
+            Readoption::NotRunning => {}
         }
 
         if self.draining {
