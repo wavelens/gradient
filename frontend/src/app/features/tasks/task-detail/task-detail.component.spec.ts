@@ -1150,6 +1150,19 @@ describe('TaskDetailComponent - #636 eval page', () => {
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     expect(spy).toHaveBeenCalled();
   });
+
+  it('opens the evaluation menu for the right-clicked evaluation', () => {
+    const { fixture } = setup(access, { extraEvals: [evalSummary('e2', 'Completed')] });
+    fixture.detectChanges();
+    const cards = fixture.nativeElement.querySelectorAll('.eval-card') as NodeListOf<HTMLElement>;
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 });
+    cards[1].dispatchEvent(event);
+    fixture.detectChanges();
+    expect(event.defaultPrevented).toBe(true);
+    expect(fixture.componentInstance.selected()?.id).toBe('e2');
+    const summary = [...document.querySelectorAll('.cdk-overlay-container a')].find(a => a.textContent?.includes('Summary'));
+    expect(summary?.getAttribute('href')).toContain('/summary/e2');
+  });
 });
 
 describe('TaskDetailComponent - status phases', () => {
