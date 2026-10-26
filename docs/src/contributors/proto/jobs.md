@@ -175,6 +175,22 @@ Each build job contains a single `BuildSpec` and maps to one shared build (a `de
 - Held members count against `eval.maxConcurrent` / `build.maxConcurrent` like running jobs.
 - `hold_secs`: the server's `scheduler.clusterPrepareTimeoutSecs` (30 s) plus a 10 s margin.
 
+### Split Evaluation Members
+
+A cluster member with the role `split-evaluation-primary` or `split-evaluation-companion` can evaluate part of one flake (`gradient-worker/src/executor/eval_split.rs`).
+
+| Member | Steps |
+|---|---|
+| Primary | Fetch the flake as usual. Push the inputs during planning, then send `EvalSourceReady`. Ask with `EvalShardRequest { have_source = true }`. On `Plan`: plan the shards, report the plan errors, upload the new eval cache rows, send `EvalShardsPlanned`. Then take shards |
+| Companion | Ask with `have_source = false` until `Source` arrives. Fetch that store path from the cache. Then take shards |
+| Taker loop | Per shard: pull new eval cache segments, pull `drv_paths` in one batch, list the shard across the local subprocesses, stream `EvalResult` batches. The next request can carry `finished` with the deferred sets. The segment upload of the shard takes place during that request |
+| End | `Finished`: send `EvalStats`, then `JobCompleted` |
+
+- `Wait` answers pause the member for `retry_after_ms` (1 000 ms).
+- Only the primary can report `EvaluatingFlake` and `EvaluatingDerivations`.
+- The 30 s eval cache flush timer is for standalone evaluations only.
+- Message shapes: [Split Evaluation Messages](messages.md#split-evaluation-messages).
+
 ## Abort and Lost Workers
 
 - **API Abort:** The evaluation receive the status `Aborted`. Pending jobs of the evaluation leave the queue.
