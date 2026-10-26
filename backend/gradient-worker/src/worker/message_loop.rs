@@ -7,8 +7,6 @@
 use crate::executor::input_fetch::{
     InputDownloader, InputFetchJob, SubprocessDownloader, UpdaterFetchReport, fetch_input,
 };
-use gradient_util::sync::Mutex;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -17,12 +15,10 @@ use gradient_wire::messages::{
     BuildFailureKind, CachedPath, ClientMessage, ClusterAddress, ClusterMembership, ClusterPeer,
     Job, JobCandidate, JobKind, JobPhaseSpan, ServerMessage,
 };
-use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
-use crate::count::clamp_to_u32;
 use crate::executor::eval_split::SplitMember;
 use crate::executor::timeline::{JobTimeline, TimelineSnapshot};
 use crate::executor::{AbortSignal, JobExecutor};
@@ -30,13 +26,11 @@ use crate::exit_clock;
 use crate::proto::credentials::CredentialStore;
 use crate::proto::job::JobUpdater;
 use crate::proto::scorer::JobScorer;
-use gradient_worker_client::connection::reconnecting::ReconnectingWriter;
 use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
-use gradient_worker_client::correlation::{
-    AssignmentHandle, CacheWaiters, ImportWaiters, InputWaiters, KnownDerivationWaiters,
-};
+use gradient_worker_client::correlation::AssignmentHandle;
 
 use super::cluster::{ClusterChannels, ClusterHolds, HeldJob};
+use super::jobs::WorkerJobs;
 use super::scoring::spawn_scoring_task;
 
 const STOP_BUDGET: Duration = Duration::from_secs(5);
@@ -52,10 +46,8 @@ pub(super) async fn run_message_loop(
     mut reader: ProtoReader,
     stop: CancellationToken,
 ) -> Result<LoopEnd> {
-    let mut done_rx = state
-        .done_rx
-        .take()
-        .expect("dispatch loop runs once per connection");
+    let jobs = Arc::clone(&state.jobs);
+    let mut done_rx = jobs.done_rx.lock().await;
 
     let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
     heartbeat.tick().await;
@@ -73,20 +65,20 @@ pub(super) async fn run_message_loop(
 
             _ = stop.cancelled(), if !state.stopping => {
                 state.begin_stop().await?;
-                if state.jobs.is_idle() {
+                if state.jobs.registry.lock().is_idle() {
                     break;
                 }
                 stop_deadline = Some(tokio::time::Instant::now() + STOP_BUDGET);
             }
 
             () = stop_budget_elapsed(stop_deadline) => {
-                warn!(active = state.jobs.len(), "stop budget expired; closing without the remaining job reports");
+                warn!(active = state.jobs.registry.lock().len(), "stop budget expired; closing without the remaining job reports");
                 break;
             }
 
             Some((job_id, result)) = done_rx.recv() => {
                 state.on_job_done(job_id, result).await?;
-                if state.stopping && state.jobs.is_idle() {
+                if state.stopping && state.jobs.registry.lock().is_idle() {
                     info!("stopped: every aborted job has reported");
                     break;
                 }
@@ -120,7 +112,7 @@ pub(super) async fn run_message_loop(
                 };
                 let started = std::time::Instant::now();
                 let kind = inbound.variant_name();
-                let result = match state.nar_recv.absorb(inbound).await {
+                let result = match state.jobs.nar_recv.absorb(inbound).await {
                     None => Ok(()),
                     Some(msg) => state.route(msg).await,
                 };
@@ -134,7 +126,7 @@ pub(super) async fn run_message_loop(
         state.report_busy();
     }
 
-    exit_clock::clock().report(state.session, 0, Instant::now());
+    state.jobs.report_busy(0);
     Ok(LoopEnd {
         draining: state.draining && !state.stopping,
         refused: state.refused,
@@ -148,109 +140,11 @@ async fn stop_budget_elapsed(deadline: Option<tokio::time::Instant>) {
     }
 }
 
-struct ActiveJob {
-    kind: JobKind,
-    assignment_id: AssignmentHandle,
-    abort: watch::Sender<bool>,
-    timeline: Arc<JobTimeline>,
-    cluster: Option<String>,
-}
-
-// Every exit of a session drops the registry and with it each job's abort sender, which aborts
-// the job: it can never report over the dead writer, and the server queues it again elsewhere.
-struct JobRegistry {
-    running: HashMap<String, ActiveJob>,
-    done_tx: mpsc::UnboundedSender<(String, Result<()>)>,
-}
-
-impl JobRegistry {
-    fn active(&self, kind: JobKind) -> u32 {
-        clamp_to_u32(self.running.values().filter(|j| j.kind == kind).count())
-    }
-
-    fn len(&self) -> usize {
-        self.running.len()
-    }
-
-    fn is_idle(&self) -> bool {
-        self.running.is_empty()
-    }
-
-    fn register(
-        &mut self,
-        job_id: String,
-        kind: JobKind,
-        assignment_id: String,
-        cluster: Option<String>,
-    ) -> (AssignmentHandle, AbortSignal, Arc<JobTimeline>) {
-        let assignment_id = AssignmentHandle::new(assignment_id);
-        let (abort, abort_rx) = AbortSignal::channel();
-        let timeline = JobTimeline::new();
-        self.running.insert(
-            job_id,
-            ActiveJob {
-                kind,
-                assignment_id: assignment_id.clone(),
-                abort,
-                timeline: Arc::clone(&timeline),
-                cluster,
-            },
-        );
-        (assignment_id, abort_rx, timeline)
-    }
-
-    fn readopt(&self, job_id: &str, assignment_id: &str) -> bool {
-        match self.running.get(job_id) {
-            Some(job) => {
-                job.assignment_id.set(assignment_id.to_owned());
-                true
-            }
-            None => false,
-        }
-    }
-
-    fn abort(&self, job_id: &str) -> bool {
-        match self.running.get(job_id) {
-            Some(job) => job.abort.send(true).is_ok(),
-            None => false,
-        }
-    }
-
-    fn abort_all(&self) -> usize {
-        self.running
-            .values()
-            .filter(|j| j.abort.send(true).is_ok())
-            .count()
-    }
-
-    fn abort_attempt(&self, attempt: &str) -> usize {
-        self.running
-            .values()
-            .filter(|j| j.cluster.as_deref() == Some(attempt))
-            .filter(|j| j.abort.send(true).is_ok())
-            .count()
-    }
-
-    fn finish(&mut self, job_id: &str) -> Option<ActiveJob> {
-        self.running.remove(job_id)
-    }
-}
-
 pub(super) struct MessageLoopState {
     writer: ProtoWriter,
-    job_writer: ReconnectingWriter,
-    cache_waiters: CacheWaiters,
-    known_derivation_waiters: KnownDerivationWaiters,
-    import_waiters: ImportWaiters,
-    input_waiters: InputWaiters,
-    nar_recv: gradient_worker_client::nar_recv::NarReceiver,
-    eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver,
-    eval_shard_replies: crate::proto::eval_shard_replies::EvalShardReplies,
-    uploads: gradient_worker_client::upload::UploadClient,
-    jobs: JobRegistry,
+    jobs: Arc<WorkerJobs>,
     holds: ClusterHolds,
     channels: ClusterChannels,
-    done_rx: Option<mpsc::UnboundedReceiver<(String, Result<()>)>>,
     max_eval: u32,
     max_build: u32,
     credentials: CredentialStore,
@@ -264,50 +158,23 @@ pub(super) struct MessageLoopState {
     stopping: bool,
     refused: bool,
     exiting: bool,
-    session: u64,
 }
 
 impl MessageLoopState {
     pub(super) fn new(
         writer: ProtoWriter,
+        jobs: &Arc<WorkerJobs>,
         config: WorkerConfig,
         executor: JobExecutor,
         scorer: JobScorer,
         credentials: CredentialStore,
     ) -> Self {
-        let nar_recv = match gradient_storage::PartialStore::new(config.nar_partial_dir()) {
-            Ok(store) => gradient_worker_client::nar_recv::NarReceiver::with_partial_store(store),
-            Err(e) => {
-                warn!(error = %e, "failed to init NAR partial dir; downloads will not resume");
-                gradient_worker_client::nar_recv::NarReceiver::new()
-            }
-        };
-        let (done_tx, done_rx) = mpsc::unbounded_channel();
         let channels = ClusterChannels::new(writer.clone());
-        let job_writer = ReconnectingWriter::attached_to(writer.clone());
-        let uploads = gradient_worker_client::upload::UploadClient::new(
-            job_writer.clone(),
-            usize::try_from(config.nar.max_concurrent_uploads.get()).unwrap_or(usize::MAX),
-        )
-        .with_chunk_bytes(usize::try_from(config.nar.chunk_bytes).unwrap_or(usize::MAX));
         Self {
-            uploads,
             writer,
-            job_writer,
-            cache_waiters: Arc::new(Mutex::new(HashMap::new())),
-            known_derivation_waiters: Arc::new(Mutex::new(HashMap::new())),
-            import_waiters: Arc::new(Mutex::new(HashMap::new())),
-            input_waiters: Arc::new(Mutex::new(HashMap::new())),
-            nar_recv,
-            eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver::new(),
-            eval_shard_replies: Default::default(),
-            jobs: JobRegistry {
-                running: HashMap::new(),
-                done_tx,
-            },
+            jobs: Arc::clone(jobs),
             holds: ClusterHolds::default(),
             channels,
-            done_rx: Some(done_rx),
             max_eval: config.eval.max_concurrent.get(),
             max_build: config.build.max_concurrent.get(),
             credentials,
@@ -323,14 +190,13 @@ impl MessageLoopState {
             stopping: false,
             refused: false,
             exiting: false,
-            session: exit_clock::new_session(),
         }
     }
 
     fn report_busy(&self) {
         let held = self.holds.held(&JobKind::Flake) + self.holds.held(&JobKind::Build);
-        let busy = self.jobs.len() + usize::try_from(held).unwrap_or(usize::MAX);
-        exit_clock::clock().report(self.session, busy, Instant::now());
+        self.jobs
+            .report_busy(usize::try_from(held).unwrap_or(usize::MAX));
     }
 
     async fn begin_drain(&mut self) -> Result<()> {
@@ -344,7 +210,7 @@ impl MessageLoopState {
         self.stopping = true;
         self.begin_drain().await?;
         self.fetches.abort_all();
-        let aborted = self.jobs.abort_all();
+        let aborted = self.jobs.registry.lock().abort_all();
         info!(
             aborted,
             "stopping: aborted every running job, collecting their reports"
@@ -359,7 +225,7 @@ impl MessageLoopState {
                 .load(std::sync::atomic::Ordering::Acquire),
             JobKind::Flake => 0,
         };
-        self.jobs.active(kind.clone()) + self.holds.held(&kind) + fetches
+        self.jobs.registry.lock().active(kind.clone()) + self.holds.held(&kind) + fetches
     }
 
     fn max_for(&self, kind: JobKind) -> u32 {
@@ -440,13 +306,15 @@ impl MessageLoopState {
                 self.on_cache_error(query_id, message);
             }
             msg @ (ServerMessage::UploadGrant { .. } | ServerMessage::UploadCommitted { .. }) => {
-                self.uploads.deliver(msg);
+                self.jobs.uploads.deliver(msg);
             }
             ServerMessage::KnownDerivations { query_id, known } => {
                 self.on_known_derivations(query_id, known);
             }
             ServerMessage::EvalCachePullResult { job_id, outcome } => {
-                self.eval_cache_recv.deliver_pull_result(&job_id, outcome);
+                self.jobs
+                    .eval_cache_recv
+                    .deliver_pull_result(&job_id, outcome);
             }
             ServerMessage::EvalCacheChunk {
                 job_id,
@@ -454,11 +322,12 @@ impl MessageLoopState {
                 offset,
                 is_final,
             } => {
-                self.eval_cache_recv
+                self.jobs
+                    .eval_cache_recv
                     .deliver_pull_chunk(&job_id, &data, offset, is_final);
             }
             ServerMessage::EvalShardReply { job_id, outcome } => {
-                if !self.eval_shard_replies.deliver(&job_id, outcome) {
+                if !self.jobs.eval_shard_replies.deliver(&job_id, outcome) {
                     debug!(%job_id, "EvalShardReply arrived after its waiter cleared");
                 }
             }
@@ -481,7 +350,7 @@ impl MessageLoopState {
                 outcome,
             } => {
                 if !gradient_worker_client::correlation::deliver_input_result(
-                    &self.input_waiters,
+                    &self.jobs.input_waiters,
                     &request_id,
                     outcome,
                 ) {
@@ -495,7 +364,7 @@ impl MessageLoopState {
                 ..
             } => {
                 gradient_worker_client::correlation::deliver_input_progress(
-                    &self.input_waiters,
+                    &self.jobs.input_waiters,
                     &request_id,
                     bytes_done,
                     bytes_total,
@@ -521,31 +390,15 @@ impl MessageLoopState {
     async fn on_job_done(&mut self, job_id: String, result: Result<()>) -> Result<()> {
         let job = self
             .jobs
+            .registry
+            .lock()
             .finish(&job_id)
             .expect("a job task is registered before it is spawned");
         if let Some(attempt) = &job.cluster {
             self.channels.close(attempt);
         }
-        gradient_worker_client::correlation::forget_cache_waiters_for_job(
-            &self.cache_waiters,
-            &job_id,
-        );
-        gradient_worker_client::correlation::forget_known_derivation_waiters_for_job(
-            &self.known_derivation_waiters,
-            &job_id,
-        );
-        gradient_worker_client::correlation::forget_import_waiters_for_job(
-            &self.import_waiters,
-            &job_id,
-        );
-        gradient_worker_client::correlation::forget_input_waiters_for_job(
-            &self.input_waiters,
-            &job_id,
-        );
-        self.nar_recv.forget_job(&job_id);
-        self.eval_cache_recv.forget_job(&job_id);
-        self.eval_shard_replies.forget_job(&job_id);
-        self.uploads.forget_job(&job_id);
+        self.jobs.forget_job(&job_id);
+        job.log.remove();
         self.credentials.clear();
 
         let completed_kind = job.kind;
@@ -560,7 +413,8 @@ impl MessageLoopState {
         match result {
             Ok(()) => {
                 info!(%job_id, phases = spans.len(), "job completed");
-                self.writer
+                self.jobs
+                    .writer
                     .send(ClientMessage::JobCompleted {
                         job_id,
                         assignment_id,
@@ -611,7 +465,8 @@ impl MessageLoopState {
                 error
             }
         };
-        self.writer
+        self.jobs
+            .writer
             .send(ClientMessage::JobFailed {
                 job_id,
                 assignment_id,
@@ -630,7 +485,11 @@ impl MessageLoopState {
     /// A peer that stalled without closing is never ending the read half.
     /// Warning and carrying on left the worker building jobs it could no longer report.
     async fn on_heartbeat(&mut self) -> Result<()> {
-        send_live_metrics(&self.writer, self.config.build.cgroup.clone());
+        send_live_metrics(
+            &self.writer,
+            self.config.build.cgroup.clone(),
+            self.config.exit_limits(),
+        );
         let expired = self.holds.expired(std::time::Instant::now());
         self.report_released(expired, "cluster start timed out")
             .await?;
@@ -716,7 +575,7 @@ impl MessageLoopState {
         job: Job,
         cluster: Option<ClusterMembership>,
     ) -> Result<()> {
-        if self.jobs.readopt(&job_id, &assignment_id) {
+        if self.jobs.registry.lock().readopt(&job_id, &assignment_id) {
             warn!(%job_id, dispatch = %assignment_id, "job assigned again while still running; reporting under the new dispatch id");
             self.writer
                 .send(ClientMessage::AssignJobResponse {
@@ -825,65 +684,38 @@ impl MessageLoopState {
         split: Option<SplitMember>,
         credentials: CredentialStore,
     ) {
-        let (assignment_id, abort_rx, timeline) =
-            self.jobs
-                .register(job_id.clone(), kind, assignment_id, cluster);
-
+        let registered = self
+            .jobs
+            .register(job_id.clone(), kind, assignment_id, cluster);
         let executor = self.executor.clone();
-        let job_store = Arc::clone(&executor.store);
-        let job_writer = self.job_writer.clone();
-        let job_cache_waiters = Arc::clone(&self.cache_waiters);
-        let job_known_derivation_waiters = Arc::clone(&self.known_derivation_waiters);
-        let job_import_waiters = Arc::clone(&self.import_waiters);
-        let job_input_waiters = Arc::clone(&self.input_waiters);
-        let job_nar_recv = self.nar_recv.clone();
-        let job_eval_cache_recv = self.eval_cache_recv.clone();
-        let job_eval_shard_replies = self.eval_shard_replies.clone();
-        let job_uploads = self.uploads.clone();
-        let job_done_tx = self.jobs.done_tx.clone();
-        let jid = job_id.clone();
+        let mut updater = self.jobs.updater(
+            job_id.clone(),
+            registered.assignment_id,
+            registered.timeline,
+            registered.log.clone(),
+            Some(Arc::clone(&executor.store)),
+        );
+        let (log, abort, done_tx) = (registered.log, registered.abort, registered.done_tx);
 
         #[expect(
             clippy::disallowed_methods,
             reason = "reports back on done_tx and aborts through the registry"
         )]
         tokio::spawn(async move {
-            let mut updater = JobUpdater::new(
-                jid.clone(),
-                assignment_id,
-                job_writer,
-                job_cache_waiters,
-                job_known_derivation_waiters,
-                job_import_waiters,
-                job_input_waiters,
-                job_nar_recv,
-                job_eval_cache_recv,
-                job_eval_shard_replies,
-                Some(job_store),
-                timeline,
-                job_uploads,
-            );
-            let result = run_job(executor, job, &mut updater, &credentials, abort_rx, split).await;
-            let _ = job_done_tx.send((jid, result));
+            let result = run_job(executor, job, &mut updater, &credentials, abort, split).await;
+            log.drained().await;
+            let _ = done_tx.send((job_id, result));
         });
     }
 
     fn on_fetch_input(&mut self, fetch: InputFetchJob) {
         while self.fetches.try_join_next().is_some() {}
-        let updater = JobUpdater::new(
+        let updater = self.jobs.updater(
             fetch.fetch_id.clone(),
             AssignmentHandle::new(String::new()),
-            self.job_writer.clone(),
-            Arc::clone(&self.cache_waiters),
-            Arc::clone(&self.known_derivation_waiters),
-            Arc::clone(&self.import_waiters),
-            Arc::clone(&self.input_waiters),
-            self.nar_recv.clone(),
-            self.eval_cache_recv.clone(),
-            self.eval_shard_replies.clone(),
+            JobTimeline::new(),
+            self.jobs.log(&fetch.fetch_id),
             Some(Arc::clone(&self.executor.store)),
-            crate::executor::timeline::JobTimeline::new(),
-            self.uploads.clone(),
         );
         let downloader = Arc::clone(&self.downloader);
         let writer = self.writer.clone();
@@ -935,7 +767,7 @@ impl MessageLoopState {
 
     async fn on_abort_cluster(&mut self, attempt: String, reason: String) -> Result<()> {
         let held = self.holds.drop_attempt(&attempt);
-        let running = self.jobs.abort_attempt(&attempt);
+        let running = self.jobs.registry.lock().abort_attempt(&attempt);
         self.channels.close(&attempt);
         warn!(%attempt, %reason, held = held.is_some(), running, "cluster attempt aborted by server");
         if let Some(job) = held
@@ -952,7 +784,8 @@ impl MessageLoopState {
     async fn report_released(&mut self, released: Vec<HeldJob>, error: &str) -> Result<()> {
         for job in released {
             warn!(job_id = %job.job_id, %error, "releasing a held cluster member");
-            self.writer
+            self.jobs
+                .writer
                 .send(ClientMessage::JobFailed {
                     job_id: job.job_id,
                     assignment_id: job.assignment_id,
@@ -980,10 +813,10 @@ impl MessageLoopState {
             }
             return Ok(());
         }
-        if !self.jobs.abort(&job_id) {
-            debug!(%job_id, "abort for a job this session does not run");
+        if !self.jobs.registry.lock().abort(&job_id) {
+            debug!(%job_id, "abort for a job this worker does not run");
         }
-        self.uploads.cancel_job(&job_id).await;
+        self.jobs.uploads.cancel_job(&job_id).await;
 
         Ok(())
     }
@@ -996,7 +829,7 @@ impl MessageLoopState {
     fn on_cache_status(&mut self, query_id: String, cached: Vec<CachedPath>) {
         let count = cached.len();
         if !gradient_worker_client::correlation::deliver_cache_reply(
-            &self.cache_waiters,
+            &self.jobs.cache_waiters,
             &query_id,
             Ok(cached),
         ) {
@@ -1006,7 +839,7 @@ impl MessageLoopState {
 
     fn on_cache_error(&mut self, query_id: String, message: String) {
         if !gradient_worker_client::correlation::deliver_cache_reply(
-            &self.cache_waiters,
+            &self.jobs.cache_waiters,
             &query_id,
             Err(message),
         ) {
@@ -1017,7 +850,7 @@ impl MessageLoopState {
     fn on_known_derivations(&mut self, query_id: String, known: Vec<String>) {
         let count = known.len();
         if !gradient_worker_client::correlation::deliver_known_derivations(
-            &self.known_derivation_waiters,
+            &self.jobs.known_derivation_waiters,
             &query_id,
             known,
         ) {
@@ -1032,7 +865,7 @@ impl MessageLoopState {
         outcome: gradient_wire::types::ImportOutcome,
     ) {
         if !gradient_worker_client::correlation::deliver_import_result(
-            &self.import_waiters,
+            &self.jobs.import_waiters,
             &request_id,
             outcome,
         ) {
@@ -1087,7 +920,11 @@ impl Drop for RunningFetch {
     }
 }
 
-fn send_live_metrics(writer: &ProtoWriter, daemon_cgroup: Option<std::path::PathBuf>) {
+fn send_live_metrics(
+    writer: &ProtoWriter,
+    daemon_cgroup: Option<std::path::PathBuf>,
+    limits: exit_clock::ExitLimits,
+) {
     let writer = writer.clone();
     #[expect(
         clippy::disallowed_methods,
@@ -1115,7 +952,9 @@ fn send_live_metrics(writer: &ProtoWriter, daemon_cgroup: Option<std::path::Path
                 upload_speed_mbps: gradient_worker_client::throughput::UPLOAD.current(),
                 download_speed_mbps: gradient_worker_client::throughput::DOWNLOAD.current(),
                 build_peak_ram_mb,
-                lifetime_left_secs: None,
+                lifetime_left_secs: exit_clock::clock()
+                    .lifetime_left(&limits, Instant::now())
+                    .map(|left| left.as_secs()),
             })
             .await
         {
@@ -1150,7 +989,7 @@ async fn run_job(
     until_aborted(run, abort).await
 }
 
-async fn until_aborted(
+pub(super) async fn until_aborted(
     job: impl std::future::Future<Output = Result<()>>,
     mut abort: AbortSignal,
 ) -> Result<()> {
@@ -1167,90 +1006,6 @@ async fn until_aborted(
 mod tests {
     use super::*;
     use crate::executor::failure::JobAborted;
-
-    fn registry() -> (JobRegistry, mpsc::UnboundedReceiver<(String, Result<()>)>) {
-        let (done_tx, done_rx) = mpsc::unbounded_channel();
-        (
-            JobRegistry {
-                running: HashMap::new(),
-                done_tx,
-            },
-            done_rx,
-        )
-    }
-
-    #[test]
-    fn a_reassigned_running_job_keeps_its_task_and_takes_the_new_assignment_id() {
-        let (mut jobs, _done_rx) = registry();
-        let (assignment_id, abort_rx, _timeline) = jobs.register(
-            "job-1".to_owned(),
-            JobKind::Build,
-            "dispatch-1".to_owned(),
-            None,
-        );
-
-        assert!(jobs.readopt("job-1", "dispatch-2"));
-
-        assert_eq!(
-            assignment_id.get(),
-            "dispatch-2",
-            "the task reports under the new id"
-        );
-        assert_eq!(
-            jobs.active(JobKind::Build),
-            1,
-            "no second task is registered"
-        );
-        assert!(jobs.abort("job-1"));
-        assert!(
-            abort_rx.is_aborted(),
-            "the first task still hears the abort"
-        );
-        assert!(
-            !jobs.readopt("job-9", "dispatch-3"),
-            "an unknown job is a fresh assignment"
-        );
-    }
-
-    #[test]
-    fn aborting_an_attempt_stops_only_its_members() {
-        let (mut jobs, _done_rx) = registry();
-        let (_, member, _) = jobs.register(
-            "build:x".to_owned(),
-            JobKind::Build,
-            "dispatch-1".to_owned(),
-            Some("a1".to_owned()),
-        );
-        let (_, single, _) = jobs.register(
-            "build:y".to_owned(),
-            JobKind::Build,
-            "dispatch-2".to_owned(),
-            None,
-        );
-
-        assert_eq!(jobs.abort_attempt("a1"), 1);
-
-        assert!(member.is_aborted(), "the member hears the abort");
-        assert!(!single.is_aborted(), "a single job keeps running");
-    }
-
-    #[test]
-    fn finishing_a_job_hands_back_its_current_assignment_id() {
-        let (mut jobs, _done_rx) = registry();
-        jobs.register(
-            "job-1".to_owned(),
-            JobKind::Flake,
-            "dispatch-1".to_owned(),
-            None,
-        );
-        jobs.readopt("job-1", "dispatch-2");
-
-        let job = jobs.finish("job-1").expect("the job was running");
-
-        assert_eq!(job.assignment_id.get(), "dispatch-2");
-        assert!(jobs.is_idle());
-        assert!(jobs.finish("job-1").is_none());
-    }
 
     #[tokio::test]
     async fn an_aborted_job_stops_without_reaching_a_checkpoint() {
@@ -1277,37 +1032,6 @@ mod tests {
             format!("{:#}", result.expect_err("its own error")),
             "nix failed"
         );
-    }
-
-    #[tokio::test]
-    async fn a_session_that_ends_stops_every_job_it_was_running() {
-        let (mut jobs, _done_rx) = registry();
-        let (_, waiting, _) = jobs.register(
-            "build:x".to_owned(),
-            JobKind::Build,
-            "dispatch-1".to_owned(),
-            None,
-        );
-        let (_, idle, _) = jobs.register(
-            "eval:y".to_owned(),
-            JobKind::Flake,
-            "dispatch-2".to_owned(),
-            None,
-        );
-        let mut job = std::pin::pin!(until_aborted(std::future::pending(), waiting));
-        assert!(futures::poll!(job.as_mut()).is_pending());
-
-        drop(jobs);
-
-        let err = tokio::time::timeout(std::time::Duration::from_secs(5), job)
-            .await
-            .expect("the job stops once its session is gone")
-            .expect_err("a job of a dead session fails");
-        assert!(
-            err.downcast_ref::<JobAborted>().is_some(),
-            "reported as an abort: {err:#}"
-        );
-        assert!(idle.is_aborted(), "a job between checkpoints sees it too");
     }
 
     struct StalledDownloader;
@@ -1338,35 +1062,6 @@ mod tests {
         }
     }
 
-    fn executor(gcroots: &std::path::Path) -> JobExecutor {
-        let store =
-            crate::nix::store::LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1)
-                .unwrap();
-        let config = WorkerConfig::default();
-        JobExecutor::new(
-            store.clone(),
-            crate::executor::WorkerEvaluator::new(
-                std::num::NonZeroUsize::MIN,
-                0,
-                config.memory_guard().unwrap(),
-                String::new(),
-                false,
-                false,
-            ),
-            crate::nix::gcroots::GcRootKeeper::new(gcroots.to_str().unwrap(), Arc::new(store)),
-            "ssh".into(),
-            crate::executor::log_limit::LogRateLimits {
-                burst_bytes_per_min: 0,
-                sustained_bytes_per_hour: 0,
-            },
-            false,
-            crate::executor::BuildHost {
-                build_cores: None,
-                cpu_core_score: 0,
-            },
-        )
-    }
-
     #[tokio::test]
     #[expect(
         clippy::disallowed_methods,
@@ -1384,12 +1079,17 @@ mod tests {
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
         let gcroots = tempfile::tempdir().unwrap();
-        let mut config = WorkerConfig::default();
+        let mut config = WorkerConfig {
+            base_dir: gcroots.path().to_owned(),
+            ..WorkerConfig::default()
+        };
         config.eval.max_concurrent = std::num::NonZeroU32::MIN;
+        let jobs = Arc::new(WorkerJobs::new(&config));
         let mut state = MessageLoopState::new(
             writer,
+            &jobs,
             config,
-            executor(gcroots.path()),
+            super::super::test_executor(gcroots.path()),
             JobScorer::new(),
             CredentialStore::new(),
         );
@@ -1448,10 +1148,16 @@ mod tests {
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
         let gcroots = tempfile::tempdir().unwrap();
+        let config = WorkerConfig {
+            base_dir: gcroots.path().to_owned(),
+            ..WorkerConfig::default()
+        };
+        let jobs = Arc::new(WorkerJobs::new(&config));
         let mut state = MessageLoopState::new(
             writer,
-            WorkerConfig::default(),
-            executor(gcroots.path()),
+            &jobs,
+            config,
+            super::super::test_executor(gcroots.path()),
             JobScorer::new(),
             CredentialStore::new(),
         );

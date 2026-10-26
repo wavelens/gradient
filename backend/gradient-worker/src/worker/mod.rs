@@ -6,14 +6,16 @@
 
 mod cluster;
 mod id;
+mod jobs;
 mod message_loop;
 mod scoring;
 
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use gradient_wire::messages::{ClientMessage, JobKind};
-use tracing::info;
+use gradient_wire::messages::{ClientMessage, JobKind, RUNNING_JOBS_SINCE, RunningAssignment};
+use tracing::{info, warn};
 
 use crate::config::WorkerConfig;
 use crate::connection_state::{Connected, Disconnected};
@@ -27,6 +29,9 @@ use gradient_worker_client::reconnect::RunOutcome;
 use tokio_util::sync::CancellationToken;
 
 use id::load_or_generate_id;
+use jobs::WorkerJobs;
+
+pub(crate) use jobs::clear_job_logs;
 
 const WRITER_FLUSH_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -35,6 +40,7 @@ pub struct Worker<S> {
     executor: JobExecutor,
     scorer: JobScorer,
     credentials: CredentialStore,
+    jobs: Arc<WorkerJobs>,
     conn_state: S,
     _marker: PhantomData<S>,
 }
@@ -72,6 +78,7 @@ impl Worker<Connected> {
         scorer: JobScorer,
     ) -> Self {
         Self {
+            jobs: Arc::new(WorkerJobs::new(&config)),
             config,
             executor,
             scorer,
@@ -87,7 +94,13 @@ impl Worker<Disconnected> {
     /// A reconnect must re-run the full handshake, capability advertisement and initial request.
     pub async fn reconnect(&self, server_url: &str) -> Result<ProtoConnection> {
         let mut conn = ProtoConnection::open(server_url).await?;
-        perform_setup(&mut conn, &self.config, Side::Reconnect).await?;
+        perform_setup(
+            &mut conn,
+            &self.config,
+            Side::Reconnect,
+            self.jobs.running_assignments(),
+        )
+        .await?;
         Ok(conn)
     }
 
@@ -97,6 +110,7 @@ impl Worker<Disconnected> {
             executor,
             scorer,
             credentials,
+            jobs,
             ..
         } = self;
 
@@ -105,6 +119,7 @@ impl Worker<Disconnected> {
             executor,
             scorer,
             credentials,
+            jobs,
             conn_state: Connected { conn },
             _marker: PhantomData,
         }
@@ -118,19 +133,26 @@ impl Worker<Connected> {
             executor,
             scorer,
             credentials,
+            jobs,
             conn_state: Connected { conn },
             ..
         } = self;
 
         let (writer, reader, flush) = conn.split();
+        let version = writer.version();
+        if let Err(e) = jobs.start_session(writer.clone()).await {
+            warn!(error = %e, "the new session closed before the queued job reports went out");
+        }
         let state = message_loop::MessageLoopState::new(
             writer,
+            &jobs,
             config.clone(),
             executor.clone(),
             scorer,
             credentials.clone(),
         );
         let outcome = message_loop::run_message_loop(state, reader, stop.clone()).await;
+        jobs.end_session(version);
 
         // Only background tasks can still hold a writer clone at this point.
         // A stopping worker must see its last reports leave the queue.
@@ -146,6 +168,7 @@ impl Worker<Connected> {
             executor,
             scorer,
             credentials,
+            jobs,
             conn_state: Disconnected,
             _marker: PhantomData,
         };
@@ -162,14 +185,14 @@ impl Worker<Connected> {
 
 impl Worker<Connected> {
     async fn setup_connection(conn: &mut ProtoConnection, config: &WorkerConfig) -> Result<()> {
-        perform_setup(conn, config, Side::Outbound).await
+        perform_setup(conn, config, Side::Outbound, Vec::new()).await
     }
 
     async fn setup_connection_incoming(
         conn: &mut ProtoConnection,
         config: &WorkerConfig,
     ) -> Result<()> {
-        perform_setup(conn, config, Side::Inbound).await
+        perform_setup(conn, config, Side::Inbound, Vec::new()).await
     }
 
     async fn build_executor(config: &WorkerConfig) -> Result<(JobExecutor, JobScorer)> {
@@ -219,6 +242,7 @@ async fn perform_setup(
     conn: &mut ProtoConnection,
     config: &WorkerConfig,
     side: Side,
+    running: Vec<RunningAssignment>,
 ) -> Result<()> {
     let peer_id = load_or_generate_id(&config.base_dir, config.id.as_deref())
         .context("load or generate persistent worker ID")?;
@@ -242,6 +266,12 @@ async fn perform_setup(
         version = handshake.version,
         "capabilities negotiated"
     );
+    if handshake.version >= RUNNING_JOBS_SINCE {
+        conn.send(ClientMessage::RunningJobs {
+            assignments: running,
+        })
+        .await?;
+    }
     if handshake.negotiated.build {
         let architectures = if config.system.architectures.is_empty() {
             vec![crate::config::host_system()]
@@ -287,4 +317,111 @@ async fn perform_setup(
     })
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+fn test_executor(gcroots: &std::path::Path) -> JobExecutor {
+    let store =
+        LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).expect("lazy connect");
+    let config = WorkerConfig::default();
+    JobExecutor::new(
+        store.clone(),
+        WorkerEvaluator::new(
+            std::num::NonZeroUsize::MIN,
+            0,
+            config.memory_guard().expect("default memory guard"),
+            String::new(),
+            false,
+            false,
+        ),
+        crate::nix::gcroots::GcRootKeeper::new(
+            gcroots.to_str().expect("utf-8 path"),
+            Arc::new(store),
+        ),
+        "ssh".into(),
+        crate::executor::log_limit::LogRateLimits {
+            burst_bytes_per_min: 0,
+            sustained_bytes_per_hour: 0,
+        },
+        false,
+        crate::executor::BuildHost {
+            build_cores: None,
+            cpu_core_score: 0,
+        },
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_test_support::prelude::MockProtoServer;
+    use gradient_wire::messages::GradientCapabilities;
+
+    #[tokio::test]
+    async fn a_job_finished_while_detached_reports_after_running_jobs() {
+        let base = tempfile::tempdir().unwrap();
+        let config = WorkerConfig {
+            base_dir: base.path().to_owned(),
+            ..WorkerConfig::default()
+        };
+        let worker = Worker {
+            jobs: Arc::new(WorkerJobs::new(&config)),
+            executor: test_executor(base.path()),
+            scorer: JobScorer::new(),
+            credentials: CredentialStore::new(),
+            config,
+            conn_state: Disconnected,
+            _marker: PhantomData,
+        };
+        let finished = worker.jobs.register(
+            "build:1".to_owned(),
+            JobKind::Build,
+            "dispatch-1".to_owned(),
+            None,
+        );
+        finished
+            .done_tx
+            .send(("build:1".to_owned(), Ok(())))
+            .unwrap();
+
+        let server = MockProtoServer::bind().await;
+        let (mut sc, conn) = tokio::join!(
+            async {
+                let mut sc = server.accept().await;
+                sc.handshake(GradientCapabilities::default()).await.unwrap();
+                sc
+            },
+            worker.reconnect(server.url())
+        );
+        let worker = worker.into_connected(conn.unwrap());
+
+        let script = async {
+            let listed = sc
+                .recv_until(|msg| match msg {
+                    ClientMessage::RunningJobs { assignments } => Some(assignments),
+                    ClientMessage::JobCompleted { .. } => panic!("completed before RunningJobs"),
+                    _ => None,
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                listed,
+                vec![RunningAssignment {
+                    assignment_id: "dispatch-1".into(),
+                    kind: JobKind::Build,
+                }]
+            );
+            let completed = sc
+                .recv_until(|msg| match msg {
+                    ClientMessage::JobCompleted { job_id, .. } => Some(job_id),
+                    _ => None,
+                })
+                .await
+                .unwrap();
+            assert_eq!(completed, "build:1");
+            sc.close().await;
+        };
+        let ((_, ended), ()) = tokio::join!(worker.run(CancellationToken::new()), script);
+        ended.unwrap();
+    }
 }

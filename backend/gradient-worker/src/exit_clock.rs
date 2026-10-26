@@ -93,6 +93,12 @@ impl ExitClock {
             .map(|t| state.idle_since + t);
         lifetime.into_iter().chain(idle).min()
     }
+
+    pub fn lifetime_left(&self, limits: &ExitLimits, now: Instant) -> Option<Duration> {
+        limits
+            .max_lifetime
+            .map(|lifetime| (self.started + lifetime).saturating_duration_since(now))
+    }
 }
 
 fn exit_due(
@@ -203,6 +209,30 @@ mod tests {
         assert_eq!(
             clock.deadline(&limits(Some(60), Some(600))),
             Some(started + secs(600))
+        );
+    }
+
+    #[test]
+    fn a_disconnected_worker_with_a_running_job_is_not_idle() {
+        let started = Instant::now();
+        let clock = ExitClock::new(started);
+        let (jobs, message_loop) = (new_session(), new_session());
+        clock.report(jobs, 1, started);
+        clock.report(message_loop, 0, started);
+        assert_eq!(clock.deadline(&limits(Some(10), None)), None);
+    }
+
+    #[test]
+    fn lifetime_left_counts_down_from_the_start() {
+        let started = Instant::now();
+        let clock = ExitClock::new(started);
+        assert_eq!(
+            clock.lifetime_left(&limits(None, Some(100)), started + secs(30)),
+            Some(secs(70))
+        );
+        assert_eq!(
+            clock.lifetime_left(&limits(Some(10), None), started + secs(30)),
+            None
         );
     }
 }

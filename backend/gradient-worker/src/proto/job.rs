@@ -24,6 +24,7 @@ use crate::executor::timeline::{JobTimeline, PhaseGuard};
 use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::{EvalCacheReceiver, PendingPull};
 use crate::proto::eval_shard_replies::EvalShardReplies;
+use crate::proto::job_log::JobLog;
 use crate::proto::prefetch::MissingInputs;
 use crate::proto::progress::{
     BuildProgressSink, EvalProgressSender, Progress, Tally, count_delivery,
@@ -52,6 +53,7 @@ pub struct JobUpdater {
     pub(crate) store: Option<Arc<LocalNixStore>>,
     pub(crate) timeline: Arc<JobTimeline>,
     pub(crate) uploads: UploadClient,
+    pub(crate) log: JobLog,
 }
 
 async fn passthrough_blob(
@@ -177,6 +179,7 @@ impl JobUpdater {
         store: Option<Arc<LocalNixStore>>,
         timeline: Arc<JobTimeline>,
         uploads: UploadClient,
+        log: JobLog,
     ) -> Self {
         Self {
             job_id,
@@ -192,6 +195,7 @@ impl JobUpdater {
             store,
             timeline,
             uploads,
+            log,
         }
     }
 
@@ -214,6 +218,7 @@ impl JobUpdater {
             store: self.store.clone(),
             timeline: self.timeline.concurrent(),
             uploads: self.uploads.clone(),
+            log: self.log.clone(),
         }
     }
 
@@ -224,24 +229,46 @@ impl JobUpdater {
     ) -> Result<PulledSegments> {
         let mut guard = self.phase(JobPhase::EvalCachePull);
         let mut pending = self.eval_cache_recv.register_pull(&self.job_id);
+        let session = self
+            .writer
+            .current_session()
+            .context("no session to pull the eval cache over")?;
         self.writer
-            .send(ClientMessage::EvalCachePull {
+            .send_now(ClientMessage::EvalCachePull {
                 job_id: self.job_id.clone(),
                 fingerprint: fingerprint.to_owned(),
                 applied,
             })
             .await?;
 
-        let (keys, fetch) = match pending.await_outcome().await? {
+        let outcome = self
+            .within_session(session, pending.await_outcome())
+            .await?;
+        let (keys, fetch) = match outcome {
             EvalCachePullOutcome::Miss => return Ok(PulledSegments::default()),
             EvalCachePullOutcome::Segments { keys, fetch, .. } => (keys, fetch),
             other => bail!("a segment pull cannot be answered with {other:?}"),
         };
 
-        let segments = fetch_segments(fetch, &mut pending).await;
+        let segments = self
+            .within_session(session, async {
+                Ok(fetch_segments(fetch, &mut pending).await)
+            })
+            .await?;
         let bytes = segments.iter().map(|(_, s)| s.len() as u64).sum();
         guard.record(clamp_to_u32(segments.len()), bytes);
         Ok(PulledSegments { keys, segments })
+    }
+
+    async fn within_session<T>(
+        &self,
+        session: u64,
+        answer: impl std::future::Future<Output = Result<T>>,
+    ) -> Result<T> {
+        tokio::select! {
+            answered = answer => answered,
+            () = self.writer.lost(session) => bail!("the session ended during the eval-cache pull"),
+        }
     }
 
     pub async fn push_eval_cache_segment(&self, fingerprint: &str, bytes: Vec<u8>) -> Result<()> {
@@ -446,8 +473,36 @@ impl JobUpdater {
     }
 
     async fn request_nar(&self, store_path: &str, tally: Tally) -> Result<Option<NarPayload>> {
-        let pending = self.nar_recv.register(&self.job_id, store_path);
-        let request = match self.nar_recv.resumable(&self.job_id, store_path).await {
+        loop {
+            let session = self.writer.attached().await;
+            let pending = self.nar_recv.register(&self.job_id, store_path);
+            if self
+                .writer
+                .send_now(self.nar_request(store_path).await)
+                .await
+                .is_ok()
+            {
+                let received = pending.received();
+                let delivery = count_delivery(
+                    tally.clone(),
+                    received,
+                    self.nar_recv.await_pending(pending),
+                );
+                tokio::select! {
+                    delivered = delivery => return match delivered {
+                        Ok(body) => Ok(Some(body)),
+                        Err(e) if e.is::<NarUnavailable>() => Ok(None),
+                        Err(e) => Err(e),
+                    },
+                    () = self.writer.lost(session) => {}
+                }
+            }
+            self.nar_recv.interrupt(&self.job_id, store_path).await;
+        }
+    }
+
+    async fn nar_request(&self, store_path: &str) -> ClientMessage {
+        match self.nar_recv.resumable(&self.job_id, store_path).await {
             (received_bytes, Some(stream_token)) if received_bytes > 0 => {
                 ClientMessage::NarRequestResume {
                     job_id: self.job_id.clone(),
@@ -460,14 +515,6 @@ impl JobUpdater {
                 job_id: self.job_id.clone(),
                 paths: vec![store_path.to_owned()],
             },
-        };
-        self.writer.send(request).await?;
-
-        let received = pending.received();
-        match count_delivery(tally, received, self.nar_recv.await_pending(pending)).await {
-            Ok(body) => Ok(Some(body)),
-            Err(e) if e.is::<NarUnavailable>() => Ok(None),
-            Err(e) => Err(e),
         }
     }
 
@@ -539,12 +586,7 @@ impl JobUpdater {
     }
 
     pub async fn send_log_chunk(&self, data: Vec<u8>) -> Result<()> {
-        self.writer
-            .send(ClientMessage::LogChunk {
-                job_id: self.job_id.clone(),
-                data: data.into(),
-            })
-            .await
+        self.log.send(&self.writer, data).await
     }
 
     async fn send_update(&self, update: JobUpdateKind) -> Result<()> {
@@ -719,12 +761,7 @@ impl JobReporter for JobUpdater {
     }
 
     async fn send_log_chunk(&mut self, data: Vec<u8>) -> Result<()> {
-        self.writer
-            .send(ClientMessage::LogChunk {
-                job_id: self.job_id.clone(),
-                data: data.into(),
-            })
-            .await
+        self.log.send(&self.writer, data).await
     }
 
     async fn send_eval_message(
@@ -789,6 +826,11 @@ mod tests {
         let input_waiters = Arc::new(Mutex::new(HashMap::new()));
         let nar_recv = NarReceiver::new();
         let eval_cache_recv = EvalCacheReceiver::new();
+        let log = JobLog::open(
+            &std::env::temp_dir(),
+            &job_id,
+            crate::proto::job_log::JOB_LOG_BUFFER_CAP,
+        );
         let updater = JobUpdater::new(
             job_id,
             AssignmentHandle::new("dispatch-1".to_owned()),
@@ -803,6 +845,7 @@ mod tests {
             None,
             JobTimeline::new(),
             UploadClient::new(writer_for_uploads, 8),
+            log,
         );
         (updater, reader)
     }

@@ -79,7 +79,6 @@ impl WorkerConfig {
         self.base_dir.join("nar-partial")
     }
 
-    #[expect(dead_code, reason = "job tasks adopt it next")]
     pub fn job_log_dir(&self) -> std::path::PathBuf {
         self.base_dir.join("job-logs")
     }

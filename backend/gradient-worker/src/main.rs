@@ -90,6 +90,10 @@ fn main() -> Result<()> {
             );
         }
 
+        if let Err(e) = worker::clear_job_logs(&config) {
+            warn!(error = %e, "could not empty the job log directory");
+        }
+
         let stop = CancellationToken::new();
         install_signal_handler(stop.clone());
 

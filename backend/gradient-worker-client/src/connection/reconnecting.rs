@@ -138,6 +138,11 @@ impl ReconnectingWriter {
         self.inner.session.borrow().version
     }
 
+    pub fn current_session(&self) -> Option<u64> {
+        let current = *self.inner.session.borrow();
+        current.version.map(|_| current.number)
+    }
+
     pub fn is_current(&self, session: u64) -> bool {
         let current = *self.inner.session.borrow();
         current.number == session && current.version.is_some()

@@ -37,6 +37,7 @@ pub struct JobLog {
 
 struct Inner {
     job_id: String,
+    dir: PathBuf,
     log: PathBuf,
     offset: PathBuf,
     cap: u64,
@@ -67,20 +68,19 @@ fn file_key(job_id: &str) -> String {
 }
 
 impl JobLog {
-    pub fn open(dir: &Path, job_id: &str, cap: u64) -> Result<Self> {
-        std::fs::create_dir_all(dir)
-            .with_context(|| format!("create job log dir {}", dir.display()))?;
+    pub fn open(dir: &Path, job_id: &str, cap: u64) -> Self {
         let key = file_key(job_id);
-        Ok(Self {
+        Self {
             inner: Arc::new(Inner {
                 job_id: job_id.to_owned(),
+                dir: dir.to_owned(),
                 log: dir.join(format!("{key}.log")),
                 offset: dir.join(format!("{key}.offset")),
                 cap,
                 state: Mutex::new(State::default()),
                 drained: watch::Sender::new(true),
             }),
-        })
+        }
     }
 
     pub async fn send(&self, writer: &impl LogChunkSender, data: Vec<u8>) -> Result<()> {
@@ -134,6 +134,11 @@ impl JobLog {
     }
 
     async fn append(&self, state: &mut State, data: &[u8]) -> Result<()> {
+        if state.file_len == 0 {
+            tokio::fs::create_dir_all(&self.inner.dir)
+                .await
+                .with_context(|| format!("create job log dir {}", self.inner.dir.display()))?;
+        }
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -284,7 +289,7 @@ mod tests {
     #[tokio::test]
     async fn chunks_sent_while_detached_replay_in_order_after_attach() {
         let dir = tempfile::tempdir().unwrap();
-        let log = JobLog::open(dir.path(), "build:x", JOB_LOG_BUFFER_CAP).unwrap();
+        let log = JobLog::open(dir.path(), "build:x", JOB_LOG_BUFFER_CAP);
         let detached = Recorder::detached();
         log.send(&detached, b"a".to_vec()).await.unwrap();
         log.send(&detached, b"b".to_vec()).await.unwrap();
@@ -301,7 +306,7 @@ mod tests {
     #[tokio::test]
     async fn a_full_buffer_drops_the_oldest_bytes_and_says_so() {
         let dir = tempfile::tempdir().unwrap();
-        let log = JobLog::open(dir.path(), "build:x", 8).unwrap();
+        let log = JobLog::open(dir.path(), "build:x", 8);
         let detached = Recorder::detached();
         for chunk in b"0123456789abcdef".chunks(4) {
             log.send(&detached, chunk.to_vec()).await.unwrap();
@@ -319,7 +324,7 @@ mod tests {
     #[tokio::test]
     async fn lines_written_during_a_replay_follow_the_replayed_ones() {
         let dir = tempfile::tempdir().unwrap();
-        let log = JobLog::open(dir.path(), "build:x", JOB_LOG_BUFFER_CAP).unwrap();
+        let log = JobLog::open(dir.path(), "build:x", JOB_LOG_BUFFER_CAP);
         let buffered = vec![7u8; 4 * chunk_len()];
         log.send(&Recorder::detached(), buffered.clone())
             .await
@@ -351,7 +356,7 @@ mod tests {
     #[tokio::test]
     async fn a_replay_cut_by_a_session_loss_resumes_at_the_stored_offset() {
         let dir = tempfile::tempdir().unwrap();
-        let log = JobLog::open(dir.path(), "build:x", JOB_LOG_BUFFER_CAP).unwrap();
+        let log = JobLog::open(dir.path(), "build:x", JOB_LOG_BUFFER_CAP);
         let detached = Recorder::detached();
         let chunks: Vec<Vec<u8>> = (0u8..3).map(|i| vec![i; chunk_len()]).collect();
         for chunk in &chunks {
@@ -372,7 +377,7 @@ mod tests {
     #[tokio::test]
     async fn drained_waits_until_the_buffer_is_replayed() {
         let dir = tempfile::tempdir().unwrap();
-        let log = JobLog::open(dir.path(), "build:x", JOB_LOG_BUFFER_CAP).unwrap();
+        let log = JobLog::open(dir.path(), "build:x", JOB_LOG_BUFFER_CAP);
         log.send(&Recorder::detached(), b"pending".to_vec())
             .await
             .unwrap();

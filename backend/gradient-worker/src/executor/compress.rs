@@ -291,6 +291,11 @@ mod tests {
             None,
             JobTimeline::new(),
             uploads,
+            crate::proto::job_log::JobLog::open(
+                &std::env::temp_dir(),
+                job,
+                crate::proto::job_log::JOB_LOG_BUFFER_CAP,
+            ),
         )
     }
 
