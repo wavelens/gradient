@@ -9,20 +9,35 @@ use std::collections::{HashMap, HashSet};
 use gradient_db::lookup::by_ids;
 use gradient_db::maintenance::recovery::KeptAssignment;
 use gradient_db::scheduling::assignment_record::{
-    abandon_open_assignments, assignment_rows, eval_of_key, shared_build_of_key,
+    abandon_open_assignments, assignment_rows, eval_of_key, open_single_assignments_of_worker,
+    shared_build_of_key,
 };
 use gradient_entity::dispatched_job::Model as MDispatchedJob;
+use gradient_graph::OrphanCause;
 use gradient_types::*;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
-use crate::jobs::{PendingJob, Reattached};
+use crate::jobs::{AwaitingReclaim, HeldReclaim, PendingJob, Reattached};
 
 #[derive(Debug, Default)]
 pub struct Reclaimed {
     pub reattached: Vec<Reattached>,
     pub unknown: Vec<(DispatchedJobId, Option<String>)>,
+}
+
+#[derive(Default)]
+struct RowJobs {
+    jobs: HashMap<String, PendingJob>,
+    live: HashSet<String>,
+}
+
+#[derive(Default)]
+struct SettledRows {
+    restored: Vec<Reattached>,
+    live: Vec<MDispatchedJob>,
+    finished: Vec<MDispatchedJob>,
 }
 
 impl Scheduler {
@@ -35,27 +50,47 @@ impl Scheduler {
         worker_id: &str,
         listed: Vec<DispatchedJobId>,
     ) -> Reclaimed {
-        let (mut reattached, unresolved) = self.reclaim_held(worker_id, &listed).await;
-        let rows = self.listed_rows(&unresolved).await;
-        let (rows, mut unknown) = classify_listed(worker_id, &unresolved, rows);
-        let (restored, unbuildable) = self.jobs_of_rows(rows).await;
-        unknown.extend(self.abandon_unbuildable(unbuildable).await);
-        self.restore_reclaimed(worker_id, restored.clone(), &unknown)
+        let listed = without_repeats(listed);
+        let held = self.reclaim_held(worker_id, &listed).await;
+        let rows = match assignment_rows(&self.db.worker_db, &held.unresolved).await {
+            Ok(rows) => rows,
+            Err(e) => return self.keep_holding(worker_id, held, e.into()).await,
+        };
+        let (rows, mut unknown) = classify_listed(worker_id, &held.unresolved, rows);
+        let row_jobs = match self.pending_jobs_of_rows(&rows).await {
+            Ok(row_jobs) => row_jobs,
+            Err(e) => return self.keep_holding(worker_id, held, e).await,
+        };
+        let settled = settle_rows(rows, row_jobs);
+        unknown.extend(self.abandon_finished(settled.finished).await);
+        unknown.extend(self.requeue_live(settled.live).await);
+        let refused = self
+            .restore_reclaimed(worker_id, settled.restored.clone(), Vec::new())
             .await;
+        let refused_ids: HashSet<DispatchedJobId> =
+            refused.iter().map(|job| job.assignment_id).collect();
+        unknown.extend(
+            refused
+                .into_iter()
+                .map(|job| (job.assignment_id, Some(job.job_id))),
+        );
         self.requeue_unlisted(worker_id, &listed).await;
+        self.requeue_untracked_rows(worker_id, &listed).await;
 
-        reattached.extend(restored);
+        let mut reattached = held.reattached;
+        reattached.extend(
+            settled
+                .restored
+                .into_iter()
+                .filter(|job| !refused_ids.contains(&job.assignment_id)),
+        );
         Reclaimed {
             reattached,
             unknown,
         }
     }
 
-    async fn reclaim_held(
-        &self,
-        worker_id: &str,
-        listed: &[DispatchedJobId],
-    ) -> (Vec<Reattached>, Vec<DispatchedJobId>) {
+    async fn reclaim_held(&self, worker_id: &str, listed: &[DispatchedJobId]) -> HeldReclaim {
         let worker = worker_id.to_owned();
         let listed = listed.to_vec();
         self.call(|reply| SchedulerMsg::Reclaim {
@@ -66,74 +101,69 @@ impl Scheduler {
         .await
         .unwrap_or_else(|e| {
             warn!(error = %e, %worker_id, "reclaiming held jobs did not reach the scheduler");
-            (Vec::new(), listed)
+            HeldReclaim {
+                unresolved: listed,
+                ..Default::default()
+            }
         })
     }
 
-    async fn listed_rows(&self, ids: &[DispatchedJobId]) -> Vec<MDispatchedJob> {
-        assignment_rows(&self.db.worker_db, ids)
-            .await
-            .unwrap_or_else(|e| {
-                warn!(error = %e, "loading the listed assignment rows failed");
-                Vec::new()
-            })
-    }
-
-    async fn jobs_of_rows(
+    async fn keep_holding(
         &self,
-        rows: Vec<MDispatchedJob>,
-    ) -> (Vec<Reattached>, Vec<MDispatchedJob>) {
-        let mut jobs = self.pending_jobs_of_keys(&rows).await;
-        let (mut restored, mut unbuildable) = (Vec::new(), Vec::new());
-        for row in rows {
-            match row.job_id.as_ref().and_then(|key| jobs.remove(key)) {
-                Some(job) => restored.push(Reattached::single(
-                    row.job_id.clone().unwrap_or_default(),
-                    row.id,
-                    job,
-                )),
-                None => unbuildable.push(row),
-            }
+        worker_id: &str,
+        held: HeldReclaim,
+        error: anyhow::Error,
+    ) -> Reclaimed {
+        warn!(error = %error, %worker_id, "reclaim left the listed rows to the reclaim grace");
+        self.restore_reclaimed(worker_id, Vec::new(), held.seeded)
+            .await;
+        Reclaimed {
+            reattached: held.reattached,
+            unknown: Vec::new(),
         }
-        (restored, unbuildable)
     }
 
-    async fn pending_jobs_of_keys(&self, rows: &[MDispatchedJob]) -> HashMap<String, PendingJob> {
+    async fn pending_jobs_of_rows(&self, rows: &[MDispatchedJob]) -> anyhow::Result<RowJobs> {
         let keys: Vec<&str> = rows.iter().filter_map(|r| r.job_id.as_deref()).collect();
         let build_ids: Vec<DerivationBuildId> =
             keys.iter().filter_map(|k| shared_build_of_key(k)).collect();
         let eval_ids: Vec<EvaluationId> = keys.iter().filter_map(|k| eval_of_key(k)).collect();
 
-        let builds = by_ids::<EDerivationBuild, _>(&self.db.worker_db, &build_ids)
-            .await
-            .map(|rows| {
-                rows.into_values()
-                    .filter(|b| !b.status.is_terminal())
-                    .collect()
-            })
-            .unwrap_or_default();
-        let evals = by_ids::<EEvaluation, _>(&self.db.worker_db, &eval_ids)
-            .await
-            .map(|rows| {
-                rows.into_values()
-                    .filter(|e| !e.status.is_terminal())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let builds: Vec<MDerivationBuild> =
+            by_ids::<EDerivationBuild, _>(&self.db.worker_db, &build_ids)
+                .await?
+                .into_values()
+                .filter(|b| !b.status.is_terminal())
+                .collect();
+        let evals: Vec<MEvaluation> = by_ids::<EEvaluation, _>(&self.db.worker_db, &eval_ids)
+            .await?
+            .into_values()
+            .filter(|e| !e.status.is_terminal())
+            .collect();
 
-        let mut jobs = HashMap::new();
-        match crate::loops::pending_build_jobs(self, builds).await {
-            Ok(built) => jobs.extend(built.into_iter().map(|(k, j)| (k, PendingJob::Build(j)))),
-            Err(e) => warn!(error = %e, "assembling reclaimed build jobs failed"),
-        }
-        match crate::loops::pending_eval_jobs(self, evals).await {
-            Ok(evals) => jobs.extend(evals.into_iter().map(|(k, j)| (k, PendingJob::Eval(j)))),
-            Err(e) => warn!(error = %e, "assembling reclaimed evaluation jobs failed"),
-        }
-        jobs
+        let mut row_jobs = RowJobs::default();
+        row_jobs
+            .live
+            .extend(builds.iter().map(|b| crate::jobs::build_job_key(b.id)));
+        row_jobs
+            .live
+            .extend(evals.iter().map(|e| crate::jobs::eval_job_key(e.id, 0)));
+        let built = crate::loops::pending_build_jobs(self, builds).await?;
+        let evaluated = crate::loops::pending_eval_jobs(self, evals).await?;
+        row_jobs.jobs.extend(
+            built
+                .into_iter()
+                .map(|(key, job)| (key, PendingJob::Build(job))),
+        );
+        row_jobs.jobs.extend(
+            evaluated
+                .into_iter()
+                .map(|(key, job)| (key, PendingJob::Eval(job))),
+        );
+        Ok(row_jobs)
     }
 
-    async fn abandon_unbuildable(
+    async fn abandon_finished(
         &self,
         rows: Vec<MDispatchedJob>,
     ) -> Vec<(DispatchedJobId, Option<String>)> {
@@ -144,25 +174,39 @@ impl Scheduler {
         rows.into_iter().map(|r| (r.id, r.job_id)).collect()
     }
 
+    async fn requeue_live(
+        &self,
+        rows: Vec<MDispatchedJob>,
+    ) -> Vec<(DispatchedJobId, Option<String>)> {
+        let keys: Vec<String> = rows.iter().filter_map(|r| r.job_id.clone()).collect();
+        if !keys.is_empty() {
+            warn!(
+                jobs = keys.len(),
+                "re-queuing reclaimed jobs the scheduler cannot assemble"
+            );
+            self.requeue_keys(&keys).await;
+        }
+        rows.into_iter().map(|r| (r.id, r.job_id)).collect()
+    }
+
     async fn restore_reclaimed(
         &self,
         worker_id: &str,
         reattached: Vec<Reattached>,
-        unknown: &[(DispatchedJobId, Option<String>)],
-    ) {
+        hold_again: Vec<(String, AwaitingReclaim)>,
+    ) -> Vec<Reattached> {
         let worker = worker_id.to_owned();
-        let dropped = unknown.iter().filter_map(|(_, key)| key.clone()).collect();
-        if let Err(e) = self
-            .call(|reply| SchedulerMsg::RestoreReclaimed {
-                worker,
-                reattached,
-                dropped,
-                reply,
-            })
-            .await
-        {
+        self.call(|reply| SchedulerMsg::RestoreReclaimed {
+            worker,
+            reattached,
+            hold_again,
+            reply,
+        })
+        .await
+        .unwrap_or_else(|e| {
             warn!(error = %e, %worker_id, "restoring reclaimed jobs did not reach the scheduler");
-        }
+            Vec::new()
+        })
     }
 
     async fn requeue_unlisted(&self, worker_id: &str, listed: &[DispatchedJobId]) {
@@ -178,6 +222,59 @@ impl Scheduler {
             .unwrap_or_default();
         self.requeue_held(unlisted).await;
     }
+
+    async fn requeue_untracked_rows(&self, worker_id: &str, listed: &[DispatchedJobId]) {
+        let rows = match open_single_assignments_of_worker(&self.db.worker_db, worker_id).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(error = %e, %worker_id, "reading the worker's open rows failed");
+                return;
+            }
+        };
+        let keys: Vec<String> = rows
+            .into_iter()
+            .filter(|(id, _)| !listed.contains(id))
+            .map(|(_, key)| key)
+            .collect();
+        if keys.is_empty() {
+            return;
+        }
+        let untracked = self.untracked(keys).await;
+        if !untracked.is_empty() {
+            info!(%worker_id, jobs = untracked.len(), "re-queuing open rows the worker no longer runs");
+            self.requeue_keys(&untracked).await;
+        }
+    }
+
+    async fn requeue_keys(&self, keys: &[String]) {
+        crate::build::requeue_orphaned_keys(
+            &self.db,
+            &self.graph,
+            keys,
+            &HashMap::new(),
+            OrphanCause::WorkerLost,
+        )
+        .await;
+        self.build_kick.kick();
+    }
+}
+
+fn without_repeats(listed: Vec<DispatchedJobId>) -> Vec<DispatchedJobId> {
+    let mut seen = HashSet::new();
+    listed.into_iter().filter(|id| seen.insert(*id)).collect()
+}
+
+fn settle_rows(rows: Vec<MDispatchedJob>, mut row_jobs: RowJobs) -> SettledRows {
+    let mut settled = SettledRows::default();
+    for row in rows {
+        let key = row.job_id.clone().unwrap_or_default();
+        match row_jobs.jobs.remove(&key) {
+            Some(job) => settled.restored.push(Reattached::single(key, row.id, job)),
+            None if row_jobs.live.contains(&key) => settled.live.push(row),
+            None => settled.finished.push(row),
+        }
+    }
+    settled
 }
 
 pub(crate) fn classify_listed(

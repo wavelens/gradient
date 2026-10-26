@@ -255,6 +255,23 @@ pub async fn open_assignment_keys<C: ConnectionTrait>(
         .await
 }
 
+pub async fn open_single_assignments_of_worker<C: ConnectionTrait>(
+    db: &C,
+    worker_id: &str,
+) -> Result<Vec<(DispatchedJobId, String)>, DbErr> {
+    EDispatchedJob::find()
+        .select_only()
+        .column(CDispatchedJob::Id)
+        .column(CDispatchedJob::JobId)
+        .filter(CDispatchedJob::WorkerId.eq(worker_id))
+        .filter(CDispatchedJob::FinishedAt.is_null())
+        .filter(CDispatchedJob::ClusterAttempt.is_null())
+        .filter(CDispatchedJob::JobId.is_not_null())
+        .into_tuple()
+        .all(db)
+        .await
+}
+
 pub async fn assignment_rows<C: ConnectionTrait>(
     db: &C,
     ids: &[DispatchedJobId],

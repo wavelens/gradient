@@ -13,6 +13,7 @@ use anyhow::Result;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
+    QuerySelect,
 };
 use tracing::{debug, info, warn};
 
@@ -351,7 +352,44 @@ impl Scheduler {
             .call(|reply| SchedulerMsg::TakeUnreclaimed { now, reply })
             .await
             .unwrap_or_default();
+        if unreclaimed.is_empty() {
+            return;
+        }
+        let connected = self
+            .connected_workers(unreclaimed.iter().map(|(_, held)| held.worker.clone()))
+            .await;
+        let (elsewhere, unreclaimed): (Vec<_>, Vec<_>) = unreclaimed
+            .into_iter()
+            .partition(|(_, held)| connected.contains(&held.worker));
+        if !elsewhere.is_empty() {
+            info!(
+                jobs = elsewhere.len(),
+                "left held jobs to the session their worker reconnected on"
+            );
+        }
+        let unreclaimed = self
+            .call(|reply| SchedulerMsg::ReturnUnreclaimed { unreclaimed, reply })
+            .await
+            .unwrap_or_default();
         self.requeue_held(unreclaimed).await;
+    }
+
+    async fn connected_workers(&self, workers: impl Iterator<Item = String>) -> HashSet<String> {
+        let workers: Vec<String> = workers.collect::<HashSet<_>>().into_iter().collect();
+        gradient_entity::worker_connection::Entity::find()
+            .select_only()
+            .column(gradient_entity::worker_connection::Column::WorkerId)
+            .filter(gradient_entity::worker_connection::Column::WorkerId.is_in(workers))
+            .filter(gradient_entity::worker_connection::Column::DisconnectedAt.is_null())
+            .into_tuple::<String>()
+            .all(&self.db.worker_db)
+            .await
+            .unwrap_or_else(|e| {
+                warn!(error = %e, "reading the connected workers failed");
+                Vec::new()
+            })
+            .into_iter()
+            .collect()
     }
 
     pub(crate) async fn requeue_held(&self, held: Vec<(String, AwaitingReclaim)>) {

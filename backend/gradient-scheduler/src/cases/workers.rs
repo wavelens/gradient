@@ -1724,6 +1724,89 @@ async fn w34_a_restart_requeues_what_nobody_reclaims_after_the_grace() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn w35_a_held_build_of_a_worker_back_on_another_instance_outlives_the_grace() {
+    let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
+    let second = case.second_instance().await;
+    case.connect_reclaiming(W1, w_all(), &[]).await;
+    let (a, a1) = building_on_w1(&case).await;
+    case.disconnect(W1).await;
+
+    second.connect_reclaiming(W1, w_all(), &[]).await;
+    case.requeue_unreclaimed_after(Duration::from_secs(600))
+        .await;
+    assert_eq!(
+        closes(&case.assignments(&a).await),
+        vec![(a1, None)],
+        "after 2: dj(build:A) stays open"
+    );
+    assert_eq!(
+        running(&case.attempts(A).await),
+        vec![Some(a1)],
+        "after 2: att(A) still Running"
+    );
+    assert!(!case.pending(&a).await, "after 2: pending(build:A)");
+
+    let reclaimed = second.reclaim(W1, &[a1]).await;
+    assert_eq!(
+        reattached_keys(&reclaimed),
+        vec![(a.clone(), a1)],
+        "after 3: the second instance reattaches build:A"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Building,
+        "after 3: sb(A).status"
+    );
+    case.check("step 3").await;
+    second.check("step 3").await;
+
+    second.finish().await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn w36_an_open_row_the_reconnecting_worker_does_not_list_is_requeued() {
+    let seed = shape()
+        .one(EvaluationId::now_v7(), A, A_OUT)
+        .build_status(BuildStatus::Building)
+        .attempt(AttemptOutcome::Running, None)
+        .open_assignment()
+        .by_worker(W1)
+        .dispatched_at(ago(60));
+    let case = SchedulerCase::start(seed).await;
+    let a = case.key(A).await;
+
+    case.connect_reclaiming(W1, w_all(), &[]).await;
+    let reclaimed = case.reclaim(W1, &[]).await;
+    assert!(
+        reclaimed.reattached.is_empty() && reclaimed.unknown.is_empty(),
+        "after 1: nothing reclaimed, got {reclaimed:?}"
+    );
+    let rows = case.assignments(&a).await;
+    assert_eq!(
+        rows.iter().map(|row| row.outcome).collect::<Vec<_>>(),
+        vec![Some(DispatchedJobOutcome::Abandoned)],
+        "after 1: dj(build:A)"
+    );
+    assert_eq!(
+        verdicts(&case.attempts(A).await),
+        vec![(
+            AttemptOutcome::Aborted,
+            Some(AttemptFailureReason::WorkerLost)
+        )],
+        "after 1: att(A)"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 1: sb(A).status"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
 fn reattached_keys(reclaimed: &Reclaimed) -> Vec<(String, DispatchedJobId)> {
     reclaimed
         .reattached

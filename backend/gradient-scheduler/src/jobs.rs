@@ -672,6 +672,13 @@ pub struct AwaitingReclaim {
     pub observed_peak_ram_mb: Option<u64>,
 }
 
+#[derive(Debug, Default)]
+pub struct HeldReclaim {
+    pub reattached: Vec<Reattached>,
+    pub unresolved: Vec<DispatchedJobId>,
+    pub seeded: Vec<(String, AwaitingReclaim)>,
+}
+
 pub fn reclaim_grace(configured: Duration, exits_at: Option<Instant>, now: Instant) -> Duration {
     exits_at.map_or(configured, |exits_at| {
         configured.min(exits_at.saturating_duration_since(now))
@@ -1222,7 +1229,7 @@ impl JobTracker {
         Some(assignment)
     }
 
-    pub fn restore_active(&mut self, worker_id: &str, reattached: Reattached) {
+    pub fn restore_active(&mut self, worker_id: &str, reattached: Reattached) -> bool {
         let Reattached {
             job_id,
             assignment_id,
@@ -1230,7 +1237,7 @@ impl JobTracker {
             cluster,
         } = reattached;
         if self.active.contains_key(&job_id) {
-            return;
+            return false;
         }
         self.pending.remove(&job_id);
         self.clusters.forget(&job_id);
@@ -1242,6 +1249,7 @@ impl JobTracker {
                 ..ActiveJob::new(worker_id, assignment_id, job)
             },
         );
+        true
     }
 
     pub fn owns_dispatch(
@@ -1520,42 +1528,36 @@ impl JobTracker {
             .collect()
     }
 
-    pub fn take_reclaimable(
-        &mut self,
-        worker_id: &str,
-        listed: &[DispatchedJobId],
-    ) -> (Vec<Reattached>, Vec<DispatchedJobId>) {
-        let mut reattached = Vec::new();
-        let mut unresolved = Vec::new();
+    pub fn take_reclaimable(&mut self, worker_id: &str, listed: &[DispatchedJobId]) -> HeldReclaim {
+        let mut taken = HeldReclaim::default();
         for assignment_id in listed {
             let key = self
                 .awaiting_reclaim
                 .iter()
-                .find(|(_, held)| {
-                    held.worker == worker_id
-                        && held.assignment_id == *assignment_id
-                        && held.job.is_some()
-                })
+                .find(|(_, held)| held.worker == worker_id && held.assignment_id == *assignment_id)
                 .map(|(key, _)| key.clone());
-            let job = key
-                .as_ref()
-                .and_then(|key| self.awaiting_reclaim.remove(key))
-                .and_then(|held| held.job);
-            match key.zip(job) {
-                Some((key, job)) => reattached.push(Reattached::single(key, *assignment_id, job)),
-                None => unresolved.push(*assignment_id),
+            let Some((key, held)) =
+                key.and_then(|key| Some((key.clone(), self.awaiting_reclaim.remove(&key)?)))
+            else {
+                taken.unresolved.push(*assignment_id);
+                continue;
+            };
+            match held.job {
+                Some(job) => taken
+                    .reattached
+                    .push(Reattached::single(key, *assignment_id, job)),
+                None => {
+                    taken.unresolved.push(*assignment_id);
+                    taken.seeded.push((key, held));
+                }
             }
         }
-        (reattached, unresolved)
+        taken
     }
 
-    pub fn release_held(&mut self, worker_id: &str, job_id: &str) {
-        if self
-            .awaiting_reclaim
-            .get(job_id)
-            .is_some_and(|held| held.worker == worker_id)
-        {
-            self.awaiting_reclaim.remove(job_id);
+    pub fn hold_again(&mut self, held: Vec<(String, AwaitingReclaim)>) {
+        for (job_id, held) in held {
+            self.await_reclaim(held, job_id);
         }
     }
 
