@@ -184,7 +184,7 @@
                   </div>
                 } @else {
                   <div class="pkg" data-phase="failure" [style.animation-delay.ms]="($index % staggeredRows) * 18">
-                    <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]"
+                    <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }"
                        [title]="row.failure.eval + ' - ' + row.failure.message" [attr.aria-label]="row.label + ', failed to evaluate'"></a>
                     <gr-status-icon class="si" [phase]="'failure'" size="sm" />
                     <span class="pkg-name">{{ row.label }}</span>

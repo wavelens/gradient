@@ -681,6 +681,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const failed = root.querySelector('.pkg[data-phase="failure"]');
     expect(failed?.querySelector('.pkg-name')?.textContent?.trim()).toBe('b');
     expect(failed?.querySelector('.pkg-error')?.textContent?.trim()).toBe('Failed to evaluate');
+    expect(failed?.querySelector('.pkg-link')?.getAttribute('href')).toMatch(/\/log\/[^?]+\?eval=1$/);
   });
 
   it('holds a failed attribute back until the rows before it are loaded', () => {
