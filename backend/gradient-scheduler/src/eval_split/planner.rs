@@ -326,6 +326,7 @@ mod tests {
             path: segs(path),
             startup_ms: Some(startup_ms),
             peak_rss_mb: 1024.0,
+            max_peak_rss_mb: 1024.0,
         }
     }
 
