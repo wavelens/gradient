@@ -10,6 +10,8 @@ export const DOCS_URL = 'https://wavelens.github.io/gradient/';
 export type DocLink =
   | 'concepts/caches/#using-a-cache'
   | 'concepts/caches/#upstream-types'
+  | 'concepts/caches/#pull-through'
+  | 'concepts/caches/#sharing'
   | 'concepts/projects-and-tasks/#project'
   | 'concepts/projects-and-tasks/#task'
   | 'concepts/projects-and-tasks/#concurrency'
@@ -35,7 +37,8 @@ export type DocLink =
   | 'ui/job-board/#storage-metrics'
   | 'ui/job-board/#workers'
   | 'ui/members-and-roles/#project-roles'
-  | 'ui/members-and-roles/#cache-roles';
+  | 'ui/members-and-roles/#cache-roles'
+  | 'ui/settings/#cache-settings';
 
 export function docsUrl(link: DocLink): string {
   return DOCS_URL + link;

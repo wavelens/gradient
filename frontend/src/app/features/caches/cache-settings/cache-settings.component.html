@@ -12,7 +12,7 @@
     title="Cache Settings"
   >
     <gr-settings-section title="General">
-      <gr-form-field label="Name" for="cache-name" hint="Cache name cannot be changed">
+      <gr-form-field label="Name" for="cache-name">
         <input grInput id="cache-name" [value]="c.name" disabled />
       </gr-form-field>
 
@@ -35,8 +35,8 @@
         for="priority"
         [invalid]="priorityInvalid"
         error="Priority must be between 0 and 255"
-        hint="Higher priority caches are used first (0-255)"
       >
+        <gr-label-help slot="label" doc="ui/settings/#cache-settings" title="Priority sent to Nix clients (0-255). Lower values are queried first." />
         <input
           grInput
           type="number"
@@ -51,8 +51,8 @@
       <gr-form-field
         label="Local Priority"
         for="local-priority"
-        hint="Advertised to clients whose IP matches the server's local-IPs allowlist. Leave empty (or set 0) to always advertise the default priority."
       >
+        <gr-label-help slot="label" doc="ui/settings/#cache-settings" title="Priority sent to clients on the local network. Empty: same as Priority." />
         <input
           grInput
           type="number"
@@ -67,8 +67,8 @@
         for="max-storage"
         [invalid]="maxStorageInvalid"
         error="Set 0 for unlimited, otherwise at least 1 GB"
-        hint="Maximum storage for this cache. Set 0 for unlimited (default); otherwise at least 1 GB."
       >
+        <gr-label-help slot="label" doc="ui/settings/#cache-settings" title="Storage limit of this cache. 0 is unlimited." />
         <input
           grInput
           type="number"
@@ -79,26 +79,23 @@
         />
       </gr-form-field>
 
-      <gr-form-field
-        label="Pull-Through"
-        for="pull-through"
-        hint="Nix clients receive paths from the upstream caches through this cache. Disabled: only paths the cache holds. Builds still substitute from the upstream caches."
-      >
-        <gr-select
+      <gr-form-field>
+        <gr-checkbox
           inputId="pull-through"
-          [options]="pullThroughOptions"
-          optionLabel="label"
-          optionValue="value"
           [(ngModel)]="formData.pull_through"
+          [binary]="true"
           [appManagedDisable]="access()"
-        />
+          label="Pull-Through"
+        >
+          <gr-label-help doc="concepts/caches/#pull-through" title="Nix clients receive paths from the upstream caches through this cache. Off: only paths the cache holds." />
+        </gr-checkbox>
       </gr-form-field>
 
       <gr-form-field
         label="Visibility"
         for="visibility"
-        hint="Public caches are visible and readable by all users"
       >
+        <gr-label-help slot="label" doc="concepts/caches/#sharing" title="Public caches are visible and readable by all users." />
         <gr-select
           inputId="visibility"
           [options]="visibilityOptions"

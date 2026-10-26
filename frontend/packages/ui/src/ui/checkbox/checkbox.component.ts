@@ -24,7 +24,7 @@ let nextCheckboxId = 0;
       (blur)="onTouched()"
     />
     @if (label()) {
-      <label class="gr-checkbox__label" [attr.for]="resolvedId()">{{ label() }}</label>
+      <label class="gr-checkbox__label" [attr.for]="resolvedId()">{{ label() }}<ng-content /></label>
     }
   `,
   styleUrl: './checkbox.component.scss',
