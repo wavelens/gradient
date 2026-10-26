@@ -269,7 +269,7 @@ mod tests {
                         "created_at": "2026-05-21T08:53:21", "created_by": "00000000-0000-0000-0000-000000000009",
                         "force_evaluation": false, "keep_evaluations": 0, "managed": true,
                         "project": "00000000-0000-0000-0000-000000000010", "repository": "https://example.com/repo.git",
-                        "retry_failed_builds": false, "sign_cache": false,
+                        "retry_failed_builds": false, "multi_node_evaluation": false, "sign_cache": false,
                         "wait_for_workers": false, "wildcard": "*"
                     }],
                     "total": 1, "page": 1, "per_page": 50

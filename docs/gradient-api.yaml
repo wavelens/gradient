@@ -16581,6 +16581,10 @@ components:
           type:
           - boolean
           - 'null'
+        multi_node_evaluation:
+          type:
+          - boolean
+          - 'null'
     MakeTeamRequest:
       type: object
       required:
@@ -17468,6 +17472,10 @@ components:
           - boolean
           - 'null'
         retry_failed_builds:
+          type:
+          - boolean
+          - 'null'
+        multi_node_evaluation:
           type:
           - boolean
           - 'null'
@@ -18759,6 +18767,7 @@ components:
       - sign_cache
       - wait_for_workers
       - retry_failed_builds
+      - multi_node_evaluation
       - can_edit
       - can_trigger
       properties:
@@ -18805,6 +18814,8 @@ components:
         wait_for_workers:
           type: boolean
         retry_failed_builds:
+          type: boolean
+        multi_node_evaluation:
           type: boolean
         can_edit:
           type: boolean

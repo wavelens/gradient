@@ -18,13 +18,13 @@ use gradient_entity::dispatched_job::{
     Column as CDispatchedJob, DispatchedJobKind, Entity as EDispatchedJob,
 };
 use gradient_entity::eval_split::{Entity as EEvalSplit, Model as MEvalSplit};
-use gradient_types::MEvaluation;
-use gradient_types::ids::{ClusterJobId, ClusterMemberId, DispatchedJobId, EvaluationId};
+use gradient_types::ids::{ClusterJobId, ClusterMemberId, DispatchedJobId, EvaluationId, TaskId};
+use gradient_types::{CTask, ETask, MEvaluation};
 use gradient_util::sync::Mutex;
 use gradient_wire::types::{SPLIT_COMPANION_ROLE, SPLIT_PRIMARY_ROLE};
 use sea_orm::{
-    ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel, QueryFilter, QuerySelect,
-    TransactionTrait,
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, IntoActiveModel, QueryFilter,
+    QuerySelect, TransactionTrait,
 };
 use tracing::info;
 
@@ -79,6 +79,10 @@ impl Scheduler {
         let Some(task) = evaluation.task else {
             return Ok(None);
         };
+        if !opted_in(&self.db.worker_db, task).await? {
+            return Ok(None);
+        }
+
         let seats = split_seats(&self.cluster_snapshot().await.slots);
         if seats < 2 {
             return Ok(None);
@@ -103,6 +107,17 @@ impl Scheduler {
 
         Ok(created)
     }
+}
+
+async fn opted_in<C: ConnectionTrait>(db: &C, task: TaskId) -> Result<bool> {
+    let opted_in = ETask::find_by_id(task)
+        .select_only()
+        .column(CTask::MultiNodeEvaluation)
+        .into_tuple::<bool>()
+        .one(db)
+        .await?;
+
+    Ok(opted_in.unwrap_or(false))
 }
 
 #[expect(
@@ -277,6 +292,34 @@ mod tests {
         ];
 
         assert_eq!(split_seats(&slots), 2);
+    }
+
+    #[tokio::test]
+    async fn no_split_when_the_task_has_not_opted_in() {
+        let opted_out =
+            BTreeMap::from([("multi_node_evaluation", sea_orm::Value::Bool(Some(false)))]);
+        let db = mock_db()
+            .append_query_results([vec![opted_out]])
+            .into_connection();
+        let scheduler = Scheduler::new(
+            gradient_test_support::state::TestState::new()
+                .worker_db(db)
+                .build(),
+        );
+        let evaluation = MEvaluation {
+            id: EvaluationId::now_v7(),
+            task: Some(TaskId::now_v7()),
+            ..Default::default()
+        };
+
+        let decided = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            scheduler.decide_split(&evaluation),
+        )
+        .await
+        .expect("decided without asking the scheduler core for idle workers");
+
+        assert_eq!(decided.expect("decision"), None);
     }
 
     #[tokio::test]

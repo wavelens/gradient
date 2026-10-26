@@ -1304,6 +1304,7 @@ export interface MakeTaskRequest {
   sign_cache?: boolean | null;
   wait_for_workers?: boolean | null;
   retry_failed_builds?: boolean | null;
+  multi_node_evaluation?: boolean | null;
 }
 
 export interface MakeTeamRequest {
@@ -1616,6 +1617,7 @@ export interface PatchTaskRequest {
   sign_cache?: boolean | null;
   wait_for_workers?: boolean | null;
   retry_failed_builds?: boolean | null;
+  multi_node_evaluation?: boolean | null;
 }
 
 export interface PatchTeamRequest {
@@ -2112,6 +2114,7 @@ export interface TaskResponse {
   sign_cache: boolean;
   wait_for_workers: boolean;
   retry_failed_builds: boolean;
+  multi_node_evaluation: boolean;
   can_edit: boolean;
   can_trigger: boolean;
 }

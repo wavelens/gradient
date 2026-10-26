@@ -218,6 +218,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         wildcard: input.get("Wildcard"),
                         concurrency: None,
                         retry_failed_builds: None,
+                        multi_node_evaluation: None,
                         sign_cache: None,
                         wait_for_workers: None,
                     },

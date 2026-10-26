@@ -37,6 +37,7 @@ function taskFor(c: AccessCase) {
     sign_cache: true,
     wait_for_workers: false,
     retry_failed_builds: true,
+    multi_node_evaluation: false,
     managed: c.managed,
     can_edit: c.canEdit,
     can_trigger: c.canTrigger ?? c.canEdit,

@@ -315,6 +315,15 @@
         '';
       };
 
+      multi_node_evaluation = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Whether to let more than one eval worker run an evaluation of this task. The server
+          splits an evaluation only when past evaluations of the task predict a gain.
+        '';
+      };
+
       concurrency = mkOption {
         type = types.enum [ "auto" "hard_abort" "soft_abort" "skip" "all" ];
         default = "auto";

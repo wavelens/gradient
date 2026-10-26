@@ -96,6 +96,16 @@
       />
     </gr-form-field>
 
+    <gr-form-field>
+      <gr-checkbox
+        inputId="task-multi-node-evaluation"
+        [(ngModel)]="formData.multi_node_evaluation"
+        [binary]="true"
+        [appManagedDisable]="access()"
+        label="Enable MultiNode Evaluations (beta)"
+      />
+    </gr-form-field>
+
     <div class="form-actions">
       <button
         *appWritable="access()"

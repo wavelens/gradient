@@ -52,6 +52,8 @@ pub struct MakeTaskRequest {
     pub wait_for_workers: Option<bool>,
     #[serde(default)]
     pub retry_failed_builds: Option<bool>,
+    #[serde(default)]
+    pub multi_node_evaluation: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
@@ -78,6 +80,7 @@ pub struct PatchTaskRequest {
     pub sign_cache: Option<bool>,
     pub wait_for_workers: Option<bool>,
     pub retry_failed_builds: Option<bool>,
+    pub multi_node_evaluation: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -255,6 +258,7 @@ pub async fn put(
         sign_cache: body.sign_cache.unwrap_or(true),
         wait_for_workers: body.wait_for_workers.unwrap_or(false),
         retry_failed_builds: body.retry_failed_builds.unwrap_or(true),
+        multi_node_evaluation: body.multi_node_evaluation.unwrap_or(false),
         ..Default::default()
     };
 
@@ -394,6 +398,10 @@ pub async fn patch_task(
         ("sign_cache", body.sign_cache.is_some()),
         ("wait_for_workers", body.wait_for_workers.is_some()),
         ("retry_failed_builds", body.retry_failed_builds.is_some()),
+        (
+            "multi_node_evaluation",
+            body.multi_node_evaluation.is_some(),
+        ),
     ]);
     let mut atask: ATask = task.into();
     let mut patcher = TaskPatcher::new(&state, &mut atask);
@@ -427,6 +435,9 @@ pub async fn patch_task(
     }
     if let Some(retry_failed_builds) = body.retry_failed_builds {
         patcher.atask.retry_failed_builds = Set(retry_failed_builds);
+    }
+    if let Some(multi_node_evaluation) = body.multi_node_evaluation {
+        patcher.atask.multi_node_evaluation = Set(multi_node_evaluation);
     }
 
     atask.force_evaluation = Set(true);
