@@ -9,8 +9,8 @@ use bytes::Bytes;
 use crate::codec::Proto;
 use crate::types::{
     CachedPath, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
-    EvalCachePullOutcome, GradientCapabilities, GrantTarget, ImportOutcome, InputOutcome, Job,
-    JobCandidate, UploadOutcome,
+    EvalCachePullOutcome, EvalShardOutcome, GradientCapabilities, GrantTarget, ImportOutcome,
+    InputOutcome, Job, JobCandidate, UploadOutcome,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -191,6 +191,12 @@ pub enum ServerMessage {
         bytes_done: u64,
         bytes_total: Option<u64>,
     },
+
+    #[proto(40)]
+    EvalShardReply {
+        job_id: String,
+        outcome: EvalShardOutcome,
+    },
 }
 
 impl ServerMessage {
@@ -206,7 +212,8 @@ impl ServerMessage {
             | ServerMessage::EvalCacheChunk { job_id, .. }
             | ServerMessage::ImportResult { job_id, .. }
             | ServerMessage::InputResult { job_id, .. }
-            | ServerMessage::InputProgress { job_id, .. } => Some(job_id),
+            | ServerMessage::InputProgress { job_id, .. }
+            | ServerMessage::EvalShardReply { job_id, .. } => Some(job_id),
             _ => None,
         }
     }
@@ -243,6 +250,7 @@ impl ServerMessage {
             ServerMessage::InputResult { .. } => "InputResult",
             ServerMessage::FetchInput { .. } => "FetchInput",
             ServerMessage::InputProgress { .. } => "InputProgress",
+            ServerMessage::EvalShardReply { .. } => "EvalShardReply",
         }
     }
 

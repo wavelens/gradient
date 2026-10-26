@@ -214,6 +214,41 @@ pub enum SegmentSource {
     Inline { size_bytes: u64 },
 }
 
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
+pub struct EvalShardSpec {
+    pub pattern: String,
+    pub set: Vec<String>,
+    pub children: Option<Vec<String>>,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
+pub struct EvalShard {
+    pub id: String,
+    pub pattern: String,
+    pub children: Option<Vec<String>>,
+    pub drv_paths: Vec<String>,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
+pub struct FinishedShard {
+    pub id: String,
+    pub deferred: Vec<EvalShardSpec>,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq)]
+pub enum EvalShardOutcome {
+    Wait {
+        retry_after_ms: u32,
+    },
+    Source {
+        store_path: String,
+        fingerprint: String,
+    },
+    Plan,
+    Shard(EvalShard),
+    Finished,
+}
+
 #[derive(Proto, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum QueryMode {
     #[default]

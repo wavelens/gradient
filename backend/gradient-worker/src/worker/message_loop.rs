@@ -450,6 +450,9 @@ impl MessageLoopState {
                 self.eval_cache_recv
                     .deliver_pull_chunk(&job_id, &data, offset, is_final);
             }
+            ServerMessage::EvalShardReply { job_id, .. } => {
+                debug!(%job_id, "EvalShardReply without a split evaluation member - dropped");
+            }
             ServerMessage::NarPush { .. }
             | ServerMessage::NarStreamHeader { .. }
             | ServerMessage::NarUnavailable { .. }

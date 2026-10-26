@@ -42,3 +42,67 @@ fn an_eval_cache_pull_from_proto_37_decodes_with_no_applied_keys() {
         }
     );
 }
+
+#[test]
+fn split_evaluation_messages_round_trip_and_need_proto_40() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{ClientMessage, ServerMessage};
+    use crate::types::{EvalShard, EvalShardOutcome, EvalShardSpec, FinishedShard};
+
+    let spec = EvalShardSpec {
+        pattern: "legacyPackages.x86_64-linux.*".into(),
+        set: vec!["legacyPackages".into(), "x86_64-linux".into()],
+        children: Some(vec!["hello".into()]),
+    };
+    let client = [
+        ClientMessage::EvalSourceReady {
+            job_id: "eval:e".into(),
+            store_path: "/nix/store/[hash130]-source".into(),
+            fingerprint: "fp".into(),
+        },
+        ClientMessage::EvalShardsPlanned {
+            job_id: "eval:e".into(),
+            shards: vec![spec.clone()],
+        },
+        ClientMessage::EvalShardRequest {
+            job_id: "eval:e:1".into(),
+            have_source: true,
+            finished: Some(FinishedShard {
+                id: "s".into(),
+                deferred: vec![spec],
+            }),
+        },
+    ];
+    for message in client {
+        let bytes = to_bytes(&message, 40).unwrap();
+        assert_eq!(from_bytes::<ClientMessage>(bytes, 40).unwrap(), message);
+        assert!(to_bytes(&message, 39).is_err(), "{message:?}");
+    }
+
+    let outcomes = [
+        EvalShardOutcome::Wait {
+            retry_after_ms: 1000,
+        },
+        EvalShardOutcome::Source {
+            store_path: "/nix/store/[hash130]-source".into(),
+            fingerprint: "fp".into(),
+        },
+        EvalShardOutcome::Plan,
+        EvalShardOutcome::Shard(EvalShard {
+            id: "s".into(),
+            pattern: "packages.*".into(),
+            children: None,
+            drv_paths: vec!["/nix/store/[hash131]-hello.drv".into()],
+        }),
+        EvalShardOutcome::Finished,
+    ];
+    for outcome in outcomes {
+        let reply = ServerMessage::EvalShardReply {
+            job_id: "eval:e".into(),
+            outcome,
+        };
+        let bytes = to_bytes(&reply, 40).unwrap();
+        assert_eq!(from_bytes::<ServerMessage>(bytes, 40).unwrap(), reply);
+        assert!(to_bytes(&reply, 39).is_err());
+    }
+}
