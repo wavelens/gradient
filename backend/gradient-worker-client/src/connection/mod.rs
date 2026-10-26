@@ -5,6 +5,7 @@
  */
 
 pub mod handshake;
+pub mod reconnecting;
 
 use anyhow::{Context, Result};
 use gradient_wire::messages::{ClientMessage, ServerMessage};
