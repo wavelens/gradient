@@ -132,6 +132,25 @@ impl ClusterBook {
         Some(cluster)
     }
 
+    pub fn drop_members(&mut self, id: ClusterJobId, members: &[ClusterMemberId]) -> Vec<String> {
+        let Some(cluster) = self.waiting.get_mut(&id) else {
+            return Vec::new();
+        };
+        let (dropped, kept) = std::mem::take(&mut cluster.members)
+            .into_iter()
+            .partition::<Vec<_>, _>(|m| members.contains(&m.id));
+        cluster.members = kept;
+        cluster.expected = cluster.members.len();
+        cluster.refresh_startable();
+
+        let keys: Vec<String> = dropped.into_iter().map(|m| m.key).collect();
+        for key in &keys {
+            self.by_key.remove(key);
+        }
+
+        keys
+    }
+
     pub fn release(&mut self, key: &str) {
         self.by_key.remove(key);
     }

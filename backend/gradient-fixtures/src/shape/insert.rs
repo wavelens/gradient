@@ -8,7 +8,7 @@ use gradient_entity::{
     build_attempt, build_job, cache, cache_upstream, cached_path, cluster_attempt, cluster_job,
     cluster_member, commit, derivation, derivation_build, derivation_dependency,
     derivation_feature, derivation_metric, derivation_output, dispatched_job, dispatched_job_phase,
-    entry_point, eval_cache_store, evaluation, evaluation_flake_input_override,
+    entry_point, eval_cache_store, eval_split, evaluation, evaluation_flake_input_override,
     evaluation_input_update, evaluation_metric, feature, project, project_cache, task, task_action,
     task_flake_input_override, task_trigger, user, worker_registration,
 };
@@ -58,6 +58,7 @@ pub(super) async fn all(shape: Shape, db: &DatabaseConnection) {
     insert!(db, cache_upstream::Entity, shape.upstreams);
     insert!(db, cluster_job::Entity, shape.clusters);
     insert!(db, cluster_member::Entity, shape.members);
+    insert!(db, eval_split::Entity, shape.eval_splits);
     insert!(db, cluster_attempt::Entity, shape.cluster_attempts);
     insert!(db, dispatched_job::Entity, shape.assignments);
     insert!(db, dispatched_job_phase::Entity, shape.phases);

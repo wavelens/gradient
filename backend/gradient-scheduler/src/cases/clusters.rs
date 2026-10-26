@@ -14,13 +14,16 @@ use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::dispatched_job::{DispatchedJobKind, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{ClusterAttemptId, ClusterJobId, EvaluationId};
+use gradient_entity::{cluster_job, cluster_member, eval_split};
 use gradient_fixtures::shape::shape;
 use gradient_pool::session_port::SessionSignal;
-use gradient_wire::types::{BuildFailureKind, ClusterPeer, JobKind};
+use gradient_wire::types::{
+    BuildFailureKind, ClusterPeer, JobKind, SPLIT_COMPANION_ROLE, SPLIT_PRIMARY_ROLE,
+};
 
 use super::{
     A, A_OUT, B, B_OUT, CaseShapes, ClusterAssignment, D, D_OUT, SchedulerCase, SlotKind, ago,
-    eval_key, failure, output_nar, w_all, without_offers,
+    eval_key, failure, output_nar, w_all, w_eval, without_offers,
 };
 
 const W1: &str = "w1";
@@ -1133,6 +1136,107 @@ async fn k29_startup_recovery_closes_an_unstarted_attempt_as_prepare_failed() {
     case.check("step 1").await;
 
     case.finish().await;
+}
+
+#[tokio::test]
+async fn k30_a_split_cluster_shrinks_to_the_free_seats() {
+    let (c, e1, _) = cluster_ids();
+    let case = SchedulerCase::start(split_of_three(c, e1)).await;
+    case.connect(W1, w_eval(), &[]).await;
+    case.connect(W2, w_eval(), &[]).await;
+    case.assign_queued_evals().await;
+    assert_eq!(
+        present_members(&case, c).await.len(),
+        3,
+        "after 1: members_present"
+    );
+    case.check("step 1").await;
+
+    case.idle(W1, JobKind::Flake).await;
+    case.idle(W2, JobKind::Flake).await;
+    case.plan_clusters().await;
+    assert_eq!(
+        split_indexes(&case, c).await,
+        vec![0, 1],
+        "after 2: cluster_member(C) lost the companion with index 2"
+    );
+    only_attempt(&case, c).await;
+    let seated = [eval_key(e1), format!("{}:1", eval_key(e1))];
+    for key in &seated {
+        assert_eq!(case.assignments(key).await.len(), 1, "after 2: dj({key})");
+    }
+    case.signals(W1);
+    case.signals(W2);
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn k31_a_split_cluster_with_one_free_seat_dissolves_at_once() {
+    let (c, e1, _) = cluster_ids();
+    let case = SchedulerCase::start(split_of_three(c, e1)).await;
+    case.connect(W1, w_eval(), &[]).await;
+    case.assign_queued_evals().await;
+    case.idle(W1, JobKind::Flake).await;
+    case.check("step 1").await;
+
+    case.plan_clusters().await;
+    assert!(
+        case.db.rows::<cluster_job::Entity>().await.is_empty(),
+        "after 2: cluster_job == []"
+    );
+    assert!(
+        split_indexes(&case, c).await.is_empty(),
+        "after 2: cluster_member == []"
+    );
+    assert!(
+        case.db.rows::<eval_split::Entity>().await.is_empty(),
+        "after 2: eval_split == []"
+    );
+    assert!(
+        case.waiting_cluster(c).await.is_none(),
+        "after 2: waiting_cluster(C)"
+    );
+    case.check("step 2").await;
+
+    case.assign_queued_evals().await;
+    assert!(
+        case.pending(&eval_key(e1)).await,
+        "after 3: eval:E1 routes as a single job"
+    );
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+fn split_of_three(
+    cluster: ClusterJobId,
+    evaluation: EvaluationId,
+) -> gradient_fixtures::shape::Shape {
+    shape()
+        .evalq(evaluation)
+        .split_member_of(cluster, SPLIT_PRIMARY_ROLE, 0)
+        .split_member_of(cluster, SPLIT_COMPANION_ROLE, 1)
+        .split_member_of(cluster, SPLIT_COMPANION_ROLE, 2)
+        .eval_split_of(cluster)
+        .cluster(cluster, false, 2, ClusterJobStatus::Queued, 0, ago(0))
+        .cluster_option(cluster, |c| {
+            c.dissolve_after = Some(gradient_types::now() + chrono::TimeDelta::seconds(30));
+        })
+}
+
+async fn split_indexes(case: &SchedulerCase, cluster: ClusterJobId) -> Vec<i16> {
+    let mut indexes: Vec<i16> = case
+        .db
+        .rows::<cluster_member::Entity>()
+        .await
+        .into_iter()
+        .filter(|m| m.cluster_job == cluster)
+        .filter_map(|m| m.eval_index)
+        .collect();
+    indexes.sort_unstable();
+    indexes
 }
 
 struct Claimed {

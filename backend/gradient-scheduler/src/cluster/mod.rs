@@ -19,7 +19,7 @@ pub use book::{ClusterBook, ClusterMember, PendingCluster};
 pub use coordinator::*;
 pub(crate) use divert::{Membership, Route};
 pub use matching::kuhn;
-pub use planner::{Placement, ScoreLookup, Seat, plan};
+pub use planner::{Placement, ScoreLookup, Seat, fillable_seats, plan};
 pub use prepared::{PreparedMember, PreparedMembers};
 pub use reservation::*;
 pub use settlement::*;

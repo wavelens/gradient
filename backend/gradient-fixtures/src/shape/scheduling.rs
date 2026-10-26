@@ -23,9 +23,9 @@ use gradient_entity::task_trigger::TriggerType;
 use gradient_entity::{
     build_attempt, build_job, cache_upstream, cluster_attempt, cluster_job, cluster_member,
     derivation, derivation_build, derivation_feature, derivation_metric, dispatched_job,
-    dispatched_job_phase, eval_cache_store, evaluation, evaluation_flake_input_override,
-    evaluation_input_update, evaluation_metric, feature, task_action, task_flake_input_override,
-    task_trigger,
+    dispatched_job_phase, eval_cache_store, eval_split, evaluation,
+    evaluation_flake_input_override, evaluation_input_update, evaluation_metric, feature,
+    task_action, task_flake_input_override, task_trigger,
 };
 use gradient_types::{ActionConfig, ActionType, PatchGeneratorKind, PrGranularity, VerifyGate};
 
@@ -481,6 +481,26 @@ impl Shape {
         if let Some(added) = self.members.last_mut() {
             added.evaluation = Some(evaluation);
         }
+        self
+    }
+
+    pub fn split_member_of(mut self, cluster: ClusterJobId, role: &str, eval_index: i16) -> Self {
+        let evaluation = self.evaluations[self.current_evaluation()].id;
+        self.members.push(cluster_member::Model {
+            evaluation: Some(evaluation),
+            eval_index: Some(eval_index),
+            ..member(cluster, role, eval_index == 0, None)
+        });
+        self
+    }
+
+    pub fn eval_split_of(mut self, cluster: ClusterJobId) -> Self {
+        let evaluation = self.evaluations[self.current_evaluation()].id;
+        self.eval_splits.push(eval_split::Model {
+            evaluation,
+            cluster_job: cluster,
+            ..Default::default()
+        });
         self
     }
 

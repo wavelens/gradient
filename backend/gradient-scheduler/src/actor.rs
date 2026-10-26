@@ -226,6 +226,11 @@ pub enum SchedulerMsg {
         cluster: gradient_types::ids::ClusterJobId,
         reply: RpcReplyPort<Option<crate::cluster::PendingCluster>>,
     },
+    DropWaitingMembers {
+        cluster: gradient_types::ids::ClusterJobId,
+        members: Vec<gradient_types::ids::ClusterMemberId>,
+        reply: RpcReplyPort<Option<crate::cluster::PendingCluster>>,
+    },
     IsAborting {
         job_id: String,
         reply: RpcReplyPort<bool>,
@@ -1039,6 +1044,13 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::DropWaiting { cluster, reply } => {
                 let _ = reply.send(core.tracker.drop_cluster(cluster));
+            }
+            SchedulerMsg::DropWaitingMembers {
+                cluster,
+                members,
+                reply,
+            } => {
+                let _ = reply.send(core.tracker.drop_cluster_members(cluster, &members));
             }
             SchedulerMsg::IsAborting { job_id, reply } => {
                 let _ = reply.send(core.tracker.is_aborting(&job_id));

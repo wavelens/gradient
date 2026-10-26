@@ -27,6 +27,15 @@ pub fn kuhn(eligible: &[Vec<usize>]) -> Option<Vec<usize>> {
     Some(seats)
 }
 
+pub fn matched_count(eligible: &[Vec<usize>]) -> usize {
+    let right = eligible.iter().flatten().max().map_or(0, |m| m + 1);
+    let mut owner: Vec<Option<usize>> = vec![None; right];
+
+    (0..eligible.len())
+        .filter(|&left| augment(left, eligible, &mut owner, &mut vec![false; right]))
+        .count()
+}
+
 fn augment(
     left: usize,
     eligible: &[Vec<usize>],
@@ -53,7 +62,7 @@ fn augment(
 
 #[cfg(test)]
 mod tests {
-    use super::kuhn;
+    use super::{kuhn, matched_count};
 
     #[test]
     fn a_later_member_displaces_an_earlier_one_to_its_second_choice() {
@@ -70,6 +79,12 @@ mod tests {
     #[test]
     fn a_member_without_workers_has_no_matching() {
         assert_eq!(kuhn(&[vec![0], vec![]]), None);
+    }
+
+    #[test]
+    fn the_matched_count_is_the_largest_partial_seating() {
+        assert_eq!(matched_count(&[vec![0], vec![0], vec![0, 1]]), 2);
+        assert_eq!(matched_count(&[vec![], vec![]]), 0);
     }
 
     #[test]
