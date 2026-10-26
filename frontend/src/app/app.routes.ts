@@ -308,6 +308,14 @@ export const routes: Routes = [
 
       // Job Board
       {
+        path: 'board/jobs/:id',
+        title: 'Assigned Job',
+        loadComponent: () =>
+          import('./features/board/job-detail/job-detail.component').then(
+            (m) => m.BoardJobDetailComponent
+          ),
+      },
+      {
         path: 'board',
         title: 'Job Board',
         loadComponent: () =>
@@ -326,14 +334,6 @@ export const routes: Routes = [
             loadComponent: () =>
               import('./features/board/live-jobs/live-jobs.component').then(
                 (m) => m.BoardLiveJobsComponent
-              ),
-          },
-          {
-            path: 'jobs/:id',
-            title: 'Assigned Job',
-            loadComponent: () =>
-              import('./features/board/job-detail/job-detail.component').then(
-                (m) => m.BoardJobDetailComponent
               ),
           },
           {
