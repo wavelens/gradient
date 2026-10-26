@@ -15,6 +15,7 @@ mod probe;
 mod queue;
 mod realisation;
 mod retire;
+mod runner;
 mod scenarios;
 mod sharing;
 mod signing;
@@ -46,6 +47,7 @@ use gradient_entity::{
 use gradient_fixtures::database::TestDatabase;
 use gradient_fixtures::shape::{Shape, build_assignment, build_job_key};
 use gradient_fixtures::test_date;
+use gradient_types::RuntimeConfig;
 use gradient_wire::types::{BuildFailureKind, DiscoveredDerivation};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
@@ -98,18 +100,26 @@ impl Case {
     }
 
     pub async fn start_with_mapping(shape: Shape, mapping: Arc<dyn StorePathMapping>) -> Self {
-        let (case, report) = Self::start_mapped(shape, Some(mapping)).await;
+        let (case, report) = Self::start_configured(shape, Some(mapping), |_| {}).await;
+        assert_eq!(report.total(), 0, "drift after the seed: {report:?}");
+        case
+    }
+
+    pub async fn start_without_runner_jobs(shape: Shape) -> Self {
+        let (case, report) =
+            Self::start_configured(shape, None, |config| config.runner.enable = false).await;
         assert_eq!(report.total(), 0, "drift after the seed: {report:?}");
         case
     }
 
     pub async fn start_with_drift(shape: Shape) -> (Self, ConsistencyReport) {
-        Self::start_mapped(shape, None).await
+        Self::start_configured(shape, None, |_| {}).await
     }
 
-    async fn start_mapped(
+    async fn start_configured(
         shape: Shape,
         mapping: Option<Arc<dyn StorePathMapping>>,
+        configure: impl FnOnce(&mut RuntimeConfig),
     ) -> (Self, ConsistencyReport) {
         let declared = shape.declared_statuses();
         let secret = SECRET.with(|(_, path)| path.clone());
@@ -119,7 +129,10 @@ impl Case {
             .take_inbox()
             .expect("a fresh channel has an inbox");
         let ctx = ctx_with_crypt_file(db.connection(), &secret).await;
+        let mut config = (*ctx.config).clone();
+        configure(&mut config);
         let ctx = DbContext {
+            config: Arc::new(config),
             memory: DbMemory {
                 probe_requests,
                 ..ctx.memory.clone()

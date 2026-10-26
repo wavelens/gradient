@@ -17,8 +17,9 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::entry_point::{self, Licenses};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::evaluation_message::MessageLevel;
+use gradient_types::runner::{runner_image_attr, runner_refusal};
 use gradient_types::*;
-use gradient_wire::types::{DiscoveredDerivation, License};
+use gradient_wire::types::{DiscoveredDerivation, License, attr_eval_source};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
     QueryFilter, Value,
@@ -880,14 +881,15 @@ impl BatchWriter<'_> {
         task_id: TaskId,
         derivations: &[DiscoveredDerivation],
         drv_path_to_id: &HashMap<String, DerivationId>,
-    ) -> Vec<DerivationId> {
+    ) -> Result<Vec<DerivationId>> {
         let now = gradient_types::now();
+        let refused = self.refused_runner_attrs(task_id, derivations).await?;
 
         let mut active_entry_points: Vec<AEntryPoint> = Vec::new();
         let mut entry_point_drvs: Vec<DerivationId> = Vec::new();
 
         for d in derivations {
-            if d.attr.is_empty() {
+            if d.attr.is_empty() || refused.contains(&d.attr) {
                 continue;
             }
 
@@ -901,6 +903,7 @@ impl BatchWriter<'_> {
                         derivation: drv_id,
                         eval: d.attr.clone(),
                         licenses: entry_point_licenses(&d.licenses),
+                        runner: entry_point_runner(d),
                         created_at: now,
                         ..Default::default()
                     }
@@ -919,8 +922,72 @@ impl BatchWriter<'_> {
             }
         }
 
-        entry_point_drvs
+        Ok(entry_point_drvs)
     }
+
+    async fn refused_runner_attrs(
+        &self,
+        task_id: TaskId,
+        derivations: &[DiscoveredDerivation],
+    ) -> Result<HashSet<String>> {
+        let image_suffix = runner_image_attr("");
+        let is_image = |d: &DiscoveredDerivation| d.attr.ends_with(&image_suffix);
+        if !derivations
+            .iter()
+            .any(|d| d.runner.is_some() || is_image(d))
+        {
+            return Ok(HashSet::new());
+        }
+
+        let instance_enabled = self.ctx.config.runner.enable;
+        let project_enabled = self.project_runs_runner_jobs(task_id).await?;
+        let mut refused = HashSet::new();
+        for d in derivations {
+            if let Some(spec) = &d.runner {
+                if let Some(message) = runner_refusal(instance_enabled, project_enabled, spec.nodes)
+                {
+                    self.refuse_runner(&d.attr, message).await;
+                    refused.extend([d.attr.clone(), runner_image_attr(&d.attr)]);
+                }
+            } else if is_image(d) && runner_refusal(instance_enabled, project_enabled, 1).is_some()
+            {
+                refused.insert(d.attr.clone());
+            }
+        }
+
+        Ok(refused)
+    }
+
+    async fn project_runs_runner_jobs(&self, task_id: TaskId) -> Result<bool> {
+        let task = ETask::find_by_id(task_id)
+            .one(self.db())
+            .await
+            .context("fetch the task of a runner entry point")?
+            .with_context(|| format!("task {task_id} not found"))?;
+        let project = EProject::find_by_id(task.project)
+            .one(self.db())
+            .await
+            .context("fetch the project of a runner entry point")?
+            .with_context(|| format!("project {} not found", task.project))?;
+        Ok(project.runner_enabled)
+    }
+
+    async fn refuse_runner(&self, attr: &str, message: &str) {
+        report_worker_message(
+            self.ctx,
+            self.evaluation_id,
+            MessageLevel::Error,
+            message.to_owned(),
+            attr_eval_source(attr),
+        )
+        .await;
+    }
+}
+
+fn entry_point_runner(d: &DiscoveredDerivation) -> Option<sea_orm::JsonValue> {
+    d.runner
+        .as_ref()
+        .and_then(|spec| serde_json::to_value(spec).ok())
 }
 
 fn entry_point_licenses(licenses: &[License]) -> Licenses {
@@ -1002,7 +1069,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
             Some(task) => {
                 writer
                     .process_entry_points(task, &batch.derivations, ids)
-                    .await
+                    .await?
             }
             None => Vec::new(),
         };
