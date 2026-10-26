@@ -28,6 +28,7 @@ pub struct SetCost {
     pub path: Vec<String>,
     pub startup_ms: Option<f64>,
     pub peak_rss_mb: f64,
+    pub max_peak_rss_mb: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -79,6 +80,7 @@ pub async fn load_eval_costs<C: ConnectionTrait>(
                 path: row.path,
                 startup_ms: row.startup_ms,
                 peak_rss_mb: row.peak_rss_mb,
+                max_peak_rss_mb: row.max_peak_rss_mb,
             })
             .collect(),
         subtrees: subtrees
@@ -103,6 +105,7 @@ fn set_rows(
         path: set.path.clone(),
         startup_ms: set.startup_ms.map(|ms| ms as f64),
         peak_rss_mb: set.peak_rss_mb as f64,
+        max_peak_rss_mb: set.peak_rss_mb as f64,
         samples: 1,
         updated_at: now,
     });
@@ -167,6 +170,12 @@ fn set_conflict() -> OnConflict {
             )),
         )
         .value(CSetCost::PeakRssMb, moving_average(table, "peak_rss_mb"))
+        .value(
+            CSetCost::MaxPeakRssMb,
+            Expr::cust(format!(
+                "greatest(\"{table}\".\"max_peak_rss_mb\", \"excluded\".\"max_peak_rss_mb\")"
+            )),
+        )
         .value(CSetCost::Samples, one_more_sample(table))
         .update_column(CSetCost::UpdatedAt)
         .to_owned()
@@ -290,6 +299,37 @@ mod tests {
         );
         let values = format!("{:?}", upsert.values);
         assert!(values.contains("Double(None)"), "{values}");
+    }
+
+    #[tokio::test]
+    async fn the_seat_peak_keeps_the_largest_value() {
+        let sets = [EvalSetCost {
+            path: path(0),
+            startup_ms: None,
+            peak_rss_mb: 900,
+        }];
+
+        let statements = recorded(&sets, &[]).await;
+
+        let upsert = starting_with(&statements, "INSERT INTO \"eval_set_cost\"")[0];
+        assert!(
+            upsert.sql.contains(
+                "\"max_peak_rss_mb\" = greatest(\"eval_set_cost\".\"max_peak_rss_mb\", \
+                 \"excluded\".\"max_peak_rss_mb\")"
+            ),
+            "{}",
+            upsert.sql
+        );
+        assert!(
+            upsert.sql.contains(
+                "\"peak_rss_mb\" = \"eval_set_cost\".\"peak_rss_mb\" * 0.5 + \
+                 \"excluded\".\"peak_rss_mb\" * 0.5"
+            ),
+            "{}",
+            upsert.sql
+        );
+        let values = format!("{:?}", upsert.values);
+        assert_eq!(values.matches("Double(Some(900.0))").count(), 2, "{values}");
     }
 
     #[tokio::test]

@@ -142,7 +142,7 @@ flowchart LR
 | Seats | Distinct idle eval workers, at most `MAX_SPLIT_MEMBERS` (4). Workers with the `federate` capability never count |
 | Member count | The cost planner can pick the count with the shortest predicted wall clock. Fewer than 2 members: no split |
 | One transaction | No open eval dispatch of the evaluation, then the `cluster_job` row, the members and the `eval_split` row |
-| Placement | A worker can seat a member only with free memory of at least `min_free_ram_mb`, the largest set peak RSS. `federate` workers never seat a member |
+| Placement | A worker can seat a member only with free memory of at least `min_free_ram_mb`, the largest `max_peak_rss_mb` of the task. `federate` workers never seat a member |
 | Too few free seats | `cluster-dispatch` can drop the companions with the highest `eval_index` down to the fillable seats. Below 2 fillable seats, the cluster gets deleted on the same pass |
 | Unplaced | A cluster still `Queued` after `dissolve_after` (30 s) gets deleted by `cluster-dispatch`. The evaluation then runs on one worker |
 

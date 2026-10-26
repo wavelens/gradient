@@ -18,7 +18,7 @@ flowchart LR
 | `evaluation_metric` | Per evaluation: thunks, function calls, primop calls, lookups, allocated bytes, peak GC heap and RSS (MB), `total_eval_ms`, `worker_id`, plus the phase columns `fetch_ms`, `eval_flake_ms`, `eval_drv_ms` |
 | `evaluation_attr_cost` | Per attribute: thunks, function calls, wall clock and allocated bytes of resolving its derivation. The discovery walk of a request stays with its wildcard target |
 | `flake_output_node` | The walked flake-output tree: `path`, `parent`, `name`, `kind`, `is_derivation`, `drv_path` |
-| `eval_set_cost` | Per task and split attribute set: estimated startup cost (`startup_ms`), peak RSS (MB), sample count |
+| `eval_set_cost` | Per task and split attribute set: estimated startup cost (`startup_ms`), averaged peak RSS (`peak_rss_mb`), largest peak RSS (`max_peak_rss_mb`), sample count |
 | `eval_subtree_cost` | Per task and subtree (one child of a split set): estimated attribute count, wall clock per attribute, sample count |
 | `eval_cost_report` | Per evaluation and job: the staged `EvalStats` totals, sets and subtrees, deleted after the merge |
 
@@ -43,6 +43,7 @@ Two estimate tables predict the cost for each flake part. Paths persist across c
 - Startup samples are the first walk time of a subprocess minus the median walk time of later calls of that set.
 - Sets listed only by reused subprocesses keep their stored startup cost.
 - Members of a split evaluation can report the same set. Merged sets keep the median startup sample and the largest peak RSS. Subtrees with one path add up.
+- `max_peak_rss_mb`: the largest sample, not an average. Members of a split evaluation need this much free RAM on each worker.
 - Rows without an update for 30 days disappear on the next report of the task.
 - Tables take one statement per 1000 rows, never one per attribute.
 

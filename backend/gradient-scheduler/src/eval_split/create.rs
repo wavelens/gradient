@@ -128,7 +128,7 @@ fn min_free_ram_mb(costs: &TaskEvalCosts) -> Option<i32> {
     costs
         .sets
         .iter()
-        .map(|set| set.peak_rss_mb)
+        .map(|set| set.max_peak_rss_mb)
         .reduce(f64::max)
         .map(|mb| mb.ceil().clamp(0.0, f64::from(i32::MAX)) as i32)
 }
@@ -262,6 +262,7 @@ mod tests {
                 path: set.clone(),
                 startup_ms: Some(3000.0),
                 peak_rss_mb: 2048.0,
+                max_peak_rss_mb: 2048.0,
             }],
             subtrees: (0..400)
                 .map(|index| SubtreeCost {
@@ -278,7 +279,16 @@ mod tests {
         assert_eq!(split_members(&TaskEvalCosts::default(), 4), 1);
         assert_eq!(split_members(&large_flake(), 1), 1);
         assert_eq!(split_members(&large_flake(), 4), 4);
-        assert_eq!(min_free_ram_mb(&large_flake()), Some(2048));
+    }
+
+    #[test]
+    fn the_seat_ram_comes_from_the_largest_peak() {
+        let mut costs = large_flake();
+        costs.sets[0].peak_rss_mb = 600.0;
+        costs.sets[0].max_peak_rss_mb = 900.4;
+
+        assert_eq!(min_free_ram_mb(&costs), Some(901));
+        assert_eq!(min_free_ram_mb(&TaskEvalCosts::default()), None);
     }
 
     #[test]

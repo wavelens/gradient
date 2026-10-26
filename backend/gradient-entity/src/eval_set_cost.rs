@@ -19,6 +19,7 @@ pub struct Model {
     pub path: Vec<String>,
     pub startup_ms: Option<f64>,
     pub peak_rss_mb: f64,
+    pub max_peak_rss_mb: f64,
     pub samples: i32,
     pub updated_at: NaiveDateTime,
 }
