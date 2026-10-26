@@ -85,12 +85,20 @@ impl Scheduler {
 
         let seats = split_seats(&self.cluster_snapshot().await.slots);
         if seats < 2 {
+            info!(evaluation_id = %evaluation.id, seats, "evaluation kept on one worker: too few free seats");
             return Ok(None);
         }
 
         let costs = gradient_db::eval_costs::load_eval_costs(&self.db.worker_db, task).await?;
         let members = split_members(&costs, seats);
         if members < 2 {
+            info!(
+                evaluation_id = %evaluation.id,
+                seats,
+                cost_sets = costs.sets.len(),
+                cost_subtrees = costs.subtrees.len(),
+                "evaluation kept on one worker: a split is not predicted to be faster"
+            );
             return Ok(None);
         }
 
