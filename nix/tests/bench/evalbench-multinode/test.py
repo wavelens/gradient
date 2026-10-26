@@ -32,6 +32,15 @@ def pin_vms():
         pin(node, CPUS[first:first + WORKER_CORES])
 
 
+def wait_links_shaped():
+    for node in WORKER_NODES:
+        try:
+            node.wait_for_unit("shape-links.service")
+        except Exception:
+            print(node.execute("journalctl -u shape-links.service --no-pager -b")[1])
+            raise
+
+
 def assert_shaped_links():
     for node in WORKER_NODES:
         reply = node.succeed("ping -c 3 server")
@@ -161,6 +170,7 @@ pin_vms()
 banner("bring services up")
 server.wait_for_unit("gradient-server.service")
 server.wait_for_unit("nginx.service")
+wait_links_shaped()
 wait_workers_ready()
 assert_shaped_links()
 

@@ -21,20 +21,19 @@
   };
 
   shapedLink = {
-    boot.kernelModules = [ "ifb" "sch_netem" ];
-    boot.extraModprobeConfig = "options ifb numifbs=1";
-
     systemd.services.shape-links = {
       wants = [ "network-online.target" ];
       after = [ "network-online.target" ];
       before = [ "gradient-worker.service" ];
       requiredBy = [ "gradient-worker.service" ];
-      path = [ pkgs.iproute2 ];
+      path = [ pkgs.iproute2 pkgs.kmod ];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
       };
       script = ''
+        modprobe -a ifb sch_netem sch_ingress cls_matchall act_mirred
+        ip link show ifb0 >/dev/null 2>&1 || ip link add ifb0 type ifb
         ip link set dev ifb0 up
         tc qdisc replace dev eth1 root netem delay ${toString DELAY_MS}ms rate ${RATE}
         tc qdisc replace dev eth1 handle ffff: ingress
