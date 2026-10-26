@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_entity::StorePath;
+use gradient_entity::derivation::Column as CDerivation;
+use gradient_entity::entry_point::{Column as CEntryPoint, Entity as EEntryPoint};
 use gradient_entity::eval_shard::{
     ActiveModel as AEvalShard, Column as CEvalShard, Entity as EEvalShard, EvalShardState,
     Model as MEvalShard,
@@ -12,8 +15,9 @@ use gradient_entity::eval_split::{Column as CEvalSplit, Entity as EEvalSplit};
 use gradient_entity::ids::{EvalShardId, EvaluationId};
 use sea_orm::sea_query::{Expr, LockType};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, FromQueryResult,
-    IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, TransactionTrait, Value,
+    ColumnTrait, Condition, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait,
+    FromQueryResult, IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, RelationTrait,
+    TransactionTrait, Value,
 };
 
 use crate::chunked::insert_in_chunks;
@@ -114,6 +118,51 @@ pub async fn has_open_shards<C: ConnectionTrait>(
         .await?;
 
     Ok(open.is_some())
+}
+
+pub async fn shard_drv_paths<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+    pattern: &str,
+    children: Option<&[String]>,
+) -> Result<Vec<String>, DbErr> {
+    let set: Vec<&str> = pattern
+        .split('.')
+        .take_while(|segment| !segment.contains('*'))
+        .collect();
+    let set = set.join(".");
+    let attrs: Vec<String> = match children {
+        Some(children) => children.iter().map(|c| format!("{set}.{c}")).collect(),
+        None => vec![set],
+    };
+    let under = attrs.iter().fold(Condition::any(), |any, attr| {
+        any.add(CEntryPoint::Eval.eq(attr.as_str()))
+            .add(CEntryPoint::Eval.like(format!("{}.%", escape_like(attr))))
+    });
+    let rows: Vec<(String, String)> = EEntryPoint::find()
+        .select_only()
+        .column(CDerivation::Hash)
+        .column(CDerivation::Name)
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            gradient_entity::entry_point::Relation::Derivation.def(),
+        )
+        .filter(CEntryPoint::Evaluation.eq(evaluation))
+        .filter(under)
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(hash, name)| StorePath::from_stored(hash, format!("{name}.drv")).full())
+        .collect())
+}
+
+fn escape_like(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 pub async fn requeue_shards_of<C>(db: &C, job: &str) -> Result<Vec<FailedShard>, DbErr>

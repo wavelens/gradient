@@ -7,6 +7,7 @@
 pub(crate) mod compression;
 pub mod credentials;
 pub mod eval_cache_recv;
+pub mod eval_shard_replies;
 pub mod job;
 pub(crate) mod nar_daemon_import;
 pub(crate) mod prefetch;

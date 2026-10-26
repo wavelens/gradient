@@ -23,6 +23,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
 use crate::count::clamp_to_u32;
+use crate::executor::eval_split::SplitMember;
 use crate::executor::timeline::{JobTimeline, TimelineSnapshot};
 use crate::executor::{AbortSignal, JobExecutor};
 use crate::exit_clock;
@@ -242,6 +243,7 @@ pub(super) struct MessageLoopState {
     input_waiters: InputWaiters,
     nar_recv: gradient_worker_client::nar_recv::NarReceiver,
     eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver,
+    eval_shard_replies: crate::proto::eval_shard_replies::EvalShardReplies,
     uploads: gradient_worker_client::upload::UploadClient,
     jobs: JobRegistry,
     holds: ClusterHolds,
@@ -294,6 +296,7 @@ impl MessageLoopState {
             input_waiters: Arc::new(Mutex::new(HashMap::new())),
             nar_recv,
             eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver::new(),
+            eval_shard_replies: Default::default(),
             jobs: JobRegistry {
                 running: HashMap::new(),
                 done_tx,
@@ -450,8 +453,10 @@ impl MessageLoopState {
                 self.eval_cache_recv
                     .deliver_pull_chunk(&job_id, &data, offset, is_final);
             }
-            ServerMessage::EvalShardReply { job_id, .. } => {
-                debug!(%job_id, "EvalShardReply without a split evaluation member - dropped");
+            ServerMessage::EvalShardReply { job_id, outcome } => {
+                if !self.eval_shard_replies.deliver(&job_id, outcome) {
+                    debug!(%job_id, "EvalShardReply arrived after its waiter cleared");
+                }
             }
             ServerMessage::NarPush { .. }
             | ServerMessage::NarStreamHeader { .. }
@@ -535,6 +540,7 @@ impl MessageLoopState {
         );
         self.nar_recv.forget_job(&job_id);
         self.eval_cache_recv.forget_job(&job_id);
+        self.eval_shard_replies.forget_job(&job_id);
         self.uploads.forget_job(&job_id);
         self.credentials.clear();
 
@@ -790,6 +796,7 @@ impl MessageLoopState {
             assignment_id,
             job,
             None,
+            None,
             credentials,
         );
 
@@ -800,6 +807,10 @@ impl MessageLoopState {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "arg-heavy; refactor tracked in #503"
+    )]
     fn spawn_job(
         &mut self,
         job_id: String,
@@ -807,6 +818,7 @@ impl MessageLoopState {
         assignment_id: String,
         job: Job,
         cluster: Option<String>,
+        split: Option<SplitMember>,
         credentials: CredentialStore,
     ) {
         let (assignment_id, abort_rx, timeline) =
@@ -822,6 +834,7 @@ impl MessageLoopState {
         let job_input_waiters = Arc::clone(&self.input_waiters);
         let job_nar_recv = self.nar_recv.clone();
         let job_eval_cache_recv = self.eval_cache_recv.clone();
+        let job_eval_shard_replies = self.eval_shard_replies.clone();
         let job_uploads = self.uploads.clone();
         let job_done_tx = self.jobs.done_tx.clone();
         let jid = job_id.clone();
@@ -841,11 +854,12 @@ impl MessageLoopState {
                 job_input_waiters,
                 job_nar_recv,
                 job_eval_cache_recv,
+                job_eval_shard_replies,
                 Some(job_store),
                 timeline,
                 job_uploads,
             );
-            let result = run_job(executor, job, &mut updater, &credentials, abort_rx).await;
+            let result = run_job(executor, job, &mut updater, &credentials, abort_rx, split).await;
             let _ = job_done_tx.send((jid, result));
         });
     }
@@ -862,6 +876,7 @@ impl MessageLoopState {
             Arc::clone(&self.input_waiters),
             self.nar_recv.clone(),
             self.eval_cache_recv.clone(),
+            self.eval_shard_replies.clone(),
             Some(Arc::clone(&self.executor.store)),
             crate::executor::timeline::JobTimeline::new(),
             self.uploads.clone(),
@@ -891,6 +906,7 @@ impl MessageLoopState {
             return Ok(());
         };
         info!(%attempt, job_id = %held.job_id, peers = roster.len(), ?roster, "cluster started - running the held member");
+        let split = SplitMember::of_role(&membership.role);
         let me = ClusterAddress {
             role: membership.role,
             index: membership.index,
@@ -902,6 +918,7 @@ impl MessageLoopState {
             held.assignment_id,
             held.job,
             Some(attempt),
+            split,
             held.credentials,
         );
 
@@ -1104,13 +1121,14 @@ async fn run_job(
     updater: &mut JobUpdater,
     credentials: &CredentialStore,
     abort: AbortSignal,
+    split: Option<SplitMember>,
 ) -> Result<()> {
     let job_abort = abort.clone();
     let run = async move {
         match job {
             Job::Flake(flake_job) => {
                 executor
-                    .execute_flake_job(flake_job, updater, credentials, job_abort)
+                    .execute_flake_job(flake_job, updater, credentials, job_abort, split)
                     .await
             }
             Job::Build(build_job) => {

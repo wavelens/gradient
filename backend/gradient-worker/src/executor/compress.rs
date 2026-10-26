@@ -286,6 +286,7 @@ mod tests {
             Arc::new(Mutex::new(HashMap::new())),
             NarReceiver::new(),
             EvalCacheReceiver::new(),
+            Default::default(),
             None,
             JobTimeline::new(),
             uploads,

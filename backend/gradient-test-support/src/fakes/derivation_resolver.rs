@@ -123,6 +123,7 @@ impl DerivationResolver for FakeDerivationResolver {
                 .get(&repository)
                 .cloned()
                 .unwrap_or_default(),
+            ..Default::default()
         })
     }
 
