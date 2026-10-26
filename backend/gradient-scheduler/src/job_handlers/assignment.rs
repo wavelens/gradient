@@ -196,19 +196,26 @@ pub(crate) fn assignment_row(
 pub(crate) async fn assigned_transition(
     config: &RuntimeConfig,
     graph: &Graph,
+    worker_id: &str,
     rec: &AssignmentRecord,
-) -> anyhow::Result<()> {
-    let Some(shared_build) = rec.derivation_build else {
-        return Ok(());
+) -> anyhow::Result<bool> {
+    let transition = match (rec.derivation_build, rec.runner) {
+        (Some(shared_build), _) => Transition::Assigned { shared_build },
+        (None, Some(runner)) => Transition::RunnerJobAssigned {
+            runner_job: runner.runner_job,
+            attempt: runner.attempt,
+            number: runner.number,
+            assignment: rec.assignment_id,
+            worker: worker_id.to_owned(),
+            retries_cap: runner.retries_cap,
+        },
+        (None, None) => return Ok(true),
     };
     let budget = transition_budget(config.proto.worker_heartbeat_timeout_secs);
-    match tokio::time::timeout(
-        budget,
-        graph.transition(Transition::Assigned { shared_build }),
-    )
-    .await
-    {
-        Ok(moved) => moved.map(|_| ()).context("Dispatched transition"),
+    match tokio::time::timeout(budget, graph.transition(transition)).await {
+        Ok(moved) => moved
+            .map(|report| !report.already_aborted)
+            .context("Dispatched transition"),
         Err(_) => Err(anyhow::anyhow!(
             "Dispatched transition exceeded {}s",
             budget.as_secs()
@@ -233,12 +240,12 @@ async fn claim(
     )
     .await
     .context("dispatched_job claim")?;
-    if !won || rec.derivation_build.is_none() {
+    if !won || (rec.derivation_build.is_none() && rec.runner.is_none()) {
         return Ok(won);
     }
 
-    let moved = assigned_transition(&db.config, graph, rec).await;
-    if moved.is_err()
+    let moved = assigned_transition(&db.config, graph, worker_id, rec).await;
+    if !matches!(moved, Ok(true))
         && let Err(e) = gradient_db::scheduling::assignment_record::abandon_open_assignment(
             &db.worker_db,
             rec.assignment_id,
@@ -248,7 +255,7 @@ async fn claim(
         warn!(error = %e, dispatch = %rec.assignment_id, "dispatch row left open after a failed transition");
     }
 
-    moved.map(|_| true)
+    moved
 }
 
 #[cfg(test)]

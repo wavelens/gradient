@@ -108,14 +108,14 @@ impl ActiveJobs {
     pub(crate) fn build(&self, job_id: &str) -> Option<DerivationBuildId> {
         match &self.0.lock().get(job_id)?.pending {
             PendingJob::Build(j) => Some(j.derivation_build),
-            PendingJob::Eval(_) => None,
+            PendingJob::Eval(_) | PendingJob::Runner(_) => None,
         }
     }
 
     pub(crate) fn eval(&self, job_id: &str) -> Option<(EvaluationId, Option<TaskId>)> {
         match &self.0.lock().get(job_id)?.pending {
             PendingJob::Eval(j) => Some((j.evaluation_id, j.task_id)),
-            PendingJob::Build(_) => None,
+            PendingJob::Build(_) | PendingJob::Runner(_) => None,
         }
     }
 

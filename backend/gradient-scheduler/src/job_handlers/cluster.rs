@@ -301,16 +301,31 @@ impl Scheduler {
         let hold_secs = u32::try_from(timeout)
             .unwrap_or(u32::MAX)
             .saturating_add(CLUSTER_HOLD_MARGIN_SECS);
+        let Some(jobs) = seats
+            .iter()
+            .map(|seat| {
+                seat.job
+                    .clone()
+                    .into_job_on(None, seat.record.choice.map(|c| c.cores))
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            warn!(%attempt, "a cluster member has no worker job");
+            self.fail_prepare(attempt).await;
+            return;
+        };
         for seat in &seats {
-            if let Err(e) = assigned_transition(&self.db.config, &self.graph, &seat.record).await {
-                warn!(error = %e, %attempt, "cluster member transition failed");
+            let moved =
+                assigned_transition(&self.db.config, &self.graph, &seat.worker, &seat.record).await;
+            if !matches!(moved, Ok(true)) {
+                warn!(outcome = ?moved, %attempt, "cluster member transition failed");
                 self.fail_prepare(attempt).await;
                 return;
             }
         }
 
         let mut signals = Vec::with_capacity(seats.len());
-        for seat in seats {
+        for (seat, job) in seats.into_iter().zip(jobs) {
             self.announce_assignment(&seat.worker, &seat.record);
             let membership = ClusterMembership {
                 attempt: attempt.to_string(),
@@ -319,10 +334,7 @@ impl Scheduler {
                 hold_secs,
             };
             let assignment = Assignment {
-                job: seat
-                    .job
-                    .clone()
-                    .into_job_with_cores(seat.record.choice.map(|c| c.cores)),
+                job,
                 ram_need: seat.job.ram_need_with(seat.record.choice, false),
                 project_id: seat.job.project_id(),
                 assignment_record: seat.record,

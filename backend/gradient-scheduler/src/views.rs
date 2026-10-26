@@ -163,6 +163,7 @@ impl JobContextView {
                 fetch_flake: Some(e.job.steps.contains(&FlakeStep::FetchFlake)),
                 ..common("Eval", String::new())
             },
+            PendingJob::Runner(r) => common("Runner", r.architecture.clone()),
         }
     }
 }

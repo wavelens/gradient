@@ -21,6 +21,7 @@ use gradient_wire::types::{
 
 use crate::cluster::{ClusterBook, PendingCluster};
 use crate::count::clamp_to_u32;
+pub use crate::runner_job::{PendingRunnerJob, RunnerAssignment, runner_job_key};
 use gradient_graph::RamShortage;
 use gradient_pool::WorkerCaps;
 use gradient_pool::score::weights::REFERENCE_CORES;
@@ -90,6 +91,7 @@ pub struct PendingBuildJob {
 pub enum PendingJob {
     Eval(PendingEvalJob),
     Build(PendingBuildJob),
+    Runner(PendingRunnerJob),
 }
 
 pub fn eval_job_key(evaluation: EvaluationId, index: u16) -> String {
@@ -134,6 +136,7 @@ impl PendingJob {
         match self {
             PendingJob::Eval(j) => eval_job_key(j.evaluation_id, j.eval_index),
             PendingJob::Build(j) => build_job_key(j.derivation_build),
+            PendingJob::Runner(j) => runner_job_key(j.runner_job),
         }
     }
 
@@ -141,6 +144,7 @@ impl PendingJob {
         match self {
             PendingJob::Eval(j) => &j.required_paths,
             PendingJob::Build(j) => &j.required_paths,
+            PendingJob::Runner(j) => &j.required_paths,
         }
     }
 
@@ -152,6 +156,7 @@ impl PendingJob {
         match self {
             PendingJob::Eval(j) => j.project_id,
             PendingJob::Build(j) => j.project_id,
+            PendingJob::Runner(j) => j.project_id,
         }
     }
 
@@ -168,7 +173,7 @@ impl PendingJob {
                     .collect(),
                 Some(j.job.requirement.clone()),
             ),
-            PendingJob::Eval(_) => (Vec::new(), Vec::new(), None),
+            PendingJob::Eval(_) | PendingJob::Runner(_) => (Vec::new(), Vec::new(), None),
         };
         JobCandidate {
             job_id: job_id.to_owned(),
@@ -179,20 +184,17 @@ impl PendingJob {
         }
     }
 
-    pub(crate) fn into_job(self) -> Job {
+    pub(crate) fn into_job_on(self, caps: Option<&WorkerCaps>, cores: Option<u32>) -> Option<Job> {
         match self {
-            PendingJob::Eval(j) => Job::Flake(j.job),
-            PendingJob::Build(j) => Job::Build(j.job),
-        }
-    }
-
-    pub(crate) fn into_job_with_cores(self, cores: Option<u32>) -> Job {
-        match self.into_job() {
-            Job::Build(mut build) => {
-                build.build.build_cores = cores;
-                Job::Build(build)
+            PendingJob::Eval(j) => Some(Job::Flake(j.job)),
+            PendingJob::Build(mut j) => {
+                j.job.build.build_cores = cores;
+                Some(Job::Build(j.job))
             }
-            other => other,
+            PendingJob::Runner(j) => {
+                let job = j.runner_job_for(caps?, j.assignment.as_ref()?);
+                Some(Job::Runner(Box::new(job)))
+            }
         }
     }
 
@@ -200,6 +202,7 @@ impl PendingJob {
         match self {
             PendingJob::Eval(j) => j.evaluation_id,
             PendingJob::Build(j) => j.evaluation_id,
+            PendingJob::Runner(j) => j.evaluation_id,
         }
     }
 
@@ -207,27 +210,28 @@ impl PendingJob {
         match self {
             PendingJob::Eval(_) => DispatchedJobKind::Eval,
             PendingJob::Build(_) => DispatchedJobKind::Build,
+            PendingJob::Runner(_) => DispatchedJobKind::Runner,
         }
     }
 
     pub fn derivation_build(&self) -> Option<DerivationBuildId> {
         match self {
             PendingJob::Build(j) => Some(j.derivation_build),
-            PendingJob::Eval(_) => None,
+            PendingJob::Eval(_) | PendingJob::Runner(_) => None,
         }
     }
 
     pub fn pname(&self) -> Option<String> {
         match self {
             PendingJob::Build(j) => j.pname.clone(),
-            PendingJob::Eval(_) => None,
+            PendingJob::Eval(_) | PendingJob::Runner(_) => None,
         }
     }
 
     pub fn dependency_count(&self) -> u32 {
         match self {
             PendingJob::Build(j) => j.dependency_count,
-            PendingJob::Eval(_) => 0,
+            PendingJob::Eval(_) | PendingJob::Runner(_) => 0,
         }
     }
 
@@ -235,6 +239,7 @@ impl PendingJob {
         match self {
             PendingJob::Build(j) => j.queued_at,
             PendingJob::Eval(j) => j.queued_at,
+            PendingJob::Runner(j) => j.queued_at,
         }
     }
 
@@ -242,6 +247,7 @@ impl PendingJob {
         match self {
             PendingJob::Build(j) => j.ready_at,
             PendingJob::Eval(j) => j.ready_at,
+            PendingJob::Runner(j) => j.ready_at,
         }
     }
 
@@ -249,6 +255,7 @@ impl PendingJob {
         match self {
             PendingJob::Build(j) => j.rescore_count,
             PendingJob::Eval(j) => j.rescore_count,
+            PendingJob::Runner(j) => j.rescore_count,
         }
     }
 
@@ -256,6 +263,7 @@ impl PendingJob {
         match self {
             PendingJob::Build(j) => j.prioritized,
             PendingJob::Eval(j) => j.prioritized,
+            PendingJob::Runner(_) => false,
         }
     }
 
@@ -263,6 +271,7 @@ impl PendingJob {
         match self {
             PendingJob::Build(j) => j.build_request,
             PendingJob::Eval(j) => j.build_request,
+            PendingJob::Runner(_) => false,
         }
     }
 
@@ -270,6 +279,7 @@ impl PendingJob {
         match self {
             PendingJob::Eval(_) => JobKind::Flake,
             PendingJob::Build(_) => JobKind::Build,
+            PendingJob::Runner(_) => JobKind::Runner,
         }
     }
 
@@ -293,7 +303,7 @@ impl PendingJob {
                 j.substitute || outputs_present,
                 j.is_fixed_output || j.job.requirement.architecture == gradient_types::BUILTIN_ARCH,
             ),
-            PendingJob::Eval(_) => RamNeed::Negligible,
+            PendingJob::Eval(_) | PendingJob::Runner(_) => RamNeed::Negligible,
         }
     }
 
@@ -308,6 +318,7 @@ impl PendingJob {
         match self {
             PendingJob::Build(j) => j.rescore_count = n,
             PendingJob::Eval(j) => j.rescore_count = n,
+            PendingJob::Runner(j) => j.rescore_count = n,
         }
     }
 }
@@ -348,18 +359,22 @@ pub struct AssignmentRecord {
     pub instance_context: serde_json::Value,
     pub substitute: bool,
     pub choice: Option<CoreChoice>,
+    pub runner: Option<RunnerAssignment>,
 }
 
 /// An upstream probe landing in between can turn a build into a passthrough. A stale build would
 /// then rebuild bytes already available upstream (#593).
 impl From<&AssignmentRecord> for ClaimGate {
     fn from(rec: &AssignmentRecord) -> Self {
-        match rec.derivation_build {
-            Some(shared_build) => ClaimGate::Build {
+        match (rec.derivation_build, rec.runner) {
+            (Some(shared_build), _) => ClaimGate::Build {
                 shared_build,
                 substitute: rec.substitute,
             },
-            None => ClaimGate::Eval {
+            (None, Some(runner)) => ClaimGate::Runner {
+                runner_job: runner.runner_job,
+            },
+            (None, None) => ClaimGate::Eval {
                 evaluation: rec.evaluation_id,
             },
         }
@@ -377,6 +392,7 @@ struct ScoredCandidate {
 
 fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     match (job, caps) {
+        (PendingJob::Runner(j), caps) => caps.is_some_and(|c| j.fits(c)),
         (_, None) => true,
         (PendingJob::Eval(j), Some(c)) => c.can_eval(&j.job),
         (PendingJob::Build(j), Some(c)) => c.can_run_build(&j.job),
@@ -485,6 +501,7 @@ fn assignment_record_for(
     let (kind_disc, derivation_build, task) = match job {
         PendingJob::Build(b) => (DispatchedJobKind::Build, Some(b.derivation_build), None),
         PendingJob::Eval(e) => (DispatchedJobKind::Eval, None, e.task_id),
+        PendingJob::Runner(r) => (DispatchedJobKind::Runner, None, Some(r.task_id)),
     };
     AssignmentRecord {
         job_id: job_id.to_owned(),
@@ -503,6 +520,7 @@ fn assignment_record_for(
         instance_context,
         substitute: matches!(job, PendingJob::Build(b) if b.substitute),
         choice: sc.choice,
+        runner: None,
     }
 }
 
@@ -894,7 +912,7 @@ impl JobTracker {
             instance_context,
         );
 
-        self.assign_pending(worker_id, &job_id, record)
+        self.assign_pending(worker_id, &job_id, record, caps)
     }
 
     fn recheck_waiting_build(
@@ -1000,7 +1018,9 @@ impl JobTracker {
             .filter(|(_, j)| {
                 matches!(
                     (kind, j),
-                    (JobKind::Flake, PendingJob::Eval(_)) | (JobKind::Build, PendingJob::Build(_))
+                    (JobKind::Flake, PendingJob::Eval(_))
+                        | (JobKind::Build, PendingJob::Build(_))
+                        | (JobKind::Runner, PendingJob::Runner(_))
                 )
             })
             .map(|(id, job)| {
@@ -1034,7 +1054,9 @@ impl JobTracker {
         worker_ctx: &WorkerContext<'_>,
         now: chrono::NaiveDateTime,
     ) -> ScoredCandidate {
+        let no_estimate = BuildEstimate::default();
         let scored_job = match job {
+            PendingJob::Runner(_) => ScoredJob::new_eval(id, job.project_id(), false, &no_estimate),
             PendingJob::Eval(e) => ScoredJob::new_eval(
                 id,
                 job.project_id(),
@@ -1202,9 +1224,21 @@ impl JobTracker {
         &mut self,
         worker_id: &str,
         job_id: &str,
-        record: AssignmentRecord,
+        mut record: AssignmentRecord,
+        caps: Option<&WorkerCaps>,
     ) -> Option<Assignment> {
-        let job = self.pending.remove(job_id)?;
+        let mut job = self.pending.remove(job_id)?;
+        if let PendingJob::Runner(runner) = &mut job {
+            runner.assignment = caps.and_then(|c| runner.assignment_on(c));
+            record.runner = runner.assignment;
+        }
+        let Some(wire_job) = job
+            .clone()
+            .into_job_on(caps, record.choice.map(|c| c.cores))
+        else {
+            self.pending.insert(job_id.to_owned(), job);
+            return None;
+        };
         self.waiting_builds
             .retain(|_, waiting| waiting.job_id != job_id);
         let outputs_present = self
@@ -1215,9 +1249,7 @@ impl JobTracker {
 
         let assignment_id = record.assignment_id;
         let assignment = Assignment {
-            job: job
-                .clone()
-                .into_job_with_cores(record.choice.map(|c| c.cores)),
+            job: wire_job,
             ram_need: job.ram_need_with(record.choice, outputs_present),
             project_id: job.project_id(),
             assignment_record: record,
@@ -1272,7 +1304,7 @@ impl JobTracker {
         let active = self.active.get(job_id).filter(|a| a.worker == worker_id)?;
         match &active.job {
             PendingJob::Build(build) => Some((active.assignment_id, build)),
-            PendingJob::Eval(_) => None,
+            PendingJob::Eval(_) | PendingJob::Runner(_) => None,
         }
     }
 
@@ -1637,6 +1669,9 @@ impl JobTracker {
                         });
                         (None, Vec::new(), fetch, eval)
                     }
+                    PendingJob::Runner(r) => {
+                        (Some(r.architecture.clone()), Vec::new(), false, false)
+                    }
                 };
 
                 BoardActiveJob {
@@ -1709,7 +1744,7 @@ impl JobTracker {
             .chain(members)
             .filter_map(|job| match job {
                 PendingJob::Build(b) => Some(b.derivation_build),
-                PendingJob::Eval(_) => None,
+                PendingJob::Eval(_) | PendingJob::Runner(_) => None,
             })
             .collect()
     }
@@ -1769,6 +1804,7 @@ impl JobTracker {
                         b.pname.clone(),
                     ),
                     PendingJob::Eval(_) => (DispatchedJobKind::Eval, None, None),
+                    PendingJob::Runner(_) => (DispatchedJobKind::Runner, None, None),
                 };
                 PendingJobInfo {
                     kind,
@@ -1834,6 +1870,90 @@ mod tests {
         BuildJob, BuildRequirement, BuildSpec, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep,
         GradientCapabilities,
     };
+
+    fn take_runner(
+        tracker: &mut JobTracker,
+        worker: &str,
+        caps: &WorkerCaps,
+    ) -> Option<Assignment> {
+        let policy = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
+        let instance = gradient_pool::score::InstanceContext::default();
+        tracker.take_best_of_kind(
+            worker,
+            None,
+            Some(caps),
+            &JobKind::Runner,
+            &*policy,
+            &instance,
+        )
+    }
+
+    #[test]
+    fn an_assigned_runner_job_carries_the_clamped_limits_and_the_filled_defaults() {
+        use crate::test_jobs::{allow_all, runner_caps, runner_job};
+        use gradient_types::runner::{RunnerAllow, RunnerDefaults, RunnerSpec};
+
+        let mut tracker = JobTracker::new();
+        let job = runner_job(RunnerSpec {
+            timeout_secs: Some(60 * 24 * 3600),
+            retries: 9,
+            ..RunnerSpec::default()
+        });
+        let key = runner_job_key(job.runner_job);
+        tracker.add_pending(key, PendingJob::Runner(job));
+        let caps = runner_caps(
+            RunnerAllow {
+                timeout_secs: Some(30 * 24 * 3600),
+                retries: 5,
+                ..allow_all()
+            },
+            RunnerDefaults {
+                ssh: true,
+                max_silent_secs: Some(3600),
+                ..Default::default()
+            },
+        );
+
+        let assignment = take_runner(&mut tracker, "w1", &caps).expect("placed");
+
+        let Job::Runner(r) = assignment.job else {
+            panic!("runner job")
+        };
+        assert_eq!(
+            (r.timeout_secs, r.max_silent_secs, r.attempt),
+            (Some(30 * 24 * 3600), Some(3600), 1)
+        );
+        assert!(r.requirement.ssh);
+        assert_eq!(
+            assignment
+                .assignment_record
+                .runner
+                .expect("a runner assignment")
+                .retries_cap,
+            5
+        );
+        assert_eq!(r.context.entry_point, "apps.x86_64-linux.train");
+        assert_eq!(
+            (r.context.repository.as_str(), r.context.commit.as_str()),
+            ("git+ssh://git@example.com/repo", "abc123")
+        );
+    }
+
+    #[test]
+    fn a_runner_job_is_not_offered_to_a_worker_it_does_not_fit() {
+        use crate::test_jobs::{allow_all, runner_caps, runner_job};
+        use gradient_types::runner::{RunnerDefaults, RunnerSpec};
+
+        let job = PendingJob::Runner(runner_job(RunnerSpec {
+            labels: vec!["3d-printer".into()],
+            ..RunnerSpec::default()
+        }));
+        assert!(!visible_to(
+            &job,
+            None,
+            Some(&runner_caps(allow_all(), RunnerDefaults::default()))
+        ));
+    }
 
     #[test]
     fn companion_keys_carry_their_index() {
@@ -2389,7 +2509,7 @@ mod tests {
         let record = record_for(&tracker, "build:1");
         assert!(
             tracker
-                .assign_pending("worker", "build:1", record)
+                .assign_pending("worker", "build:1", record, None)
                 .is_some(),
             "job should assign"
         );
@@ -2409,7 +2529,7 @@ mod tests {
         tracker.add_pending(job_id.into(), build_job(ProjectId::now_v7(), vec![]));
         let record = record_for(tracker, job_id);
         tracker
-            .assign_pending("w1", job_id, record)
+            .assign_pending("w1", job_id, record, None)
             .expect("the job assigns");
     }
 
@@ -3187,7 +3307,7 @@ mod tests {
         assert_eq!(tracker.rescore_count_of("build:1"), 2);
 
         let record = record_for(&tracker, "build:1");
-        tracker.assign_pending("worker", "build:1", record);
+        tracker.assign_pending("worker", "build:1", record, None);
         tracker.bump_rescore_counts();
         assert_eq!(
             tracker.rescore_count_of("build:1"),

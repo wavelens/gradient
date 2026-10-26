@@ -64,7 +64,11 @@ fn sends_ssh_key(
     use gradient_wire::types::{FlakeStep, Job};
 
     caps.is_some_and(|c| c.secrets)
-        && matches!(job, Job::Flake(flake_job) if flake_job.steps.contains(&FlakeStep::FetchFlake))
+        && match job {
+            Job::Flake(flake_job) => flake_job.steps.contains(&FlakeStep::FetchFlake),
+            Job::Runner(_) => true,
+            Job::Build(_) => false,
+        }
 }
 
 pub(super) async fn send_input_fetch(
@@ -149,7 +153,9 @@ async fn project_ssh_key(db: &DbContext, project_id: ProjectId) -> Option<String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_wire::types::{FlakeJob, FlakeSource, FlakeStep, GradientCapabilities, Job};
+    use gradient_wire::types::{
+        FlakeJob, FlakeSource, FlakeStep, GradientCapabilities, Job, JobContext, RunnerJob,
+    };
 
     fn fetch_job() -> Job {
         Job::Flake(FlakeJob {
@@ -180,6 +186,42 @@ mod tests {
             ..network_only
         };
         assert!(sends_ssh_key(Some(&with_secrets), &fetch_job()));
+    }
+
+    fn runner_job() -> Job {
+        Job::Runner(Box::new(RunnerJob {
+            program: "/nix/store/aaaa-check".into(),
+            args: vec![],
+            env: Default::default(),
+            image: None,
+            requirement: Default::default(),
+            context: JobContext {
+                repository: "git+ssh://git@example.com/repo".into(),
+                commit: "abc123".into(),
+                ..Default::default()
+            },
+            secrets: vec![],
+            keep_running: false,
+            timeout_secs: None,
+            max_silent_secs: None,
+            attempt: 1,
+        }))
+    }
+
+    #[test]
+    fn a_runner_job_gets_the_project_ssh_key_only_with_secrets() {
+        let with_secrets = GradientCapabilities {
+            exec: true,
+            secrets: true,
+            ..Default::default()
+        };
+        let without = GradientCapabilities {
+            exec: true,
+            ..Default::default()
+        };
+        assert!(sends_ssh_key(Some(&with_secrets), &runner_job()));
+        assert!(!sends_ssh_key(Some(&without), &runner_job()));
+        assert!(!sends_ssh_key(None, &runner_job()));
     }
 
     #[test]

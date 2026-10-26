@@ -193,7 +193,7 @@ pub(crate) async fn requeue_cluster_members(db: &DbContext, graph: &Graph, jobs:
         .startable_set
         .enter(jobs.iter().filter_map(|j| match j {
             PendingJob::Build(b) => Some(b.derivation),
-            PendingJob::Eval(_) => None,
+            PendingJob::Eval(_) | PendingJob::Runner(_) => None,
         }));
 
     for job in jobs.iter().filter(|j| j.derivation_build().is_none()) {

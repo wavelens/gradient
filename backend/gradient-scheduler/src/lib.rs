@@ -22,6 +22,7 @@ pub mod log_substitution;
 pub mod loops;
 pub mod probe;
 pub mod reclaim;
+pub mod runner_job;
 pub mod views;
 pub mod waiting_state;
 

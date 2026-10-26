@@ -314,14 +314,14 @@ impl SchedulerCase {
     pub async fn pending_flake_job(&self, key: &str) -> Option<FlakeJob> {
         match self.pending_job(key).await? {
             PendingJob::Eval(job) => Some(job.job),
-            PendingJob::Build(_) => None,
+            PendingJob::Build(_) | PendingJob::Runner(_) => None,
         }
     }
 
     pub async fn pending_build_job(&self, key: &str) -> Option<PendingBuildJob> {
         match self.pending_job(key).await? {
             PendingJob::Build(job) => Some(job),
-            PendingJob::Eval(_) => None,
+            PendingJob::Eval(_) | PendingJob::Runner(_) => None,
         }
     }
 

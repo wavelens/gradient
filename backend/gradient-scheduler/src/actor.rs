@@ -591,6 +591,13 @@ impl SchedulerCore {
                     assignment.pending.job_kind(),
                     assignment.ram_need,
                 );
+                if let gradient_wire::types::Job::Runner(runner) = &assignment.job {
+                    self.pool.hold_devices(
+                        worker,
+                        assignment.job_id(),
+                        runner.requirement.devices.clone(),
+                    );
+                }
                 AssignOutcome::Assigned(assignment)
             }
             None => self.idle(worker, slot, caps.as_ref()),

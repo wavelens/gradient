@@ -13,7 +13,9 @@ use gradient_wire::types::{
 };
 use tokio::sync::mpsc;
 
-use crate::jobs::{PendingBuildJob, PendingEvalJob};
+use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingRunnerJob};
+use gradient_pool::WorkerCaps;
+use gradient_types::runner::{RunnerAllow, RunnerDefaults, RunnerInventory, RunnerSpec};
 
 pub(crate) fn port() -> (Arc<dyn SessionPort>, mpsc::UnboundedReceiver<SessionSignal>) {
     let (tx, rx) = mpsc::unbounded_channel();
@@ -99,5 +101,57 @@ pub(crate) fn eval_worker_caps() -> GradientCapabilities {
     GradientCapabilities {
         eval: true,
         ..GradientCapabilities::default()
+    }
+}
+
+pub(crate) fn runner_job(spec: RunnerSpec) -> PendingRunnerJob {
+    PendingRunnerJob {
+        runner_job: RunnerJobId::now_v7(),
+        evaluation_id: EvaluationId::now_v7(),
+        project_id: ProjectId::now_v7(),
+        task_id: TaskId::now_v7(),
+        entry_point: "apps.x86_64-linux.train".into(),
+        repository: "git+ssh://git@example.com/repo".into(),
+        commit: "abc123".into(),
+        architecture: "x86_64-linux".into(),
+        retries_left: spec.retries,
+        spec,
+        image_path: None,
+        attempts_done: 0,
+        last_phase: None,
+        required_paths: vec![],
+        queued_at: gradient_types::now(),
+        ready_at: gradient_types::now(),
+        rescore_count: 0,
+        api_url: "http://127.0.0.1:3000".into(),
+        assignment: None,
+    }
+}
+
+pub(crate) fn allow_all() -> RunnerAllow {
+    RunnerAllow {
+        network: true,
+        ssh: true,
+        ports: (1, u16::MAX),
+        nodes: 1,
+        custom_images: true,
+        ..RunnerAllow::default()
+    }
+}
+
+pub(crate) fn runner_caps(allow: RunnerAllow, defaults: RunnerDefaults) -> WorkerCaps {
+    WorkerCaps {
+        architectures: vec!["x86_64-linux".into()],
+        capabilities: GradientCapabilities {
+            exec: true,
+            ..GradientCapabilities::default()
+        },
+        runner: Some(RunnerInventory {
+            labels: vec!["w1".into()],
+            allow,
+            defaults,
+            ..RunnerInventory::default()
+        }),
+        ..WorkerCaps::default()
     }
 }

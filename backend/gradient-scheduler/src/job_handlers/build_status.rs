@@ -209,6 +209,7 @@ impl Scheduler {
 
                 Ok(())
             }
+            PendingJob::Runner(_) => Ok(()),
         }
     }
 
@@ -287,6 +288,7 @@ impl Scheduler {
 
                 r
             }
+            PendingJob::Runner(_) => Ok(()),
         }
     }
 }
