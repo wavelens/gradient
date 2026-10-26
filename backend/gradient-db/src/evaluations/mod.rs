@@ -167,6 +167,20 @@ pub async fn of_commit<C: ConnectionTrait>(
         .await
 }
 
+pub async fn task_of<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<Option<TaskId>, DbErr> {
+    let task = EEvaluation::find_by_id(evaluation)
+        .select_only()
+        .column(CEvaluation::Task)
+        .into_tuple::<Option<TaskId>>()
+        .one(db)
+        .await?;
+
+    Ok(task.flatten())
+}
+
 pub async fn repositories<C: ConnectionTrait>(
     db: &C,
     evaluations: &[EvaluationId],

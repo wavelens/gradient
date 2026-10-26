@@ -31,6 +31,7 @@ pub mod derivations;
 pub mod entry_points;
 pub mod error;
 pub mod eval_cache;
+pub mod eval_costs;
 pub mod evaluations;
 pub mod flake_input_overrides;
 pub mod flake_output_nodes;
