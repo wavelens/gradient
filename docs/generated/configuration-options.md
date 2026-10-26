@@ -386,7 +386,6 @@
 |---|---|---|---|---|
 | `worker.packages.git` | package | derived | - | Git package available to the worker for cloning repositories. |
 | `worker.packages.gradient` | package | derived | - | The gradient package to use. |
-| `worker.packages.nix` | package | derived | - | Nix package providing the `nix` for system feature detection. The default is Gradient's Nix fork, matching the worker's embedded evaluator. |
 | `worker.packages.ssh` | package | derived | - | OpenSSH package used as `GIT_SSH_COMMAND` to fetch private flake inputs. |
 
 ## `worker.reverseProxy`
@@ -404,5 +403,5 @@
 |---|---|---|---|---|
 | `worker.system.architectures` | list of string | derived | `GRADIENT_WORKER_SYSTEM_ARCHITECTURES` | Nix system types this worker builds for. |
 | `worker.system.cpuCoreScore` | null or (positive int) | `null` | `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` | Single-core speed score advertised to the scheduler; higher is faster. `null` benchmarks the host at startup. |
-| `worker.system.features` | list of string | `[ ]` | `GRADIENT_WORKER_SYSTEM_FEATURES` | Nix system features this worker advertises. An empty list detects them at runtime from `nix config show system-features`, including CPU-derived `gccarch-*` levels. |
+| `worker.system.features` | list of string | `[ ]` | `GRADIENT_WORKER_SYSTEM_FEATURES` | Nix system features this worker advertises. An empty list uses the system features of the Nix store, including those that enabled experimental features imply, such as `recursive-nix`. |
 | `worker.system.minFreeRamMb` | unsigned int | `0` | `GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB` | Free memory in MiB below which the worker kills the one evaluation subprocess large enough to restore the margin and reports that evaluation as failed instead of letting the host freeze. `0` uses 10% of total memory, clamped to 128 MiB to 1 GiB. `worker.eval.maxRss` still bounds steady-state memory. |

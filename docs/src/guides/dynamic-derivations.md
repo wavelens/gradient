@@ -64,16 +64,11 @@ Flakes without nested `nix` calls don't need this step. A build with recursive N
 
 ```nix
 # configuration.nix
-nix.settings = {
-  experimental-features = [ "recursive-nix" ];
-  system-features = [ "nixos-test" "benchmark" "big-parallel" "kvm" "recursive-nix" ]; # (1)!
-};
+nix.settings.experimental-features = [ "recursive-nix" ];
 ```
 
-1.  A list here can replace the NixOS default. The first four entries keep the default features.
-
 - Derivations that use recursive Nix list `requiredSystemFeatures = [ "recursive-nix" ]`.
-- Workers report the host's `system-features`. Gradient can place such a build only on a worker with `recursive-nix`.
+- The experimental feature adds the system feature `recursive-nix` to the Nix store of the worker. Gradient can place such a build only on a worker with `recursive-nix`.
 - Nested `nix` calls produce paths. Those paths land in the cache next to the outputs that refer to them.
 
 ## Verify Deployment

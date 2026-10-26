@@ -18,6 +18,8 @@
 in {
   imports = [
     (removed [ "worker" "capabilities" "fetch" ] "replaced by services.gradient.worker.capabilities.network and services.gradient.worker.capabilities.secrets")
+    (removed [ "worker" "nixBin" ] "the worker reads system features from the Nix store instead of running nix")
+    (removed [ "worker" "packages" "nix" ] "the worker no longer runs nix; set nix.package for the daemon")
   ];
 
   config.assertions = lib.concatMap (def:

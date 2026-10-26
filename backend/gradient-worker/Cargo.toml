@@ -47,6 +47,7 @@ harmonia-utils-signature       = { workspace = true }
 hex                   = { workspace = true }
 libc                  = { workspace = true }
 nix                   = { workspace = true }
+nix-bindings          = { workspace = true, features = ["store"] }
 rand                  = { workspace = true }
 reqwest               = { workspace = true }
 rkyv                  = { workspace = true }

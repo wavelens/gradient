@@ -20,11 +20,10 @@
       log.traceDir = "/var/lib/gradient-worker/trace";
     };
 
-    withoutEnvironment = [ [ "peers" ] [ "nixBin" ] [ "sshBin" ] [ "evalSubprocess" ] [ "evalDriver" ] ];
+    withoutEnvironment = [ [ "peers" ] [ "sshBin" ] [ "evalSubprocess" ] [ "evalDriver" ] ];
 
     writtenByHand = [
       [ "peers" ]
-      [ "nixBin" ]
       [ "sshBin" ]
       [ "evalSubprocess" ]
       [ "evalDriver" ]
@@ -65,16 +64,6 @@ in {
 
     packages = {
       gradient = lib.mkPackageOption pkgs "gradient" { };
-      nix = lib.mkOption {
-        type = lib.types.package;
-        default = pkgs.gradient-nix;
-        defaultText = lib.literalExpression "pkgs.gradient-nix";
-        description = ''
-          Nix package providing the {command}`nix` for system feature detection.
-          The default is Gradient's Nix fork, matching the worker's embedded evaluator.
-        '';
-      };
-
       git = lib.mkOption {
         type = lib.types.package;
         default = config.programs.git.package;
@@ -176,8 +165,9 @@ in {
         default = [ ];
         example = [ "nixos-test" "benchmark" "big-parallel" ];
         description = ''
-          Nix system features this worker advertises. An empty list detects them at runtime from
-          {command}`nix config show system-features`, including CPU-derived `gccarch-*` levels.
+          Nix system features this worker advertises. An empty list uses the system features of
+          the Nix store, including those that enabled experimental features imply, such as
+          `recursive-nix`.
         '';
       };
 
@@ -342,7 +332,6 @@ in {
           after = [ "network.target" ];
           path = [
             cfg.packages.git
-            cfg.packages.nix
             cfg.packages.ssh
           ];
 
@@ -382,7 +371,6 @@ in {
             NIX_REMOTE = "daemon";
             XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
             RUST_LOG = cfg.log.level.default;
-            GRADIENT_WORKER_NIX_BIN = lib.getExe' cfg.packages.nix "nix";
             GRADIENT_WORKER_SSH_BIN = lib.getExe' cfg.packages.ssh "ssh";
           } // lib.optionalAttrs (cfg.peersFile != null) {
             GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
@@ -425,7 +413,7 @@ in {
     };
 
     nix = {
-      package = lib.mkIf cfg.build.metrics (lib.mkDefault cfg.packages.nix);
+      package = lib.mkIf cfg.build.metrics (lib.mkDefault pkgs.gradient-nix);
       settings = {
         trusted-users = [ "gradient-worker" ];
         use-cgroups = lib.mkIf cfg.build.metrics true;

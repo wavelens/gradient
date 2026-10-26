@@ -249,7 +249,7 @@ async fn perform_setup(
             config.system.architectures.clone()
         };
         let system_features = if config.system.features.is_empty() {
-            detect_system_features(&config.nix_bin).await
+            crate::nix::system_features::detect().await
         } else {
             config.system.features.clone()
         };
@@ -287,68 +287,4 @@ async fn perform_setup(
     })
     .await?;
     Ok(())
-}
-
-fn parse_system_features(output: &str) -> Vec<String> {
-    let value = output.split_once('=').map_or(output, |(_, v)| v);
-    value.split_whitespace().map(str::to_owned).collect()
-}
-
-async fn detect_system_features(binpath_nix: &str) -> Vec<String> {
-    let output = tokio::process::Command::new(binpath_nix)
-        .args([
-            "--extra-experimental-features",
-            "nix-command",
-            "config",
-            "show",
-            "system-features",
-        ])
-        .output()
-        .await;
-    match output {
-        Ok(o) if o.status.success() => parse_system_features(&String::from_utf8_lossy(&o.stdout)),
-        Ok(o) => {
-            tracing::warn!(
-                status = ?o.status.code(),
-                stderr = %String::from_utf8_lossy(&o.stderr).trim(),
-                "`nix config show system-features` failed; advertising no system features"
-            );
-            Vec::new()
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, binpath_nix, "could not run nix to detect system features; advertising none");
-            Vec::new()
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_system_features;
-
-    #[test]
-    fn parses_space_separated_value() {
-        let out = "benchmark big-parallel gccarch-x86-64-v2 kvm nixos-test\n";
-        assert_eq!(
-            parse_system_features(out),
-            vec![
-                "benchmark",
-                "big-parallel",
-                "gccarch-x86-64-v2",
-                "kvm",
-                "nixos-test"
-            ]
-        );
-    }
-
-    #[test]
-    fn tolerates_name_equals_value_form() {
-        let out = "system-features = kvm big-parallel\n";
-        assert_eq!(parse_system_features(out), vec!["kvm", "big-parallel"]);
-    }
-
-    #[test]
-    fn empty_output_yields_no_features() {
-        assert!(parse_system_features("\n").is_empty());
-    }
 }
