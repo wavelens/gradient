@@ -10,6 +10,7 @@
 { ... }:
 let
   specNames = lib.unique (map (s: s.name) specs);
+  multiNodeSpecs = map (s: s.name) (lib.filter (s: s.multiNodeEvaluation or false) specs);
   upstream = storeSpec.toUpstreamCache specs;
   downloads = storeSpec.toDownloads specs;
 in
@@ -96,6 +97,7 @@ in
           project = "project";
           repository = "git://server/${name}";
           created_by = "admin";
+          multi_node_evaluation = lib.elem name multiNodeSpecs;
           triggers = [{
             type = "polling";
             active = false;
