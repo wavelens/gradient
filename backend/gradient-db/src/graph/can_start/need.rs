@@ -176,21 +176,25 @@ static UPDATE_NEED_SQL: LazyLock<String> = LazyLock::new(|| {
         open = open_predicate("p"),
         builder = builder_predicate("p", "pw"),
     );
-    let seed = format!(
-        "SELECT NULL::uuid, r.derivation, ({builder}) FROM region r \
-         JOIN derivation_build rb ON rb.derivation = r.derivation \
-         JOIN derivation w ON w.id = rb.derivation \
-         WHERE {open} \
-           AND r.derivation IN (SELECT ep.derivation FROM entry_point ep {live} \
-                                UNION ALL SELECT derivation FROM entered)",
+    let seeds = format!(
+        "seeds(derivation) AS MATERIALIZED (SELECT r.derivation \
+         FROM (SELECT DISTINCT derivation FROM region) r \
+         WHERE EXISTS (SELECT 1 FROM entry_point ep {live} WHERE ep.derivation = r.derivation) \
+         UNION SELECT derivation FROM entered)",
         live = wanted_by_its_evaluation("ep"),
+    );
+    let seed = format!(
+        "SELECT NULL::uuid, s.derivation, b.builder FROM seeds s, \
+         LATERAL (SELECT ({builder}) AS builder FROM derivation_build rb \
+                  JOIN derivation w ON w.id = rb.derivation \
+                  WHERE rb.derivation = s.derivation AND {open} OFFSET 0) b",
         builder = builder_predicate("rb", "w"),
         open = open_predicate("rb"),
     );
     let wanted = crate::graph::walks::open_closure_cte_body("wanted", &seed, Some("region"));
 
     format!(
-        "WITH RECURSIVE {region}, {entered}, {wanted} \
+        "WITH RECURSIVE {region}, {entered}, {seeds}, {wanted} \
          SELECT DISTINCT r.derivation, (d.derivation IS NOT NULL) AS wanted \
          FROM region r LEFT JOIN (SELECT DISTINCT derivation FROM wanted) d \
            ON d.derivation = r.derivation ORDER BY r.derivation",
@@ -413,6 +417,37 @@ mod tests {
     }
 
     #[test]
+    fn the_need_seeds_are_gathered_once_and_never_rescanned_per_region_row() {
+        let sql = norm(UPDATE_NEED_SQL.as_str());
+        assert!(
+            sql.contains(
+                "seeds(derivation) AS MATERIALIZED (SELECT r.derivation \
+                 FROM (SELECT DISTINCT derivation FROM region) r \
+                 WHERE EXISTS (SELECT 1 FROM entry_point ep JOIN evaluation ev \
+                 ON ev.id = ep.evaluation AND ev.status <> 7 \
+                 AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = ep.evaluation \
+                 AND bj.derivation = ep.derivation AND bj.aborted) \
+                 WHERE ep.derivation = r.derivation) \
+                 UNION SELECT derivation FROM entered)"
+            ),
+            "an entry point is probed by key per region derivation: {sql}"
+        );
+        assert!(
+            sql.contains(
+                "wanted(evaluation, derivation, builder) AS (SELECT NULL::uuid, s.derivation, \
+                 b.builder FROM seeds s, LATERAL ("
+            ),
+            "the seeds drive the walk: {sql}"
+        );
+        assert!(
+            !sql.contains("UNION ALL SELECT derivation FROM entered")
+                && !sql.contains("r.derivation IN (SELECT"),
+            "a membership test against the seeds is a semi join the planner may rescan \
+             per open region row under a one-row estimate: {sql}"
+        );
+    }
+
+    #[test]
     fn the_backstop_rewrites_every_open_shared_build() {
         let sql = norm(RECOUNT_WANTED_SQL.as_str());
         assert!(
@@ -545,16 +580,12 @@ mod tests {
         );
         assert!(
             walk.contains(
-                "FROM region r JOIN derivation_build rb ON rb.derivation = r.derivation \
-                 JOIN derivation w ON w.id = rb.derivation \
-                 WHERE (NOT rb.fetchable AND rb.status NOT IN (4, 6, 9)) \
-                 AND r.derivation IN (SELECT ep.derivation FROM entry_point ep \
-                 JOIN evaluation ev ON ev.id = ep.evaluation AND ev.status <> 7 \
-                 AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = ep.evaluation \
-                 AND bj.derivation = ep.derivation AND bj.aborted) \
-                 UNION ALL SELECT derivation FROM entered)"
+                "FROM seeds s, LATERAL (SELECT (w.walked AND rb.probed AND NOT rb.cache_available \
+                 AND rb.status IN (0, 1, 2, 8)) AS builder FROM derivation_build rb \
+                 JOIN derivation w ON w.id = rb.derivation WHERE rb.derivation = s.derivation \
+                 AND (NOT rb.fetchable AND rb.status NOT IN (4, 6, 9)) OFFSET 0) b"
             ),
-            "a settled root seeds nothing, and a seed carries its own builder bit: {walk}"
+            "a settled root seeds nothing and a seed carries its own builder bit: {walk}"
         );
         assert_eq!(
             walk.matches("build_job").count(),
