@@ -29,6 +29,14 @@ pub fn shared_build_of_key(job_id: &str) -> Option<DerivationBuildId> {
     job_id.strip_prefix(BUILD_KEY_PREFIX)?.parse().ok()
 }
 
+pub fn eval_of_key(job_id: &str) -> Option<EvaluationId> {
+    job_id.strip_prefix(EVAL_KEY_PREFIX)?.parse().ok()
+}
+
+pub fn eval_job_key_sql(id_expr: &str) -> String {
+    format!("'{EVAL_KEY_PREFIX}' || {id_expr}::text")
+}
+
 pub fn build_job_key_sql(id_expr: &str) -> String {
     format!("'{BUILD_KEY_PREFIX}' || {id_expr}::text")
 }
@@ -177,10 +185,11 @@ const RECOVERY_CLOSE_CHUNK: u64 = 10_000;
 /// The statement is chunked at [`RECOVERY_CLOSE_CHUNK`] rows.
 /// One statement over a six-figure backlog would hold WAL and row locks before the
 /// listener is bound.
-pub async fn abandon_all_open_assignments<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
+pub async fn abandon_open_cluster_assignments<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
     let chunk = format!(
         "\"dispatched_job\".\"id\" IN (SELECT id FROM dispatched_job \
-         WHERE finished_at IS NULL LIMIT {RECOVERY_CLOSE_CHUNK})"
+         WHERE finished_at IS NULL AND (cluster_attempt IS NOT NULL OR job_id IS NULL) \
+         LIMIT {RECOVERY_CLOSE_CHUNK})"
     );
 
     let mut closed = 0;
@@ -228,6 +237,34 @@ pub async fn abandon_open_assignments<C: ConnectionTrait>(
             [Value::from(ids)],
         )),
     )
+    .await
+}
+
+pub async fn open_assignment_keys<C: ConnectionTrait>(
+    db: &C,
+) -> Result<Vec<(DispatchedJobId, String, String)>, DbErr> {
+    EDispatchedJob::find()
+        .select_only()
+        .column(CDispatchedJob::Id)
+        .column(CDispatchedJob::JobId)
+        .column(CDispatchedJob::WorkerId)
+        .filter(CDispatchedJob::FinishedAt.is_null())
+        .filter(CDispatchedJob::JobId.is_not_null())
+        .into_tuple()
+        .all(db)
+        .await
+}
+
+pub async fn assignment_rows<C: ConnectionTrait>(
+    db: &C,
+    ids: &[DispatchedJobId],
+) -> Result<Vec<MDispatchedJob>, DbErr> {
+    crate::fetch_in_chunks(ids, |chunk| async move {
+        EDispatchedJob::find()
+            .filter(CDispatchedJob::Id.is_in(chunk))
+            .all(db)
+            .await
+    })
     .await
 }
 
@@ -421,6 +458,22 @@ mod tests {
     }
 
     #[test]
+    fn only_an_eval_key_names_an_evaluation() {
+        let evaluation = EvaluationId::now_v7();
+        assert_eq!(
+            eval_of_key(&format!("{EVAL_KEY_PREFIX}{evaluation}")),
+            Some(evaluation)
+        );
+        assert_eq!(
+            eval_of_key(&format!(
+                "{BUILD_KEY_PREFIX}{}",
+                DerivationBuildId::now_v7()
+            )),
+            None
+        );
+    }
+
+    #[test]
     fn the_predicate_rebuilds_the_trackers_key() {
         assert_eq!(build_job_key_sql("db.id"), "'build:' || db.id::text");
         assert_eq!(
@@ -454,10 +507,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn every_open_row_closes_for_startup_recovery() {
+    async fn startup_recovery_closes_only_open_cluster_rows() {
         let db = closed_rows(7).into_connection();
 
-        let closed = abandon_all_open_assignments(&db).await.expect("update");
+        let closed = abandon_open_cluster_assignments(&db).await.expect("update");
 
         assert_eq!(closed, 7);
         let log = db.into_transaction_log();
@@ -466,7 +519,6 @@ mod tests {
 
         let sql = &statement.sql;
         assert!(!sql.contains("\"worker_id\""), "{sql}");
-        assert!(!sql.contains("\"job_id\""), "{sql}");
         assert!(!sql.contains("\"dispatched_at\""), "{sql}");
         assert!(sql.contains(&chunk_scope()), "{sql}");
     }
@@ -474,7 +526,7 @@ mod tests {
     fn chunk_scope() -> String {
         format!(
             "IN (SELECT id FROM dispatched_job WHERE finished_at IS NULL \
-             LIMIT {RECOVERY_CLOSE_CHUNK})"
+             AND (cluster_attempt IS NOT NULL OR job_id IS NULL) LIMIT {RECOVERY_CLOSE_CHUNK})"
         )
     }
 
@@ -493,7 +545,7 @@ mod tests {
             ])
             .into_connection();
 
-        let closed = abandon_all_open_assignments(&db).await.expect("update");
+        let closed = abandon_open_cluster_assignments(&db).await.expect("update");
 
         assert_eq!(closed, RECOVERY_CLOSE_CHUNK + 7);
         let log = db.into_transaction_log();

@@ -402,7 +402,7 @@ pub async fn serve_web(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> st
 
     match gradient_db::maintenance::recovery::recover_interrupted_work(&state.worker_db).await {
         Ok(r)
-            if r.assignments_closed > 0
+            if !r.kept.is_empty()
                 || r.attempts_aborted > 0
                 || r.builds_requeued > 0
                 || r.builds_unpromoted > 0
@@ -411,7 +411,7 @@ pub async fn serve_web(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> st
                 || r.connections_closed > 0 =>
         {
             tracing::warn!(
-                dispatches_closed = r.assignments_closed,
+                assignments_kept = r.kept.len(),
                 attempts_aborted = r.attempts_aborted,
                 builds_requeued = r.builds_requeued,
                 builds_unpromoted = r.builds_unpromoted,

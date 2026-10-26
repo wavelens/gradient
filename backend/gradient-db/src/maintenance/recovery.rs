@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::scheduling::assignment_record::{
+    abandon_open_cluster_assignments, build_job_key_sql, eval_job_key_sql,
+    no_open_assignment_predicate, open_assignment_keys,
+};
 use crate::sql::StatusWrite;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::AttemptOutcome;
@@ -13,9 +17,16 @@ use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 
 use gradient_types::*;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeptAssignment {
+    pub assignment_id: DispatchedJobId,
+    pub worker_id: String,
+    pub job_key: String,
+}
+
 #[derive(Debug, Default)]
 pub struct RecoveryReport {
-    pub assignments_closed: u64,
+    pub kept: Vec<KeptAssignment>,
     pub attempts_aborted: u64,
     pub builds_requeued: u64,
     pub builds_unpromoted: u64,
@@ -31,9 +42,10 @@ fn requeue_mid_flight_sql() -> String {
     format!(
         "UPDATE derivation_build SET status = {queued}, \
          updated_at = (now() AT TIME ZONE 'UTC') \
-         WHERE status = {building} RETURNING derivation",
+         WHERE status = {building} AND {unassigned} RETURNING derivation",
         queued = crate::sql::status::to(BuildStatus::REQUEUE_MID_FLIGHT),
         building = crate::sql::status::from(BuildStatus::REQUEUE_MID_FLIGHT),
+        unassigned = no_open_assignment_predicate(&build_job_key_sql("derivation_build.id")),
     )
 }
 
@@ -47,14 +59,11 @@ crate::sql_fn! {
 pub async fn recover_interrupted_work<C: ConnectionTrait>(
     conn: &C,
 ) -> Result<RecoveryReport, DbErr> {
-    // Dispatch rows must close before the requeue below.
-    // Both dispatch selections would otherwise refuse the requeued work.
-    // That refusal would last until each worker is back.
+    // Cluster rows must close before the cluster recovery below, and every other open row keeps
+    // its work as it is until its worker reports it again or the reclaim grace ends.
+    abandon_open_cluster_assignments(conn).await?;
     let mut report = RecoveryReport {
-        assignments_closed: crate::scheduling::assignment_record::abandon_all_open_assignments(
-            conn,
-        )
-        .await?,
+        kept: kept_assignments(conn).await?,
         ..Default::default()
     };
 
@@ -69,6 +78,9 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
             Expr::value(now),
         )
         .filter(gradient_entity::build_attempt::Column::Outcome.eq(AttemptOutcome::Running))
+        .filter(Expr::cust(no_open_assignment_predicate(
+            &build_job_key_sql("\"build_attempt\".\"derivation_build\""),
+        )))
         .exec(conn)
         .await?;
     report.attempts_aborted = res.rows_affected;
@@ -106,11 +118,26 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     Ok(report)
 }
 
+async fn kept_assignments<C: ConnectionTrait>(conn: &C) -> Result<Vec<KeptAssignment>, DbErr> {
+    Ok(open_assignment_keys(conn)
+        .await?
+        .into_iter()
+        .map(|(assignment_id, job_key, worker_id)| KeptAssignment {
+            assignment_id,
+            worker_id,
+            job_key,
+        })
+        .collect())
+}
+
 async fn requeue_interrupted_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, DbErr> {
     let ids: Vec<EvaluationId> = EEvaluation::find()
         .filter(
             CEvaluation::Status.is_in(EvaluationStatus::REQUEUE_INTERRUPTED.from.iter().copied()),
         )
+        .filter(Expr::cust(no_open_assignment_predicate(&eval_job_key_sql(
+            "\"evaluation\".\"id\"",
+        ))))
         .all(conn)
         .await?
         .into_iter()
@@ -155,17 +182,19 @@ mod tests {
 
     use gradient_entity::evaluation::Model as MEval;
     use gradient_entity::ids::{CommitId, EvaluationId, TaskId};
-    use sea_orm::{MockExecResult, Value};
+    use sea_orm::{DatabaseConnection, MockExecResult, Value};
     use std::collections::BTreeMap;
 
-    fn derivation_row(derivation: DerivationId) -> BTreeMap<String, Value> {
+    type Row = BTreeMap<String, Value>;
+
+    fn derivation_row(derivation: DerivationId) -> Row {
         BTreeMap::from([(
             "derivation".to_owned(),
             Value::from(derivation.into_inner()),
         )])
     }
 
-    fn unpromoted_row(derivation: DerivationId) -> BTreeMap<String, Value> {
+    fn unpromoted_row(derivation: DerivationId) -> Row {
         BTreeMap::from([
             (
                 "derivation".to_owned(),
@@ -179,6 +208,17 @@ mod tests {
                 "to_status".to_owned(),
                 Value::from(crate::sql::status::build(BuildStatus::Created)),
             ),
+        ])
+    }
+
+    fn kept_row(kept: &KeptAssignment) -> Row {
+        BTreeMap::from([
+            (
+                "id".to_owned(),
+                Value::from(kept.assignment_id.into_inner()),
+            ),
+            ("job_id".to_owned(), Value::from(kept.job_key.clone())),
+            ("worker_id".to_owned(), Value::from(kept.worker_id.clone())),
         ])
     }
 
@@ -196,48 +236,58 @@ mod tests {
         }
     }
 
+    fn affected(rows_affected: u64) -> MockExecResult {
+        MockExecResult {
+            last_insert_id: 0,
+            rows_affected,
+        }
+    }
+
+    fn idle_db(kept: Vec<Row>) -> DatabaseConnection {
+        mock_db()
+            .append_exec_results([affected(0), affected(0)])
+            .append_query_results([kept])
+            .append_query_results([Vec::<Row>::new()])
+            .append_query_results([Vec::<MEval>::new()])
+            .append_exec_results([0, 0, 0, 0, 0].map(affected))
+            .append_query_results([Vec::<Row>::new()])
+            .append_exec_results([affected(0)])
+            .into_connection()
+    }
+
+    async fn recovered_sql(db: DatabaseConnection) -> Vec<String> {
+        recover_interrupted_work(&db).await.unwrap();
+
+        db.into_transaction_log()
+            .iter()
+            .flat_map(|t| t.statements())
+            .map(|s| s.sql.clone())
+            .collect()
+    }
+
     #[tokio::test]
     async fn all_operations_populate_report() {
         let task_id = TaskId::now_v7();
         let mid_flight = DerivationId::now_v7();
         let db = mock_db()
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 5,
-            }])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 3,
-            }])
+            .append_exec_results([affected(1), affected(3)])
+            .append_query_results([Vec::<Row>::new()])
             .append_query_results([vec![
                 derivation_row(mid_flight),
                 derivation_row(DerivationId::now_v7()),
             ]])
             .append_query_results([vec![unpromoted_row(mid_flight)]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
+            .append_exec_results([affected(1)])
             .append_query_results([vec![eval_row(EvaluationStatus::Fetching, Some(task_id))]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
+            .append_exec_results([affected(1)])
             .append_query_results([crate::test_ctx::inserted_phase_event()])
-            .append_exec_results([1, 0, 0, 0, 1].map(|n| MockExecResult {
-                last_insert_id: 0,
-                rows_affected: n,
-            }))
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
+            .append_exec_results([1, 0, 0, 0, 1].map(affected))
+            .append_query_results([Vec::<Row>::new()])
+            .append_exec_results([affected(0)])
             .into_connection();
 
         let report = recover_interrupted_work(&db).await.unwrap();
 
-        assert_eq!(report.assignments_closed, 5);
         assert_eq!(report.attempts_aborted, 3);
         assert_eq!(report.builds_requeued, 2);
         assert_eq!(report.builds_unpromoted, 1);
@@ -261,71 +311,80 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_assignment_rows_close_before_the_shared_build_requeue() {
-        let none = MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 0,
+    async fn open_assignments_are_kept_and_cluster_ones_close() {
+        let kept = KeptAssignment {
+            assignment_id: DispatchedJobId::now_v7(),
+            worker_id: "w1".into(),
+            job_key: format!("build:{}", DerivationBuildId::now_v7()),
         };
-        let db = mock_db()
-            .append_exec_results([none.clone(), none])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<MEval>::new()])
-            .append_exec_results([0, 0, 0, 0, 0].map(|n| MockExecResult {
-                last_insert_id: 0,
-                rows_affected: n,
-            }))
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
-            .into_connection();
+        let db = idle_db(vec![kept_row(&kept)]);
 
-        recover_interrupted_work(&db).await.unwrap();
+        let report = recover_interrupted_work(&db).await.unwrap();
 
-        let log = db.into_transaction_log();
-        let sql: Vec<&str> = log
+        assert_eq!(report.kept, vec![kept]);
+        let sql: Vec<String> = db
+            .into_transaction_log()
             .iter()
             .flat_map(|t| t.statements())
-            .map(|s| s.sql.as_str())
+            .map(|s| s.sql.clone())
             .collect();
+        let closes: Vec<_> = sql
+            .iter()
+            .filter(|s| s.starts_with("UPDATE \"dispatched_job\""))
+            .collect();
+        assert_eq!(closes.len(), 1, "{sql:?}");
+        assert!(closes[0].contains("cluster_attempt IS NOT NULL"), "{sql:?}");
         let close = sql
             .iter()
             .position(|s| s.starts_with("UPDATE \"dispatched_job\""))
-            .expect("recovery closes every open dispatch row");
+            .unwrap();
+        let select = sql
+            .iter()
+            .position(|s| s.starts_with("SELECT") && s.contains("FROM \"dispatched_job\""))
+            .expect("recovery reads the open rows it keeps");
+        assert!(close < select, "{sql:?}");
+    }
+
+    #[tokio::test]
+    async fn only_builds_without_an_open_assignment_are_requeued() {
+        let sql = recovered_sql(idle_db(Vec::new())).await;
+
         let requeue = sql
             .iter()
-            .position(|s| s.contains("UPDATE derivation_build SET status"))
+            .find(|s| s.contains("UPDATE derivation_build SET status"))
             .expect("recovery requeues the mid-flight shared builds");
-        assert!(close < requeue, "{sql:?}");
+        assert!(
+            requeue.contains(&no_open_assignment_predicate(&build_job_key_sql(
+                "derivation_build.id"
+            ))),
+            "{requeue}"
+        );
+        let attempts = sql
+            .iter()
+            .find(|s| s.starts_with("UPDATE \"build_attempt\""))
+            .expect("recovery aborts running attempts");
+        assert!(
+            attempts.contains(&no_open_assignment_predicate(&build_job_key_sql(
+                "\"build_attempt\".\"derivation_build\""
+            ))),
+            "{attempts}"
+        );
+        let evals = sql
+            .iter()
+            .find(|s| s.contains("FROM \"evaluation\""))
+            .expect("recovery reads the interrupted evaluations");
+        assert!(
+            evals.contains(&no_open_assignment_predicate(&eval_job_key_sql(
+                "\"evaluation\".\"id\""
+            ))),
+            "{evals}"
+        );
     }
 
     #[tokio::test]
     async fn clusters_recover_after_the_evaluations_they_hold() {
-        let none = MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 0,
-        };
-        let db = mock_db()
-            .append_exec_results([none.clone(), none.clone()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<MEval>::new()])
-            .append_exec_results([none.clone(), none.clone(), none.clone(), none.clone(), none])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
-            .into_connection();
+        let sql = recovered_sql(idle_db(Vec::new())).await;
 
-        recover_interrupted_work(&db).await.unwrap();
-
-        let log = db.into_transaction_log();
-        let sql: Vec<&str> = log
-            .iter()
-            .flat_map(|t| t.statements())
-            .map(|s| s.sql.as_str())
-            .collect();
         let evals = sql
             .iter()
             .position(|s| s.contains("FROM \"evaluation\""))
@@ -339,31 +398,11 @@ mod tests {
 
     #[tokio::test]
     async fn nothing_is_reported_without_interrupted_work() {
-        let db = mock_db()
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<MEval>::new()])
-            .append_exec_results([0, 0, 0, 0, 0].map(|n| MockExecResult {
-                last_insert_id: 0,
-                rows_affected: n,
-            }))
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
-            .into_connection();
+        let report = recover_interrupted_work(&idle_db(Vec::new()))
+            .await
+            .unwrap();
 
-        let report = recover_interrupted_work(&db).await.unwrap();
-
-        assert_eq!(report.assignments_closed, 0);
+        assert!(report.kept.is_empty());
         assert_eq!(report.attempts_aborted, 0);
         assert_eq!(report.builds_requeued, 0);
         assert_eq!(report.builds_unpromoted, 0);

@@ -9,7 +9,6 @@ use std::collections::BTreeSet;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::commit;
-use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_entity::ids::EvaluationId;
 use gradient_fixtures::shape::{Shape, shape};
@@ -751,7 +750,7 @@ async fn q16_the_reheal_thaws_a_timed_out_build_and_leaves_a_reproducible_failur
 }
 
 #[tokio::test]
-async fn q17_startup_recovery_closes_rows_requeues_builds_and_evaluations() {
+async fn q17_startup_recovery_keeps_open_rows_and_their_work() {
     let (e1, e2, e3) = (
         EvaluationId::now_v7(),
         EvaluationId::now_v7(),
@@ -770,8 +769,8 @@ async fn q17_startup_recovery_closes_rows_requeues_builds_and_evaluations() {
             .collect();
         assert_eq!(
             closings,
-            vec![(true, Some(DispatchedJobOutcome::Abandoned))],
-            "after 1: dj({key}) closed Abandoned"
+            vec![(false, None)],
+            "after 1: dj({key}) stays open"
         );
     }
     for path in [A, B] {
@@ -783,13 +782,13 @@ async fn q17_startup_recovery_closes_rows_requeues_builds_and_evaluations() {
             .collect();
         assert_eq!(
             outcomes,
-            vec![AttemptOutcome::Aborted],
+            vec![AttemptOutcome::Running],
             "after 1: att({path})"
         );
     }
     assert_eq!(
         (case.sb(A).await.status, case.sb(B).await.status),
-        (BuildStatus::Queued, BuildStatus::Created),
+        (BuildStatus::Building, BuildStatus::Building),
         "after 1: sb(A).status, sb(B).status"
     );
     assert_eq!(
@@ -800,7 +799,7 @@ async fn q17_startup_recovery_closes_rows_requeues_builds_and_evaluations() {
         ),
         (
             EvaluationStatus::Building,
-            EvaluationStatus::Queued,
+            EvaluationStatus::EvaluatingDerivation,
             EvaluationStatus::Building,
         ),
         "after 1: evaluation(E1), evaluation(E2), evaluation(E3) status"
