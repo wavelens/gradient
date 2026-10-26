@@ -81,16 +81,19 @@ fn corrupt_eval_cache(msg: &str) -> Option<CorruptEvalCache> {
 }
 
 fn recognise_corrupt_cache(error: anyhow::Error) -> anyhow::Error {
-    match corrupt_eval_cache(&format!("{error:#}")) {
-        Some(corrupt) => error.context(corrupt),
+    let message = format!("{error:#}");
+    match corrupt_eval_cache(&message) {
+        Some(corrupt) => anyhow::Error::new(corrupt).context(message),
         None => error,
     }
 }
 
 pub(super) fn corrupt_cache_in(error: &anyhow::Error) -> Option<&CorruptEvalCache> {
-    error
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<CorruptEvalCache>())
+    error.downcast_ref::<CorruptEvalCache>().or_else(|| {
+        error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<CorruptEvalCache>())
+    })
 }
 
 pub(super) async fn drop_corrupt_cache(
