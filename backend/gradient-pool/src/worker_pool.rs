@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use gradient_types::ids::ProjectId;
-use gradient_wire::types::{BuildStage, GradientCapabilities, JobKind};
+use gradient_wire::types::{
+    BuildStage, DeviceRequest, GradientCapabilities, JobKind, RunnerInventory,
+};
 
 use crate::peer_auth::PeerAuth;
 use crate::session_port::{SessionPort, SessionSignal};
@@ -160,6 +162,7 @@ impl WorkerPool {
                 metrics: self.metrics_for(id),
                 zone: s.zone.clone(),
                 endpoint: s.endpoint.clone(),
+                runner: s.runner_inventory(),
             }
         })
     }
@@ -167,6 +170,12 @@ impl WorkerPool {
     pub fn update_capabilities(&mut self, id: &str, profile: crate::WorkerProfile) {
         if let Some(slot) = self.workers.get_mut(id) {
             slot.shared_mut().apply_profile(profile);
+        }
+    }
+
+    pub fn update_runner_inventory(&mut self, id: &str, runner: Option<RunnerInventory>) {
+        if let Some(slot) = self.workers.get_mut(id) {
+            slot.shared_mut().runner = runner;
         }
     }
 
@@ -299,7 +308,7 @@ impl WorkerPool {
             Some(WorkerSlot::Active(w)) => match kind {
                 JobKind::Flake => true,
                 JobKind::Build => w.has_build_capacity(),
-                JobKind::Runner => false,
+                JobKind::Runner => w.runner.is_some(),
             },
             Some(WorkerSlot::Draining(_)) => false,
             None => false,
@@ -323,15 +332,37 @@ impl WorkerPool {
         reserved_ram_mb: u64,
     ) {
         if let Some(slot) = self.workers.get_mut(worker_id) {
-            slot.shared_mut().assigned_jobs.insert(
+            let jobs = &mut slot.shared_mut().assigned_jobs;
+            let devices = jobs
+                .remove(job_id)
+                .map(|held| held.devices)
+                .unwrap_or_default();
+            jobs.insert(
                 job_id.to_owned(),
                 AssignedJob {
                     kind,
                     stage: None,
                     reserved_ram_mb,
                     observed_ram_mb: 0,
+                    devices,
                 },
             );
+        }
+    }
+
+    pub fn hold_devices(&mut self, worker_id: &str, job_id: &str, devices: Vec<DeviceRequest>) {
+        if let Some(slot) = self.workers.get_mut(worker_id) {
+            slot.shared_mut()
+                .assigned_jobs
+                .entry(job_id.to_owned())
+                .or_insert_with(|| AssignedJob {
+                    kind: JobKind::Runner,
+                    stage: None,
+                    reserved_ram_mb: 0,
+                    observed_ram_mb: 0,
+                    devices: Vec::new(),
+                })
+                .devices = devices;
         }
     }
 
@@ -422,6 +453,7 @@ impl WorkerPool {
             disk_speed_mbps: s.disk_speed_mbps,
             upload_speed_mbps: s.upload_speed_mbps,
             download_speed_mbps: s.download_speed_mbps,
+            runner: s.runner_inventory(),
         }
     }
 
@@ -467,6 +499,7 @@ pub struct WorkerInfo {
     pub upload_speed_mbps: Option<f32>,
     #[serde(skip)]
     pub download_speed_mbps: Option<f32>,
+    pub runner: Option<RunnerInventory>,
 }
 
 #[cfg(test)]
@@ -608,6 +641,7 @@ mod tests {
                 zone: Some("fra1".into()),
                 endpoint: Some("10.0.0.7:7000".into()),
                 build_cores: Some(6),
+                runner: None,
             },
         );
 
@@ -1149,5 +1183,41 @@ mod tests {
             !Arc::ptr_eq(&first, &other),
             "a different worker gets its own handle"
         );
+    }
+
+    #[test]
+    fn a_held_device_is_not_free_before_the_worker_reports_it() {
+        use gradient_wire::types::{DeviceClass, DeviceRequest, RunnerInventory};
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.update_runner_inventory(
+            "w1",
+            Some(RunnerInventory {
+                devices: vec![DeviceClass {
+                    name: "gpu:h100".into(),
+                    total: 8,
+                    free: 8,
+                }],
+                ..Default::default()
+            }),
+        );
+        let free = |pool: &WorkerPool| {
+            pool.worker_caps("w1")
+                .and_then(|caps| caps.runner)
+                .map(|runner| runner.devices[0].free)
+        };
+        pool.hold_devices(
+            "w1",
+            "runner:1",
+            vec![DeviceRequest {
+                name: "gpu:h100".into(),
+                count: 8,
+            }],
+        );
+        assert_eq!(free(&pool), Some(0));
+        pool.assign_job("w1", "runner:1", JobKind::Runner, 0);
+        assert_eq!(free(&pool), Some(0), "the assignment keeps the hold");
+        pool.release_job("w1", "runner:1");
+        assert_eq!(free(&pool), Some(8));
     }
 }

@@ -733,6 +733,7 @@ mod tests {
             disk_speed_mbps: None,
             upload_speed_mbps: None,
             download_speed_mbps: None,
+            runner: None,
         }
     }
 

@@ -236,6 +236,7 @@ impl<'a> InboundContext<'a> {
                     zone,
                     endpoint,
                     build_cores,
+                    runner: None,
                 })
                 .await;
                 true

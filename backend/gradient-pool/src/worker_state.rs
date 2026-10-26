@@ -11,7 +11,11 @@ use std::sync::atomic::AtomicI64;
 
 use gradient_types::ids::ProjectId;
 
-use gradient_wire::types::{BuildStage, GradientCapabilities, JobKind};
+use gradient_wire::types::{
+    BuildStage, DeviceClass, DeviceRequest, GradientCapabilities, JobKind, RunnerInventory,
+};
+
+use crate::worker_caps::effective_free;
 
 use crate::peer_auth::PeerAuth;
 use crate::session_port::SessionPort;
@@ -39,6 +43,7 @@ pub struct AssignedJob {
     pub stage: Option<BuildStage>,
     pub reserved_ram_mb: u64,
     pub observed_ram_mb: u64,
+    pub devices: Vec<DeviceRequest>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -52,6 +57,7 @@ pub struct WorkerProfile {
     pub zone: Option<String>,
     pub endpoint: Option<String>,
     pub build_cores: Option<u32>,
+    pub runner: Option<RunnerInventory>,
 }
 
 pub struct WorkerShared {
@@ -65,6 +71,7 @@ pub struct WorkerShared {
     pub zone: Option<String>,
     pub endpoint: Option<String>,
     pub build_cores: Option<u32>,
+    pub runner: Option<RunnerInventory>,
     pub cpu_usage_pct: Option<f32>,
     pub ram_free_mb: Option<u64>,
     pub disk_speed_mbps: Option<f32>,
@@ -134,7 +141,25 @@ impl WorkerShared {
             zone: self.zone.clone(),
             endpoint: self.endpoint.clone(),
             build_cores: self.build_cores,
+            runner: self.runner.clone(),
         }
+    }
+
+    pub fn runner_inventory(&self) -> Option<RunnerInventory> {
+        let mut inventory = self.runner.clone()?;
+        for class in &mut inventory.devices {
+            class.free = effective_free(class, self.held_units(class));
+        }
+        Some(inventory)
+    }
+
+    fn held_units(&self, class: &DeviceClass) -> u32 {
+        self.assigned_jobs
+            .values()
+            .flat_map(|job| &job.devices)
+            .filter(|device| device.name == class.name)
+            .map(|device| device.count)
+            .sum()
     }
 
     pub fn apply_profile(&mut self, profile: WorkerProfile) {
@@ -147,6 +172,7 @@ impl WorkerShared {
         self.zone = profile.zone.filter(|z| !z.is_empty());
         self.endpoint = profile.endpoint.filter(|e| !e.is_empty());
         self.build_cores = profile.build_cores;
+        self.runner = profile.runner;
     }
 }
 
@@ -198,6 +224,7 @@ impl TypedWorker<Active> {
                 zone: None,
                 endpoint: None,
                 build_cores: None,
+                runner: None,
                 cpu_usage_pct: None,
                 ram_free_mb: None,
                 disk_speed_mbps: None,
