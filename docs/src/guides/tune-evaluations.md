@@ -110,3 +110,4 @@ Recent evaluations appear under **Job Board -> Evals** together with their times
 - [Evaluation Wildcards](../reference/wildcards.md)
 - [Monitor Gradient](monitoring.md)
 - [Add a Remote Worker](remote-worker.md)
+- [Run Multi-Node Evaluations](multi-node-evaluations.md)
