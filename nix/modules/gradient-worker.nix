@@ -512,7 +512,7 @@ in {
   config = lib.mkIf cfg.enable (lib.mkMerge [ {
     assertions = [
       {
-        assertion = cfg.serverUrl != null || cfg.discoverable;
+        assertion = config.systemd.services.gradient-worker.enable -> cfg.serverUrl != null || cfg.discoverable;
         message = "services.gradient.worker: serverUrl unset without discoverable, set either to connect to a server";
       }
       {
