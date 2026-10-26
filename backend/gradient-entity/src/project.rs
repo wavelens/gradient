@@ -27,6 +27,7 @@ pub struct Model {
     pub private_key: String,
     pub public: bool,
     pub hide_build_requests: bool,
+    pub runner_enabled: bool,
     pub created_by: UserId,
     pub created_at: NaiveDateTime,
     pub managed: bool,
@@ -43,6 +44,7 @@ impl std::fmt::Debug for Model {
             .field("private_key", &"[redacted]")
             .field("public", &self.public)
             .field("hide_build_requests", &self.hide_build_requests)
+            .field("runner_enabled", &self.runner_enabled)
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)
             .finish()

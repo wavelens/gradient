@@ -25,6 +25,8 @@ pub struct Model {
     pub dep_counts_computed_at: Option<NaiveDateTime>,
     #[sea_orm(column_type = "JsonBinary")]
     pub licenses: Licenses,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub runner: Option<Json>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]

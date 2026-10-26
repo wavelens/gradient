@@ -90,6 +90,7 @@ impl<'a> StateApplicator<'a> {
                     private_key: encrypted_private_key,
                     public: state_project.public,
                     hide_build_requests: state_project.hide_build_requests,
+                    runner_enabled: false,
                     created_by: created_by_id,
                     created_at: now,
                     managed: true,
