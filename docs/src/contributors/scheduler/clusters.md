@@ -185,17 +185,20 @@ flowchart LR
 | Event | Result |
 |---|---|
 | Primary lost or failed before `planned_at` | Retry of the attempt, as for any cluster |
+| Source announcement the server cannot store, before `planned_at` | The server fails the primary. Retry of the attempt |
 | Member lost or failed after `planned_at` | Its running shards go back to the queue. No verdict. The others continue |
 | Returned shard with 2 or more children | `Split` into two queued halves |
 | Returned shard with 1 child or none | Queued again once (`MAX_SHARD_ATTEMPTS` = 2), then `Failed` with an attribute error |
-| Every member lost after `planned_at` | Retry. The queue survives into the next attempt |
+| Every member lost after `planned_at` | Retry. The queue survives into the next attempt. Staged `EvalStats` of the failed attempt get deleted |
 | A request without `finished`, with a running shard still under the member key | That shard goes back to the queue first |
 
 ### Verdict
 
-- Members can only report success, after `Finished`. The first success can settle the attempt as `Complete`.
-- The evaluation completion can happen once, for that first report.
-- Other members end like survivors and leave the evaluation untouched.
+- Members can only report success, after `Finished`. Members send their `EvalStats` before the success.
+- The verdict can only come after a report from every member. One success among those reports can settle the attempt as `Complete`.
+- Members still taking shards get `Finished` on the next request. Members of a completed attempt never receive an abort.
+- Aborted members end the attempt as `Abort` at once.
+- The evaluation completion can happen once, for the first success. The merge of the staged `EvalStats` then covers every member.
 
 ## Related
 

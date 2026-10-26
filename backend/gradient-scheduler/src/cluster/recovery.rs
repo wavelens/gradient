@@ -5,6 +5,7 @@
  */
 
 use anyhow::Result;
+use gradient_db::eval_reports::drop_eval_reports;
 use gradient_db::status::BuildRefusal;
 use gradient_graph::Transition;
 use gradient_pool::session_port::SessionSignal;
@@ -89,6 +90,7 @@ impl Scheduler {
             split: self.cluster.book.split(attempt).await,
         };
         let (reports, survivors) = self.cluster.book.drain(attempt, resolution).await;
+        self.drop_reports_of_a_retry(resolution, &reports).await;
         let completion = split_completion(resolution, &reports);
         let mut dispositions: Vec<Disposition> = reports
             .into_iter()
@@ -105,6 +107,23 @@ impl Scheduler {
         self.build_kick.kick();
 
         Ok(())
+    }
+
+    async fn drop_reports_of_a_retry(&self, resolution: Resolution, reports: &[MemberReport]) {
+        if !resolution.split || resolution.fate != Fate::Retry {
+            return;
+        }
+        let Some(evaluation) = reports
+            .iter()
+            .find_map(|report| report.job())
+            .map(PendingJob::evaluation_id)
+        else {
+            return;
+        };
+
+        if let Err(e) = drop_eval_reports(&self.db.worker_db, evaluation).await {
+            warn!(%evaluation, error = %e, "dropping the eval stats of a retried split attempt failed");
+        }
     }
 
     async fn abort_survivors(
@@ -246,4 +265,50 @@ fn split_completion(resolution: Resolution, reports: &[MemberReport]) -> Option<
         MemberReport::Completed { job } => Some(Disposition::Complete(job.clone())),
         _ => None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_jobs::eval_job;
+    use gradient_fixtures::mock::{exec_ok, mock_db, raw_statements};
+    use gradient_test_support::state::TestState;
+    use gradient_types::ids::ProjectId;
+
+    fn lost() -> MemberReport {
+        MemberReport::Lost {
+            job: PendingJob::Eval(eval_job(ProjectId::now_v7())),
+        }
+    }
+
+    async fn statements_after(fate: Fate, split: bool) -> Vec<sea_orm::Statement> {
+        let db = mock_db().append_exec_results([exec_ok()]).into_connection();
+        let scheduler = Scheduler::new(TestState::new().worker_db(db.clone()).build());
+        let resolution = Resolution {
+            fate,
+            requeued: true,
+            split,
+        };
+
+        scheduler
+            .drop_reports_of_a_retry(resolution, &[lost()])
+            .await;
+        raw_statements(db.into_transaction_log())
+    }
+
+    #[tokio::test]
+    async fn reports_of_a_failed_attempt_are_dropped_on_retry() {
+        let dropped = statements_after(Fate::Retry, true).await;
+
+        assert_eq!(dropped.len(), 1, "{dropped:?}");
+        assert!(
+            dropped[0]
+                .sql
+                .starts_with("DELETE FROM \"eval_cost_report\""),
+            "{}",
+            dropped[0].sql
+        );
+        assert!(statements_after(Fate::Complete, true).await.is_empty());
+        assert!(statements_after(Fate::Retry, false).await.is_empty());
+    }
 }

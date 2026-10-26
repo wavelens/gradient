@@ -64,11 +64,20 @@ pub async fn fold_eval_reports<C: ConnectionTrait + TransactionTrait>(
         record_eval_costs(&txn, task, &merged.sets, &merged.subtrees).await?;
     }
 
+    drop_eval_reports(&txn, evaluation).await?;
+    txn.commit().await
+}
+
+pub async fn drop_eval_reports<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<(), DbErr> {
     ECostReport::delete_many()
         .filter(CCostReport::Evaluation.eq(evaluation))
-        .exec(&txn)
+        .exec(db)
         .await?;
-    txn.commit().await
+
+    Ok(())
 }
 
 pub fn merge_reports(reports: Vec<EvalStatsReport>) -> EvalStatsReport {
