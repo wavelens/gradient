@@ -132,7 +132,8 @@ flowchart LR
 | Pull | Before discovery: `EvalCachePull` with the keys of the segments already applied. The answer holds only the missing segments |
 | Apply | One immediate transaction per segment. A placeholder never replaces a value or a failure. Applied rows stay out of the change log |
 | Change log | Triggers on the Nix `Attributes` table: every inserted or updated row noted in `gradient_changed_attribute` |
-| Export | Every 30 s and after a successful evaluation: the change log turned into segments of at most 8 MiB. Export and log clear in one transaction |
+| Export | Every 30 s and after a successful evaluation: the change log turned into segments of at most 8 MiB. Complete attribute sets hold a list of their child names. `Missing` rows stay absent from that list. Export and log clear in one transaction |
+| Attribute Sets | A complete set on apply: a placeholder for every listed child without a row, then removal of the `Missing` children. A `Missing` row outside the listing of a complete parent stays out |
 | Upload | Each segment kept in `gradient_unsent_segment` until the server committed the upload. A failed upload: another attempt at the next flush, also in a later job of the same fingerprint |
 
 - **Bad Segments:** the worker can skip a segment without a valid decode and leave the segment unapplied. The next pull can offer that segment again.
@@ -143,7 +144,7 @@ flowchart LR
 |---|---|
 | Store | A new key `eval-cache-segments/<cache>/<fp>/<uuidv7>` per upload, in the first writable cache of the project |
 | Record | One `eval_cache_store` row per cache and fingerprint, plus one `EvalCacheCompact` pending delivery, delayed by 15 min |
-| Compact | All listed segments merged into one new segment, then removal of only the listed keys. Other writable caches of the project receive a copy as a new segment |
+| Compact | All listed segments merged into new segments of at most 8 MiB, without `Missing` rows under a complete attribute set. Then removal of only the listed keys. The other writable caches of the project each receive a copy of every new segment |
 | Pull | A listing of every readable cache. Segments sent as presigned URLs, or inline as `EvalCacheChunk` streams |
 | Heal | `CorruptEvalCache`: removal of the fingerprint's segments, `purged_at` set. A second corruption within one hour: evaluation `Failed` |
 
