@@ -115,9 +115,10 @@ def save_slow_statements(label):
         " || round(total_exec_time) || ' ms total: ' || left(regexp_replace(query, '\\s+', ' ', 'g'), 400)"
         " FROM pg_stat_statements ORDER BY max_exec_time DESC LIMIT 25"
     )
-    logged = server.execute(f"grep -E 'duration:|canceling|STATEMENT' {POSTGRES_LOG}")[1]
-    path = pathlib.Path(server.out_dir) / f"slow-statements-{label}.txt"
-    path.write_text(f"{slowest}\n\n{logged}")
+    logged = server.succeed(f"cat {POSTGRES_LOG}")
+    text = f"{slowest}\n\n{logged}"
+    (pathlib.Path(server.out_dir) / f"slow-statements-{label}.txt").write_text(text)
+    print(f"slow statements of {label}:\n{text}")
 
 
 def measure(token, task):
