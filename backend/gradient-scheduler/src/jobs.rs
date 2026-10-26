@@ -42,6 +42,7 @@ pub struct PendingEvalJob {
     pub rescore_count: u32,
     pub estimate: BuildEstimate,
     pub walk_mode: WalkMode,
+    pub eval_index: u16,
     pub prioritized: bool,
     pub build_request: bool,
 }
@@ -91,11 +92,12 @@ pub enum PendingJob {
     Build(PendingBuildJob),
 }
 
-pub fn eval_job_key(evaluation: EvaluationId) -> String {
-    format!(
-        "{}{evaluation}",
-        gradient_db::scheduling::assignment_record::EVAL_KEY_PREFIX
-    )
+pub fn eval_job_key(evaluation: EvaluationId, index: u16) -> String {
+    let prefix = gradient_db::scheduling::assignment_record::EVAL_KEY_PREFIX;
+    match index {
+        0 => format!("{prefix}{evaluation}"),
+        index => format!("{prefix}{evaluation}:{index}"),
+    }
 }
 
 pub fn parse_eval_job_key(key: &str) -> Option<(EvaluationId, u16)> {
@@ -130,7 +132,7 @@ impl PendingBuildJob {
 impl PendingJob {
     pub fn job_key(&self) -> String {
         match self {
-            PendingJob::Eval(j) => eval_job_key(j.evaluation_id),
+            PendingJob::Eval(j) => eval_job_key(j.evaluation_id, j.eval_index),
             PendingJob::Build(j) => build_job_key(j.derivation_build),
         }
     }
@@ -1708,6 +1710,25 @@ mod tests {
     };
 
     #[test]
+    fn companion_keys_carry_their_index() {
+        let evaluation = EvaluationId::now_v7();
+
+        assert_eq!(eval_job_key(evaluation, 2), format!("eval:{evaluation}:2"));
+        assert_eq!(eval_job_key(evaluation, 0), format!("eval:{evaluation}"));
+        for index in [0, 1, 3] {
+            assert_eq!(
+                parse_eval_job_key(&eval_job_key(evaluation, index)),
+                Some((evaluation, index))
+            );
+        }
+        assert_eq!(
+            parse_eval_job_key(&build_job_key(DerivationBuildId::now_v7())),
+            None
+        );
+        assert_eq!(parse_eval_job_key(&format!("eval:{evaluation}:x")), None);
+    }
+
+    #[test]
     fn a_pending_job_reports_its_own_key() {
         let peer = ProjectId::now_v7();
 
@@ -1715,7 +1736,7 @@ mod tests {
         let PendingJob::Eval(e) = &eval else {
             unreachable!("eval_job builds an eval")
         };
-        assert_eq!(eval.job_key(), eval_job_key(e.evaluation_id));
+        assert_eq!(eval.job_key(), eval_job_key(e.evaluation_id, 0));
 
         let build = build_job(peer, vec![]);
         let PendingJob::Build(b) = &build else {
@@ -1791,6 +1812,7 @@ mod tests {
             build_request: false,
             estimate: Default::default(),
             walk_mode: Default::default(),
+            eval_index: 0,
         })
     }
 
@@ -1824,6 +1846,7 @@ mod tests {
             build_request: false,
             estimate: Default::default(),
             walk_mode: Default::default(),
+            eval_index: 0,
         })
     }
 

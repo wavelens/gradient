@@ -48,6 +48,7 @@ use crate::cluster::{
     CLUSTER_RETRY_BACKOFF, ClusterSnapshot, CommittedSeat, Committing, PendingCluster, Placement,
     PreparedMember, Reservation, aging_step, hide_reserved,
 };
+use crate::eval_split::is_split_role;
 use crate::jobs::Assignment;
 
 impl Scheduler {
@@ -103,6 +104,7 @@ impl Scheduler {
             .expire_resolved(Instant::now(), RESOLVED_ATTEMPT_TTL)
             .await;
         self.abort_dead_clusters().await?;
+        self.dissolve_unplaced_splits().await?;
 
         let mut snapshot = self.cluster_snapshot().await;
         let aging = snapshot.clone();
@@ -243,6 +245,8 @@ impl Scheduler {
                     resolving: false,
                     resolution: None,
                     resolved_at: None,
+                    split: seats.iter().any(|s| is_split_role(&s.role)),
+                    planned: false,
                 },
             )
             .await;
@@ -527,6 +531,24 @@ impl Scheduler {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    async fn dissolve_unplaced_splits(&self) -> anyhow::Result<()> {
+        let dissolved =
+            gradient_db::scheduling::cluster::dissolve_unplaced_clusters(&self.db.worker_db)
+                .await?;
+        if dissolved.is_empty() {
+            return Ok(());
+        }
+
+        for cluster in dissolved {
+            info!(%cluster, "unplaced split cluster dissolved; its evaluation runs on one worker");
+            self.call(|reply| SchedulerMsg::DropWaiting { cluster, reply })
+                .await?;
+        }
+        self.db.wake.eval_assign.notify_one();
 
         Ok(())
     }

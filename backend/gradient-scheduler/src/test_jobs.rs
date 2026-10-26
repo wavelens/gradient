@@ -46,6 +46,7 @@ pub(crate) fn eval_job(peer: ProjectId) -> PendingEvalJob {
         build_request: false,
         estimate: Default::default(),
         walk_mode: Default::default(),
+        eval_index: 0,
     }
 }
 

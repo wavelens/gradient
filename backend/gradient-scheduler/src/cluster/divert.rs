@@ -36,7 +36,7 @@ impl Membership {
                 .into_iter()
                 .filter_map(|of| {
                     let key = match (of.member.evaluation, of.member.derivation_build) {
-                        (Some(e), _) => eval_job_key(e),
+                        (Some(e), _) => eval_job_key(e, member_index(&of)),
                         (None, Some(a)) => build_job_key(a),
                         (None, None) => return None,
                     };
@@ -44,6 +44,27 @@ impl Membership {
                 })
                 .collect();
         Ok(Self { by_key })
+    }
+
+    pub(crate) fn eval_routes(&self, evaluation: EvaluationId) -> Vec<(u16, String, Route)> {
+        let mut routes: Vec<(u16, String, Route)> = self
+            .by_key
+            .iter()
+            .filter(|(_, of)| of.member.evaluation == Some(evaluation))
+            .map(|(key, of)| (member_index(of), key.clone(), self.route(key)))
+            .collect();
+        if routes.is_empty() {
+            routes.push((0, eval_job_key(evaluation, 0), Route::Single));
+        }
+
+        routes.sort_by_key(|(index, ..)| *index);
+        routes
+    }
+
+    pub(crate) fn has_cluster(&self, evaluation: EvaluationId) -> bool {
+        self.by_key
+            .values()
+            .any(|of| of.member.evaluation == Some(evaluation))
     }
 
     pub(crate) fn route(&self, key: &str) -> Route {
@@ -54,6 +75,13 @@ impl Membership {
             Some((_, ClusterJobStatus::Failed | ClusterJobStatus::Aborted)) => Route::Dead,
         }
     }
+}
+
+fn member_index(of: &MemberOf) -> u16 {
+    of.member
+        .eval_index
+        .and_then(|index| u16::try_from(index).ok())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

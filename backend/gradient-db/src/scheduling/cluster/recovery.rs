@@ -12,7 +12,7 @@ use gradient_entity::cluster_job::{
     ClusterJobStatus, Column as CClusterJob, Entity as EClusterJob,
 };
 use gradient_entity::ids::ClusterJobId;
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, Query};
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, QueryFilter};
 
 fn retries_left() -> Expr {
@@ -53,6 +53,28 @@ pub async fn finish_cluster_job<C: ConnectionTrait>(
         .await?;
 
     Ok(res.rows_affected == 1)
+}
+
+pub async fn dissolve_unplaced_clusters<C: ConnectionTrait>(
+    db: &C,
+) -> Result<Vec<ClusterJobId>, DbErr> {
+    let open_attempt = Query::select()
+        .expr(Expr::val(1))
+        .from(EClusterAttempt)
+        .and_where(
+            Expr::col((EClusterAttempt, CClusterAttempt::ClusterJob))
+                .equals((EClusterJob, CClusterJob::Id)),
+        )
+        .and_where(Expr::col((EClusterAttempt, CClusterAttempt::FinishedAt)).is_null())
+        .to_owned();
+    let dissolved = EClusterJob::delete_many()
+        .filter(CClusterJob::Status.eq(ClusterJobStatus::Queued))
+        .filter(CClusterJob::DissolveAfter.lt(gradient_types::now()))
+        .filter(Expr::exists(open_attempt).not())
+        .exec_with_returning(db)
+        .await?;
+
+    Ok(dissolved.into_iter().map(|c| c.id).collect())
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -169,6 +191,31 @@ mod tests {
             values.contains(&queued) && values.contains(&running),
             "{values}"
         );
+    }
+
+    #[tokio::test]
+    async fn an_unplaced_split_cluster_is_dissolved() {
+        use gradient_entity::cluster_job::Model as MClusterJob;
+
+        let cluster = ClusterJobId::now_v7();
+        let db = mock_db()
+            .append_query_results([vec![MClusterJob {
+                id: cluster,
+                ..Default::default()
+            }]])
+            .into_connection();
+
+        let dissolved = dissolve_unplaced_clusters(&db).await.expect("dissolve");
+
+        assert_eq!(dissolved, vec![cluster]);
+        let statements = all_statements(db.into_transaction_log());
+        let sql = &statements[0].sql;
+        assert!(sql.starts_with("DELETE FROM \"cluster_job\""), "{sql}");
+        assert!(sql.contains("\"dissolve_after\" < $"), "{sql}");
+        assert!(sql.contains("NOT EXISTS(SELECT"), "{sql}");
+        assert!(sql.contains("\"finished_at\" IS NULL"), "{sql}");
+        let queued = format!("SmallInt(Some({}))", i16::from(ClusterJobStatus::Queued));
+        assert!(format!("{:?}", statements[0].values).contains(&queued));
     }
 
     #[tokio::test]

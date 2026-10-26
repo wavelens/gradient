@@ -151,7 +151,7 @@ impl Scheduler {
         Ok(())
     }
 
-    async fn split_of(&self, job_id: &str) -> Result<Option<(MEvalSplit, u16)>> {
+    pub(crate) async fn split_of(&self, job_id: &str) -> Result<Option<(MEvalSplit, u16)>> {
         let Some((evaluation, index)) = parse_eval_job_key(job_id) else {
             return Ok(None);
         };
@@ -169,9 +169,13 @@ impl Scheduler {
         finished: Option<FinishedShard>,
     ) -> Result<EvalShardOutcome> {
         let txn = self.db.worker_db.begin().await?;
-        if let Some(finished) = finished {
-            finish(&txn, job_id, finished).await?;
-        }
+        let stale = match finished {
+            Some(finished) => {
+                finish(&txn, job_id, finished).await?;
+                Vec::new()
+            }
+            None => eval_shards::requeue_shards_of(&txn, job_id).await?,
+        };
 
         let outcome = match eval_shards::take_shard(&txn, evaluation, job_id).await? {
             Some(shard) => EvalShardOutcome::Shard(EvalShard {
@@ -184,6 +188,7 @@ impl Scheduler {
             None => EvalShardOutcome::Finished,
         };
         txn.commit().await?;
+        self.record_failed_shards(&stale).await;
 
         Ok(outcome)
     }

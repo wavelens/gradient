@@ -216,6 +216,8 @@ mod tests {
                         prioritized,
                         ..eval_job(peer)
                     })),
+                    split: false,
+                    min_free_ram_mb: None,
                 })
                 .collect(),
             not_before: None,

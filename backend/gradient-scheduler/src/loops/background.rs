@@ -375,7 +375,7 @@ fn plan_eval_repairs(
     untracked: &HashSet<String>,
 ) -> Vec<(EvaluationId, EvalRepair)> {
     lost.iter()
-        .filter(|l| untracked.contains(&crate::jobs::eval_job_key(l.evaluation)))
+        .filter(|l| untracked.contains(&crate::jobs::eval_job_key(l.evaluation, 0)))
         .filter_map(|l| {
             let repair = match l.outcome {
                 DispatchedJobOutcome::Completed => EvalRepair::Complete,
@@ -421,7 +421,7 @@ pub(crate) async fn eval_completion_watchdog_pass(scheduler: &Scheduler) -> anyh
     let untracked: HashSet<String> = scheduler
         .untracked(
             lost.iter()
-                .map(|l| crate::jobs::eval_job_key(l.evaluation))
+                .map(|l| crate::jobs::eval_job_key(l.evaluation, 0))
                 .collect(),
         )
         .await
@@ -642,7 +642,7 @@ mod tests {
         ];
         let untracked = rows
             .iter()
-            .map(|l| crate::jobs::eval_job_key(l.evaluation))
+            .map(|l| crate::jobs::eval_job_key(l.evaluation, 0))
             .collect();
 
         assert_eq!(
@@ -658,7 +658,7 @@ mod tests {
     fn eval_repairs_skip_tracked_abandoned_and_core_outage_rows() {
         let tracked = lost(DispatchedJobOutcome::Completed);
         let stranded = lost(DispatchedJobOutcome::Completed);
-        let untracked = HashSet::from([crate::jobs::eval_job_key(stranded.evaluation)]);
+        let untracked = HashSet::from([crate::jobs::eval_job_key(stranded.evaluation, 0)]);
         assert_eq!(
             plan_eval_repairs(&[tracked, stranded], &untracked),
             vec![(stranded.evaluation, EvalRepair::Complete)]
@@ -667,7 +667,7 @@ mod tests {
         let abandoned = vec![lost(DispatchedJobOutcome::Abandoned)];
         let untracked: HashSet<String> = abandoned
             .iter()
-            .map(|l| crate::jobs::eval_job_key(l.evaluation))
+            .map(|l| crate::jobs::eval_job_key(l.evaluation, 0))
             .collect();
         assert!(plan_eval_repairs(&abandoned, &untracked).is_empty());
 

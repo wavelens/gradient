@@ -403,7 +403,7 @@ async fn after_an_evaluation_build_and_upload_no_original_hash_is_stored() {
         .await;
 
     let eval = worker
-        .claim(JobKind::Flake, |c| c.job_id == eval_job_key(e1))
+        .claim(JobKind::Flake, |c| c.job_id == eval_job_key(e1, 0))
         .await;
     worker.update(&eval, JobUpdateKind::Fetching).await;
     worker

@@ -78,6 +78,7 @@ pub struct Scheduler {
     pub(crate) import_waits: import_waits::ImportWaits,
     pub(crate) input_waits: input_waits::InputWaits,
     pub(crate) workers: worker_memory::WorkerMemory,
+    pub(crate) split_decisions: eval_split::create::SplitDecisions,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -103,6 +104,7 @@ impl Scheduler {
             import_waits: import_waits::ImportWaits::default(),
             input_waits: input_waits::InputWaits::default(),
             workers: worker_memory::WorkerMemory::default(),
+            split_decisions: Default::default(),
         }
     }
 
@@ -159,7 +161,10 @@ impl Scheduler {
         eval_id: EvaluationId,
         shared_build_ids: &[DerivationBuildId],
     ) {
-        let mut job_ids = vec![crate::jobs::eval_job_key(eval_id)];
+        let split_members = u16::try_from(eval_split::create::MAX_SPLIT_MEMBERS).unwrap_or(1);
+        let mut job_ids: Vec<String> = (0..split_members)
+            .map(|index| crate::jobs::eval_job_key(eval_id, index))
+            .collect();
         job_ids.extend(
             shared_build_ids
                 .iter()

@@ -55,6 +55,8 @@ pub struct AttemptState {
     pub resolving: bool,
     pub resolution: Option<Resolution>,
     pub resolved_at: Option<Instant>,
+    pub split: bool,
+    pub planned: bool,
 }
 
 #[derive(Debug)]
@@ -126,7 +128,7 @@ impl Attempts {
         if state.verdict.is_some() {
             return Some(None);
         }
-        state.verdict = verdict(&state.members);
+        state.verdict = verdict(&state.members, state.split && state.planned);
 
         Some(state.verdict)
     }
@@ -175,7 +177,7 @@ impl Attempts {
         Some(SignalRoute { from, workers })
     }
 
-    pub fn record(&mut self, job_id: &str, report: MemberReport) -> Recorded {
+    pub fn record(&mut self, job_id: &str, report: MemberReport, planned: bool) -> Recorded {
         let Some(&attempt) = self.by_job.get(job_id) else {
             return Recorded::NotMember(report);
         };
@@ -198,13 +200,14 @@ impl Attempts {
             };
         }
         member.report = Some(report);
+        state.planned |= planned;
         if !state.started {
             return Recorded::Held;
         }
         if state.verdict.is_some() {
             return Recorded::Deferred;
         }
-        match verdict(&state.members) {
+        match verdict(&state.members, state.split && state.planned) {
             Some(fate) => {
                 state.verdict = Some(fate);
                 Recorded::Decided(attempt, fate)
@@ -264,6 +267,12 @@ impl Attempts {
                 self.by_job.remove(&member.job_id);
             }
         }
+    }
+
+    pub fn split_member(&self, job_id: &str) -> bool {
+        self.attempt_of(job_id)
+            .and_then(|attempt| self.attempts.get(&attempt))
+            .is_some_and(|s| s.split)
     }
 
     pub fn pending_verdicts(&self) -> Vec<(ClusterAttemptId, Fate)> {
@@ -351,8 +360,20 @@ impl AttemptBook {
         self.0.lock().route(attempt, sender, to)
     }
 
-    pub async fn record(&self, job_id: &str, report: MemberReport) -> Recorded {
-        self.0.lock().record(job_id, report)
+    pub async fn record(&self, job_id: &str, report: MemberReport, planned: bool) -> Recorded {
+        self.0.lock().record(job_id, report, planned)
+    }
+
+    pub async fn split_member(&self, job_id: &str) -> bool {
+        self.0.lock().split_member(job_id)
+    }
+
+    pub async fn split(&self, attempt: ClusterAttemptId) -> bool {
+        self.0
+            .lock()
+            .attempts
+            .get(&attempt)
+            .is_some_and(|s| s.split)
     }
 
     pub async fn drain(
@@ -432,6 +453,8 @@ mod tests {
                 resolving: false,
                 resolution: None,
                 resolved_at: None,
+                split: false,
+                planned: false,
             },
         );
 
@@ -521,7 +544,10 @@ mod tests {
         book.accept("build:b");
         let lost = MemberReport::Aborted { job: None };
 
-        assert!(matches!(book.record("build:a", lost), Recorded::Held));
+        assert!(matches!(
+            book.record("build:a", lost, false),
+            Recorded::Held
+        ));
         assert_eq!(book.mark_started(attempt), Some(Some(Fate::Abort)));
     }
 
@@ -529,7 +555,7 @@ mod tests {
     fn a_failed_resolution_is_retried() {
         let (mut book, attempt) = book(Instant::now());
         let _ = book.mark_started(attempt);
-        book.record("build:a", MemberReport::Aborted { job: None });
+        book.record("build:a", MemberReport::Aborted { job: None }, false);
         assert!(book.begin_resolving(attempt).is_some());
         assert!(book.pending_verdicts().is_empty(), "underway");
 

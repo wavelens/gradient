@@ -15,13 +15,14 @@ use gradient_graph::writer::RECORD_ROW_BUDGET;
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_types::ids::{DispatchedJobId, EvaluationId};
 use gradient_util::shutdown::Shutdown;
-use gradient_wire::types::{BuildFailureKind, BuildMetrics, InputOutcome};
+use gradient_wire::types::{BuildFailureKind, BuildMetrics, FinishedShard, InputOutcome};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{Instrument as _, debug, debug_span, error, info, warn};
 
 use gradient_wire::messages::JobUpdateKind;
 
+use super::eval_split::handle_eval_shard_request;
 use super::socket::{ProtoWriter, push_pending_candidates};
 
 const JOB_EVENT_QUEUE: usize = 64;
@@ -61,6 +62,11 @@ pub(super) enum JobEvent {
         fetch_id: String,
         outcome: InputOutcome,
     },
+    ShardRequest {
+        job_id: String,
+        have_source: bool,
+        finished: Option<FinishedShard>,
+    },
 }
 
 impl JobEvent {
@@ -71,6 +77,7 @@ impl JobEvent {
             | JobEvent::Failed { job_id, .. }
             | JobEvent::ImportRequest { job_id, .. }
             | JobEvent::InputRequest { job_id, .. }
+            | JobEvent::ShardRequest { job_id, .. }
             | JobEvent::InputFetched {
                 fetch_id: job_id, ..
             } => job_id,
@@ -89,6 +96,7 @@ impl JobEvent {
             JobEvent::ImportRequest { .. } => "import_request",
             JobEvent::InputRequest { .. } => "input_request",
             JobEvent::InputFetched { .. } => "input_fetched",
+            JobEvent::ShardRequest { .. } => "shard_request",
         }
     }
 
@@ -276,6 +284,20 @@ impl ApplyJobEvent for SchedulerJobEvents {
                 self.scheduler
                     .handle_input_fetched(&self.peer_id, &fetch_id, outcome)
                     .await;
+            }
+            JobEvent::ShardRequest {
+                job_id,
+                have_source,
+                finished,
+            } => {
+                handle_eval_shard_request(
+                    &self.scheduler,
+                    &self.writer,
+                    job_id,
+                    have_source,
+                    finished,
+                )
+                .await;
             }
         }
     }

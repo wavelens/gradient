@@ -10,19 +10,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gradient_db::WorkerDb;
+use gradient_entity::dispatched_job::{
+    Column as CDispatchedJob, DispatchedJobKind, Entity as EDispatchedJob,
+};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::input::vec_to_hex;
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
 use gradient_util::supervision::{Pass, PassError, RunsOn};
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, ExprTrait, Query, SelectStatement};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use tokio::sync::Notify;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::Scheduler;
-use crate::jobs::PendingEvalJob;
+use crate::cluster::{Membership, Route};
+use crate::jobs::{PendingEvalJob, PendingJob};
 use gradient_wire::types::{FlakeJob, FlakeStep, RequiredPath};
 
 pub(crate) struct EvalDispatch {
@@ -57,40 +61,51 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
 
     // The open `dispatched_job` row is the durable proof a job is out. The tracker is only the
     // in-memory fast path and is empty after a respawn.
-    let not_in_flight = gradient_db::scheduling::assignment_record::no_open_assignment_predicate(
-        &gradient_db::scheduling::assignment_record::eval_job_key_sql("\"evaluation\".\"id\""),
-    );
-
     let evals = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Queued))
-        .filter(Expr::cust(not_in_flight))
+        .filter(Expr::exists(open_eval_dispatch()).not())
         .all(&scheduler.db.worker_db)
         .await?;
+    if evals.is_empty() {
+        return Ok(());
+    }
 
-    let ids: Vec<String> = evals
+    let membership = membership_after_splits(scheduler, &evals).await?;
+    let routes: HashMap<EvaluationId, Vec<(u16, String, Route)>> = evals
         .iter()
-        .map(|e| crate::jobs::eval_job_key(e.id))
+        .map(|e| (e.id, membership.eval_routes(e.id)))
         .collect();
-    let untracked: HashSet<String> = scheduler.untracked(ids).await.into_iter().collect();
+    let keys: Vec<String> = routes
+        .values()
+        .flatten()
+        .map(|(_, key, _)| key.clone())
+        .collect();
+    let untracked: HashSet<String> = scheduler.untracked(keys).await.into_iter().collect();
+    let mut routes = routes;
+    for routes in routes.values_mut() {
+        routes.retain(|(index, key, route)| {
+            untracked.contains(key) && (*index == 0 || !matches!(route, Route::Single))
+        });
+    }
+
     let evals: Vec<MEvaluation> = evals
         .into_iter()
-        .filter(|e| untracked.contains(&crate::jobs::eval_job_key(e.id)))
+        .filter(|e| routes.get(&e.id).is_some_and(|r| !r.is_empty()))
         .collect();
     if evals.is_empty() {
         return Ok(());
     }
 
-    let eval_ids: Vec<_> = evals.iter().map(|e| e.id).collect();
-    let membership =
-        crate::cluster::Membership::load(&scheduler.db.worker_db, &eval_ids, &[]).await?;
     let maps = EvalAssignMaps::load(&scheduler.db.worker_db, &evals).await?;
     let split_fetch = scheduler.has_idle_eval_only_worker().await;
     let eval_history = scheduler.scoring.eval_history.load();
 
     for eval in evals {
-        let job_id = crate::jobs::eval_job_key(eval.id);
-        let route = membership.route(&job_id);
-        let split_fetch = split_fetch && matches!(route, crate::cluster::Route::Single);
+        let Some(members) = routes.remove(&eval.id) else {
+            continue;
+        };
+        let single = matches!(members.as_slice(), [(0, _, Route::Single)]);
+        let split_fetch = split_fetch && single;
 
         let Some(commit) = maps.commits.get(&eval.commit) else {
             error!(evaluation_id = %eval.id, "commit not found for evaluation");
@@ -160,23 +175,65 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
             build_request: maps.build_request_tasks.contains(&task_id),
             estimate,
             walk_mode: eval.walk_mode,
+            eval_index: 0,
         };
 
-        if let Err(e) = scheduler
-            .enqueue_routed(
-                route,
-                job_id.clone(),
-                crate::jobs::PendingJob::Eval(pending),
-            )
-            .await
-        {
-            error!(error = %e, %job_id, "enqueue_eval_job failed");
-            continue;
+        for (eval_index, job_id, route) in members {
+            let pending = PendingEvalJob {
+                eval_index,
+                ..pending.clone()
+            };
+            if let Err(e) = scheduler
+                .enqueue_routed(route, job_id.clone(), PendingJob::Eval(pending))
+                .await
+            {
+                error!(error = %e, %job_id, "enqueue_eval_job failed");
+                continue;
+            }
+
+            debug!(evaluation_id = %eval.id, %job_id, split_fetch, "eval job enqueued");
         }
-        debug!(evaluation_id = %eval.id, %job_id, split_fetch, "eval job enqueued");
     }
 
     Ok(())
+}
+
+fn open_eval_dispatch() -> SelectStatement {
+    Query::select()
+        .expr(Expr::val(1))
+        .from(EDispatchedJob)
+        .and_where(
+            Expr::col((EDispatchedJob, CDispatchedJob::EvaluationId))
+                .equals((gradient_entity::evaluation::Entity, CEvaluation::Id)),
+        )
+        .and_where(Expr::col((EDispatchedJob, CDispatchedJob::Kind)).eq(DispatchedJobKind::Eval))
+        .and_where(Expr::col((EDispatchedJob, CDispatchedJob::FinishedAt)).is_null())
+        .to_owned()
+}
+
+async fn membership_after_splits(
+    scheduler: &Scheduler,
+    evals: &[MEvaluation],
+) -> anyhow::Result<Membership> {
+    let db = &scheduler.db.worker_db;
+    let ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
+    let membership = Membership::load(db, &ids, &[]).await?;
+    scheduler
+        .split_decisions
+        .keep_only(&ids.iter().copied().collect());
+    let mut created = false;
+    for eval in evals.iter().filter(|e| !membership.has_cluster(e.id)) {
+        match scheduler.decide_split(eval).await {
+            Ok(split) => created |= split.is_some(),
+            Err(e) => warn!(evaluation_id = %eval.id, error = %e, "split decision failed"),
+        }
+    }
+
+    if !created {
+        return Ok(membership);
+    }
+
+    Ok(Membership::load(db, &ids, &[]).await?)
 }
 
 struct EvalAssignMaps {

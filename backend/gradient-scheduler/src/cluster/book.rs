@@ -21,6 +21,8 @@ pub struct ClusterMember {
     pub pin: Option<String>,
     pub key: String,
     pub job: Option<PendingJob>,
+    pub split: bool,
+    pub min_free_ram_mb: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +95,11 @@ impl ClusterBook {
                 pin: of.member.pin,
                 key: key.clone(),
                 job: Some(job),
+                split: of.member.eval_index.is_some(),
+                min_free_ram_mb: of
+                    .member
+                    .min_free_ram_mb
+                    .and_then(|mb| u64::try_from(mb).ok()),
             }),
         }
         cluster.refresh_startable();

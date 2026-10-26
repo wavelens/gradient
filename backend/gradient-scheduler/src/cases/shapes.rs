@@ -160,7 +160,7 @@ pub(crate) fn w_network_secrets() -> Profile {
 }
 
 pub(crate) fn eval_key(evaluation: EvaluationId) -> String {
-    crate::jobs::eval_job_key(evaluation)
+    crate::jobs::eval_job_key(evaluation, 0)
 }
 
 pub(crate) fn ago(secs: i64) -> NaiveDateTime {

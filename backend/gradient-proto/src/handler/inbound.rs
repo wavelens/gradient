@@ -34,9 +34,7 @@ use super::auth::{challenge_for, resolve_authorized};
 use super::cache::handle_cache_query;
 use super::dialed::{DialedSession, refresh_dialed_peers};
 use super::eval_cache::handle_eval_cache_pull;
-use super::eval_split::{
-    handle_eval_shard_request, handle_eval_shards_planned, handle_eval_source_ready, send_reply,
-};
+use super::eval_split::{handle_eval_shards_planned, handle_eval_source_ready, send_reply};
 use super::job_events::{JobEvent, JobEvents};
 use super::log_lane::LogLane;
 use super::nar_serve::{ServeSlot, serve_nar_request};
@@ -415,14 +413,13 @@ impl<'a> InboundContext<'a> {
                 finished,
             } => {
                 if self.owns_split_member(&job_id).await {
-                    handle_eval_shard_request(
-                        self.scheduler,
-                        self.writer,
-                        job_id,
-                        have_source,
-                        finished,
-                    )
-                    .await;
+                    self.job_events
+                        .push(JobEvent::ShardRequest {
+                            job_id,
+                            have_source,
+                            finished,
+                        })
+                        .await;
                 } else {
                     send_reply(self.writer, job_id, EvalShardOutcome::Finished).await;
                 }
@@ -1299,6 +1296,7 @@ pub(in crate::handler) mod fixture {
             rescore_count: 0,
             estimate: Default::default(),
             walk_mode: Default::default(),
+            eval_index: 0,
             prioritized: false,
             build_request: false,
         })

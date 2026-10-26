@@ -1405,7 +1405,7 @@ mod tests {
         core.pool
             .register("w1".into(), eval_worker_caps(), HashSet::new(), port().0);
         let job = eval_job(ProjectId::now_v7());
-        let job_id = crate::jobs::eval_job_key(job.evaluation_id);
+        let job_id = crate::jobs::eval_job_key(job.evaluation_id, 0);
         core.tracker
             .add_pending(job_id.clone(), PendingJob::Eval(job));
         assert_eq!(core.candidates("w1", true).candidates.len(), 1);

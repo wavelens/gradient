@@ -105,6 +105,7 @@ fn candidates(
                 s.worker == **w
                     && s.kind == kind
                     && visible_to(job, s.authorized.as_ref(), Some(&s.caps))
+                    && seats_split_member(member, s)
             })
         })
         .map(|(i, _)| i)
@@ -112,6 +113,20 @@ fn candidates(
     fit.sort_by_key(|&i| (seat_cost(member, workers[i], scores), i));
 
     fit
+}
+
+fn seats_split_member(member: &ClusterMember, slot: &Slot) -> bool {
+    if !member.split {
+        return true;
+    }
+
+    let free_mb = slot.caps.metrics.as_ref().and_then(|m| m.ram_free_mb);
+    let fits = match (member.min_free_ram_mb, free_mb) {
+        (Some(need), Some(free)) => free >= need,
+        _ => true,
+    };
+
+    fits && !slot.caps.capabilities.federate
 }
 
 fn seat_cost(member: &ClusterMember, worker: &str, scores: &ScoreLookup) -> u128 {
@@ -142,6 +157,8 @@ mod tests {
             pin: pin.map(str::to_owned),
             key: crate::jobs::build_job_key(shared_build),
             job: Some(PendingJob::Build(job)),
+            split: false,
+            min_free_ram_mb: None,
         }
     }
 
