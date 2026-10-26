@@ -83,7 +83,8 @@
     <div class="strip-wrap pad">
       <div class="eval-strip">
         @for (e of evaluations(); track e.id) {
-          <div class="eval-card" [attr.data-phase]="evaluationPhase(e.status)" [class.selected]="selected()?.id === e.id" (click)="select(e)">
+          <div class="eval-card" [attr.data-phase]="evaluationPhase(e.status)" [class.selected]="selected()?.id === e.id" (click)="select(e)"
+               (contextmenu)="select(e); evalMenu.openAt($event)">
             <div class="l1">
               <gr-status-icon class="si" [phase]="evaluationPhase(e.status)" [prioritized]="e.prioritized" size="sm" />
               <span class="ev-title" [class.mono]="!e.commit_message">{{ evalTitle(e) }}</span>
@@ -95,6 +96,7 @@
           <div class="strip-more" aria-hidden="true" (grInView)="loadOlderEvaluations()" [grInViewKey]="evaluations().length"></div>
         }
       </div>
+      <gr-menu #evalMenu [model]="panelMenuModel()" />
     </div>
 
     <div class="panel pad">
