@@ -203,6 +203,7 @@
 |---|---|---|---|---|
 | `proto.anonymousCache.enable` | bool | `true` | `GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE` | Whether unauthenticated clients can use `GET /cache/{cache}/proto` for public caches. Private caches always require an API key. |
 | `proto.anonymousCache.maxConnectionsPerIp` | positive int | `32` | `GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP` | Maximum simultaneous anonymous `/cache/proto` connections per client IP. |
+| `proto.assignmentReclaimGraceSecs` | unsigned int | `600` | `GRADIENT_PROTO_ASSIGNMENT_RECLAIM_GRACE_SECS` | Seconds the server keeps the open assignments of a disconnected worker for the worker to report them in `RunningJobs`. After a server restart this covers the open assignments of every worker. Assignments nobody reports within this time are re-queued and count as a lost worker. A worker with a `maxLifetime` gets at most its remaining lifetime. Set it to `0` to re-queue at once. |
 | `proto.discoverable` | bool | `true` | `GRADIENT_PROTO_DISCOVERABLE` | Whether to enable incoming worker and federation connections on `/proto`. |
 | `proto.federate` | bool | `false` | `GRADIENT_PROTO_FEDERATE` | Whether to enable federation with other Gradient servers over `/proto`. |
 | `proto.maxConnections` | positive int | `256` | `GRADIENT_PROTO_MAX_CONNECTIONS` | Maximum simultaneous `/proto` WebSocket connections. |

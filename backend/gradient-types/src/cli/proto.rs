@@ -5,9 +5,12 @@
  */
 
 use std::num::NonZeroUsize;
+use std::time::Duration;
 
 use clap::Args;
 use gradient_derive::config_group;
+
+pub const ASSIGNMENT_RECLAIM_GRACE: Duration = Duration::from_secs(600);
 
 #[config_group("proto")]
 #[derive(Args, Debug, Clone)]
@@ -30,6 +33,14 @@ pub struct ProtoArgs {
     /// close (OOM kill, frozen host, network partition). Set it to `0` to disable the watchdog.
     #[arg(default_value_t = 120)]
     pub worker_heartbeat_timeout_secs: u64,
+
+    /// Seconds the server keeps the open assignments of a disconnected worker for the worker to
+    /// report them in `RunningJobs`. After a server restart this covers the open assignments of
+    /// every worker. Assignments nobody reports within this time are re-queued and count as a
+    /// lost worker. A worker with a `maxLifetime` gets at most its remaining lifetime. Set it to
+    /// `0` to re-queue at once.
+    #[arg(default_value_t = ASSIGNMENT_RECLAIM_GRACE.as_secs())]
+    pub assignment_reclaim_grace_secs: u64,
 
     /// Whether unauthenticated clients can use `GET /cache/{cache}/proto` for public caches.
     /// Private caches always require an API key.

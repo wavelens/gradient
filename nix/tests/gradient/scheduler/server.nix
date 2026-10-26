@@ -80,6 +80,7 @@ in
       secrets.cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
       log.level.default = "info";
       proto.workerHeartbeatTimeoutSecs = 30;
+      proto.assignmentReclaimGraceSecs = 90;
 
       state = {
         users.admin = {

@@ -29,6 +29,10 @@ pub fn write_config_snapshot(conn: &Connection, config: &RuntimeConfig) -> Resul
             config.proto.worker_heartbeat_timeout_secs.to_string(),
         ),
         (
+            "assignment_reclaim_grace_secs",
+            config.proto.assignment_reclaim_grace_secs.to_string(),
+        ),
+        (
             "nar_storage_open_timeout_secs",
             config.nar.storage_open_timeout_secs.to_string(),
         ),
