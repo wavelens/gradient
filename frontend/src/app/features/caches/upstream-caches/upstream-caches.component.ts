@@ -263,7 +263,7 @@ export class UpstreamCachesComponent implements OnInit {
         this.loadUpstreamCaches();
       },
       error: (err) => {
-        this.addError.set(err?.error?.message || err?.message || 'Failed to add upstream cache.');
+        this.addError.set(err?.message || 'Failed to add upstream cache.');
         this.addingUpstream.set(false);
       },
     });

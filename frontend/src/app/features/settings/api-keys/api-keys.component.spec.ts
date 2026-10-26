@@ -8,9 +8,10 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { ApiKeysComponent } from './api-keys.component';
 import { UserService } from '@core/services/user.service';
+import { ApiError } from '@core/services/api.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ApiKeyInfo } from '@core/models';
 
@@ -40,7 +41,7 @@ const managedKey: ApiKeyInfo = {
   allowed_ips: [],
 };
 
-function setup(keys: ApiKeyInfo[]): ComponentFixture<ApiKeysComponent> {
+function setup(keys: ApiKeyInfo[], user: object = {}): ComponentFixture<ApiKeysComponent> {
   TestBed.configureTestingModule({
     imports: [ApiKeysComponent],
     providers: [
@@ -52,6 +53,7 @@ function setup(keys: ApiKeyInfo[]): ComponentFixture<ApiKeysComponent> {
         useValue: {
           getApiKeys: () => of(keys),
           getApiKeyPermissions: () => of({ available_permissions: [] }),
+          ...user,
         },
       },
       {
@@ -101,5 +103,17 @@ describe('ApiKeysComponent - managed-key gating', () => {
     const editButtons = buttonsByText(fixture.nativeElement, 'edit');
     expect(editButtons.length).toBe(1);
     expect(editButtons[0].disabled).toBe(true);
+  });
+});
+
+describe('ApiKeysComponent - create errors', () => {
+  it('shows the reason the server gave for refusing the key', () => {
+    const reason = 'Permission manageProject exceeds your own permissions';
+    const fixture = setup([], { createApiKey: () => throwError(() => new ApiError(reason, 403)) });
+    const component = fixture.componentInstance;
+    component.formName = 'deploy';
+    component.formPermissions = { viewProject: true };
+    component.saveKey();
+    expect(component.errorMessage()).toBe(reason);
   });
 });

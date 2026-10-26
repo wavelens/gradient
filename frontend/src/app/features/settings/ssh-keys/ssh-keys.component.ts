@@ -95,7 +95,7 @@ export class SshKeysComponent implements OnInit {
       },
       error: (e) => {
         this.saving.set(false);
-        this.errorMessage.set(e?.error?.message ?? 'Could not add the key.');
+        this.errorMessage.set(e?.message || 'Could not add the key.');
       },
     });
   }
