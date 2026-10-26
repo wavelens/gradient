@@ -114,6 +114,7 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
         for (eval_index, job_id, route) in members {
             let pending = PendingEvalJob {
                 eval_index,
+                job: member_job(&pending.job, eval_index),
                 ..pending.clone()
             };
             if let Err(e) = scheduler
@@ -129,6 +130,15 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
     }
 
     Ok(())
+}
+
+fn member_job(job: &FlakeJob, eval_index: u16) -> FlakeJob {
+    let mut job = job.clone();
+    if eval_index > 0 {
+        job.steps.retain(|step| *step != FlakeStep::FetchFlake);
+    }
+
+    job
 }
 
 fn open_eval_dispatch() -> SelectStatement {
@@ -430,7 +440,7 @@ pub(crate) async fn project_id_for_eval(db: &WorkerDb, eval: &MEvaluation) -> Op
 
 #[cfg(test)]
 mod eval_source_tests {
-    use super::flake_job_for_eval_source;
+    use super::{flake_job_for_eval_source, member_job};
     use gradient_wire::types::{FlakeSource, FlakeStep};
 
     #[test]
@@ -487,5 +497,22 @@ mod eval_source_tests {
         assert!(matches!(job.source, FlakeSource::Repository { .. }));
         assert!(job.steps.contains(&FlakeStep::FetchFlake));
         assert!(required.is_empty());
+    }
+
+    #[test]
+    fn only_the_primary_of_a_split_fetches() {
+        let (job, _) = flake_job_for_eval_source(
+            "git@github.com:org/repo.git",
+            "abc".into(),
+            vec!["*".into()],
+            false,
+            vec![],
+            None,
+        );
+        assert_eq!(member_job(&job, 0).steps, job.steps);
+        assert_eq!(
+            member_job(&job, 1).steps,
+            vec![FlakeStep::EvaluateFlake, FlakeStep::EvaluateDerivations]
+        );
     }
 }
