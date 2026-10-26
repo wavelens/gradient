@@ -20,8 +20,8 @@ use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tracing::{debug, info};
 
 use crate::jobs::{
-    AssignDecision, Assignment, BoardActiveJob, CandidateDetail, JobTracker, PendingBuildJob,
-    PendingJob, PendingJobInfo,
+    AssignDecision, Assignment, AwaitingReclaim, BoardActiveJob, CandidateDetail, JobTracker,
+    PendingBuildJob, PendingJob, PendingJobInfo,
 };
 use gradient_pool::session_port::{SessionPort, SessionSignal};
 use gradient_pool::{WorkerCaps, WorkerInfo, WorkerPool};
@@ -34,10 +34,12 @@ pub struct Registration {
     pub authorized_peers: HashSet<ProjectId>,
     pub session: Arc<dyn SessionPort>,
     pub active: Vec<crate::jobs::Reattached>,
+    pub reclaims_jobs: bool,
 }
 
 pub struct Registered {
     pub last_seen: Arc<AtomicI64>,
+    pub unreclaimed: Vec<(String, AwaitingReclaim)>,
 }
 
 pub type WorkerCapabilities = gradient_pool::WorkerProfile;
@@ -50,6 +52,7 @@ pub struct WorkerMetrics {
     pub upload_speed_mbps: Option<f32>,
     pub download_speed_mbps: Option<f32>,
     pub build_peak_ram_mb: Option<Vec<(String, u64)>>,
+    pub exits_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -95,7 +98,12 @@ pub enum SchedulerMsg {
     Register(Registration, RpcReplyPort<Registered>),
     Unregister {
         worker: String,
+        grace: Duration,
         reply: RpcReplyPort<crate::jobs::Disconnected>,
+    },
+    TakeUnreclaimed {
+        now: Instant,
+        reply: RpcReplyPort<Vec<(String, AwaitingReclaim)>>,
     },
     IsConnected {
         worker: String,
@@ -418,8 +426,9 @@ impl SchedulerCore {
 
     /// A build lost with its worker keeps the peak RAM the worker last reported for it. The
     /// next attempt reserves at least that much.
-    fn unregister(&mut self, worker: &str) -> crate::jobs::Disconnected {
+    fn unregister(&mut self, worker: &str, grace: Duration) -> crate::jobs::Disconnected {
         let observed_peak_ram_mb = self.pool.observed_build_ram(worker);
+        let reclaims_jobs = self.pool.reclaims_jobs(worker);
         let orphaned = self.pool.unregister(worker);
         self.idle.forget_worker(worker);
         if self
@@ -430,7 +439,12 @@ impl SchedulerCore {
             self.reservation = None;
         }
         self.tracker.raise_predicted_ram(&observed_peak_ram_mb);
-        let gone = self.tracker.worker_disconnected(worker);
+        let gone = if reclaims_jobs && !grace.is_zero() {
+            self.tracker
+                .hold_for_reclaim(worker, Instant::now() + grace, &observed_peak_ram_mb)
+        } else {
+            self.tracker.worker_disconnected(worker)
+        };
         self.return_to_pending(&gone.requeued_keys);
         let total = orphaned.len() + gone.requeued.len() + gone.cluster_members.len();
         if total > 0 {
@@ -439,6 +453,13 @@ impl SchedulerCore {
         crate::jobs::Disconnected {
             observed_peak_ram_mb,
             ..gone
+        }
+    }
+
+    fn return_unreclaimed(&mut self, unreclaimed: &[(String, AwaitingReclaim)]) {
+        self.tracker.return_unreclaimed(unreclaimed);
+        for (job_id, _) in unreclaimed {
+            self.pool.remove_sent_candidate(job_id);
         }
     }
 
@@ -765,11 +786,30 @@ impl Actor for CoreActor {
                     );
                     core.tracker.restore_active(&reg.worker, reattached);
                 }
+                core.pool.set_reclaims_jobs(&reg.worker, reg.reclaims_jobs);
+                let unreclaimed = if reg.reclaims_jobs {
+                    Vec::new()
+                } else {
+                    core.tracker.take_unlisted(&reg.worker, &HashSet::new())
+                };
+                core.return_unreclaimed(&unreclaimed);
                 info!(worker = %reg.worker, "worker registered");
-                let _ = reply.send(Registered { last_seen });
+                let _ = reply.send(Registered {
+                    last_seen,
+                    unreclaimed,
+                });
             }
-            SchedulerMsg::Unregister { worker, reply } => {
-                let _ = reply.send(core.unregister(&worker));
+            SchedulerMsg::Unregister {
+                worker,
+                grace,
+                reply,
+            } => {
+                let _ = reply.send(core.unregister(&worker, grace));
+            }
+            SchedulerMsg::TakeUnreclaimed { now, reply } => {
+                let unreclaimed = core.tracker.take_unreclaimed(now);
+                core.return_unreclaimed(&unreclaimed);
+                let _ = reply.send(unreclaimed);
             }
             SchedulerMsg::IsConnected { worker, reply } => {
                 let _ = reply.send(core.pool.is_connected(&worker));
@@ -1377,7 +1417,7 @@ mod tests {
         core.pool
             .observe_build_ram("w1", Some(vec![(build.clone(), 70_000)]));
 
-        let gone = core.unregister("w1");
+        let gone = core.unregister("w1", Duration::ZERO);
 
         assert_eq!(gone.observed_peak_ram_mb.get(&build), Some(&70_000));
         let requeued = core.tracker.pending_job(&build).expect("requeued");

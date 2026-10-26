@@ -5,8 +5,9 @@
  */
 
 use gradient_types::events::worker;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use sea_orm::ActiveValue::Set;
@@ -21,6 +22,7 @@ use gradient_wire::types::{BuildStage, GradientCapabilities};
 use crate::Scheduler;
 use crate::actor::{Registered, Registration, SchedulerMsg, WorkerCapabilities, WorkerMetrics};
 use crate::build;
+use crate::jobs::{AwaitingReclaim, reclaim_grace};
 use crate::waiting_state::WaitingRefresh;
 use gradient_pool::session_port::SessionPort;
 
@@ -88,20 +90,26 @@ impl Scheduler {
         capabilities: GradientCapabilities,
         authorized_peers: HashSet<ProjectId>,
         session: Arc<dyn SessionPort>,
+        reclaims_jobs: bool,
     ) -> Result<Registered> {
         let caps_json = serde_json::to_value(&capabilities).unwrap_or(serde_json::Value::Null);
         let projects = authorized_peers.iter().copied().collect();
         self.workers.forget(worker_id);
-        let registered = self
+        let mut registered = self
             .reattach_worker(
                 worker_id,
                 capabilities,
                 authorized_peers,
                 session,
                 Vec::new(),
+                reclaims_jobs,
             )
             .await?;
-        self.close_unclaimed_assignments(worker_id).await;
+        if !reclaims_jobs {
+            self.close_unclaimed_assignments(worker_id).await;
+        }
+        self.requeue_held(std::mem::take(&mut registered.unreclaimed))
+            .await;
         self.record_worker_connection(worker_id, caps_json).await;
         self.db.events.publish(worker::Connected {
             worker_id: worker_id.to_owned(),
@@ -138,6 +146,7 @@ impl Scheduler {
         authorized_peers: HashSet<ProjectId>,
         session: Arc<dyn SessionPort>,
         active: Vec<crate::jobs::Reattached>,
+        reclaims_jobs: bool,
     ) -> Result<Registered> {
         let reports = self.workers.reports(worker_id);
         let registration = Registration {
@@ -146,6 +155,7 @@ impl Scheduler {
             authorized_peers: reports.authorized_peers.unwrap_or(authorized_peers),
             session,
             active,
+            reclaims_jobs,
         };
         let registered = self
             .call(|reply| SchedulerMsg::Register(registration, reply))
@@ -293,11 +303,16 @@ impl Scheduler {
     }
 
     pub async fn unregister_worker(&self, worker_id: &str) {
+        let grace = self.reclaim_grace_of(worker_id);
         self.workers.forget(worker_id);
         self.close_worker_connection(worker_id).await;
         let worker = worker_id.to_owned();
         let gone = self
-            .call(|reply| SchedulerMsg::Unregister { worker, reply })
+            .call(|reply| SchedulerMsg::Unregister {
+                worker,
+                grace,
+                reply,
+            })
             .await
             .unwrap_or_default();
         build::requeue_orphaned_jobs(
@@ -318,6 +333,45 @@ impl Scheduler {
         self.db.events.publish(worker::Disconnected {
             worker_id: worker_id.to_owned(),
         });
+        self.build_kick.kick();
+    }
+
+    fn reclaim_grace_of(&self, worker_id: &str) -> Duration {
+        let configured = Duration::from_secs(self.db.config.proto.assignment_reclaim_grace_secs);
+        let exits_at = self
+            .workers
+            .reports(worker_id)
+            .metrics
+            .and_then(|m| m.exits_at);
+        reclaim_grace(configured, exits_at, Instant::now())
+    }
+
+    pub async fn requeue_unreclaimed(&self, now: Instant) {
+        let unreclaimed = self
+            .call(|reply| SchedulerMsg::TakeUnreclaimed { now, reply })
+            .await
+            .unwrap_or_default();
+        self.requeue_held(unreclaimed).await;
+    }
+
+    pub(crate) async fn requeue_held(&self, held: Vec<(String, AwaitingReclaim)>) {
+        if held.is_empty() {
+            return;
+        }
+        let observed_peak_ram_mb: HashMap<String, u64> = held
+            .iter()
+            .filter_map(|(key, held)| Some((key.clone(), held.observed_peak_ram_mb?)))
+            .collect();
+        let keys: Vec<String> = held.into_iter().map(|(key, _)| key).collect();
+        info!(jobs = keys.len(), "re-queuing jobs no worker reclaimed");
+        build::requeue_orphaned_keys(
+            &self.db,
+            &self.graph,
+            &keys,
+            &observed_peak_ram_mb,
+            gradient_graph::OrphanCause::WorkerLost,
+        )
+        .await;
         self.build_kick.kick();
     }
 

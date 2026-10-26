@@ -78,6 +78,7 @@ pub(crate) struct SchedulerCase {
     connected_workers: Mutex<HashSet<String>>,
     connected_on_any_instance: Arc<Mutex<HashSet<String>>>,
     observed: Mutex<Observed>,
+    held_for_reclaim: Mutex<HashSet<String>>,
     unstored_outputs: AtomicI64,
     secret: Arc<NamedTempFile>,
     probe: crate::probe::UpstreamProbe,
@@ -201,6 +202,7 @@ impl SchedulerCase {
             connected_workers: Mutex::default(),
             connected_on_any_instance,
             observed,
+            held_for_reclaim: Mutex::default(),
             unstored_outputs: AtomicI64::new(0),
             secret,
             probe,
@@ -255,10 +257,25 @@ impl SchedulerCase {
         self.assert_drift(after).await;
 
         let rows = Rows::read(&self.db).await;
-        rows.assert_invariants(after);
+        rows.assert_invariants(after, &self.held_for_reclaim().await);
         lock(&self.observed).advance(&rows, after);
         let connected = lock(&self.connected_workers).clone();
         rows.s7_no_open_row_before_start(&connected, self.started_at.naive_utc(), after);
+    }
+
+    async fn held_for_reclaim(&self) -> HashSet<String> {
+        match self
+            .scheduler
+            .call(|reply| SchedulerMsg::TrackedKeys { reply })
+            .await
+        {
+            Ok(tracked) => {
+                let held: HashSet<String> = tracked.awaiting_reclaim.into_iter().collect();
+                lock(&self.held_for_reclaim).clone_from(&held);
+                held
+            }
+            Err(_) => lock(&self.held_for_reclaim).clone(),
+        }
     }
 
     async fn check_core(&self, after: &str) {

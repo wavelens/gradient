@@ -228,6 +228,7 @@ impl<'a> InboundContext<'a> {
                     upload_speed_mbps,
                     download_speed_mbps,
                     build_peak_ram_mb,
+                    exits_at: None,
                 });
                 true
             }

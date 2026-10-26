@@ -94,6 +94,18 @@ impl WorkerPool {
         last_seen
     }
 
+    pub fn set_reclaims_jobs(&mut self, id: &str, reclaims_jobs: bool) {
+        if let Some(slot) = self.workers.get_mut(id) {
+            slot.shared_mut().reclaims_jobs = reclaims_jobs;
+        }
+    }
+
+    pub fn reclaims_jobs(&self, id: &str) -> bool {
+        self.workers
+            .get(id)
+            .is_some_and(|slot| slot.shared().reclaims_jobs)
+    }
+
     pub fn request_reauth(&self, worker_id: &str) {
         if let Some(slot) = self.workers.get(worker_id) {
             slot.shared().session.signal(SessionSignal::Reauth);

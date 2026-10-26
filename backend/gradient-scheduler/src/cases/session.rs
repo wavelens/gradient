@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 
 use gradient_entity::dispatched_job::{self, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
@@ -86,11 +87,37 @@ pub(crate) struct ClusterAssignment {
 
 impl SchedulerCase {
     pub async fn connect(&self, worker: &str, profile: Profile, projects: &[ProjectId]) {
+        self.register(worker, profile, projects, false).await;
+    }
+
+    pub async fn connect_reclaiming(&self, worker: &str, profile: Profile, projects: &[ProjectId]) {
+        self.register(worker, profile, projects, true).await;
+    }
+
+    pub async fn requeue_unreclaimed_after(&self, elapsed: Duration) {
+        self.scheduler
+            .requeue_unreclaimed(Instant::now() + elapsed)
+            .await;
+    }
+
+    async fn register(
+        &self,
+        worker: &str,
+        profile: Profile,
+        projects: &[ProjectId],
+        reclaims_jobs: bool,
+    ) {
         let projects: HashSet<ProjectId> = projects.iter().copied().collect();
         let port = self.port_of(worker);
         let registered = self
             .scheduler
-            .register_worker(worker, profile.caps.clone(), projects.clone(), port)
+            .register_worker(
+                worker,
+                profile.caps.clone(),
+                projects.clone(),
+                port,
+                reclaims_jobs,
+            )
             .await
             .expect("the worker registers");
         if let Some(hardware) = profile.hardware {
@@ -591,7 +618,7 @@ impl SchedulerCase {
         };
         let registered = self
             .scheduler
-            .reattach_worker(worker, caps, projects, port, active)
+            .reattach_worker(worker, caps, projects, port, active, false)
             .await
             .expect("the worker reattaches");
         if let Some(session) = lock(&self.sessions).get_mut(worker) {

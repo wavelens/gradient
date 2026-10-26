@@ -5,6 +5,7 @@
  */
 
 use gradient_db::lookup::by_id;
+use gradient_db::scheduling::assignment_record::{eval_of_key, shared_build_of_key};
 use gradient_db::status::{
     EvaluationFailure, update_evaluation_status, update_evaluation_status_with_error,
 };
@@ -54,10 +55,8 @@ async fn eval_assign_count(db: &WorkerDb, evaluation_id: EvaluationId) -> u64 {
         })
 }
 
-async fn abandon_dispatched_jobs(db: &WorkerDb, orphaned: &[PendingJob]) {
-    let keys: Vec<String> = orphaned.iter().map(PendingJob::job_key).collect();
-
-    match gradient_db::scheduling::assignment_record::abandon_open_assignments_for_jobs(db, &keys)
+async fn abandon_dispatched_jobs(db: &WorkerDb, keys: &[String]) {
+    match gradient_db::scheduling::assignment_record::abandon_open_assignments_for_jobs(db, keys)
         .await
     {
         Ok(rows) if rows > 0 => {
@@ -77,11 +76,22 @@ pub async fn requeue_orphaned_jobs(
     observed_peak_ram_mb: &std::collections::HashMap<String, u64>,
     cause: gradient_graph::OrphanCause,
 ) {
-    abandon_dispatched_jobs(&db.worker_db, orphaned).await;
+    let keys: Vec<String> = orphaned.iter().map(PendingJob::job_key).collect();
+    requeue_orphaned_keys(db, graph, &keys, observed_peak_ram_mb, cause).await;
+}
 
-    let shared_builds: Vec<DerivationBuildId> = orphaned
+pub(crate) async fn requeue_orphaned_keys(
+    db: &DbContext,
+    graph: &Graph,
+    keys: &[String],
+    observed_peak_ram_mb: &std::collections::HashMap<String, u64>,
+    cause: gradient_graph::OrphanCause,
+) {
+    abandon_dispatched_jobs(&db.worker_db, keys).await;
+
+    let shared_builds: Vec<DerivationBuildId> = keys
         .iter()
-        .filter_map(|j| j.derivation_build())
+        .filter_map(|key| shared_build_of_key(key))
         .collect();
     let observed_peak_ram_mb = shared_builds
         .iter()
@@ -102,8 +112,7 @@ pub async fn requeue_orphaned_jobs(
         warn!(error = %e, "requeue orphaned builds did not reach the graph writer");
     }
 
-    for job in orphaned.iter().filter(|j| j.derivation_build().is_none()) {
-        let evaluation_id = job.evaluation_id();
+    for evaluation_id in keys.iter().filter_map(|key| eval_of_key(key)) {
         match by_id::<EEvaluation, _>(&db.worker_db, evaluation_id).await {
             Ok(Some(eval))
                 if matches!(

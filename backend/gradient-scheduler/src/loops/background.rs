@@ -7,7 +7,7 @@
 use gradient_types::events::worker;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gradient_db::evaluations::watchdog::LostCompletion;
 use gradient_db::{DbContext, WorkerDb};
@@ -162,6 +162,7 @@ pub(crate) async fn worker_liveness_pass(scheduler: &Scheduler) -> anyhow::Resul
         );
         scheduler.unregister_worker(&worker_id).await;
     }
+    scheduler.requeue_unreclaimed(Instant::now()).await;
     Ok(())
 }
 

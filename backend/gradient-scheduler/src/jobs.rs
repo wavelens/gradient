@@ -663,6 +663,21 @@ pub struct Disconnected {
     pub observed_peak_ram_mb: HashMap<String, u64>,
 }
 
+#[derive(Debug)]
+pub struct AwaitingReclaim {
+    pub worker: String,
+    pub assignment_id: DispatchedJobId,
+    pub job: Option<PendingJob>,
+    pub deadline: Instant,
+    pub observed_peak_ram_mb: Option<u64>,
+}
+
+pub fn reclaim_grace(configured: Duration, exits_at: Option<Instant>, now: Instant) -> Duration {
+    exits_at.map_or(configured, |exits_at| {
+        configured.min(exits_at.saturating_duration_since(now))
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct BuildWorker {
     pub authorized: Option<HashSet<ProjectId>>,
@@ -675,6 +690,7 @@ pub struct TrackedKeys {
     pub pending: Vec<String>,
     pub active: Vec<String>,
     pub cluster_book: Vec<String>,
+    pub awaiting_reclaim: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -685,6 +701,7 @@ pub struct JobTracker {
     decisions: VecDeque<AssignDecision>,
     clusters: ClusterBook,
     waiting_builds: HashMap<String, WaitingBuild>,
+    awaiting_reclaim: HashMap<String, AwaitingReclaim>,
 }
 
 impl JobTracker {
@@ -703,6 +720,7 @@ impl JobTracker {
             pending: self.pending.keys().cloned().collect(),
             active: self.active.keys().cloned().collect(),
             cluster_book: self.clusters.jobs().map(|(key, _)| key.clone()).collect(),
+            awaiting_reclaim: self.awaiting_reclaim.keys().cloned().collect(),
         }
     }
 
@@ -1216,6 +1234,7 @@ impl JobTracker {
         }
         self.pending.remove(&job_id);
         self.clusters.forget(&job_id);
+        self.awaiting_reclaim.remove(&job_id);
         self.active.insert(
             job_id,
             ActiveJob {
@@ -1446,10 +1465,76 @@ impl JobTracker {
         gone
     }
 
+    pub fn hold_for_reclaim(
+        &mut self,
+        worker_id: &str,
+        deadline: Instant,
+        observed_peak_ram_mb: &HashMap<String, u64>,
+    ) -> Disconnected {
+        self.scores.remove(worker_id);
+        self.waiting_builds.remove(worker_id);
+        let held: Vec<String> = self
+            .active
+            .iter()
+            .filter(|(_, a)| a.worker == worker_id && a.cluster.is_none() && a.aborted_at.is_none())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for job_id in held {
+            let Some(active) = self.active.remove(&job_id) else {
+                continue;
+            };
+            let observed_peak_ram_mb = observed_peak_ram_mb.get(&job_id).copied();
+            self.awaiting_reclaim.insert(
+                job_id,
+                AwaitingReclaim {
+                    worker: active.worker,
+                    assignment_id: active.assignment_id,
+                    job: Some(active.job),
+                    deadline,
+                    observed_peak_ram_mb,
+                },
+            );
+        }
+        self.worker_disconnected(worker_id)
+    }
+
+    pub fn await_reclaim(&mut self, kept: AwaitingReclaim, job_key: String) {
+        if !self.contains_job(&job_key) {
+            self.awaiting_reclaim.insert(job_key, kept);
+        }
+    }
+
+    pub fn take_unreclaimed(&mut self, now: Instant) -> Vec<(String, AwaitingReclaim)> {
+        self.awaiting_reclaim
+            .extract_if(|_, held| held.deadline <= now)
+            .collect()
+    }
+
+    pub fn take_unlisted(
+        &mut self,
+        worker_id: &str,
+        listed: &HashSet<DispatchedJobId>,
+    ) -> Vec<(String, AwaitingReclaim)> {
+        self.awaiting_reclaim
+            .extract_if(|_, held| held.worker == worker_id && !listed.contains(&held.assignment_id))
+            .collect()
+    }
+
+    pub fn return_unreclaimed(&mut self, unreclaimed: &[(String, AwaitingReclaim)]) {
+        for (job_id, held) in unreclaimed {
+            if let Some(job) = &held.job
+                && !self.contains_job(job_id)
+            {
+                self.pending.insert(job_id.clone(), job.clone());
+            }
+        }
+    }
+
     pub fn contains_job(&self, job_id: &str) -> bool {
         self.pending.contains_key(job_id)
             || self.active.contains_key(job_id)
             || self.clusters.contains(job_id)
+            || self.awaiting_reclaim.contains_key(job_id)
     }
 
     pub fn remove_job(&mut self, job_id: &str) {
@@ -1457,6 +1542,7 @@ impl JobTracker {
         self.pending.remove(job_id);
         self.active.remove(job_id);
         self.clusters.forget(job_id);
+        self.awaiting_reclaim.remove(job_id);
     }
 
     pub fn mark_aborting(&mut self, job_id: &str, now: Instant) {
@@ -1545,6 +1631,8 @@ impl JobTracker {
             self.clusters.forget(key);
             self.forget_job_scores(key);
         }
+        self.awaiting_reclaim
+            .retain(|_, held| !held.job.as_ref().is_some_and(|job| aborted.contains(job)));
     }
 
     pub fn prioritize(
@@ -3180,6 +3268,113 @@ mod tests {
 
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 0);
+    }
+
+    fn held_on_w1(tracker: &mut JobTracker, key: &str, job: PendingJob) -> DispatchedJobId {
+        let assignment_id = DispatchedJobId::now_v7();
+        tracker.restore_active("w1", Reattached::single(key.into(), assignment_id, job));
+        assignment_id
+    }
+
+    #[test]
+    fn a_held_job_stays_tracked_until_its_deadline() {
+        let mut tracker = JobTracker::new();
+        held_on_w1(&mut tracker, "build:a", eval_job(ProjectId::now_v7()));
+        let t0 = Instant::now();
+
+        let gone = tracker.hold_for_reclaim("w1", t0 + Duration::from_secs(600), &HashMap::new());
+
+        assert!(gone.requeued.is_empty() && gone.requeued_keys.is_empty());
+        assert!(tracker.contains_job("build:a"));
+        assert_eq!(tracker.active_count(), 0);
+        assert!(
+            tracker
+                .take_unreclaimed(t0 + Duration::from_secs(599))
+                .is_empty()
+        );
+        let unreclaimed = tracker.take_unreclaimed(t0 + Duration::from_secs(600));
+        assert_eq!(
+            unreclaimed
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["build:a"]
+        );
+        assert!(!tracker.contains_job("build:a"));
+    }
+
+    #[test]
+    fn a_held_cluster_member_is_lost_at_once() {
+        let peer = ProjectId::now_v7();
+        let attempt = ClusterAttemptId::now_v7();
+        let mut tracker = JobTracker::new();
+        tracker.activate_members(
+            attempt,
+            vec![(
+                "w1".into(),
+                "m1".into(),
+                DispatchedJobId::now_v7(),
+                eval_job(peer),
+            )],
+        );
+
+        let gone = tracker.hold_for_reclaim("w1", Instant::now(), &HashMap::new());
+
+        assert_eq!(
+            gone.cluster_members
+                .iter()
+                .map(|m| m.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["m1"]
+        );
+        assert!(!tracker.contains_job("m1"));
+    }
+
+    #[test]
+    fn only_the_unlisted_jobs_of_the_worker_leave_the_hold() {
+        let peer = ProjectId::now_v7();
+        let mut tracker = JobTracker::new();
+        let listed = held_on_w1(&mut tracker, "eval:listed", eval_job(peer));
+        held_on_w1(&mut tracker, "eval:unlisted", eval_job(peer));
+        tracker.restore_active(
+            "w2",
+            Reattached::single(
+                "eval:other".into(),
+                DispatchedJobId::now_v7(),
+                eval_job(peer),
+            ),
+        );
+        let deadline = Instant::now() + Duration::from_secs(600);
+        tracker.hold_for_reclaim("w1", deadline, &HashMap::new());
+        tracker.hold_for_reclaim("w2", deadline, &HashMap::new());
+
+        let unlisted = tracker.take_unlisted("w1", &HashSet::from([listed]));
+
+        assert_eq!(
+            unlisted
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["eval:unlisted"]
+        );
+        assert!(tracker.contains_job("eval:listed"));
+        assert!(tracker.contains_job("eval:other"));
+    }
+
+    #[test]
+    fn reclaim_grace_is_capped_by_the_remaining_lifetime() {
+        let now = Instant::now();
+        let configured = Duration::from_secs(600);
+
+        assert_eq!(
+            reclaim_grace(configured, Some(now + Duration::from_secs(60)), now),
+            Duration::from_secs(60)
+        );
+        assert_eq!(reclaim_grace(configured, None, now), configured);
+        assert_eq!(
+            reclaim_grace(configured, Some(now - Duration::from_secs(1)), now),
+            Duration::ZERO
+        );
     }
 
     #[test]

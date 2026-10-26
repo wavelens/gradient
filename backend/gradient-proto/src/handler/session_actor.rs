@@ -122,6 +122,7 @@ impl Actor for SessionActor {
                 capabilities.clone(),
                 authorized_peers.clone(),
                 port,
+                false,
             )
             .await
         {
@@ -416,6 +417,7 @@ impl Actor for SessionActor {
                         st.authorized_peers.clone(),
                         port,
                         active,
+                        false,
                     )
                     .await
                 {

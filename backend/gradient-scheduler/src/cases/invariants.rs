@@ -32,6 +32,7 @@ pub(super) fn s11_a_single_job_list_per_key(tracked: &TrackedKeys, after: &str) 
         ("pending", &tracked.pending),
         ("active", &tracked.active),
         ("cluster book", &tracked.cluster_book),
+        ("awaiting reclaim", &tracked.awaiting_reclaim),
     ];
     assert_unique(
         "S11",
@@ -70,10 +71,10 @@ impl Rows {
         }
     }
 
-    pub(super) fn assert_invariants(&self, after: &str) {
+    pub(super) fn assert_invariants(&self, after: &str, held_for_reclaim: &HashSet<String>) {
         self.s1_a_single_open_row_per_job(after);
         self.s2_open_rows_have_no_outcome(after);
-        self.s6_disconnected_workers_have_no_open_row(after);
+        self.s6_disconnected_workers_have_no_open_row(after, held_for_reclaim);
         self.s14_a_single_running_attempt_per_shared_build(after);
         self.s19_waiting_reason_only_while_waiting(after);
         self.s20_a_single_active_evaluation_per_branch(after);
@@ -165,7 +166,11 @@ impl Rows {
         }
     }
 
-    fn s6_disconnected_workers_have_no_open_row(&self, after: &str) {
+    fn s6_disconnected_workers_have_no_open_row(
+        &self,
+        after: &str,
+        held_for_reclaim: &HashSet<String>,
+    ) {
         let connected: HashSet<&str> = self
             .connections
             .iter()
@@ -181,6 +186,11 @@ impl Rows {
         let open: Vec<_> = self
             .open_assignments()
             .filter(|row| gone.contains(row.worker_id.as_str()))
+            .filter(|row| {
+                !row.job_id
+                    .as_ref()
+                    .is_some_and(|key| held_for_reclaim.contains(key))
+            })
             .map(|row| (&row.worker_id, row.id))
             .collect();
         assert!(

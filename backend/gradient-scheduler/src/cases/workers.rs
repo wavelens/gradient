@@ -1394,6 +1394,97 @@ async fn w25_a_download_needs_network() {
     .await;
 }
 
+#[tokio::test]
+async fn w26_a_reclaiming_worker_keeps_its_build_building_across_a_disconnect() {
+    let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
+    case.connect_reclaiming(W1, w_all(), &[]).await;
+    let (a, a1) = building_on_w1(&case).await;
+
+    case.disconnect(W1).await;
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Building,
+        "after 2: sb(A).status"
+    );
+    assert_eq!(
+        closes(&case.assignments(&a).await),
+        vec![(a1, None)],
+        "after 2: dj(build:A) stays open"
+    );
+    assert_eq!(
+        running(&case.attempts(A).await),
+        vec![Some(a1)],
+        "after 2: att(A) still Running"
+    );
+    assert!(!case.pending(&a).await, "after 2: pending(build:A)");
+    let signals = case.signals(W1);
+    assert!(
+        matches!(signals.as_slice(), [SessionSignal::Close { .. }]),
+        "after 2: signals(W1) == [Close], got {signals:?}"
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn w27_an_unreclaimed_build_is_requeued_with_worker_lost_after_the_grace() {
+    let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
+    case.connect_reclaiming(W1, w_all(), &[]).await;
+    let (a, a1) = building_on_w1(&case).await;
+    case.disconnect(W1).await;
+
+    case.requeue_unreclaimed_after(Duration::from_secs(599))
+        .await;
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Building,
+        "after 2: sb(A).status inside the grace"
+    );
+    case.check("step 2").await;
+
+    case.requeue_unreclaimed_after(Duration::from_secs(600))
+        .await;
+    assert_eq!(
+        closes(&case.assignments(&a).await),
+        vec![(a1, Some(DispatchedJobOutcome::Abandoned))],
+        "after 3: dj(build:A)"
+    );
+    assert_eq!(
+        verdicts(&case.attempts(A).await),
+        vec![(
+            AttemptOutcome::Aborted,
+            Some(AttemptFailureReason::WorkerLost)
+        )],
+        "after 3: att(A)"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 3: sb(A).status"
+    );
+    assert!(case.pending(&a).await, "after 3: pending(build:A)");
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+async fn building_on_w1(case: &SchedulerCase) -> (String, DispatchedJobId) {
+    let a = case.key(A).await;
+    case.admit_startable_moves().await;
+    case.offers_full(W1).await;
+    case.score_all(W1).await;
+    let a1 = case
+        .request_job(W1, JobKind::Build)
+        .await
+        .expect("after 1: W1 gets build:A")
+        .assignment_id();
+    case.report_building(W1, &a).await;
+    drain_signals(case, &[W1]);
+    case.check("step 1").await;
+    (a, a1)
+}
+
 async fn only_a_network_worker_gets(seed: Shape) {
     let case = SchedulerCase::start(seed).await;
     case.connect(W1, w_build(), &[]).await;
