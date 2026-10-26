@@ -77,11 +77,14 @@ An offer carries only a delta: the server sends a worker only the candidates abs
 
 At server start, `gradient-web/src/lib.rs` runs `recover_interrupted_work` (`gradient-db/src/maintenance/recovery.rs`) one time. `unpark_draining_evals` can only start after that. The function restores work left behind by the previous run.
 
-1. **Assignments:** every open `dispatched_job` row turns into an `Abandoned` row. Both assignment selections reject a job with an open row. Without this cleanup, re-queued work had to wait for its worker to reconnect or for the 1800 s check on abandoned assignments.
-2. **Attempts:** build attempts in `Running` state turn `Aborted`.
-3. **Shared builds:** each `Building` shared build has to turn `Queued` first. `unpromote_ungated` then moves builds with failing queue conditions back to `Created`.
+1. **Assignments:** open `dispatched_job` rows of a cluster attempt go to `Abandoned`. Other open rows stay open so their worker can [reclaim](../proto/jobs.md#abort-and-lost-workers) them.
+2. **Attempts:** build attempts in `Running` state go to `Aborted`.
+3. **Shared builds:** shared builds in `Building` state go to `Queued` first. `unpromote_ungated` then moves builds with failing queue conditions back to `Created`.
 4. **Evaluations:** evaluations in `Fetching`, `EvaluatingFlake` or `EvaluatingDerivation` state turn `Queued`, each with a phase event. Their eval job lived on a worker. Evaluations in `Building` state keep their status and their re-queued builds.
 5. **Clusters:** every open [cluster attempt](clusters.md) closes (`PrepareFailed` when it never started, `Aborted` otherwise). A cluster in `Running` state goes back to `Queued`, or to `Aborted` when a member evaluation or shared build can no longer finish.
 
-- The eval assignment pass returns `Queued` evaluations. The waiting pass returns `Waiting` ones.
+- Jobs with an open assignment skip steps 2-4. They keep their status and attempt.
+- Kept assignments wait in the scheduler for `proto.assignmentReclaimGraceSecs`. Rows with no reclaim inside the grace return to the queue as a lost worker.
+- A worker below protocol 42 can never reclaim. Its kept rows return to the queue as a lost worker at registration.
+- `Queued` evaluations come back from the eval assignment pass. The waiting pass returns `Waiting` ones.
 - Recovery omits the live effects of `update_evaluation_status` calls. The rows stay consistent on their own.

@@ -12,6 +12,7 @@ sequenceDiagram
       S->>W: AuthChallenge { peers }
       W->>S: AuthResponse { tokens }
       S->>W: InitAck { authorized_peers, failed_peers }
+      W->>S: RunningJobs { assignments }
       W->>S: WorkerCapabilities
       loop job loop
           W->>S: RequestJob
@@ -134,20 +135,34 @@ The `timeout_secs` and `max_silent_secs` of a `BuildSpec` follow the derivation'
 
 ## Server Restart
 
-In-flight work can be lost during a restart. Queued jobs survive.
+Running builds and evaluations survive a lost connection and a server restart. Queued jobs survive as well.
 
 | Side | Behavior |
 |---|---|
-| Worker | Aborts all running jobs. Reconnects with backoff that starts at 1 s, doubles each try, and caps at 60 s |
-| Worker | Performs a full handshake, then sends `RequestJobList` plus one `RequestJob` per kind |
+| Worker | Keeps its running jobs. Reconnects with backoff that starts at 1 s, doubles each try, and caps at 60 s |
+| Worker | Appends `LogChunk` payloads to `/var/lib/gradient-worker/job-logs/` while detached. At most 1 GiB of unsent log per job. Older bytes give way to one `bytes of log dropped` marker line |
+| Worker | Queues every other job report in memory. Only the newest `BuildProgress` or `EvalProgress` of a job stays in the queue |
+| Worker | Performs a full handshake, then sends `RunningJobs` with the assignment of each running job, an empty list included |
+| Worker | Sends the queued reports first. Replays each buffered log next to the job loop, from the offset already sent |
+| Worker | Sends `RequestJobList` plus one `RequestJob` per kind |
+| Server | Runs `recover_interrupted_work` before the first session. Assignments outside cluster attempts stay open. Their builds remain `Building` |
+| Server | Keeps the open assignments of a disconnected worker for `proto.assignmentReclaimGraceSecs` (600 s), capped by the worker's remaining `maxLifetime` |
+| Server | Reattaches every listed assignment that is still open and belongs to this worker. Sends `AbortJob` for every other listed one |
+| Server | Re-queues at once every open assignment of the worker absent from `RunningJobs`, as a [lost worker](jobs.md#abort-and-lost-workers) |
 | Server | Drops every report whose `assignment_id` does not match the live dispatch of that job in the scheduler core |
-| Server | Runs `recover_interrupted_work` before the first session. This closes open assignments and aborts running attempts. Every `Building` build and every interrupted evaluation goes back into the queue |
+
+- Cluster members and aborted jobs stay out of `RunningJobs`. Cluster members abort at the end of the session.
+- `RunningJobs` can also list a job with its final `JobCompleted` or `JobFailed` still in the queue.
+- Workers below protocol 42 abort every running job at the end of the session. The server can re-queue the open assignments of such a worker at once.
+- Jobs of a server-dialed session end with the session. Such sessions never reclaim jobs.
+- Workers empty `job-logs/` at process start. No job can outlive a worker process restart.
+- Log bytes in flight at the moment the connection dropped can be missing from the build log.
 
 ## Server Stop
 
 - `SIGTERM` shut down every server session at the same time.
-- Workers abort all running jobs that belong to a closed session.
-- [Startup recovery](../scheduler/waiting-and-recovery.md#startup-recovery) can re-queue the interrupted work on the next start.
+- Workers keep their running jobs and list them in `RunningJobs` after the reconnect.
+- [Startup recovery](../scheduler/waiting-and-recovery.md#startup-recovery) can re-queue the interrupted work without an open assignment on the next start.
 - Workers reconnect after the server is back.
 - A `Draining` message from the server can terminate the session. The worker process stay alive.
 

@@ -201,7 +201,13 @@ A cluster member with the role `split-evaluation-primary` or `split-evaluation-c
 - **Unbuildable Evaluation:** An evaluation with no worker for its systems also finish `Aborted`.
 - Workers stop the daemon build at once and answer with `JobFailed { Aborted }`.
 - Assignments of an unconfirmed abort close as abandoned after 5 min.
-- **Lost Worker:** Open assignments close as abandoned.
+- **Reclaim Grace:** A disconnected worker keeps its open assignments for `proto.assignmentReclaimGraceSecs` (600 s). A grace can't outlast the worker's remaining `maxLifetime`.
+    - Workers list their running jobs in `RunningJobs` after the reconnect. The server reattaches each listed assignment, and the job continues.
+    - The `unreclaimed-job-sweep` pass checks every 10 s on every server instance. A job can outlast the grace by up to 10 s.
+    - Open assignments left by a server restart get the same grace.
+    - Cluster members, workers below protocol 42 and a grace of `0` skip the wait.
+    - A worker back after the grace receive `AbortJob` for its listed jobs. That loss can increase the lost-worker streak by one at most.
+- **Lost Worker:** A job without a reclaim within the grace has a lost worker. A job missing from `RunningJobs` has one at once. Open assignments close as abandoned.
     - Each build in `Building` return to `Queued`. Its running attempt close as `Aborted` with the reason `WorkerLost`.
     - A build with 10 lost workers in a row finish `FailedPermanent`. An attempt closed in any other way reset the row. A requeue after an ended cluster attempt do not count as a lost worker.
     - Running evaluations move to `Waiting` and back into the queue.

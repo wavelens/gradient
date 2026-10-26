@@ -44,7 +44,8 @@ root
 │   ├── cluster-dispatch                 5 s tick, woken when a worker finds no single job
 │   └── upstream-probe                   1 s tick, woken by each probe request: upstream cache lookups for newly wanted shared builds and their dependencies
 ├── sessions                             supervisor: one actor per worker connection
-├── worker-sample, instance-metrics      metrics passes
+├── worker-sample, instance-metrics      metrics collection passes
+├── unreclaimed-job-sweep                every 10 s: requeue jobs of disconnected workers that outlived the reclaim grace
 ├── worker-liveness, graph-consistency,
 │   graph-stuck-reheal                   absent when disabled
 ├── eval-completion-watchdog,

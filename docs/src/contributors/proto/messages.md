@@ -47,7 +47,8 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `ReauthRequest` | Requests a fresh `AuthChallenge` | - |
 | `Reject` | Declines a session dialed by the server before `InitConnection` (`400`, `401`) | `code`, `reason` |
 | `WorkerCapabilities` | Describes the worker: systems, features, slots, CPU, RAM, core score, zone, endpoint | `architectures`, `system_features`, `max_concurrent_builds`, `zone`, `endpoint`, ... |
-| `WorkerMetrics` | Heartbeat with current load | `cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps`, `build_peak_ram_mb` (since 33) |
+| `RunningJobs` | Lists the jobs still running from an earlier session, right after the handshake. An empty list is valid | `assignments` (`assignment_id`, `kind`) (since 42) |
+| `WorkerMetrics` | Heartbeat with current load. `lifetime_left_secs` caps the [reclaim grace](jobs.md#abort-and-lost-workers) | `cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps`, `build_peak_ram_mb` (since 33), `lifetime_left_secs` (since 42) |
 | `RequestJobList` | Requests the full candidate list | - |
 | `RequestJobChunk` | Carries score deltas | `scores`, `is_final` |
 | `RequestJob` | Claims one free slot of a given kind. A worker repeats this every 10 s while idle | `kind` (`Flake` or `Build`) |

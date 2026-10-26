@@ -130,10 +130,11 @@ A `dispatched_job` row records that a job went out. `claim_assignment` writes th
 | Worker `JobFailed` of kind `Aborted` (confirmed server abort) or `Canceled` (worker stopped), with `failed_job_outcome` | `Abandoned` |
 | Claim whose `Assigned` transition failed or exceeded its budget (`assignment.rs`) | `Abandoned` |
 | Worker rejection of the assignment (`withdraw_assignment`) | `Abandoned` |
-| Worker disconnect (its jobs get requeued) | `Abandoned` |
+| Reclaim grace over (`unreclaimed-job-sweep`), or the job missing from `RunningJobs` | `Abandoned` |
+| Session end without reclaim (cluster members, server-dialed sessions, protocol below 42, grace `0`) | `Abandoned` |
 | Revoked project access for a worker (`abort_project_jobs_on_worker`), limited to that worker's jobs in the project | `Abandoned` |
-| Worker registration: rows assigned before the process started | `Abandoned` |
-| Startup recovery (`abandon_all_open_assignments`) | `Abandoned` |
+| Registration without reclaim (server-dialed session, protocol below 42): rows assigned before the process started | `Abandoned` |
+| Startup recovery (`abandon_open_cluster_assignments`), limited to cluster attempts | `Abandoned` |
 | Overdue abort reap, `abandoned-dispatch-sweep` | `Abandoned` |
 
 - `Abandoned` and `Failed` differ. The build can have succeeded before the server lost contact. These rows stay out of the board's failure rates and of history-based scoring.
