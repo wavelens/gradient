@@ -491,7 +491,10 @@ mod tests {
         nix_seal(&nix, root, "hydraJobs", &["perl"]);
 
         assert_eq!(children(&nix, root), vec!["hydraJobs"]);
-        assert_eq!(lookup(&nix, &["hydraJobs", "perl"]), Some((ATTR_PLACEHOLDER, None)));
+        assert_eq!(
+            lookup(&nix, &["hydraJobs", "perl"]),
+            Some((ATTR_PLACEHOLDER, None))
+        );
         assert_eq!(exported_rows(&mut file).len(), 3);
     }
 
