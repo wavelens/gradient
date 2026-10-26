@@ -127,6 +127,7 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
   } // topo.nodes;
 
   testScript = ''
+    import importlib
     import json
     import os
     import pathlib
@@ -135,8 +136,8 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
     import time
 
     sys.path[:0] = ["${./.}", "${../evalbench}"]
-    import report  # type: ignore[import-not-found]
-    from summarize import publish  # type: ignore[import-not-found]
+    report = importlib.import_module("report")
+    publish = importlib.import_module("summarize").publish
 
     GIT          = "${lib.getExe pkgs.git}"
     API          = "http://gradient.local/api/v1"
