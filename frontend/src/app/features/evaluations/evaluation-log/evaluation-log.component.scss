@@ -24,10 +24,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  height: calc(100vh - 65px);
   text-align: center;
-
-  gr-icon { color: var(--gr-status-danger); margin-bottom: $spacing-md; }
 }
 
 .eval-layout {
