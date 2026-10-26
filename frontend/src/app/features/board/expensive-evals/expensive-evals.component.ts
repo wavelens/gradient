@@ -8,6 +8,7 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
+import { oneOf, queryParamSignal } from '@shared/routing';
 import { firstLoad } from '../first-load';
 import { formatQuantity } from '@shared/text';
 import { BoardService } from '@core/services/board.service';
@@ -32,9 +33,9 @@ type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
       <div class="controls">
         <label>Window (days)
           <select (change)="setWindow($event)">
-            <option value="7">7</option>
-            <option value="30" selected>30</option>
-            <option value="90">90</option>
+            @for (d of windows; track d) {
+              <option [value]="d" [selected]="d === windowDays()">{{ d }}</option>
+            }
           </select>
         </label>
       </div>
@@ -68,9 +69,6 @@ export class BoardExpensiveEvalsComponent implements OnInit {
   private board = inject(BoardService);
   protected first = firstLoad();
   rows = signal<ExpensiveEval[]>([]);
-  tab = signal<Tab>('time');
-  private windowDays = 30;
-
   tabs: { key: Tab; label: string }[] = [
     { key: 'time', label: 'Slowest' },
     { key: 'rss', label: 'Peak RSS' },
@@ -79,6 +77,9 @@ export class BoardExpensiveEvalsComponent implements OnInit {
     { key: 'fncalls', label: 'Fn calls' },
     { key: 'alloc', label: 'Allocated' },
   ];
+  readonly windows = [7, 30, 90];
+  tab = queryParamSignal<Tab>('tab', 'time', oneOf(this.tabs.map((t) => t.key)));
+  windowDays = queryParamSignal('days', 30, oneOf(this.windows));
 
   readonly quantity = formatQuantity;
 
@@ -90,7 +91,7 @@ export class BoardExpensiveEvalsComponent implements OnInit {
 
   private load(): void {
     this.board
-      .getExpensiveEvalsByResource(this.tab(), this.windowDays)
+      .getExpensiveEvalsByResource(this.tab(), this.windowDays())
       .pipe(this.first.track())
       .subscribe((r) => this.rows.set(r));
   }
@@ -101,7 +102,7 @@ export class BoardExpensiveEvalsComponent implements OnInit {
   }
 
   setWindow(e: Event): void {
-    this.windowDays = Number((e.target as HTMLSelectElement).value);
+    this.windowDays.set(Number((e.target as HTMLSelectElement).value));
     this.load();
   }
 }

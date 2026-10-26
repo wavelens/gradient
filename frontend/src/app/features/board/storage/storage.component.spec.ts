@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { BoardStorageComponent } from './storage.component';
@@ -23,7 +24,7 @@ describe('BoardStorageComponent', () => {
     getStorage.mockClear();
     await TestBed.configureTestingModule({
       imports: [BoardStorageComponent],
-      providers: [{ provide: BoardService, useValue: { getStorage } }],
+      providers: [provideRouter([]), { provide: BoardService, useValue: { getStorage } }],
     }).compileComponents();
     fixture = TestBed.createComponent(BoardStorageComponent);
     fixture.detectChanges();
