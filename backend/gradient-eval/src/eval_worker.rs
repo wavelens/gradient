@@ -358,12 +358,17 @@ fn measured(
 
 fn resolve_item(walker: &FlakeWalker<'_>, attr: String) -> ResolvedItem {
     match walker.resolve(&attr) {
-        Ok(Resolved { drv_path, licenses }) => ResolvedItem {
+        Ok(Resolved {
+            drv_path,
+            licenses,
+            runner,
+        }) => ResolvedItem {
             attr,
             drv_path: Some(drv_path),
             licenses,
             error: None,
             cost: None,
+            runner,
         },
         Err(e) => ResolvedItem {
             attr,
@@ -371,6 +376,7 @@ fn resolve_item(walker: &FlakeWalker<'_>, attr: String) -> ResolvedItem {
             licenses: vec![],
             error: Some(format!("{e:#}")),
             cost: None,
+            runner: None,
         },
     }
 }
@@ -620,6 +626,7 @@ mod tests {
             licenses: vec![],
             error: None,
             cost: None,
+            runner: None,
         }
     }
 

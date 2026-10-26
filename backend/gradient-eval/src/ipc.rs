@@ -155,6 +155,19 @@ pub struct ResolvedItem {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<AttrCost>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner: Option<RunnerApp>,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize,
+)]
+#[rkyv(derive(Debug))]
+pub struct RunnerApp {
+    pub block: String,
+    pub program: String,
+    pub program_drv: String,
+    pub image_drv: Option<String>,
 }
 
 pub fn encode_request(req: &EvalRequest) -> Result<AlignedVec, RkyvError> {

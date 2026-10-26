@@ -311,6 +311,7 @@ mod tests {
             }],
             error: None,
             cost: None,
+            runner: None,
         }))
         .expect("serialize");
 
@@ -328,6 +329,7 @@ mod tests {
             licenses: vec![],
             error: Some("boom".into()),
             cost: None,
+            runner: None,
         }))
         .expect("serialize");
 

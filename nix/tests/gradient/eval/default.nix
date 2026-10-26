@@ -63,6 +63,7 @@
           {"op": "list", "repository": REPO, "wildcards": ["packages.x86_64-linux.*"]},
           {"op": "list", "repository": REPO,
            "wildcards": ["packages.x86_64-linux.**", "!packages.x86_64-linux.cowsay"]},
+          {"op": "list", "repository": REPO, "wildcards": ["apps.x86_64-linux.*"]},
           {"op": "fingerprint", "repository": REPO},
           {"op": "shutdown"},
       ]
@@ -88,7 +89,7 @@
 
           out = machine.succeed(f"cat /root/out-{tag}.jsonl").splitlines()
           responses = [json.loads(l) for l in out if l.strip()]
-          assert len(responses) == 4, f"expected 4 responses, got {len(responses)}: {responses}"
+          assert len(responses) == 5, f"expected 5 responses, got {len(responses)}: {responses}"
           return responses, int(machine.succeed(f"cat /root/ms-{tag}").strip())
 
       responses, cold_ms = drive("cold")
@@ -125,9 +126,19 @@
       refusal = "import from derivation is not available during the eval driver"
       assert ifd_errors and refusal in ifd_errors[0]["message"], f"the driver must refuse the import: {responses[0]['errors']}"
 
+      banner("Assert runner apps are leaves and plain apps are skipped")
+      assert responses[3]["kind"] == "list_ok", responses[3]
+      apps = {it["attr"].rsplit(".", 1)[1]: it for it in responses[3]["items"]}
+      assert set(apps) == {"curl", "outside", "trainer"}, f"app leaves mismatch: {sorted(apps)}"
+      curl = apps["curl"]["runner"]
+      assert curl["program_drv"].endswith("-check.drv"), curl
+      assert json.loads(curl["block"]) == {"network": True, "devices": ["gpu:h100:8"]}, curl
+      assert "is not a store path" in apps["outside"].get("error", ""), apps["outside"]
+      assert apps["trainer"]["runner"]["image_drv"].endswith(".drv"), apps["trainer"]
+
       banner("Assert fingerprint matches the eval-cache filename")
-      assert responses[3]["kind"] == "fingerprint_ok", responses[3]
-      fp = responses[3].get("fingerprint")
+      assert responses[4]["kind"] == "fingerprint_ok", responses[4]
+      fp = responses[4].get("fingerprint")
       assert fp, f"expected a fingerprint for the committed flake, got {fp}"
       machine.succeed(f"test -f /root/eval-cache/eval-cache-v6/{fp}.sqlite")
 
@@ -135,7 +146,7 @@
       # The fingerprint must match too. A different key would be a cold blob the timing cannot reveal.
       banner("Assert the second eval starts warm off the eval cache")
       warm, warm_ms = drive("warm")
-      assert warm[3].get("fingerprint") == fp, f"fingerprint moved: {fp} -> {warm[3].get('fingerprint')}"
+      assert warm[4].get("fingerprint") == fp, f"fingerprint moved: {fp} -> {warm[4].get('fingerprint')}"
 
       warm_items = {it["attr"]: it for it in warm[0]["items"]}
       assert warm_items[hello].get("drv_path") == h["drv_path"], f"warm resolve disagrees: {warm_items[hello]}"

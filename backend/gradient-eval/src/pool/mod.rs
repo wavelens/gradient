@@ -461,6 +461,7 @@ mod tests {
                     licenses: vec![],
                     error: None,
                     cost: None,
+                    runner: None,
                 })
                 .collect(),
             deferred,
@@ -558,6 +559,7 @@ mod tests {
                     licenses: vec![],
                     error: None,
                     cost: None,
+                    runner: None,
                 }],
                 deferred: vec![],
                 warnings: vec![],
@@ -599,6 +601,7 @@ mod tests {
             licenses: vec![],
             error: None,
             cost: Some(cost(thunks)),
+            runner: None,
         };
         let pool = pool(1);
         pool.workers.push_for_test(replying_worker(

@@ -11,8 +11,13 @@ pub trait WalkNode: Sized {
     fn child_names(&self) -> Result<Vec<String>>;
     fn child(&self, name: &str) -> Result<Option<Self>>;
     fn is_derivation(&self) -> Result<bool>;
+    fn is_runner_app(&self) -> Result<bool>;
     /// Opaque sets like NixOS options stay out of a `**` traversal.
     fn is_opaque(&self) -> Result<bool>;
+}
+
+pub fn is_leaf<N: WalkNode>(node: &N) -> Result<bool> {
+    Ok(node.is_derivation()? || node.is_runner_app()?)
 }
 
 pub fn collapse_deep(segs: &[String]) -> Vec<String> {
@@ -200,7 +205,7 @@ fn traverse<N: WalkNode>(
     let Some((seg, rest)) = segs.split_first() else {
         match sink {
             Sink::Derivations { out, .. } => {
-                if tolerate(node.is_derivation(), path, diags) {
+                if tolerate(is_leaf(node), path, diags) {
                     out.push(segments_to_pattern(path));
                 }
             }
@@ -270,7 +275,7 @@ fn level<N: WalkNode>(
         };
 
         if rest.is_empty() {
-            if tolerate(child.is_derivation(), &p, diags) {
+            if tolerate(is_leaf(&child), &p, diags) {
                 sink.emit_leaf(p);
             }
         } else {
@@ -302,10 +307,10 @@ fn nested<N: WalkNode>(
         };
 
         if rest.is_empty() {
-            let Some(is_derivation) = attempt(child.is_derivation(), &p, diags) else {
+            let Some(leaf) = attempt(is_leaf(&child), &p, diags) else {
                 continue;
             };
-            if is_derivation {
+            if leaf {
                 sink.emit_leaf(p);
             } else if tolerate(child.is_opaque(), &p, diags) {
                 continue;
@@ -323,7 +328,7 @@ fn nested<N: WalkNode>(
                     let Some(gc) = tolerate(child.child(&sub), &q, diags) else {
                         continue;
                     };
-                    if tolerate(gc.is_derivation(), &q, diags) {
+                    if tolerate(is_leaf(&gc), &q, diags) {
                         sink.emit_leaf(q);
                     }
                 }
@@ -480,6 +485,7 @@ mod tests {
     #[derive(Default)]
     struct StubNode {
         derivation: bool,
+        runner_app: bool,
         opaque: bool,
         throws: bool,
         type_set: bool,
@@ -491,6 +497,14 @@ mod tests {
         fn drv() -> Self {
             StubNode {
                 derivation: true,
+                ..Default::default()
+            }
+        }
+
+        fn app() -> Self {
+            StubNode {
+                runner_app: true,
+                opaque: true,
                 ..Default::default()
             }
         }
@@ -555,6 +569,11 @@ mod tests {
             Ok(self.derivation)
         }
 
+        fn is_runner_app(&self) -> Result<bool> {
+            self.force()?;
+            Ok(self.runner_app)
+        }
+
         fn is_opaque(&self) -> Result<bool> {
             if self.is_derivation()? {
                 return Ok(false);
@@ -588,6 +607,16 @@ mod tests {
                 StubNode::set(vec![(
                     "x86_64-linux",
                     StubNode::set(vec![("test", StubNode::drv())]),
+                )]),
+            ),
+            (
+                "apps",
+                StubNode::set(vec![(
+                    "x86_64-linux",
+                    StubNode::set(vec![
+                        ("curl", StubNode::app()),
+                        ("plain", StubNode::opaque(vec![])),
+                    ]),
                 )]),
             ),
         ])
@@ -790,6 +819,26 @@ mod tests {
         );
         assert_eq!(got, vec!["nixosConfigurations.airbert.config.toplevel"]);
         assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn an_app_with_a_gradient_block_is_a_leaf_and_a_plain_app_is_not() {
+        let root = StubNode::set(vec![(
+            "apps",
+            StubNode::set(vec![(
+                "x86_64-linux",
+                StubNode::set(vec![
+                    ("curl", StubNode::app()),
+                    ("plain", StubNode::opaque(vec![])),
+                ]),
+            )]),
+        )]);
+        let (found, errors) = discover(&&root, &[segs(&["apps", "x86_64-linux", "*"])], &[]);
+        assert_eq!(found, vec!["apps.x86_64-linux.curl".to_owned()]);
+        assert!(errors.is_empty());
+
+        let deep = discover(&&tree(), &[segs(&["apps", "**"])], &[]).0;
+        assert_eq!(deep, vec!["apps.x86_64-linux.curl".to_owned()]);
     }
 
     #[test]
