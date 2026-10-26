@@ -1119,20 +1119,29 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             f"server log, polling and GC noise removed:\n{j}"
         )
 
-    banner("Phase 5b: worker eval-cache is committed (non-empty)")
-    eval_cache_dir = "/var/lib/gradient-worker/eval-cache/eval-cache-v6"
-    listings = [
-        node.succeed(f"find {eval_cache_dir} -name '*.sqlite' -printf '%s %p\\n' 2>/dev/null || true").strip()
-        for node in WORKER_NODES
-    ]
-    lines = [line for listing in listings for line in listing.splitlines() if line]
-    sizes = "\n".join(sorted(lines, key=lambda line: -int(line.split()[0])))
-    print(sizes or "(no .sqlite files)")
-    biggest = int(sizes.splitlines()[0].split()[0]) if sizes else 0
-    assert biggest > 4096, (
-        f"eval-cache never committed: largest .sqlite is {biggest} bytes "
-        f"(4096 = empty SQLite header).\n{sizes}"
-    )
+    banner("Phase 5b: the server stores eval cache segments")
+    segment_dir = "/var/lib/gradient/eval-cache-segments"
+    segments = server.succeed(
+        f"find {segment_dir} -type f -printf '%s %P\\n' 2>/dev/null || true"
+    ).strip()
+    print(segments or "(no eval cache segments)")
+    if not segments:
+        local = "".join(
+            f"\n{node.name}:\n"
+            + node.succeed(
+                "find /var/lib/gradient-worker/eval-cache/eval-cache-v6 -printf '%s %p\\n' 2>/dev/null || true"
+            )
+            for node in WORKER_NODES
+        )
+        pushes = server.succeed(
+            "journalctl -u gradient-server --no-pager --since='-900s' -n 8000"
+            " | grep -iE 'eval.?cache' | tail -n 40 || true"
+        )
+        raise Exception(
+            f"no eval cache segment under {segment_dir} after the first evaluation.\n"
+            f"worker eval cache files:{local}\n"
+            f"server eval cache log lines:\n{pushes}"
+        )
 
     banner("Phase 5c: a concurrent evaluation of the same commit merged cleanly")
     eval2_id = ""
