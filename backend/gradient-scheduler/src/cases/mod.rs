@@ -19,6 +19,7 @@ mod outside;
 mod probe;
 mod readers;
 mod reports;
+mod runner;
 mod scenarios;
 mod scoring;
 mod session;

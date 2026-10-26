@@ -15,7 +15,9 @@ use tokio::sync::mpsc;
 
 use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingRunnerJob};
 use gradient_pool::WorkerCaps;
-use gradient_types::runner::{RunnerAllow, RunnerDefaults, RunnerInventory, RunnerSpec};
+use gradient_types::runner::{
+    DeviceClass, RunnerAllow, RunnerDefaults, RunnerInventory, RunnerSpec,
+};
 
 pub(crate) fn port() -> (Arc<dyn SessionPort>, mpsc::UnboundedReceiver<SessionSignal>) {
     let (tx, rx) = mpsc::unbounded_channel();
@@ -154,4 +156,39 @@ pub(crate) fn runner_caps(allow: RunnerAllow, defaults: RunnerDefaults) -> Worke
         }),
         ..WorkerCaps::default()
     }
+}
+
+pub(crate) fn build_only_caps() -> WorkerCaps {
+    WorkerCaps {
+        architectures: vec!["x86_64-linux".into()],
+        capabilities: GradientCapabilities {
+            build: true,
+            ..GradientCapabilities::default()
+        },
+        ..WorkerCaps::default()
+    }
+}
+
+pub(crate) fn eight_gpu_runner_caps() -> WorkerCaps {
+    eight_gpu_runner_caps_with_free(8)
+}
+
+pub(crate) fn eight_gpu_runner_caps_with_free(free: u32) -> WorkerCaps {
+    let mut caps = runner_caps(
+        RunnerAllow {
+            devices: vec!["gpu:h100".into()],
+            mounts: vec!["datasets".into()],
+            ..allow_all()
+        },
+        RunnerDefaults::default(),
+    );
+    if let Some(inventory) = caps.runner.as_mut() {
+        inventory.devices = vec![DeviceClass {
+            name: "gpu:h100".into(),
+            total: 8,
+            free,
+        }];
+        inventory.mounts = vec!["datasets".into()];
+    }
+    caps
 }

@@ -16,8 +16,10 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::assign_mode::decide_build_spec_kind;
 use crate::count::clamp_to_u32;
-use gradient_pool::build_needs_network;
-use gradient_wire::types::BuildSpecKind;
+use gradient_pool::{DeviceCount, WorkerCaps, build_needs_network};
+use gradient_types::runner::{DeviceRequest, RunnerInventory, RunnerSpec};
+use gradient_types::waiting_reason::{EvalCapability, RunnerUnmet};
+use gradient_wire::types::{BuildSpecKind, JobKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BuildWorkerCaps {
@@ -222,6 +224,98 @@ impl BuildabilityChecker {
             available_architectures,
         }
     }
+}
+
+pub(crate) fn runner_waiting_reason(
+    spec: &RunnerSpec,
+    architecture: &str,
+    workers: &[WorkerCaps],
+) -> Option<WaitingReason> {
+    let exec_workers: Vec<&WorkerCaps> = workers.iter().filter(|w| runs_runners(w)).collect();
+    if exec_workers.is_empty() {
+        return Some(WaitingReason::eval_workers(
+            EvalCapability::Exec,
+            clamp_to_u32(workers.len()),
+        ));
+    }
+
+    let fits = |worker: &WorkerCaps, devices: DeviceCount| {
+        let defaults = worker
+            .runner
+            .as_ref()
+            .map(|inventory| inventory.defaults.clone())
+            .unwrap_or_default();
+        worker.fits_runner(&spec.requirement_on(architecture, &defaults), devices)
+    };
+    if exec_workers.iter().any(|w| fits(w, DeviceCount::Free)) {
+        return None;
+    }
+
+    Some(WaitingReason::RunnerWorkers {
+        unmet: runner_unmet(spec, architecture, workers),
+        connected_workers: clamp_to_u32(workers.len()),
+        matching_workers: clamp_to_u32(
+            exec_workers
+                .iter()
+                .filter(|w| fits(w, DeviceCount::Total))
+                .count(),
+        ),
+    })
+}
+
+pub(crate) fn runner_unmet(
+    spec: &RunnerSpec,
+    architecture: &str,
+    workers: &[WorkerCaps],
+) -> RunnerUnmet {
+    let inventories: Vec<&RunnerInventory> = workers
+        .iter()
+        .filter(|w| runs_runners(w) && w.architectures.iter().any(|a| a == architecture))
+        .filter_map(|w| w.runner.as_ref())
+        .collect();
+    let offered = |offers: &dyn Fn(&RunnerInventory) -> bool| inventories.iter().any(|i| offers(i));
+
+    RunnerUnmet {
+        labels: spec
+            .labels
+            .iter()
+            .filter(|label| !offered(&|i| i.labels.contains(label)))
+            .cloned()
+            .collect(),
+        devices: spec
+            .devices
+            .iter()
+            .filter(|device| !offered(&|i| offers_device(i, device)))
+            .cloned()
+            .collect(),
+        mounts: spec
+            .mounts
+            .iter()
+            .flatten()
+            .filter(|mount| {
+                !offered(&|i| i.mounts.contains(mount) && i.allow.mounts.contains(mount))
+            })
+            .cloned()
+            .collect(),
+        nodes: if offered(&|i| i.allow.nodes >= spec.nodes) {
+            0
+        } else {
+            spec.nodes
+        },
+        custom_image: spec.image.is_some() && !offered(&|i| i.allow.custom_images),
+    }
+}
+
+fn runs_runners(worker: &WorkerCaps) -> bool {
+    worker.takes_jobs_of(&JobKind::Runner) && worker.runner.is_some()
+}
+
+fn offers_device(inventory: &RunnerInventory, device: &DeviceRequest) -> bool {
+    inventory.allow.devices.contains(&device.name)
+        && inventory
+            .devices
+            .iter()
+            .any(|class| class.name == device.name && class.total >= device.count)
 }
 
 #[cfg(test)]
@@ -545,5 +639,69 @@ mod tests {
         assert_eq!(unbuildable.len(), 1, "{unbuildable:?}");
         assert_eq!(unbuildable[0].0, stuck.id);
         assert_eq!(unbuildable[0].1.architecture, "aarch64-darwin");
+    }
+
+    #[test]
+    fn a_job_without_any_exec_worker_waits_for_exec() {
+        use crate::test_jobs::build_only_caps;
+        let reason =
+            runner_waiting_reason(&RunnerSpec::default(), "x86_64-linux", &[build_only_caps()]);
+        assert_eq!(
+            reason,
+            Some(WaitingReason::eval_workers(EvalCapability::Exec, 1))
+        );
+    }
+
+    #[test]
+    fn the_wait_reason_names_what_no_worker_offers() {
+        use crate::test_jobs::eight_gpu_runner_caps;
+        let spec = RunnerSpec {
+            labels: vec!["3d-printer".into()],
+            devices: vec![DeviceRequest {
+                name: "gpu:h100".into(),
+                count: 16,
+            }],
+            mounts: Some(vec!["datasets".into()]),
+            ..RunnerSpec::default()
+        };
+        let Some(WaitingReason::RunnerWorkers {
+            unmet,
+            connected_workers,
+            matching_workers,
+        }) = runner_waiting_reason(&spec, "x86_64-linux", &[eight_gpu_runner_caps()])
+        else {
+            panic!("runner wait")
+        };
+        assert_eq!(unmet.labels, vec!["3d-printer".to_owned()]);
+        assert_eq!(
+            unmet.devices,
+            vec![DeviceRequest {
+                name: "gpu:h100".into(),
+                count: 16
+            }]
+        );
+        assert!(unmet.mounts.is_empty());
+        assert_eq!((connected_workers, matching_workers), (1, 0));
+    }
+
+    #[test]
+    fn busy_devices_count_as_matching_workers() {
+        use crate::test_jobs::eight_gpu_runner_caps_with_free;
+        let spec = RunnerSpec {
+            devices: vec![DeviceRequest {
+                name: "gpu:h100".into(),
+                count: 8,
+            }],
+            ..RunnerSpec::default()
+        };
+        let Some(WaitingReason::RunnerWorkers {
+            unmet,
+            matching_workers,
+            ..
+        }) = runner_waiting_reason(&spec, "x86_64-linux", &[eight_gpu_runner_caps_with_free(0)])
+        else {
+            panic!("runner wait")
+        };
+        assert_eq!((unmet, matching_workers), (RunnerUnmet::default(), 1));
     }
 }

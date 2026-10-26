@@ -50,6 +50,12 @@ impl SchedulerCase {
         self.scheduler.counts().await;
     }
 
+    pub async fn assign_runner_jobs(&self) {
+        crate::loops::assign_runner_jobs(&self.scheduler)
+            .await
+            .expect("the runner pass runs");
+    }
+
     pub async fn assign_queued_evals(&self) {
         crate::loops::assign_queued_evals(&self.scheduler)
             .await
