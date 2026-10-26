@@ -18,7 +18,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 use tracing::debug;
 
-use gradient_worker_client::connection::ProtoWriter;
+use gradient_worker_client::connection::reconnecting::ReconnectingWriter;
 use gradient_worker_client::correlation::AssignmentHandle;
 use gradient_worker_client::nar_recv::NarPayload;
 
@@ -39,7 +39,7 @@ impl ProgressSink for () {
 }
 
 pub(crate) struct BuildProgressSink {
-    pub(crate) writer: ProtoWriter,
+    pub(crate) writer: ReconnectingWriter,
     pub(crate) job_id: String,
     pub(crate) assignment_id: AssignmentHandle,
     pub(crate) build_id: String,
@@ -68,7 +68,7 @@ impl ProgressSink for BuildProgressSink {
 }
 
 pub(crate) struct EvalProgressSender {
-    pub(crate) writer: ProtoWriter,
+    pub(crate) writer: ReconnectingWriter,
     pub(crate) job_id: String,
     pub(crate) assignment_id: AssignmentHandle,
 }

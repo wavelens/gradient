@@ -30,6 +30,7 @@ use crate::exit_clock;
 use crate::proto::credentials::CredentialStore;
 use crate::proto::job::JobUpdater;
 use crate::proto::scorer::JobScorer;
+use gradient_worker_client::connection::reconnecting::ReconnectingWriter;
 use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
 use gradient_worker_client::correlation::{
     AssignmentHandle, CacheWaiters, ImportWaiters, InputWaiters, KnownDerivationWaiters,
@@ -237,6 +238,7 @@ impl JobRegistry {
 
 pub(super) struct MessageLoopState {
     writer: ProtoWriter,
+    job_writer: ReconnectingWriter,
     cache_waiters: CacheWaiters,
     known_derivation_waiters: KnownDerivationWaiters,
     import_waiters: ImportWaiters,
@@ -282,14 +284,16 @@ impl MessageLoopState {
         };
         let (done_tx, done_rx) = mpsc::unbounded_channel();
         let channels = ClusterChannels::new(writer.clone());
+        let job_writer = ReconnectingWriter::attached_to(writer.clone());
         let uploads = gradient_worker_client::upload::UploadClient::new(
-            writer.clone(),
+            job_writer.clone(),
             usize::try_from(config.nar.max_concurrent_uploads.get()).unwrap_or(usize::MAX),
         )
         .with_chunk_bytes(usize::try_from(config.nar.chunk_bytes).unwrap_or(usize::MAX));
         Self {
             uploads,
             writer,
+            job_writer,
             cache_waiters: Arc::new(Mutex::new(HashMap::new())),
             known_derivation_waiters: Arc::new(Mutex::new(HashMap::new())),
             import_waiters: Arc::new(Mutex::new(HashMap::new())),
@@ -827,7 +831,7 @@ impl MessageLoopState {
 
         let executor = self.executor.clone();
         let job_store = Arc::clone(&executor.store);
-        let job_writer = self.writer.clone();
+        let job_writer = self.job_writer.clone();
         let job_cache_waiters = Arc::clone(&self.cache_waiters);
         let job_known_derivation_waiters = Arc::clone(&self.known_derivation_waiters);
         let job_import_waiters = Arc::clone(&self.import_waiters);
@@ -869,7 +873,7 @@ impl MessageLoopState {
         let updater = JobUpdater::new(
             fetch.fetch_id.clone(),
             AssignmentHandle::new(String::new()),
-            self.writer.clone(),
+            self.job_writer.clone(),
             Arc::clone(&self.cache_waiters),
             Arc::clone(&self.known_derivation_waiters),
             Arc::clone(&self.import_waiters),
@@ -888,10 +892,14 @@ impl MessageLoopState {
         self.fetches.spawn(async move {
             let _running = running;
             let fetch_id = fetch.fetch_id.clone();
-            let report = UpdaterFetchReport(updater);
+            let report = UpdaterFetchReport {
+                updater,
+                session: writer,
+            };
             let outcome = fetch_input(fetch, &*downloader, &report, &binpath_ssh).await;
-            report.0.uploads.forget_job(&fetch_id);
-            if let Err(e) = writer
+            report.updater.uploads.forget_job(&fetch_id);
+            if let Err(e) = report
+                .session
                 .send(ClientMessage::InputFetched { fetch_id, outcome })
                 .await
             {

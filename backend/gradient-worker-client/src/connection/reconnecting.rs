@@ -138,6 +138,11 @@ impl ReconnectingWriter {
         self.inner.session.borrow().version
     }
 
+    pub fn is_current(&self, session: u64) -> bool {
+        let current = *self.inner.session.borrow();
+        current.number == session && current.version.is_some()
+    }
+
     pub async fn attached(&self) -> u64 {
         let mut rx = self.inner.session.subscribe();
         let session = *rx
@@ -201,29 +206,9 @@ fn supersedes(queued: &ClientMessage, msg: &ClientMessage) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::connection::{ProtoConnection, ProtoReader, WriterFlush};
+    use crate::testing::mock_session as session;
     use gradient_wire::messages::{EvalProgress, JobUpdateKind};
-    use gradient_wire::testing::{MockProtoServer, MockServerConn};
     use std::time::Duration;
-
-    struct Peer {
-        writer: ProtoWriter,
-        server: MockServerConn,
-        _reader: ProtoReader,
-        flush: WriterFlush,
-    }
-
-    async fn session() -> Peer {
-        let listener = MockProtoServer::bind().await;
-        let (server, conn) = tokio::join!(listener.accept(), ProtoConnection::open(listener.url()));
-        let (writer, reader, flush) = conn.unwrap().split();
-        Peer {
-            writer,
-            server,
-            _reader: reader,
-            flush,
-        }
-    }
 
     fn update(job_id: &str) -> ClientMessage {
         ClientMessage::JobUpdate {

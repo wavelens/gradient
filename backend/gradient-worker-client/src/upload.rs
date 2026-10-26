@@ -14,9 +14,10 @@ use gradient_wire::messages::{
 };
 use gradient_wire::session::frame::BULK_CHUNK_SIZE;
 use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
+use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 
-use crate::connection::ProtoWriter;
+use crate::connection::reconnecting::{ReconnectingWriter, SessionLost};
 
 pub const MAX_UPLOAD_ATTEMPTS: u32 = 3;
 
@@ -38,7 +39,7 @@ struct Inner {
 #[derive(Clone)]
 pub struct UploadClient {
     inner: Arc<Mutex<Inner>>,
-    writer: ProtoWriter,
+    writer: ReconnectingWriter,
     small: Arc<Semaphore>,
     large: Arc<Semaphore>,
     per_job: usize,
@@ -46,7 +47,7 @@ pub struct UploadClient {
 }
 
 impl UploadClient {
-    pub fn new(writer: ProtoWriter, max_outstanding: usize) -> Self {
+    pub fn new(writer: ReconnectingWriter, max_outstanding: usize) -> Self {
         Self {
             inner: Arc::default(),
             writer,
@@ -62,7 +63,7 @@ impl UploadClient {
         self
     }
 
-    pub fn writer(&self) -> &ProtoWriter {
+    pub fn writer(&self) -> &ReconnectingWriter {
         &self.writer
     }
 
@@ -126,7 +127,7 @@ impl UploadClient {
         for request_id in ids {
             let _ = self
                 .writer
-                .send(ClientMessage::UploadCancel { request_id })
+                .send_now(ClientMessage::UploadCancel { request_id })
                 .await;
         }
     }
@@ -206,6 +207,18 @@ struct Slots {
     _worker: OwnedSemaphorePermit,
 }
 
+struct Granted {
+    request_id: u64,
+    session: u64,
+    outcome: oneshot::Receiver<UploadOutcome>,
+}
+
+enum Answer {
+    Granted(Result<GrantTarget, RecvError>),
+    Settled(Result<UploadOutcome, RecvError>),
+    SessionLost,
+}
+
 pub struct Upload<'a> {
     client: &'a UploadClient,
     slots: Option<Slots>,
@@ -214,7 +227,7 @@ pub struct Upload<'a> {
     size: u64,
     attempts: u32,
     waiting: Option<u64>,
-    open: Option<(u64, oneshot::Receiver<UploadOutcome>)>,
+    open: Option<Granted>,
 }
 
 impl Upload<'_> {
@@ -229,44 +242,32 @@ impl Upload<'_> {
                     self.object
                 );
             }
-            self.attempts += 1;
-            let (request_id, mut grant, mut outcome) = self.client.register(&self.job_id);
+            let session = self.client.writer.attached().await;
+            let (request_id, grant, outcome) = self.client.register(&self.job_id);
             self.waiting = Some(request_id);
-            let sent = self
-                .client
-                .writer
-                .send(ClientMessage::UploadRequest {
-                    job_id: self.job_id.clone(),
-                    request_id,
-                    object: self.object.clone(),
-                    size: self.size,
-                })
-                .await;
-            if let Err(e) = sent {
-                self.waiting = None;
-                self.client.forget(request_id);
-                return Err(e);
-            }
-            let answer = tokio::select! {
-                biased;
-                granted = &mut grant => Ok(granted),
-                answered = &mut outcome => Err(answered),
-            };
+            let answer = self.ask(request_id, session, grant, outcome).await;
             self.waiting = None;
             match answer {
-                Ok(granted) => {
+                (Answer::SessionLost, _) => self.client.forget(request_id),
+                (Answer::Granted(granted), outcome) => {
+                    self.attempts += 1;
                     return match granted.context("upload cancelled before its grant")? {
                         GrantTarget::Skip => {
                             self.client.forget(request_id);
                             Ok(None)
                         }
                         target => {
-                            self.open = Some((request_id, outcome));
+                            self.open = Some(Granted {
+                                request_id,
+                                session,
+                                outcome,
+                            });
                             Ok(Some((request_id, target)))
                         }
                     };
                 }
-                Err(answered) => {
+                (Answer::Settled(answered), _) => {
+                    self.attempts += 1;
                     self.client.forget(request_id);
                     if self.stored(answered.context("upload cancelled before its grant")?)? {
                         return Ok(None);
@@ -276,34 +277,77 @@ impl Upload<'_> {
         }
     }
 
+    async fn ask(
+        &self,
+        request_id: u64,
+        session: u64,
+        mut grant: oneshot::Receiver<GrantTarget>,
+        mut outcome: oneshot::Receiver<UploadOutcome>,
+    ) -> (Answer, oneshot::Receiver<UploadOutcome>) {
+        let request = ClientMessage::UploadRequest {
+            job_id: self.job_id.clone(),
+            request_id,
+            object: self.object.clone(),
+            size: self.size,
+        };
+        if self.client.writer.send_now(request).await.is_err() {
+            return (Answer::SessionLost, outcome);
+        }
+        let answer = tokio::select! {
+            biased;
+            granted = &mut grant => Answer::Granted(granted),
+            answered = &mut outcome => Answer::Settled(answered),
+            () = self.client.writer.lost(session) => Answer::SessionLost,
+        };
+        (answer, outcome)
+    }
+
     pub async fn settle(&mut self, transferred: Result<UploadMetadata>) -> Result<bool> {
-        let (request_id, outcome) = self.open.take().context("no granted upload to settle")?;
-        let finished = match transferred {
-            Ok(metadata) => {
-                self.client
-                    .writer
-                    .send(ClientMessage::UploadFinished {
-                        request_id,
-                        metadata,
-                    })
-                    .await
-            }
+        let Granted {
+            request_id,
+            session,
+            outcome,
+        } = self.open.take().context("no granted upload to settle")?;
+        let committed = match transferred {
+            Ok(metadata) => self.finish(request_id, session, metadata, outcome).await,
+            Err(e) if e.is::<SessionLost>() => Ok(None),
             Err(e) => {
                 let _ = self
                     .client
                     .writer
-                    .send(ClientMessage::UploadCancel { request_id })
+                    .send_now(ClientMessage::UploadCancel { request_id })
                     .await;
                 Err(e)
             }
         };
         self.slots = None;
-        let outcome = match finished {
-            Ok(()) => outcome.await.context("upload cancelled before its commit"),
-            Err(e) => Err(e),
-        };
         self.client.forget(request_id);
-        self.stored(outcome?)
+        match committed? {
+            Some(outcome) => self.stored(outcome),
+            None => Ok(false),
+        }
+    }
+
+    async fn finish(
+        &self,
+        request_id: u64,
+        session: u64,
+        metadata: UploadMetadata,
+        outcome: oneshot::Receiver<UploadOutcome>,
+    ) -> Result<Option<UploadOutcome>> {
+        let writer = &self.client.writer;
+        let finished = ClientMessage::UploadFinished {
+            request_id,
+            metadata,
+        };
+        if !writer.is_current(session) || writer.send_now(finished).await.is_err() {
+            return Ok(None);
+        }
+        tokio::select! {
+            biased;
+            committed = outcome => committed.map(Some).context("upload cancelled before its commit"),
+            () = writer.lost(session) => Ok(None),
+        }
     }
 
     fn stored(&self, outcome: UploadOutcome) -> Result<bool> {
@@ -325,14 +369,14 @@ impl Drop for Upload<'_> {
         let abandoned = self
             .waiting
             .take()
-            .or_else(|| self.open.take().map(|(id, _)| id));
+            .or_else(|| self.open.take().map(|granted| granted.request_id));
         if let Some(request_id) = abandoned {
             self.client.forget(request_id);
             if let Ok(runtime) = tokio::runtime::Handle::try_current() {
                 let writer = self.client.writer.clone();
                 runtime.spawn(async move {
                     let _ = writer
-                        .send(ClientMessage::UploadCancel { request_id })
+                        .send_now(ClientMessage::UploadCancel { request_id })
                         .await;
                 });
             }
@@ -348,7 +392,7 @@ mod tests {
     )]
 
     use super::*;
-    use gradient_wire::testing::MockProtoServer;
+    use gradient_wire::testing::{MockProtoServer, MockServerConn};
     use std::time::Duration;
 
     async fn connected(
@@ -365,7 +409,7 @@ mod tests {
             .await
             .unwrap();
         let (writer, mut reader, _flush) = conn.split();
-        let client = UploadClient::new(writer, max);
+        let client = UploadClient::new(ReconnectingWriter::attached_to(writer), max);
         let pump_client = client.clone();
         let pump = tokio::spawn(async move {
             while let Some(msg) = reader.recv().await {
@@ -731,5 +775,105 @@ mod tests {
             server.recv().await.unwrap(),
             ClientMessage::UploadRequest { .. }
         ));
+    }
+
+    async fn reattach(client: &UploadClient) -> (MockServerConn, tokio::task::JoinHandle<()>) {
+        let crate::testing::MockSession {
+            writer,
+            server,
+            mut reader,
+            ..
+        } = crate::testing::mock_session().await;
+        client.writer().attach(writer).await.unwrap();
+        let pump_client = client.clone();
+        let pump = tokio::spawn(async move {
+            while let Some(msg) = reader.recv().await {
+                pump_client.deliver(msg);
+            }
+        });
+        (server, pump)
+    }
+
+    async fn requested(server: &mut MockServerConn) -> u64 {
+        let received = tokio::time::timeout(Duration::from_secs(5), server.recv())
+            .await
+            .expect("the upload asks on this session");
+        let ClientMessage::UploadRequest { request_id, .. } = received.unwrap() else {
+            panic!("an upload request")
+        };
+        request_id
+    }
+
+    #[tokio::test]
+    async fn a_lost_session_before_the_grant_spends_no_upload_attempt() {
+        let client = UploadClient::new(ReconnectingWriter::new(), 4);
+        let upload = tokio::spawn({
+            let client = client.clone();
+            async move {
+                let mut upload = client.start("build:1", nar(), LARGE).await?;
+                upload.next_grant().await
+            }
+        });
+        for _ in 0..MAX_UPLOAD_ATTEMPTS {
+            let (mut server, _pump) = reattach(&client).await;
+            requested(&mut server).await;
+            client.writer().detach();
+        }
+        let (mut server, _pump) = reattach(&client).await;
+        let request_id = requested(&mut server).await;
+        server
+            .send(ServerMessage::UploadGrant {
+                request_id,
+                target: GrantTarget::Skip,
+            })
+            .await
+            .unwrap();
+
+        assert!(upload.await.unwrap().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_transfer_cut_by_a_session_loss_starts_over_on_the_next_session() {
+        let client = UploadClient::new(ReconnectingWriter::new(), 4);
+        let (mut first, _pump) = reattach(&client).await;
+        let (granted_tx, granted_rx) = tokio::sync::oneshot::channel();
+        let (cut_tx, cut_rx) = tokio::sync::oneshot::channel::<()>();
+        let upload = tokio::spawn({
+            let client = client.clone();
+            async move {
+                let mut upload = client.start("build:1", nar(), LARGE).await?;
+                let granted = upload.next_grant().await?;
+                let _ = granted_tx.send(granted);
+                let _ = cut_rx.await;
+                let settled = upload.settle(Err(SessionLost.into())).await?;
+                let again = upload.next_grant().await?;
+                anyhow::Ok((settled, again))
+            }
+        });
+        let request_id = requested(&mut first).await;
+        first
+            .send(ServerMessage::UploadGrant {
+                request_id,
+                target: GrantTarget::Passthrough { resume_offset: 0 },
+            })
+            .await
+            .unwrap();
+        assert!(granted_rx.await.unwrap().is_some());
+
+        client.writer().detach();
+        cut_tx.send(()).unwrap();
+        let (mut second, _pump) = reattach(&client).await;
+        let again = requested(&mut second).await;
+        second
+            .send(ServerMessage::UploadGrant {
+                request_id: again,
+                target: GrantTarget::Skip,
+            })
+            .await
+            .unwrap();
+
+        let (settled, next) = upload.await.unwrap().unwrap();
+        assert!(!settled, "a cut transfer is not stored");
+        assert!(next.is_none());
     }
 }

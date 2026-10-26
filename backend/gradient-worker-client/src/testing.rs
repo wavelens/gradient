@@ -10,12 +10,13 @@ use gradient_wire::messages::{
     JobKind, ServerMessage,
 };
 use gradient_wire::session::handshake::HandshakeResult;
-use gradient_wire::testing::SCRIPT_TIMEOUT;
+use gradient_wire::testing::{MockProtoServer, MockServerConn, SCRIPT_TIMEOUT};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::connection::handshake::perform_handshake;
-use crate::connection::{ProtoConnection, ProtoWriter};
+use crate::connection::reconnecting::ReconnectingWriter;
+use crate::connection::{ProtoConnection, ProtoReader, ProtoWriter, WriterFlush};
 use crate::nar::{NarSource, upload_nar};
 use crate::nar_recv::NarReceiver;
 use crate::upload::UploadClient;
@@ -81,7 +82,7 @@ impl ProtoPeer {
         let nar_recv = NarReceiver::new();
         let (tx, inbox) = mpsc::unbounded_channel();
         let routed = nar_recv.clone();
-        let uploads = UploadClient::new(writer.clone(), 8);
+        let uploads = UploadClient::new(ReconnectingWriter::attached_to(writer.clone()), 8);
         let delivered = uploads.clone();
 
         #[expect(
@@ -256,6 +257,25 @@ impl ProtoPeer {
             .await
             .context("the authority never served the NAR")??;
         Ok(payload.read_bytes().await?.into_owned())
+    }
+}
+
+pub struct MockSession {
+    pub writer: ProtoWriter,
+    pub server: MockServerConn,
+    pub reader: ProtoReader,
+    pub flush: WriterFlush,
+}
+
+pub async fn mock_session() -> MockSession {
+    let listener = MockProtoServer::bind().await;
+    let (server, conn) = tokio::join!(listener.accept(), ProtoConnection::open(listener.url()));
+    let (writer, reader, flush) = conn.expect("the mock server accepts").split();
+    MockSession {
+        writer,
+        server,
+        reader,
+        flush,
     }
 }
 

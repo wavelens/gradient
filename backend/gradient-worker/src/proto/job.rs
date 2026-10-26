@@ -34,14 +34,14 @@ use gradient_wire::types::{
     ImportOutcome, InputOutcome, Realisation, SegmentFetch, SegmentSource, UploadMetadata,
     UploadObject,
 };
-use gradient_worker_client::connection::ProtoWriter;
+use gradient_worker_client::connection::reconnecting::ReconnectingWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
 use gradient_worker_client::upload::UploadClient;
 
 pub struct JobUpdater {
     pub(crate) job_id: String,
     pub(crate) assignment_id: AssignmentHandle,
-    pub(crate) writer: ProtoWriter,
+    pub(crate) writer: ReconnectingWriter,
     pub(crate) cache_waiters: CacheWaiters,
     pub(crate) known_derivation_waiters: KnownDerivationWaiters,
     pub(crate) import_waiters: ImportWaiters,
@@ -67,7 +67,7 @@ async fn passthrough_blob(
     let mut offset = start as u64;
     for chunk in bytes[start..].chunks(uploads.chunk_bytes()) {
         writer
-            .send(ClientMessage::UploadChunk {
+            .send_now(ClientMessage::UploadChunk {
                 request_id,
                 data: Bytes::copy_from_slice(chunk),
                 offset,
@@ -77,7 +77,7 @@ async fn passthrough_blob(
         offset += chunk.len() as u64;
     }
     writer
-        .send(ClientMessage::UploadChunk {
+        .send_now(ClientMessage::UploadChunk {
             request_id,
             data: Bytes::new(),
             offset,
@@ -166,7 +166,7 @@ impl JobUpdater {
     pub fn new(
         job_id: String,
         assignment_id: AssignmentHandle,
-        writer: ProtoWriter,
+        writer: ReconnectingWriter,
         cache_waiters: CacheWaiters,
         known_derivation_waiters: KnownDerivationWaiters,
         import_waiters: ImportWaiters,
@@ -781,6 +781,7 @@ mod tests {
         conn: gradient_worker_client::connection::ProtoConnection,
     ) -> (JobUpdater, gradient_worker_client::connection::ProtoReader) {
         let (writer, reader, _flush) = conn.split();
+        let writer = ReconnectingWriter::attached_to(writer);
         let writer_for_uploads = writer.clone();
         let cache_waiters = Arc::new(Mutex::new(HashMap::new()));
         let known_derivation_waiters = Arc::new(Mutex::new(HashMap::new()));

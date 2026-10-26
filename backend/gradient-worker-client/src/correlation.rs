@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use futures::{StreamExt as _, TryStreamExt as _};
@@ -17,8 +18,10 @@ use gradient_wire::messages::{
 use gradient_wire::traits::InputProgressSink;
 use gradient_wire::types::{ImportOutcome, InputOutcome};
 use tokio::sync::oneshot;
+use tokio::sync::oneshot::error::RecvError;
 
-use crate::connection::ProtoWriter;
+use crate::connection::Unresponsive;
+use crate::connection::reconnecting::ReconnectingWriter;
 
 pub struct CacheWaiter {
     job_id: String,
@@ -135,24 +138,52 @@ pub fn forget_import_waiters_for_job(waiters: &ImportWaiters, job_id: &str) {
     waiters.lock().retain(|_, w| w.job_id != job_id);
 }
 
+pub async fn request_across_sessions<T>(
+    writer: &ReconnectingWriter,
+    request: ClientMessage,
+    answer: &mut oneshot::Receiver<T>,
+    timeout: Option<Duration>,
+) -> Result<Result<T, RecvError>> {
+    loop {
+        let session = writer.attached().await;
+        if writer.send_now(request.clone()).await.is_err() {
+            continue;
+        }
+        tokio::select! {
+            answered = answer_within(&mut *answer, timeout) => return answered,
+            () = writer.lost(session) => {}
+        }
+    }
+}
+
+async fn answer_within<T>(
+    answer: &mut oneshot::Receiver<T>,
+    timeout: Option<Duration>,
+) -> Result<Result<T, RecvError>> {
+    match timeout {
+        Some(limit) => tokio::time::timeout(limit, answer)
+            .await
+            .map_err(|_| anyhow::Error::new(Unresponsive)),
+        None => Ok(answer.await),
+    }
+}
+
 pub async fn request_import(
     job_id: &str,
-    writer: &ProtoWriter,
+    writer: &ReconnectingWriter,
     waiters: &ImportWaiters,
     drv_paths: Vec<String>,
 ) -> Result<ImportOutcome> {
     let request_id = uuid::Uuid::now_v7().to_string();
-    let rx = register_import_waiter(waiters, request_id.clone(), job_id.to_owned());
-    writer
-        .send(ClientMessage::ImportRequest {
-            job_id: job_id.to_owned(),
-            request_id,
-            drv_paths,
-        })
-        .await?;
-    rx.await.map_err(|_| {
-        anyhow::anyhow!("import waiter dropped - the job ended or the connection closed")
-    })
+    let mut rx = register_import_waiter(waiters, request_id.clone(), job_id.to_owned());
+    let request = ClientMessage::ImportRequest {
+        job_id: job_id.to_owned(),
+        request_id,
+        drv_paths,
+    };
+    request_across_sessions(writer, request, &mut rx, None)
+        .await?
+        .map_err(|_| anyhow::anyhow!("import waiter dropped - the job ended"))
 }
 
 pub struct InputWaiter {
@@ -218,23 +249,21 @@ pub fn forget_input_waiters_for_job(waiters: &InputWaiters, job_id: &str) {
 
 pub async fn request_input(
     job_id: &str,
-    writer: &ProtoWriter,
+    writer: &ReconnectingWriter,
     waiters: &InputWaiters,
     request: String,
     progress: Arc<dyn InputProgressSink>,
 ) -> Result<InputOutcome> {
     let request_id = uuid::Uuid::now_v7().to_string();
-    let rx = register_input_waiter(waiters, request_id.clone(), job_id.to_owned(), progress);
-    writer
-        .send(ClientMessage::InputRequest {
-            job_id: job_id.to_owned(),
-            request_id,
-            request,
-        })
-        .await?;
-    rx.await.map_err(|_| {
-        anyhow::anyhow!("input waiter dropped - the job ended or the connection closed")
-    })
+    let mut rx = register_input_waiter(waiters, request_id.clone(), job_id.to_owned(), progress);
+    let request = ClientMessage::InputRequest {
+        job_id: job_id.to_owned(),
+        request_id,
+        request,
+    };
+    request_across_sessions(writer, request, &mut rx, None)
+        .await?
+        .map_err(|_| anyhow::anyhow!("input waiter dropped - the job ended"))
 }
 
 #[derive(Clone, Debug)]
@@ -256,7 +285,7 @@ impl AssignmentHandle {
 
 pub async fn known_derivations_with_timeout(
     job_id: &str,
-    writer: &ProtoWriter,
+    writer: &ReconnectingWriter,
     waiters: &KnownDerivationWaiters,
     drv_paths: Vec<String>,
 ) -> Result<Vec<String>> {
@@ -274,24 +303,22 @@ pub async fn known_derivations_with_timeout(
 
 pub async fn known_derivations_chunk(
     job_id: &str,
-    writer: &ProtoWriter,
+    writer: &ReconnectingWriter,
     waiters: &KnownDerivationWaiters,
     drv_paths: Vec<String>,
 ) -> Result<Vec<String>> {
     let path_count = drv_paths.len();
     let query_id = uuid::Uuid::now_v7().to_string();
-    let rx = register_known_derivation_waiter(waiters, query_id.clone(), job_id.to_owned());
-    writer
-        .send(ClientMessage::QueryKnownDerivations {
-            job_id: job_id.to_owned(),
-            query_id: query_id.clone(),
-            drv_paths,
-        })
-        .await?;
-    match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
+    let mut rx = register_known_derivation_waiter(waiters, query_id.clone(), job_id.to_owned());
+    let request = ClientMessage::QueryKnownDerivations {
+        job_id: job_id.to_owned(),
+        query_id: query_id.clone(),
+        drv_paths,
+    };
+    match request_across_sessions(writer, request, &mut rx, Some(CACHE_QUERY_TIMEOUT)).await {
         Ok(Ok(known)) => Ok(known),
         Ok(Err(_)) => Err(anyhow::anyhow!(
-            "known-derivation waiter dropped - connection closed or superseded?"
+            "known-derivation waiter dropped - the job ended or the query was superseded"
         )),
         Err(_) => {
             waiters.lock().remove(&query_id);
@@ -309,7 +336,7 @@ pub async fn known_derivations_chunk(
 /// Each chunk is bounded, and replies are matched by `query_id`.
 pub async fn cache_query_with_timeout(
     job_id: &str,
-    writer: &ProtoWriter,
+    writer: &ReconnectingWriter,
     cache_waiters: &CacheWaiters,
     paths: Vec<String>,
     nar_sizes: Vec<Option<u64>>,
@@ -346,7 +373,7 @@ pub async fn cache_query_with_timeout(
 
 pub async fn cache_query_chunk(
     job_id: &str,
-    writer: &ProtoWriter,
+    writer: &ReconnectingWriter,
     cache_waiters: &CacheWaiters,
     paths: Vec<String>,
     nar_sizes: Vec<Option<u64>>,
@@ -355,25 +382,23 @@ pub async fn cache_query_chunk(
 ) -> Result<Vec<CachedPath>> {
     let path_count = paths.len();
     let query_id = uuid::Uuid::now_v7().to_string();
-    let rx = register_cache_waiter(cache_waiters, query_id.clone(), job_id.to_owned());
-    writer
-        .send(ClientMessage::CacheQuery {
-            job_id: job_id.to_owned(),
-            query_id: query_id.clone(),
-            paths,
-            mode,
-            nar_sizes,
-            external,
-        })
-        .await?;
-    match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
+    let mut rx = register_cache_waiter(cache_waiters, query_id.clone(), job_id.to_owned());
+    let request = ClientMessage::CacheQuery {
+        job_id: job_id.to_owned(),
+        query_id: query_id.clone(),
+        paths,
+        mode,
+        nar_sizes,
+        external,
+    };
+    match request_across_sessions(writer, request, &mut rx, Some(CACHE_QUERY_TIMEOUT)).await {
         Ok(Ok(Ok(cached))) => Ok(cached),
         // A server-side `CacheError` is indeterminate, not "absent". Prefetch must retry it as an
         // outage instead of a terminal `InputsUnavailable`.
         Ok(Ok(Err(message))) => Err(anyhow::Error::new(crate::connection::Unresponsive)
             .context(format!("CacheQuery failed server-side: {message}"))),
         Ok(Err(_)) => Err(anyhow::anyhow!(
-            "cache waiter dropped - connection closed or superseded?"
+            "cache waiter dropped - the job ended or the query was superseded"
         )),
         Err(_) => {
             forget_cache_waiter(cache_waiters, &query_id);
@@ -506,5 +531,50 @@ mod tests {
 
         assert!(first.0.lock().is_empty());
         assert_eq!(*second.0.lock(), vec![(512, Some(1024))]);
+    }
+
+    #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test stands in for the server by hand"
+    )]
+    async fn a_query_cut_by_a_session_loss_is_asked_again_on_the_next_session() {
+        let waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let writer = ReconnectingWriter::new();
+        let mut first = crate::testing::mock_session().await;
+        writer.attach(first.writer.clone()).await.unwrap();
+
+        let query = tokio::spawn({
+            let (writer, waiters) = (writer.clone(), Arc::clone(&waiters));
+            async move {
+                cache_query_chunk(
+                    "build:1",
+                    &writer,
+                    &waiters,
+                    vec!["/nix/store/a".into()],
+                    vec![None],
+                    QueryMode::Pull,
+                    false,
+                )
+                .await
+            }
+        });
+        let ClientMessage::CacheQuery { query_id, .. } = first.server.recv().await.unwrap() else {
+            panic!("a cache query first");
+        };
+
+        writer.detach();
+        let mut second = crate::testing::mock_session().await;
+        writer.attach(second.writer.clone()).await.unwrap();
+        let ClientMessage::CacheQuery {
+            query_id: again, ..
+        } = second.server.recv().await.unwrap()
+        else {
+            panic!("the query is asked again");
+        };
+        assert_eq!(again, query_id);
+
+        assert!(deliver_cache_reply(&waiters, &query_id, Ok(vec![])));
+        assert_eq!(query.await.unwrap().unwrap(), vec![]);
     }
 }

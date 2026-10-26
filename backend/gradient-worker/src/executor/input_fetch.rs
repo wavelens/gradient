@@ -20,6 +20,7 @@ use tokio::time::MissedTickBehavior;
 use tracing::{info, warn};
 
 use crate::proto::job::JobUpdater;
+use gradient_worker_client::connection::ProtoWriter;
 
 #[derive(Debug, Clone)]
 pub struct InputFetchJob {
@@ -63,27 +64,29 @@ impl InputDownloader for SubprocessDownloader {
     }
 }
 
-pub(crate) struct UpdaterFetchReport(pub JobUpdater);
+pub(crate) struct UpdaterFetchReport {
+    pub(crate) updater: JobUpdater,
+    pub(crate) session: ProtoWriter,
+}
 
 #[async_trait]
 impl FetchReport for UpdaterFetchReport {
     async fn progress(&self, bytes_done: u64, bytes_total: Option<u64>) {
         let sent = self
-            .0
-            .writer
+            .session
             .send(ClientMessage::InputFetchProgress {
-                fetch_id: self.0.job_id.clone(),
+                fetch_id: self.updater.job_id.clone(),
                 bytes_done,
                 bytes_total,
             })
             .await;
         if let Err(e) = sent {
-            warn!(fetch_id = %self.0.job_id, error = %e, "input fetch progress not sent");
+            warn!(fetch_id = %self.updater.job_id, error = %e, "input fetch progress not sent");
         }
     }
 
     async fn push(&self, store_path: String) -> Result<()> {
-        JobReporter::push_paths(&self.0, &[(store_path, None)]).await
+        JobReporter::push_paths(&self.updater, &[(store_path, None)]).await
     }
 }
 

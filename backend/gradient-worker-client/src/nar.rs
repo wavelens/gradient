@@ -16,7 +16,7 @@ use tracing::debug;
 
 use gradient_util::store_path::nix_store_path;
 
-use crate::connection::ProtoWriter;
+use crate::connection::reconnecting::ReconnectingWriter;
 use crate::nar_multipart::{PartSink, PartUploader};
 use crate::upload::{Upload, UploadClient};
 use gradient_wire::types::{
@@ -404,13 +404,13 @@ async fn measure_nar(store_path: &str) -> Result<u64> {
 
 struct PassthroughStream<'a> {
     request_id: u64,
-    writer: &'a ProtoWriter,
+    writer: &'a ReconnectingWriter,
     resume_from: u64,
     produced: u64,
 }
 
 impl<'a> PassthroughStream<'a> {
-    fn new(request_id: u64, writer: &'a ProtoWriter, resume_from: u64) -> Self {
+    fn new(request_id: u64, writer: &'a ReconnectingWriter, resume_from: u64) -> Self {
         Self {
             request_id,
             writer,
@@ -421,7 +421,7 @@ impl<'a> PassthroughStream<'a> {
 
     async fn finish(self) -> Result<()> {
         self.writer
-            .send(ClientMessage::UploadChunk {
+            .send_now(ClientMessage::UploadChunk {
                 request_id: self.request_id,
                 data: Bytes::new(),
                 offset: self.produced,
@@ -437,7 +437,7 @@ impl PartSink for PassthroughStream<'_> {
         let part_len = part.len() as u64;
         if let Some((offset, data)) = part_to_send(part, self.produced, self.resume_from) {
             self.writer
-                .send(ClientMessage::UploadChunk {
+                .send_now(ClientMessage::UploadChunk {
                     request_id: self.request_id,
                     data: Bytes::from(data),
                     offset,
@@ -617,7 +617,7 @@ mod tests {
     async fn client(url: &str) -> (UploadClient, tokio::task::JoinHandle<()>) {
         let conn = crate::connection::ProtoConnection::open(url).await.unwrap();
         let (writer, mut reader, _flush) = conn.split();
-        let uploads = UploadClient::new(writer, 4);
+        let uploads = UploadClient::new(ReconnectingWriter::attached_to(writer), 4);
         let delivered = uploads.clone();
         let pump = tokio::spawn(async move {
             while let Some(msg) = reader.recv().await {

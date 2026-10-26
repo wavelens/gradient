@@ -225,6 +225,7 @@ mod tests {
     use crate::executor::timeline::JobTimeline;
     use crate::proto::eval_cache_recv::EvalCacheReceiver;
     use crate::proto::job::JobUpdater;
+    use gradient_worker_client::connection::reconnecting::ReconnectingWriter;
     use gradient_worker_client::connection::{ProtoConnection, ProtoReader};
     use gradient_worker_client::correlation::{
         AssignmentHandle, CacheWaiters, deliver_cache_reply,
@@ -279,7 +280,7 @@ mod tests {
         JobUpdater::new(
             job.to_owned(),
             AssignmentHandle::new("dispatch-1".to_owned()),
-            writer,
+            ReconnectingWriter::attached_to(writer),
             cache_waiters,
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashMap::new())),
@@ -337,7 +338,7 @@ mod tests {
 
         let conn = ProtoConnection::open(&url).await.unwrap();
         let (writer, reader, _flush) = conn.split();
-        let uploads = UploadClient::new(writer.clone(), 8);
+        let uploads = UploadClient::new(ReconnectingWriter::attached_to(writer.clone()), 8);
         let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
         let updater = updater(
             "job-upload-settle",
@@ -435,7 +436,7 @@ mod tests {
 
         let conn = ProtoConnection::open(&url).await.unwrap();
         let (writer, reader, _flush) = conn.split();
-        let uploads = UploadClient::new(writer.clone(), 8);
+        let uploads = UploadClient::new(ReconnectingWriter::attached_to(writer.clone()), 8);
         let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
         let mut updater = updater(JOB, writer, cache_waiters.clone(), uploads.clone());
         let pump = pump(reader, cache_waiters, uploads);
@@ -555,7 +556,7 @@ mod tests {
 
         let conn = ProtoConnection::open(&url).await.unwrap();
         let (writer, reader, _flush) = conn.split();
-        let uploads = UploadClient::new(writer.clone(), 8);
+        let uploads = UploadClient::new(ReconnectingWriter::attached_to(writer.clone()), 8);
         let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
         let mut updater = updater(
             "job-recursive-nix",
@@ -671,7 +672,7 @@ mod tests {
 
         let conn = ProtoConnection::open(&url).await.unwrap();
         let (writer, reader, _flush) = conn.split();
-        let uploads = UploadClient::new(writer.clone(), 8);
+        let uploads = UploadClient::new(ReconnectingWriter::attached_to(writer.clone()), 8);
         let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
         let mut updater = updater(
             "job-upload-progress",

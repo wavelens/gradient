@@ -14,6 +14,7 @@ use bytes::Bytes;
 use gradient_storage::{PartialStore, PartialWriter};
 use gradient_wire::messages::{ServerMessage, TRANSFER_TIMEOUT};
 use tokio::sync::{mpsc, oneshot, watch};
+use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{debug, warn};
 
@@ -257,6 +258,7 @@ impl std::error::Error for NarUnavailable {}
 struct Inner {
     streams: HashMap<Key, mpsc::Sender<NarChunk>>,
     waiters: HashMap<Key, Waiter>,
+    staging: HashMap<Key, CancellationToken>,
 }
 
 #[derive(Clone, Default)]
@@ -332,6 +334,7 @@ impl Stager {
             Some(inner) => {
                 let mut g = inner.lock();
                 g.streams.remove(key);
+                g.staging.remove(key);
                 match g.waiters.remove(key) {
                     Some(waiter) => {
                         if waiter.tx.send(result).is_err() {
@@ -555,6 +558,7 @@ impl NarReceiver {
                 let mut g = self.inner.lock();
                 g.streams.remove(&key);
                 g.waiters.remove(&key);
+                g.staging.remove(&key);
                 Err(anyhow::anyhow!(
                     "NarRequest for {} made no progress for {}s waiting for NarPush \
                      (job_id={})",
@@ -621,10 +625,12 @@ impl NarReceiver {
 
     fn open_stream(&self, mut spec: StreamSpec) -> mpsc::Sender<NarChunk> {
         let (tx, rx) = mpsc::channel(STAGE_QUEUE_DEPTH);
+        let staging = CancellationToken::new();
         {
             let mut g = self.inner.lock();
             spec.progress = g.waiters.get(&spec.key).map(|w| w.progress.clone());
             g.streams.insert(spec.key.clone(), tx.clone());
+            g.staging.insert(spec.key.clone(), staging.clone());
         }
 
         let stager = Stager {
@@ -632,6 +638,7 @@ impl NarReceiver {
             partial: self.partial.clone(),
         };
         self.stagers.spawn(async move {
+            let _staged = staging.drop_guard();
             match stager.open_sink(&spec, Resume::Staged).await {
                 Ok(sink) => stage_pull(stager, spec, sink, rx).await,
                 Err(e) => {
@@ -656,6 +663,7 @@ impl NarReceiver {
         };
         let mut g = self.inner.lock();
         g.streams.remove(&key);
+        g.staging.remove(&key);
         match g.waiters.remove(&key) {
             Some(waiter) => {
                 if waiter.tx.send(Err(failure)).is_err() {
@@ -672,6 +680,20 @@ impl NarReceiver {
         let mut g = self.inner.lock();
         g.streams.retain(|(j, _), _| j != job_id);
         g.waiters.retain(|(j, _), _| j != job_id);
+        g.staging.retain(|(j, _), _| j != job_id);
+    }
+
+    pub async fn interrupt(&self, job_id: &str, store_path: &str) {
+        let key = (job_id.to_owned(), store_path.to_owned());
+        let staging = {
+            let mut g = self.inner.lock();
+            g.streams.remove(&key);
+            g.waiters.remove(&key);
+            g.staging.remove(&key)
+        };
+        if let Some(staging) = staging {
+            staging.cancelled().await;
+        }
     }
 
     pub async fn absorb(&self, msg: ServerMessage) -> Option<ServerMessage> {
@@ -963,6 +985,31 @@ mod tests {
         assert!(
             task.await.unwrap().is_err(),
             "waiter should have been cancelled"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_pull_keeps_its_staged_bytes() {
+        let dir = TempDir::new().unwrap();
+        let r = NarReceiver::with_partial_store(PartialStore::new(dir.path()).unwrap());
+        let path = format!("/nix/store/{}-pkg", "c".repeat(32));
+        let pending = r.register("j", &path);
+
+        r.note_header("j", &path, 20, "t");
+        r.absorb(ServerMessage::NarPush {
+            job_id: "j".into(),
+            store_path: path.clone(),
+            data: Bytes::from_static(&[1; 10]),
+            offset: 0,
+            is_final: false,
+        })
+        .await;
+        r.interrupt("j", &path).await;
+
+        assert_eq!(r.resumable("j", &path).await, (10, Some("t".into())));
+        assert!(
+            r.await_pending(pending).await.is_err(),
+            "the interrupted waiter is released"
         );
     }
 
