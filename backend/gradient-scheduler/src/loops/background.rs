@@ -34,6 +34,8 @@ const ABANDONED_ASSIGNMENT_SWEEP_LIMIT: u64 = 10_000;
 
 const ABORT_CONFIRM_GRACE: Duration = Duration::from_secs(300);
 
+const UNRECLAIMED_JOB_SWEEP_PERIOD: Duration = Duration::from_secs(10);
+
 pub(crate) fn liveness_period(config: &RuntimeConfig) -> Option<Duration> {
     let timeout_secs = config.proto.worker_heartbeat_timeout_secs;
     (timeout_secs != 0)
@@ -162,8 +164,26 @@ pub(crate) async fn worker_liveness_pass(scheduler: &Scheduler) -> anyhow::Resul
         );
         scheduler.unregister_worker(&worker_id).await;
     }
-    scheduler.requeue_unreclaimed(Instant::now()).await;
     Ok(())
+}
+
+pub(crate) struct UnreclaimedJobSweep {
+    pub(crate) scheduler: Arc<Scheduler>,
+}
+
+impl Pass for UnreclaimedJobSweep {
+    const NAME: &'static str = "unreclaimed-job-sweep";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = super::METRICS_BUDGET;
+
+    fn period(&self) -> Duration {
+        UNRECLAIMED_JOB_SWEEP_PERIOD
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        self.scheduler.requeue_unreclaimed(Instant::now()).await;
+        Ok(())
+    }
 }
 
 pub(crate) struct InstanceMetrics {

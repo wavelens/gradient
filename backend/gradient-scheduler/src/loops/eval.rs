@@ -26,6 +26,7 @@ use tracing::{debug, error, warn};
 
 use crate::Scheduler;
 use crate::cluster::{Membership, Route};
+use crate::instance::EvalHistory;
 use crate::jobs::{PendingEvalJob, PendingJob};
 use gradient_wire::types::{FlakeJob, FlakeStep, RequiredPath};
 
@@ -106,76 +107,8 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
         };
         let single = matches!(members.as_slice(), [(0, _, Route::Single)]);
         let split_fetch = split_fetch && single;
-
-        let Some(commit) = maps.commits.get(&eval.commit) else {
-            error!(evaluation_id = %eval.id, "commit not found for evaluation");
+        let Some(pending) = assemble_eval_job(&eval, &maps, split_fetch, &eval_history) else {
             continue;
-        };
-
-        // An `input_update` evaluation's own commit is blank until the PR is pushed. The fetch is
-        // using the base recorded in the sidecar instead.
-        let sidecar = maps.sidecars.get(&eval.id);
-        let commit_sha = match sidecar {
-            Some(s) => s.base_commit.clone(),
-            None => vec_to_hex(&commit.hash),
-        };
-
-        let input_overrides = maps.overrides.get(&eval.id).cloned().unwrap_or_default();
-        let input_update = sidecar.map(|s| gradient_wire::types::InputUpdateSpec {
-            generator: s.generator.clone(),
-            discover_only: s.discover_only,
-            inputs: s
-                .target_inputs
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        });
-
-        let wildcards = eval
-            .wildcard
-            .parse::<Wildcard>()
-            .map(|w| w.patterns().to_vec())
-            .unwrap_or_else(|_| vec![eval.wildcard.clone()]);
-        let (flake_job, required_paths) = flake_job_for_eval_source(
-            &eval.repository,
-            commit_sha,
-            wildcards,
-            split_fetch,
-            input_overrides,
-            input_update,
-        );
-
-        let Some(task_id) = eval.task else {
-            error!(evaluation_id = %eval.id, "evaluation has no task");
-            continue;
-        };
-        let Some(project_id) = maps.projects.get(&task_id).copied() else {
-            error!(evaluation_id = %eval.id, %task_id, "could not determine project for evaluation");
-            continue;
-        };
-
-        let estimate = eval_history.for_job(task_id, &flake_job.steps);
-
-        let pending = PendingEvalJob {
-            evaluation_id: eval.id,
-            task_id: eval.task,
-            project_id,
-            commit_id: eval.commit,
-            repository: eval.repository.clone(),
-            job: flake_job,
-            required_paths,
-            queued_at: eval.updated_at,
-            ready_at: eval.updated_at,
-            rescore_count: 0,
-            prioritized: eval.prioritized,
-            build_request: maps.build_request_tasks.contains(&task_id),
-            estimate,
-            walk_mode: eval.walk_mode,
-            eval_index: 0,
         };
 
         for (eval_index, job_id, route) in members {
@@ -234,6 +167,103 @@ async fn membership_after_splits(
     }
 
     Ok(Membership::load(db, &ids, &[]).await?)
+}
+
+fn assemble_eval_job(
+    eval: &MEvaluation,
+    maps: &EvalAssignMaps,
+    split_fetch: bool,
+    eval_history: &EvalHistory,
+) -> Option<PendingEvalJob> {
+    let Some(commit) = maps.commits.get(&eval.commit) else {
+        error!(evaluation_id = %eval.id, "commit not found for evaluation");
+        return None;
+    };
+
+    // An `input_update` evaluation's own commit is blank until the PR is pushed. The fetch is
+    // using the base recorded in the sidecar instead.
+    let sidecar = maps.sidecars.get(&eval.id);
+    let commit_sha = match sidecar {
+        Some(s) => s.base_commit.clone(),
+        None => vec_to_hex(&commit.hash),
+    };
+
+    let input_overrides = maps.overrides.get(&eval.id).cloned().unwrap_or_default();
+    let input_update = sidecar.map(|s| gradient_wire::types::InputUpdateSpec {
+        generator: s.generator.clone(),
+        discover_only: s.discover_only,
+        inputs: s
+            .target_inputs
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    });
+
+    let wildcards = eval
+        .wildcard
+        .parse::<Wildcard>()
+        .map(|w| w.patterns().to_vec())
+        .unwrap_or_else(|_| vec![eval.wildcard.clone()]);
+    let (flake_job, required_paths) = flake_job_for_eval_source(
+        &eval.repository,
+        commit_sha,
+        wildcards,
+        split_fetch,
+        input_overrides,
+        input_update,
+    );
+
+    let Some(task_id) = eval.task else {
+        error!(evaluation_id = %eval.id, "evaluation has no task");
+        return None;
+    };
+    let Some(project_id) = maps.projects.get(&task_id).copied() else {
+        error!(evaluation_id = %eval.id, %task_id, "could not determine project for evaluation");
+        return None;
+    };
+
+    let estimate = eval_history.for_job(task_id, &flake_job.steps);
+
+    Some(PendingEvalJob {
+        evaluation_id: eval.id,
+        task_id: eval.task,
+        project_id,
+        commit_id: eval.commit,
+        repository: eval.repository.clone(),
+        job: flake_job,
+        required_paths,
+        queued_at: eval.updated_at,
+        ready_at: eval.updated_at,
+        rescore_count: 0,
+        prioritized: eval.prioritized,
+        build_request: maps.build_request_tasks.contains(&task_id),
+        estimate,
+        walk_mode: eval.walk_mode,
+        eval_index: 0,
+    })
+}
+
+pub(crate) async fn pending_eval_jobs(
+    scheduler: &Scheduler,
+    evaluations: Vec<MEvaluation>,
+) -> anyhow::Result<Vec<(String, PendingEvalJob)>> {
+    if evaluations.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let maps = EvalAssignMaps::load(&scheduler.db.worker_db, &evaluations).await?;
+    let eval_history = scheduler.scoring.eval_history.load();
+    Ok(evaluations
+        .iter()
+        .filter_map(|eval| {
+            let pending = assemble_eval_job(eval, &maps, false, &eval_history)?;
+            Some((crate::jobs::eval_job_key(eval.id, 0), pending))
+        })
+        .collect())
 }
 
 struct EvalAssignMaps {

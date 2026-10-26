@@ -26,7 +26,7 @@ mod eval;
 use background::{
     AbandonedDispatchSweep, BuildHistoryRefit, EvalCompletionWatchdog, GraphConsistency,
     GraphStuckReheal, InstanceMetrics, RamShortageSweep, StrandedBuildSweep, TransientRetryRequeue,
-    WorkerLiveness, WorkerSample,
+    UnreclaimedJobSweep, WorkerLiveness, WorkerSample,
 };
 use eval::EvalDispatch;
 
@@ -36,10 +36,12 @@ pub(crate) use background::{
     worker_liveness_pass, worker_sample_pass,
 };
 pub(crate) use build::BuildKick;
+pub(crate) use build::pending_build_jobs;
 #[cfg(test)]
 pub(crate) use build::{admit_startable_moves, build_assign_pass, resync_startable_set};
 #[cfg(test)]
 pub(crate) use eval::assign_queued_evals;
+pub(crate) use eval::pending_eval_jobs;
 pub(crate) use eval::project_id_for_eval;
 
 pub(crate) const ASSIGN_TICK_SECS: u64 = 5;
@@ -117,6 +119,9 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
             scheduler: Arc::clone(scheduler),
         }),
         ChildSpec::pass(AbandonedDispatchSweep {
+            scheduler: Arc::clone(scheduler),
+        }),
+        ChildSpec::pass(UnreclaimedJobSweep {
             scheduler: Arc::clone(scheduler),
         }),
     ];

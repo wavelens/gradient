@@ -21,6 +21,7 @@ pub mod jobs;
 pub mod log_substitution;
 pub mod loops;
 pub mod probe;
+pub mod reclaim;
 pub mod views;
 pub mod waiting_state;
 
@@ -42,6 +43,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use gradient_core::ServerState;
 use gradient_db::DbContext;
+use gradient_db::maintenance::recovery::KeptAssignment;
 use gradient_graph::Graph;
 use gradient_types::*;
 use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
@@ -79,6 +81,7 @@ pub struct Scheduler {
     pub(crate) input_waits: input_waits::InputWaits,
     pub(crate) workers: worker_memory::WorkerMemory,
     pub(crate) split_decisions: eval_split::create::SplitDecisions,
+    expected_reclaims: Arc<gradient_util::sync::Mutex<Vec<KeptAssignment>>>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -105,6 +108,7 @@ impl Scheduler {
             input_waits: input_waits::InputWaits::default(),
             workers: worker_memory::WorkerMemory::default(),
             split_decisions: Default::default(),
+            expected_reclaims: Arc::default(),
         }
     }
 
@@ -114,6 +118,10 @@ impl Scheduler {
     ) -> Result<ActorRef<SchedulerMsg>, SpawnErr> {
         let args = CoreArgs {
             policy: Arc::clone(&self.scoring.policy),
+            kept: std::mem::take(&mut *self.expected_reclaims.lock()),
+            reclaim_grace: std::time::Duration::from_secs(
+                self.db.config.proto.assignment_reclaim_grace_secs,
+            ),
         };
         let (actor, _) = match parent {
             Some(parent) => Actor::spawn_linked(None, CoreActor, args, parent).await?,

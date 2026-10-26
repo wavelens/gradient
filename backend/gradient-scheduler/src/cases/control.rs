@@ -182,14 +182,15 @@ impl SchedulerCase {
         }
     }
 
-    pub async fn startup_recovery(&self) {
+    pub async fn startup_recovery(&self) -> gradient_db::maintenance::recovery::RecoveryReport {
         let db = &self.scheduler.db.worker_db;
-        gradient_db::maintenance::recovery::recover_interrupted_work(db)
+        let report = gradient_db::maintenance::recovery::recover_interrupted_work(db)
             .await
             .expect("the startup recovery runs");
         gradient_db::evaluations::draining::resume_drained_evals(db)
             .await
             .expect("the draining evaluations return");
+        report
     }
 
     pub async fn plan_clusters(&self) {

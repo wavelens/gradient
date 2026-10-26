@@ -23,6 +23,7 @@ use crate::ReportedTimeline;
 use crate::actor::{Offer, SchedulerMsg};
 use crate::job_handlers::timeline::failed_job_outcome;
 use crate::jobs::{Assignment, PendingJob, Reattached, build_job_key};
+use crate::reclaim::Reclaimed;
 use crate::test_jobs;
 
 const BUILD_PREFIX: &str = "build:";
@@ -593,6 +594,33 @@ impl SchedulerCase {
             .await
             .expect("the scheduler core starts again");
         *lock(&self.core) = new;
+    }
+
+    pub async fn restart_server(&self) {
+        let old = lock(&self.core).clone();
+        old.stop_and_wait(None, None)
+            .await
+            .expect("the scheduler core stops");
+        lock(&self.connected_workers).clear();
+        let report = self.startup_recovery().await;
+        self.scheduler.expect_reclaims(report.kept);
+        let new = self
+            .scheduler
+            .spawn_core(None)
+            .await
+            .expect("the scheduler core starts again");
+        *lock(&self.core) = new;
+    }
+
+    pub async fn reclaim(&self, worker: &str, listed: &[DispatchedJobId]) -> Reclaimed {
+        let reclaimed = self
+            .scheduler
+            .reclaim_assignments(worker, listed.to_vec())
+            .await;
+        for job in &reclaimed.reattached {
+            self.remember(worker, &job.job_id, job.assignment_id, job.job.clone());
+        }
+        reclaimed
     }
 
     pub async fn reattach(&self, worker: &str, jobs: &[(&str, DispatchedJobId)]) {

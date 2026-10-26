@@ -851,19 +851,7 @@ async fn enqueue_startable_shared_builds(
     let membership =
         crate::cluster::Membership::load(&scheduler.db.worker_db, &[], &enqueued_ids).await?;
 
-    let waited_imports = scheduler.import_waits.waited_builds().await;
-    let maps = BuildAssignMaps::load(
-        &scheduler.db.worker_db,
-        &scheduler.db.config,
-        &new_shared_builds,
-        scheduler
-            .scoring
-            .policy
-            .uses_history()
-            .then_some(&*scheduler.scoring.build_history),
-        &waited_imports,
-    )
-    .await?;
+    let maps = assign_maps(scheduler, &new_shared_builds).await?;
 
     let mut enqueued = 0usize;
     for shared_build in new_shared_builds {
@@ -899,6 +887,45 @@ async fn enqueue_startable_shared_builds(
     );
 
     Ok(())
+}
+
+async fn assign_maps(
+    scheduler: &Scheduler,
+    shared_builds: &[MDerivationBuild],
+) -> anyhow::Result<BuildAssignMaps> {
+    let waited_imports = scheduler.import_waits.waited_builds().await;
+    BuildAssignMaps::load(
+        &scheduler.db.worker_db,
+        &scheduler.db.config,
+        shared_builds,
+        scheduler
+            .scoring
+            .policy
+            .uses_history()
+            .then_some(&*scheduler.scoring.build_history),
+        &waited_imports,
+    )
+    .await
+}
+
+pub(crate) async fn pending_build_jobs(
+    scheduler: &Scheduler,
+    shared_builds: Vec<MDerivationBuild>,
+) -> anyhow::Result<Vec<(String, PendingBuildJob)>> {
+    if shared_builds.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let maps = assign_maps(scheduler, &shared_builds).await?;
+    Ok(shared_builds
+        .iter()
+        .filter_map(
+            |shared_build| match maps.classify_assignment(shared_build) {
+                AssignOutcome::Assign(job_id, pending) => Some((job_id, *pending)),
+                AssignOutcome::Skip(_) => None,
+            },
+        )
+        .collect())
 }
 
 fn stamp_ready(

@@ -1520,6 +1520,45 @@ impl JobTracker {
             .collect()
     }
 
+    pub fn take_reclaimable(
+        &mut self,
+        worker_id: &str,
+        listed: &[DispatchedJobId],
+    ) -> (Vec<Reattached>, Vec<DispatchedJobId>) {
+        let mut reattached = Vec::new();
+        let mut unresolved = Vec::new();
+        for assignment_id in listed {
+            let key = self
+                .awaiting_reclaim
+                .iter()
+                .find(|(_, held)| {
+                    held.worker == worker_id
+                        && held.assignment_id == *assignment_id
+                        && held.job.is_some()
+                })
+                .map(|(key, _)| key.clone());
+            let job = key
+                .as_ref()
+                .and_then(|key| self.awaiting_reclaim.remove(key))
+                .and_then(|held| held.job);
+            match key.zip(job) {
+                Some((key, job)) => reattached.push(Reattached::single(key, *assignment_id, job)),
+                None => unresolved.push(*assignment_id),
+            }
+        }
+        (reattached, unresolved)
+    }
+
+    pub fn release_held(&mut self, worker_id: &str, job_id: &str) {
+        if self
+            .awaiting_reclaim
+            .get(job_id)
+            .is_some_and(|held| held.worker == worker_id)
+        {
+            self.awaiting_reclaim.remove(job_id);
+        }
+    }
+
     pub fn return_unreclaimed(&mut self, unreclaimed: &[(String, AwaitingReclaim)]) {
         for (job_id, held) in unreclaimed {
             if let Some(job) = &held.job

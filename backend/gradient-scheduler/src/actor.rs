@@ -21,8 +21,9 @@ use tracing::{debug, info};
 
 use crate::jobs::{
     AssignDecision, Assignment, AwaitingReclaim, BoardActiveJob, CandidateDetail, JobTracker,
-    PendingBuildJob, PendingJob, PendingJobInfo,
+    PendingBuildJob, PendingJob, PendingJobInfo, Reattached,
 };
+use gradient_db::maintenance::recovery::KeptAssignment;
 use gradient_pool::session_port::{SessionPort, SessionSignal};
 use gradient_pool::{WorkerCaps, WorkerInfo, WorkerPool};
 
@@ -103,6 +104,22 @@ pub enum SchedulerMsg {
     },
     TakeUnreclaimed {
         now: Instant,
+        reply: RpcReplyPort<Vec<(String, AwaitingReclaim)>>,
+    },
+    Reclaim {
+        worker: String,
+        listed: Vec<DispatchedJobId>,
+        reply: RpcReplyPort<(Vec<Reattached>, Vec<DispatchedJobId>)>,
+    },
+    RestoreReclaimed {
+        worker: String,
+        reattached: Vec<Reattached>,
+        dropped: Vec<String>,
+        reply: RpcReplyPort<()>,
+    },
+    TakeUnlisted {
+        worker: String,
+        listed: HashSet<DispatchedJobId>,
         reply: RpcReplyPort<Vec<(String, AwaitingReclaim)>>,
     },
     IsConnected {
@@ -371,6 +388,8 @@ pub enum SchedulerMsg {
 
 pub struct CoreArgs {
     pub policy: Arc<dyn ScoringPolicy>,
+    pub kept: Vec<KeptAssignment>,
+    pub reclaim_grace: Duration,
 }
 
 pub struct SchedulerCore {
@@ -453,6 +472,18 @@ impl SchedulerCore {
         crate::jobs::Disconnected {
             observed_peak_ram_mb,
             ..gone
+        }
+    }
+
+    fn restore(&mut self, worker: &str, reattached: Vec<Reattached>) {
+        for reattached in reattached {
+            self.occupy(
+                worker,
+                &reattached.job_id,
+                reattached.job.job_kind(),
+                reattached.job.ram_need_with(None, false),
+            );
+            self.tracker.restore_active(worker, reattached);
         }
     }
 
@@ -751,9 +782,23 @@ impl Actor for CoreActor {
         _myself: ActorRef<Self::Msg>,
         args: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
+        let mut tracker = JobTracker::new();
+        let deadline = Instant::now() + args.reclaim_grace;
+        for kept in args.kept {
+            tracker.await_reclaim(
+                AwaitingReclaim {
+                    worker: kept.worker_id,
+                    assignment_id: kept.assignment_id,
+                    job: None,
+                    deadline,
+                    observed_peak_ram_mb: None,
+                },
+                kept.job_key,
+            );
+        }
         Ok(SchedulerCore {
             pool: WorkerPool::new(),
-            tracker: JobTracker::new(),
+            tracker,
             offers: 0,
             policy: args.policy,
             idle: Default::default(),
@@ -777,15 +822,7 @@ impl Actor for CoreActor {
                     reg.authorized_peers,
                     reg.session,
                 );
-                for reattached in reg.active {
-                    core.occupy(
-                        &reg.worker,
-                        &reattached.job_id,
-                        reattached.job.job_kind(),
-                        reattached.job.ram_need_with(None, false),
-                    );
-                    core.tracker.restore_active(&reg.worker, reattached);
-                }
+                core.restore(&reg.worker, reg.active);
                 core.pool.set_reclaims_jobs(&reg.worker, reg.reclaims_jobs);
                 let unreclaimed = if reg.reclaims_jobs {
                     Vec::new()
@@ -805,6 +842,36 @@ impl Actor for CoreActor {
                 reply,
             } => {
                 let _ = reply.send(core.unregister(&worker, grace));
+            }
+            SchedulerMsg::Reclaim {
+                worker,
+                listed,
+                reply,
+            } => {
+                let (reattached, unresolved) = core.tracker.take_reclaimable(&worker, &listed);
+                core.restore(&worker, reattached.clone());
+                let _ = reply.send((reattached, unresolved));
+            }
+            SchedulerMsg::RestoreReclaimed {
+                worker,
+                reattached,
+                dropped,
+                reply,
+            } => {
+                for job_id in &dropped {
+                    core.tracker.release_held(&worker, job_id);
+                }
+                core.restore(&worker, reattached);
+                let _ = reply.send(());
+            }
+            SchedulerMsg::TakeUnlisted {
+                worker,
+                listed,
+                reply,
+            } => {
+                let unlisted = core.tracker.take_unlisted(&worker, &listed);
+                core.return_unreclaimed(&unlisted);
+                let _ = reply.send(unlisted);
             }
             SchedulerMsg::TakeUnreclaimed { now, reply } => {
                 let unreclaimed = core.tracker.take_unreclaimed(now);

@@ -401,30 +401,31 @@ pub async fn serve_web(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> st
     );
 
     match gradient_db::maintenance::recovery::recover_interrupted_work(&state.worker_db).await {
-        Ok(r)
+        Ok(r) => {
             if !r.kept.is_empty()
                 || r.attempts_aborted > 0
                 || r.builds_requeued > 0
                 || r.builds_unpromoted > 0
                 || r.evals_requeued > 0
                 || r.cluster_attempts_closed > 0
-                || r.connections_closed > 0 =>
-        {
-            tracing::warn!(
-                assignments_kept = r.kept.len(),
-                attempts_aborted = r.attempts_aborted,
-                builds_requeued = r.builds_requeued,
-                builds_unpromoted = r.builds_unpromoted,
-                evals_requeued = r.evals_requeued,
-                cluster_attempts_closed = r.cluster_attempts_closed,
-                clusters_requeued = r.clusters_requeued,
-                clusters_aborted = r.clusters_aborted,
-                clusters_failed = r.clusters_failed,
-                connections_closed = r.connections_closed,
-                "recovered interrupted work from previous process"
-            )
+                || r.connections_closed > 0
+            {
+                tracing::warn!(
+                    assignments_kept = r.kept.len(),
+                    attempts_aborted = r.attempts_aborted,
+                    builds_requeued = r.builds_requeued,
+                    builds_unpromoted = r.builds_unpromoted,
+                    evals_requeued = r.evals_requeued,
+                    cluster_attempts_closed = r.cluster_attempts_closed,
+                    clusters_requeued = r.clusters_requeued,
+                    clusters_aborted = r.clusters_aborted,
+                    clusters_failed = r.clusters_failed,
+                    connections_closed = r.connections_closed,
+                    "recovered interrupted work from previous process"
+                );
+            }
+            scheduler.expect_reclaims(r.kept);
         }
-        Ok(_) => {}
         Err(e) => tracing::error!(error = ?e, "failed to recover interrupted work"),
     }
 
