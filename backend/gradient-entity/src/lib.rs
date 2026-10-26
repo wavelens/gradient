@@ -53,6 +53,7 @@ pub mod entry_point;
 pub mod entry_point_dep_count;
 pub mod entry_point_message;
 pub mod eval_cache_store;
+pub mod eval_cost_report;
 pub mod eval_set_cost;
 pub mod eval_shard;
 pub mod eval_split;

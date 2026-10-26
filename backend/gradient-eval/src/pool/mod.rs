@@ -222,7 +222,7 @@ impl EvalPool {
         }
     }
 
-    pub fn remember_patterns(&self, wildcards: &[String]) {
+    fn remember_patterns(&self, wildcards: &[String]) {
         *lock(&self.patterns) = wildcards
             .iter()
             .filter(|w| !w.starts_with('!'))
@@ -234,16 +234,18 @@ impl EvalPool {
         &self,
         repository: String,
         shards: Vec<DiscoveryShard>,
-        excludes: &[String],
+        wildcards: &[String],
         overrides: &[(String, String)],
         dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
     ) -> Result<Discovery> {
-        let calls = discovery_calls(shards, excludes, self.workers.max());
+        self.remember_patterns(wildcards);
+        let excludes = excludes_of(wildcards);
+        let calls = discovery_calls(shards, &excludes, self.workers.max());
         self.run_calls(
             repository,
             calls,
-            excludes,
+            &excludes,
             overrides,
             dependencies,
             found,
@@ -423,7 +425,7 @@ impl EvalPool {
     }
 }
 
-pub fn excludes_of(wildcards: &[String]) -> Vec<String> {
+fn excludes_of(wildcards: &[String]) -> Vec<String> {
     wildcards
         .iter()
         .filter(|w| w.starts_with('!'))
@@ -507,6 +509,38 @@ mod tests {
         assert_eq!(discovery.deferred, vec![python_set()]);
         assert_eq!(lock(&found).len(), 1);
         assert_eq!(discovery.calls.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn list_given_charges_walk_time_to_the_job_pattern() {
+        let pool = pool(1);
+        pool.workers.push_for_test(replying_worker(
+            &listed(&["hydraJobs.perl.Moose"], vec![]),
+            "given-pattern",
+        ));
+        let given = DiscoveryShard {
+            pattern: "hydraJobs.perl.*".into(),
+            only: Some(vec!["Moose".into()]),
+        };
+
+        let discovery = pool
+            .list_given(
+                "repo".into(),
+                vec![given],
+                &["hydraJobs.**".into(), "!hydraJobs.perl.broken".into()],
+                &[],
+                &RefuseDependencies("the test"),
+                &|_| {},
+            )
+            .await
+            .expect("list");
+
+        let buckets: Vec<&str> = discovery
+            .calls
+            .iter()
+            .map(|call| call.entry_point.as_str())
+            .collect();
+        assert_eq!(buckets, vec!["hydraJobs.**"]);
     }
 
     #[tokio::test]

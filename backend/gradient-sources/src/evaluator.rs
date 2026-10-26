@@ -92,7 +92,7 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
         &self,
         _repository: String,
         _shards: Vec<ShardSpec>,
-        _excludes: &[String],
+        _wildcards: &[String],
         _overrides: &[(String, String)],
         _dependencies: &dyn EvalDependencies,
         _found: FoundDerivations<'_>,

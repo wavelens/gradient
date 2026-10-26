@@ -202,7 +202,7 @@ impl DerivationResolver for WorkerPoolResolver {
         &self,
         repository: String,
         shards: Vec<ShardSpec>,
-        excludes: &[String],
+        wildcards: &[String],
         overrides: &[(String, String)],
         dependencies: &dyn EvalDependencies,
         found: FoundDerivations<'_>,
@@ -222,7 +222,7 @@ impl DerivationResolver for WorkerPoolResolver {
             .list_given(
                 repository,
                 shards,
-                excludes,
+                wildcards,
                 overrides,
                 &SourceDependencies(dependencies),
                 &found_items,

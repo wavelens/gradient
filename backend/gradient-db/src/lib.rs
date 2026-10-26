@@ -32,6 +32,7 @@ pub mod entry_points;
 pub mod error;
 pub mod eval_cache;
 pub mod eval_costs;
+pub mod eval_reports;
 pub mod eval_shards;
 pub mod evaluations;
 pub mod exec_jobs;

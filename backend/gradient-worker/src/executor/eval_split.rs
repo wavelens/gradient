@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
-use gradient_eval::pool::excludes_of;
 use gradient_sources::ShardSpec;
 use gradient_wire::messages::{FlakeJob, FlakeOutputNode};
 use gradient_wire::traits::JobReporter;
@@ -271,7 +270,6 @@ impl ShardWork for PoolShardWork<'_> {
             &mut *self.updater,
             self.context.abort,
             vec![given],
-            excludes_of(&self.context.job.wildcards),
         )
         .await?;
         self.flake_nodes.extend(outcome.flake_nodes);

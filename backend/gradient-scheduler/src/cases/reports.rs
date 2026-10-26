@@ -1444,7 +1444,8 @@ async fn r20_eval_messages_are_stored_for_an_active_job_and_an_error_fails_the_v
 }
 
 #[tokio::test]
-async fn r21_eval_stats_write_the_metric_and_only_the_closing_completion_adds_span_totals() {
+async fn r21_eval_stats_fold_into_the_metric_when_the_evaluation_settles_and_only_the_closing_completion_adds_span_totals()
+ {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().evalq(e1)).await;
     let k = eval_key(e1);
@@ -1460,18 +1461,10 @@ async fn r21_eval_stats_write_the_metric_and_only_the_closing_completion_adds_sp
         ..Default::default()
     };
     case.report_eval_stats(W1, &k, stats).await;
-    let metric = case
-        .evaluation_metric(e1)
-        .await
-        .expect("after 1: evaluation_metric(E1)");
     assert_eq!(
-        (
-            metric.peak_rss_mb,
-            metric.fetch_ms,
-            metric.worker_id.as_str()
-        ),
-        (512, 0, W1),
-        "after 1: evaluation_metric(E1)"
+        case.evaluation_metric(e1).await,
+        None,
+        "after 1: evaluation_metric(E1) waits for the evaluation to settle"
     );
     case.check("step 1").await;
 
@@ -1492,8 +1485,9 @@ async fn r21_eval_stats_write_the_metric_and_only_the_closing_completion_adds_sp
             metric.eval_flake_ms,
             metric.eval_drv_ms,
             metric.total_eval_ms,
+            metric.worker_id.as_str(),
         ),
-        (512, 100, 100, 700, 900),
+        (512, 100, 100, 700, 900, W1),
         "after 2: evaluation_metric(E1)"
     );
     let phases: Vec<_> = case
