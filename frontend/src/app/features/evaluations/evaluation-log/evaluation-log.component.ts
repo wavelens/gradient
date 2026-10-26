@@ -106,7 +106,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const ev = this.evaluation();
     return ev ? phaseProgress(ev.status, this.liveProgress(), ev.progress) : null;
   });
-  thunkRow = computed(() => this.builds().length ? null : thunkProgress(this.progress(), this.evaluation()?.expected_thunks));
+  thunkRow = computed(() => thunkProgress(this.progress(), this.evaluation()?.expected_thunks));
   fetchRows = computed(() => {
     const p = this.progress();
     return p?.kind === 'fetching' ? p.inputs : [];
