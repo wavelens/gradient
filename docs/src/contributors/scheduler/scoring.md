@@ -161,7 +161,7 @@ Every `metrics.instanceIntervalSecs` (30 s), `instance_metrics_pass` can run and
 
 - Upload, download and disk throughput live in `gradient-worker-client/src/throughput.rs` as EWMAs with `alpha = 0.3`. They hold `None` until the first sample.
 - Upload and download speeds exclude batches under 1 MiB. Connection setup dominates their measured time.
-- Eval-cache blobs contribute to neither speed.
+- Both upload and download speeds ignore eval cache segments.
 - `cpu_core_score_mean`, `upload_speed_mean_mbps` and `download_speed_mean_mbps` average over connected workers with a measured value.
 - The wait for the server's upload grant has its own `UploadWait` span. The `NarPush` span can only begin at the first grant.
 - Substitutions measure the worker's own link, the same link a cache download uses. `EstimatedTimeRule` models the server side as the storage share.

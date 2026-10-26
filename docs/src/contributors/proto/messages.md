@@ -25,8 +25,8 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `NarPush` (bulk) | One NAR pull chunk of `nar.chunkBytes` zstd | `job_id`, `store_path`, `data`, `offset`, `is_final` |
 | `NarUnavailable` | Storage holds no object for the path. No chunks will follow | `job_id`, `store_path`, `reason` |
 | `NarAbort` | Pull failed before or during the stream on a storage error or timeout. Retryable | `job_id`, `store_path`, `reason` |
-| `EvalCachePullResult` | Reply to `EvalCachePull`: miss, presigned URL or inline stream | `job_id`, `outcome` |
-| `EvalCacheChunk` (bulk) | One inline evaluation cache chunk | `job_id`, `data`, `offset`, `is_final` |
+| `EvalCachePullResult` | Reply to `EvalCachePull`: `Miss` or `Segments`, see [Evaluation Cache Messages](#evaluation-cache-messages) | `job_id`, `outcome` |
+| `EvalCacheChunk` (bulk) | One chunk of an inline evaluation cache segment | `job_id`, `data`, `offset`, `is_final` |
 | `CacheStatus` | Reply to `CacheQuery` | `query_id`, `cached` |
 | `KnownDerivations` | Reply to `QueryKnownDerivations` | `query_id`, `known` |
 | `CacheError` | Cache state unknown. The worker will retry | `query_id`, `message` |
@@ -62,10 +62,10 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `EvalMessage` | Carries a warning or error from the evaluation | `job_id`, `level`, `source`, `message` |
 | `NarRequest` | Pulls the given paths | `job_id`, `paths` |
 | `NarRequestResume` | Resumes a pull from a byte offset | `job_id`, `store_path`, `received_bytes`, `stream_token` |
-| `EvalCachePull` | Requests the evaluation cache | `job_id`, `fingerprint` |
+| `EvalCachePull` | Requests the evaluation cache segments not applied yet | `job_id`, `fingerprint`, `applied` (since 38) |
 | `CacheQuery` | Performs a bulk cache lookup | `job_id`, `query_id`, `paths`, `mode`, `nar_sizes`, `external` |
 | `QueryKnownDerivations` | Asks which `.drv` files the server knows, to shorten the walk | `job_id`, `query_id`, `drv_paths` |
-| `UploadRequest` | Requests an upload slot for a NAR or the evaluation cache | `job_id`, `request_id`, `object`, `size` |
+| `UploadRequest` | Requests an upload slot for a NAR (`UploadObject::Nar`) or an evaluation cache segment (`UploadObject::EvalCacheSegment`, since 38) | `job_id`, `request_id`, `object`, `size` |
 | `UploadChunk` (bulk) | Streams upload bytes through the server | `request_id`, `data`, `offset`, `is_final` |
 | `UploadFinished` | Marks an upload done and carries NAR metadata | `request_id`, `metadata` |
 | `UploadCancel` | Cancels an upload in progress | `request_id` |
@@ -81,6 +81,20 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `Normal` | The paths that live in the caches. The response contains no URLs |
 | `Pull` | The held paths, each with a transfer URL. The worker streams a path without a URL via `NarRequest`. One named path can originate from an upstream cache marked `external` |
 | `Push` | The paths that still require an upload |
+
+## Evaluation Cache Messages
+
+| Field | Content |
+|---|---|
+| `EvalCachePull.applied` | Keys of the segments the worker already applied to its local file |
+| `Segments.keys` | Every segment key of the fingerprint across the readable caches of the project |
+| `Segments.fetch` | One `SegmentFetch` per key outside `applied`: a presigned URL or an inline size |
+| `Segments.stream_token` | Set only with at least one inline source |
+
+- Inline segments arrive as `EvalCacheChunk` streams after the result. They follow `fetch` order.
+- Inline segments start at offset 0 and end with exactly one `is_final` chunk each.
+- Workers can forget any applied key outside `Segments.keys`. A `Miss` can clear every applied key.
+- Peers below protocol 38 receive `Miss` for every pull. The server can return `Rejected` for their whole-blob upload (`UploadObject::EvalCache`).
 
 ## Evaluation Messages
 

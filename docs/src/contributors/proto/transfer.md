@@ -21,7 +21,7 @@ sequenceDiagram
 
 | Grant | When | Transfer |
 |---|---|---|
-| `Skip` | The path is already stored, or the server does not want the evaluation cache blob | Nothing |
+| `Skip` | The path is already stored, or the project has no writable cache for an evaluation cache segment | Nothing |
 | `Passthrough { resume_offset }` | Local NAR storage | `UploadChunk` frames of `worker.nar.chunkBytes` into `<baseDir>/nar-partial`, resuming after a break |
 | `Put { url }` | S3, NAR up to 1 GiB | One presigned PUT, valid 1 h |
 | `Multipart` | S3, NAR over 1 GiB | Presigned parts of at least 64 MiB |
@@ -45,7 +45,10 @@ sequenceDiagram
     - For a presigned upload, the commit completed the multipart transfer and checked the object size.
     - A full digest check happened only with `nar.verifyDigest` set.
 - **Leases:** A passthrough upload expired after `upload.leaseIdleSecs` (300 s) without progress. A failed job or closed session released its uploads.
-- **Evaluation cache blobs** use the same handshake with `UploadObject::EvalCache`.
+- **Evaluation cache segments** reuse the same handshake, with `UploadObject::EvalCacheSegment` and `UploadMetadata::EvalCache` as the payload types.
+    - A request over 8 MiB (`SEGMENT_MAX_BYTES`) got `Rejected`.
+    - Every grant carried a fresh object key `eval-cache-segments/<cache>/<fp>/<uuidv7>`. The commit wrote to that key.
+    - A commit can produce an `eval_cache_store` row. A delayed compaction for the cache in the key can follow, see [Shared Eval Cache](../eval-worker.md#shared-eval-cache).
 
 ## Download for a Build
 
