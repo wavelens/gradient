@@ -23,27 +23,6 @@ fn max_proto_message_size_is_sane() {
 }
 
 #[test]
-fn an_eval_cache_pull_from_proto_37_decodes_with_no_applied_keys() {
-    use crate::codec::{from_bytes, to_bytes};
-    use crate::messages::ClientMessage;
-
-    let pull = ClientMessage::EvalCachePull {
-        job_id: "j".into(),
-        fingerprint: "fp".into(),
-        applied: vec!["k".into()],
-    };
-    let decoded = from_bytes::<ClientMessage>(to_bytes(&pull, 37).unwrap(), 37).unwrap();
-    assert_eq!(
-        decoded,
-        ClientMessage::EvalCachePull {
-            job_id: "j".into(),
-            fingerprint: "fp".into(),
-            applied: Vec::new(),
-        }
-    );
-}
-
-#[test]
 fn split_evaluation_messages_round_trip_and_need_proto_40() {
     use crate::codec::{from_bytes, to_bytes};
     use crate::messages::{ClientMessage, ServerMessage};

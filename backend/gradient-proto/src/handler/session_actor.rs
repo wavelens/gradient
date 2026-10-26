@@ -958,7 +958,6 @@ pub(in crate::handler) mod tests {
 
         let log_chunks = (0..500).map(|_| ClientMessage::LogChunk {
             job_id: "j1".into(),
-            task_index: 0,
             data: Bytes::from_static(b"building\n"),
         });
         let query = ClientMessage::CacheQuery {

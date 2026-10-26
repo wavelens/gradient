@@ -54,7 +54,6 @@ pub enum ReportedEvent {
         substituted: bool,
     },
     LogChunk {
-        task_index: u32,
         data: Vec<u8>,
     },
     EvalMessage {
@@ -363,8 +362,8 @@ impl JobReporter for RecordingJobReporter {
         Ok(())
     }
 
-    async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()> {
-        self.record(ReportedEvent::LogChunk { task_index, data });
+    async fn send_log_chunk(&mut self, data: Vec<u8>) -> Result<()> {
+        self.record(ReportedEvent::LogChunk { data });
         Ok(())
     }
 

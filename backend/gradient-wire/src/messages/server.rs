@@ -20,7 +20,7 @@ pub struct FailedPeer {
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
-#[proto(oldest = 35)]
+#[proto(oldest = 41)]
 pub enum ServerMessage {
     AuthChallenge {
         peers: Vec<String>,

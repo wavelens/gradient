@@ -16,8 +16,6 @@ use tracing::warn;
 use super::socket::{BULK_CHUNK_SIZE, ProtoWriter, send_server_msg};
 use gradient_wire::messages::{PRESIGN_TTL, ServerMessage};
 
-pub(super) const EVAL_CACHE_SEGMENTS_SINCE: u16 = 38;
-
 pub(super) async fn handle_eval_cache_pull(
     nar_storage: &NarStore,
     writer: &ProtoWriter,
@@ -26,11 +24,7 @@ pub(super) async fn handle_eval_cache_pull(
     fingerprint: String,
     applied: Vec<String>,
 ) {
-    let (outcome, inline) = if writer.version() < EVAL_CACHE_SEGMENTS_SINCE {
-        (EvalCachePullOutcome::Miss, Vec::new())
-    } else {
-        segments_outcome(nar_storage, readable, &fingerprint, applied).await
-    };
+    let (outcome, inline) = segments_outcome(nar_storage, readable, &fingerprint, applied).await;
 
     if send_server_msg(
         writer,

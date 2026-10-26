@@ -14,7 +14,7 @@ use crate::types::{
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
-#[proto(oldest = 35)]
+#[proto(oldest = 41)]
 pub enum ClientMessage {
     InitConnection {
         capabilities: GradientCapabilities,
@@ -113,7 +113,6 @@ pub enum ClientMessage {
 
     LogChunk {
         job_id: String,
-        task_index: u32,
         data: Bytes,
     },
 

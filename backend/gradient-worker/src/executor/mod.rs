@@ -451,14 +451,13 @@ impl JobExecutor {
     async fn adopt_realised<'a>(
         &'a self,
         build_task: &BuildSpec,
-        task_index: u32,
         realised: Vec<(String, String)>,
         updater: &mut JobUpdater,
         gc_handles: &mut Vec<GcRootHandle>,
         outputs: &mut Vec<compress::OutputNar<'a>>,
     ) -> Result<()> {
         if self.log_fetch_from_store {
-            build::forward_store_build_log(updater, task_index, &build_task.drv_path).await;
+            build::forward_store_build_log(updater, &build_task.drv_path).await;
         }
         for (_, path) in &realised {
             gc_handles.push(self.gcroots.add(path).await);
@@ -491,7 +490,7 @@ impl JobExecutor {
     ) -> Result<()> {
         let mut outputs: Vec<compress::OutputNar<'_>> = Vec::new();
         let mut gc_handles: Vec<GcRootHandle> = Vec::new();
-        for (index, build_task) in job.builds.iter().enumerate() {
+        for build_task in &job.builds {
             abort.check()?;
             // The build must reach `Building` before anything that can fail. The server is only
             // accepting `Building -> Failed`. An earlier `JobFailed` would leave the build in
@@ -501,15 +500,8 @@ impl JobExecutor {
             let (realised, missing) =
                 split_already_realised(self.store.as_ref(), named_outputs(build_task)).await;
             if fully_realised(&realised, &missing) {
-                self.adopt_realised(
-                    build_task,
-                    clamp_to_u32(index),
-                    realised,
-                    updater,
-                    &mut gc_handles,
-                    &mut outputs,
-                )
-                .await?;
+                self.adopt_realised(build_task, realised, updater, &mut gc_handles, &mut outputs)
+                    .await?;
                 continue;
             }
 
@@ -629,7 +621,6 @@ impl JobExecutor {
             let built = build::build_derivation(
                 &self.store,
                 build_task,
-                clamp_to_u32(index),
                 updater,
                 &mut abort,
                 self.log_limits,

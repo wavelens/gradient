@@ -538,11 +538,10 @@ impl JobUpdater {
             .await
     }
 
-    pub async fn send_log_chunk(&self, task_index: u32, data: Vec<u8>) -> Result<()> {
+    pub async fn send_log_chunk(&self, data: Vec<u8>) -> Result<()> {
         self.writer
             .send(ClientMessage::LogChunk {
                 job_id: self.job_id.clone(),
-                task_index,
                 data: data.into(),
             })
             .await
@@ -719,11 +718,10 @@ impl JobReporter for JobUpdater {
         .await
     }
 
-    async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()> {
+    async fn send_log_chunk(&mut self, data: Vec<u8>) -> Result<()> {
         self.writer
             .send(ClientMessage::LogChunk {
                 job_id: self.job_id.clone(),
-                task_index,
                 data: data.into(),
             })
             .await

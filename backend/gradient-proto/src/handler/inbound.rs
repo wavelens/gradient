@@ -105,9 +105,9 @@ impl ActiveJobs {
         }
     }
 
-    pub(crate) fn build(&self, job_id: &str, task_index: u32) -> Option<DerivationBuildId> {
+    pub(crate) fn build(&self, job_id: &str) -> Option<DerivationBuildId> {
         match &self.0.lock().get(job_id)?.pending {
-            PendingJob::Build(j) => j.job.builds.get(task_index as usize)?.build_id.parse().ok(),
+            PendingJob::Build(j) => Some(j.derivation_build),
             PendingJob::Eval(_) => None,
         }
     }
@@ -542,12 +542,8 @@ impl<'a> InboundContext<'a> {
                     .await;
                 true
             }
-            ClientMessage::LogChunk {
-                job_id,
-                task_index,
-                data,
-            } => {
-                self.on_log_chunk(&job_id, task_index, &data).await;
+            ClientMessage::LogChunk { job_id, data } => {
+                self.on_log_chunk(&job_id, &data).await;
                 true
             }
         }
@@ -914,12 +910,12 @@ impl<'a> InboundContext<'a> {
         self.scheduler.mark_worker_draining(self.peer_id).await;
     }
 
-    async fn on_log_chunk(&mut self, job_id: &str, task_index: u32, data: &[u8]) {
-        trace!(peer_id = %self.peer_id, %job_id, task_index, bytes = data.len(), "LogChunk");
-        match self.active.build(job_id, task_index) {
+    async fn on_log_chunk(&mut self, job_id: &str, data: &[u8]) {
+        trace!(peer_id = %self.peer_id, %job_id, bytes = data.len(), "LogChunk");
+        match self.active.build(job_id) {
             Some(build) => self.logs.append(build, data.to_vec()).await,
             None => {
-                debug!(peer_id = %self.peer_id, %job_id, task_index, "log chunk dropped: not a build this session runs")
+                debug!(peer_id = %self.peer_id, %job_id, "log chunk dropped: not a build this session runs")
             }
         }
     }
@@ -1244,10 +1240,10 @@ pub(in crate::handler) mod fixture {
     use crate::handler::upload::{UploadSession, UploadTable};
     use bytes::Bytes;
     use gradient_core::ServerState;
-    use gradient_scheduler::jobs::PendingEvalJob;
+    use gradient_scheduler::jobs::{PendingBuildJob, PendingEvalJob};
     use gradient_storage::admission::Admitted;
-    use gradient_types::ids::{CommitId, EvaluationId};
-    use gradient_wire::types::{FlakeJob, FlakeSource, FlakeStep};
+    use gradient_types::ids::{CommitId, DerivationId, EvaluationId};
+    use gradient_wire::types::{BuildJob, BuildSpec, FlakeJob, FlakeSource, FlakeStep};
     use std::time::Duration;
     use tokio::sync::mpsc;
 
@@ -1270,6 +1266,52 @@ pub(in crate::handler) mod fixture {
 
         assert!(!active.contains("member"));
         assert!(active.contains("single"));
+    }
+
+    #[test]
+    fn active_jobs_name_the_build_of_build_jobs_only() {
+        let shared_build = DerivationBuildId::now_v7();
+        let job = |pending| ActiveJob {
+            assignment_id: DispatchedJobId::now_v7(),
+            pending,
+            cluster: None,
+        };
+        let active = ActiveJobs::from(HashMap::from([
+            ("build".to_owned(), job(pending_build(shared_build))),
+            ("eval".to_owned(), job(pending_eval())),
+        ]));
+
+        assert_eq!(active.build("build"), Some(shared_build));
+        assert_eq!(active.build("eval"), None);
+        assert_eq!(active.build("gone"), None);
+    }
+
+    pub(in crate::handler) fn pending_build(derivation_build: DerivationBuildId) -> PendingJob {
+        PendingJob::Build(PendingBuildJob {
+            derivation_build,
+            derivation: DerivationId::now_v7(),
+            evaluation_id: EvaluationId::now_v7(),
+            project_id: ProjectId::now_v7(),
+            job: BuildJob {
+                builds: vec![BuildSpec::default()],
+                requirement: Default::default(),
+            },
+            required_paths: vec![],
+            dependency_count: 0,
+            closure_size: None,
+            prefer_local_build: false,
+            is_fixed_output: false,
+            estimate: Default::default(),
+            history_key: None,
+            queued_at: gradient_types::now(),
+            ready_at: gradient_types::now(),
+            rescore_count: 0,
+            prioritized: false,
+            build_request: false,
+            ifd: false,
+            pname: None,
+            substitute: false,
+        })
     }
 
     pub(in crate::handler) fn pending_eval() -> PendingJob {

@@ -69,7 +69,6 @@ impl ParsedDerivation {
     pub(super) async fn realize(
         &self,
         store: &LocalNixStore,
-        task_index: u32,
         updater: &mut JobUpdater,
         drv_path: &str,
         max_silent_secs: Option<u64>,
@@ -125,7 +124,6 @@ impl ParsedDerivation {
                 match drain_build_logs_with_timeout(
                     logs.as_mut(),
                     updater_ref,
-                    task_index,
                     silent,
                     abort_ref,
                     log_limits,
@@ -167,7 +165,6 @@ impl ParsedDerivation {
         result: BuildResultInner,
         oom_kills: Option<u64>,
         updater: &mut JobUpdater,
-        task_index: u32,
         drv_path: &str,
         log_fetch_from_store: bool,
     ) -> Result<(Vec<BuildOutput>, bool), BuildError> {
@@ -193,7 +190,7 @@ impl ParsedDerivation {
                          protocol); recovering input-addressed/FOD paths from .drv"
                     );
                     if log_fetch_from_store {
-                        forward_store_build_log(updater, task_index, drv_path).await;
+                        forward_store_build_log(updater, drv_path).await;
                     }
                 }
                 let mut outputs = Vec::with_capacity(pairs.len());
@@ -292,14 +289,9 @@ pub(super) async fn load_products(store_path: &str) -> Vec<BuildProduct> {
     products
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "arg-heavy; refactor tracked in #503"
-)]
 pub async fn build_derivation(
     store: &LocalNixStore,
     task: &BuildSpec,
-    task_index: u32,
     updater: &mut JobUpdater,
     abort: &mut super::AbortSignal,
     log_limits: crate::executor::log_limit::LogRateLimits,
@@ -318,7 +310,6 @@ pub async fn build_derivation(
     let running = RUNNING_BUILDS.start(&updater.job_id, &task.drv_path);
     let realize = parsed.realize(
         store,
-        task_index,
         updater,
         &task.drv_path,
         task.max_silent_secs,
@@ -357,7 +348,6 @@ pub async fn build_derivation(
                     result.inner,
                     result.oom_kills,
                     updater,
-                    task_index,
                     &task.drv_path,
                     log_fetch_from_store,
                 )
@@ -379,18 +369,14 @@ pub async fn build_derivation(
     Ok(outputs)
 }
 
-pub(super) async fn forward_store_build_log(
-    updater: &mut JobUpdater,
-    task_index: u32,
-    drv_path: &str,
-) {
+pub(super) async fn forward_store_build_log(updater: &mut JobUpdater, drv_path: &str) {
     let log_dir = crate::nix::log::nix_log_dir();
     match crate::nix::log::read_store_build_log(&log_dir, drv_path) {
         Ok(Some(text)) if !text.is_empty() => {
             const SEND_CHUNK: usize = 256 * 1024;
             let bytes = text.into_bytes();
             for slice in bytes.chunks(SEND_CHUNK) {
-                if let Err(e) = updater.send_log_chunk(task_index, slice.to_vec()).await {
+                if let Err(e) = updater.send_log_chunk(slice.to_vec()).await {
                     warn!(error = %e, "failed to forward stored build log; continuing");
                     break;
                 }
@@ -456,7 +442,6 @@ async fn maybe_silent_timeout(silent: Option<std::time::Duration>) {
 async fn drain_build_logs_with_timeout<S>(
     mut logs: Pin<&mut S>,
     updater: &mut JobUpdater,
-    task_index: u32,
     silent: Option<std::time::Duration>,
     abort: &mut super::AbortSignal,
     log_limits: crate::executor::log_limit::LogRateLimits,
@@ -485,7 +470,6 @@ where
                 limit_hit = true;
                 let _ = updater
                     .send_log_chunk(
-                        task_index,
                         b"\x1b[0m[gradient: log truncated \xe2\x80\x94 rate limit exceeded]\n"
                             .to_vec(),
                     )
@@ -493,7 +477,7 @@ where
                 warn!("build log rate limit exceeded; truncating remaining output");
                 continue;
             }
-            match updater.send_log_chunk(task_index, line.into_bytes()).await {
+            match updater.send_log_chunk(line.into_bytes()).await {
                 Ok(()) => {
                     stats.forwarded_lines += 1;
                     stats.forwarded_bytes += len as u64;

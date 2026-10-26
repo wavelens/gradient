@@ -103,7 +103,7 @@ pub enum BuildSpecKind {
     Download,
 }
 
-#[derive(Proto, Debug, Clone, PartialEq)]
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
 pub struct BuildSpec {
     pub build_id: String,
     pub drv_path: String,
