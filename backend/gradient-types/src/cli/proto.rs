@@ -37,8 +37,9 @@ pub struct ProtoArgs {
     /// Seconds the server keeps the open assignments of a disconnected worker for the worker to
     /// report them in `RunningJobs`. After a server restart this covers the open assignments of
     /// every worker. Assignments nobody reports within this time are re-queued and count as a
-    /// lost worker. A worker with a `maxLifetime` gets at most its remaining lifetime. Set it to
-    /// `0` to re-queue at once.
+    /// lost worker. A worker that disconnected with a `maxLifetime` gets at most its remaining
+    /// lifetime. Assignments kept over a server restart get the full time. Set it to `0` to
+    /// re-queue at once.
     #[arg(default_value_t = ASSIGNMENT_RECLAIM_GRACE.as_secs())]
     pub assignment_reclaim_grace_secs: u64,
 

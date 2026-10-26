@@ -922,42 +922,18 @@ impl<'a> InboundContext<'a> {
     }
 
     async fn on_running_jobs(&mut self, assignments: Vec<RunningAssignment>) -> bool {
+        if self.dialed.is_some() {
+            debug!(peer_id = %self.peer_id, listed = assignments.len(), "RunningJobs of a dialed session ignored");
+            return true;
+        }
         let listed = parsed_assignment_ids(self.peer_id, &assignments);
-        let unknown = match self.dialed {
-            Some(_) => self.rows_of_dialed(&listed).await,
-            None => {
-                let reclaimed = self
-                    .scheduler
-                    .reclaim_assignments(self.peer_id, listed)
-                    .await;
-                info!(peer_id = %self.peer_id, reattached = reclaimed.reattached.len(), unknown = reclaimed.unknown.len(), "RunningJobs");
-                self.active.reattach(&reclaimed.reattached);
-                reclaimed.unknown
-            }
-        };
-        self.abort_unknown(unknown).await
-    }
-
-    async fn rows_of_dialed(
-        &self,
-        listed: &[DispatchedJobId],
-    ) -> Vec<(DispatchedJobId, Option<String>)> {
-        let rows = gradient_db::scheduling::assignment_record::assignment_rows(
-            &self.handles.db.worker_db,
-            listed,
-        )
-        .await
-        .unwrap_or_default();
-        listed
-            .iter()
-            .map(|id| {
-                let key = rows
-                    .iter()
-                    .find(|r| r.id == *id)
-                    .and_then(|r| r.job_id.clone());
-                (*id, key)
-            })
-            .collect()
+        let reclaimed = self
+            .scheduler
+            .reclaim_assignments(self.peer_id, listed)
+            .await;
+        info!(peer_id = %self.peer_id, reattached = reclaimed.reattached.len(), unknown = reclaimed.unknown.len(), "RunningJobs");
+        self.active.reattach(&reclaimed.reattached);
+        self.abort_unknown(reclaimed.unknown).await
     }
 
     async fn abort_unknown(&self, unknown: Vec<(DispatchedJobId, Option<String>)>) -> bool {

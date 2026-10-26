@@ -487,7 +487,7 @@
     "flag": "proto-assignment-reclaim-grace-secs",
     "env": "GRADIENT_PROTO_ASSIGNMENT_RECLAIM_GRACE_SECS",
     "type": "u64",
-    "description": "Seconds the server keeps the open assignments of a disconnected worker for the worker to\nreport them in `RunningJobs`. After a server restart this covers the open assignments of\nevery worker. Assignments nobody reports within this time are re-queued and count as a\nlost worker. A worker with a `maxLifetime` gets at most its remaining lifetime. Set it to\n`0` to re-queue at once.",
+    "description": "Seconds the server keeps the open assignments of a disconnected worker for the worker to\nreport them in `RunningJobs`. After a server restart this covers the open assignments of\nevery worker. Assignments nobody reports within this time are re-queued and count as a\nlost worker. A worker that disconnected with a `maxLifetime` gets at most its remaining\nlifetime. Assignments kept over a server restart get the full time. Set it to `0` to\nre-queue at once.",
     "default": "600",
     "values": []
   },

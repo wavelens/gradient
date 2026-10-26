@@ -146,7 +146,7 @@ Running builds and evaluations survive a lost connection and a server restart. Q
 | Worker | Sends the queued reports first. Replays each buffered log next to the job loop, from the offset already sent |
 | Worker | Sends `RequestJobList` plus one `RequestJob` per kind |
 | Server | Runs `recover_interrupted_work` before the first session. Assignments outside cluster attempts stay open. Their builds remain `Building` |
-| Server | Keeps the open assignments of a disconnected worker for `proto.assignmentReclaimGraceSecs` (600 s), capped by the worker's remaining `maxLifetime` |
+| Server | Keeps the open assignments of a disconnected worker for `proto.assignmentReclaimGraceSecs` (600 s). The grace of a worker lost by a running server ends with its remaining `maxLifetime` at the latest |
 | Server | Reattaches every listed assignment that is still open and belongs to this worker. Sends `AbortJob` for every other listed one |
 | Server | Re-queues at once every open assignment of the worker absent from `RunningJobs`, as a [lost worker](jobs.md#abort-and-lost-workers) |
 | Server | Drops every report whose `assignment_id` does not match the live dispatch of that job in the scheduler core |
