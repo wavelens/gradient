@@ -13,8 +13,8 @@ use gradient_types::ids::ProjectId;
 use gradient_types::{MappingError, StorePathMapper};
 use gradient_wire::messages::{BuildFailureKind, ClientMessage, ServerMessage};
 use gradient_wire::types::{
-    FlakeSource, ImportOutcome, InputOutcome, Job, JobCandidate, JobUpdateKind, Realisation,
-    UploadMetadata, UploadObject,
+    EvalShardOutcome, FlakeSource, ImportOutcome, InputOutcome, Job, JobCandidate, JobUpdateKind,
+    Realisation, UploadMetadata, UploadObject,
 };
 use serde_json::Value;
 
@@ -96,6 +96,7 @@ pub(super) fn inbound_message(
             object: UploadObject::Nar { store_path },
             ..
         } => paths.path(store_path)?,
+        ClientMessage::EvalSourceReady { store_path, .. } => paths.path(store_path)?,
         ClientMessage::InputRequest { request, .. } => paths.json_store_path(request)?,
         ClientMessage::InputFetched {
             outcome: InputOutcome::Fetched { response },
@@ -245,6 +246,14 @@ fn outbound_fields(
             outcome: ImportOutcome::Completed { realisations },
             ..
         } => outbound_realisations(realisations, paths)?,
+        ServerMessage::EvalShardReply {
+            outcome: EvalShardOutcome::Source { store_path, .. },
+            ..
+        } => paths.path(store_path)?,
+        ServerMessage::EvalShardReply {
+            outcome: EvalShardOutcome::Shard(shard),
+            ..
+        } => paths.paths(&mut shard.drv_paths)?,
         ServerMessage::FetchInput { request, .. } => paths.json_store_path(request)?,
         ServerMessage::InputResult {
             outcome: InputOutcome::Fetched { response },

@@ -25,10 +25,17 @@ pub struct AttrError {
 
 pub type FoundDerivations<'a> = &'a (dyn Fn(Vec<ResolvedDerivation>) + Send + Sync);
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ShardSpec {
+    pub pattern: String,
+    pub only: Option<Vec<String>>,
+}
+
 #[derive(Debug, Default)]
 pub struct FlakeDiscovery {
     pub warnings: Vec<String>,
     pub errors: Vec<AttrError>,
+    pub deferred: Vec<ShardSpec>,
 }
 
 #[async_trait]
@@ -69,6 +76,28 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
         dependencies: &dyn EvalDependencies,
         found: FoundDerivations<'_>,
     ) -> Result<FlakeDiscovery>;
+
+    async fn plan_shards(
+        &self,
+        _repository: String,
+        _wildcards: Vec<String>,
+        _overrides: &[(String, String)],
+        _dependencies: &dyn EvalDependencies,
+    ) -> Result<(Vec<ShardSpec>, Vec<AttrError>)> {
+        anyhow::bail!("this resolver cannot plan shards")
+    }
+
+    async fn list_given_shards(
+        &self,
+        _repository: String,
+        _shards: Vec<ShardSpec>,
+        _excludes: &[String],
+        _overrides: &[(String, String)],
+        _dependencies: &dyn EvalDependencies,
+        _found: FoundDerivations<'_>,
+    ) -> Result<FlakeDiscovery> {
+        anyhow::bail!("this resolver cannot list given shards")
+    }
 
     async fn release_evaluators(&self);
 

@@ -21,7 +21,7 @@ use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
 use gradient_eval::pool::MemoryGuard;
 use gradient_sources::{
-    AttrError, DerivationResolver, FlakeDiscovery, Resolved, ResolvedDerivation,
+    AttrError, DerivationResolver, FlakeDiscovery, Resolved, ResolvedDerivation, ShardSpec,
 };
 use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
@@ -255,14 +255,14 @@ pub async fn evaluate_derivations(
     Ok(())
 }
 
-fn eval_cache_path(evaluator: &WorkerEvaluator, fingerprint: &str) -> String {
+pub(super) fn eval_cache_path(evaluator: &WorkerEvaluator, fingerprint: &str) -> String {
     format!(
         "{}/eval-cache-v6/{fingerprint}.sqlite",
         evaluator.resolver.eval_cache_dir()
     )
 }
 
-async fn eval_cache_fingerprint(
+pub(super) async fn eval_cache_fingerprint(
     evaluator: &WorkerEvaluator,
     repo: String,
     overrides: &[(String, String)],
@@ -281,7 +281,7 @@ async fn eval_cache_fingerprint(
         })
 }
 
-fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
+pub(super) fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
     if let Some(path) = local_flake_path {
         return format!("path:{}", path);
     }
@@ -293,7 +293,10 @@ fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
     }
 }
 
-fn eval_input_overrides(job: &FlakeJob, local_flake_path: Option<&str>) -> Vec<(String, String)> {
+pub(super) fn eval_input_overrides(
+    job: &FlakeJob,
+    local_flake_path: Option<&str>,
+) -> Vec<(String, String)> {
     let declared: std::collections::BTreeSet<String> = local_flake_path
         .and_then(|p| std::fs::read(std::path::Path::new(p).join("flake.lock")).ok())
         .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
@@ -766,7 +769,10 @@ async fn produced_drvs(
     .map_err(|e| anyhow::anyhow!("resolving a dynamic derivation input failed: {e}"))
 }
 
-async fn report_failed_attrs(updater: &mut dyn JobReporter, failed: &[AttrError]) -> Result<()> {
+pub(super) async fn report_failed_attrs(
+    updater: &mut dyn JobReporter,
+    failed: &[AttrError],
+) -> Result<()> {
     for AttrError { attr, message } in failed {
         updater
             .send_eval_message(
@@ -815,7 +821,7 @@ fn flake_nodes_from_roots(roots: &[Root]) -> Vec<FlakeOutputNode> {
         .collect()
 }
 
-fn build_eval_stats_report(
+pub(super) fn build_eval_stats_report(
     totals: crate::worker_pool::eval_stats::EvalStatsTotals,
     flake_nodes: Vec<FlakeOutputNode>,
     total_eval_ms: u64,
@@ -868,6 +874,7 @@ pub async fn evaluate_derivations_with(
         local_flake_path,
         &*updater,
         abort,
+        Listing::Wildcards,
     )
     .await?;
     let listed = match streamed.listed {
@@ -886,6 +893,80 @@ pub async fn evaluate_derivations_with(
     finish_evaluation(updater, job, listed, streamed.found, streamed.rest).await
 }
 
+pub(super) enum Listing {
+    Wildcards,
+    Given {
+        shards: Vec<ShardSpec>,
+        excludes: Vec<String>,
+    },
+}
+
+pub(super) struct ShardOutcome {
+    pub(super) deferred: Vec<ShardSpec>,
+    pub(super) flake_nodes: Vec<FlakeOutputNode>,
+}
+
+pub(super) async fn plan_shards_with(
+    resolver: &dyn DerivationResolver,
+    drv_reader: &dyn DrvReader,
+    job: &FlakeJob,
+    local_flake_path: Option<&str>,
+    reporter: &dyn JobReporter,
+    abort: &super::AbortSignal,
+) -> Result<(Vec<ShardSpec>, Vec<AttrError>)> {
+    let imports = Imports::new(reporter, drv_reader, abort.clone());
+    let dependencies = EvalDependencySource::new(imports);
+    let overrides = eval_input_overrides(job, local_flake_path);
+    let planned = resolver.plan_shards(
+        build_flake_url(job, local_flake_path),
+        job.wildcards.clone(),
+        &overrides,
+        &dependencies,
+    );
+
+    unless_aborted(&mut abort.clone(), planned).await
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the same evaluation inputs as a whole evaluation, plus the shard"
+)]
+pub(super) async fn evaluate_shard_with(
+    resolver: &dyn DerivationResolver,
+    drv_reader: &dyn DrvReader,
+    job: &FlakeJob,
+    local_flake_path: Option<&str>,
+    updater: &mut dyn JobReporter,
+    abort: &super::AbortSignal,
+    shards: Vec<ShardSpec>,
+    excludes: Vec<String>,
+) -> Result<ShardOutcome> {
+    let listing = Listing::Given { shards, excludes };
+    let streamed = discover_and_walk(
+        resolver,
+        drv_reader,
+        job,
+        local_flake_path,
+        &*updater,
+        abort,
+        listing,
+    )
+    .await?;
+    let FlakeDiscovery {
+        warnings,
+        errors,
+        deferred,
+    } = streamed.listed?;
+    let mut failed = errors;
+    failed.extend(streamed.found.failed);
+    report_rest(updater, failed, warnings, Vec::new(), streamed.rest).await?;
+
+    Ok(ShardOutcome {
+        deferred,
+        flake_nodes: flake_nodes_from_roots(&streamed.found.roots),
+    })
+}
+
 struct Streamed {
     listed: Result<FlakeDiscovery>,
     found: FoundAttrs,
@@ -899,6 +980,7 @@ async fn discover_and_walk(
     local_flake_path: Option<&str>,
     reporter: &dyn JobReporter,
     abort: &super::AbortSignal,
+    listing: Listing,
 ) -> Result<Streamed> {
     let (found_tx, mut found_rx) = mpsc::unbounded_channel();
     let (flushes, published) = mpsc::channel(PUBLISH_BACKLOG);
@@ -911,6 +993,7 @@ async fn discover_and_walk(
             local_flake_path,
             abort.clone(),
             found_tx,
+            listing,
         )
         .await)
     };
@@ -935,6 +1018,7 @@ async fn discover(
     local_flake_path: Option<&str>,
     mut abort: super::AbortSignal,
     found: mpsc::UnboundedSender<ResolvedDerivation>,
+    listing: Listing,
 ) -> Result<FlakeDiscovery> {
     let repo = build_flake_url(job, local_flake_path);
     let eval_overrides = eval_input_overrides(job, local_flake_path);
@@ -946,20 +1030,31 @@ async fn discover(
             let _ = found.send(derivation);
         }
     };
-    let listed = unless_aborted(
-        &mut abort,
-        resolver.list_flake_derivations(
-            repo,
-            job.wildcards.clone(),
-            &eval_overrides,
-            &imports,
-            &send,
-        ),
-    )
-    .await;
+    let releases = matches!(listing, Listing::Wildcards);
+    let list = async {
+        match listing {
+            Listing::Wildcards => {
+                resolver
+                    .list_flake_derivations(
+                        repo,
+                        job.wildcards.clone(),
+                        &eval_overrides,
+                        &imports,
+                        &send,
+                    )
+                    .await
+            }
+            Listing::Given { shards, excludes } => {
+                resolver
+                    .list_given_shards(repo, shards, &excludes, &eval_overrides, &imports, &send)
+                    .await
+            }
+        }
+    };
+    let listed = unless_aborted(&mut abort, list).await;
     drop(send);
 
-    if listed.is_ok() {
+    if releases && listed.is_ok() {
         resolver.release_evaluators().await;
     }
     listed
@@ -973,17 +1068,11 @@ async fn finish_evaluation(
     rest: Flush,
 ) -> Result<EvalOutcome> {
     let FlakeDiscovery {
-        mut warnings,
+        warnings,
         errors: mut failed,
+        ..
     } = listed;
     failed.extend(found.failed);
-    if let Some(corrupt) = failed.iter().find_map(|e| corrupt_eval_cache(&e.message)) {
-        warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt; failing for self-heal");
-        return Err(anyhow::Error::new(corrupt));
-    }
-
-    report_failed_attrs(updater, &failed).await?;
-
     let errors = if found.attrs == 0 {
         warn!("no derivations found for evaluation");
         unmatched_target_errors(&job.wildcards)
@@ -993,19 +1082,35 @@ async fn finish_evaluation(
         }
         Vec::new()
     };
-    warnings.sort_unstable();
-    warnings.dedup();
-
-    if !rest.paths.is_empty() {
-        updater.push_paths(&rest.paths).await?;
-    }
-    updater
-        .report_eval_result(rest.derivations, warnings, errors)
-        .await?;
+    report_rest(updater, failed, warnings, errors, rest).await?;
 
     Ok(EvalOutcome {
         flake_nodes: flake_nodes_from_roots(&found.roots),
     })
+}
+
+async fn report_rest(
+    updater: &mut dyn JobReporter,
+    failed: Vec<AttrError>,
+    mut warnings: Vec<String>,
+    errors: Vec<String>,
+    rest: Flush,
+) -> Result<()> {
+    if let Some(corrupt) = failed.iter().find_map(|e| corrupt_eval_cache(&e.message)) {
+        warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt; failing for self-heal");
+        return Err(anyhow::Error::new(corrupt));
+    }
+
+    report_failed_attrs(updater, &failed).await?;
+    warnings.sort_unstable();
+    warnings.dedup();
+    if !rest.paths.is_empty() {
+        updater.push_paths(&rest.paths).await?;
+    }
+
+    updater
+        .report_eval_result(rest.derivations, warnings, errors)
+        .await
 }
 
 #[cfg(test)]

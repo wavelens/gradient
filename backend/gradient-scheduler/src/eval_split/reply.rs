@@ -9,6 +9,7 @@ use std::collections::{BTreeSet, HashMap};
 use anyhow::Result;
 use gradient_db::eval_shards::{self, NewShard};
 use gradient_entity::cluster_member::{Column as CClusterMember, Entity as EClusterMember};
+use gradient_entity::eval_shard::Model as MEvalShard;
 use gradient_entity::eval_split::{
     Column as CEvalSplit, Entity as EEvalSplit, Model as MEvalSplit,
 };
@@ -178,12 +179,7 @@ impl Scheduler {
         };
 
         let outcome = match eval_shards::take_shard(&txn, evaluation, job_id).await? {
-            Some(shard) => EvalShardOutcome::Shard(EvalShard {
-                id: shard.id.to_string(),
-                pattern: shard.pattern,
-                children: shard.children,
-                drv_paths: Vec::new(),
-            }),
+            Some(shard) => EvalShardOutcome::Shard(given_shard(&txn, shard).await?),
             None if eval_shards::has_open_shards(&txn, evaluation).await? => wait(),
             None => EvalShardOutcome::Finished,
         };
@@ -192,6 +188,27 @@ impl Scheduler {
 
         Ok(outcome)
     }
+}
+
+async fn given_shard(txn: &DatabaseTransaction, shard: MEvalShard) -> Result<EvalShard> {
+    let drv_paths = if shard.attempts > 0 {
+        eval_shards::shard_drv_paths(
+            txn,
+            shard.evaluation,
+            &shard.pattern,
+            shard.children.as_deref(),
+        )
+        .await?
+    } else {
+        Vec::new()
+    };
+
+    Ok(EvalShard {
+        id: shard.id.to_string(),
+        pattern: shard.pattern,
+        children: shard.children,
+        drv_paths,
+    })
 }
 
 fn wait() -> EvalShardOutcome {

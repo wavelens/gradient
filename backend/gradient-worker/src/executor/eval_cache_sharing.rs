@@ -124,6 +124,10 @@ impl EvalCacheSharing {
         Self { file, sink }
     }
 
+    pub(super) async fn pull(&self, updater: &JobUpdater, fingerprint: &str) {
+        pull_segments(&self.file, updater, fingerprint).await;
+    }
+
     pub(super) async fn beside_flusher<T>(
         &mut self,
         interval: Duration,

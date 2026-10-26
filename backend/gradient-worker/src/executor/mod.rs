@@ -13,6 +13,7 @@ mod download;
 pub mod eval;
 mod eval_cache_sharing;
 pub mod eval_cache_sync;
+pub mod eval_split;
 pub(crate) mod failure;
 pub mod fetch;
 pub(crate) mod input_fetch;
@@ -313,7 +314,14 @@ impl JobExecutor {
         updater: &mut JobUpdater,
         credentials: &CredentialStore,
         abort: AbortSignal,
+        split: Option<eval_split::SplitMember>,
     ) -> Result<()> {
+        if let Some(member) = split {
+            return self
+                .execute_split_member(member, &job, updater, credentials, &abort)
+                .await;
+        }
+
         let fetches = job
             .steps
             .iter()
@@ -344,6 +352,42 @@ impl JobExecutor {
 
         let sink = gradient_wire::traits::JobReporter::eval_progress_sink(&*updater);
         progress_report::resend_during(&*sink, fetched.progress, push).await
+    }
+
+    async fn execute_split_member(
+        &self,
+        member: eval_split::SplitMember,
+        job: &FlakeJob,
+        updater: &mut JobUpdater,
+        credentials: &CredentialStore,
+        abort: &AbortSignal,
+    ) -> Result<()> {
+        let context = eval_split::SplitContext {
+            evaluator: &self.evaluator,
+            store: &self.store,
+            job,
+            abort,
+        };
+        if member == eval_split::SplitMember::Companion {
+            return eval_split::run_companion(context, updater).await;
+        }
+
+        let fetched = self.fetch_flake(job, updater, credentials, abort).await?;
+        updater
+            .report_fetch_result(Some(fetched.source_path.clone()))
+            .await?;
+        {
+            let _g = updater.phase(JobPhase::EvalFlake);
+            eval::evaluate_flake(job, updater).await?;
+        }
+
+        let push = push_inputs(
+            updater.concurrent(),
+            Arc::clone(&self.store),
+            fetched.input_paths,
+        );
+        let _g = updater.phase(JobPhase::EvalDerivations);
+        eval_split::run_primary(context, &fetched.source_path, push, updater).await
     }
 
     async fn evaluate_steps(

@@ -7,11 +7,11 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use gradient_derivation::{Derivation, parse_drv};
-use gradient_eval::ipc::ResolvedItem;
+use gradient_eval::ipc::{DiscoveryShard, ResolvedItem};
 use gradient_eval::pool::{CallStats, EvalPool, EvalPoolConfig, LiveThunks, MemoryGuard};
 use gradient_sources::{
     AttrError, DerivationResolver, EvalDependencies, FlakeDiscovery, FoundDerivations, Resolved,
-    ResolvedDerivation,
+    ResolvedDerivation, ShardSpec,
 };
 use gradient_util::store_path::nix_store_path;
 use gradient_util::sync::Mutex;
@@ -57,6 +57,13 @@ fn wire_license(license: gradient_eval::ipc::License) -> License {
     match license {
         gradient_eval::ipc::License::Spdx { id } => License::Spdx { id },
         gradient_eval::ipc::License::Name { name } => License::Name { name },
+    }
+}
+
+fn shard_spec(shard: DiscoveryShard) -> ShardSpec {
+    ShardSpec {
+        pattern: shard.pattern,
+        only: shard.only,
     }
 }
 
@@ -157,6 +164,68 @@ impl DerivationResolver for WorkerPoolResolver {
         Ok(FlakeDiscovery {
             warnings: discovery.warnings,
             errors: discovery.errors.into_iter().map(attr_error).collect(),
+            ..Default::default()
+        })
+    }
+
+    async fn plan_shards(
+        &self,
+        repository: String,
+        wildcards: Vec<String>,
+        overrides: &[(String, String)],
+        dependencies: &dyn EvalDependencies,
+    ) -> Result<(Vec<ShardSpec>, Vec<AttrError>)> {
+        let (shards, errors) = self
+            .pool
+            .plan(
+                repository,
+                wildcards,
+                overrides,
+                &SourceDependencies(dependencies),
+            )
+            .await?;
+
+        Ok((
+            shards.into_iter().map(shard_spec).collect(),
+            errors.into_iter().map(attr_error).collect(),
+        ))
+    }
+
+    async fn list_given_shards(
+        &self,
+        repository: String,
+        shards: Vec<ShardSpec>,
+        excludes: &[String],
+        overrides: &[(String, String)],
+        dependencies: &dyn EvalDependencies,
+        found: FoundDerivations<'_>,
+    ) -> Result<FlakeDiscovery> {
+        let found_items = |items: Vec<ResolvedItem>| {
+            found(items.into_iter().map(item_to_resolved).collect());
+        };
+        let shards = shards
+            .into_iter()
+            .map(|shard| DiscoveryShard {
+                pattern: shard.pattern,
+                only: shard.only,
+            })
+            .collect();
+        let discovery = self
+            .pool
+            .list_given(
+                repository,
+                shards,
+                excludes,
+                overrides,
+                &SourceDependencies(dependencies),
+                &found_items,
+            )
+            .await?;
+        self.observe(discovery.calls);
+        Ok(FlakeDiscovery {
+            warnings: discovery.warnings,
+            errors: discovery.errors.into_iter().map(attr_error).collect(),
+            deferred: discovery.deferred.into_iter().map(shard_spec).collect(),
         })
     }
 

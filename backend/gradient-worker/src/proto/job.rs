@@ -23,14 +23,16 @@ use crate::count::clamp_to_u32;
 use crate::executor::timeline::{JobTimeline, PhaseGuard};
 use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::{EvalCacheReceiver, PendingPull};
+use crate::proto::eval_shard_replies::EvalShardReplies;
 use crate::proto::prefetch::MissingInputs;
 use crate::proto::progress::{
     BuildProgressSink, EvalProgressSender, Progress, Tally, count_delivery,
 };
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter};
 use gradient_wire::types::{
-    BuildProgressPhase, BuildStage, GrantTarget, ImportOutcome, InputOutcome, Realisation,
-    SegmentFetch, SegmentSource, UploadMetadata, UploadObject,
+    BuildProgressPhase, BuildStage, EvalShardOutcome, EvalShardSpec, FinishedShard, GrantTarget,
+    ImportOutcome, InputOutcome, Realisation, SegmentFetch, SegmentSource, UploadMetadata,
+    UploadObject,
 };
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
@@ -46,6 +48,7 @@ pub struct JobUpdater {
     pub(crate) input_waiters: InputWaiters,
     pub(crate) nar_recv: NarReceiver,
     pub(crate) eval_cache_recv: EvalCacheReceiver,
+    pub(crate) eval_shard_replies: EvalShardReplies,
     pub(crate) store: Option<Arc<LocalNixStore>>,
     pub(crate) timeline: Arc<JobTimeline>,
     pub(crate) uploads: UploadClient,
@@ -170,6 +173,7 @@ impl JobUpdater {
         input_waiters: InputWaiters,
         nar_recv: NarReceiver,
         eval_cache_recv: EvalCacheReceiver,
+        eval_shard_replies: EvalShardReplies,
         store: Option<Arc<LocalNixStore>>,
         timeline: Arc<JobTimeline>,
         uploads: UploadClient,
@@ -184,6 +188,7 @@ impl JobUpdater {
             input_waiters,
             nar_recv,
             eval_cache_recv,
+            eval_shard_replies,
             store,
             timeline,
             uploads,
@@ -205,6 +210,7 @@ impl JobUpdater {
             input_waiters: Arc::clone(&self.input_waiters),
             nar_recv: self.nar_recv.clone(),
             eval_cache_recv: self.eval_cache_recv.clone(),
+            eval_shard_replies: self.eval_shard_replies.clone(),
             store: self.store.clone(),
             timeline: self.timeline.concurrent(),
             uploads: self.uploads.clone(),
@@ -256,6 +262,46 @@ impl JobUpdater {
             }
         }
         Ok(())
+    }
+
+    pub async fn announce_eval_source(
+        &self,
+        store_path: String,
+        fingerprint: String,
+    ) -> Result<()> {
+        self.writer
+            .send(ClientMessage::EvalSourceReady {
+                job_id: self.job_id.clone(),
+                store_path,
+                fingerprint,
+            })
+            .await
+    }
+
+    pub async fn announce_eval_shards(&self, shards: Vec<EvalShardSpec>) -> Result<()> {
+        self.writer
+            .send(ClientMessage::EvalShardsPlanned {
+                job_id: self.job_id.clone(),
+                shards,
+            })
+            .await
+    }
+
+    pub async fn request_eval_shard(
+        &self,
+        have_source: bool,
+        finished: Option<FinishedShard>,
+    ) -> Result<EvalShardOutcome> {
+        let replied = self.eval_shard_replies.register(&self.job_id);
+        self.writer
+            .send(ClientMessage::EvalShardRequest {
+                job_id: self.job_id.clone(),
+                have_source,
+                finished,
+            })
+            .await?;
+
+        self.eval_shard_replies.wait(&self.job_id, replied).await
     }
 
     async fn send_eval_cache(
@@ -754,6 +800,7 @@ mod tests {
             input_waiters,
             nar_recv,
             eval_cache_recv,
+            Default::default(),
             None,
             JobTimeline::new(),
             UploadClient::new(writer_for_uploads, 8),
