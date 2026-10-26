@@ -118,7 +118,7 @@ impl Scheduler {
     ) -> Result<ActorRef<SchedulerMsg>, SpawnErr> {
         let args = CoreArgs {
             policy: Arc::clone(&self.scoring.policy),
-            kept: std::mem::take(&mut *self.expected_reclaims.lock()),
+            kept: self.held_for_new_core().await,
             reclaim_grace: std::time::Duration::from_secs(
                 self.db.config.proto.assignment_reclaim_grace_secs,
             ),

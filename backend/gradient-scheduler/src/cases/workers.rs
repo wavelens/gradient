@@ -1855,6 +1855,31 @@ async fn w37_the_grace_end_keeps_a_row_another_instance_opened_since() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn w38_a_restarted_core_still_requeues_a_held_build_after_the_grace() {
+    let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
+    case.connect_reclaiming(W1, w_all(), &[]).await;
+    let (a, a1) = building_on_w1(&case).await;
+    case.disconnect(W1).await;
+
+    case.respawn_core().await;
+    case.requeue_unreclaimed_after(Duration::from_secs(600))
+        .await;
+    assert_eq!(
+        closes(&case.assignments(&a).await),
+        vec![(a1, Some(DispatchedJobOutcome::Abandoned))],
+        "after 2: dj(build:A)"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 2: sb(A).status"
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
 fn reattached_keys(reclaimed: &Reclaimed) -> Vec<(String, DispatchedJobId)> {
     reclaimed
         .reattached

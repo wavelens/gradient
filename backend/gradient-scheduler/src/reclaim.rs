@@ -9,7 +9,8 @@ use std::collections::{HashMap, HashSet};
 use gradient_db::lookup::by_ids;
 use gradient_db::maintenance::recovery::KeptAssignment;
 use gradient_db::scheduling::assignment_record::{
-    abandon_open_assignments, assignment_rows, eval_of_key, open_single_assignments_of_worker,
+    abandon_open_assignments, assignment_rows, eval_of_key,
+    open_single_assignments_of_disconnected_workers, open_single_assignments_of_worker,
     shared_build_of_key,
 };
 use gradient_entity::dispatched_job::Model as MDispatchedJob;
@@ -43,6 +44,32 @@ struct SettledRows {
 impl Scheduler {
     pub fn expect_reclaims(&self, kept: Vec<KeptAssignment>) {
         self.expected_reclaims.lock().extend(kept);
+    }
+
+    pub(crate) async fn held_for_new_core(&self) -> Vec<KeptAssignment> {
+        let mut kept = std::mem::take(&mut *self.expected_reclaims.lock());
+        let respawn = self.core.borrow().is_some();
+        if !respawn {
+            return kept;
+        }
+        let rows = match open_single_assignments_of_disconnected_workers(&self.db.worker_db).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(error = %e, "reading the held rows for the new scheduler core failed");
+                return kept;
+            }
+        };
+        let known: HashSet<DispatchedJobId> = kept.iter().map(|k| k.assignment_id).collect();
+        kept.extend(
+            rows.into_iter()
+                .filter(|(id, _, _)| !known.contains(id))
+                .map(|(assignment_id, job_key, worker_id)| KeptAssignment {
+                    assignment_id,
+                    worker_id,
+                    job_key,
+                }),
+        );
+        kept
     }
 
     pub async fn reclaim_assignments(
