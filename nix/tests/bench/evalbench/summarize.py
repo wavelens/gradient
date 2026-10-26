@@ -180,20 +180,22 @@ def summarize(out_dir, runs):
     return summaries
 
 
-def publish(out_dir, report):
+def publish(out_dir, report=None, name="evalbench"):
     out_dir = pathlib.Path(out_dir).resolve()
-    report = pathlib.Path(report).resolve()
-    bundle = out_dir / "evalbench.tar.gz"
+    report = pathlib.Path(report).resolve() if report else None
+    bundle = out_dir / f"{name}.tar.gz"
+    skipped = {"nix-support", bundle.name, report.parent.name if report else None}
     with tarfile.open(bundle, "w:gz") as tar:
         for entry in sorted(out_dir.iterdir()):
-            if entry.name not in ("nix-support", bundle.name, report.parent.name):
-                tar.add(entry, arcname=f"evalbench/{entry.name}")
+            if entry.name not in skipped:
+                tar.add(entry, arcname=f"{name}/{entry.name}")
 
     products = out_dir / "nix-support"
     products.mkdir(exist_ok=True)
+    html = f"file html {report}\n" if report else ""
     (products / "hydra-build-products").write_text(
         f"file tarball {bundle}\n"
         f"file text {out_dir / 'summary.txt'}\n"
         f"file json {out_dir / 'summary.json'}\n"
-        f"file html {report}\n"
+        + html
     )

@@ -131,7 +131,12 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
     import os
     import pathlib
     import re
+    import sys
     import time
+
+    sys.path[:0] = ["${./.}", "${../evalbench}"]
+    import report  # type: ignore[import-not-found]
+    from summarize import publish  # type: ignore[import-not-found]
 
     GIT          = "${lib.getExe pkgs.git}"
     API          = "http://gradient.local/api/v1"
