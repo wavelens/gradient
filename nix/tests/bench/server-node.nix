@@ -1,0 +1,143 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+{ self, pkgs, topo, token, flakeFiles, tasks }: let
+  nixpkgsTarball = import ../harness/nixpkgs-tarball.nix { inherit pkgs; inherit (self.inputs) nixpkgs; };
+in
+{ pkgs, lib, ... }: {
+  imports = [ ../../modules/gradient.nix ./capture-module.nix ];
+
+  nix.settings.substituters = lib.mkForce [ ];
+  networking.hosts."127.0.0.1" = [ "gradient.local" ];
+
+  environment = {
+    variables.TEST_PKGS = [ self.inputs.nixpkgs ];
+    etc = {
+      "gradient/secrets/admin_password" = {
+        mode = "0600";
+        user = "gradient";
+        group = "gradient";
+        text = "$argon2id$v=19$m=4096,t=3,p=1$c29tZXNhbHQxMjM0NQ$hIKBEy9SOWlnAlcwUv2PLPBdsMkKhVlCyjTxaWIK+v4";
+      };
+
+      "gradient/secrets/main_cache_key" = {
+        mode = "0600";
+        user = "gradient";
+        group = "gradient";
+        text = "22yRW7p/hxuPRWJh9pcfGH0oXPk2MFUuG0wIA1rfq1BvDbvMqzMZS+er/BE8ucbxNSG5KZ8B0ELO4TJal8mZlw==";
+      };
+
+      "gradient/secrets/project_ssh_key" = {
+        mode = "0600";
+        user = "gradient";
+        group = "gradient";
+        text = ''
+        -----BEGIN OPENSSH PRIVATE KEY-----
+        b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+        QyNTUxOQAAACDle/PUDDuuI9h8+ViFyHMQjqARSRhLJcYKnay7MrflOgAAAJALQNCyC0DQ
+        sgAAAAtzc2gtZWQyNTUxOQAAACDle/PUDDuuI9h8+ViFyHMQjqARSRhLJcYKnay7MrflOg
+        AAAEAROowXB/e8+691yZgfHOASTPVyIM2Hx7U9RpmAtUda++V789QMO64j2Hz5WIXIcxCO
+        oBFJGEslxgqdrLsyt+U6AAAABm5vbmFtZQECAwQFBgc=
+        -----END OPENSSH PRIVATE KEY-----
+        '';
+      };
+
+      "gradient/secrets/worker_token" = {
+        mode = "0600";
+        user = "gradient";
+        group = "gradient";
+        text = token;
+      };
+
+      "gitconfig".text = ''
+        [safe]
+          directory = *
+      '';
+    };
+  };
+
+  services = {
+    gradient = {
+      enable = true;
+      reverseProxy.nginx.enable = true;
+      postgres.enable = true;
+      postgres.sharedBuffers = "128MB";
+      database.url = "postgresql://gradient@127.0.0.1/gradient";
+      domain = "gradient.local";
+      proto.public = true;
+      secrets.jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4");
+      secrets.cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
+      log.traceDir = "/var/lib/gradient/trace";
+      state = {
+        users.admin = {
+          email = "admin@example.com";
+          password_file = "/etc/gradient/secrets/admin_password";
+          superuser = true;
+        };
+
+        projects.project = {
+          private_key_file = "/etc/gradient/secrets/project_ssh_key";
+          created_by = "admin";
+        };
+
+        inherit tasks;
+
+        caches.main = {
+          signing_key_file = "/etc/gradient/secrets/main_cache_key";
+          projects = [ "project" ];
+          public = true;
+          created_by = "admin";
+          upstream_caches = [ ];
+        };
+
+        workers = lib.mapAttrs (_: id: {
+          worker_id = id;
+          projects = [ "project" ];
+          token_file = "/etc/gradient/secrets/worker_token";
+          created_by = "admin";
+        }) topo.upstreamPeers;
+      };
+    };
+
+    nginx.virtualHosts."gradient.local" = {
+      enableACME = lib.mkForce false;
+      forceSSL = lib.mkForce false;
+      locations."= /nixpkgs.tar.gz".alias = nixpkgsTarball;
+    };
+
+    postgresql = {
+      package = pkgs.postgresql_18;
+      enableTCPIP = true;
+      authentication = ''
+        host all all 127.0.0.1/32 trust
+      '';
+      settings = {
+        shared_preload_libraries = "pg_stat_statements,auto_explain";
+        "pg_stat_statements.max" = 10000;
+        "pg_stat_statements.track_planning" = true;
+        "auto_explain.log_min_duration" = -1;
+        "auto_explain.log_nested_statements" = true;
+        # Per-node clock reads trap on the acpi_pm clock. Rows and loops are enough.
+        "auto_explain.log_timing" = false;
+        # Plans on the serial console are costing a millisecond per line inside the logging transaction.
+        logging_collector = true;
+        log_filename = "postgresql.log";
+        log_rotation_age = 0;
+        log_rotation_size = 0;
+      };
+    };
+
+    gitDaemon = {
+      enable = true;
+      basePath = "/var/lib/git/";
+      exportAll = true;
+    };
+  };
+
+  systemd.tmpfiles.rules = [
+    "d /var/lib/git 0755 git git"
+  ] ++ lib.mapAttrsToList (name: file: "L+ /var/lib/git/${name} 0755 git git - ${file}") flakeFiles;
+}
