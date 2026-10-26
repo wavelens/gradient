@@ -23,6 +23,7 @@ pub(super) async fn copy_entry_points<C: ConnectionTrait>(
             derivation: prev_ep.derivation,
             eval: prev_ep.eval.clone(),
             licenses: prev_ep.licenses.clone(),
+            runner: prev_ep.runner.clone(),
             created_at: now,
             ..Default::default()
         }
@@ -66,6 +67,34 @@ mod tests {
             log.iter()
                 .any(|s| s.sql.contains("INSERT INTO \"entry_point\"")
                     && format!("{:?}", s.values).contains("unfree")),
+            "{log:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_restart_keeps_the_runner_spec() {
+        let previous = MEntryPoint {
+            runner: Some(serde_json::json!({ "program": "/nix/store/aaaa-train/bin/train" })),
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_query_results([vec![previous.clone()]])
+            .into_connection();
+
+        copy_entry_points(
+            &db,
+            &[previous],
+            EvaluationId::now_v7(),
+            gradient_types::now(),
+        )
+        .await
+        .unwrap();
+
+        let log = raw_statements(db.into_transaction_log());
+        assert!(
+            log.iter()
+                .any(|s| s.sql.contains("INSERT INTO \"entry_point\"")
+                    && format!("{:?}", s.values).contains("aaaa-train")),
             "{log:?}"
         );
     }

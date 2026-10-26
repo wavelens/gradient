@@ -57,6 +57,9 @@ pub async fn trigger_evaluation_retry<C: ConnectionTrait>(
     snapshot_flake_input_overrides(db, task.id, new_eval.id).await?;
 
     entry_points::copy_entry_points(db, &prev_entry_points, new_eval_id, now).await?;
+    if has_runner_entry_points(&prev_entry_points) {
+        gradient_db::runner_jobs::create::for_evaluation(db, new_eval_id).await?;
+    }
     if initial_status == EvaluationStatus::Building {
         gradient_db::graph::reachability::inherit_names(db, prev_eval.id, new_eval_id).await?;
     }
@@ -73,6 +76,10 @@ async fn restart_initial_status<C: ConnectionTrait>(
     db: &C,
     prev_entry_points: &[MEntryPoint],
 ) -> Result<EvaluationStatus, TriggerError> {
+    if has_runner_entry_points(prev_entry_points) {
+        return Ok(EvaluationStatus::Building);
+    }
+
     let derivation_ids: Vec<DerivationId> = prev_entry_points
         .iter()
         .map(|ep| ep.derivation)
@@ -98,4 +105,8 @@ async fn restart_initial_status<C: ConnectionTrait>(
     } else {
         EvaluationStatus::Building
     })
+}
+
+fn has_runner_entry_points(entry_points: &[MEntryPoint]) -> bool {
+    entry_points.iter().any(|ep| ep.runner.is_some())
 }
