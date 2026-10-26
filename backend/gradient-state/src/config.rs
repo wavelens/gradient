@@ -81,6 +81,8 @@ pub struct StateTask {
     #[serde(default = "default_true")]
     pub retry_failed_builds: bool,
     #[serde(default)]
+    pub multi_node_evaluation: bool,
+    #[serde(default)]
     pub flake_input_overrides: HashMap<String, StateFlakeInputOverride>,
     #[serde(default)]
     pub actions: Vec<StateAction>,

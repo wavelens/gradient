@@ -78,6 +78,7 @@ services.gradient.state = {
 | `flake_input_overrides.<name>.keep_url` | bool | `false` | Whether to force-update this input from its flake-declared URL. |
 | `flake_input_overrides.<name>.url` | null or string | `null` | Flake reference that replaces this input. |
 | `keep_evaluations` | int | `30` | How many finished evaluations, regardless of outcome, to keep for metrics and history. Must be at least 1 and at most `eval.maxKeep`. |
+| `multi_node_evaluation` | bool | `false` | Whether more than one eval worker may evaluate one evaluation of this task together. The server can split an evaluation only when past evaluations predict a gain. |
 | `name` | string | attribute name | Unique name of the task. |
 | `project` | string | - | Name of the project that owns this task. |
 | `repository` | string | - | Git repository URL of the task. |

@@ -58,6 +58,7 @@ impl<'a> StateApplicator<'a> {
                 proj.sign_cache = Set(state_task.sign_cache);
                 proj.wait_for_workers = Set(state_task.wait_for_workers);
                 proj.retry_failed_builds = Set(state_task.retry_failed_builds);
+                proj.multi_node_evaluation = Set(state_task.multi_node_evaluation);
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
                 tracing::info!(name = %state_task.name, "Updated managed task");
@@ -83,6 +84,7 @@ impl<'a> StateApplicator<'a> {
                     sign_cache: state_task.sign_cache,
                     wait_for_workers: state_task.wait_for_workers,
                     retry_failed_builds: state_task.retry_failed_builds,
+                    multi_node_evaluation: state_task.multi_node_evaluation,
                     ..Default::default()
                 }
                 .into_active_model();

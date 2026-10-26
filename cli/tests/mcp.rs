@@ -297,7 +297,7 @@ async fn mcp_list_tasks_defaults_to_the_selected_project() {
                     "created_at": "2026-01-01T00:00:00", "managed": false, "can_edit": true,
                     "can_trigger": true, "concurrency": "skip", "force_evaluation": false,
                     "keep_evaluations": 30, "last_evaluation": null,
-                    "last_evaluation_status": null, "retry_failed_builds": false,
+                    "last_evaluation_status": null, "retry_failed_builds": false, "multi_node_evaluation": false,
                     "sign_cache": true, "wait_for_workers": false
                 }],
                 "total": 1, "page": 1, "per_page": 20

@@ -202,6 +202,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 sign_cache: p.sign_cache,
                 wait_for_workers: p.wait_for_workers,
                 retry_failed_builds: p.retry_failed_builds,
+                multi_node_evaluation: p.multi_node_evaluation,
                 flake_input_overrides,
                 actions: task_actions,
             },

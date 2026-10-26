@@ -29,6 +29,7 @@ mod m20261025_000000_derivation_build_probed_at;
 mod m20261026_000000_eval_cache_purged_at;
 mod m20261027_000000_eval_cost_estimates;
 mod m20261028_000000_split_evaluation;
+mod m20261028_000001_task_multi_node_evaluation;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -75,6 +76,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261026_000000_eval_cache_purged_at::Migration),
             Box::new(m20261027_000000_eval_cost_estimates::Migration),
             Box::new(m20261028_000000_split_evaluation::Migration),
+            Box::new(m20261028_000001_task_multi_node_evaluation::Migration),
         ]
     }
 }

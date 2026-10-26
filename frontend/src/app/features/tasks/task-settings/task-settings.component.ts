@@ -98,6 +98,7 @@ export class TaskSettingsComponent implements OnInit {
     sign_cache: boolean;
     wait_for_workers: boolean;
     retry_failed_builds: boolean;
+    multi_node_evaluation: boolean;
   } = {
     display_name: '',
     description: '',
@@ -108,6 +109,7 @@ export class TaskSettingsComponent implements OnInit {
     sign_cache: true,
     wait_for_workers: false,
     retry_failed_builds: true,
+    multi_node_evaluation: false,
   };
 
   concurrencyOptions: { label: string; value: ConcurrencyPolicy; disabled?: boolean }[] = [
@@ -144,6 +146,7 @@ export class TaskSettingsComponent implements OnInit {
           sign_cache: task.sign_cache,
           wait_for_workers: task.wait_for_workers,
           retry_failed_builds: task.retry_failed_builds,
+          multi_node_evaluation: task.multi_node_evaluation,
         };
         this.loading.set(false);
       },

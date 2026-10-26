@@ -68,6 +68,7 @@ pub struct Model {
     pub sign_cache: bool,
     pub wait_for_workers: bool,
     pub retry_failed_builds: bool,
+    pub multi_node_evaluation: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
