@@ -98,6 +98,14 @@ pub fn eval_job_key(evaluation: EvaluationId) -> String {
     )
 }
 
+pub fn parse_eval_job_key(key: &str) -> Option<(EvaluationId, u16)> {
+    let rest = key.strip_prefix(gradient_db::scheduling::assignment_record::EVAL_KEY_PREFIX)?;
+    match rest.split_once(':') {
+        Some((evaluation, index)) => Some((evaluation.parse().ok()?, index.parse().ok()?)),
+        None => Some((rest.parse().ok()?, 0)),
+    }
+}
+
 pub fn build_job_key(shared_build: DerivationBuildId) -> String {
     format!(
         "{}{shared_build}",
