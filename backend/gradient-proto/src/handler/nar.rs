@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_db::metrics::cache_traffic::CacheTraffic;
+use gradient_db::metrics::cache_traffic::{CacheTraffic, TrafficSource};
 use gradient_db::{DbContext, WorkerDb};
 use gradient_graph::{Graph, NarCommit, SignTargets};
 use gradient_types::events::cache::NarSigned;
@@ -37,7 +37,7 @@ pub(super) async fn record_nar_push_metric(
         .ok_or_else(|| anyhow::anyhow!("no cache for project {}", project_id))?;
 
     let bucket = gradient_db::metrics::cache_traffic::minute_bucket(gradient_types::now());
-    cache_traffic.record(project_cache.cache, bucket, bytes);
+    cache_traffic.record(project_cache.cache, bucket, bytes, TrafficSource::Internal);
 
     Ok(())
 }

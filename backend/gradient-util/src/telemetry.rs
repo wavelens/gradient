@@ -27,6 +27,7 @@ pub mod metric {
     pub const NAR_SERVES_ACTIVE: &str = "nar.serves_active";
     pub const NAR_SERVE_FAILURES: &str = "nar.serve_failures";
     pub const CACHE_BYTES_SENT: &str = "cache.bytes_sent";
+    pub const CACHE_BYTES_SENT_EXTERNAL: &str = "cache.bytes_sent_external";
     pub const CACHE_BYTES_ADDED: &str = "cache.bytes_added";
     pub const UPSTREAM_LATENCY_MS: &str = "upstream.latency_ms";
     pub const UPSTREAM_NARINFO_HITS: &str = "upstream.narinfo_hits";

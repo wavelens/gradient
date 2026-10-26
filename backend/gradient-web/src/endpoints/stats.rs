@@ -9,15 +9,40 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::scope::{CacheScope, Readable};
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use gradient_core::ServerState;
 use gradient_db::metrics::cache_traffic;
 use gradient_db::metrics::cache_traffic::CacheTraffic;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
 use gradient_util::telemetry::metric;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+#[derive(Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TrafficKind {
+    #[default]
+    Total,
+    External,
+}
+
+impl TrafficKind {
+    pub fn metric(self) -> &'static str {
+        match self {
+            Self::Total => metric::CACHE_BYTES_SENT,
+            Self::External => metric::CACHE_BYTES_SENT_EXTERNAL,
+        }
+    }
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct TrafficParams {
+    /// `total` counts every NAR transfer of the cache. `external` counts only NARs sent over the HTTP binary cache and the `/proto` cache session.
+    #[serde(default)]
+    pub traffic: TrafficKind,
+}
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct CacheMetricPoint {
@@ -52,24 +77,25 @@ pub struct CacheStatsResponse {
 /// `gradient_db::metrics::cache_traffic` is writing the accumulator.
 pub fn record_nar_traffic(cache_traffic: &CacheTraffic, cache_id: CacheId, bytes: i64) {
     let bucket = cache_traffic::minute_bucket(gradient_types::now());
-    cache_traffic.record(cache_id, bucket, bytes);
+    cache_traffic.record(
+        cache_id,
+        bucket,
+        bytes,
+        cache_traffic::TrafficSource::External,
+    );
 }
 
 async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
     db: &C,
     cache_id: CacheId,
+    sent: &str,
     granularity: RollupGranularity,
     back_interval: &str,
 ) -> Result<Vec<CacheMetricPoint>, WebError> {
-    let series = gradient_db::metrics::series::of_cache(
-        db,
-        cache_id,
-        metric::CACHE_BYTES_SENT,
-        granularity,
-        back_interval,
-    )
-    .await
-    .map_err(WebError::from)?;
+    let series =
+        gradient_db::metrics::series::of_cache(db, cache_id, sent, granularity, back_interval)
+            .await
+            .map_err(WebError::from)?;
     Ok(series
         .into_iter()
         .map(|(time, requests, bytes)| CacheMetricPoint {
@@ -112,13 +138,15 @@ async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
     tag = "caches",
     summary = "Get cache statistics",
     description = "Returns bandwidth and hit statistics for the cache. Visible to anyone for public caches, and to cache members or members of any project subscribed to a private cache (matching `GET /caches/{cache}`); other callers receive `404`.",
-    params(CachePath),
+    params(CachePath, TrafficParams),
     responses((status = OK, description = "Cache statistics", body = CacheStatsResponse), WebError)
 )]
 pub async fn get_cache_stats(
     CacheScope { cache, .. }: CacheScope<Readable>,
     state: State<Arc<ServerState>>,
+    Query(TrafficParams { traffic }): Query<TrafficParams>,
 ) -> WebResult<Json<BaseResponse<CacheStatsResponse>>> {
+    let sent = traffic.metric();
     let size = gradient_db::cached_paths::size_of_cache(&state.web_db, cache.id)
         .await
         .map_err(WebError::from)?;
@@ -137,12 +165,31 @@ pub async fn get_cache_stats(
             aggregate_traffic(
                 &state.web_db,
                 cache.id,
+                sent,
                 RollupGranularity::Minute,
                 "59 minutes"
             ),
-            aggregate_traffic(&state.web_db, cache.id, RollupGranularity::Hour, "23 hours"),
-            aggregate_traffic(&state.web_db, cache.id, RollupGranularity::Day, "29 days"),
-            aggregate_traffic(&state.web_db, cache.id, RollupGranularity::Week, "11 weeks"),
+            aggregate_traffic(
+                &state.web_db,
+                cache.id,
+                sent,
+                RollupGranularity::Hour,
+                "23 hours"
+            ),
+            aggregate_traffic(
+                &state.web_db,
+                cache.id,
+                sent,
+                RollupGranularity::Day,
+                "29 days"
+            ),
+            aggregate_traffic(
+                &state.web_db,
+                cache.id,
+                sent,
+                RollupGranularity::Week,
+                "11 weeks"
+            ),
         )?;
 
     Ok(ok_json(CacheStatsResponse {

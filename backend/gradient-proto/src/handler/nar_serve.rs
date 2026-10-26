@@ -80,7 +80,7 @@ pub(super) async fn serve_nar_request(
     store_path: &str,
     resume_from: u64,
     client_token: Option<&str>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<u64> {
     let nar_cfg = &handles.db.config.nar;
     let limits = PassthroughLimits {
         open: Duration::from_secs(nar_cfg.storage_open_timeout_secs.get()),
@@ -104,7 +104,7 @@ pub(super) async fn serve_nar_request(
         client_token,
     };
     match send_nar(&handles.db.storage.nar_storage, writer, req, limits).await {
-        Ok(_) => Ok(()),
+        Ok(bytes) => Ok(bytes),
         Err(PassthroughError::NotFound(reason)) => {
             unavailable(writer, job_id, &original, &reason).await;
             invalidate_cached_path(handles, key, store_path).await;

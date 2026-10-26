@@ -14,6 +14,7 @@ import {
   RoleResponse_CacheRoleOwner,
   Cache,
   CacheStatsResponse,
+  TrafficKind,
   UpstreamCacheItem,
   UpstreamTestResponse,
   NarSummary,
@@ -87,8 +88,8 @@ export class CachesService {
     return this.api.delete<void>(`caches/${cache}/active`);
   }
 
-  getCacheStats(cache: string): Observable<CacheStatsResponse> {
-    return this.api.get<CacheStatsResponse>(`caches/${cache}/stats`);
+  getCacheStats(cache: string, traffic: TrafficKind = 'total'): Observable<CacheStatsResponse> {
+    return this.api.get<CacheStatsResponse>(`caches/${cache}/stats?traffic=${traffic}`);
   }
 
   getUpstreamCaches(cache: string): Observable<UpstreamCacheItem[]> {

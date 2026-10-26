@@ -5,6 +5,7 @@
  */
 
 use crate::endpoints::badges::BadgeStyle;
+use crate::endpoints::stats::TrafficKind;
 use crate::error::{ErrorResponseBody, WebError};
 use crate::routes::{self, BodyLimits};
 use crate::scim::ScimErrorBody;
@@ -28,7 +29,7 @@ const JSON: &str = "application/json";
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Gradient API", description = include_str!("api.md")),
-    components(schemas(ErrorResponseBody, ScimErrorBody, ApiId, SessionId, BadgeStyle)),
+    components(schemas(ErrorResponseBody, ScimErrorBody, ApiId, SessionId, BadgeStyle, TrafficKind)),
     tags(
         (name = "general", description = "Health check and server configuration"),
         (name = "board", description = "Job Board - metric queries, live assigned jobs, workers, scoring, and expensive builds"),

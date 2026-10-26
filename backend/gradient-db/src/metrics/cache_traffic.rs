@@ -22,10 +22,18 @@ use uuid::Uuid;
 
 use crate::DbContext;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrafficSource {
+    External,
+    Internal,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Traffic {
     pub bytes: i64,
     pub nars: i64,
+    pub external_bytes: i64,
+    pub external_nars: i64,
 }
 
 #[derive(Debug, Default)]
@@ -42,11 +50,15 @@ impl CacheTraffic {
         Arc::new(Self::new())
     }
 
-    pub fn record(&self, cache: CacheId, bucket: NaiveDateTime, bytes: i64) {
+    pub fn record(&self, cache: CacheId, bucket: NaiveDateTime, bytes: i64, source: TrafficSource) {
         let mut buckets = self.buckets.lock();
         let entry = buckets.entry((cache, bucket)).or_default();
         entry.bytes = entry.bytes.saturating_add(bytes);
         entry.nars = entry.nars.saturating_add(1);
+        if source == TrafficSource::External {
+            entry.external_bytes = entry.external_bytes.saturating_add(bytes);
+            entry.external_nars = entry.external_nars.saturating_add(1);
+        }
     }
 
     pub fn take(&self) -> Vec<(CacheId, NaiveDateTime, Traffic)> {
@@ -120,12 +132,14 @@ pub fn flush_on_shutdown(ctx: DbContext, traffic: Arc<CacheTraffic>) {
 }
 
 crate::sql! {
-    ADD_TRAFFIC = r#"INSERT INTO cache_metric (id, cache, bucket_time, bytes_sent, nar_count)
-           VALUES ($1, $2, $3, $4, $5)
+    ADD_TRAFFIC = r#"INSERT INTO cache_metric (id, cache, bucket_time, bytes_sent, nar_count, external_bytes_sent, external_nar_count)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
            ON CONFLICT (cache, bucket_time)
            DO UPDATE SET bytes_sent = cache_metric.bytes_sent + EXCLUDED.bytes_sent,
-                         nar_count  = cache_metric.nar_count  + EXCLUDED.nar_count"#,
-        params = [NewUuid, CacheId, Now, Int(4096), Int(1)];
+                         nar_count  = cache_metric.nar_count  + EXCLUDED.nar_count,
+                         external_bytes_sent = cache_metric.external_bytes_sent + EXCLUDED.external_bytes_sent,
+                         external_nar_count  = cache_metric.external_nar_count  + EXCLUDED.external_nar_count"#,
+        params = [NewUuid, CacheId, Now, Int(4096), Int(1), Int(4096), Int(1)];
 }
 
 fn add_traffic_stmt(cache: CacheId, bucket: NaiveDateTime, traffic: Traffic) -> Statement {
@@ -135,6 +149,8 @@ fn add_traffic_stmt(cache: CacheId, bucket: NaiveDateTime, traffic: Traffic) -> 
         sea_orm::Value::ChronoDateTime(Some(bucket)),
         sea_orm::Value::BigInt(Some(traffic.bytes)),
         sea_orm::Value::BigInt(Some(traffic.nars)),
+        sea_orm::Value::BigInt(Some(traffic.external_bytes)),
+        sea_orm::Value::BigInt(Some(traffic.external_nars)),
     ])
 }
 
@@ -173,8 +189,8 @@ mod tests {
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
         let traffic = CacheTraffic::new();
 
-        traffic.record(cache(1), bucket(34), 4096);
-        traffic.record(cache(1), bucket(34), 1024);
+        traffic.record(cache(1), bucket(34), 4096, TrafficSource::External);
+        traffic.record(cache(1), bucket(34), 1024, TrafficSource::External);
         flush(&ctx, &traffic).await;
 
         drop(ctx);
@@ -217,9 +233,9 @@ mod tests {
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
         let traffic = CacheTraffic::new();
 
-        traffic.record(cache(1), bucket(34), 1);
-        traffic.record(cache(2), bucket(34), 1);
-        traffic.record(cache(1), bucket(35), 1);
+        traffic.record(cache(1), bucket(34), 1, TrafficSource::External);
+        traffic.record(cache(2), bucket(34), 1, TrafficSource::External);
+        traffic.record(cache(1), bucket(35), 1, TrafficSource::External);
         flush(&ctx, &traffic).await;
 
         drop(ctx);
@@ -230,13 +246,43 @@ mod tests {
     #[test]
     fn a_flush_clears_what_it_took() {
         let traffic = CacheTraffic::new();
-        traffic.record(cache(1), bucket(34), 7);
+        traffic.record(cache(1), bucket(34), 7, TrafficSource::External);
 
         assert_eq!(
             traffic.take(),
-            vec![(cache(1), bucket(34), Traffic { bytes: 7, nars: 1 })]
+            vec![(
+                cache(1),
+                bucket(34),
+                Traffic {
+                    bytes: 7,
+                    nars: 1,
+                    external_bytes: 7,
+                    external_nars: 1
+                }
+            )]
         );
         assert!(traffic.take().is_empty(), "a second flush has nothing left");
+    }
+
+    #[test]
+    fn only_external_serves_count_as_external_traffic() {
+        let traffic = CacheTraffic::new();
+        traffic.record(cache(1), bucket(34), 100, TrafficSource::External);
+        traffic.record(cache(1), bucket(34), 900, TrafficSource::Internal);
+
+        assert_eq!(
+            traffic.take(),
+            vec![(
+                cache(1),
+                bucket(34),
+                Traffic {
+                    bytes: 1000,
+                    nars: 2,
+                    external_bytes: 100,
+                    external_nars: 1,
+                }
+            )]
+        );
     }
 
     #[test]

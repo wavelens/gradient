@@ -8,6 +8,7 @@ use crate::authorization::MaybeUser;
 use crate::endpoints::metrics::{
     HttpRouteStat, Observations, ProcessStat, collect, http_snapshot, process_snapshot,
 };
+use crate::endpoints::stats::TrafficParams;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
@@ -112,13 +113,14 @@ pub struct BoardUpstreamCacheStats {
     tag = "board",
     summary = "Cache statistics",
     description = "Cache totals plus hourly traffic and storage-growth series, aggregated across caches (anonymized infra view).",
-    params(WindowParams),
+    params(WindowParams, TrafficParams),
     responses((status = OK, description = "Cache statistics", body = BoardCacheStats), WebError)
 )]
 pub async fn get_board_cache(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Query(params): Query<WindowParams>,
+    Query(TrafficParams { traffic }): Query<TrafficParams>,
 ) -> WebResult<Json<BaseResponse<BoardCacheStats>>> {
     let window = window_clause(&params);
     let obs = collect(
@@ -128,7 +130,7 @@ pub async fn get_board_cache(
         &scheduler,
     )
     .await?;
-    let traffic = infra_series(&state.web_db, metric::CACHE_BYTES_SENT, window).await?;
+    let traffic = infra_series(&state.web_db, traffic.metric(), window).await?;
     let storage = infra_series(&state.web_db, metric::CACHE_BYTES_ADDED, window).await?;
     Ok(ok_json(BoardCacheStats {
         totals: CacheTotals::from(&obs),

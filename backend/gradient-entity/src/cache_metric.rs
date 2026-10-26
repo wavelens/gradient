@@ -18,6 +18,8 @@ pub struct Model {
     pub bucket_time: NaiveDateTime,
     pub bytes_sent: i64,
     pub nar_count: i32,
+    pub external_bytes_sent: i64,
+    pub external_nar_count: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
