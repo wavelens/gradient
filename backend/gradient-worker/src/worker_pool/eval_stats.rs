@@ -8,6 +8,10 @@ use std::collections::HashMap;
 
 use gradient_eval::pool::CallStats;
 pub use gradient_eval::stats::StatsDelta;
+use gradient_eval::wildcard_walk::parse_pattern;
+use gradient_wire::messages::{EvalSetCost, EvalSubtreeCost};
+
+const MIB: u64 = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Cost {
@@ -60,12 +64,63 @@ pub(crate) struct EvalStatsTotals {
     pub peak_heap_bytes: u64,
     pub peak_rss_bytes: u64,
     pub per_entry_point: Vec<EntryPointCost>,
+    pub sets: Vec<EvalSetCost>,
+    pub subtrees: Vec<EvalSubtreeCost>,
+}
+
+#[derive(Debug, Default)]
+struct SetWalks {
+    fresh_ms: Vec<u64>,
+    later_ms: Vec<u64>,
+    peak_rss_bytes: u64,
+}
+
+impl SetWalks {
+    fn add(&mut self, first_call: bool, walk_ms: u64, rss_bytes: u64) {
+        if first_call {
+            self.fresh_ms.push(walk_ms);
+        } else {
+            self.later_ms.push(walk_ms);
+        }
+
+        self.peak_rss_bytes = self.peak_rss_bytes.max(rss_bytes);
+    }
+
+    fn startup_ms(&self) -> Option<u64> {
+        let fresh = median(&self.fresh_ms)?;
+        Some(fresh.saturating_sub(median(&self.later_ms).unwrap_or(0)))
+    }
+}
+
+fn median(values: &[u64]) -> Option<u64> {
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    sorted.get(sorted.len().checked_sub(1)? / 2).copied()
+}
+
+fn split_set(pattern: &str) -> Vec<String> {
+    let mut segs = parse_pattern(pattern).1;
+    match segs.iter().position(|seg| seg.contains('*')) {
+        Some(wildcard) => segs.truncate(wildcard),
+        None => {
+            segs.pop();
+        }
+    }
+
+    segs
+}
+
+fn subtree_of(set: &[String], attr: &str) -> Option<Vec<String>> {
+    let segs = parse_pattern(attr).1;
+    (segs.len() > set.len() && segs.starts_with(set)).then(|| segs[..=set.len()].to_vec())
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct EvalStatsAccumulator {
     totals: EvalStatsTotals,
     buckets: HashMap<String, Cost>,
+    sets: HashMap<Vec<String>, SetWalks>,
+    subtrees: HashMap<Vec<String>, EvalSubtreeCost>,
 }
 
 impl EvalStatsAccumulator {
@@ -75,12 +130,19 @@ impl EvalStatsAccumulator {
         };
         self.add_totals(&delta, call.rss);
 
+        let set = split_set(&call.pattern);
         let mut walk = Cost::of(&delta, call.eval_ms);
         for (attr, attr_cost) in call.attrs {
             let cost = Cost::of(&attr_cost.stats, attr_cost.eval_ms);
             walk = walk.without(cost);
+            self.count_subtree(&set, &attr, cost.eval_ms);
             self.charge(attr, cost);
         }
+
+        self.sets
+            .entry(set)
+            .or_default()
+            .add(call.first_call, walk.eval_ms, call.rss);
         if walk != Cost::default() {
             self.charge(call.entry_point, walk);
         }
@@ -92,7 +154,26 @@ impl EvalStatsAccumulator {
             .into_iter()
             .map(|(attr, cost)| EntryPointCost { attr, cost })
             .collect();
+        self.totals.sets = set_costs(self.sets);
+        self.totals.subtrees = self.subtrees.into_values().collect();
+        self.totals.subtrees.sort_by(|a, b| a.path.cmp(&b.path));
         self.totals
+    }
+
+    fn count_subtree(&mut self, set: &[String], attr: &str, eval_ms: u64) {
+        let Some(path) = subtree_of(set, attr) else {
+            return;
+        };
+
+        let subtree = self
+            .subtrees
+            .entry(path.clone())
+            .or_insert_with(|| EvalSubtreeCost {
+                path,
+                ..Default::default()
+            });
+        subtree.attrs += 1;
+        subtree.eval_ms += eval_ms;
     }
 
     fn add_totals(&mut self, delta: &StatsDelta, rss_bytes: u64) {
@@ -108,6 +189,19 @@ impl EvalStatsAccumulator {
     fn charge(&mut self, attr: String, cost: Cost) {
         self.buckets.entry(attr).or_default().add(cost);
     }
+}
+
+fn set_costs(sets: HashMap<Vec<String>, SetWalks>) -> Vec<EvalSetCost> {
+    let mut costs: Vec<EvalSetCost> = sets
+        .into_iter()
+        .map(|(path, walks)| EvalSetCost {
+            path,
+            startup_ms: walks.startup_ms(),
+            peak_rss_mb: walks.peak_rss_bytes / MIB,
+        })
+        .collect();
+    costs.sort_by(|a, b| a.path.cmp(&b.path));
+    costs
 }
 
 #[cfg(test)]
@@ -129,11 +223,104 @@ mod tests {
     fn call(entry_point: &str, delta: StatsDelta, rss: u64) -> CallStats {
         CallStats {
             entry_point: entry_point.into(),
+            pattern: entry_point.into(),
+            first_call: false,
             stats: Some(delta),
             eval_ms: 0,
             attrs: vec![],
             rss,
         }
+    }
+
+    fn attr(name: &str, eval_ms: u64) -> (String, AttrCost) {
+        (
+            name.to_string(),
+            AttrCost {
+                stats: d(0, 0, 0),
+                eval_ms,
+            },
+        )
+    }
+
+    fn walk(ms: u64) -> CallStats {
+        CallStats {
+            eval_ms: ms,
+            ..call("legacyPackages.x86_64-linux.**", d(0, 0, 0), 0)
+        }
+    }
+
+    fn segs(path: &[&str]) -> Vec<String> {
+        path.iter().map(|seg| seg.to_string()).collect()
+    }
+
+    #[test]
+    fn startup_is_the_first_call_walk_minus_the_typical_later_walk() {
+        let mut acc = EvalStatsAccumulator::default();
+        acc.observe(CallStats {
+            first_call: true,
+            attrs: vec![
+                attr("legacyPackages.x86_64-linux.a", 100),
+                attr("legacyPackages.x86_64-linux.b", 100),
+            ],
+            rss: 3 * MIB,
+            ..walk(5000)
+        });
+        acc.observe(walk(300));
+        acc.observe(CallStats {
+            rss: 2 * MIB,
+            ..walk(600)
+        });
+        acc.observe(walk(300));
+
+        assert_eq!(
+            acc.finish().sets,
+            vec![EvalSetCost {
+                path: segs(&["legacyPackages", "x86_64-linux"]),
+                startup_ms: Some(4500),
+                peak_rss_mb: 3,
+            }]
+        );
+    }
+
+    #[test]
+    fn subtrees_count_attributes_below_the_first_wildcard_child() {
+        let mut acc = EvalStatsAccumulator::default();
+        acc.observe(CallStats {
+            eval_ms: 40,
+            attrs: vec![
+                attr("packages.x86_64-linux.a", 10),
+                attr("packages.x86_64-linux.b", 20),
+                attr("packages.aarch64-linux.c", 5),
+            ],
+            ..call("packages.*.*", d(0, 0, 0), 0)
+        });
+
+        assert_eq!(
+            acc.finish().subtrees,
+            vec![
+                EvalSubtreeCost {
+                    path: segs(&["packages", "aarch64-linux"]),
+                    attrs: 1,
+                    eval_ms: 5,
+                },
+                EvalSubtreeCost {
+                    path: segs(&["packages", "x86_64-linux"]),
+                    attrs: 2,
+                    eval_ms: 30,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_set_without_a_fresh_call_reports_no_startup() {
+        let mut acc = EvalStatsAccumulator::default();
+        acc.observe(walk(300));
+        acc.observe(walk(400));
+
+        let sets = acc.finish().sets;
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].startup_ms, None);
     }
 
     fn costs(totals: EvalStatsTotals) -> Vec<(String, Cost)> {

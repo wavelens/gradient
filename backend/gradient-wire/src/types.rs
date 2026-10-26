@@ -450,6 +450,24 @@ pub struct EvalStatsReport {
     pub worker_id: String,
     pub per_entry_point: Vec<EvalAttrCost>,
     pub flake_nodes: Vec<FlakeOutputNode>,
+    #[proto(39, default)]
+    pub sets: Vec<EvalSetCost>,
+    #[proto(39, default)]
+    pub subtrees: Vec<EvalSubtreeCost>,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
+pub struct EvalSetCost {
+    pub path: Vec<String>,
+    pub startup_ms: Option<u64>,
+    pub peak_rss_mb: u64,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
+pub struct EvalSubtreeCost {
+    pub path: Vec<String>,
+    pub attrs: u64,
+    pub eval_ms: u64,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]

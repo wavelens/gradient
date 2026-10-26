@@ -296,14 +296,10 @@ impl EvalPool {
         overrides: &[(String, String)],
         dependencies: &dyn EvalDependencies,
     ) -> Result<(Listing, CallStats)> {
-        let bucket = entry_point_of(
-            call.wildcards
-                .first()
-                .map(String::as_str)
-                .unwrap_or_default(),
-            &lock(&self.patterns),
-        );
+        let pattern = call.wildcards.first().cloned().unwrap_or_default();
+        let bucket = entry_point_of(&pattern, &lock(&self.patterns));
         let mut worker = self.workers.acquire().await?;
+        let first_call = worker.is_fresh();
         let started = Instant::now();
         match worker
             .list(
@@ -335,6 +331,8 @@ impl EvalPool {
                     listing,
                     CallStats {
                         entry_point: bucket,
+                        pattern,
+                        first_call,
                         stats,
                         eval_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
                         attrs,
@@ -370,7 +368,7 @@ impl EvalPool {
 mod tests {
     use super::*;
     use crate::ipc::EvalResponse;
-    use crate::pool::workers::tests::replying_worker;
+    use crate::pool::workers::tests::{replying_worker, replying_worker_times};
 
     fn pool(workers: usize) -> Arc<EvalPool> {
         EvalPool::new(EvalPoolConfig {
@@ -470,6 +468,36 @@ mod tests {
             charged,
             vec![("hydraJobs.a", 600, 60), ("hydraJobs.b", 300, 30)]
         );
+    }
+
+    #[tokio::test]
+    async fn only_the_first_list_of_a_subprocess_is_a_first_call() {
+        let pool = pool(1);
+        pool.workers.push_for_test(replying_worker_times(
+            &EvalResponse::ListOk {
+                items: vec![],
+                deferred: vec![],
+                warnings: vec![],
+                errors: vec![],
+                stats: None,
+            },
+            "first-call",
+            2,
+        ));
+
+        let discovery = pool
+            .list_attrs(
+                "repo".into(),
+                vec!["hydraJobs.a".into(), "hydraJobs.b".into()],
+                &[],
+                &RefuseDependencies("the test"),
+                &|_| {},
+            )
+            .await
+            .expect("list");
+
+        let first_calls: Vec<bool> = discovery.calls.iter().map(|call| call.first_call).collect();
+        assert_eq!(first_calls, vec![true, false]);
     }
 
     #[tokio::test]
