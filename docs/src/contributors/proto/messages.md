@@ -59,7 +59,7 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `BuildProgress` | Reports bytes and paths for a build's prefetch, download or upload | `job_id`, `assignment_id`, `build_id`, `phase`, `bytes_done`, `bytes_total`, `paths_done`, `paths_total` |
 | `EvalProgress` | Reports flake input downloads or live thunks of an eval job, at most once per second | `job_id`, `assignment_id`, `progress` |
 | `Draining` | Tells the server the worker will stop. No further job assignments | - |
-| `LogChunk` (bulk) | Streams the build log | `job_id`, `task_index`, `data` |
+| `LogChunk` (bulk) | Streams the build log | `job_id`, `data` |
 | `EvalMessage` | Carries a warning or error from the evaluation | `job_id`, `level`, `source`, `message` |
 | `NarRequest` | Pulls the given paths | `job_id`, `paths` |
 | `NarRequestResume` | Resumes a pull from a byte offset | `job_id`, `store_path`, `received_bytes`, `stream_token` |
@@ -98,7 +98,6 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 - Inline segments arrive as `EvalCacheChunk` streams after the result. They follow `fetch` order.
 - Inline segments start at offset 0 and end with exactly one `is_final` chunk each.
 - Workers can forget any applied key outside `Segments.keys`. A `Miss` can clear every applied key.
-- Peers below protocol 38 receive `Miss` for every pull. The server can return `Rejected` for their whole-blob upload (`UploadObject::EvalCache`).
 
 ## Split Evaluation Messages
 

@@ -162,7 +162,7 @@ In-flight work can be lost during a restart. Queued jobs survive.
 - The agreed version is the lower of both newest versions. Every later frame is for that version.
 - Two ranges without overlap can end the session with close code `1002` and `no shared protocol version: ours 30..=30, peer 31..=32`.
 - A first frame without `GRAD` came from protocol 26 or older. The session can end with `peer protocol is older than 30`.
-- The oldest supported version is 35. Older workers need an upgrade.
+- Supported versions start at 41. Older workers need an upgrade.
 - Both sides are logging the reason at the `warn` level.
 - A server connecting to a worker can keep the reason as the worker's offline reason.
 - `gradient_wire::PROTO_VERSIONS` is the supported range, computed from the `#[proto]` annotations.

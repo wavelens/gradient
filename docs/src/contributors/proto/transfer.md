@@ -80,8 +80,8 @@ Before any build work starts, workers fetch all inputs that the local store does
 
 ## Logs
 
-- Build output streams over the bulk lane as `LogChunk { job_id, task_index, data }` messages with no acknowledgement.
-- The server appends every chunk to the open attempt of the build at `task_index`.
+- Workers stream build output over the bulk lane as `LogChunk { job_id, data }` messages with no acknowledgement.
+- The server can append every chunk to the open attempt of the job's build.
 - Chunks for evaluations or finished attempts get dropped by the server.
 - Workers cap each build's log at `worker.log.burstBytesPerMin` (8 MiB) and `worker.log.sustainedBytesPerHour` (64 MiB).
 - Past either limit, the worker halts forwarding and adds a truncation note.
