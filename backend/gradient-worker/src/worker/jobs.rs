@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use gradient_util::sync::Mutex;
-use gradient_wire::messages::{JobKind, RUNNING_JOBS_SINCE, RunningAssignment};
+use gradient_wire::messages::{ClientMessage, JobKind, RUNNING_JOBS_SINCE, RunningAssignment};
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::connection::reconnecting::ReconnectingWriter;
 use gradient_worker_client::correlation::{
@@ -170,8 +170,22 @@ pub(crate) struct WorkerJobs {
     pub(super) eval_shard_replies: EvalShardReplies,
     pub(super) uploads: UploadClient,
     pub(super) writer: ReconnectingWriter,
+    reporting: Mutex<HashMap<String, JobKind>>,
     log_dir: PathBuf,
     busy_session: u64,
+}
+
+pub(super) async fn report_when_drained(
+    log: JobLog,
+    done_tx: mpsc::UnboundedSender<JobDone>,
+    done: JobDone,
+) {
+    tokio::select! {
+        () = log.drained() => {
+            let _ = done_tx.send(done);
+        }
+        () = done_tx.closed() => log.remove(),
+    }
 }
 
 pub(crate) fn clear_job_logs(config: &WorkerConfig) -> std::io::Result<()> {
@@ -214,6 +228,7 @@ impl WorkerJobs {
             eval_shard_replies: EvalShardReplies::default(),
             uploads,
             writer,
+            reporting: Mutex::default(),
             log_dir: config.job_log_dir(),
             busy_session: exit_clock::new_session(),
         }
@@ -279,12 +294,37 @@ impl WorkerJobs {
         exit_clock::clock().report(self.busy_session, busy, Instant::now());
     }
 
-    pub(crate) fn running_assignments(&self) -> Vec<RunningAssignment> {
-        self.registry.lock().running_assignments()
+    pub(super) async fn send_final_report(&self, kind: JobKind, report: ClientMessage) {
+        if let ClientMessage::JobCompleted { assignment_id, .. }
+        | ClientMessage::JobFailed { assignment_id, .. } = &report
+        {
+            self.reporting.lock().insert(assignment_id.clone(), kind);
+        }
+        let _ = self.writer.send(report).await;
     }
 
-    pub(crate) async fn start_session(&self, writer: ProtoWriter) -> Result<()> {
+    pub(crate) fn running_assignments(&self) -> Vec<RunningAssignment> {
+        let mut running = self.registry.lock().running_assignments();
+        let queued = self.writer.queued_final_reports();
+        let mut reporting = self.reporting.lock();
+        reporting.retain(|assignment_id, _| queued.contains(assignment_id));
+        running.extend(
+            reporting
+                .iter()
+                .map(|(assignment_id, kind)| RunningAssignment {
+                    assignment_id: assignment_id.clone(),
+                    kind: kind.clone(),
+                }),
+        );
+        running
+    }
+
+    pub(crate) async fn start_session(&self, writer: ProtoWriter) -> Result<u64> {
         self.writer.attach(writer).await?;
+        let session = self
+            .writer
+            .current_session()
+            .context("the session ended while it started")?;
         let logs = self.registry.lock().logs();
         for log in logs {
             let writer = self.writer.clone();
@@ -298,7 +338,7 @@ impl WorkerJobs {
                 }
             });
         }
-        Ok(())
+        Ok(session)
     }
 
     pub(crate) fn end_session(&self, agreed_version: u16) {
@@ -524,5 +564,53 @@ mod tests {
         assert!(!single.abort.is_aborted());
         assert!(member.abort.is_aborted());
         assert_eq!(jobs.running_assignments().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_final_report_queued_while_detached_keeps_its_assignment_listed() {
+        let (jobs, _base) = worker_jobs();
+        jobs.send_final_report(
+            JobKind::Build,
+            ClientMessage::JobCompleted {
+                job_id: "build:1".into(),
+                assignment_id: "dispatch-1".into(),
+                spans: vec![],
+                elapsed_ms: 1,
+            },
+        )
+        .await;
+
+        assert_eq!(
+            jobs.running_assignments(),
+            vec![RunningAssignment {
+                assignment_id: "dispatch-1".into(),
+                kind: JobKind::Build,
+            }],
+            "the server must hold the assignment until the report arrives"
+        );
+
+        let session = gradient_worker_client::testing::mock_session().await;
+        jobs.writer.attach(session.writer.clone()).await.unwrap();
+        assert!(jobs.running_assignments().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_job_of_a_dropped_worker_gives_up_its_buffered_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = JobLog::open(dir.path(), "build:1", JOB_LOG_BUFFER_CAP);
+        log.send(&ReconnectingWriter::new(), b"unsent".to_vec())
+            .await
+            .unwrap();
+        assert!(dir.path().join("build_1.log").exists());
+        let (done_tx, done_rx) = mpsc::unbounded_channel();
+        drop(done_rx);
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            report_when_drained(log, done_tx, ("build:1".to_owned(), Ok(()))),
+        )
+        .await
+        .expect("nobody can replay the log once the worker is gone");
+        assert!(!dir.path().join("build_1.log").exists());
     }
 }

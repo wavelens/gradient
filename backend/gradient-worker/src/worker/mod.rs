@@ -35,6 +35,8 @@ pub(crate) use jobs::clear_job_logs;
 
 const WRITER_FLUSH_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
+const NO_JOB_SESSION: u64 = 0;
+
 pub struct Worker<S> {
     config: WorkerConfig,
     executor: JobExecutor,
@@ -140,9 +142,13 @@ impl Worker<Connected> {
 
         let (writer, reader, flush) = conn.split();
         let version = writer.version();
-        if let Err(e) = jobs.start_session(writer.clone()).await {
-            warn!(error = %e, "the new session closed before the queued job reports went out");
-        }
+        let job_session = jobs
+            .start_session(writer.clone())
+            .await
+            .unwrap_or_else(|e| {
+                warn!(error = %e, "the new session closed before the queued job reports went out");
+                NO_JOB_SESSION
+            });
         let state = message_loop::MessageLoopState::new(
             writer,
             &jobs,
@@ -151,7 +157,8 @@ impl Worker<Connected> {
             scorer,
             credentials.clone(),
         );
-        let outcome = message_loop::run_message_loop(state, reader, stop.clone()).await;
+        let outcome =
+            message_loop::run_message_loop(state, reader, job_session, stop.clone()).await;
         jobs.end_session(version);
 
         // Only background tasks can still hold a writer clone at this point.
@@ -357,22 +364,63 @@ mod tests {
     use gradient_test_support::prelude::MockProtoServer;
     use gradient_wire::messages::GradientCapabilities;
 
-    #[tokio::test]
-    async fn a_job_finished_while_detached_reports_after_running_jobs() {
-        let base = tempfile::tempdir().unwrap();
+    fn disconnected_worker(base: &std::path::Path) -> Worker<Disconnected> {
         let config = WorkerConfig {
-            base_dir: base.path().to_owned(),
+            base_dir: base.to_owned(),
             ..WorkerConfig::default()
         };
-        let worker = Worker {
+        Worker {
             jobs: Arc::new(WorkerJobs::new(&config)),
-            executor: test_executor(base.path()),
+            executor: test_executor(base),
             scorer: JobScorer::new(),
             credentials: CredentialStore::new(),
             config,
             conn_state: Disconnected,
             _marker: PhantomData,
+        }
+    }
+
+    async fn reconnected(
+        worker: Worker<Disconnected>,
+    ) -> (
+        gradient_test_support::prelude::MockServerConn,
+        Worker<Connected>,
+    ) {
+        let server = MockProtoServer::bind().await;
+        let (sc, conn) = tokio::join!(
+            async {
+                let mut sc = server.accept().await;
+                sc.handshake(GradientCapabilities::default()).await.unwrap();
+                sc
+            },
+            worker.reconnect(server.url())
+        );
+        (sc, worker.into_connected(conn.unwrap()))
+    }
+
+    #[tokio::test]
+    async fn a_failed_job_report_ends_the_session() {
+        let base = tempfile::tempdir().unwrap();
+        let worker = disconnected_worker(base.path());
+        let jobs = Arc::clone(&worker.jobs);
+        let (_sc, worker) = reconnected(worker).await;
+
+        let lose_the_job_lane = async {
+            jobs.writer.attached().await;
+            jobs.writer.detach();
         };
+        let ((_, ended), ()) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::join!(worker.run(CancellationToken::new()), lose_the_job_lane)
+        })
+        .await
+        .expect("a session that cannot carry job reports ends while the socket stays open");
+        ended.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_job_finished_while_detached_reports_after_running_jobs() {
+        let base = tempfile::tempdir().unwrap();
+        let worker = disconnected_worker(base.path());
         let finished = worker.jobs.register(
             "build:1".to_owned(),
             JobKind::Build,
@@ -384,16 +432,7 @@ mod tests {
             .send(("build:1".to_owned(), Ok(())))
             .unwrap();
 
-        let server = MockProtoServer::bind().await;
-        let (mut sc, conn) = tokio::join!(
-            async {
-                let mut sc = server.accept().await;
-                sc.handshake(GradientCapabilities::default()).await.unwrap();
-                sc
-            },
-            worker.reconnect(server.url())
-        );
-        let worker = worker.into_connected(conn.unwrap());
+        let (mut sc, worker) = reconnected(worker).await;
 
         let script = async {
             let listed = sc

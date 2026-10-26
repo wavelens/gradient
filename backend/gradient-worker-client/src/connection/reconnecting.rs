@@ -138,6 +138,20 @@ impl ReconnectingWriter {
         self.inner.session.borrow().version
     }
 
+    pub fn queued_final_reports(&self) -> Vec<String> {
+        match &*self.inner.state.lock() {
+            State::Detached { queue } => queue
+                .iter()
+                .filter_map(|msg| match msg {
+                    ClientMessage::JobCompleted { assignment_id, .. }
+                    | ClientMessage::JobFailed { assignment_id, .. } => Some(assignment_id.clone()),
+                    _ => None,
+                })
+                .collect(),
+            State::Attached { .. } => Vec::new(),
+        }
+    }
+
     pub fn current_session(&self) -> Option<u64> {
         let current = *self.inner.session.borrow();
         current.version.map(|_| current.number)

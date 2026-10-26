@@ -30,7 +30,7 @@ use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
 use gradient_worker_client::correlation::AssignmentHandle;
 
 use super::cluster::{ClusterChannels, ClusterHolds, HeldJob};
-use super::jobs::WorkerJobs;
+use super::jobs::{WorkerJobs, report_when_drained};
 use super::scoring::spawn_scoring_task;
 
 const STOP_BUDGET: Duration = Duration::from_secs(5);
@@ -44,6 +44,7 @@ pub(super) struct LoopEnd {
 pub(super) async fn run_message_loop(
     mut state: MessageLoopState,
     mut reader: ProtoReader,
+    job_session: u64,
     stop: CancellationToken,
 ) -> Result<LoopEnd> {
     let jobs = Arc::clone(&state.jobs);
@@ -73,6 +74,11 @@ pub(super) async fn run_message_loop(
 
             () = stop_budget_elapsed(stop_deadline) => {
                 warn!(active = state.jobs.registry.lock().len(), "stop budget expired; closing without the remaining job reports");
+                break;
+            }
+
+            () = jobs.writer.lost(job_session) => {
+                warn!("a job report could not be sent; ending the session");
                 break;
             }
 
@@ -413,19 +419,21 @@ impl MessageLoopState {
         match result {
             Ok(()) => {
                 info!(%job_id, phases = spans.len(), "job completed");
+                let completed = ClientMessage::JobCompleted {
+                    job_id,
+                    assignment_id,
+                    spans,
+                    elapsed_ms,
+                };
                 self.jobs
-                    .writer
-                    .send(ClientMessage::JobCompleted {
-                        job_id,
-                        assignment_id,
-                        spans,
-                        elapsed_ms,
-                    })
-                    .await?;
+                    .send_final_report(completed_kind.clone(), completed)
+                    .await;
             }
             Err(e) => {
-                self.report_failure(job_id, assignment_id, &e, spans, elapsed_ms)
-                    .await?;
+                let failed = self.failure_report(job_id, assignment_id, &e, spans, elapsed_ms);
+                self.jobs
+                    .send_final_report(completed_kind.clone(), failed)
+                    .await;
             }
         }
 
@@ -439,14 +447,14 @@ impl MessageLoopState {
         Ok(())
     }
 
-    async fn report_failure(
+    fn failure_report(
         &self,
         job_id: String,
         assignment_id: String,
         e: &anyhow::Error,
         spans: Vec<JobPhaseSpan>,
         elapsed_ms: u64,
-    ) -> Result<()> {
+    ) -> ClientMessage {
         let (kind, missing_paths) = crate::executor::failure::wire_failure(e);
         let kind = if self.stopping {
             BuildFailureKind::Canceled
@@ -465,19 +473,16 @@ impl MessageLoopState {
                 error
             }
         };
-        self.jobs
-            .writer
-            .send(ClientMessage::JobFailed {
-                job_id,
-                assignment_id,
-                error,
-                kind,
-                missing_paths,
-                spans,
-                elapsed_ms,
-                metrics: crate::executor::failure::failure_metrics(e),
-            })
-            .await
+        ClientMessage::JobFailed {
+            job_id,
+            assignment_id,
+            error,
+            kind,
+            missing_paths,
+            spans,
+            elapsed_ms,
+            metrics: crate::executor::failure::failure_metrics(e),
+        }
     }
 
     /// A failed send is ending the session.
@@ -703,8 +708,7 @@ impl MessageLoopState {
         )]
         tokio::spawn(async move {
             let result = run_job(executor, job, &mut updater, &credentials, abort, split).await;
-            log.drained().await;
-            let _ = done_tx.send((job_id, result));
+            report_when_drained(log, done_tx, (job_id, result)).await;
         });
     }
 
