@@ -233,6 +233,12 @@
 | `reverseProxy.nginx.enable` | bool | `!reverseProxy.caddy.enable` | - | Whether to enable an nginx virtual host for Gradient. |
 | `reverseProxy.nginx.manageTls` | bool | `true` | - | Whether to let nginx obtain and present the TLS certificate itself through the virtual host's `enableACME` and `forceSSL` settings. Disable it for upstream proxies (Traefik, Cloudflare, load balancers) that terminate TLS and forward plain HTTP to nginx. Keep `useTls` enabled in that case for `https://` URLs and `Secure` session cookies. Has no effect with `useTls` disabled. |
 
+## `runner`
+
+| Option | Type | Default | Env | Description |
+|---|---|---|---|---|
+| `runner.enable` | bool | `true` | `GRADIENT_RUNNER_ENABLE` | Whether to enable runner jobs. When disabled, runner entry points fail with a message instead of starting a job. |
+
 ## `s3`
 
 | Option | Type | Default | Env | Description |

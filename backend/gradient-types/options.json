@@ -1466,5 +1466,18 @@
     "description": "",
     "default": null,
     "values": []
+  },
+  {
+    "group": "runner",
+    "field": "enable",
+    "flag": "runner-enable",
+    "env": "GRADIENT_RUNNER_ENABLE",
+    "type": "bool",
+    "description": "Whether to enable runner jobs. When disabled, runner entry points fail with a message\ninstead of starting a job.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
   }
 ]

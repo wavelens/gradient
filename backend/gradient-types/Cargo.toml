@@ -20,6 +20,7 @@ workspace = true
 [dependencies]
 gradient-derive = { workspace = true }
 gradient-entity = { workspace = true }
+gradient-wire = { workspace = true }
 anyhow     = { workspace = true }
 base64     = { workspace = true }
 chrono     = { workspace = true }

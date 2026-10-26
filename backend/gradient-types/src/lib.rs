@@ -20,6 +20,7 @@ pub mod ids;
 pub mod input;
 pub mod log_api;
 pub mod permissions;
+pub mod runner;
 pub mod secret;
 pub mod triggers;
 pub mod waiting_reason;
@@ -33,9 +34,9 @@ pub use self::actions::{ActionConfig, ActionType, PatchGeneratorKind, PrGranular
 pub use self::cli::{
     BuildArgs, CacheArgs, CidrParseError, CreatePermission, DatabaseArgs, EmailArgs, EvalArgs,
     GcArgs, GitHubAppArgs, GradientCiArgs, HttpArgs, LogArgs, MetricsArgs, NarArgs, OidcArgs,
-    PermissionsArgs, ProtoArgs, PullRequestsArgs, RegistrationArgs, S3Args, SchedulerArgs,
-    ScimArgs, ScoringPolicy, SecretsArgs, SentryArgs, ServerArgs, SshArgs, StateArgs, UploadArgs,
-    in_any, parse_cidr_list,
+    PermissionsArgs, ProtoArgs, PullRequestsArgs, RegistrationArgs, RunnerArgs, S3Args,
+    SchedulerArgs, ScimArgs, ScoringPolicy, SecretsArgs, SentryArgs, ServerArgs, SshArgs,
+    StateArgs, UploadArgs, in_any, parse_cidr_list,
 };
 pub use self::config::{
     ConfigError, EmailConfig, GitHubAppConfig, MetricsConfig, NetworkConfig, OidcConfig,
@@ -55,7 +56,7 @@ pub use self::log_api::{LogChunkIndex, LogChunkMeta, LogSearchDone, LogSearchHit
 pub use self::nix_cache::*;
 pub use self::secret::{SecretBytes, SecretString};
 pub use self::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerConfigError, TriggerType};
-pub use self::waiting_reason::{EvalCapability, UnmetRequirement, WaitingReason};
+pub use self::waiting_reason::{EvalCapability, RunnerUnmet, UnmetRequirement, WaitingReason};
 pub use self::wildcard::*;
 
 use chrono::NaiveDateTime;
@@ -127,6 +128,8 @@ pub struct Cli {
     pub github_app: GitHubAppArgs,
     #[command(flatten)]
     pub ssh: SshArgs,
+    #[command(flatten)]
+    pub runner: RunnerArgs,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

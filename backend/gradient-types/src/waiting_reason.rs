@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_wire::types::DeviceRequest;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -12,6 +13,7 @@ pub enum EvalCapability {
     Network,
     Secrets,
     Eval,
+    Exec,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -42,6 +44,46 @@ pub enum WaitingReason {
         pending_shared_builds: u32,
         failing_upstream_caches: Vec<String>,
     },
+    RunnerWorkers {
+        unmet: RunnerUnmet,
+        connected_workers: u32,
+        matching_workers: u32,
+    },
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct RunnerUnmet {
+    pub labels: Vec<String>,
+    pub devices: Vec<DeviceRequest>,
+    pub mounts: Vec<String>,
+    pub nodes: u32,
+    pub custom_image: bool,
+}
+
+impl RunnerUnmet {
+    fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+impl std::fmt::Display for RunnerUnmet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut parts: Vec<String> = self.labels.iter().map(|l| format!("label:{l}")).collect();
+        parts.sort();
+        let mut devices: Vec<String> = self.devices.iter().map(|d| format!("device:{d}")).collect();
+        devices.sort();
+        parts.extend(devices);
+        let mut mounts: Vec<String> = self.mounts.iter().map(|m| format!("mount:{m}")).collect();
+        mounts.sort();
+        parts.extend(mounts);
+        if self.nodes > 0 {
+            parts.push(format!("nodes:{}", self.nodes));
+        }
+        if self.custom_image {
+            parts.push("custom-image".to_owned());
+        }
+        f.write_str(&parts.join(","))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -132,7 +174,11 @@ impl WaitingReason {
                 EvalCapability::Network => "network".to_owned(),
                 EvalCapability::Secrets => "secrets".to_owned(),
                 EvalCapability::Eval => "eval".to_owned(),
+                EvalCapability::Exec => "exec".to_owned(),
             }),
+            Self::RunnerWorkers { unmet, .. } if !unmet.is_empty() => {
+                Some(format!("runner[{unmet}]"))
+            }
             _ => None,
         }
     }
@@ -179,5 +225,28 @@ mod tests {
         assert_eq!(a.worker_gap(), b.worker_gap());
         assert_eq!(WaitingReason::workers(vec![], 1, vec![]).worker_gap(), None);
         assert_eq!(WaitingReason::Draining.worker_gap(), None);
+    }
+
+    #[test]
+    fn a_runner_workers_row_round_trips() {
+        let reason = WaitingReason::RunnerWorkers {
+            unmet: RunnerUnmet {
+                labels: vec!["3d-printer".into()],
+                devices: vec![DeviceRequest {
+                    name: "gpu:h100".into(),
+                    count: 8,
+                }],
+                ..Default::default()
+            },
+            connected_workers: 2,
+            matching_workers: 0,
+        };
+        assert_eq!(WaitingReason::from_json(&reason.to_json()), Some(reason));
+        assert_eq!(
+            WaitingReason::eval_workers(EvalCapability::Exec, 1)
+                .worker_gap()
+                .as_deref(),
+            Some("exec")
+        );
     }
 }

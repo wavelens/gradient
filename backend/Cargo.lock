@@ -3138,6 +3138,7 @@ dependencies = [
  "cron",
  "gradient-derive",
  "gradient-entity",
+ "gradient-wire",
  "hex",
  "ipnet",
  "libc",

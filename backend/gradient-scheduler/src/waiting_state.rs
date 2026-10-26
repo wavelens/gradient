@@ -735,6 +735,7 @@ struct ProjectWorkerCounts {
     eval: usize,
     network: usize,
     secrets: usize,
+    exec: usize,
     connected: u32,
 }
 
@@ -748,6 +749,7 @@ impl ProjectWorkerCounts {
                 network: counts.network + usize::from(w.capabilities.network),
                 secrets: counts.secrets
                     + usize::from(w.capabilities.network && w.capabilities.secrets),
+                exec: counts.exec + usize::from(w.capabilities.exec),
                 connected: counts.connected + 1,
             })
     }
@@ -757,6 +759,7 @@ impl ProjectWorkerCounts {
             EvalCapability::Network => self.network > 0,
             EvalCapability::Secrets => self.secrets > 0,
             EvalCapability::Eval => self.eval > 0,
+            EvalCapability::Exec => self.exec > 0,
         }
     }
 }
@@ -869,6 +872,7 @@ mod tests {
             eval,
             network,
             secrets: network,
+            exec: 0,
             connected,
         }
     }

@@ -8,7 +8,7 @@ use super::Cli;
 use super::cli::{
     BuildArgs, CacheArgs, DatabaseArgs, EvalArgs, GcArgs, GradientCiArgs, HttpArgs, LogArgs,
     MetricsArgs, NarArgs, PermissionsArgs, ProtoArgs, PullRequestsArgs, RegistrationArgs,
-    SchedulerArgs, SecretsArgs, SentryArgs, ServerArgs, SshArgs, StateArgs, UploadArgs,
+    RunnerArgs, SchedulerArgs, SecretsArgs, SentryArgs, ServerArgs, SshArgs, StateArgs, UploadArgs,
 };
 use ipnet::IpNet;
 
@@ -186,6 +186,7 @@ pub struct RuntimeConfig {
     pub eval: EvalArgs,
     pub build: BuildArgs,
     pub scheduler: SchedulerArgs,
+    pub runner: RunnerArgs,
     pub oidc: Option<OidcConfig>,
     pub scim: Option<ScimConfig>,
     pub email: Option<EmailConfig>,
@@ -221,6 +222,7 @@ impl RuntimeConfig {
             eval: cli.eval.clone(),
             build: cli.build.clone(),
             scheduler: cli.scheduler.clone(),
+            runner: cli.runner.clone(),
             oidc: cli.oidc_config(),
             scim: cli.scim_config(),
             email: cli.email_config(),

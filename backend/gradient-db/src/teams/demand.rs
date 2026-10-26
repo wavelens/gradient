@@ -67,6 +67,7 @@ fn aggregate(reasons: impl IntoIterator<Item = WaitingReason>) -> TeamDemand {
                 EvalCapability::Network => demand.network += 1,
                 EvalCapability::Secrets => demand.secrets += 1,
                 EvalCapability::Eval => demand.eval += 1,
+                EvalCapability::Exec => {}
             },
             _ => {}
         }
