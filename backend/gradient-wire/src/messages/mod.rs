@@ -8,15 +8,15 @@ pub mod client;
 pub mod server;
 
 pub use crate::types::{
-    BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildProgressPhase,
-    BuildRequirement, BuildSpec, BuildSpecKind, BuildStage, BumpedInputWire, CacheInfo, CachedPath,
-    CandidateScore, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
-    DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalMessageLevel,
-    EvalProgress, EvalSetCost, EvalShard, EvalShardOutcome, EvalShardSpec, EvalStatsReport,
-    EvalSubtreeCost, FinishedShard, FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource,
-    FlakeStep, GradientCapabilities, InputFetch, InputFetchState, InputUpdateSpec, Job,
-    JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode, Realisation,
-    RequiredPath,
+    AssignmentId, BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct,
+    BuildProgressPhase, BuildRequirement, BuildSpec, BuildSpecKind, BuildStage, BumpedInputWire,
+    CacheInfo, CachedPath, CandidateScore, ClusterAddress, ClusterMembership, ClusterPeer,
+    CredentialKind, DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome,
+    EvalMessageLevel, EvalProgress, EvalSetCost, EvalShard, EvalShardOutcome, EvalShardSpec,
+    EvalStatsReport, EvalSubtreeCost, FinishedShard, FlakeInputOverride, FlakeJob, FlakeOutputNode,
+    FlakeSource, FlakeStep, GradientCapabilities, InputFetch, InputFetchState, InputUpdateSpec,
+    Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode, Realisation,
+    RequiredPath, RunningAssignment,
 };
 pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, SegmentFetch,
@@ -30,6 +30,8 @@ use crate::codec::{Proto, max};
 pub const PROTO_VERSIONS: std::ops::RangeInclusive<u16> =
     max(ClientMessage::OLDEST, ServerMessage::OLDEST)
         ..=max(ClientMessage::NEWEST, ServerMessage::NEWEST);
+
+pub const RUNNING_JOBS_SINCE: u16 = 42;
 
 pub const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 

@@ -682,6 +682,14 @@ pub enum JobKind {
     Build,
 }
 
+pub type AssignmentId = String;
+
+#[derive(Proto, Debug, Clone, PartialEq)]
+pub struct RunningAssignment {
+    pub assignment_id: AssignmentId,
+    pub kind: JobKind,
+}
+
 #[derive(Proto, Debug, Clone, PartialEq, Eq)]
 pub struct ClusterAddress {
     pub role: String,

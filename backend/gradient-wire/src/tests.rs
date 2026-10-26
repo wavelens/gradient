@@ -85,3 +85,45 @@ fn split_evaluation_messages_round_trip_and_need_proto_40() {
         assert!(to_bytes(&reply, 39).is_err());
     }
 }
+
+#[test]
+fn running_jobs_round_trips_and_is_refused_to_an_older_peer() {
+    use crate::codec::{EncodeError, from_bytes, to_bytes};
+    use crate::messages::{ClientMessage, JobKind, RUNNING_JOBS_SINCE, RunningAssignment};
+
+    let msg = ClientMessage::RunningJobs {
+        assignments: vec![RunningAssignment {
+            assignment_id: "a1".into(),
+            kind: JobKind::Build,
+        }],
+    };
+    let bytes = to_bytes(&msg, RUNNING_JOBS_SINCE).unwrap();
+    assert_eq!(
+        from_bytes::<ClientMessage>(bytes, RUNNING_JOBS_SINCE).unwrap(),
+        msg
+    );
+    assert!(matches!(
+        to_bytes(&msg, RUNNING_JOBS_SINCE - 1),
+        Err(EncodeError::NewerThanPeer { .. })
+    ));
+}
+
+#[test]
+fn worker_metrics_from_an_older_peer_carry_no_lifetime() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{ClientMessage, RUNNING_JOBS_SINCE};
+
+    let metrics = |lifetime_left_secs| ClientMessage::WorkerMetrics {
+        cpu_usage_pct: 1.0,
+        ram_free_mb: 2,
+        disk_speed_mbps: None,
+        upload_speed_mbps: None,
+        download_speed_mbps: None,
+        build_peak_ram_mb: None,
+        lifetime_left_secs,
+    };
+    let old = RUNNING_JOBS_SINCE - 1;
+    let decoded =
+        from_bytes::<ClientMessage>(to_bytes(&metrics(Some(60)), old).unwrap(), old).unwrap();
+    assert_eq!(decoded, metrics(None));
+}

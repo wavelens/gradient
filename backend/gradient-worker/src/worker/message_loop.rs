@@ -1107,6 +1107,7 @@ fn send_live_metrics(writer: &ProtoWriter, daemon_cgroup: Option<std::path::Path
                 upload_speed_mbps: gradient_worker_client::throughput::UPLOAD.current(),
                 download_speed_mbps: gradient_worker_client::throughput::DOWNLOAD.current(),
                 build_peak_ram_mb,
+                lifetime_left_secs: None,
             })
             .await
         {

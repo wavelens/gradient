@@ -219,6 +219,7 @@ impl<'a> InboundContext<'a> {
                 upload_speed_mbps,
                 download_speed_mbps,
                 build_peak_ram_mb,
+                lifetime_left_secs: _,
             } => {
                 self.spawn_worker_metrics(WorkerMetrics {
                     cpu_usage_pct,
@@ -546,6 +547,7 @@ impl<'a> InboundContext<'a> {
                 self.on_log_chunk(&job_id, &data).await;
                 true
             }
+            ClientMessage::RunningJobs { .. } => true,
         }
     }
 

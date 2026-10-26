@@ -10,7 +10,8 @@ use crate::codec::Proto;
 use crate::types::{
     BuildFailureKind, BuildMetrics, BuildProgressPhase, CandidateScore, ClusterAddress,
     EvalMessageLevel, EvalProgress, EvalShardSpec, FinishedShard, GradientCapabilities,
-    InputOutcome, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode, UploadMetadata, UploadObject,
+    InputOutcome, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode, RunningAssignment,
+    UploadMetadata, UploadObject,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -53,6 +54,8 @@ pub enum ClientMessage {
         download_speed_mbps: Option<f32>,
         #[proto(33, default)]
         build_peak_ram_mb: Option<Vec<(String, u64)>>,
+        #[proto(42, default)]
+        lifetime_left_secs: Option<u64>,
     },
 
     RequestJobList,
@@ -238,6 +241,11 @@ pub enum ClientMessage {
         have_source: bool,
         finished: Option<FinishedShard>,
     },
+
+    #[proto(42)]
+    RunningJobs {
+        assignments: Vec<RunningAssignment>,
+    },
 }
 
 impl ClientMessage {
@@ -303,6 +311,7 @@ impl ClientMessage {
             ClientMessage::EvalSourceReady { .. } => "EvalSourceReady",
             ClientMessage::EvalShardsPlanned { .. } => "EvalShardsPlanned",
             ClientMessage::EvalShardRequest { .. } => "EvalShardRequest",
+            ClientMessage::RunningJobs { .. } => "RunningJobs",
         }
     }
 
