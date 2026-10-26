@@ -139,6 +139,7 @@ pub async fn get_health() -> WebResult<Json<BaseResponse<String>>> {
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct ServerConfig {
     pub version: String,
+    pub commit: Option<String>,
     pub oidc_enabled: bool,
     pub oidc_required: bool,
     pub registration_enabled: bool,
@@ -173,6 +174,7 @@ pub async fn get_config(
         error: false,
         message: ServerConfig {
             version: env!("CARGO_PKG_VERSION").to_string(),
+            commit: option_env!("GRADIENT_GIT_REV").map(str::to_owned),
             oidc_enabled: state.config.oidc.is_some(),
             oidc_required: state.config.oidc.as_ref().is_some_and(|o| o.required),
             registration_enabled: state.config.registration.enable

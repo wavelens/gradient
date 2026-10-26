@@ -24,6 +24,7 @@
 , xz
 , zlib
 , zstd
+, gitRev ? null
 }:
 let
   testStore = import ../scripts/store.nix { inherit pkgs; };
@@ -122,7 +123,7 @@ let
     buildPhaseCargoCommand = "cargoWithProfile build $cargoExtraArgs";
   });
 in
-craneLib.buildPackage (commonArgs // rec {
+craneLib.buildPackage (commonArgs // lib.optionalAttrs (gitRev != null) { GRADIENT_GIT_REV = gitRev; } // rec {
   inherit cargoArtifacts;
   pname = "gradient";
   version = "2.0.1";

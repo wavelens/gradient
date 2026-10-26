@@ -15,6 +15,7 @@ export class ConfigService {
   private http = inject(HttpClient);
 
   backendVersion = '';
+  backendCommit: string | null = null;
   frontendVersion = environment.version;
   oidcEnabled = false;
   oidcRequired = false;
@@ -52,6 +53,7 @@ export class ConfigService {
       .then((res) => {
         if (!res.error) {
           this.backendVersion = res.message.version;
+          this.backendCommit = res.message.commit ?? null;
           this.oidcEnabled = res.message.oidc_enabled;
           this.oidcRequired = res.message.oidc_required;
           this.registrationDisabled = !res.message.registration_enabled;
