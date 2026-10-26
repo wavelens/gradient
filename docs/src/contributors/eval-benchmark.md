@@ -38,6 +38,37 @@ cat result/summary.txt
 - `summary.txt` covers only the `cold-clean` and `warm-clean` passes. Perf, strace and `auto_explain` distort timings.
 - The test can fail only on a failed evaluation or a missing capture file. No timing thresholds apply.
 
+## Multinode Benchmark
+
+Use `gradient-evalbench-multinode` to measure the speedup of [split evaluations](scheduler/clusters.md#split-evaluations) on 1 to 4 eval workers.
+
+```sh
+nix build .#gradient-evalbench-multinode -L
+cat result/summary.txt
+```
+
+| Part | Setup |
+|---|---|
+| Workers | Four eval-only VMs with 4 cores and 6 GiB each, `eval.maxConcurrent = 1` |
+| Links | `netem` on every worker: 40 ms delay and 100 Mbit in each direction, 80 ms round trip |
+| Large flake | `hydraJobs.perl` and `hydraJobs.python` from nixpkgs, task wildcard `hydraJobs.**` |
+| Small flake | The e2e hello flake |
+
+- Cost estimates come from a warm-up evaluation of the large flake on a single worker.
+- Measured rounds commit a changed comment, wipe the worker eval caches, collect garbage, then stop the surplus workers.
+- Wall clock measures the first start to the last end of the `eval_flake` and `eval_derivations` phases across all jobs.
+- Statements come from `pg_stat_statements` calls of the `gradient` role, reset before each evaluation.
+
+| Target | Check |
+|---|---|
+| Speedup | Wall clock on 1 worker divided by the wall clock on N workers, at least 0.8 x N, on more than one job |
+| Statements | At most 10 extra statements per finished shard, compared to 1 worker |
+| Small flake | One job with 4 workers up, at most 10% slower than standalone |
+
+- A missed target can fail the test. The failure can only occur after `summary.txt` and `evalbench-multinode.tar.gz` exist.
+- Builders need 18 CPUs minimum. The QEMU threads of each VM pin to separate cores. Fewer CPUs cause an immediate test failure.
+- The report check can run with `nix build .#checks.x86_64-linux.evalbench-multinode-report`.
+
 ## Report
 
 The `gradient-evalbench-inspector` tool turn a bundle into a single self-contained HTML page. Each chart can also appear as a standalone SVG next to that page. The benchmark itself place its bundle in the `result/report/` directory. A downloaded bundle work with the same tool.
