@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use super::dependencies::{EvalDependencySource, Imports};
 use super::eval_cache_sharing::{EVAL_CACHE_FLUSH_INTERVAL, share_eval_cache};
-use super::progress_report::{ChangeReporter, thunk_progress};
+use super::progress_report::report_thunks_during;
 use crate::nix::wildcard_walk;
 use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
@@ -201,21 +201,18 @@ pub async fn evaluate_derivations(
     let thunks = evaluator.resolver.live_thunks();
     thunks.reset();
     let sink = updater.eval_progress_sink();
-    let snapshot = || thunk_progress(thunks.total());
-    let mut reporter = ChangeReporter::default();
-    let evaluation = async {
-        tokio::select! {
-            evaluated = evaluate_derivations_with(
-                &*evaluator.resolver,
-                &FsDrvReader,
-                job,
-                local_flake_path,
-                updater,
-                abort,
-            ) => evaluated,
-            never = reporter.run(&*sink, snapshot) => match never {},
-        }
-    };
+    let evaluation = report_thunks_during(
+        &*sink,
+        || thunks.total(),
+        evaluate_derivations_with(
+            &*evaluator.resolver,
+            &FsDrvReader,
+            job,
+            local_flake_path,
+            updater,
+            abort,
+        ),
+    );
     let evaluated = match sharing.as_mut() {
         Some(sharing) => {
             sharing
@@ -224,7 +221,6 @@ pub async fn evaluate_derivations(
         }
         None => evaluation.await,
     };
-    reporter.flush(&*sink, &snapshot).await;
     let EvalOutcome { flake_nodes } = match evaluated {
         Ok(outcome) => outcome,
         Err(e) => {

@@ -26,11 +26,13 @@ use gradient_graph::Graph;
 use gradient_notify::EmailSender;
 use gradient_state::PendingProjectMemberships;
 use gradient_storage::{LogStorage, NarStore, StorageCtx};
+use gradient_types::ids::ClusterAttemptId;
 use gradient_types::{
     BuildProgress, DerivationBuildId, EvaluationId, EvaluationProgress, RuntimeConfig, SecretString,
 };
 use gradient_util::debounce::Debounce;
 use gradient_util::latest::Latest;
+use gradient_util::member_sums::MemberSums;
 use gradient_util::shutdown::Shutdown;
 
 use crate::ServerExtensions;
@@ -42,6 +44,7 @@ pub struct InstanceMemory {
     pub cache_traffic: Arc<CacheTraffic>,
     pub build_progress: Arc<Latest<DerivationBuildId, BuildProgress>>,
     pub eval_progress: Arc<Latest<EvaluationId, EvaluationProgress>>,
+    pub eval_member_thunks: Arc<EvalMemberThunks>,
     pub build_status_counts: Arc<BuildStatusCountsCache>,
     pub github_app_install_url: Arc<tokio::sync::OnceCell<String>>,
     pub manifest_state: ManifestStateStore,
@@ -93,6 +96,12 @@ pub const EVAL_PROGRESS_TTL: Duration = Duration::from_secs(60);
 
 pub fn eval_progress() -> Arc<Latest<EvaluationId, EvaluationProgress>> {
     Arc::new(Latest::new(EVAL_PROGRESS_TTL))
+}
+
+pub type EvalMemberThunks = MemberSums<EvaluationId, Option<ClusterAttemptId>>;
+
+pub fn eval_member_thunks() -> Arc<EvalMemberThunks> {
+    Arc::new(MemberSums::new(EVAL_PROGRESS_TTL))
 }
 
 pub fn build_status_counts() -> Arc<BuildStatusCountsCache> {

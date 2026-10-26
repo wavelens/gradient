@@ -12,6 +12,7 @@ pub mod hydra;
 pub mod latest;
 pub mod log_lines;
 pub mod logging;
+pub mod member_sums;
 pub mod metrics;
 pub mod nar;
 pub mod net;

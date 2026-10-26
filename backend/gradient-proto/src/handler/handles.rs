@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use gradient_core::ServerState;
+use gradient_core::{EvalMemberThunks, ServerState};
 use gradient_db::metrics::cache_traffic::CacheTraffic;
 use gradient_db::{CacheDb, DbContext};
 use gradient_graph::Graph;
@@ -26,6 +26,7 @@ pub struct SessionHandles {
     pub cache_traffic: Arc<CacheTraffic>,
     pub build_progress: Arc<Latest<DerivationBuildId, BuildProgress>>,
     pub eval_progress: Arc<Latest<EvaluationId, EvaluationProgress>>,
+    pub eval_member_thunks: Arc<EvalMemberThunks>,
 }
 
 impl SessionHandles {
@@ -40,6 +41,7 @@ impl SessionHandles {
             cache_traffic: Arc::clone(&state.memory.cache_traffic),
             build_progress: Arc::clone(&state.memory.build_progress),
             eval_progress: Arc::clone(&state.memory.eval_progress),
+            eval_member_thunks: Arc::clone(&state.memory.eval_member_thunks),
         }
     }
 }

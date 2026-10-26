@@ -13,8 +13,9 @@ pub mod upstream_source;
 pub use extensions::ServerExtensions;
 pub use gradient_graph::Graph;
 pub use state_root::{
-    AppState, BUILD_PROGRESS_TTL, EVAL_PROGRESS_TTL, InstanceMemory, LAST_USED_STAMP_INTERVAL,
-    ServerState, build_progress, build_status_counts, eval_progress, last_used_stamps,
+    AppState, BUILD_PROGRESS_TTL, EVAL_PROGRESS_TTL, EvalMemberThunks, InstanceMemory,
+    LAST_USED_STAMP_INTERVAL, ServerState, build_progress, build_status_counts, eval_member_thunks,
+    eval_progress, last_used_stamps,
 };
 
 use gradient_db::{
@@ -235,6 +236,7 @@ pub async fn init_state(
             cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
             build_progress: build_progress(),
             eval_progress: eval_progress(),
+            eval_member_thunks: eval_member_thunks(),
             build_status_counts: build_status_counts(),
             github_app_install_url: Default::default(),
             manifest_state: Default::default(),

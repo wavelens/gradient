@@ -129,6 +129,10 @@ impl ActiveJobs {
         }
     }
 
+    pub(crate) fn attempt(&self, job_id: &str) -> Option<gradient_types::ids::ClusterAttemptId> {
+        self.0.lock().get(job_id)?.cluster
+    }
+
     pub(crate) fn remove_attempt(
         &self,
         attempt: gradient_types::ids::ClusterAttemptId,
@@ -1064,10 +1068,22 @@ impl<'a> InboundContext<'a> {
         let Some((evaluation_id, task)) = self.active.eval(job_id) else {
             return;
         };
-        let progress = evaluation_progress(progress);
+        let now = Instant::now();
+        let progress = match evaluation_progress(progress) {
+            EvaluationProgress::Evaluating { thunks } => EvaluationProgress::Evaluating {
+                thunks: self.handles.eval_member_thunks.record(
+                    evaluation_id,
+                    self.active.attempt(job_id),
+                    job_id,
+                    thunks,
+                    now,
+                ),
+            },
+            fetching => fetching,
+        };
         self.handles
             .eval_progress
-            .set(evaluation_id, progress.clone(), Instant::now());
+            .set(evaluation_id, progress.clone(), now);
         self.handles.db.events.publish(evaluation::Activity {
             evaluation_id,
             task,
@@ -1840,6 +1856,71 @@ mod assignment_response_tests {
             other => panic!("expected evaluation.activity, got {other:?}"),
         }
         assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn the_counter_sums_the_latest_count_of_every_member() {
+        let state = test_state(empty_db());
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        let writer = detached_writer();
+        let semaphore = Arc::new(Semaphore::new(1));
+        let job_events = JobEvents::spawn(
+            &state.shutdown,
+            "w1",
+            SchedulerJobEvents {
+                scheduler: Arc::clone(&scheduler),
+                writer: writer.clone(),
+                peer_id: "w1".into(),
+            },
+        );
+        let pending = pending_eval();
+        let PendingJob::Eval(job) = &pending else {
+            unreachable!()
+        };
+        let evaluation_id = job.evaluation_id;
+        let attempt = Some(gradient_types::ids::ClusterAttemptId::now_v7());
+        let member = |pending: PendingJob| ActiveJob {
+            assignment_id: DispatchedJobId::now_v7(),
+            pending,
+            cluster: attempt,
+        };
+        let active = ActiveJobs::from(HashMap::from([
+            ("member-a".to_owned(), member(pending.clone())),
+            ("member-b".to_owned(), member(pending)),
+        ]));
+        let mut events = state.events.subscribe();
+        let ctx = InboundContext {
+            writer: &writer,
+            handles: &SessionHandles::from_state(&state),
+            scheduler: &scheduler,
+            peer_id: "w1",
+            nar_serve_semaphore: &semaphore,
+            active: &active,
+            job_events: &job_events,
+            logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
+            dialed: None,
+        };
+
+        ctx.on_eval_progress("member-a", WireEvalProgress::Evaluating { thunks: 10 });
+        ctx.on_eval_progress("member-b", WireEvalProgress::Evaluating { thunks: 5 });
+        ctx.on_eval_progress("member-a", WireEvalProgress::Evaluating { thunks: 12 });
+
+        let mut published = Vec::new();
+        while let Ok(env) = events.try_recv() {
+            if let Event::EvaluationActivity(sent) = env.event.clone()
+                && let EvaluationProgress::Evaluating { thunks } = sent.progress
+            {
+                published.push(thunks);
+            }
+        }
+        assert_eq!(published, vec![10, 15, 17]);
+        assert_eq!(
+            state
+                .memory
+                .eval_progress
+                .get(&evaluation_id, Instant::now()),
+            Some(EvaluationProgress::Evaluating { thunks: 17 })
+        );
     }
 
     #[tokio::test]
