@@ -17,8 +17,9 @@ in builtins.unsafeDiscardStringContext (builtins.toJSON {
   block = removeAttrs g [ "image" "sops" ];
   program = app.program;
   programDrvs = builtins.filter (k: ctx.${k} ? outputs) (builtins.attrNames ctx);
-  image = if g ? image then g.image.config.system.build.toplevel.drvPath else null;
 })"#;
+
+const IMAGE_TOPLEVEL: [&str; 4] = ["config", "system", "build", "toplevel"];
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,7 +27,6 @@ struct AppJson {
     block: serde_json::Value,
     program: String,
     program_drvs: Vec<String>,
-    image: Option<String>,
 }
 
 pub fn is_runner_app(cursor: &AttrCursor) -> Result<bool> {
@@ -48,10 +48,35 @@ pub fn is_runner_app(cursor: &AttrCursor) -> Result<bool> {
 pub fn read_runner_app(cursor: &AttrCursor, state: &EvalState) -> Result<RunnerApp> {
     let read = state.eval_from_string(RUNNER_APP_EXPR, "/")?;
     let json = read.call(&cursor.value(state)?)?.as_string()?;
-    runner_app_from_json(&json).map_err(|e| anyhow!(e))
+    let image = image_drv(cursor, state)?;
+    runner_app_from_json(&json, image.as_deref()).map_err(|e| anyhow!(e))
 }
 
-pub fn runner_app_from_json(json: &str) -> Result<RunnerApp, String> {
+fn image_drv(cursor: &AttrCursor, state: &EvalState) -> Result<Option<String>> {
+    let Some(mut at) = cursor
+        .maybe_get_attr("passthru")?
+        .map(|passthru| passthru.maybe_get_attr("gradient"))
+        .transpose()?
+        .flatten()
+        .map(|gradient| gradient.maybe_get_attr("image"))
+        .transpose()?
+        .flatten()
+    else {
+        return Ok(None);
+    };
+    for name in IMAGE_TOPLEVEL {
+        at = at.maybe_get_attr(name)?.ok_or_else(|| {
+            anyhow!(
+                "passthru.gradient: image has no {}",
+                IMAGE_TOPLEVEL.join(".")
+            )
+        })?;
+    }
+
+    Ok(Some(at.drv_path(state)?))
+}
+
+pub fn runner_app_from_json(json: &str, image_drv: Option<&str>) -> Result<RunnerApp, String> {
     let app: AppJson = serde_json::from_str(json)
         .map_err(|e| format!("passthru.gradient: unreadable app: {e}"))?;
     if !app.program.starts_with("/nix/store/") {
@@ -72,7 +97,7 @@ pub fn runner_app_from_json(json: &str) -> Result<RunnerApp, String> {
     Ok(RunnerApp {
         block: app.block.to_string(),
         program_drv: strip_nix_store_prefix(program_drv),
-        image_drv: app.image.as_deref().map(strip_nix_store_prefix),
+        image_drv: image_drv.map(strip_nix_store_prefix),
         program: app.program,
     })
 }
@@ -83,23 +108,23 @@ mod tests {
 
     #[test]
     fn a_program_outside_the_store_is_a_field_error() {
-        let json = r#"{"block":{},"program":"/bin/sh","programDrvs":[],"image":null}"#;
+        let json = r#"{"block":{},"program":"/bin/sh","programDrvs":[]}"#;
         assert_eq!(
-            runner_app_from_json(json).unwrap_err(),
+            runner_app_from_json(json, None).unwrap_err(),
             "passthru.gradient: program \"/bin/sh\" is not a store path"
         );
     }
 
     #[test]
     fn a_program_must_come_from_exactly_one_derivation() {
-        let two = r#"{"block":{},"program":"/nix/store/aaaa-x/bin/x","programDrvs":["/nix/store/a.drv","/nix/store/b.drv"],"image":null}"#;
+        let two = r#"{"block":{},"program":"/nix/store/aaaa-x/bin/x","programDrvs":["/nix/store/a.drv","/nix/store/b.drv"]}"#;
         assert!(
-            runner_app_from_json(two)
+            runner_app_from_json(two, None)
                 .unwrap_err()
                 .contains("exactly one derivation")
         );
-        let one = r#"{"block":{"network":true},"program":"/nix/store/aaaa-x/bin/x","programDrvs":["/nix/store/aaaa-x.drv"],"image":"/nix/store/bbbb-nixos-system.drv"}"#;
-        let app = runner_app_from_json(one).unwrap();
+        let one = r#"{"block":{"network":true},"program":"/nix/store/aaaa-x/bin/x","programDrvs":["/nix/store/aaaa-x.drv"]}"#;
+        let app = runner_app_from_json(one, Some("/nix/store/bbbb-nixos-system.drv")).unwrap();
         assert_eq!(
             (app.program_drv.as_str(), app.image_drv.as_deref()),
             ("aaaa-x.drv", Some("bbbb-nixos-system.drv"))

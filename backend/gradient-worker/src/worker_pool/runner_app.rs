@@ -47,7 +47,7 @@ pub(crate) fn runner_spec(app: RunnerApp) -> Result<RunnerSpec, String> {
 }
 
 fn spec_of(app: RunnerApp) -> Result<RunnerSpec, String> {
-    let block: NixBlock = serde_json::from_str(&app.block).map_err(|e| e.to_string())?;
+    let block = nix_block(&app.block)?;
     if block.nodes == 0 {
         return Err("nodes must be at least 1".into());
     }
@@ -73,6 +73,14 @@ fn spec_of(app: RunnerApp) -> Result<RunnerSpec, String> {
         timeout_secs: block.timeout,
         max_silent_secs: block.max_silent,
         retries: block.retries,
+    })
+}
+
+fn nix_block(json: &str) -> Result<NixBlock, String> {
+    let value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    serde_path_to_error::deserialize(value).map_err(|e| match e.path().to_string().as_str() {
+        "." => e.inner().to_string(),
+        path => format!("{path}: {}", e.inner()),
     })
 }
 
@@ -145,6 +153,16 @@ mod tests {
             runner_spec(app(r#"{"ports":[0]}"#))
                 .unwrap_err()
                 .contains("ports")
+        );
+        assert!(
+            runner_spec(app(r#"{"network":"yes"}"#))
+                .unwrap_err()
+                .starts_with("passthru.gradient: network: ")
+        );
+        assert!(
+            runner_spec(app(r#"{"env":{"X":1}}"#))
+                .unwrap_err()
+                .contains("env.X")
         );
     }
 }
