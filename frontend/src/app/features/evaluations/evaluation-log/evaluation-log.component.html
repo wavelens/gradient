@@ -12,8 +12,9 @@
   </div>
 } @else if (!evaluation()) {
   <div class="error-state">
-    <gr-icon name="error" size="xl" />
-    <h2>Evaluation not found</h2>
+    <gr-empty-state icon="search_off" title="Evaluation not found" message="The evaluation was deleted or never existed.">
+      <button slot="action" grButton label="Back to Project" icon="arrow_back" [routerLink]="['/project', projectName]"></button>
+    </gr-empty-state>
   </div>
 } @else if (evaluation(); as ev) {
   <div class="eval-layout">

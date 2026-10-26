@@ -51,6 +51,7 @@ import {
   BadgeSeverity,
   ButtonComponent,
   DialogComponent,
+  EmptyStateComponent,
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
@@ -71,7 +72,7 @@ import { unmetParts } from '@features/exec-jobs/exec-job-status';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, ToastComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, EmptyStateComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, ToastComponent, WritableDirective],
   providers: [MessageService],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
