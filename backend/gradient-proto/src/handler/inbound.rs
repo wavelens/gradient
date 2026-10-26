@@ -17,12 +17,12 @@ use tokio::sync::Semaphore;
 use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
 
 use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
-use gradient_scheduler::jobs::{Assignment, PendingJob};
+use gradient_scheduler::jobs::{Assignment, PendingJob, Reattached};
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_wire::Rejection;
 use gradient_wire::messages::{
     BuildFailureKind, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership,
-    JobKind, JobUpdateKind, ServerMessage,
+    JobKind, JobUpdateKind, RunningAssignment, ServerMessage,
 };
 use gradient_wire::types::{
     BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
@@ -135,6 +135,20 @@ impl ActiveJobs {
         members
     }
 
+    pub(crate) fn reattach(&self, reattached: &[Reattached]) {
+        let mut jobs = self.0.lock();
+        for job in reattached {
+            jobs.insert(
+                job.job_id.clone(),
+                ActiveJob {
+                    assignment_id: job.assignment_id,
+                    pending: job.job.clone(),
+                    cluster: job.cluster,
+                },
+            );
+        }
+    }
+
     pub(crate) fn pending(&self) -> Vec<gradient_scheduler::jobs::Reattached> {
         self.0
             .lock()
@@ -147,6 +161,19 @@ impl ActiveJobs {
             })
             .collect()
     }
+}
+
+fn parsed_assignment_ids(peer_id: &str, assignments: &[RunningAssignment]) -> Vec<DispatchedJobId> {
+    assignments
+        .iter()
+        .filter_map(|a| match a.assignment_id.parse() {
+            Ok(id) => Some(id),
+            Err(_) => {
+                warn!(%peer_id, assignment_id = %a.assignment_id, "RunningJobs lists an unparsable assignment id");
+                None
+            }
+        })
+        .collect()
 }
 
 impl From<HashMap<String, ActiveJob>> for ActiveJobs {
@@ -219,7 +246,7 @@ impl<'a> InboundContext<'a> {
                 upload_speed_mbps,
                 download_speed_mbps,
                 build_peak_ram_mb,
-                lifetime_left_secs: _,
+                lifetime_left_secs,
             } => {
                 self.spawn_worker_metrics(WorkerMetrics {
                     cpu_usage_pct,
@@ -228,7 +255,8 @@ impl<'a> InboundContext<'a> {
                     upload_speed_mbps,
                     download_speed_mbps,
                     build_peak_ram_mb,
-                    exits_at: None,
+                    exits_at: lifetime_left_secs
+                        .map(|secs| Instant::now() + std::time::Duration::from_secs(secs)),
                 });
                 true
             }
@@ -548,7 +576,7 @@ impl<'a> InboundContext<'a> {
                 self.on_log_chunk(&job_id, &data).await;
                 true
             }
-            ClientMessage::RunningJobs { .. } => true,
+            ClientMessage::RunningJobs { assignments } => self.on_running_jobs(assignments).await,
         }
     }
 
@@ -891,6 +919,62 @@ impl<'a> InboundContext<'a> {
                 self.scheduler.job_rejected(self.peer_id, &job_id).await;
             }
         }
+    }
+
+    async fn on_running_jobs(&mut self, assignments: Vec<RunningAssignment>) -> bool {
+        let listed = parsed_assignment_ids(self.peer_id, &assignments);
+        let unknown = match self.dialed {
+            Some(_) => self.rows_of_dialed(&listed).await,
+            None => {
+                let reclaimed = self
+                    .scheduler
+                    .reclaim_assignments(self.peer_id, listed)
+                    .await;
+                info!(peer_id = %self.peer_id, reattached = reclaimed.reattached.len(), unknown = reclaimed.unknown.len(), "RunningJobs");
+                self.active.reattach(&reclaimed.reattached);
+                reclaimed.unknown
+            }
+        };
+        self.abort_unknown(unknown).await
+    }
+
+    async fn rows_of_dialed(
+        &self,
+        listed: &[DispatchedJobId],
+    ) -> Vec<(DispatchedJobId, Option<String>)> {
+        let rows = gradient_db::scheduling::assignment_record::assignment_rows(
+            &self.handles.db.worker_db,
+            listed,
+        )
+        .await
+        .unwrap_or_default();
+        listed
+            .iter()
+            .map(|id| {
+                let key = rows
+                    .iter()
+                    .find(|r| r.id == *id)
+                    .and_then(|r| r.job_id.clone());
+                (*id, key)
+            })
+            .collect()
+    }
+
+    async fn abort_unknown(&self, unknown: Vec<(DispatchedJobId, Option<String>)>) -> bool {
+        for (assignment_id, key) in unknown {
+            let Some(job_id) = key else {
+                warn!(peer_id = %self.peer_id, %assignment_id, "RunningJobs lists an assignment without a row");
+                continue;
+            };
+            let abort = ServerMessage::AbortJob {
+                job_id,
+                reason: "the server no longer runs this assignment".into(),
+            };
+            if send_server_msg(self.writer, &abort).await.is_err() {
+                return false;
+            }
+        }
+        true
     }
 
     async fn withdraw_assignment(&mut self, job_id: &str) {
@@ -1933,5 +2017,112 @@ mod assignment_response_tests {
         };
         let cached: Vec<String> = cached.into_iter().map(|hit| hit.path).collect();
         assert_eq!(cached, vec![asked]);
+    }
+}
+
+#[cfg(test)]
+mod running_jobs_tests {
+    use super::fixture::{TestSession, decode, pending_build};
+    use super::*;
+    use gradient_entity::dispatched_job::Model as MDispatchedJob;
+    use gradient_fixtures::mock::{empty_db, mock_db};
+    use gradient_test_support::prelude::*;
+    use std::time::Duration;
+
+    fn running(assignment_id: String) -> ClientMessage {
+        ClientMessage::RunningJobs {
+            assignments: vec![RunningAssignment {
+                assignment_id,
+                kind: JobKind::Build,
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn running_jobs_reattach_the_job_to_the_session() {
+        let state = test_state(empty_db());
+        let (mut session, _sent, _admitted) = TestSession::new(&state).await;
+        let shared_build = DerivationBuildId::now_v7();
+        let key = format!("build:{shared_build}");
+        let a1 = DispatchedJobId::now_v7();
+        let (port, _signals) = tokio::sync::mpsc::unbounded_channel();
+        session
+            .scheduler
+            .reattach_worker(
+                "w1",
+                Default::default(),
+                HashSet::new(),
+                Arc::new(port),
+                vec![Reattached::single(
+                    key.clone(),
+                    a1,
+                    pending_build(shared_build),
+                )],
+                true,
+            )
+            .await
+            .expect("the worker registers");
+        session.scheduler.unregister_worker("w1").await;
+        let written = Arc::new(gradient_util::sync::Mutex::new(Vec::new()));
+        session.logs = LogLane::spawn(&state.shutdown, {
+            let written = Arc::clone(&written);
+            move |build, data| {
+                let written = Arc::clone(&written);
+                async move { written.lock().push((build, data)) }
+            }
+        });
+
+        let (mut ctx, uploads) = session.split();
+        assert!(ctx.handle(running(a1.to_string()), uploads).await);
+        let chunk = ClientMessage::LogChunk {
+            job_id: key.clone(),
+            data: bytes::Bytes::from_static(b"line"),
+        };
+        assert!(ctx.handle(chunk, uploads).await);
+
+        assert_eq!(session.active.build(&key), Some(shared_build));
+        let _ = session.logs.flushed().await.await;
+        assert_eq!(*written.lock(), vec![(shared_build, b"line".to_vec())]);
+    }
+
+    #[tokio::test]
+    async fn an_unknown_assignment_gets_abort_job() {
+        let a9 = DispatchedJobId::now_v7();
+        let closed = MDispatchedJob {
+            id: a9,
+            worker_id: "w1".into(),
+            job_id: Some("build:x".into()),
+            finished_at: Some(gradient_types::now()),
+            ..Default::default()
+        };
+        let state = test_state(
+            mock_db()
+                .append_query_results([vec![closed]])
+                .into_connection(),
+        );
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+
+        assert!(ctx.handle(running(a9.to_string()), uploads).await);
+
+        let abort = tokio::time::timeout(Duration::from_secs(5), sent.recv())
+            .await
+            .expect("answered")
+            .expect("an abort");
+        assert!(matches!(
+            decode(abort),
+            ServerMessage::AbortJob { job_id, .. } if job_id == "build:x"
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_unparsable_assignment_id_is_dropped() {
+        let state = test_state(empty_db());
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+
+        assert!(ctx.handle(running("nope".into()), uploads).await);
+
+        assert!(sent.try_recv().is_err());
     }
 }

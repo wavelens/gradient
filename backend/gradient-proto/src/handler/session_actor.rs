@@ -36,7 +36,9 @@ use super::socket::{
 use super::store_paths::{outbound_message, outbound_offer, project_mapper};
 use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::Rejection;
-use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
+use gradient_wire::messages::{
+    ClientMessage, GradientCapabilities, RUNNING_JOBS_SINCE, ServerMessage,
+};
 use gradient_wire::session::frame::ProtoReader;
 
 const IN_FLIGHT_STAMP: Duration = Duration::from_secs(5);
@@ -77,6 +79,7 @@ pub struct SessionState {
     capabilities: GradientCapabilities,
     authorized_peers: HashSet<ProjectId>,
     dialed: Option<DialedSession>,
+    reclaims_jobs: bool,
     uploads: UploadSession,
     nar_serve_semaphore: Arc<Semaphore>,
     offers_seen: u64,
@@ -116,13 +119,17 @@ impl Actor for SessionActor {
         )
         .map_err(|e| ActorProcessingErr::from(format!("{e:#}")))?;
         let port: Arc<dyn SessionPort> = Arc::new(SessionRef(myself.clone()));
+        let reclaims_jobs = dialed.is_none()
+            && socket
+                .version()
+                .is_some_and(|version| version >= RUNNING_JOBS_SINCE);
         let registered = match scheduler
             .register_worker(
                 &peer_id,
                 capabilities.clone(),
                 authorized_peers.clone(),
                 port,
-                false,
+                reclaims_jobs,
             )
             .await
         {
@@ -183,6 +190,7 @@ impl Actor for SessionActor {
             capabilities,
             authorized_peers,
             dialed,
+            reclaims_jobs,
             uploads,
             nar_serve_semaphore: Arc::new(Semaphore::new(max_serves)),
             offers_seen: 0,
@@ -417,7 +425,7 @@ impl Actor for SessionActor {
                         st.authorized_peers.clone(),
                         port,
                         active,
-                        false,
+                        st.reclaims_jobs,
                     )
                     .await
                 {
