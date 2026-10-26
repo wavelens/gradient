@@ -36,6 +36,7 @@ sea-orm-migration = { workspace = true }
 serde             = { workspace = true }
 serde_json        = { workspace = true }
 sqlx              = { workspace = true }
+sqlx-core         = { workspace = true }
 thiserror         = { workspace = true }
 tokio             = { workspace = true, features = ["sync", "rt", "macros", "time"] }
 tracing           = { workspace = true }

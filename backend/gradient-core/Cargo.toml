@@ -51,7 +51,6 @@ num_enum              = { workspace = true }
 object_store          = { workspace = true }
 rand                  = { workspace = true }
 reqwest               = { workspace = true }
-ring                  = { workspace = true }
 rustls                = { workspace = true }
 utoipa            = { workspace = true }
 sea-orm               = { workspace = true }
