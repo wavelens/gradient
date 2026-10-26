@@ -1807,6 +1807,54 @@ async fn w36_an_open_row_the_reconnecting_worker_does_not_list_is_requeued() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn w37_the_grace_end_keeps_a_row_another_instance_opened_since() {
+    let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
+    let second = case.second_instance().await;
+    case.connect_reclaiming(W1, w_all(), &[]).await;
+    let (a, a1) = building_on_w1(&case).await;
+    case.disconnect(W1).await;
+
+    second.connect_reclaiming(W1, w_all(), &[]).await;
+    second.reclaim(W1, &[]).await;
+    second.disconnect(W1).await;
+    second.connect_reclaiming(W2, w_all(), &[]).await;
+    second.admit_startable_moves().await;
+    second.offers_full(W2).await;
+    second.score_all(W2).await;
+    let a2 = second
+        .request_job(W2, JobKind::Build)
+        .await
+        .expect("after 2: W2 gets build:A on the second instance")
+        .assignment_id();
+    second.report_building(W2, &a).await;
+    drain_signals(&second, &[W1, W2]);
+    second.check("step 2").await;
+
+    case.requeue_unreclaimed_after(Duration::from_secs(600))
+        .await;
+    assert_eq!(
+        closes(&case.assignments(&a).await),
+        vec![(a1, Some(DispatchedJobOutcome::Abandoned)), (a2, None)],
+        "after 3: dj(build:A) of W2 stays open"
+    );
+    assert_eq!(
+        running(&case.attempts(A).await),
+        vec![Some(a2)],
+        "after 3: att(A) of W2 still Running"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Building,
+        "after 3: sb(A).status"
+    );
+    case.check("step 3").await;
+    second.check("step 3").await;
+
+    second.finish().await;
+    case.finish().await;
+}
+
 fn reattached_keys(reclaimed: &Reclaimed) -> Vec<(String, DispatchedJobId)> {
     reclaimed
         .reattached

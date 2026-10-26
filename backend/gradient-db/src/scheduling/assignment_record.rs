@@ -255,6 +255,25 @@ pub async fn open_assignment_keys<C: ConnectionTrait>(
         .await
 }
 
+pub async fn keys_with_open_assignment<C: ConnectionTrait>(
+    db: &C,
+    job_keys: &[String],
+) -> Result<Vec<String>, DbErr> {
+    if job_keys.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    EDispatchedJob::find()
+        .select_only()
+        .column(CDispatchedJob::JobId)
+        .filter(CDispatchedJob::FinishedAt.is_null())
+        .filter(CDispatchedJob::JobId.is_in(job_keys.to_vec()))
+        .distinct()
+        .into_tuple()
+        .all(db)
+        .await
+}
+
 pub async fn open_single_assignments_of_worker<C: ConnectionTrait>(
     db: &C,
     worker_id: &str,

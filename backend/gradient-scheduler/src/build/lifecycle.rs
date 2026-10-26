@@ -88,7 +88,16 @@ pub(crate) async fn requeue_orphaned_keys(
     cause: gradient_graph::OrphanCause,
 ) {
     abandon_dispatched_jobs(&db.worker_db, keys).await;
+    requeue_closed_keys(db, graph, keys, observed_peak_ram_mb, cause).await;
+}
 
+pub(crate) async fn requeue_closed_keys(
+    db: &DbContext,
+    graph: &Graph,
+    keys: &[String],
+    observed_peak_ram_mb: &std::collections::HashMap<String, u64>,
+    cause: gradient_graph::OrphanCause,
+) {
     let shared_builds: Vec<DerivationBuildId> = keys
         .iter()
         .filter_map(|key| shared_build_of_key(key))

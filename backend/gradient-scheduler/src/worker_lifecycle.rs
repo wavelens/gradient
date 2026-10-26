@@ -25,6 +25,10 @@ use crate::actor::{Registered, Registration, SchedulerMsg, WorkerCapabilities, W
 use crate::build;
 use crate::jobs::{AwaitingReclaim, reclaim_grace};
 use crate::waiting_state::WaitingRefresh;
+use gradient_db::scheduling::assignment_record::{
+    abandon_open_assignments, keys_with_open_assignment,
+};
+use gradient_entity::ids::DispatchedJobId;
 use gradient_pool::session_port::SessionPort;
 
 pub(crate) async fn record_worker_sample(
@@ -400,9 +404,26 @@ impl Scheduler {
             .iter()
             .filter_map(|(key, held)| Some((key.clone(), held.observed_peak_ram_mb?)))
             .collect();
+        let rows: Vec<DispatchedJobId> = held.iter().map(|(_, h)| h.assignment_id).collect();
+        if let Err(e) = abandon_open_assignments(&self.db.worker_db, &rows).await {
+            warn!(error = %e, "closing the rows of held jobs failed");
+            return;
+        }
         let keys: Vec<String> = held.into_iter().map(|(key, _)| key).collect();
-        info!(jobs = keys.len(), "re-queuing jobs no worker reclaimed");
-        build::requeue_orphaned_keys(
+        let reopened = match keys_with_open_assignment(&self.db.worker_db, &keys).await {
+            Ok(reopened) => reopened,
+            Err(e) => {
+                warn!(error = %e, "reading the open rows of held jobs failed");
+                return;
+            }
+        };
+        let keys: Vec<String> = keys.into_iter().filter(|k| !reopened.contains(k)).collect();
+        info!(
+            jobs = keys.len(),
+            dispatched_again = reopened.len(),
+            "re-queuing jobs no worker reclaimed"
+        );
+        build::requeue_closed_keys(
             &self.db,
             &self.graph,
             &keys,
