@@ -5,10 +5,12 @@
  */
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
+use gradient_eval::pool::LiveThunks;
 use gradient_sources::ShardSpec;
 use gradient_wire::messages::{FlakeJob, FlakeOutputNode};
 use gradient_wire::traits::JobReporter;
@@ -25,6 +27,7 @@ use super::eval::{
     report_failed_attrs,
 };
 use super::eval_cache_sharing::{EvalCacheSharing, share_eval_cache};
+use super::progress_report::report_thunks_during;
 use crate::nix::store::LocalNixStore;
 use crate::nix::wildcard_walk;
 use crate::proto::job::JobUpdater;
@@ -136,6 +139,8 @@ pub(super) async fn run_primary(
 ) -> Result<()> {
     updater.report_evaluating_derivations().await?;
     let started = Instant::now();
+    let thunks = counted_thunks(context.evaluator);
+    let sink = updater.eval_progress_sink();
     let server = updater.concurrent();
     let repo = build_flake_url(context.job, Some(source_path));
     let overrides = eval_input_overrides(context.job, Some(source_path));
@@ -148,7 +153,7 @@ pub(super) async fn run_primary(
             .await
     };
     let mut work = PoolShardWork::open(context, Some(source_path), fingerprint, updater).await;
-    let take = take_shards(&server, &mut work);
+    let take = report_thunks_during(&*sink, || thunks.total(), take_shards(&server, &mut work));
     tokio::try_join!(announce, take)?;
 
     work.report_stats(started).await;
@@ -160,6 +165,8 @@ pub(super) async fn run_companion(
     updater: &mut JobUpdater,
 ) -> Result<()> {
     let started = Instant::now();
+    let thunks = counted_thunks(context.evaluator);
+    let sink = updater.eval_progress_sink();
     let server = updater.concurrent();
     let Some((source_path, fingerprint)) = await_source(&server).await? else {
         info!("the split evaluation finished before this companion got its source");
@@ -169,10 +176,16 @@ pub(super) async fn run_companion(
     crate::proto::prefetch::ensure_path(context.store, &source_path, updater).await?;
     let fingerprint = (!fingerprint.is_empty()).then_some(fingerprint);
     let mut work = PoolShardWork::open(context, Some(&source_path), fingerprint, updater).await;
-    take_shards(&server, &mut work).await?;
+    report_thunks_during(&*sink, || thunks.total(), take_shards(&server, &mut work)).await?;
 
     work.report_stats(started).await;
     Ok(())
+}
+
+fn counted_thunks(evaluator: &WorkerEvaluator) -> Arc<LiveThunks> {
+    let thunks = evaluator.resolver().live_thunks();
+    thunks.reset();
+    thunks
 }
 
 struct PoolShardWork<'a> {
@@ -304,8 +317,10 @@ fn set_of(pattern: &str) -> Vec<String> {
 mod tests {
     use super::*;
     use gradient_util::sync::Mutex;
+    use gradient_wire::traits::EvalProgressSink;
+    use gradient_wire::types::EvalProgress;
     use std::collections::VecDeque;
-    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     #[derive(Default)]
     struct ScriptedServer {
@@ -467,6 +482,69 @@ mod tests {
         );
         assert_eq!(server.plans.lock().len(), 1);
         assert_eq!(events.first(), Some(&"request"));
+    }
+
+    struct SlowWork {
+        thunks: Arc<AtomicU64>,
+        events: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    #[async_trait]
+    impl ShardWork for SlowWork {
+        async fn plan(&mut self) -> Result<Vec<EvalShardSpec>> {
+            Ok(Vec::new())
+        }
+
+        async fn shard(&mut self, _shard: EvalShard) -> Result<Vec<EvalShardSpec>> {
+            self.events.lock().push("shard");
+            self.thunks.store(40, Ordering::Relaxed);
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            self.events.lock().push("shard listed");
+            Ok(Vec::new())
+        }
+
+        async fn flush(&mut self) {}
+    }
+
+    struct EventSink(Arc<Mutex<Vec<&'static str>>>);
+
+    #[async_trait]
+    impl EvalProgressSink for EventSink {
+        async fn report(&self, progress: EvalProgress) {
+            assert_eq!(progress, EvalProgress::Evaluating { thunks: 40 });
+            self.0.lock().push("progress");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_taker_reports_thunks_while_a_shard_is_listed() {
+        let events = Arc::default();
+        let server = ScriptedServer::new(vec![shard("s1"), EvalShardOutcome::Finished], &events);
+        let thunks = Arc::new(AtomicU64::new(0));
+        let mut work = SlowWork {
+            thunks: Arc::clone(&thunks),
+            events: Arc::clone(&events),
+        };
+        let sink = EventSink(Arc::clone(&events));
+
+        report_thunks_during(
+            &sink,
+            || thunks.load(Ordering::Relaxed),
+            take_shards(&server, &mut work),
+        )
+        .await
+        .expect("taken");
+
+        let events = events.lock().clone();
+        let listing = events.iter().position(|e| *e == "shard").expect("a shard");
+        let listed = events
+            .iter()
+            .position(|e| *e == "shard listed")
+            .expect("listed");
+        assert!(
+            events[listing..listed].contains(&"progress"),
+            "progress is sent while the shard is listed: {events:?}"
+        );
     }
 
     #[test]

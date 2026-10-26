@@ -63,6 +63,21 @@ pub(crate) async fn resend_during<T>(
     }
 }
 
+pub(crate) async fn report_thunks_during<T>(
+    sink: &dyn EvalProgressSink,
+    thunks: impl Fn() -> u64,
+    work: impl Future<Output = T>,
+) -> T {
+    let snapshot = || thunk_progress(thunks());
+    let mut reporter = ChangeReporter::default();
+    let out = tokio::select! {
+        out = work => out,
+        never = reporter.run(sink, &snapshot) => match never {},
+    };
+    reporter.flush(sink, &snapshot).await;
+    out
+}
+
 pub(crate) fn thunk_progress(thunks: u64) -> Option<EvalProgress> {
     (thunks > 0).then_some(EvalProgress::Evaluating { thunks })
 }

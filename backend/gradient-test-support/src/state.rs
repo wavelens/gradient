@@ -147,6 +147,7 @@ impl TestState {
                 cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
                 build_progress: gradient_core::build_progress(),
                 eval_progress: gradient_core::eval_progress(),
+                eval_member_thunks: gradient_core::eval_member_thunks(),
                 build_status_counts: gradient_core::build_status_counts(),
                 github_app_install_url: Default::default(),
                 manifest_state: Default::default(),
