@@ -123,7 +123,7 @@ export class TaskSettingsComponent implements OnInit {
   };
 
   concurrencyOptions: { label: string; value: ConcurrencyPolicy; disabled?: boolean }[] = [
-    { label: 'Auto: Gradient decides', value: 'auto' },
+    { label: 'Auto: abort the running evaluation once the new one builds, keep builds both need', value: 'auto' },
     { label: 'Hard Abort: cancel running evaluation and its in-flight builds', value: 'hard_abort' },
     { label: 'Soft Abort: mark current evaluation aborted, let in-flight builds finish', value: 'soft_abort' },
     { label: 'Skip: keep the running evaluation, discard the new trigger event', value: 'skip' },
