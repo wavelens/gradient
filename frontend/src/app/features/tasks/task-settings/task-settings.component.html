@@ -153,6 +153,14 @@
         Flake Inputs
         <span slot="meta">Override an input's git URL, or force an update keeping the original</span>
       </gr-row>
+      <gr-row icon="database" linkLabel="Project cache subscriptions" [link]="['/project', projectName, 'caches']">
+        Cache Subscriptions
+        <span slot="meta">Nix binary caches the project pushes builds to</span>
+      </gr-row>
+      <gr-row icon="construction" linkLabel="Project workers" [link]="['/project', projectName, 'workers']">
+        Workers
+        <span slot="meta">Build workers registered to the project</span>
+      </gr-row>
     </gr-row-list>
   </gr-settings-section>
 
