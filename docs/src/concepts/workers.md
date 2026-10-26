@@ -76,4 +76,5 @@ Workers can stop at any time. This include throwaway VMs. A stop never lose a jo
 
 - [Quick Start](../get-started/quick-start.md): run a worker locally
 - [Add a Remote Worker](../guides/remote-worker.md): hook up extra build machines
+- [Set Up Clusters](../guides/clusters.md): zones and endpoints for cluster jobs
 - [Evaluations and Builds](evaluations-and-builds.md): the work a worker performs

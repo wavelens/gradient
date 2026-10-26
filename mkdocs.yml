@@ -73,6 +73,8 @@ nav:
       - Connect an AI Assistant: guides/mcp.md
       - Monitor Gradient: guides/monitoring.md
       - Tune Evaluation Speed: guides/tune-evaluations.md
+      - Set Up Clusters: guides/clusters.md
+      - Run Multi-Node Evaluations: guides/multi-node-evaluations.md
       - Export an SBOM: guides/sbom.md
       - Use Dynamic Derivations: guides/dynamic-derivations.md
       - Report a Bug: guides/diagnostic-report.md
