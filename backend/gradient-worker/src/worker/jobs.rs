@@ -241,10 +241,16 @@ impl WorkerJobs {
         assignment_id: String,
         cluster: Option<String>,
     ) -> Registered {
+        self.writer.forget_reports(&job_id);
         let log = JobLog::open(&self.log_dir, &job_id, JOB_LOG_BUFFER_CAP);
         self.registry
             .lock()
             .register(job_id, kind, assignment_id, cluster, log)
+    }
+
+    pub(super) fn abort_job(&self, job_id: &str) -> bool {
+        self.writer.forget_reports(job_id);
+        self.registry.lock().abort(job_id)
     }
 
     pub(super) fn updater(
@@ -592,6 +598,70 @@ mod tests {
         let session = gradient_worker_client::testing::mock_session().await;
         jobs.writer.attach(session.writer.clone()).await.unwrap();
         assert!(jobs.running_assignments().is_empty());
+    }
+
+    fn completed(job_id: &str, assignment_id: &str) -> ClientMessage {
+        ClientMessage::JobCompleted {
+            job_id: job_id.into(),
+            assignment_id: assignment_id.into(),
+            spans: vec![],
+            elapsed_ms: 1,
+        }
+    }
+
+    async fn reported_into_an_ended_session(jobs: &WorkerJobs) {
+        let session = gradient_worker_client::testing::mock_session().await;
+        jobs.start_session(session.writer.clone()).await.unwrap();
+        jobs.send_final_report(JobKind::Build, completed("build:1", "dispatch-1"))
+            .await;
+        jobs.end_session(RUNNING_JOBS_SINCE);
+    }
+
+    #[tokio::test]
+    async fn a_final_report_sent_before_the_session_ended_keeps_its_assignment_listed() {
+        let (jobs, _base) = worker_jobs();
+
+        reported_into_an_ended_session(&jobs).await;
+
+        assert_eq!(
+            jobs.running_assignments(),
+            vec![RunningAssignment {
+                assignment_id: "dispatch-1".into(),
+                kind: JobKind::Build,
+            }],
+            "the report may have died in the socket"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_abort_of_a_reported_job_stops_listing_it() {
+        let (jobs, _base) = worker_jobs();
+        reported_into_an_ended_session(&jobs).await;
+
+        assert!(!jobs.abort_job("build:1"));
+
+        assert!(jobs.running_assignments().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_new_assignment_of_a_reported_job_stops_listing_the_old_one() {
+        let (jobs, _base) = worker_jobs();
+        reported_into_an_ended_session(&jobs).await;
+
+        jobs.register(
+            "build:1".to_owned(),
+            JobKind::Build,
+            "dispatch-2".to_owned(),
+            None,
+        );
+
+        assert_eq!(
+            jobs.running_assignments(),
+            vec![RunningAssignment {
+                assignment_id: "dispatch-2".into(),
+                kind: JobKind::Build,
+            }]
+        );
     }
 
     #[tokio::test]

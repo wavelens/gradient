@@ -817,7 +817,7 @@ impl MessageLoopState {
             }
             return Ok(());
         }
-        if !self.jobs.registry.lock().abort(&job_id) {
+        if !self.jobs.abort_job(&job_id) {
             debug!(%job_id, "abort for a job this worker does not run");
         }
         self.jobs.uploads.cancel_job(&job_id).await;

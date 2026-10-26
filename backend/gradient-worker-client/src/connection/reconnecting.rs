@@ -27,8 +27,14 @@ struct Inner {
 }
 
 enum State {
-    Attached { writer: ProtoWriter, session: u64 },
-    Detached { queue: VecDeque<ClientMessage> },
+    Attached {
+        writer: ProtoWriter,
+        session: u64,
+        sent_reports: Vec<ClientMessage>,
+    },
+    Detached {
+        queue: VecDeque<ClientMessage>,
+    },
 }
 
 impl Default for State {
@@ -70,6 +76,7 @@ impl ReconnectingWriter {
                 state: Mutex::new(State::Attached {
                     writer,
                     session: session.number,
+                    sent_reports: Vec::new(),
                 }),
                 send_order: tokio::sync::Mutex::new(()),
                 session: watch::Sender::new(session),
@@ -83,11 +90,17 @@ impl ReconnectingWriter {
             State::Detached { queue } => std::mem::take(queue),
             State::Attached { .. } => VecDeque::new(),
         };
+        let mut sent_reports = Vec::new();
         while let Some(msg) = queue.pop_front() {
             if let Err(e) = writer.send(msg.clone()).await {
-                queue.push_front(msg);
-                *self.inner.state.lock() = State::Detached { queue };
+                let mut requeued = VecDeque::from(sent_reports);
+                requeued.push_back(msg);
+                requeued.extend(queue);
+                *self.inner.state.lock() = State::Detached { queue: requeued };
                 return Err(e);
+            }
+            if final_report_job(&msg).is_some() {
+                sent_reports.push(msg);
             }
         }
         let number = self.inner.session.borrow().number + 1;
@@ -95,6 +108,7 @@ impl ReconnectingWriter {
         *self.inner.state.lock() = State::Attached {
             writer,
             session: number,
+            sent_reports,
         };
         self.inner.session.send_replace(Session {
             number,
@@ -105,9 +119,19 @@ impl ReconnectingWriter {
 
     pub fn detach(&self) {
         let mut state = self.inner.state.lock();
-        if let State::Attached { .. } = *state {
-            *state = State::default();
+        if let State::Attached { sent_reports, .. } = &mut *state {
+            *state = State::Detached {
+                queue: std::mem::take(sent_reports).into(),
+            };
             self.mark_detached();
+        }
+    }
+
+    pub fn forget_reports(&self, job_id: &str) {
+        let other_job = |msg: &ClientMessage| final_report_job(msg) != Some(job_id);
+        match &mut *self.inner.state.lock() {
+            State::Attached { sent_reports, .. } => sent_reports.retain(other_job),
+            State::Detached { queue } => queue.retain(other_job),
         }
     }
 
@@ -120,6 +144,8 @@ impl ReconnectingWriter {
         if writer.send(msg.clone()).await.is_err() {
             self.lose(session);
             self.enqueue(msg);
+        } else if final_report_job(&msg).is_some() {
+            self.keep_sent_report(msg);
         }
         Ok(())
     }
@@ -180,16 +206,33 @@ impl ReconnectingWriter {
 
     fn current(&self) -> Option<(ProtoWriter, u64)> {
         match &*self.inner.state.lock() {
-            State::Attached { writer, session } => Some((writer.clone(), *session)),
+            State::Attached {
+                writer, session, ..
+            } => Some((writer.clone(), *session)),
             State::Detached { .. } => None,
         }
     }
 
     fn lose(&self, lost: u64) {
         let mut state = self.inner.state.lock();
-        if matches!(*state, State::Attached { session, .. } if session == lost) {
-            *state = State::default();
+        if let State::Attached {
+            session,
+            sent_reports,
+            ..
+        } = &mut *state
+            && *session == lost
+        {
+            *state = State::Detached {
+                queue: std::mem::take(sent_reports).into(),
+            };
             self.mark_detached();
+        }
+    }
+
+    fn keep_sent_report(&self, msg: ClientMessage) {
+        match &mut *self.inner.state.lock() {
+            State::Attached { sent_reports, .. } => sent_reports.push(msg),
+            State::Detached { queue } => queue.push_back(msg),
         }
     }
 
@@ -206,6 +249,15 @@ impl ReconnectingWriter {
             Some(queued) => *queued = msg,
             None => queue.push_back(msg),
         }
+    }
+}
+
+fn final_report_job(msg: &ClientMessage) -> Option<&str> {
+    match msg {
+        ClientMessage::JobCompleted { job_id, .. } | ClientMessage::JobFailed { job_id, .. } => {
+            Some(job_id)
+        }
+        _ => None,
     }
 }
 
@@ -325,6 +377,44 @@ mod tests {
                 .await
                 .is_err(),
             "a refused chunk is not queued"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_final_report_sent_into_an_ended_session_is_resent_after_attach() {
+        let w = ReconnectingWriter::new();
+        let first = session().await;
+        w.attach(first.writer.clone()).await.unwrap();
+        w.send(completed()).await.unwrap();
+
+        w.detach();
+        assert_eq!(w.queued_final_reports(), vec!["a".to_owned()]);
+
+        let mut next = session().await;
+        w.attach(next.writer.clone()).await.unwrap();
+        let received = tokio::time::timeout(Duration::from_secs(5), next.server.recv())
+            .await
+            .expect("the dead session may have swallowed the report");
+        assert_eq!(received.unwrap(), completed());
+    }
+
+    #[tokio::test]
+    async fn a_forgotten_report_is_neither_listed_nor_resent() {
+        let w = ReconnectingWriter::new();
+        let first = session().await;
+        w.attach(first.writer.clone()).await.unwrap();
+        w.send(completed()).await.unwrap();
+
+        w.forget_reports("j");
+        w.detach();
+        assert!(w.queued_final_reports().is_empty());
+
+        let mut next = session().await;
+        w.attach(next.writer.clone()).await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), next.server.recv())
+                .await
+                .is_err()
         );
     }
 
