@@ -14,6 +14,7 @@ let
   specFiles = lib.mapAttrs (_: import) {
     zone-pair = ./specs/zone-pair.nix;
     kill-pair = ./specs/kill-pair.nix;
+    split-flake = ./specs/split-flake.nix;
   };
   specs = lib.attrValues specFiles;
 

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 # SPDX-License-Identifier: AGPL-3.0-only
 # mk.nix prepends FLAKES, RESOLVED, WORKER_IDS, the topology prelude and ../scheduler/helpers.py.
-# No producer creates cluster jobs yet: members are shared builds held behind a hanging `gate`, seeded by SQL meanwhile.
+# Build clusters come from SQL seeds: members are shared builds held behind a hanging `gate`. Split evaluations come from the scheduler.
 
 import uuid
 
@@ -154,4 +154,39 @@ victim.succeed("systemctl start gradient-worker")
 victim.wait_until_succeeds(
     "journalctl -u gradient-worker --no-pager --since=-180s | grep -q 'handshake successful'", timeout=180
 )
+assert_clean()
+
+
+def entry_points_of(evaluation):
+    return sql(f"SELECT eval FROM entry_point WHERE evaluation = '{evaluation}' ORDER BY eval")
+
+
+def predict_a_gain(task_name):
+    task = sql(f"SELECT id FROM task WHERE name = '{task_name}'")
+    sql(
+        f"DELETE FROM eval_set_cost WHERE task = '{task}';\n"
+        f"DELETE FROM eval_subtree_cost WHERE task = '{task}';\n"
+        "INSERT INTO eval_set_cost (id, task, path, startup_ms, peak_rss_mb, samples, updated_at) "
+        f"VALUES (gen_random_uuid(), '{task}', ARRAY['packages', 'x86_64-linux'], 3000, 64, 1, now() AT TIME ZONE 'UTC');\n"
+        "INSERT INTO eval_subtree_cost (id, task, path, attrs, ms_per_attr, samples, updated_at) "
+        f"SELECT gen_random_uuid(), '{task}', ARRAY['packages', 'x86_64-linux', 'p' || i], 1, 100000, 1, "
+        "now() AT TIME ZONE 'UTC' FROM generate_series(0, 11) AS i;"
+    )
+
+
+banner("split evaluation")
+assert sql("SELECT multi_node_evaluation FROM task WHERE name = 'split-flake'") == "t"
+standalone = phase("split-flake")
+wait_evaluation(standalone, "Completed", timeout=600)
+assert sql(f"SELECT count(*) FROM eval_split WHERE evaluation = '{standalone}'") == "0"
+predict_a_gain("split-flake")
+wait_workers_ready()
+split = evaluate("split-flake")
+wait_evaluation(split, "Completed", timeout=600)
+members = int(sql(f"SELECT count(*) FROM dispatched_job WHERE evaluation_id = '{split}' AND kind = 0"))
+assert members >= 2, f"the split evaluation ran on {members} eval jobs"
+assert sql(f"SELECT count(*) FROM eval_split WHERE evaluation = '{split}'") == "1"
+assert sql(f"SELECT count(*) FROM eval_shard WHERE evaluation = '{split}'") != "0"
+assert sql(f"SELECT count(*) FROM eval_shard WHERE evaluation = '{split}' AND state IN (0, 1)") == "0"
+assert entry_points_of(split) == entry_points_of(standalone), (entry_points_of(split), entry_points_of(standalone))
 assert_clean()
