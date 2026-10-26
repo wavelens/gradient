@@ -22,9 +22,9 @@ use tracing::{info, warn};
 
 use super::AbortSignal;
 use super::eval::{
-    WorkerEvaluator, build_eval_stats_report, build_flake_url, eval_cache_fingerprint,
-    eval_cache_path, eval_input_overrides, evaluate_shard_with, plan_shards_with,
-    report_failed_attrs,
+    CorruptEvalCache, WorkerEvaluator, build_eval_stats_report, build_flake_url, corrupt_cache_in,
+    drop_corrupt_cache, eval_cache_fingerprint, eval_cache_path, eval_input_overrides,
+    evaluate_shard_with, plan_shards_with, report_failed_attrs,
 };
 use super::eval_cache_sharing::{EvalCacheSharing, share_eval_cache};
 use super::progress_report::report_thunks_during;
@@ -67,6 +67,8 @@ pub(crate) trait ShardWork: Send {
     async fn shard(&mut self, shard: EvalShard) -> Result<Vec<EvalShardSpec>>;
 
     async fn flush(&mut self);
+
+    async fn drop_cache(&mut self, corrupt: &CorruptEvalCache);
 }
 
 #[async_trait]
@@ -104,13 +106,15 @@ pub(crate) async fn take_shards(server: &dyn SplitServer, work: &mut dyn ShardWo
         let (reply, ()) = tokio::join!(server.request(true, finished.take()), work.flush());
         match reply? {
             EvalShardOutcome::Plan => {
-                let shards = work.plan().await?;
+                let planned = work.plan().await;
+                let shards = drop_cache_if_corrupt(work, planned).await?;
                 work.flush().await;
                 server.announce_plan(shards).await?;
             }
             EvalShardOutcome::Shard(shard) => {
                 let id = shard.id.clone();
-                let deferred = work.shard(shard).await?;
+                let listed = work.shard(shard).await;
+                let deferred = drop_cache_if_corrupt(work, listed).await?;
                 finished = Some(FinishedShard { id, deferred });
             }
             EvalShardOutcome::Wait { retry_after_ms } => wait(retry_after_ms).await,
@@ -118,6 +122,15 @@ pub(crate) async fn take_shards(server: &dyn SplitServer, work: &mut dyn ShardWo
             EvalShardOutcome::Source { .. } => bail!("a member with the source was sent it again"),
         }
     }
+}
+
+async fn drop_cache_if_corrupt<T>(work: &mut dyn ShardWork, result: Result<T>) -> Result<T> {
+    if let Err(e) = &result
+        && let Some(corrupt) = corrupt_cache_in(e)
+    {
+        work.drop_cache(corrupt).await;
+    }
+    result
 }
 
 async fn wait(retry_after_ms: u32) {
@@ -295,6 +308,12 @@ impl ShardWork for PoolShardWork<'_> {
             sharing.flush().await;
         }
     }
+
+    async fn drop_cache(&mut self, corrupt: &CorruptEvalCache) {
+        self.sharing = None;
+        let resolver = self.context.evaluator.resolver();
+        drop_corrupt_cache(&**resolver, resolver.eval_cache_dir(), corrupt).await;
+    }
 }
 
 fn shard_spec(shard: ShardSpec) -> EvalShardSpec {
@@ -361,6 +380,7 @@ mod tests {
 
     struct ScriptedWork {
         deferred: Vec<EvalShardSpec>,
+        corrupt: bool,
         events: Arc<Mutex<Vec<&'static str>>>,
     }
 
@@ -373,11 +393,21 @@ mod tests {
 
         async fn shard(&mut self, _shard: EvalShard) -> Result<Vec<EvalShardSpec>> {
             self.events.lock().push("shard");
+            if self.corrupt {
+                let corrupt = CorruptEvalCache {
+                    fingerprint: "ab".into(),
+                };
+                return Err(anyhow::Error::new(corrupt).context("listing the shard"));
+            }
             Ok(std::mem::take(&mut self.deferred))
         }
 
         async fn flush(&mut self) {
             self.events.lock().push("flush");
+        }
+
+        async fn drop_cache(&mut self, _corrupt: &CorruptEvalCache) {
+            self.events.lock().push("drop cache");
         }
     }
 
@@ -437,6 +467,7 @@ mod tests {
         let server = ScriptedServer::new(vec![shard("s1"), EvalShardOutcome::Finished], &events);
         let mut work = ScriptedWork {
             deferred: vec![python_set()],
+            corrupt: false,
             events: Arc::clone(&events),
         };
 
@@ -469,6 +500,7 @@ mod tests {
         );
         let mut work = ScriptedWork {
             deferred: Vec::new(),
+            corrupt: false,
             events: Arc::clone(&events),
         };
 
@@ -482,6 +514,27 @@ mod tests {
         );
         assert_eq!(server.plans.lock().len(), 1);
         assert_eq!(events.first(), Some(&"request"));
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_cache_fails_the_member_not_the_evaluation() {
+        let events = Arc::default();
+        let server = ScriptedServer::new(vec![shard("s1"), shard("s2")], &events);
+        let mut work = ScriptedWork {
+            deferred: Vec::new(),
+            corrupt: true,
+            events: Arc::clone(&events),
+        };
+
+        let error = take_shards(&server, &mut work)
+            .await
+            .expect_err("the member fails");
+
+        assert!(corrupt_cache_in(&error).is_some(), "{error:#}");
+        assert_eq!(*server.requests.lock(), vec![(true, None)]);
+        let events = events.lock().clone();
+        let listed = events.iter().position(|e| *e == "shard").expect("a shard");
+        assert_eq!(events[listed..], ["shard", "drop cache"]);
     }
 
     struct SlowWork {
@@ -504,6 +557,8 @@ mod tests {
         }
 
         async fn flush(&mut self) {}
+
+        async fn drop_cache(&mut self, _corrupt: &CorruptEvalCache) {}
     }
 
     struct EventSink(Arc<Mutex<Vec<&'static str>>>);

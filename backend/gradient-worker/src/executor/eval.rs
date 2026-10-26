@@ -80,6 +80,29 @@ fn corrupt_eval_cache(msg: &str) -> Option<CorruptEvalCache> {
     eval_cache_fingerprint_from_error(msg).map(|fingerprint| CorruptEvalCache { fingerprint })
 }
 
+fn recognise_corrupt_cache(error: anyhow::Error) -> anyhow::Error {
+    match corrupt_eval_cache(&format!("{error:#}")) {
+        Some(corrupt) => error.context(corrupt),
+        None => error,
+    }
+}
+
+pub(super) fn corrupt_cache_in(error: &anyhow::Error) -> Option<&CorruptEvalCache> {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<CorruptEvalCache>())
+}
+
+pub(super) async fn drop_corrupt_cache(
+    resolver: &dyn DerivationResolver,
+    cache_dir: &str,
+    corrupt: &CorruptEvalCache,
+) {
+    warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt; dropping local blob + recycling eval workers");
+    delete_eval_cache_blob(&eval_cache_file(cache_dir, &corrupt.fingerprint)).await;
+    resolver.release_evaluators().await;
+}
+
 async fn delete_eval_cache_blob(sqlite_path: &str) {
     for suffix in ["", "-wal", "-shm"] {
         let p = format!("{sqlite_path}{suffix}");
@@ -224,11 +247,10 @@ pub async fn evaluate_derivations(
     let EvalOutcome { flake_nodes } = match evaluated {
         Ok(outcome) => outcome,
         Err(e) => {
-            if let Some(corrupt) = e.downcast_ref::<CorruptEvalCache>() {
+            if let Some(corrupt) = corrupt_cache_in(&e) {
                 drop(sharing);
-                warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt; dropping local blob + recycling eval workers");
-                delete_eval_cache_blob(&eval_cache_path(evaluator, &corrupt.fingerprint)).await;
-                evaluator.resolver.release_evaluators().await;
+                let cache_dir = evaluator.resolver.eval_cache_dir();
+                drop_corrupt_cache(&*evaluator.resolver, cache_dir, corrupt).await;
             }
             return Err(e);
         }
@@ -254,10 +276,11 @@ pub async fn evaluate_derivations(
 }
 
 pub(super) fn eval_cache_path(evaluator: &WorkerEvaluator, fingerprint: &str) -> String {
-    format!(
-        "{}/eval-cache-v6/{fingerprint}.sqlite",
-        evaluator.resolver.eval_cache_dir()
-    )
+    eval_cache_file(evaluator.resolver.eval_cache_dir(), fingerprint)
+}
+
+fn eval_cache_file(cache_dir: &str, fingerprint: &str) -> String {
+    format!("{cache_dir}/eval-cache-v6/{fingerprint}.sqlite")
 }
 
 pub(super) async fn eval_cache_fingerprint(
@@ -940,7 +963,14 @@ pub(super) async fn plan_shards_with(
         &dependencies,
     );
 
-    unless_aborted(&mut abort.clone(), planned).await
+    let (shards, errors) = unless_aborted(&mut abort.clone(), planned)
+        .await
+        .map_err(recognise_corrupt_cache)?;
+    if let Some(corrupt) = errors.iter().find_map(|e| corrupt_eval_cache(&e.message)) {
+        return Err(anyhow::Error::new(corrupt));
+    }
+
+    Ok((shards, errors))
 }
 
 pub(super) async fn evaluate_shard_with(
@@ -967,7 +997,7 @@ pub(super) async fn evaluate_shard_with(
         warnings,
         errors,
         deferred,
-    } = streamed.listed?;
+    } = streamed.listed.map_err(recognise_corrupt_cache)?;
     let mut failed = errors;
     failed.extend(streamed.found.failed);
     report_rest(updater, failed, warnings, Vec::new(), streamed.rest).await?;
@@ -1226,6 +1256,30 @@ mod tests {
             reporter.last_eval_result().is_none(),
             "SQLite corruption noise must not be reported as the eval result"
         );
+    }
+
+    #[tokio::test]
+    async fn the_local_cache_file_is_deleted_before_the_job_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache_dir = dir.path().to_str().expect("utf-8 path");
+        let fp = "deadbeef";
+        let file = eval_cache_file(cache_dir, fp);
+        std::fs::create_dir_all(dir.path().join("eval-cache-v6")).expect("cache dir");
+        for suffix in ["", "-wal"] {
+            std::fs::write(format!("{file}{suffix}"), b"garbage").expect("cache file");
+        }
+        let resolver = FakeDerivationResolver::new();
+        let listed = anyhow::anyhow!(
+            "database disk image is malformed (in '/var/cache/eval-cache-v6/{fp}.sqlite')"
+        );
+        let error = recognise_corrupt_cache(listed);
+
+        let corrupt = corrupt_cache_in(&error).expect("a typed corrupt cache");
+        drop_corrupt_cache(&resolver, cache_dir, corrupt).await;
+
+        assert!(!std::path::Path::new(&file).exists());
+        assert!(!std::path::Path::new(&format!("{file}-wal")).exists());
+        assert_eq!(resolver.releases(), 1);
     }
 
     #[test]
