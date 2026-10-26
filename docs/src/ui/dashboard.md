@@ -35,7 +35,7 @@ A task with an evaluation in the last 14 days other than a pull request is activ
 
 ## Command Palette
 
-Open the palette with `/` from anywhere outside a text field, or with the search field in the header.
+Open the palette with `/` from anywhere outside a text field, with Ctrl+K (Cmd+K on macOS) from anywhere, or with the search field in the header.
 
 | Query | Results |
 |---|---|

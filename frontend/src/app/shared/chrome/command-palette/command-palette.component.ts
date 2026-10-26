@@ -40,6 +40,12 @@ function isTextField(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && !!target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
 }
 
+function opensPalette(e: KeyboardEvent): boolean {
+  if (e.altKey) return false;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') return true;
+  return e.key === '/' && !e.ctrlKey && !e.metaKey && !isTextField(e.target);
+}
+
 function stepOf(e: KeyboardEvent): number {
   const key = e.key.toLowerCase();
   if (e.key === 'ArrowDown' || (e.ctrlKey && key === 'j')) return 1;
@@ -94,7 +100,7 @@ export class CommandPaletteComponent {
   }
 
   onGlobalKey(e: KeyboardEvent): void {
-    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !this.palette.isOpen() && !isTextField(e.target)) {
+    if (!this.palette.isOpen() && opensPalette(e)) {
       e.preventDefault();
       this.palette.open();
     } else if (e.key === 'Escape' && this.palette.isOpen()) {

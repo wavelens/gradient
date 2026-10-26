@@ -42,14 +42,27 @@ describe('CommandPaletteComponent', () => {
     expect(root.querySelector('input')).not.toBeNull();
   });
 
-  it('leaves / to a focused text field and ignores Ctrl+K', () => {
+  it('leaves / to a focused text field', () => {
     render();
     const palette = TestBed.inject(CommandPaletteService);
     const field = document.body.appendChild(document.createElement('textarea'));
     field.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }));
-    press('k', { ctrlKey: true });
     field.remove();
     expect(palette.isOpen()).toBe(false);
+  });
+
+  it('opens on Ctrl+K and Cmd+K even from a text field, taking the key from the browser', () => {
+    render();
+    const palette = TestBed.inject(CommandPaletteService);
+    const field = document.body.appendChild(document.createElement('input'));
+    for (const init of [{ ctrlKey: true }, { metaKey: true }]) {
+      const e = new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true, ...init });
+      field.dispatchEvent(e);
+      expect(palette.isOpen()).toBe(true);
+      expect(e.defaultPrevented).toBe(true);
+      palette.close();
+    }
+    field.remove();
   });
 
   it('closes on Escape', () => {
