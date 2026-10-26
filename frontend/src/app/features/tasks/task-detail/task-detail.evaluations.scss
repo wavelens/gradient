@@ -234,6 +234,7 @@ h1 { font-size: $font-size-xxl; margin: 0; }
   flex-wrap: wrap;
 
   b { color: var(--gr-text-primary); }
+  .tally-overall { color: var(--gr-text-muted); }
   .dur { display: inline-flex; align-items: center; gap: $spacing-xs; gr-icon { color: var(--gr-text-muted); } }
 }
 

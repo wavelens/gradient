@@ -122,7 +122,11 @@
             </div>
             <div class="bar-line">
               <gr-segmented-bar class="eval-bar" [counts]="sel.builds" />
-              <span><b>{{ doneCount(sel.builds) }} / {{ totalCount(sel.builds) }}</b> builds</span>
+              @let tally = buildTally(sel.builds);
+              <span>
+                <b>{{ tally.done }} / {{ tally.total }}</b> builds
+                @if (tally.overall > tally.total) { <span class="tally-overall">of {{ tally.overall }} total</span> }
+              </span>
               <span class="dur"><gr-icon name="timer" size="sm" /> <b>{{ evalDuration(sel) }}</b></span>
               @if (sel.errors > 0) {
                 <a class="msg-chip error" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
@@ -173,7 +177,8 @@
                     <span class="pkg-name">@if (ep.ifd) { <gr-badge class="pkg-ifd" severity="info">IFD</gr-badge> }{{ row.label }}</span>
                     <span class="chip-arch mono">{{ ep.architecture }}</span>
                     <gr-segmented-bar class="pkg-bar" [counts]="counts" />
-                    <span class="pkg-deps">{{ doneCount(counts) }} / {{ totalCount(counts) }} deps</span>
+                    @let depTally = buildTally(counts);
+                    <span class="pkg-deps" [title]="depTally.overall + ' deps in total'">{{ depTally.done }} / {{ depTally.total }} deps</span>
                     <span class="pkg-time">
                       {{ pkgDuration(ep) }}
                       @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }

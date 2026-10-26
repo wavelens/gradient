@@ -6,6 +6,7 @@
 
 export * from './build-actions';
 export * from './build-progress';
+export * from './build-tally';
 export * from './commit';
 export * from './duration';
 export * from './progress';

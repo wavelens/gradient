@@ -49,7 +49,7 @@ import {
   WalkMode,
   EvaluationStatus,
 } from '@core/models';
-import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, repositoryWebUrl, splitRepository, thunkProgress, unmetRequirementLabel, waitingTitle, formatWaitingReason } from '@shared/evaluation';
+import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, unmetRequirementLabel, waitingTitle, formatWaitingReason } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -745,13 +745,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     menu.openAt(event);
   }
 
-  doneCount(c: BuildStatusCounts): number {
-    return c.completed + c.failed + c.substituted + c.aborted;
-  }
-
-  totalCount(c: BuildStatusCounts): number {
-    return this.doneCount(c) + c.building + c.queued;
-  }
+  protected readonly buildTally = buildTally;
 
   /// Dep-closure counts plus the entry point's own build, so a package with
   /// few or no deps still shows its own progress in the bar.

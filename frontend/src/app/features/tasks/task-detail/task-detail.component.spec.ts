@@ -858,7 +858,6 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const deps = { completed: 2, failed: 0, building: 0, queued: 0, substituted: 1, aborted: 0 };
     const ep = { deps, build_status: 'Completed' } as unknown as EntryPointSummary;
     expect(component.barCounts(ep).completed).toBe(3);
-    expect(component.totalCount(component.barCounts(ep))).toBe(4);
     const sub = { deps: { ...deps, completed: 0, substituted: 0 }, build_status: 'Substituted' } as unknown as EntryPointSummary;
     expect(component.barCounts(sub).substituted).toBe(1);
   });
