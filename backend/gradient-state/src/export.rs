@@ -141,21 +141,9 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 })
             })
             .collect();
-        config.projects.insert(
-            o.name.clone(),
-            StateProject {
-                name: o.name.clone(),
-                display_name: o.display_name.clone(),
-                id: Some(o.id.to_string()),
-                description: opt(&o.description),
-                private_key_file: String::new(),
-                public: o.public,
-                hide_build_requests: o.hide_build_requests,
-                created_by: name_or_blank(&username, o.created_by),
-                members,
-                teams,
-            },
-        );
+        config
+            .projects
+            .insert(o.name.clone(), export_project(o, &username, members, teams));
     }
 
     for p in &tasks {
@@ -389,6 +377,27 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     }
 
     Ok(config)
+}
+
+fn export_project(
+    project: &gradient_entity::project::Model,
+    username: &HashMap<UserId, String>,
+    members: Vec<StateProjectMemberEntry>,
+    teams: Vec<StateProjectTeam>,
+) -> StateProject {
+    StateProject {
+        name: project.name.clone(),
+        display_name: project.display_name.clone(),
+        id: Some(project.id.to_string()),
+        description: opt(&project.description),
+        private_key_file: String::new(),
+        public: project.public,
+        hide_build_requests: project.hide_build_requests,
+        runner_enabled: project.runner_enabled,
+        created_by: name_or_blank(username, project.created_by),
+        members,
+        teams,
+    }
 }
 
 fn export_team(
@@ -782,6 +791,20 @@ mod tests {
         assert!(!sw.enable_eval);
         assert_eq!(sw.created_by, Some("alice".to_string()));
         assert!(sw.token_file.is_empty());
+    }
+
+    #[test]
+    fn runner_enabled_survives_export_round_trip() {
+        let project = gradient_entity::project::Model {
+            name: "acme".into(),
+            runner_enabled: true,
+            ..Default::default()
+        };
+
+        let exported = export_project(&project, &HashMap::new(), Vec::new(), Vec::new());
+        let reread: StateProject =
+            serde_json::from_value(serde_json::to_value(&exported).unwrap()).unwrap();
+        assert!(reread.runner_enabled);
     }
 
     #[test]

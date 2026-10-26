@@ -75,6 +75,7 @@ impl<'a> StateApplicator<'a> {
                 project.created_by = Set(created_by_id);
                 project.public = Set(state_project.public);
                 project.hide_build_requests = Set(state_project.hide_build_requests);
+                project.runner_enabled = Set(state_project.runner_enabled);
                 project.managed = Set(true);
                 project.update(self.db).await?;
                 tracing::info!(name = %state_project.name, "Updated managed project");
@@ -90,7 +91,7 @@ impl<'a> StateApplicator<'a> {
                     private_key: encrypted_private_key,
                     public: state_project.public,
                     hide_build_requests: state_project.hide_build_requests,
-                    runner_enabled: false,
+                    runner_enabled: state_project.runner_enabled,
                     created_by: created_by_id,
                     created_at: now,
                     managed: true,

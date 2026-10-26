@@ -665,6 +665,11 @@ export interface DependencyGraphNode {
 
 export type DerivationId = string;
 
+export interface DeviceRequest {
+  name: string;
+  count: number;
+}
+
 export interface DispatchRequest {
   target?: string | null;
   system?: string | null;
@@ -801,7 +806,7 @@ export interface ErrorResponseBody {
   message: string;
 }
 
-export type EvalCapability = "network" | "secrets" | "eval";
+export type EvalCapability = "network" | "secrets" | "eval" | "exec";
 
 export interface EvaluateRequest {
   commit?: string | null;
@@ -1595,6 +1600,7 @@ export interface PatchProjectRequest {
   display_name?: string | null;
   description?: string | null;
   hide_build_requests?: boolean | null;
+  runner_enabled?: boolean | null;
 }
 
 export interface PatchRequest {
@@ -1711,6 +1717,7 @@ export interface Project {
   private_key: string;
   public: boolean;
   hide_build_requests: boolean;
+  runner_enabled: boolean;
   created_by: UserId;
   created_at: string;
   managed: boolean;
@@ -1726,6 +1733,7 @@ export interface ProjectResponse {
   public_key?: string | null;
   public: boolean;
   hide_build_requests: boolean;
+  runner_enabled: boolean;
   managed: boolean;
   created_by: UserId;
   created_at: string;
@@ -1906,6 +1914,14 @@ export interface RuleDescription {
   description: string;
 }
 
+export interface RunnerUnmet {
+  labels: string[];
+  devices: DeviceRequest[];
+  mounts: string[];
+  nodes: number;
+  custom_image: boolean;
+}
+
 export interface ScimErrorBody {
   schemas: string[];
   status: string;
@@ -1959,6 +1975,7 @@ export interface ServerConfig {
   gradient_ci_enabled: boolean;
   gradient_ci_url: string;
   logo_url?: string | null;
+  runner_enabled: boolean;
 }
 
 export type SessionId = string;
@@ -2435,6 +2452,11 @@ export type WaitingReason = {
   pending_shared_builds: number;
   failing_upstream_caches: string[];
   kind: "upstream_caches";
+} | {
+  unmet: RunnerUnmet;
+  connected_workers: number;
+  matching_workers: number;
+  kind: "runner_workers";
 };
 
 export type WalkMode = "pruned" | "full";

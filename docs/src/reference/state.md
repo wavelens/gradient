@@ -53,6 +53,7 @@ services.gradient.state = {
 | `name` | string | attribute name | Unique name of the project. |
 | `private_key_file` | string | - | Path to the SSH private key used for Git access. |
 | `public` | bool | `false` | Set to `true` to make the project visible to all users. |
+| `runner_enabled` | bool | `false` | Set to `true` to start runner jobs of the project. Runner entry points of a project without it fail with a message. |
 | `teams` | list of submodule | `[ ]` | Teams with access to the project. Team grants declared here and later removed from the list get cleaned up on the next state apply. Grants created through the API or by new-project settings remain untouched. |
 | `teams.*.role` | null or string | `null` | Role given to the team's users: one of the built-in `Admin`, `Write` or `View`, or a custom role of this project. Required when `users` is `true`. |
 | `teams.*.team` | string | - | Name of the team to grant on the project. |

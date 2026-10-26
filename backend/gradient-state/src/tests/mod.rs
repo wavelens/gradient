@@ -57,6 +57,32 @@ fn project_task_cache_descriptions_optional() {
 }
 
 #[test]
+fn a_project_without_runner_enabled_keeps_runner_jobs_off() {
+    let json = r#"{
+        "users": {
+            "alice": {
+                "username": "alice",
+                "name": "Alice",
+                "email": "alice@example.com",
+                "password_file": "/dev/null"
+            }
+        },
+        "projects": {
+            "acme": {
+                "name": "acme",
+                "display_name": "ACME",
+                "description": null,
+                "private_key_file": "/dev/null",
+                "public": false,
+                "created_by": "alice"
+            }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    assert!(!cfg.projects["acme"].runner_enabled);
+}
+
+#[test]
 fn state_task_keep_evaluations_zero_rejected_by_validator() {
     let json = r#"{
         "users": {

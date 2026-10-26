@@ -14707,6 +14707,18 @@ components:
     DerivationId:
       type: string
       format: uuid
+    DeviceRequest:
+      type: object
+      required:
+      - name
+      - count
+      properties:
+        name:
+          type: string
+        count:
+          type: integer
+          format: int32
+          minimum: 0
     DispatchRequest:
       type: object
       properties:
@@ -15102,6 +15114,7 @@ components:
       - network
       - secrets
       - eval
+      - exec
     EvaluateRequest:
       type: object
       properties:
@@ -17409,6 +17422,10 @@ components:
           type:
           - boolean
           - 'null'
+        runner_enabled:
+          type:
+          - boolean
+          - 'null'
     PatchRequest:
       type: object
       required:
@@ -17725,6 +17742,7 @@ components:
       - private_key
       - public
       - hide_build_requests
+      - runner_enabled
       - created_by
       - created_at
       - managed
@@ -17745,6 +17763,8 @@ components:
           type: boolean
         hide_build_requests:
           type: boolean
+        runner_enabled:
+          type: boolean
         created_by:
           $ref: '#/components/schemas/UserId'
         created_at:
@@ -17764,6 +17784,7 @@ components:
       - description
       - public
       - hide_build_requests
+      - runner_enabled
       - managed
       - created_by
       - created_at
@@ -17784,6 +17805,8 @@ components:
         public:
           type: boolean
         hide_build_requests:
+          type: boolean
+        runner_enabled:
           type: boolean
         managed:
           type: boolean
@@ -18245,6 +18268,33 @@ components:
           type: string
         description:
           type: string
+    RunnerUnmet:
+      type: object
+      required:
+      - labels
+      - devices
+      - mounts
+      - nodes
+      - custom_image
+      properties:
+        labels:
+          type: array
+          items:
+            type: string
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceRequest'
+        mounts:
+          type: array
+          items:
+            type: string
+        nodes:
+          type: integer
+          format: int32
+          minimum: 0
+        custom_image:
+          type: boolean
     ScimErrorBody:
       type: object
       required:
@@ -18361,6 +18411,7 @@ components:
       - ssh_enabled
       - gradient_ci_enabled
       - gradient_ci_url
+      - runner_enabled
       properties:
         version:
           type: string
@@ -18400,6 +18451,8 @@ components:
           type:
           - string
           - 'null'
+        runner_enabled:
+          type: boolean
     SessionId:
       type: string
       format: uuid
@@ -19726,6 +19779,27 @@ components:
             type: string
             enum:
             - upstream_caches
+      - type: object
+        required:
+        - unmet
+        - connected_workers
+        - matching_workers
+        - kind
+        properties:
+          unmet:
+            $ref: '#/components/schemas/RunnerUnmet'
+          connected_workers:
+            type: integer
+            format: int32
+            minimum: 0
+          matching_workers:
+            type: integer
+            format: int32
+            minimum: 0
+          kind:
+            type: string
+            enum:
+            - runner_workers
     WalkMode:
       type: string
       enum:

@@ -170,6 +170,12 @@
         '';
       };
 
+      runner_enabled = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Toggle runner jobs of this project with this option. Runner entry points of a project without this option fail with a message.";
+      };
+
       created_by = mkOption {
         type = types.str;
         description = "User name of the project's creator.";
