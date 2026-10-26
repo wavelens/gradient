@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use sea_orm::DbErr;
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ActiveModelTrait, ConnectionTrait, DbErr, EntityTrait};
 use std::future::Future;
 
 /// Postgres is binding at most 65535 parameters per statement.
@@ -41,6 +42,28 @@ where
 {
     for chunk in ids.chunks(IN_CHUNK_SIZE) {
         op(chunk.to_vec()).await?;
+    }
+
+    Ok(())
+}
+
+pub async fn insert_in_chunks<A, C>(
+    db: &C,
+    rows: Vec<A>,
+    rows_per_statement: usize,
+    on_conflict: Option<OnConflict>,
+) -> Result<(), DbErr>
+where
+    A: ActiveModelTrait + Send,
+    C: ConnectionTrait,
+{
+    for chunk in rows.chunks(rows_per_statement) {
+        let mut insert = A::Entity::insert_many(chunk.to_vec());
+        if let Some(on_conflict) = &on_conflict {
+            insert = insert.on_conflict(on_conflict.clone());
+        }
+
+        insert.exec_without_returning(db).await?;
     }
 
     Ok(())
