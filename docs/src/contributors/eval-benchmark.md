@@ -67,7 +67,7 @@ cat result/summary.txt
 | Small flake | One job with 4 workers up, at most 10% slower than standalone |
 
 - A missed target can fail the test. The failure can only occur after `summary.txt` and `evalbench-multinode.tar.gz` exist.
-- 20 CPUs meet builders' needs. minimum. The QEMU threads of each VM pin to separate cores. Fewer CPUs cause an immediate test failure.
+- Set at least 20 CPUs on the builder. QEMU threads of each VM pin to separate cores. Fewer CPUs trigger an immediate test failure.
 - The report check can run with `nix build .#checks.x86_64-linux.evalbench-multinode-report`.
 
 ## Report
