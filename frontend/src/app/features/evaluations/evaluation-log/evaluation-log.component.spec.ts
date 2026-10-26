@@ -806,20 +806,13 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
-    it('shows the thunk bar only until the first build appears', () => {
+    it('keeps the thunk bar while builds appear during the evaluation', () => {
       const thunks = { kind: 'evaluating' as const, thunks: 1234567 };
-      const before = setupLive(thunks, 'EvaluatingFlake');
-      before.fixture.detectChanges();
-      expect(before.fixture.componentInstance.thunkRow()?.label).toBe('1.23M thunks');
-      expect(before.fixture.nativeElement.querySelector('.evaluating-hint gr-thunk-progress gr-segmented-bar')).not.toBeNull();
-      before.fixture.destroy();
-      TestBed.resetTestingModule();
-
-      const after = setupLive(thunks, 'EvaluatingDerivation', [build('b1', 'hello.drv', 'Queued')]);
-      after.fixture.detectChanges();
-      expect(after.fixture.componentInstance.thunkRow()).toBeNull();
-      expect(after.fixture.nativeElement.textContent).not.toContain('thunks');
-      after.fixture.destroy();
+      const { fixture } = setupLive(thunks, 'EvaluatingDerivation', [build('b1', 'hello.drv', 'Queued')]);
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.evaluating-hint gr-thunk-progress gr-segmented-bar')).not.toBeNull();
+      expect(fixture.nativeElement.textContent).not.toContain('Discovering builds');
+      fixture.destroy();
     });
 
     it('keeps a live frame over an older snapshot from a refetch', async () => {
