@@ -104,6 +104,7 @@ pub struct EvalWorker {
     /// Discard a worker dropped mid-exchange: its leftover frame on the wire is the next
     /// request's answer.
     in_flight: bool,
+    served: bool,
     pid_guard: PidGuard,
     thunks: Arc<LiveThunks>,
     downloads: DownloadSlot,
@@ -203,6 +204,7 @@ impl EvalWorker {
             stdin,
             stdout,
             in_flight: false,
+            served: false,
             pid_guard: PidGuard { live: None, pid },
             thunks,
             downloads,
@@ -237,6 +239,10 @@ impl EvalWorker {
 
     pub(super) fn in_flight(&self) -> bool {
         self.in_flight
+    }
+
+    pub(super) fn is_fresh(&self) -> bool {
+        !self.served
     }
 
     async fn send(&mut self, req: &EvalRequest) -> Result<()> {
@@ -362,6 +368,7 @@ impl EvalWorker {
         input_overrides: Vec<(String, String)>,
         dependencies: &dyn EvalDependencies,
     ) -> Result<(Vec<DiscoveryShard>, Vec<AttrError>)> {
+        self.served = true;
         self.call(
             EvalRequest::Plan {
                 repository,
@@ -386,6 +393,7 @@ impl EvalWorker {
         input_overrides: Vec<(String, String)>,
         dependencies: &dyn EvalDependencies,
     ) -> Result<Listing> {
+        self.served = true;
         self.call(
             EvalRequest::List {
                 repository,

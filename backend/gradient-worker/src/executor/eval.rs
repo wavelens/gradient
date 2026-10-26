@@ -842,6 +842,8 @@ fn build_eval_stats_report(
             })
             .collect(),
         flake_nodes,
+        sets: totals.sets,
+        subtrees: totals.subtrees,
         ..Default::default()
     }
 }

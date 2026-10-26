@@ -371,12 +371,21 @@ pub(super) mod tests {
         resp: &crate::ipc::EvalResponse,
         tag: &str,
     ) -> EvalWorker {
+        replying_worker_times(resp, tag, 1)
+    }
+
+    pub(in crate::pool) fn replying_worker_times(
+        resp: &crate::ipc::EvalResponse,
+        tag: &str,
+        times: usize,
+    ) -> EvalWorker {
         let payload = crate::ipc::encode_response(resp).expect("encode response");
         let mut frame = u32::try_from(payload.len())
             .expect("frame fits")
             .to_le_bytes()
             .to_vec();
         frame.extend_from_slice(&payload);
+        let frame = frame.repeat(times);
         let path = std::env::temp_dir().join(format!(
             "gradient-pool-test-{}-{tag}.frame",
             std::process::id()

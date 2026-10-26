@@ -191,6 +191,8 @@ pub type FoundItems<'a> = &'a (dyn Fn(Vec<ResolvedItem>) + Send + Sync);
 /// A completed `List` call, reported so the caller can account for it.
 pub struct CallStats {
     pub entry_point: String,
+    pub pattern: String,
+    pub first_call: bool,
     pub stats: Option<StatsDelta>,
     pub eval_ms: u64,
     pub attrs: Vec<(String, AttrCost)>,

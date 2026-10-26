@@ -12,10 +12,10 @@ pub use crate::types::{
     BuildRequirement, BuildSpec, BuildSpecKind, BuildStage, BumpedInputWire, CacheInfo, CachedPath,
     CandidateScore, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
     DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalMessageLevel,
-    EvalProgress, EvalStatsReport, FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource,
-    FlakeStep, GradientCapabilities, InputFetch, InputFetchState, InputUpdateSpec, Job,
-    JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode, Realisation,
-    RequiredPath,
+    EvalProgress, EvalSetCost, EvalStatsReport, EvalSubtreeCost, FlakeInputOverride, FlakeJob,
+    FlakeOutputNode, FlakeSource, FlakeStep, GradientCapabilities, InputFetch, InputFetchState,
+    InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode,
+    Realisation, RequiredPath,
 };
 pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, SegmentFetch,
