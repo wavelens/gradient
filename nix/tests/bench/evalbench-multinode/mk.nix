@@ -118,7 +118,11 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
         })
       ];
 
-      services.postgresql.settings.log_min_duration_statement = 5000;
+      services.postgresql.settings = {
+        log_min_duration_statement = 5000;
+        "auto_explain.log_min_duration" = lib.mkForce 5000;
+        "auto_explain.log_analyze" = true;
+      };
 
       virtualisation = {
         cores = SERVER_CORES;
