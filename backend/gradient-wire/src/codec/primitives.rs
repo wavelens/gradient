@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::BTreeMap;
+
 use bytes::{BufMut, Bytes, BytesMut};
 
 use super::{DecodeError, EncodeError, Proto, get_u8, get_varint, max, put_varint, take};
@@ -228,6 +230,27 @@ impl<A: Proto, B: Proto> Proto for (A, B) {
         out.push(',');
         B::describe(version, out);
         out.push(')');
+    }
+}
+
+impl<K: Proto + Ord, V: Proto> Proto for BTreeMap<K, V> {
+    const OLDEST: u16 = max(K::OLDEST, V::OLDEST);
+    const NEWEST: u16 = max(K::NEWEST, V::NEWEST);
+
+    fn encode(&self, version: u16, out: &mut BytesMut) -> Result<(), EncodeError> {
+        put_varint(out, self.len() as u64);
+        self.iter().try_for_each(|(key, value)| {
+            key.encode(version, out)?;
+            value.encode(version, out)
+        })
+    }
+
+    fn decode(input: &mut Bytes, version: u16) -> Result<Self, DecodeError> {
+        Vec::<(K, V)>::decode(input, version).map(BTreeMap::from_iter)
+    }
+
+    fn describe(version: u16, out: &mut String) {
+        Vec::<(K, V)>::describe(version, out);
     }
 }
 
