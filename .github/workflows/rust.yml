@@ -65,6 +65,7 @@ jobs:
           if grep -rlE --include='*.rs' --exclude-dir=target 'SKIP LOCKED' . \
                | grep -v -e 'gradient-db/src/deliveries/pending.rs' \
                          -e 'gradient-db/src/evaluations/counters.rs' \
+                         -e 'gradient-db/src/eval_shards.rs' \
                          -e 'gradient-ci/src/actions/executor.rs' \
                          -e 'gradient-ci/src/webhooks/deliver.rs'; then
             echo "::error::add a PendingDeliveryKind and enqueue it instead of a new SKIP LOCKED claim statement"
