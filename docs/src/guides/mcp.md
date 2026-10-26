@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Connect an AI Assistant
 
 Any [Model Context Protocol](https://modelcontextprotocol.io) client, such as Claude Code, Claude Desktop or Cursor, can connect through `gradient mcp`. The connection exposes every evaluation, build and build log. An assistant can locate a failed build and read the log line that broke it.

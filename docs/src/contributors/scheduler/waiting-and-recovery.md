@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Waiting and Recovery
 
 The scheduler covers four recovery cases: it splits a flake job across several workers, parks an evaluation that makes no progress, re-offers a job a worker returned, and cleans up leftover state after a server restart.

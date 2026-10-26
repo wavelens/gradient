@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Members and Roles
 
 Members and roles define who can access a project or cache and what they can do there. Each project and each cache keeps its own member list. Open the page through **Settings -> Members & Roles** on a project or **Members & Roles** on a cache.

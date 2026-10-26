@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Proto
 
 Server and workers share one WebSocket at `/proto`. The `Proto` derive encodes all frames as binary. A session must pass version agreement, handshake, authorization and capability exchange before the job loop can start.

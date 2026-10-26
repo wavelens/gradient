@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Pull Deployment
 
 NixOS machines that fetch and switch to their newest configuration built by Gradient on their own. Machines need only outbound access to the server. No deploy host has to push.

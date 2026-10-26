@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Projects and Tasks
 
 A **project** bundles people, machines and caches. Each **task** in a project points to one repository and lists the flake outputs that need building from it.

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Messages
 
 The message definitions live in `backend/gradient-wire/src/messages` and cover everything sent over `/proto`. All identifiers such as `job_id`, `assignment_id` and peer IDs travel as strings. **Bulk** messages carry payload chunks and use the bulk lane. Every other message uses the control lane.

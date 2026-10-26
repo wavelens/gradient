@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Connect Gitea or Forgejo
 
 Pushes and pull requests trigger evaluations. Commit statuses appear back on the Git host.

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Cache Closure
 
 One invariant governs the cache: an output served from the cache must include its full runtime closure, stored alongside it. Per-shared-build counters enforce this invariant across the graph, and every start condition checks those counters. A self-heal can then fix anything a failed build exposed.

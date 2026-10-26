@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Build Before Pushing
 
 Push work to CI workers and build there with `gradient build`. The workers build uncommitted changes. The output shows a `result` link at the end, the same way `nix build` does. The laptop needs no builders and no Nix evaluation.

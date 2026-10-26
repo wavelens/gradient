@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Connection
 
 A worker holds one WebSocket connection to the server at `/proto`. All frames are binary and encoded by the `Proto` derive. A session moves through five stages: **version agreement -> handshake -> authorization -> capabilities -> job loop**.
