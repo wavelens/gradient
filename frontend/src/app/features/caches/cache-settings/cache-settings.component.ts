@@ -12,6 +12,7 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import {
   ButtonComponent,
+  CheckboxComponent,
   DialogComponent,
   FormFieldComponent,
   InputDirective,
@@ -27,6 +28,7 @@ import {
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { CacheResponse } from '@core/models';
+import { LabelHelpComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-cache-settings',
@@ -49,6 +51,8 @@ import { CacheResponse } from '@core/models';
     RowComponent,
     SelectComponent,
     RowListComponent,
+    CheckboxComponent,
+    LabelHelpComponent,
   ],
   templateUrl: './cache-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -78,11 +82,6 @@ export class CacheSettingsComponent implements OnInit {
   readonly visibilityOptions = [
     { label: 'Private', value: false },
     { label: 'Public', value: true },
-  ];
-
-  readonly pullThroughOptions = [
-    { label: 'Enabled', value: true },
-    { label: 'Disabled', value: false },
   ];
 
   formData = {

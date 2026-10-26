@@ -41,7 +41,7 @@ Anyone can view every evaluation and build on a public project, signed in or not
 | Priority | Advertised to Nix clients in `nix-cache-info`. Lower values win, default `10` |
 | Local Priority | Priority for clients from `services.gradient.http.localIps`. Empty: same as **Priority** |
 | Max Storage (GB) | New evaluations wait while every writable cache of the project is down to less than 10 MiB. `0` is unlimited |
-| Pull-Through | Nix clients receive paths from the [upstream caches](../concepts/caches.md#pull-through) through the cache. **Disabled**: only paths the cache holds |
+| Pull-Through | Nix clients receive paths from the [upstream caches](../concepts/caches.md#pull-through) through the cache. Unchecked: only paths the cache holds |
 | Visibility | Public caches hand out paths without credentials |
 
 The cache page also includes **Upstream Caches**, **NARs**, **Members & Roles**, **Subscriptions** and **Webhooks**.
