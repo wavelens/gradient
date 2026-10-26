@@ -11,3 +11,4 @@ export * from './duration';
 export * from './progress';
 export * from './repository';
 export * from './status-phase';
+export * from './waiting-reason';

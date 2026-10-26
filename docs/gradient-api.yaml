@@ -16241,6 +16241,10 @@ components:
           - 'null'
           format: int64
           minimum: 0
+        waiting_reason:
+          oneOf:
+          - $ref: '#/components/schemas/WaitingReason'
+          - type: 'null'
     EvaluationTriggerSummary:
       type: object
       required:

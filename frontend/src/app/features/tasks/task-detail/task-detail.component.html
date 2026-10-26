@@ -228,6 +228,19 @@
               <gr-empty-state class="pkg-wait" flat icon="manage_search" title="Evaluating">
                 <gr-thunk-progress [progress]="row" />
               </gr-empty-state>
+            } @else if (sel.status === 'Waiting') {
+              <gr-empty-state class="pkg-wait" flat icon="pause_circle" [title]="waitingTitle(sel.waiting_reason)"
+                [message]="sel.waiting_reason ? formatWaitingReason(sel.waiting_reason) : ''">
+                @if (sel.waiting_reason; as reason) {
+                  @if (reason.kind === 'workers') {
+                    <ul class="waiting-unmet">
+                      @for (req of reason.unmet; track $index) {
+                        <li>{{ unmetRequirementLabel(req) }}</li>
+                      }
+                    </ul>
+                  }
+                }
+              </gr-empty-state>
             } @else {
               <gr-empty-state class="pkg-wait" flat icon="hourglass_empty" title="Waiting for packages"
                 message="Packages appear as their entry points are found." />
