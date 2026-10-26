@@ -10,7 +10,7 @@ use anyhow::Result;
 use gradient_entity::eval_cache_store;
 use gradient_storage::NarStore;
 use gradient_storage::eval_cache_segment::{
-    decode, encode, eval_cache_segment_key, eval_cache_segment_prefix, merge_segments,
+    decode, encode_bounded, eval_cache_segment_key, eval_cache_segment_prefix, merge_segments,
 };
 use gradient_types::ids::{CacheId, EvalCacheStoreId};
 use gradient_types::{EEvalCacheStore, MEvalCacheStore};
@@ -26,7 +26,7 @@ pub const COMPACTION_DELAY: Duration = Duration::from_secs(15 * 60);
 
 pub struct CompactionPlan {
     listed: Vec<String>,
-    merged: Option<Vec<u8>>,
+    merged: Vec<Vec<u8>>,
 }
 
 pub async fn record_segment(
@@ -110,11 +110,7 @@ pub async fn plan_compaction(
         }
     }
 
-    let merged = if segments.is_empty() {
-        None
-    } else {
-        Some(encode(&merge_segments(segments))?)
-    };
+    let merged = encode_bounded(&merge_segments(segments))?;
     Ok(CompactionPlan { listed, merged })
 }
 
@@ -126,26 +122,25 @@ pub async fn apply_compaction(
     copies: &[CacheId],
     plan: CompactionPlan,
 ) -> Result<()> {
-    let compacted = match plan.merged {
-        Some(bytes) => {
-            let key = eval_cache_segment_key(cache, fingerprint, Uuid::now_v7());
-            let size = bytes.len() as i64;
-            nar_storage.put_eval_cache(&key, bytes).await?;
-            Some((key, size))
-        }
-        None => None,
-    };
+    let mut compacted = Vec::with_capacity(plan.merged.len());
+    let mut size = 0;
+    for bytes in plan.merged {
+        let key = eval_cache_segment_key(cache, fingerprint, Uuid::now_v7());
+        size += bytes.len() as i64;
+        nar_storage.put_eval_cache(&key, bytes).await?;
+        compacted.push(key);
+    }
 
     for key in &plan.listed {
         nar_storage.delete_eval_cache(key).await?;
     }
 
-    let Some((key, size)) = compacted else {
+    if compacted.is_empty() {
         return Ok(());
-    };
+    }
 
     for &copy in copies {
-        if let Err(e) = add_to_copy(db, nar_storage, &key, copy, fingerprint).await {
+        if let Err(e) = add_to_copy(db, nar_storage, &compacted, copy, fingerprint).await {
             warn!(%copy, %fingerprint, error = %e, "copying the compacted eval cache failed");
         }
     }
@@ -157,12 +152,15 @@ pub async fn apply_compaction(
 async fn add_to_copy(
     db: &impl ConnectionTrait,
     nar_storage: &NarStore,
-    compacted: &str,
+    compacted: &[String],
     copy: CacheId,
     fingerprint: &str,
 ) -> Result<()> {
-    let target = eval_cache_segment_key(copy, fingerprint, Uuid::now_v7());
-    nar_storage.copy_eval_cache(compacted, &target).await?;
+    for key in compacted {
+        let target = eval_cache_segment_key(copy, fingerprint, Uuid::now_v7());
+        nar_storage.copy_eval_cache(key, &target).await?;
+    }
+
     record_segment(db, copy, fingerprint, &[]).await?;
     Ok(())
 }
@@ -207,7 +205,9 @@ async fn record_compacted(
 mod tests {
     use super::*;
     use gradient_fixtures::mock::{exec_ok, mock_db, raw_statements};
-    use gradient_storage::eval_cache_segment::{ATTR_PLACEHOLDER, EvalCacheRow};
+    use gradient_storage::eval_cache_segment::{
+        ATTR_PLACEHOLDER, EvalCacheRow, SEGMENT_MAX_BYTES, encode,
+    };
     use sea_orm::{DatabaseConnection, Value};
 
     fn row(path: &str, kind: u8, value: &str) -> EvalCacheRow {
@@ -268,6 +268,33 @@ mod tests {
             decode(&bytes).unwrap(),
             vec![row("a", 2, "x"), row("b", 2, "y")]
         );
+    }
+
+    #[tokio::test]
+    async fn compaction_splits_output_above_the_segment_size() {
+        let cache = CacheId::now_v7();
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = NarStore::local(dir.path()).unwrap();
+        let value = "x".repeat(1024 * 1024);
+        let rows: Vec<EvalCacheRow> = (0..10).map(|n| row(&format!("c{n}"), 2, &value)).collect();
+        put_segment(&store, cache, &rows[..5]).await;
+        put_segment(&store, cache, &rows[5..]).await;
+
+        let plan = plan_compaction(&store, cache, "fp").await.unwrap();
+        apply_compaction(&one_exec(), &store, cache, "fp", &[], plan)
+            .await
+            .unwrap();
+
+        let keys = listed(&store, cache).await;
+        assert_eq!(keys.len(), 2, "{keys:?}");
+        let mut compacted = Vec::new();
+        for key in &keys {
+            let bytes = store.get_eval_cache(key).await.unwrap().unwrap();
+            assert!(bytes.len() <= SEGMENT_MAX_BYTES);
+            compacted.extend(decode(&bytes).unwrap());
+        }
+        compacted.sort_by(|a, b| a.path.cmp(&b.path));
+        assert_eq!(compacted, rows);
     }
 
     #[tokio::test]
