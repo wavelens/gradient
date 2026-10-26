@@ -684,6 +684,27 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(failed?.querySelector('.pkg-link')?.getAttribute('href')).toMatch(/\/log\/[^?]+\?eval=1$/);
   });
 
+  it('shows why a waiting evaluation has no packages yet', () => {
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      {
+        primaryStatus: 'Waiting',
+        primary: {
+          waiting_reason: {
+            kind: 'workers',
+            connected_workers: 0,
+            available_architectures: [],
+            unmet: [{ architecture: 'aarch64-linux', required_features: ['kvm'], build_count: 3 }],
+          },
+        },
+      },
+    );
+    const text = (fixture.nativeElement as HTMLElement).querySelector('.pkg-wait')?.textContent ?? '';
+    expect(text).toContain('Waiting for Workers');
+    expect(text).toContain('No workers are connected');
+    expect(text).toContain('aarch64-linux with feature kvm - 3 builds');
+  });
+
   it('holds a failed attribute back until the rows before it are loaded', () => {
     const host = (n: string) => `nixosConfigurations.${n}.config.system.build.toplevel`;
     const { fixture, tasksService } = setup(

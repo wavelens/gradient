@@ -49,7 +49,7 @@ import {
   WalkMode,
   EvaluationStatus,
 } from '@core/models';
-import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, repositoryWebUrl, splitRepository, thunkProgress } from '@shared/evaluation';
+import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, repositoryWebUrl, splitRepository, thunkProgress, unmetRequirementLabel, waitingTitle, formatWaitingReason } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -499,6 +499,9 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   isRunning(status: EvaluationStatus): boolean { return isRunningEvaluationStatus(status); }
+  readonly waitingTitle = waitingTitle;
+  readonly formatWaitingReason = formatWaitingReason;
+  readonly unmetRequirementLabel = unmetRequirementLabel;
 
   private runningActivity(all: Record<string, EvaluationProgress>): Record<string, EvaluationProgress> {
     const running = new Set(this.evaluations().filter(e => this.isRunning(e.status)).map(e => e.id));

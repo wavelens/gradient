@@ -929,6 +929,7 @@ export interface EvaluationSummary {
   updated_at: string;
   progress?: EvaluationProgress | null;
   expected_thunks?: number | null;
+  waiting_reason?: WaitingReason | null;
 }
 
 export interface EvaluationTriggerSummary {

@@ -32,7 +32,7 @@ use gradient_db::evaluations::failed_attributes::FailedAttribute;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::triggers::ConcurrencyPolicy;
-use gradient_types::{EvaluationProgress, MTask, TaskTriggerId, TriggerType};
+use gradient_types::{EvaluationProgress, MTask, TaskTriggerId, TriggerType, WaitingReason};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -187,6 +187,8 @@ pub struct EvaluationSummary {
     pub progress: Option<EvaluationProgress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_thunks: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_reason: Option<WaitingReason>,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -369,6 +371,7 @@ mod summary_tests {
             updated_at: chrono::NaiveDateTime::default(),
             expected_thunks: progress.as_ref().map(|_| 450),
             progress,
+            waiting_reason: None,
         })
         .unwrap()
     }
