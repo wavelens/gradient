@@ -108,9 +108,7 @@
               <div>
                 <div class="title-line">
                   <h2 [title]="evalTitle(sel)">{{ evalTitle(sel) }}</h2>
-                  @if (isRunning(sel.status)) {
-                    <gr-eval-status-badge [status]="sel.status" [prioritized]="sel.prioritized" />
-                  }
+                  <gr-eval-status-badge [status]="sel.status" [prioritized]="sel.prioritized" />
                 </div>
                 <div class="sub">
                   @if (commitWebUrl(proj.repository, sel.commit); as commitUrl) {
