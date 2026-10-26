@@ -218,6 +218,36 @@ daemon(frozen, "release", {"node": "frozen/c1"})
 assert_clean()
 latency_report("frozen")
 
+if requires("the server restart reclaim", "distinct-upstream-workers"):
+    banner("server restart mid build")
+    e = phase("server-restart")
+    holder = None
+    for _ in range(300):
+        holder = next((w for w in WORKER_NODES if "server-restart/c1" in daemon(w, "running")), None)
+        if holder:
+            break
+        server.sleep(1)
+    assert holder, "c1 never started building"
+    since = holder.succeed("date +%s").strip()
+    server.succeed("systemctl restart gradient-server.service")
+    server.wait_for_unit("gradient-server.service")
+    holder.wait_until_succeeds(
+        f"journalctl -u gradient-worker --no-pager --since=@{since} | grep -q 'reconnected successfully'", timeout=120
+    )
+    daemon(holder, "release", {"node": "server-restart/c1"})
+    wait_evaluation(e, "Completed")
+    assert [w.name for w, _ in builds_of("server-restart", "c1")] == [holder.name], "c1 was re-queued"
+    BUILT = 1
+    drv_hash = drv_of("server-restart", "c1").split("/")[-1].split("-")[0]
+    attempts = sql(
+        "SELECT ba.outcome || ':' || coalesce(ba.reason::text, '') FROM build_attempt ba "
+        "JOIN derivation_build db ON db.id = ba.derivation_build JOIN derivation d ON d.id = db.derivation "
+        f"WHERE d.hash = '{drv_hash}'"
+    )
+    assert attempts.splitlines() == [f"{BUILT}:"], attempts
+    assert_clean()
+    latency_report("server-restart")
+
 e = phase("stress")
 wait_evaluation(e, "Completed", timeout=900)
 assert_clean()

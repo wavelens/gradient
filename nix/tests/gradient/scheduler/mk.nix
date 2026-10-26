@@ -23,6 +23,7 @@ let
     twins = ./specs/twins.nix;
     hang = ./specs/hang.nix;
     frozen = ./specs/frozen.nix;
+    server-restart = ./specs/server-restart.nix;
     stress = ./specs/stress.nix;
     replay = ./specs/replay.nix;
   };
