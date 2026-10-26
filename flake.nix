@@ -78,6 +78,7 @@
       };
 
       gradient-evalbench = import ./nix/tests/bench/evalbench { inherit self pkgs; };
+      gradient-evalbench-multinode = import ./nix/tests/bench/evalbench-multinode { inherit self pkgs; };
 
       default = gradient;
     } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
