@@ -35,8 +35,7 @@
         <input grInput id="proj-repo" [(ngModel)]="formData.repository" [appManagedDisable]="access()" />
         <button *appWritable="access()" grButton type="button" label="Test connection" icon="lan"
                 severity="secondary" [loading]="checkingRepo()"
-                [disabled]="checkingRepo() || repositoryEdited()"
-                [grTooltip]="repositoryEdited() ? 'Save the new URL first' : ''"
+                [disabled]="checkingRepo() || !formData.repository.trim()"
                 (click)="testConnection()"></button>
       </div>
       @if (repoCheck(); as r) {

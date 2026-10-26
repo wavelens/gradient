@@ -9,6 +9,7 @@ import { Observable } from 'rxjs';
 import { HttpResponse } from '@angular/common/http';
 import { ApiService } from './api.service';
 import {
+  CheckRepositoryRequest,
   Paginated,
   TaskResponse,
   TaskDetailsResponse,
@@ -95,9 +96,9 @@ export class TasksService {
     return this.api.post<string>(`tasks/${project}/${task}/active`);
   }
 
-  /** Fetches the saved repository the way the scheduler does; resolves to the head commit. */
-  checkRepository(project: string, task: string): Observable<string> {
-    return this.api.post<string>(`tasks/${project}/${task}/check-repository`, {});
+  checkRepository(project: string, task: string, repository: string): Observable<string> {
+    const body: CheckRepositoryRequest = { repository };
+    return this.api.post<string>(`tasks/${project}/${task}/check-repository`, body);
   }
 
   deactivateTask(project: string, task: string): Observable<string> {

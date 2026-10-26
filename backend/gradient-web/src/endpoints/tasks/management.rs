@@ -26,7 +26,7 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
 use gradient_core::ServerState;
-use gradient_sources::check_task_updates;
+use gradient_sources::resolve_remote_ref;
 use gradient_types::consts::*;
 use gradient_types::input::vec_to_hex;
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
@@ -52,6 +52,18 @@ pub struct MakeTaskRequest {
     pub wait_for_workers: Option<bool>,
     #[serde(default)]
     pub retry_failed_builds: Option<bool>,
+}
+
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
+pub struct CheckRepositoryRequest {
+    pub repository: Option<String>,
+}
+
+fn validated_repository(repository: String) -> WebResult<String> {
+    repository
+        .parse::<RepositoryUrl>()
+        .map_err(|e| TaskRefusal::InvalidRepositoryUrl(e.to_string()))?;
+    Ok(repository)
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -454,10 +466,7 @@ impl<'a> TaskPatcher<'a> {
     }
 
     fn apply_repository(&mut self, repository: String) -> WebResult<()> {
-        repository
-            .parse::<RepositoryUrl>()
-            .map_err(|e| TaskRefusal::InvalidRepositoryUrl(e.to_string()))?;
-        self.atask.repository = Set(repository);
+        self.atask.repository = Set(validated_repository(repository)?);
         Ok(())
     }
 
@@ -586,22 +595,30 @@ pub async fn delete_task_active(
     operation_id = "checkTaskRepository",
     tag = "tasks",
     summary = "Check repository accessibility",
-    description = "Tests whether Gradient can clone the task's repository using the project's SSH key. Requires Admin or Write role; rejects state-managed tasks.\nReturns `400` with `code: \"repository_unreachable\"` and the underlying git error when the repository cannot be fetched.",
+    description = "Tests whether Gradient can clone the task's repository using the project's SSH key and returns the remote head commit. A `repository` in the body is tested instead of the saved URL, so a new URL can be checked before saving it. Requires Admin or Write role; rejects state-managed tasks.\nReturns `400` with `code: \"repository_unreachable\"` and the underlying git error when the repository cannot be fetched.",
     params(TaskPath),
+    request_body = Option<CheckRepositoryRequest>,
     responses((status = OK, description = "Repository is accessible", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn post_task_check_repository(
-    TaskScope { task, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    TaskScope {
+        project, task, db, ..
+    }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    body: Option<Json<CheckRepositoryRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_has_updates, head) = check_task_updates(&db, &task, None).await.map_err(|e| {
-        TaskRefusal::RepositoryCheckFailed {
+    let repository = match body.and_then(|Json(b)| b.repository) {
+        Some(repository) => validated_repository(repository)?,
+        None => task.repository,
+    };
+    let head = resolve_remote_ref(&db, &project, &repository, None)
+        .await
+        .map_err(|e| TaskRefusal::RepositoryCheckFailed {
             reason: e.to_string(),
-        }
-    })?;
+        })?;
 
     let res = BaseResponse {
         error: false,
-        message: vec_to_hex(&head.commit),
+        message: vec_to_hex(&head),
     };
 
     Ok(Json(res))

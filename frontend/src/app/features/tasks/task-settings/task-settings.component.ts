@@ -25,7 +25,6 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
-  TooltipDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
@@ -42,7 +41,6 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
     DialogComponent,
     ButtonComponent,
     InputDirective,
-    TooltipDirective,
     AutoCompleteComponent,
     SelectComponent,
     CheckboxComponent,
@@ -159,14 +157,10 @@ export class TaskSettingsComponent implements OnInit {
   repoCheck = signal<{ ok: boolean; message: string } | null>(null);
   checkingRepo = signal(false);
 
-  repositoryEdited(): boolean {
-    return this.formData.repository !== (this.task()?.repository ?? '');
-  }
-
   testConnection(): void {
     this.checkingRepo.set(true);
     this.repoCheck.set(null);
-    this.tasksService.checkRepository(this.projectName, this.taskName).subscribe({
+    this.tasksService.checkRepository(this.projectName, this.taskName, this.formData.repository.trim()).subscribe({
       next: (head) => {
         this.checkingRepo.set(false);
         this.repoCheck.set({ ok: true, message: `Reachable, head at ${head.slice(0, 12)}` });

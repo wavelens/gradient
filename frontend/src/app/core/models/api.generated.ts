@@ -403,6 +403,10 @@ export interface CatalogEntry {
   durable: boolean;
 }
 
+export interface CheckRepositoryRequest {
+  repository?: string | null;
+}
+
 export interface CheckUsernameRequest {
   username: string;
 }

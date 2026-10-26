@@ -28,7 +28,7 @@ function taskFor(c: AccessCase) {
     name: 'demo',
     display_name: 'Demo',
     description: '',
-    repository: '',
+    repository: 'git@example.org:demo.git',
     wildcard: '',
     active: true,
     force_evaluation: false,
@@ -60,7 +60,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 
 function setup(
   c: AccessCase,
-  checkRepository: () => Observable<string> = () => of('abc1234def5678'),
+  checkRepository: (...args: unknown[]) => Observable<string> = () => of('abc1234def5678'),
   updateTask: (...args: unknown[]) => Observable<string> = () => of('ok'),
 ): ComponentFixture<TaskSettingsComponent> {
   TestBed.configureTestingModule({
@@ -130,14 +130,27 @@ describe('TaskSettingsComponent - repository connection test', () => {
     expect(status(fixture)).toContain('Permission denied (publickey)');
   });
 
-  /// The server checks the saved URL, so an edited one would test the old remote.
-  it('asks to save an edited URL before testing it', async () => {
-    const fixture = setup(editor);
+  async function typeRepository(fixture: ComponentFixture<TaskSettingsComponent>, url: string) {
     await fixture.whenStable();
     const input = (fixture.nativeElement as HTMLElement).querySelector('#proj-repo') as HTMLInputElement;
-    input.value = 'git@example.org:other.git';
+    input.value = url;
     input.dispatchEvent(new Event('input'));
     fixture.detectChanges();
+  }
+
+  it('tests an edited URL without saving it', async () => {
+    const checkRepository = vi.fn(() => of('abc1234def5678'));
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup(editor, checkRepository, updateTask);
+    await typeRepository(fixture, ' git@example.org:other.git ');
+    (findByText(fixture.nativeElement, 'test connection') as HTMLButtonElement).click();
+    expect(checkRepository).toHaveBeenCalledWith('acme', 'demo', 'git@example.org:other.git');
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it('cannot test an empty URL', async () => {
+    const fixture = setup(editor);
+    await typeRepository(fixture, '  ');
     const btn = findByText(fixture.nativeElement, 'test connection') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
   });
