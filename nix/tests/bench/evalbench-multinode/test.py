@@ -81,7 +81,7 @@ def reset_workers():
 
 def connected_workers(token):
     workers = api("GET", "projects/project/workers", token)
-    return sum(1 for worker in workers if worker["connection"]["connected"])
+    return sum(1 for worker in workers if worker.get("live") is not None)
 
 
 def use_workers(token, n):
