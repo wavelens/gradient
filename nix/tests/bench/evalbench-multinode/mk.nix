@@ -8,7 +8,7 @@
   DELAY_MS = 40;
   RATE = "100mbit";
   WORKER_CORES = 4;
-  SERVER_CORES = 2;
+  SERVER_CORES = 4;
 
   e2e = ../../gradient/e2e;
 
@@ -120,7 +120,7 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
 
       virtualisation = {
         cores = SERVER_CORES;
-        memorySize = 4096;
+        memorySize = 8192;
       };
     };
   } // topo.nodes;

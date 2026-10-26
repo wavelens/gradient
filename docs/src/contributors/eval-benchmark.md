@@ -49,6 +49,7 @@ cat result/summary.txt
 
 | Part | Setup |
 |---|---|
+| Server | One VM with 4 cores and 8 GiB |
 | Workers | Four eval-only VMs with 4 cores and 6 GiB each, `eval.maxConcurrent = 1` |
 | Links | `netem` on every worker: 40 ms delay and 100 Mbit in each direction, 80 ms round trip |
 | Large flake | `hydraJobs.perl` and `hydraJobs.python` from nixpkgs, task wildcard `hydraJobs.**` |
@@ -66,7 +67,7 @@ cat result/summary.txt
 | Small flake | One job with 4 workers up, at most 10% slower than standalone |
 
 - A missed target can fail the test. The failure can only occur after `summary.txt` and `evalbench-multinode.tar.gz` exist.
-- Builders need 18 CPUs minimum. The QEMU threads of each VM pin to separate cores. Fewer CPUs cause an immediate test failure.
+- 20 CPUs meet builders' needs. minimum. The QEMU threads of each VM pin to separate cores. Fewer CPUs cause an immediate test failure.
 - The report check can run with `nix build .#checks.x86_64-linux.evalbench-multinode-report`.
 
 ## Report
