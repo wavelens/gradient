@@ -43,6 +43,13 @@ impl MemberReport {
         }
     }
 
+    pub fn job(&self) -> Option<&PendingJob> {
+        match self {
+            Self::Completed { job } | Self::Failed { job, .. } | Self::Lost { job } => Some(job),
+            Self::Aborted { job } => job.as_ref(),
+        }
+    }
+
     pub fn outcome(&self) -> MemberOutcome {
         match self {
             Self::Completed { .. } => MemberOutcome::Succeeded,
@@ -151,17 +158,15 @@ fn split_verdict(members: &[AttemptMember]) -> Option<Fate> {
         .iter()
         .map(|m| m.report.as_ref().map(MemberReport::outcome))
         .collect();
+    let aborted = outcomes.contains(&Some(MemberOutcome::Aborted));
+    if outcomes.contains(&None) {
+        return aborted.then_some(Fate::Abort);
+    }
     if outcomes.contains(&Some(MemberOutcome::Succeeded)) {
         return Some(Fate::Complete);
     }
-    if outcomes.contains(&Some(MemberOutcome::Aborted)) {
-        return Some(Fate::Abort);
-    }
 
-    outcomes
-        .iter()
-        .all(|o| matches!(o, Some(MemberOutcome::Failed | MemberOutcome::Lost)))
-        .then_some(Fate::Retry)
+    Some(if aborted { Fate::Abort } else { Fate::Retry })
 }
 
 pub fn dispose(resolution: Resolution, report: MemberReport) -> Disposition {
@@ -437,6 +442,26 @@ mod tests {
             dispose(resolution, MemberReport::Aborted { job: Some(job()) }),
             Disposition::Nothing
         ));
+    }
+
+    #[test]
+    fn every_member_report_is_folded_once_the_attempt_settles() {
+        let running = [
+            member("p", true, Some(completed())),
+            member("c", false, None),
+        ];
+        let settled = [
+            member("p", true, Some(completed())),
+            member("c", false, Some(completed())),
+        ];
+        let aborted = [
+            member("p", true, Some(failed(BuildFailureKind::Aborted))),
+            member("c", false, None),
+        ];
+
+        assert_eq!(verdict(&running, true), None);
+        assert_eq!(verdict(&settled, true), Some(Fate::Complete));
+        assert_eq!(verdict(&aborted, true), Some(Fate::Abort));
     }
 
     #[test]

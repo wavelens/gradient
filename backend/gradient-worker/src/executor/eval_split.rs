@@ -15,7 +15,7 @@ use gradient_sources::ShardSpec;
 use gradient_wire::messages::{FlakeJob, FlakeOutputNode};
 use gradient_wire::traits::JobReporter;
 use gradient_wire::types::{
-    EvalShard, EvalShardOutcome, EvalShardSpec, FinishedShard, SPLIT_COMPANION_ROLE,
+    EvalShard, EvalShardOutcome, EvalShardSpec, FinishedShard, JobPhase, SPLIT_COMPANION_ROLE,
     SPLIT_PRIMARY_ROLE,
 };
 use tracing::{info, warn};
@@ -186,6 +186,7 @@ pub(super) async fn run_companion(
         return Ok(());
     };
 
+    let _phase = updater.phase(JobPhase::EvalDerivations);
     crate::proto::prefetch::ensure_path(context.store, &source_path, updater).await?;
     let fingerprint = (!fingerprint.is_empty()).then_some(fingerprint);
     let mut work = PoolShardWork::open(context, Some(&source_path), fingerprint, updater).await;

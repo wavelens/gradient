@@ -120,8 +120,8 @@ def measure(token, task):
     shards = int(psql(f"SELECT count(*) FROM eval_shard WHERE evaluation = '{eval_id}' AND state IN (2, 3)"))
     jobs = int(psql(
         "SELECT count(*) FROM dispatched_job dj"
-        f" WHERE dj.evaluation_id = '{eval_id}' AND dj.kind = 0 AND (dj.cluster_attempt IS NOT NULL"
-        " OR EXISTS (SELECT 1 FROM dispatched_job_phase p WHERE p.dispatched_job = dj.id AND p.phase IN (2, 3)))"
+        f" WHERE dj.evaluation_id = '{eval_id}' AND dj.kind = 0"
+        " AND EXISTS (SELECT 1 FROM dispatched_job_phase p WHERE p.dispatched_job = dj.id AND p.phase IN (2, 3))"
     ))
     return {
         "eval_id": eval_id,
