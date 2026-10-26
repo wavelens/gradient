@@ -458,9 +458,9 @@ describe('TaskDetailComponent - in-progress state (#452)', () => {
     expect(badge).toBeTruthy();
   });
 
-  it('hides the title badge when the latest evaluation is terminal', () => {
+  it('keeps the title badge once the evaluation finished', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Completed' });
-    expect(fixture.nativeElement.querySelector('.title-line gr-eval-status-badge')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.title-line gr-eval-status-badge')?.textContent?.trim()).toBe('Completed');
   });
 });
 
