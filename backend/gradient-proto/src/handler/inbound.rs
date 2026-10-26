@@ -389,6 +389,12 @@ impl<'a> InboundContext<'a> {
                 self.on_eval_cache_pull(job_id, fingerprint, applied).await;
                 true
             }
+            ClientMessage::EvalSourceReady { job_id, .. }
+            | ClientMessage::EvalShardsPlanned { job_id, .. }
+            | ClientMessage::EvalShardRequest { job_id, .. } => {
+                debug!(peer_id = %self.peer_id, %job_id, "split evaluation message dropped");
+                true
+            }
             msg @ (ClientMessage::CacheQuery { .. }
             | ClientMessage::QueryKnownDerivations { .. }) => {
                 self.rpc().serve(msg);

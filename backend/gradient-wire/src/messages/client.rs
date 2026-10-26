@@ -9,8 +9,8 @@ use bytes::Bytes;
 use crate::codec::Proto;
 use crate::types::{
     BuildFailureKind, BuildMetrics, BuildProgressPhase, CandidateScore, ClusterAddress,
-    EvalMessageLevel, EvalProgress, GradientCapabilities, InputOutcome, JobKind, JobPhaseSpan,
-    JobUpdateKind, QueryMode, UploadMetadata, UploadObject,
+    EvalMessageLevel, EvalProgress, EvalShardSpec, FinishedShard, GradientCapabilities,
+    InputOutcome, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode, UploadMetadata, UploadObject,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -219,6 +219,26 @@ pub enum ClientMessage {
         bytes_done: u64,
         bytes_total: Option<u64>,
     },
+
+    #[proto(40)]
+    EvalSourceReady {
+        job_id: String,
+        store_path: String,
+        fingerprint: String,
+    },
+
+    #[proto(40)]
+    EvalShardsPlanned {
+        job_id: String,
+        shards: Vec<EvalShardSpec>,
+    },
+
+    #[proto(40)]
+    EvalShardRequest {
+        job_id: String,
+        have_source: bool,
+        finished: Option<FinishedShard>,
+    },
 }
 
 impl ClientMessage {
@@ -239,7 +259,10 @@ impl ClientMessage {
             | ClientMessage::QueryKnownDerivations { job_id, .. }
             | ClientMessage::UploadRequest { job_id, .. }
             | ClientMessage::ImportRequest { job_id, .. }
-            | ClientMessage::InputRequest { job_id, .. } => Some(job_id),
+            | ClientMessage::InputRequest { job_id, .. }
+            | ClientMessage::EvalSourceReady { job_id, .. }
+            | ClientMessage::EvalShardsPlanned { job_id, .. }
+            | ClientMessage::EvalShardRequest { job_id, .. } => Some(job_id),
             _ => None,
         }
     }
@@ -278,6 +301,9 @@ impl ClientMessage {
             ClientMessage::InputRequest { .. } => "InputRequest",
             ClientMessage::InputFetched { .. } => "InputFetched",
             ClientMessage::InputFetchProgress { .. } => "InputFetchProgress",
+            ClientMessage::EvalSourceReady { .. } => "EvalSourceReady",
+            ClientMessage::EvalShardsPlanned { .. } => "EvalShardsPlanned",
+            ClientMessage::EvalShardRequest { .. } => "EvalShardRequest",
         }
     }
 
