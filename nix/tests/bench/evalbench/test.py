@@ -114,6 +114,8 @@ def dump_postgres(run, eval_id):
         f" WHERE dj.evaluation_id = '{eval_id}' ORDER BY dj.dispatched_at, p.seq",
         f"{pg}/job_phases.json",
     )
+    dump_json("SELECT * FROM eval_set_cost ORDER BY path", f"{pg}/eval_set_cost.json")
+    dump_json("SELECT * FROM eval_subtree_cost ORDER BY path", f"{pg}/eval_subtree_cost.json")
 
 
 def evaluate(run, cold, instrumented):
