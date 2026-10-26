@@ -60,10 +60,6 @@ pub struct WorkerConfig {
     /// verbatim in the cluster roster. `null` advertises none.
     pub endpoint: Option<String>,
 
-    /// Path to the `nix` binary, resolved via `PATH` by default.
-    #[arg(default_value = "nix")]
-    pub nix_bin: String,
-
     /// Path to the `ssh` binary, resolved via `PATH` by default.
     /// Nix uses it as `GIT_SSH_COMMAND` for private flake inputs.
     #[arg(default_value = "ssh")]
@@ -138,7 +134,6 @@ impl Default for WorkerConfig {
             id: None,
             zone: None,
             endpoint: None,
-            nix_bin: "nix".to_owned(),
             ssh_bin: "ssh".to_owned(),
             gcroots_dir: "/nix/var/nix/gcroots/gradient".to_owned(),
             discoverable: false,
@@ -197,8 +192,9 @@ pub struct SystemArgs {
     #[arg(value_delimiter = ',')]
     pub architectures: Vec<String>,
 
-    /// Nix system features this worker advertises. An empty list detects them at runtime from
-    /// {command}`nix config show system-features`, including CPU-derived `gccarch-*` levels.
+    /// Nix system features this worker advertises. An empty list uses the system features of
+    /// the Nix store, including those that enabled experimental features imply, such as
+    /// `recursive-nix`.
     #[arg(value_delimiter = ',')]
     pub features: Vec<String>,
 

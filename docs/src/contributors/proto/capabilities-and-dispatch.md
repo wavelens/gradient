@@ -22,7 +22,7 @@ After the handshake, workers with the `build` capability send a `WorkerCapabilit
 | Field | Meaning | Worker default |
 |---|---|---|
 | `architectures` | Nix systems the worker can build, as free-form strings | The host system (`macos` show up as `darwin`) |
-| `system_features` | Nix system features | The local daemon's `nix config show system-features` output |
+| `system_features` | Nix system features | System features from the local Nix store plus extras that enabled experimental features add (`recursive-nix`)
 | `max_concurrent_builds` | Number of build slots | `GRADIENT_WORKER_BUILD_MAX_CONCURRENT` (1) |
 | `cpu_count`, `ram_total_mb` | Hardware details | Detected at startup |
 | `cpu_core_score` | Relative single-core speed | A startup micro-benchmark, or `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` |

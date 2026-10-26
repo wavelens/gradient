@@ -71,16 +71,6 @@
   },
   {
     "group": "",
-    "field": "nix_bin",
-    "flag": "nix-bin",
-    "env": "GRADIENT_WORKER_NIX_BIN",
-    "type": "String",
-    "description": "Path to the `nix` binary, resolved via `PATH` by default.",
-    "default": "nix",
-    "values": []
-  },
-  {
-    "group": "",
     "field": "ssh_bin",
     "flag": "ssh-bin",
     "env": "GRADIENT_WORKER_SSH_BIN",
@@ -279,7 +269,7 @@
     "flag": "system-features",
     "env": "GRADIENT_WORKER_SYSTEM_FEATURES",
     "type": "Vec<String>",
-    "description": "Nix system features this worker advertises. An empty list detects them at runtime from\n{command}`nix config show system-features`, including CPU-derived `gccarch-*` levels.",
+    "description": "Nix system features this worker advertises. An empty list uses the system features of\nthe Nix store, including those that enabled experimental features imply, such as\n`recursive-nix`.",
     "default": null,
     "values": []
   },

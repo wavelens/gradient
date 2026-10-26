@@ -30,7 +30,7 @@ A single machine can hold every capability. A machine with a lot of memory can e
 
 ## Matching Builds
 
-Builds only go to workers supporting the derivation's system (e.g. `aarch64-linux`) and every required system feature (e.g. `kvm`, `big-parallel`). Systems come from `worker.system.architectures`, with the host platform as default. Features come from the local Nix of the worker. `worker.system.features` can override the detected features.
+Builds only go to workers supporting the derivation's system (e.g. `aarch64-linux`) and every required system feature (e.g. `kvm`, `big-parallel`). Systems come from `worker.system.architectures`, with the host platform as default. Workers read features from their local Nix store. Experimental features such as `recursive-nix` add a system feature to that store once enabled. `worker.system.features` can override the detected features.
 
 The scheduler will score each queued job among the matching workers. The scheduler will also keep heavy builds and evaluations away from workers lacking free memory for the predicted peak. Earlier builds are the source of this prediction. `services.gradient.worker.build.metrics` can record the per-build measurements behind this prediction.
 

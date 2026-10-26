@@ -770,7 +770,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
- "syn 2.0.119",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -3323,6 +3323,7 @@ dependencies = [
  "hex",
  "libc",
  "nix",
+ "nix-bindings",
  "rand 0.10.3",
  "reqwest",
  "rkyv",
@@ -4744,7 +4745,7 @@ dependencies = [
 [[package]]
 name = "nix-bindings"
 version = "0.2352.0"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Fnix-2.35.3#35fe73004066858e1c5a3c798766ca7a67d26944"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Fnix-2.35.3#0cb4654c9dd672d99dfab90a9741fae8eb8334f6"
 dependencies = [
  "nix-bindings-sys",
 ]
@@ -4752,7 +4753,7 @@ dependencies = [
 [[package]]
 name = "nix-bindings-sys"
 version = "0.2352.0"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Fnix-2.35.3#35fe73004066858e1c5a3c798766ca7a67d26944"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Fnix-2.35.3#0cb4654c9dd672d99dfab90a9741fae8eb8334f6"
 dependencies = [
  "bindgen",
  "cc",

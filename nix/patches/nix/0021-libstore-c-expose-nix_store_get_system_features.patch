@@ -1,0 +1,118 @@
+From 26e75e7b0859e4dd9251f4723f6529151f24b72d Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Mon, 26 Oct 2026 12:50:43 +0100
+Subject: [PATCH] libstore-c: expose nix_store_get_system_features
+
+A C API consumer that schedules builds onto a machine has to know which
+requiredSystemFeatures the machine accepts. The `system-features` setting
+alone misses the features implied by experimental features, such as
+`recursive-nix`; expose the store's own `system-features` instead.
+---
+ doc/manual/rl-next/c-api-system-features.md |  6 ++++++
+ src/libstore-c/nix_api_store.cc             | 13 ++++++++++++
+ src/libstore-c/nix_api_store.h              | 17 +++++++++++++++
+ src/libstore-tests/nix_api_store.cc         | 23 +++++++++++++++++++++
+ 4 files changed, 59 insertions(+)
+ create mode 100644 doc/manual/rl-next/c-api-system-features.md
+
+diff --git a/doc/manual/rl-next/c-api-system-features.md b/doc/manual/rl-next/c-api-system-features.md
+new file mode 100644
+index 000000000..9bc892eea
+--- /dev/null
++++ b/doc/manual/rl-next/c-api-system-features.md
+@@ -0,0 +1,6 @@
++---
++synopsis: "C API: `nix_store_get_system_features`"
++prs: []
++---
++
++A new function `nix_store_get_system_features()` in `nix_api_store.h` can return a store's system features. A store can check `requiredSystemFeatures` against that list. The returned list can include extra features from enabled experimental features. One example is `recursive-nix`. `nix config show system-features` can list only the `system-features` setting. The command can omit those implied features.
+diff --git a/src/libstore-c/nix_api_store.cc b/src/libstore-c/nix_api_store.cc
+index 276164012..9842ccd32 100644
+--- a/src/libstore-c/nix_api_store.cc
++++ b/src/libstore-c/nix_api_store.cc
+@@ -131,6 +131,19 @@ nix_err nix_store_add_perm_root(
+     NIXC_CATCH_ERRS
+ }
+ 
++nix_err nix_store_get_system_features(
++    nix_c_context * context, Store * store, nix_get_string_callback callback, void * user_data)
++{
++    if (context)
++        context->last_err_code = NIX_OK;
++    try {
++        for (auto & feature : store->ptr->config.systemFeatures.get())
++            call_nix_get_string_callback(feature, callback, user_data);
++        return NIX_OK;
++    }
++    NIXC_CATCH_ERRS
++}
++
+ bool nix_store_is_valid_path(nix_c_context * context, Store * store, const StorePath * path)
+ {
+     if (context)
+diff --git a/src/libstore-c/nix_api_store.h b/src/libstore-c/nix_api_store.h
+index ebade943f..3c11edcfd 100644
+--- a/src/libstore-c/nix_api_store.h
++++ b/src/libstore-c/nix_api_store.h
+@@ -215,6 +215,23 @@ nix_err nix_store_add_perm_root(
+     nix_get_string_callback callback,
+     void * user_data);
+ 
++/**
++ * @brief Get the system features of the machine a Nix store builds on.
++ *
++ * These are the features the store checks a derivation's `requiredSystemFeatures` against. Unless the store sets the
++ * `system-features` store setting, they are the `system-features` setting plus the features implied by enabled
++ * experimental features, such as `recursive-nix`.
++ *
++ * @param[out] context Optional, stores error information
++ * @param[in] store nix store reference
++ * @param[in] callback Called once for each system feature, in sorted order.
++ * @param[in] user_data optional, arbitrary data, passed to the callback when it's called.
++ * @see nix_get_string_callback
++ * @return error code, NIX_OK on success.
++ */
++nix_err nix_store_get_system_features(
++    nix_c_context * context, Store * store, nix_get_string_callback callback, void * user_data);
++
+ /**
+  * @brief Create a `nix_derivation` from a JSON representation of that derivation.
+  *
+diff --git a/src/libstore-tests/nix_api_store.cc b/src/libstore-tests/nix_api_store.cc
+index 663e008fc..ba626f5da 100644
+--- a/src/libstore-tests/nix_api_store.cc
++++ b/src/libstore-tests/nix_api_store.cc
+@@ -184,6 +184,29 @@ TEST_F(nix_api_util_context, nix_store_open_dummy)
+     nix_store_free(store);
+ }
+ 
++TEST_F(nix_api_util_context, nix_store_get_system_features)
++{
++    nix_libstore_init(ctx);
++    const char * p1[] = {"system-features", "kvm big-parallel"};
++    const char ** params[] = {p1, nullptr};
++    Store * store = nix_store_open(ctx, "dummy://", params);
++    assert_ctx_ok();
++
++    std::vector<std::string> features;
++    auto ret = nix_store_get_system_features(
++        ctx,
++        store,
++        [](const char * start, unsigned int n, void * user_data) {
++            static_cast<std::vector<std::string> *>(user_data)->emplace_back(start, n);
++        },
++        &features);
++    assert_ctx_ok();
++    ASSERT_EQ(NIX_OK, ret);
++    ASSERT_EQ((std::vector<std::string>{"big-parallel", "kvm"}), features);
++
++    nix_store_free(store);
++}
++
+ TEST_F(nix_api_util_context, nix_store_open_invalid)
+ {
+     nix_libstore_init(ctx);
+-- 
+2.55.0
+
