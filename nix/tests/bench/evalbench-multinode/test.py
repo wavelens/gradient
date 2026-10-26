@@ -112,7 +112,7 @@ def measure(token, task):
     banner(f"evaluate {task} on {connected_workers(token)} workers")
     psql("SELECT pg_stat_statements_reset();")
     eval_id = api("POST", f"tasks/project/{task}/evaluate", token, body={})
-    wait_for_status(token, eval_id, EVALUATED, timeout=EVAL_TIMEOUT)
+    status = wait_for_status(token, eval_id, EVALUATED, timeout=EVAL_TIMEOUT)
     statements = int(psql(
         "SELECT coalesce(sum(s.calls), 0) FROM pg_stat_statements s"
         " JOIN pg_roles r ON r.oid = s.userid WHERE r.rolname = 'gradient'"
@@ -123,13 +123,16 @@ def measure(token, task):
         f" WHERE dj.evaluation_id = '{eval_id}' AND dj.kind = 0"
         " AND EXISTS (SELECT 1 FROM dispatched_job_phase p WHERE p.dispatched_job = dj.id AND p.phase IN (2, 3))"
     ))
-    return {
+    result = {
         "eval_id": eval_id,
         "wall_ms": report.wall_ms(eval_phases(eval_id)),
         "statements": statements,
         "shards": shards,
         "jobs": jobs,
     }
+    if status != "Completed":
+        api("POST", f"evals/{eval_id}", token, body={"method": "abort"})
+    return result
 
 
 def write_summary(runs, small):
