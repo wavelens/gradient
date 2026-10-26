@@ -8,6 +8,7 @@ pub mod create;
 pub mod planner;
 pub mod recovery;
 pub mod reply;
+pub mod shrink;
 
 pub use reply::{MemberView, NextStep, SplitView, next_step};
 

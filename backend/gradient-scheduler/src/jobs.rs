@@ -11,8 +11,8 @@ use gradient_db::scheduling::assignment_record::ClaimGate;
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::evaluation::WalkMode;
 use gradient_types::ids::{
-    ClusterAttemptId, ClusterJobId, CommitId, DerivationBuildId, DerivationId, DispatchedJobId,
-    EvaluationId, ProjectId, TaskId,
+    ClusterAttemptId, ClusterJobId, ClusterMemberId, CommitId, DerivationBuildId, DerivationId,
+    DispatchedJobId, EvaluationId, ProjectId, TaskId,
 };
 use gradient_wire::types::{
     BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeStep, Job, JobCandidate, JobKind,
@@ -1351,6 +1351,18 @@ impl JobTracker {
             self.forget_job_scores(&member.key);
         }
         Some(cluster)
+    }
+
+    pub fn drop_cluster_members(
+        &mut self,
+        id: ClusterJobId,
+        members: &[ClusterMemberId],
+    ) -> Option<PendingCluster> {
+        for key in self.clusters.drop_members(id, members) {
+            self.forget_job_scores(&key);
+        }
+
+        self.clusters.get(id).cloned()
     }
 
     pub fn is_aborting(&self, job_id: &str) -> bool {

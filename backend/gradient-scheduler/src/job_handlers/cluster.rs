@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use gradient_db::scheduling::assignment_record::ClaimGate;
 use gradient_db::scheduling::cluster::ClusterClaim;
 use gradient_pool::session_port::SessionSignal;
-use gradient_types::ids::ClusterAttemptId;
+use gradient_types::ids::{ClusterAttemptId, ClusterJobId};
 use gradient_util::supervision::{Pass, PassError, RunsOn};
 use gradient_wire::types::{ClusterAddress, ClusterMembership, ClusterPeer};
 use tokio::sync::Notify;
@@ -113,7 +113,11 @@ impl Scheduler {
         let mut slots = snapshot.slots;
         let mut seated: Vec<String> = Vec::new();
         for cluster in snapshot.clusters.iter().filter(|c| Some(c.id) != reserved) {
-            let Some(placement) = crate::cluster::plan(cluster, &slots, &snapshot.scores) else {
+            let placement = match crate::cluster::plan(cluster, &slots, &snapshot.scores) {
+                Some(placement) => Some(placement),
+                None => self.shrink_split(cluster, &slots, &snapshot.scores).await,
+            };
+            let Some(placement) = placement else {
                 continue;
             };
             slots.retain(|s| !placement.seats.iter().any(|seat| seat.worker == s.worker));
@@ -551,18 +555,24 @@ impl Scheduler {
         let dissolved =
             gradient_db::scheduling::cluster::dissolve_unplaced_clusters(&self.db.worker_db)
                 .await?;
+        self.forget_dissolved(dissolved).await;
+
+        Ok(())
+    }
+
+    pub(crate) async fn forget_dissolved(&self, dissolved: Vec<ClusterJobId>) {
         if dissolved.is_empty() {
-            return Ok(());
+            return;
         }
 
         for cluster in dissolved {
-            info!(%cluster, "unplaced split cluster dissolved; its evaluation runs on one worker");
-            self.call(|reply| SchedulerMsg::DropWaiting { cluster, reply })
-                .await?;
+            info!(%cluster, "split cluster dissolved; its evaluation runs on one worker");
+            let _ = self
+                .call(|reply| SchedulerMsg::DropWaiting { cluster, reply })
+                .await;
         }
-        self.db.wake.eval_assign.notify_one();
 
-        Ok(())
+        self.db.wake.eval_assign.notify_one();
     }
 
     async fn is_aborting(&self, job_id: &str) -> bool {

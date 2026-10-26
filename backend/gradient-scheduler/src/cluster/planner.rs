@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use gradient_types::ids::ClusterJobId;
 
-use super::matching::kuhn;
+use super::matching::{kuhn, matched_count};
 use super::{ClusterMember, PendingCluster, Slot, SlotKind};
 use crate::jobs::{WorkerJobScore, visible_to};
 
@@ -51,20 +51,38 @@ fn zone_groups(same_zone: bool, slots: &[Slot]) -> BTreeMap<Option<String>, Vec<
     groups
 }
 
+pub fn fillable_seats(cluster: &PendingCluster, slots: &[Slot], scores: &ScoreLookup) -> usize {
+    zone_groups(cluster.same_zone, slots)
+        .values()
+        .map(|group| matched_count(&eligibility(cluster, group, scores).1))
+        .max()
+        .unwrap_or(0)
+}
+
+fn eligibility<'a>(
+    cluster: &PendingCluster,
+    group: &[&'a Slot],
+    scores: &ScoreLookup,
+) -> (Vec<&'a str>, Vec<Vec<usize>>) {
+    let mut workers: Vec<&str> = group.iter().map(|s| s.worker.as_str()).collect();
+    workers.sort_unstable();
+    workers.dedup();
+
+    let eligible = cluster
+        .members
+        .iter()
+        .map(|m| candidates(m, group, &workers, scores))
+        .collect();
+
+    (workers, eligible)
+}
+
 fn place_in(
     cluster: &PendingCluster,
     group: &[&Slot],
     scores: &ScoreLookup,
 ) -> Option<(u128, Vec<Seat>)> {
-    let mut workers: Vec<&str> = group.iter().map(|s| s.worker.as_str()).collect();
-    workers.sort_unstable();
-    workers.dedup();
-
-    let eligible: Vec<Vec<usize>> = cluster
-        .members
-        .iter()
-        .map(|m| candidates(m, group, &workers, scores))
-        .collect();
+    let (workers, eligible) = eligibility(cluster, group, scores);
     let mut order: Vec<usize> = (0..eligible.len()).collect();
     order.sort_by_key(|&i| (cluster.members[i].pin.is_none(), eligible[i].len()));
     let ordered: Vec<Vec<usize>> = order.iter().map(|&i| eligible[i].clone()).collect();

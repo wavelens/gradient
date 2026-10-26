@@ -11,9 +11,12 @@ use gradient_entity::cluster_attempt::{
 use gradient_entity::cluster_job::{
     ClusterJobStatus, Column as CClusterJob, Entity as EClusterJob,
 };
-use gradient_entity::ids::ClusterJobId;
+use gradient_entity::cluster_member::{Column as CClusterMember, Entity as EClusterMember};
+use gradient_entity::ids::{ClusterJobId, ClusterMemberId};
 use sea_orm::sea_query::{Expr, Query};
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbErr, DeleteMany, EntityTrait, ExprTrait, QueryFilter,
+};
 
 fn retries_left() -> Expr {
     Expr::col(CClusterJob::Attempts).lte(Expr::col(CClusterJob::RetryBudget))
@@ -55,9 +58,7 @@ pub async fn finish_cluster_job<C: ConnectionTrait>(
     Ok(res.rows_affected == 1)
 }
 
-pub async fn dissolve_unplaced_clusters<C: ConnectionTrait>(
-    db: &C,
-) -> Result<Vec<ClusterJobId>, DbErr> {
+fn dissolvable() -> DeleteMany<EClusterJob> {
     let open_attempt = Query::select()
         .expr(Expr::val(1))
         .from(EClusterAttempt)
@@ -67,14 +68,50 @@ pub async fn dissolve_unplaced_clusters<C: ConnectionTrait>(
         )
         .and_where(Expr::col((EClusterAttempt, CClusterAttempt::FinishedAt)).is_null())
         .to_owned();
-    let dissolved = EClusterJob::delete_many()
+
+    EClusterJob::delete_many()
         .filter(CClusterJob::Status.eq(ClusterJobStatus::Queued))
-        .filter(CClusterJob::DissolveAfter.lt(gradient_types::now()))
+        .filter(CClusterJob::DissolveAfter.is_not_null())
         .filter(Expr::exists(open_attempt).not())
+}
+
+pub async fn dissolve_unplaced_clusters<C: ConnectionTrait>(
+    db: &C,
+) -> Result<Vec<ClusterJobId>, DbErr> {
+    let dissolved = dissolvable()
+        .filter(CClusterJob::DissolveAfter.lt(gradient_types::now()))
         .exec_with_returning(db)
         .await?;
 
     Ok(dissolved.into_iter().map(|c| c.id).collect())
+}
+
+pub async fn dissolve_split_cluster<C: ConnectionTrait>(
+    db: &C,
+    cluster: ClusterJobId,
+) -> Result<bool, DbErr> {
+    let res = dissolvable()
+        .filter(CClusterJob::Id.eq(cluster))
+        .exec(db)
+        .await?;
+
+    Ok(res.rows_affected == 1)
+}
+
+pub async fn drop_split_companions<C: ConnectionTrait>(
+    db: &C,
+    cluster: ClusterJobId,
+    members: &[ClusterMemberId],
+) -> Result<u64, DbErr> {
+    let res = EClusterMember::delete_many()
+        .filter(CClusterMember::ClusterJob.eq(cluster))
+        .filter(CClusterMember::Id.is_in(members.iter().copied()))
+        .filter(CClusterMember::Primary.eq(false))
+        .filter(CClusterMember::EvalIndex.is_not_null())
+        .exec(db)
+        .await?;
+
+    Ok(res.rows_affected)
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
