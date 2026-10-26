@@ -23,12 +23,16 @@ create table if not exists gradient_changed_attribute (attribute integer primary
 create table if not exists gradient_applying (one integer);
 create table if not exists gradient_applied_segment (key text primary key);
 create table if not exists gradient_unsent_segment (id integer primary key, bytes blob not null);
-create trigger if not exists gradient_record_inserted_attribute after insert on Attributes
+drop trigger if exists gradient_record_inserted_attribute;
+drop trigger if exists gradient_record_updated_attribute;
+create trigger gradient_record_inserted_attribute after insert on Attributes
     when not exists (select 1 from gradient_applying)
-    begin insert or ignore into gradient_changed_attribute (attribute) values (new.rowid); end;
-create trigger if not exists gradient_record_updated_attribute after update on Attributes
+    begin insert into gradient_changed_attribute (attribute) select new.rowid
+        where not exists (select 1 from gradient_changed_attribute where attribute = new.rowid); end;
+create trigger gradient_record_updated_attribute after update on Attributes
     when not exists (select 1 from gradient_applying)
-    begin insert or ignore into gradient_changed_attribute (attribute) values (new.rowid); end;
+    begin insert into gradient_changed_attribute (attribute) select new.rowid
+        where not exists (select 1 from gradient_changed_attribute where attribute = new.rowid); end;
 ";
 
 // Each changed row walks up its parents; a chain that stops before the root `(0, '')` is an orphan.
@@ -473,6 +477,22 @@ mod tests {
             ]
         );
         assert!(file.export_changes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_nix_upsert_of_a_row_changed_since_the_last_export_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = cache_path(&dir);
+        let mut file = open(&path).unwrap();
+        let nix = nix(&path);
+        let root = nix_insert(&nix, 0, "", ATTR_PLACEHOLDER, None);
+        nix_seal(&nix, root, "hydraJobs", &[]);
+
+        nix_seal(&nix, root, "hydraJobs", &["perl"]);
+
+        assert_eq!(children(&nix, root), vec!["hydraJobs"]);
+        assert_eq!(lookup(&nix, &["hydraJobs", "perl"]), Some((ATTR_PLACEHOLDER, None)));
+        assert_eq!(exported_rows(&mut file).len(), 3);
     }
 
     #[test]
