@@ -379,13 +379,23 @@ pub(super) mod tests {
         tag: &str,
         times: usize,
     ) -> EvalWorker {
-        let payload = crate::ipc::encode_response(resp).expect("encode response");
-        let mut frame = u32::try_from(payload.len())
-            .expect("frame fits")
-            .to_le_bytes()
-            .to_vec();
-        frame.extend_from_slice(&payload);
-        let frame = frame.repeat(times);
+        replying_worker_sequence(&vec![resp.clone(); times], tag)
+    }
+
+    pub(in crate::pool) fn replying_worker_sequence(
+        resps: &[crate::ipc::EvalResponse],
+        tag: &str,
+    ) -> EvalWorker {
+        let mut frame = Vec::new();
+        for resp in resps {
+            let payload = crate::ipc::encode_response(resp).expect("encode response");
+            frame.extend_from_slice(
+                &u32::try_from(payload.len())
+                    .expect("frame fits")
+                    .to_le_bytes(),
+            );
+            frame.extend_from_slice(&payload);
+        }
         let path = std::env::temp_dir().join(format!(
             "gradient-pool-test-{}-{tag}.frame",
             std::process::id()
