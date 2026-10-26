@@ -8874,7 +8874,7 @@ paths:
       - tasks
       summary: Check repository accessibility
       description: |-
-        Tests whether Gradient can clone the task's repository using the project's SSH key. Requires Admin or Write role; rejects state-managed tasks.
+        Tests whether Gradient can clone the task's repository using the project's SSH key and returns the remote head commit. A `repository` in the body is tested instead of the saved URL, so a new URL can be checked before saving it. Requires Admin or Write role; rejects state-managed tasks.
         Returns `400` with `code: "repository_unreachable"` and the underlying git error when the repository cannot be fetched.
       operationId: checkTaskRepository
       parameters:
@@ -8888,6 +8888,13 @@ paths:
         required: true
         schema:
           type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - $ref: '#/components/schemas/CheckRepositoryRequest'
+              - type: 'null'
       responses:
         '200':
           description: Repository is accessible
@@ -14016,6 +14023,13 @@ components:
           type: string
         durable:
           type: boolean
+    CheckRepositoryRequest:
+      type: object
+      properties:
+        repository:
+          type:
+          - string
+          - 'null'
     CheckUsernameRequest:
       type: object
       required:

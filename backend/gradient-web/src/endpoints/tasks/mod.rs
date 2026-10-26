@@ -19,9 +19,9 @@ pub use self::evaluations::{
     post_task_evaluate,
 };
 pub use self::management::{
-    MakeTaskRequest, PatchTaskRequest, TransferOwnershipRequest, delete_task, delete_task_active,
-    get, get_task, get_task_name_available, patch_task, post_task_active,
-    post_task_check_repository, post_task_transfer, put,
+    CheckRepositoryRequest, MakeTaskRequest, PatchTaskRequest, TransferOwnershipRequest,
+    delete_task, delete_task_active, get, get_task, get_task_name_available, patch_task,
+    post_task_active, post_task_check_repository, post_task_transfer, put,
 };
 pub use self::metrics::{EntryPointMetricsQuery, get_entry_point_metrics, get_task_metrics};
 
