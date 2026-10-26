@@ -10,10 +10,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use gradient_storage::eval_cache_segment::{
-    ATTR_PLACEHOLDER, EvalCacheRow, Merge, SEGMENT_MAX_BYTES, encode, merge,
+    ATTR_FULL_ATTRS, ATTR_MISSING, ATTR_PLACEHOLDER, EvalCacheRow, Merge, child_listing,
+    encode_bounded, listed_children, merge,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
-use tracing::warn;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -87,7 +87,7 @@ impl EvalCacheFile {
         let rows = changed_rows(&tx)?;
         tx.execute("delete from gradient_changed_attribute", [])?;
         let mut unsent = Vec::new();
-        for segment in segments_of(rows)? {
+        for segment in encode_bounded(&rows)? {
             tx.prepare_cached("insert into gradient_unsent_segment (bytes) values (?1)")?
                 .execute([&segment])?;
             unsent.push((tx.last_insert_rowid(), segment));
@@ -181,10 +181,30 @@ fn changed_rows(tx: &Transaction<'_>) -> Result<Vec<EvalCacheRow>> {
         })?
         .collect::<rusqlite::Result<Vec<Link>>>()?;
 
-    Ok(links
-        .chunk_by(|a, b| a.attribute == b.attribute)
-        .filter_map(row_of_chain)
-        .collect())
+    let mut rows = Vec::new();
+    for chain in links.chunk_by(|a, b| a.attribute == b.attribute) {
+        let Some(mut row) = row_of_chain(chain) else {
+            continue;
+        };
+
+        if row.kind == ATTR_FULL_ATTRS {
+            row.value = Some(child_listing(present_children(tx, chain[0].attribute)?));
+        }
+
+        rows.push(row);
+    }
+
+    Ok(rows)
+}
+
+fn present_children(tx: &Transaction<'_>, attribute: i64) -> Result<Vec<String>> {
+    let names = tx
+        .prepare_cached("select name from Attributes where parent = ?1 and type != ?2")?
+        .query_map(params![attribute, ATTR_MISSING], |row| {
+            Ok(row.get::<_, Option<String>>(0)?.unwrap_or_default())
+        })?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(names)
 }
 
 fn row_of_chain(chain: &[Link]) -> Option<EvalCacheRow> {
@@ -206,52 +226,6 @@ fn row_of_chain(chain: &[Link]) -> Option<EvalCacheRow> {
     })
 }
 
-fn estimated_size(row: &EvalCacheRow) -> usize {
-    let text = |part: &Option<String>| part.as_ref().map_or(0, String::len) + 16;
-    32 + row.path.iter().map(|part| part.len() + 16).sum::<usize>()
-        + text(&row.value)
-        + text(&row.context)
-}
-
-fn segments_of(rows: Vec<EvalCacheRow>) -> Result<Vec<Vec<u8>>> {
-    let mut segments = Vec::new();
-    let mut chunk = Vec::new();
-    let mut chunk_size = 0;
-    for row in rows {
-        let size = estimated_size(&row);
-        if !chunk.is_empty() && chunk_size + size > SEGMENT_MAX_BYTES {
-            encode_within_limit(&std::mem::take(&mut chunk), &mut segments)?;
-            chunk_size = 0;
-        }
-
-        chunk_size += size;
-        chunk.push(row);
-    }
-
-    if !chunk.is_empty() {
-        encode_within_limit(&chunk, &mut segments)?;
-    }
-
-    Ok(segments)
-}
-
-fn encode_within_limit(rows: &[EvalCacheRow], segments: &mut Vec<Vec<u8>>) -> Result<()> {
-    let bytes = encode(rows)?;
-    if bytes.len() <= SEGMENT_MAX_BYTES {
-        segments.push(bytes);
-        return Ok(());
-    }
-
-    if let [row] = rows {
-        warn!(path = ?row.path, "eval cache row is larger than a segment; keeping it local");
-        return Ok(());
-    }
-
-    let (first, second) = rows.split_at(rows.len() / 2);
-    encode_within_limit(first, segments)?;
-    encode_within_limit(second, segments)
-}
-
 fn apply_row(
     tx: &Transaction<'_>,
     rowids: &mut HashMap<Vec<String>, i64>,
@@ -261,6 +235,10 @@ fn apply_row(
         Some((name, ancestors)) => (resolve(tx, rowids, ancestors)?, name.as_str()),
         None => (0, ""),
     };
+
+    if row.kind == ATTR_MISSING && is_unlisted(tx, parent, name)? {
+        return Ok(());
+    }
 
     let existing = tx
         .prepare_cached(
@@ -279,11 +257,45 @@ fn apply_row(
         return Ok(());
     }
 
+    if row.kind == ATTR_FULL_ATTRS {
+        return seal(tx, parent, name, &listed_children(row.value.as_deref())?);
+    }
+
     tx.prepare_cached(
         "insert into Attributes (parent, name, type, value, context) values (?1, ?2, ?3, ?4, ?5) \
          on conflict (parent, name) do update set type = excluded.type, value = excluded.value, context = excluded.context",
     )?
     .execute(params![parent, name, row.kind, row.value, row.context])?;
+    Ok(())
+}
+
+fn is_unlisted(tx: &Transaction<'_>, parent: i64, name: &str) -> Result<bool> {
+    let unlisted = tx
+        .prepare_cached(
+            "select exists (select 1 from Attributes where rowid = ?1 and type = ?3) \
+             and not exists (select 1 from Attributes where parent = ?1 and name = ?2)",
+        )?
+        .query_row(params![parent, name, ATTR_FULL_ATTRS], |row| row.get(0))?;
+    Ok(unlisted)
+}
+
+fn seal(tx: &Transaction<'_>, parent: i64, name: &str, children: &[String]) -> Result<()> {
+    let rowid: i64 = tx
+        .prepare_cached(
+            "insert into Attributes (parent, name, type, value) values (?1, ?2, ?3, null) \
+             on conflict (parent, name) do update set type = excluded.type, value = excluded.value \
+             returning rowid",
+        )?
+        .query_row(params![parent, name, ATTR_FULL_ATTRS], |row| row.get(0))?;
+    tx.prepare_cached("delete from Attributes where parent = ?1 and type = ?2")?
+        .execute(params![rowid, ATTR_MISSING])?;
+    for child in children {
+        tx.prepare_cached(
+            "insert or ignore into Attributes (parent, name, type) values (?1, ?2, ?3)",
+        )?
+        .execute(params![rowid, child, ATTR_PLACEHOLDER])?;
+    }
+
     Ok(())
 }
 
@@ -322,7 +334,7 @@ fn rowid_or_placeholder(tx: &Transaction<'_>, parent: i64, name: &str) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_storage::eval_cache_segment::{ATTR_FULL_ATTRS, decode};
+    use gradient_storage::eval_cache_segment::decode;
     use std::path::PathBuf;
     use std::time::Instant;
 
@@ -353,12 +365,51 @@ mod tests {
         conn.last_insert_rowid()
     }
 
-    fn nix_seal(conn: &Connection, parent: i64, name: &str) -> i64 {
+    fn nix_seal(conn: &Connection, parent: i64, name: &str, children: &[&str]) -> i64 {
+        let rowid = conn
+            .query_row(
+                "insert into Attributes(parent, name, type, value) values (?, ?, ?, ?) \
+                 on conflict(parent, name) do update set type = excluded.type, value = excluded.value \
+                 returning rowid",
+                params![parent, name, ATTR_FULL_ATTRS, None::<String>],
+                |row| row.get(0),
+            )
+            .unwrap();
+        conn.execute(
+            "delete from Attributes where parent = ? and type = 3",
+            [rowid],
+        )
+        .unwrap();
+        for child in children {
+            conn.execute(
+                "insert or ignore into Attributes(parent, name, type, value) values (?, ?, ?, ?)",
+                params![rowid, child, ATTR_PLACEHOLDER, None::<String>],
+            )
+            .unwrap();
+        }
+
+        rowid
+    }
+
+    fn listing(names: &[&str]) -> String {
+        child_listing(names.iter().map(|name| (*name).to_owned()).collect())
+    }
+
+    fn children(conn: &Connection, parent: i64) -> Vec<String> {
+        let mut statement = conn
+            .prepare("select name from Attributes where parent = ?1 order by name")
+            .unwrap();
+        statement
+            .query_map([parent], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<String>>>()
+            .unwrap()
+    }
+
+    fn root_rowid(conn: &Connection) -> i64 {
         conn.query_row(
-            "insert into Attributes(parent, name, type, value) values (?, ?, ?, ?) \
-             on conflict(parent, name) do update set type = excluded.type, value = excluded.value \
-             returning rowid",
-            params![parent, name, ATTR_FULL_ATTRS, None::<String>],
+            "select rowid from Attributes where parent = 0 and name = ''",
+            [],
             |row| row.get(0),
         )
         .unwrap()
@@ -409,7 +460,7 @@ mod tests {
         let path = cache_path(&dir);
         let mut file = open(&path).unwrap();
         let nix = nix(&path);
-        let root = nix_seal(&nix, 0, "");
+        let root = nix_seal(&nix, 0, "", &[]);
         nix_insert(&nix, root, "hello", ATTR_STRING, Some("world"));
 
         let rows = exported_rows(&mut file);
@@ -417,7 +468,7 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                row(&[], ATTR_FULL_ATTRS, None),
+                row(&[], ATTR_FULL_ATTRS, Some(&listing(&["hello"]))),
                 row(&["hello"], ATTR_STRING, Some("world")),
             ]
         );
@@ -476,7 +527,7 @@ mod tests {
         let path = cache_path(&dir);
         let mut file = open(&path).unwrap();
         let nix = nix(&path);
-        let root = nix_seal(&nix, 0, "");
+        let root = nix_seal(&nix, 0, "", &[]);
         let a = nix_insert(&nix, root, "a", ATTR_PLACEHOLDER, None);
         nix_insert(&nix, a, "b", ATTR_STRING, Some("x"));
         nix_insert(&nix, root, "a", ATTR_STRING, Some("y"));
@@ -486,7 +537,7 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                row(&[], ATTR_FULL_ATTRS, None),
+                row(&[], ATTR_FULL_ATTRS, Some(&listing(&["a"]))),
                 row(&["a"], ATTR_STRING, Some("y")),
             ]
         );
@@ -529,22 +580,83 @@ mod tests {
     }
 
     #[test]
-    fn export_splits_at_the_segment_size() {
+    fn export_carries_the_child_listing_of_a_full_attrs_row() {
         let dir = tempfile::tempdir().unwrap();
         let path = cache_path(&dir);
         let mut file = open(&path).unwrap();
         let nix = nix(&path);
-        let root = nix_seal(&nix, 0, "");
-        let value = "x".repeat(1024 * 1024);
-        for child in 0..9 {
-            nix_insert(&nix, root, &format!("c{child}"), ATTR_STRING, Some(&value));
+        let root = nix_seal(&nix, 0, "", &["b\tc", "a"]);
+        nix_insert(&nix, root, "type", ATTR_MISSING, None);
+
+        let rows = exported_rows(&mut file);
+
+        assert_eq!(rows[0].path, Vec::<String>::new());
+        assert_eq!(
+            listed_children(rows[0].value.as_deref()).unwrap(),
+            vec!["a".to_owned(), "b\tc".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_full_attrs_row_alone_yields_its_children_as_placeholders() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = cache_path(&dir);
+        let mut file = open(&path).unwrap();
+        let nix = nix(&path);
+        let root = nix_insert(&nix, 0, "", ATTR_PLACEHOLDER, None);
+        nix_insert(&nix, root, "a", ATTR_STRING, Some("x"));
+        nix_insert(&nix, root, "type", ATTR_MISSING, None);
+        file.export_changes().unwrap();
+
+        file.apply(
+            "k",
+            &[row(&[], ATTR_FULL_ATTRS, Some(&listing(&["a", "b"])))],
+        )
+        .unwrap();
+
+        assert_eq!(lookup(&nix, &[]), Some((ATTR_FULL_ATTRS, None)));
+        assert_eq!(root_rowid(&nix), root);
+        assert_eq!(children(&nix, root), vec!["a", "b"]);
+        assert_eq!(
+            lookup(&nix, &["a"]),
+            Some((ATTR_STRING, Some("x".to_owned())))
+        );
+        assert_eq!(lookup(&nix, &["b"]), Some((ATTR_PLACEHOLDER, None)));
+        assert!(file.export_changes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_missing_row_exported_before_the_seal_leaves_no_phantom_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = cache_path(&dir);
+        let mut source = open(&path).unwrap();
+        let writer = nix(&path);
+        let root = nix_insert(&writer, 0, "", ATTR_PLACEHOLDER, None);
+        nix_insert(&writer, root, "type", ATTR_MISSING, None);
+        let before_seal = source.export_changes().unwrap();
+        nix_seal(&writer, 0, "", &["a"]);
+        let after_seal = source.export_changes().unwrap();
+        let rows_of = |segments: &[(i64, Vec<u8>)]| -> Vec<EvalCacheRow> {
+            segments
+                .iter()
+                .flat_map(|(_, segment)| decode(segment).unwrap())
+                .collect()
+        };
+        let (early, late) = (rows_of(&before_seal), rows_of(&after_seal));
+
+        for order in [[&early, &late], [&late, &early]] {
+            let other = tempfile::tempdir().unwrap();
+            let other_path = cache_path(&other);
+            let mut receiver = open(&other_path).unwrap();
+            for (index, rows) in order.into_iter().enumerate() {
+                receiver.apply(&format!("k{index}"), rows).unwrap();
+            }
+
+            let receiver_nix = nix(&other_path);
+            assert_eq!(
+                children(&receiver_nix, root_rowid(&receiver_nix)),
+                vec!["a"]
+            );
         }
-
-        let segments = file.export_changes().unwrap();
-
-        assert_eq!(segments.len(), 2);
-        assert!(segments.iter().all(|(_, s)| s.len() <= SEGMENT_MAX_BYTES));
-        let rows: usize = segments.iter().map(|(_, s)| decode(s).unwrap().len()).sum();
-        assert_eq!(rows, 10);
     }
 }
