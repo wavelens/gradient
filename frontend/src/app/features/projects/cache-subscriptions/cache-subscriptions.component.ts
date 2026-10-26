@@ -146,7 +146,7 @@ export class CacheSubscriptionsComponent implements OnInit {
         this.loadCaches();
       },
       error: (err) => {
-        this.errorMessage.set(err?.error?.message || err?.message || 'Cache not found or already subscribed.');
+        this.errorMessage.set(err?.message || 'Cache not found or already subscribed.');
         this.subscribing.set(false);
       },
     });

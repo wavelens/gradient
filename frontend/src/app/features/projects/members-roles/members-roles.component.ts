@@ -211,7 +211,7 @@ export class MembersRolesComponent implements OnInit {
         },
         error: (err) => {
           this.memberError.set(
-            err?.error?.message || err?.message || 'Failed to add member.'
+            err?.message || 'Failed to add member.'
           );
           this.addingMember.set(false);
         },
@@ -302,7 +302,7 @@ export class MembersRolesComponent implements OnInit {
       },
       error: (err) => {
         this.roleError.set(
-          err?.error?.message || err?.message || 'Failed to save role.'
+          err?.message || 'Failed to save role.'
         );
         this.savingRole.set(false);
       },

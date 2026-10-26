@@ -245,7 +245,7 @@ export class ApiKeysComponent implements OnInit {
             this.loadKeys();
           },
           error: (err) => {
-            this.errorMessage.set(err?.error?.message || 'Failed to save key.');
+            this.errorMessage.set(err?.message || 'Failed to save key.');
             this.saving.set(false);
           },
         });
@@ -262,7 +262,7 @@ export class ApiKeysComponent implements OnInit {
             this.loadKeys();
           },
           error: (err) => {
-            this.errorMessage.set(err?.error?.message || 'Failed to create key.');
+            this.errorMessage.set(err?.message || 'Failed to create key.');
             this.creating.set(false);
           },
         });

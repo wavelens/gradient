@@ -64,7 +64,7 @@ export class GithubAppComponent implements OnInit {
       },
       error: (err) => {
         this.loading.set(false);
-        this.errorMessage.set(err?.error?.message ?? 'Failed to start manifest flow');
+        this.errorMessage.set(err?.message || 'Failed to start manifest flow');
       },
     });
   }
