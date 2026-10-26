@@ -5,6 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { vi } from 'vitest';
 import { BoardExpensiveJobsComponent } from './expensive-jobs.component';
@@ -35,6 +36,7 @@ function setup(superuser = false): ComponentFixture<BoardExpensiveJobsComponent>
   TestBed.configureTestingModule({
     imports: [BoardExpensiveJobsComponent],
     providers: [
+      provideRouter([]),
       {
         provide: BoardService,
         useValue: {

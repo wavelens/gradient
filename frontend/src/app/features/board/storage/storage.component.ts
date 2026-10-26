@@ -9,6 +9,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Observable, Subject, catchError, interval, map, startWith, switchMap } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/ui';
+import { oneOf, queryParamSignal } from '@shared/routing';
 import { clockTime, monthDay, formatCount, formatDuration } from '@shared/text';
 import { alignSeries, windowBuckets } from './storage-chart';
 import { BoardStorage } from '@core/models';
@@ -92,7 +93,7 @@ export class BoardStorageComponent implements OnInit {
   readonly duration = formatDuration;
   readonly percent = (v: number) => `${Math.round(v)}%`;
 
-  hours = signal(6);
+  hours = queryParamSignal('hours', 6, oneOf(WINDOWS));
   view = signal<StorageView | null>(null);
 
   private buckets = computed(() => this.view()?.buckets ?? []);

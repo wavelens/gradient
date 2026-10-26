@@ -10,6 +10,7 @@ import { BoardService } from '@core/services/board.service';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
+import { oneOf, queryParamSignal } from '@shared/routing';
 import { firstLoad } from '../first-load';
 import { formatDuration, formatQuantity } from '@shared/text';
 import { ExpensiveBuild, ExpensiveResource, TopProjectBuildTime } from '@core/models';
@@ -33,9 +34,9 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
       <div class="controls">
         <label>Window (days)
           <select (change)="setWindow($event)">
-            <option value="7">7</option>
-            <option value="30" selected>30</option>
-            <option value="90">90</option>
+            @for (d of windows; track d) {
+              <option [value]="d" [selected]="d === windowDays()">{{ d }}</option>
+            }
           </select>
         </label>
       </div>
@@ -88,15 +89,15 @@ export class BoardExpensiveJobsComponent implements OnInit {
   builds = signal<ExpensiveBuild[]>([]);
   resources = signal<ExpensiveResource[]>([]);
   topProjects = signal<TopProjectBuildTime[]>([]);
-  tab = signal<Tab>('time');
-  private windowDays = 30;
-
   tabs: { key: Tab; label: string }[] = [
     { key: 'time', label: 'Longest' },
     { key: 'ram', label: 'Peak RAM' },
     { key: 'cpu', label: 'CPU time' },
     { key: 'disk', label: 'Disk I/O' },
   ];
+  readonly windows = [7, 30, 90];
+  tab = queryParamSignal<Tab>('tab', 'time', oneOf(this.tabs.map((t) => t.key)));
+  windowDays = queryParamSignal('days', 30, oneOf(this.windows));
 
   readonly duration = formatDuration;
   readonly quantity = formatQuantity;
@@ -113,15 +114,15 @@ export class BoardExpensiveJobsComponent implements OnInit {
 
   private load(): void {
     if (this.tab() === 'time') {
-      this.board.getExpensive(this.windowDays).pipe(this.first.track()).subscribe((b) => this.builds.set(b));
+      this.board.getExpensive(this.windowDays()).pipe(this.first.track()).subscribe((b) => this.builds.set(b));
     } else {
       this.board
-        .getExpensiveByResource(this.tab() as 'ram' | 'cpu' | 'disk', this.windowDays)
+        .getExpensiveByResource(this.tab() as 'ram' | 'cpu' | 'disk', this.windowDays())
         .pipe(this.first.track())
         .subscribe((r) => this.resources.set(r));
     }
     if (this.auth.user()?.superuser !== true) return;
-    this.board.getTopProjects(this.windowDays).pipe(this.first.track()).subscribe({
+    this.board.getTopProjects(this.windowDays()).pipe(this.first.track()).subscribe({
       next: (o) => this.topProjects.set(o),
       error: () => this.topProjects.set([]),
     });
@@ -133,7 +134,7 @@ export class BoardExpensiveJobsComponent implements OnInit {
   }
 
   setWindow(e: Event): void {
-    this.windowDays = Number((e.target as HTMLSelectElement).value);
+    this.windowDays.set(Number((e.target as HTMLSelectElement).value));
     this.load();
   }
 }
