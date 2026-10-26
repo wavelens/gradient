@@ -142,6 +142,7 @@ Running builds and evaluations survive a lost connection and a server restart. Q
 | Worker | Keeps its running jobs. Reconnects with backoff that starts at 1 s, doubles each try, and caps at 60 s |
 | Worker | Appends `LogChunk` payloads to `/var/lib/gradient-worker/job-logs/` while detached. At most 1 GiB of unsent log per job. Older bytes give way to one `bytes of log dropped` marker line |
 | Worker | Queues every other job report in memory. Only the newest `BuildProgress` or `EvalProgress` of a job stays in the queue |
+| Worker | Queues again every `JobCompleted` and `JobFailed` sent during the lost session. A dead socket can swallow them unnoticed. An `AbortJob` or a new assignment of the job drops the copy |
 | Worker | Performs a full handshake, then sends `RunningJobs` with the assignment of each running job, an empty list included |
 | Worker | Sends the queued reports first. Replays each buffered log next to the job loop, from the offset already sent |
 | Worker | Sends `RequestJobList` plus one `RequestJob` per kind |
