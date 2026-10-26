@@ -49,8 +49,8 @@ Flake jobs fetch and evaluate a flake. The server can pick the steps at queue ti
 | `EvaluateFlake` | Status `EvaluatingFlake` only, no work |
 | `EvaluateDerivations` | Eval cache pull, attribute discovery, closure walk, eval cache push |
 
-- **Eval Cache:** Workers pull the evaluation cache before discovery and push the cache after a walk with derivations. Empty or schemaless caches stay local.
-- **Eval Cache Entries:** Entries belong to a single cache. Pulls read the newest entry among the readable caches of the project. Pushes write one entry into every writable cache of the project.
+- **Eval Cache:** Before discovery, workers pull the evaluation cache segments they lack. New rows travel up as segments every 30 s, plus once after a successful evaluation. See [Shared Eval Cache](../eval-worker.md#shared-eval-cache).
+- **Eval Cache Segments:** Segments each belong to one cache. Pulls read segments from every readable cache of the project. Pushes write into the first writable cache. Compaction can then copy the result into the other writable caches.
 - **Attribute Failures:** Workers send them as `EvalMessage { level: Error, source: "nix-eval:<attr>" }` before the last `EvalResult`.
 - **Import From Derivation:** Workers send `ImportRequest { drv_paths }` during discovery and wait for `ImportResult`.
 - **Missing Inputs:** Workers send `InputRequest { request }` for an input in neither the store nor the cache, and wait for `InputResult`. The server can send the download as `FetchInput` to a worker with `network`. That worker can push the input under the `fetch_id` and answer with `InputFetched`.
@@ -136,7 +136,7 @@ Each build job contains a single `BuildSpec` and maps to one shared build (a `de
 | `Timeout` | Timed out. Builds needing the timed-out build turn `DependencyFailed` |
 | `SubstituteUnavailable` | Re-queued. Built normally after `build.substituteMissEscalationThreshold` (2) misses |
 | `InputsUnavailable` | Self-heal, see below |
-| `CorruptEvalCache` | Purging the evaluation cache blob and re-queuing the evaluation. A repeat without a blob left: evaluation `Failed`. For builds: `Permanent` |
+| `CorruptEvalCache` | Purging the evaluation cache segments and re-queuing the evaluation. A repeat within one hour of the purge, or with nothing to purge: evaluation `Failed`. For builds: `Permanent` |
 | `Aborted` | Aborted by the server. No cascade |
 | `Canceled` | Stopped by the worker. Re-queued without using an attempt, see [Worker Stop](#worker-stop) |
 

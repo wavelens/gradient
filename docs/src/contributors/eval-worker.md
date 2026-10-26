@@ -1,6 +1,6 @@
 # Eval Worker Setup
 
-Flake evaluations take place in a pool of `--eval-subprocess` processes driving the embedded Nix C API. One evaluation is split into shards and spread across the pool. The pool is sized to fit the host's memory. Results land in a persistent eval cache shared by the fleet. A repeat evaluation of the same locked flake is mostly cache hits.
+Flake evaluations take place in a pool of `--eval-subprocess` processes driving the embedded Nix C API. The pool can split one evaluation into shards. The pool can spread those shards across its subprocesses. The pool can size itself to the host's memory. Results land in a local eval cache per locked flake. Workers share new cache rows with the fleet through the server. See [Shared Eval Cache](#shared-eval-cache). Repeat evaluations of the same locked flake hit the cache on most runs.
 
 ```mermaid
 flowchart LR
@@ -14,7 +14,7 @@ flowchart LR
 ## Subprocess IPC
 
 - **Frames:** each frame start with a `u32` little-endian length prefix, followed by an rkyv payload (`gradient-eval/src/ipc.rs`).
-- **Version byte:** before the first frame, subprocesses write `EVAL_IPC_VERSION` (currently 13). A binary swapped mid-evaluation then fail the handshake instead of sending undecodable frames.
+- **Version byte:** before the first frame, subprocesses write `EVAL_IPC_VERSION` (currently 15). A binary swapped mid-evaluation then fail the handshake instead of sending undecodable frames.
 - **Fetch byte:** parents reply with one byte. Subprocesses given `1` ask the parent for [missing inputs](#missing-inputs). Subprocesses given `0` let Nix download them.
 - **Responses:** each request pair with one response. `Stats` ticks and [build requests](#import-from-derivation) can arrive before that response. `List` responses carry the derivation path of every attribute found, resolved in the subprocess that forced the attribute.
 - **Shards:** `Plan` can split each include at its first wildcard.
@@ -50,7 +50,7 @@ An import from a derivation (IFD) requires a build in the middle of an evaluatio
 4. Answer `BuildDone`, with `import from derivation '<name>' failed: build <id> <status>` after a failure.
 
 - Requests for the same `.drv` from different subprocesses share the wait and the answer.
-- Fingerprint, checkpoint, input fetch and the `--eval-driver` harness refuse imports with `import from derivation is not available during <call>`.
+- Fingerprint calls, input fetches and `--eval-driver` calls all reject imports. The error message is `import from derivation is not available during <call>`.
 
 ## Missing Inputs
 
@@ -69,7 +69,7 @@ Workers answer from the first source holding the input.
 - The server can hand the download to a worker with `network`, plus `secrets` for an SSH URL. That worker can start one subprocess with fetch byte `0`, outside the eval pool. Downloads hold one build slot of that worker until `InputFetched`.
 - Requests of one job for the same input share the wait and the answer. Failed inputs keep their error for the rest of the evaluation.
 - The fetch step can request every locked input of `flake.lock` up front. Failures there remain warnings. The evaluation can retry such an input through the hook.
-- `gradient eval` and the `--eval-driver` harness use fetch byte `0`.
+- `gradient eval` and the `--eval-driver` mode use fetch byte `0`.
 
 ## Parent Side
 
@@ -81,11 +81,11 @@ The pool code sits in `gradient-eval/src/pool/`. Both `gradient eval` and the wo
 | `workers.rs` | Checkout and return with test-on-borrow |
 | `memory.rs` | The memory guard, its victim choice and its reaper |
 | `fan_out.rs` | Shard batching and crash isolation |
-| `mod.rs` | The `EvalPool` facade: plan, list, fingerprint, checkpoint |
+| `mod.rs` | The `EvalPool` facade: plan, list, fingerprint |
 | `live_thunks.rs` | Live thunk counters |
 | `dependencies.rs` | The seam for imports and missing inputs, with `RefuseDependencies` as the refusal |
 | `download.rs` | The `@nix` log parser and the download progress seam |
-| `driver.rs` | The hidden `--eval-driver <file>` harness: JSONL requests through the real transport, JSON responses out. The NixOS VM test can drive both sides of the wire through the harness from Python |
+| `driver.rs` | The hidden `--eval-driver <file>` mode: JSONL requests through the real transport, JSON responses out. The NixOS VM test can drive both sides of the wire through this mode from Python |
 
 The worker adapter sits in `gradient-worker/src/worker_pool/`.
 
@@ -115,14 +115,46 @@ Evaluation memory is guarded at three layers.
 - `worker.system.minFreeRamMb` and `worker.eval.maxMemory` are alternatives. A worker with both set fail at startup.
 - Evaluation subprocesses run with `oom_score_adj = 600` as the kernel's last resort.
 
+## Shared Eval Cache
+
+Workers place one SQLite file per flake fingerprint in the eval cache directory. The file name is `eval-cache-v6/<fp>.sqlite`. Rows move between workers as segments. Segments hold zstd-compressed batches of rows. Segments become separate objects on the server (`gradient-worker/src/executor/eval_cache_sharing.rs`).
+
+```mermaid
+flowchart LR
+    nix[Nix writes] -->|triggers| log[(change log)]
+    log -->|every 30 s and at the end| unsent[(unsent segments)]
+    unsent -->|upload| store[(eval-cache-segments)]
+    store -->|pull of new segments| other[other workers]
+```
+
+| Step | Worker side |
+|---|---|
+| Pull | Before discovery: `EvalCachePull` with the keys of the segments already applied. The answer holds only the missing segments |
+| Apply | One immediate transaction per segment. A placeholder never replaces a value or a failure. Applied rows stay out of the change log |
+| Change log | Triggers on the Nix `Attributes` table: every inserted or updated row noted in `gradient_changed_attribute` |
+| Export | Every 30 s and after a successful evaluation: the change log turned into segments of at most 8 MiB. Export and log clear in one transaction |
+| Upload | Each segment kept in `gradient_unsent_segment` until the server committed the upload. A failed upload: another attempt at the next flush, also in a later job of the same fingerprint |
+
+- **Bad Segments:** the worker can skip a segment without a valid decode and leave the segment unapplied. The next pull can offer that segment again.
+- **Busy File:** a lock longer than the busy timeout (30 s) can end the apply early. Evaluations then go on with the local rows only.
+- **Replaced Parents:** the export can skip a row whose parent Nix replaced in the meantime. Nix can write the row again under the new parent.
+
+| Step | Server side |
+|---|---|
+| Store | A new key `eval-cache-segments/<cache>/<fp>/<uuidv7>` per upload, in the first writable cache of the project |
+| Record | One `eval_cache_store` row per cache and fingerprint, plus one `EvalCacheCompact` pending delivery, delayed by 15 min |
+| Compact | All listed segments merged into one new segment, then removal of only the listed keys. Other writable caches of the project receive a copy as a new segment |
+| Pull | A listing of every readable cache. Segments sent as presigned URLs, or inline as `EvalCacheChunk` streams |
+| Heal | `CorruptEvalCache`: removal of the fingerprint's segments, `purged_at` set. A second corruption within one hour: evaluation `Failed` |
+
 ## Compared to nix-eval-jobs
 
 | | Gradient | nix-eval-jobs |
 |---|---|---|
 | Parallelism | Long-lived worker pool. One evaluation can be sharded across it | Short-lived children forked from a warm parent |
 | Warmth across evaluations | A persistent eval cache keyed by flake fingerprint | None. Copy-on-write warmth lasts for a single evaluation |
-| Across machines | A fleet-shared `<fp>.sqlite` cache with pull and push. Staging a pulled blob will drop the previous local `-wal` / `-shm` sidecars | None |
-| Concurrent writers | Shards write to a shared cache. Each write runs in its own immediate transaction, and a checkpoint follow at the end | Not applicable |
+| Across machines | A local `<fp>.sqlite` per worker. New rows reach the server as segments every 30 s and at the end. Pulls fetch only the segments not applied yet | None |
+| Concurrent writers | Shards write to one shared file, each write in its own immediate transaction. Segment apply and export take an immediate transaction too, with up to 30 s of wait for a busy file | Not applicable |
 | Memory | The pool can size itself. A flake with many systems can degrade to a single shard and still complete | Manual `--workers` and `--max-memory-size` |
 | Pipeline | Discovery writes rows, and build assignment can start mid-evaluation. The closure walk will skip derivations already known to the server | A JSON job stream for consumers such as Hydra |
 | Failure isolation | A bad attribute turn into an error while the evaluation continue. A crashed batch come back attribute by attribute, down to the one that sank the subprocess | Per-job errors across the fork boundary |
@@ -131,5 +163,5 @@ Evaluation memory is guarded at three layers.
 ## Related
 
 - [Evaluation Metrics](eval-metrics.md): per-evaluation records kept by the pool
-- [Transfer](proto/transfer.md): how the eval cache gets uploaded (`UploadObject::EvalCache`)
+- [Transfer](proto/transfer.md): the upload of eval cache segments (`UploadObject::EvalCacheSegment`)
 - [Configuration](../reference/configuration.md#worker): a list of all worker options
