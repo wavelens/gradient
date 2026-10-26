@@ -19,7 +19,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 
-use crate::ipc::{AttrError, ResolvedItem};
+use crate::ipc::{AttrError, DiscoveryShard, ResolvedItem};
 
 use self::fan_out::{
     DiscoveryCall, MAX_CRASH_ATTEMPTS, crashed_listing, discovery_calls, entry_point_of,
@@ -134,7 +134,15 @@ impl EvalPool {
             })
             .collect();
         let mut discovery = self
-            .run_calls(repository, calls, &[], overrides, dependencies, &recording)
+            .run_calls(
+                repository,
+                calls,
+                &[],
+                overrides,
+                dependencies,
+                &recording,
+                false,
+            )
             .await?;
 
         let listed = listed.into_inner().unwrap_or_default();
@@ -160,36 +168,15 @@ impl EvalPool {
         dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
     ) -> Result<Discovery> {
-        *lock(&self.patterns) = wildcards
-            .iter()
-            .filter(|w| !w.starts_with('!'))
-            .cloned()
-            .collect();
-
-        let (shards, plan_errors) = {
-            let mut worker = self.workers.acquire().await?;
-            match worker
-                .plan(
-                    repository.clone(),
-                    wildcards.clone(),
-                    overrides.to_vec(),
-                    dependencies,
-                )
-                .await
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    worker.mark_dead();
-                    return Err(e);
-                }
-            }
-        };
-
-        let excludes: Vec<String> = wildcards
-            .iter()
-            .filter(|w| w.starts_with('!'))
-            .cloned()
-            .collect();
+        let (shards, plan_errors) = self
+            .plan(
+                repository.clone(),
+                wildcards.clone(),
+                overrides,
+                dependencies,
+            )
+            .await?;
+        let excludes = excludes_of(&wildcards);
         let calls = discovery_calls(shards, &excludes, self.workers.max());
         tracing::info!(
             calls = calls.len(),
@@ -198,7 +185,15 @@ impl EvalPool {
         );
 
         let mut discovery = self
-            .run_calls(repository, calls, &excludes, overrides, dependencies, found)
+            .run_calls(
+                repository,
+                calls,
+                &excludes,
+                overrides,
+                dependencies,
+                found,
+                false,
+            )
             .await?;
         discovery.errors.extend(plan_errors);
         discovery.errors.sort_unstable();
@@ -206,6 +201,61 @@ impl EvalPool {
         Ok(discovery)
     }
 
+    pub async fn plan(
+        &self,
+        repository: String,
+        wildcards: Vec<String>,
+        overrides: &[(String, String)],
+        dependencies: &dyn EvalDependencies,
+    ) -> Result<(Vec<DiscoveryShard>, Vec<AttrError>)> {
+        self.remember_patterns(&wildcards);
+        let mut worker = self.workers.acquire().await?;
+        match worker
+            .plan(repository, wildcards, overrides.to_vec(), dependencies)
+            .await
+        {
+            Ok(planned) => Ok(planned),
+            Err(e) => {
+                worker.mark_dead();
+                Err(e)
+            }
+        }
+    }
+
+    pub fn remember_patterns(&self, wildcards: &[String]) {
+        *lock(&self.patterns) = wildcards
+            .iter()
+            .filter(|w| !w.starts_with('!'))
+            .cloned()
+            .collect();
+    }
+
+    pub async fn list_given(
+        &self,
+        repository: String,
+        shards: Vec<DiscoveryShard>,
+        excludes: &[String],
+        overrides: &[(String, String)],
+        dependencies: &dyn EvalDependencies,
+        found: FoundItems<'_>,
+    ) -> Result<Discovery> {
+        let calls = discovery_calls(shards, excludes, self.workers.max());
+        self.run_calls(
+            repository,
+            calls,
+            excludes,
+            overrides,
+            dependencies,
+            found,
+            true,
+        )
+        .await
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the fan-out is one call with its repository, overrides and sinks"
+    )]
     async fn run_calls(
         &self,
         repository: String,
@@ -214,15 +264,17 @@ impl EvalPool {
         overrides: &[(String, String)],
         dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
+        return_deferred: bool,
     ) -> Result<Discovery> {
         let listed_attrs = Mutex::new(HashSet::<String>::new());
         let warnings = Mutex::new(Vec::<String>::new());
         let errors = Mutex::new(Vec::<AttrError>::new());
         let calls_seen = Mutex::new(Vec::<CallStats>::new());
+        let deferred = Mutex::new(Vec::<DiscoveryShard>::new());
         {
             let repo = repository.as_str();
-            let (listed_attrs, warnings, errors, calls_seen) =
-                (&listed_attrs, &warnings, &errors, &calls_seen);
+            let (listed_attrs, warnings, errors, calls_seen, deferred) =
+                (&listed_attrs, &warnings, &errors, &calls_seen, &deferred);
             pooled_fan_out(self.workers.max(), calls, |call| async move {
                 let (listing, call_stats) =
                     self.list_shard(repo, call, overrides, dependencies).await?;
@@ -237,9 +289,15 @@ impl EvalPool {
                 found(fresh);
                 lock(warnings).extend(listing.warnings);
                 lock(errors).extend(listing.errors);
+                let crashed = call_stats.is_none();
                 if let Some(call_stats) = call_stats {
                     lock(calls_seen).push(call_stats);
                 }
+                if return_deferred && !crashed {
+                    lock(deferred).extend(listing.deferred);
+                    return Ok(Vec::new());
+                }
+
                 Ok(discovery_calls(
                     listing.deferred,
                     excludes,
@@ -259,6 +317,7 @@ impl EvalPool {
             warnings,
             errors,
             calls_seen.into_inner().unwrap_or_default(),
+            deferred.into_inner().unwrap_or_default(),
         ))
     }
 
@@ -364,11 +423,21 @@ impl EvalPool {
     }
 }
 
+pub fn excludes_of(wildcards: &[String]) -> Vec<String> {
+    wildcards
+        .iter()
+        .filter(|w| w.starts_with('!'))
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ipc::EvalResponse;
-    use crate::pool::workers::tests::{replying_worker, replying_worker_times};
+    use crate::pool::workers::tests::{
+        replying_worker, replying_worker_sequence, replying_worker_times,
+    };
 
     fn pool(workers: usize) -> Arc<EvalPool> {
         EvalPool::new(EvalPoolConfig {
@@ -380,6 +449,102 @@ mod tests {
             metrics: false,
             fetch_through_parent: false,
         })
+    }
+
+    fn listed(attrs: &[&str], deferred: Vec<DiscoveryShard>) -> EvalResponse {
+        EvalResponse::ListOk {
+            items: attrs
+                .iter()
+                .map(|attr| ResolvedItem {
+                    attr: (*attr).into(),
+                    drv_path: Some(format!("/nix/store/aaaa-{attr}.drv")),
+                    licenses: vec![],
+                    error: None,
+                    cost: None,
+                })
+                .collect(),
+            deferred,
+            warnings: vec![],
+            errors: vec![],
+            stats: None,
+        }
+    }
+
+    fn python_set() -> DiscoveryShard {
+        DiscoveryShard {
+            pattern: "legacyPackages.x86_64-linux.python3Packages.*".into(),
+            only: Some(vec!["numpy".into()]),
+        }
+    }
+
+    #[tokio::test]
+    async fn list_given_returns_deferred_sets_instead_of_listing_them() {
+        let pool = pool(1);
+        pool.workers.push_for_test(replying_worker(
+            &listed(&["legacyPackages.x86_64-linux.hello"], vec![python_set()]),
+            "given-deferred",
+        ));
+        let given = DiscoveryShard {
+            pattern: "legacyPackages.x86_64-linux.*".into(),
+            only: Some(vec!["python3Packages".into()]),
+        };
+
+        let found = Mutex::new(Vec::new());
+        let found_ref = &found;
+        let discovery = pool
+            .list_given(
+                "repo".into(),
+                vec![given],
+                &[],
+                &[],
+                &RefuseDependencies("the test"),
+                &move |items| lock(found_ref).extend(items),
+            )
+            .await
+            .expect("list");
+
+        assert_eq!(discovery.deferred, vec![python_set()]);
+        assert_eq!(lock(&found).len(), 1);
+        assert_eq!(discovery.calls.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn list_shards_still_lists_deferred_sets_locally() {
+        let pool = pool(1);
+        pool.workers.push_for_test(replying_worker_sequence(
+            &[
+                EvalResponse::PlanOk {
+                    shards: vec![DiscoveryShard {
+                        pattern: "legacyPackages.x86_64-linux.*".into(),
+                        only: Some(vec!["python3Packages".into()]),
+                    }],
+                    errors: vec![],
+                },
+                listed(&["legacyPackages.x86_64-linux.hello"], vec![python_set()]),
+                listed(
+                    &["legacyPackages.x86_64-linux.python3Packages.numpy"],
+                    vec![],
+                ),
+            ],
+            "shards-deferred",
+        ));
+
+        let found = Mutex::new(Vec::new());
+        let found_ref = &found;
+        let discovery = pool
+            .list_shards(
+                "repo".into(),
+                vec!["legacyPackages.x86_64-linux.*".into()],
+                &[],
+                &RefuseDependencies("the test"),
+                &move |items| lock(found_ref).extend(items),
+            )
+            .await
+            .expect("list");
+
+        assert!(discovery.deferred.is_empty());
+        assert_eq!(lock(&found).len(), 2);
+        assert_eq!(discovery.calls.len(), 2);
     }
 
     #[tokio::test]

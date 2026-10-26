@@ -203,6 +203,7 @@ pub struct Discovery {
     pub warnings: Vec<String>,
     pub errors: Vec<AttrError>,
     pub calls: Vec<CallStats>,
+    pub deferred: Vec<DiscoveryShard>,
 }
 
 impl Discovery {
@@ -210,11 +211,13 @@ impl Discovery {
         warnings: Vec<String>,
         errors: Vec<AttrError>,
         calls: Vec<CallStats>,
+        deferred: Vec<DiscoveryShard>,
     ) -> Self {
         Self {
             warnings,
             errors,
             calls,
+            deferred,
         }
     }
 }
