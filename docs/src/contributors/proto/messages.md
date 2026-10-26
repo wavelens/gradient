@@ -36,6 +36,7 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `InputResult` | Reply to `InputRequest`: the fetch answer with the store path, or the download error | `job_id`, `request_id`, `outcome` |
 | `InputProgress` | Download bytes of the input fetch an `InputRequest` waits for | `job_id`, `request_id`, `bytes_done`, `bytes_total` |
 | `FetchInput` | Download one input for a project and push the result to the cache. Carries the project SSH key only for a worker with `secrets` | `fetch_id`, `project`, `request`, `ssh_key` |
+| `EvalShardReply` | Reply to `EvalShardRequest`, see [Split Evaluation Messages](#split-evaluation-messages) (since 40) | `job_id`, `outcome` |
 
 ## Worker -> Server
 
@@ -73,6 +74,9 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `InputRequest` | Asks for an input missing from the store and the cache, because the evaluation needs the input | `job_id`, `request_id`, `request` |
 | `InputFetchProgress` | Reports download bytes of a `FetchInput` | `fetch_id`, `bytes_done`, `bytes_total` |
 | `InputFetched` | Reply to `FetchInput` after the push: the fetch answer or the download error. `Unplaced` answers return the fetch to the server for another worker | `fetch_id`, `outcome` |
+| `EvalSourceReady` | Names the fetched source of a split evaluation, sent by the primary member (since 40) | `job_id`, `store_path`, `fingerprint` |
+| `EvalShardsPlanned` | Carries the shard plan of a split evaluation, sent by the primary member (since 40) | `job_id`, `shards` |
+| `EvalShardRequest` | Asks for the next shard of a split evaluation and reports the last finished one (since 40) | `job_id`, `have_source`, `finished` |
 
 ## Cache Query Modes
 
@@ -95,6 +99,20 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 - Inline segments start at offset 0 and end with exactly one `is_final` chunk each.
 - Workers can forget any applied key outside `Segments.keys`. A `Miss` can clear every applied key.
 - Peers below protocol 38 receive `Miss` for every pull. The server can return `Rejected` for their whole-blob upload (`UploadObject::EvalCache`).
+
+## Split Evaluation Messages
+
+| `outcome` | Worker action |
+|---|---|
+| `Wait { retry_after_ms }` | Ask again after the delay |
+| `Source { store_path, fingerprint }` | Fetch the source from the cache, then ask with `have_source = true` |
+| `Plan` | Plan the shards, then send `EvalShardsPlanned` |
+| `Shard(EvalShard)` | List the shard. Pull the derivations in `drv_paths` first, a list filled only for a shard taken over from a lost member |
+| `Finished` | End the job with success |
+
+- `EvalShardSpec` fields: a `pattern`, the attribute path `set` before the first wildcard, and the `children` batch.
+- `finished` fields: the shard id and the deferred sets found while listing the shard.
+- See [Split Evaluations](../scheduler/clusters.md#split-evaluations) for the server side.
 
 ## Evaluation Messages
 

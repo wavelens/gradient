@@ -139,6 +139,7 @@ flowchart LR
 - **Bad Segments:** the worker can skip a segment without a valid decode and leave the segment unapplied. The next pull can offer that segment again.
 - **Busy File:** a lock longer than the busy timeout (30 s) can end the apply early. Evaluations then go on with the local rows only.
 - **Replaced Parents:** the export can skip a row whose parent Nix replaced in the meantime. Nix can write the row again under the new parent.
+- **Split Evaluations:** each member can pull new segments before a shard and upload its rows after the shard. The 30 s export timer is for standalone evaluations only.
 
 | Step | Server side |
 |---|---|
@@ -159,7 +160,7 @@ flowchart LR
 | Memory | The pool can size itself. A flake with many systems can degrade to a single shard and still complete | Manual `--workers` and `--max-memory-size` |
 | Pipeline | Discovery writes rows, and build assignment can start mid-evaluation. The closure walk will skip derivations already known to the server | A JSON job stream for consumers such as Hydra |
 | Failure isolation | A bad attribute turn into an error while the evaluation continue. A crashed batch come back attribute by attribute, down to the one that sank the subprocess | Per-job errors across the fork boundary |
-| Compute across machines | A single-host pool today | Single host |
+| Compute across machines | A split evaluation, opt-in per task: eval workers take shards from a server queue, see [Split Evaluations](scheduler/clusters.md#split-evaluations) | Single host |
 
 ## Related
 

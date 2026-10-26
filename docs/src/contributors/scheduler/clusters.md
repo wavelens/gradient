@@ -23,7 +23,7 @@ flowchart LR
 | Constraint | Effect |
 |---|---|
 | `CHECK (num_nonnulls(evaluation, derivation_build) = 1)` | A member names exactly one job. Both or neither count as invalid |
-| `idx-cluster_member-evaluation`, `idx-cluster_member-derivation_build` (unique, partial) | A job can belong to at most one cluster |
+| `idx-cluster_member-evaluation` (unique on `evaluation, coalesce(eval_index, 0)`), `idx-cluster_member-derivation_build` (unique, partial) | A job can belong to at most one cluster. A split evaluation can hold one member per `eval_index` |
 | `idx-cluster_attempt-open` (unique on `cluster_job WHERE finished_at IS NULL`) | A cluster can hold at most one open attempt |
 | `dispatched_job.cluster_attempt` `ON DELETE SET NULL` | Member rows survive their attempt as plain telemetry |
 | `cluster_member`, `cluster_attempt` `ON DELETE CASCADE` | The hourly retention pass can remove a finished cluster job past [`retentionDays`](../../reference/configuration.md#general). Once evaluation garbage collection removed the members, deletion happens immediately. Active cluster jobs never get deleted by the pass |
@@ -54,7 +54,7 @@ The `claim_cluster` function in `backend/gradient-db/src/scheduling/cluster/clai
 | Offered | Job offers | Workers score members under their own key. Single assignment (`take_best_of_kind`) never see them. |
 | Running | Active jobs, marked with its attempt | A reject, a revoked peer or a disconnect can never requeue a member as a single job. |
 
-- Member evaluations always run in one job, never as a split fetch-only job. A split job would place its follow-up outside the cluster.
+- Member evaluations always run in one job, never as a split fetch-only job. A split job can place its follow-up outside the cluster. Companions of a [split evaluation](#split-evaluations) evaluate from the source the primary fetched.
 - An empty answer to `RequestJob` record an idle slot `(worker, kind)` for the worker. An assignment, a full worker or a disconnect clear the slot. The planner can ignore entries older than 25 s (two worker heartbeats). Idle slots give the planner the only view of free capacity.
 
 ## Placement
@@ -116,6 +116,85 @@ A cluster can be ready to start while no set of workers remain idle long enough 
 - Commit: once every seat reach an idle state, the reservation commit like a normal placement.
 - One at a time: a single cluster can hold a reservation at any moment. Other clusters plan over the unreserved idle workers.
 - Release: the reservation expire after `scheduler.clusterReserveTimeoutSecs` (1800 s), when a seated worker disconnect, or when the cluster leave the queue. The next planning pass can reserve again.
+
+## Split Evaluations
+
+One evaluation can run on multiple eval workers as a cluster job. The primary member can fetch the flake and plan the shards. All members then take shards from a Postgres queue. They stop at an empty queue.
+
+```mermaid
+flowchart LR
+    D[eval-dispatch] -->|decide_split| C[cluster_job]
+    C --> P[primary]
+    C --> M[companions]
+    P -->|plan| Q[(eval_shard)]
+    Q -->|take| P
+    Q -->|take| M
+```
+
+### Creation
+
+`decide_split` in `backend/gradient-scheduler/src/eval_split/create.rs` can run once per queued evaluation, before routing.
+
+| Rule | Effect |
+|---|---|
+| Task without `multi_node_evaluation` | No split |
+| No learned costs for the task | No split. The first evaluation of a task stays on one worker |
+| Seats | Distinct idle eval workers, at most `MAX_SPLIT_MEMBERS` (4). Workers with the `federate` capability never count |
+| Member count | The cost planner can pick the count with the shortest predicted wall clock. Fewer than 2 members: no split |
+| One transaction | No open eval dispatch of the evaluation, then the `cluster_job` row, the members and the `eval_split` row |
+| Placement | A worker can seat a member only with free memory of at least `min_free_ram_mb`, the largest set peak RSS. `federate` workers never seat a member |
+| Unplaced | A cluster still `Queued` after `dissolve_after` (30 s) gets deleted by `cluster-dispatch`. The evaluation then runs on one worker |
+
+- The in-memory set of decided evaluations can only save work. A restart can repeat a decision.
+- Split clusters never wait for an aging reservation.
+
+### Members
+
+| Member | Job key | Role |
+|---|---|---|
+| Primary (`eval_index` 0) | `eval:<evaluation>` | `split-evaluation-primary` |
+| Companion (`eval_index` 1..n-1) | `eval:<evaluation>:<index>` | `split-evaluation-companion` |
+
+- Member keys get one job each from the eval assignment pass.
+- Open eval `dispatched_job` rows keep an evaluation in the dispatched state.
+- Evaluation aborts cancel every possible member key.
+
+### Shard Queue
+
+| Table | Content |
+|---|---|
+| `eval_split` | One row per split evaluation: `cluster_job`, `source_store_path`, `fingerprint`, `planned_at` |
+| `eval_shard` | One row per shard: `pattern`, `children`, `predicted_ms`, `state`, `attempts`, `reported_by_job`, `taken_job` |
+
+| `state` | Meaning |
+|---|---|
+| `Queued` (0) | Waiting for a member |
+| `Running` (1) | Taken by `taken_job` |
+| `Done` (2) | Listed |
+| `Failed` (3) | Lost twice, reported as an attribute error |
+| `Split` (4) | Replaced by two halves |
+
+- A take is one `UPDATE` with `FOR UPDATE SKIP LOCKED`. Two members asking at once get different shards.
+- Take order: the member's own deferred sets, planned shards, deferred sets of other members, then lowest `seq`.
+- Appends lock the `eval_split` row first. `seq` values stay unique per evaluation.
+- The server can only answer `Finished`, when no shard is `Queued` or `Running`.
+
+### Recovery
+
+| Event | Result |
+|---|---|
+| Primary lost or failed before `planned_at` | Retry of the attempt, as for any cluster |
+| Member lost or failed after `planned_at` | Its running shards go back to the queue. No verdict. The others continue |
+| Returned shard with 2 or more children | `Split` into two queued halves |
+| Returned shard with 1 child or none | Queued again once (`MAX_SHARD_ATTEMPTS` = 2), then `Failed` with an attribute error |
+| Every member lost after `planned_at` | Retry. The queue survives into the next attempt |
+| A request without `finished`, with a running shard still under the member key | That shard goes back to the queue first |
+
+### Verdict
+
+- Members can only report success, after `Finished`. The first success can settle the attempt as `Complete`.
+- The evaluation completion can happen once, for that first report.
+- Other members end like survivors and leave the evaluation untouched.
 
 ## Related
 
