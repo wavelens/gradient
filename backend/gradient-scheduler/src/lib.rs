@@ -13,6 +13,7 @@ pub mod cluster;
 pub mod connection_failures;
 pub mod draining;
 pub mod eval;
+pub mod eval_split;
 pub mod import_waits;
 pub mod input_waits;
 pub mod instance;
