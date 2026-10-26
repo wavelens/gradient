@@ -10,6 +10,7 @@ mod cache_consumer;
 mod cache_session;
 mod dialed;
 mod eval_cache;
+mod eval_split;
 mod failures;
 mod handles;
 mod inbound;

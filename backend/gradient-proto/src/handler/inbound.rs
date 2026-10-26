@@ -26,6 +26,7 @@ use gradient_wire::messages::{
 };
 use gradient_wire::types::{
     BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
+    EvalShardOutcome,
 };
 
 use super::SessionHandles;
@@ -33,6 +34,9 @@ use super::auth::{challenge_for, resolve_authorized};
 use super::cache::handle_cache_query;
 use super::dialed::{DialedSession, refresh_dialed_peers};
 use super::eval_cache::handle_eval_cache_pull;
+use super::eval_split::{
+    handle_eval_shard_request, handle_eval_shards_planned, handle_eval_source_ready, send_reply,
+};
 use super::job_events::{JobEvent, JobEvents};
 use super::log_lane::LogLane;
 use super::nar_serve::{ServeSlot, serve_nar_request};
@@ -389,10 +393,39 @@ impl<'a> InboundContext<'a> {
                 self.on_eval_cache_pull(job_id, fingerprint, applied).await;
                 true
             }
-            ClientMessage::EvalSourceReady { job_id, .. }
-            | ClientMessage::EvalShardsPlanned { job_id, .. }
-            | ClientMessage::EvalShardRequest { job_id, .. } => {
-                debug!(peer_id = %self.peer_id, %job_id, "split evaluation message dropped");
+            ClientMessage::EvalSourceReady {
+                job_id,
+                store_path,
+                fingerprint,
+            } => {
+                if self.owns_split_member(&job_id).await {
+                    handle_eval_source_ready(self.scheduler, job_id, store_path, fingerprint).await;
+                }
+                true
+            }
+            ClientMessage::EvalShardsPlanned { job_id, shards } => {
+                if self.owns_split_member(&job_id).await {
+                    handle_eval_shards_planned(self.scheduler, job_id, shards).await;
+                }
+                true
+            }
+            ClientMessage::EvalShardRequest {
+                job_id,
+                have_source,
+                finished,
+            } => {
+                if self.owns_split_member(&job_id).await {
+                    handle_eval_shard_request(
+                        self.scheduler,
+                        self.writer,
+                        job_id,
+                        have_source,
+                        finished,
+                    )
+                    .await;
+                } else {
+                    send_reply(self.writer, job_id, EvalShardOutcome::Finished).await;
+                }
                 true
             }
             msg @ (ClientMessage::CacheQuery { .. }
@@ -595,6 +628,15 @@ impl<'a> InboundContext<'a> {
             }
             None => false,
         }
+    }
+
+    async fn owns_split_member(&self, job_id: &str) -> bool {
+        let owned = self.owns_handed_dispatch(job_id).await;
+        if !owned {
+            warn!(peer_id = %self.peer_id, %job_id, "split evaluation message for a job this session does not run");
+        }
+
+        owned
     }
 
     fn rpc(&self) -> RpcContext {
