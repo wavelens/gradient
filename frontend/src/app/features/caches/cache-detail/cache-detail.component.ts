@@ -36,9 +36,11 @@ import {
   CacheMetricPoint,
   StorageMetricPoint,
   CacheResponse,
+  TrafficKind,
 } from '@core/models';
 import { docsUrl } from '@core/docs';
 import { formatBytes, formatCount } from '@shared/text';
+import { oneOf, queryParamSignal } from '@shared/routing';
 import { FormsModule } from '@angular/forms';
 
 type Window = 'minutes' | 'hours' | 'days' | 'weeks';
@@ -87,11 +89,27 @@ export class CacheDetailComponent implements OnInit {
   cache = linkedSignal<CacheResponse | null>(() => this.access()?.cache ?? null);
   statsLoading = signal(true);
   stats = signal<CacheStatsResponse | null>(null);
-  activeWindow = signal<Window>('hours');
+  readonly windows: { key: Window; label: string }[] = [
+    { key: 'minutes', label: 'Minutes' },
+    { key: 'hours', label: 'Hours' },
+    { key: 'days', label: 'Days' },
+    { key: 'weeks', label: 'Weeks' },
+  ];
+  readonly trafficOptions: { key: TrafficKind; label: string }[] = [
+    { key: 'total', label: 'Total' },
+    { key: 'external', label: 'External' },
+  ];
+  activeWindow = queryParamSignal<Window>('window', 'hours', oneOf(this.windows.map((w) => w.key)));
+  traffic = queryParamSignal<TrafficKind>('traffic', 'total', oneOf(this.trafficOptions.map((o) => o.key)));
   starred = signal(false);
 
   setWindow(value: unknown): void {
     this.activeWindow.set(value as Window);
+  }
+
+  setTraffic(value: unknown): void {
+    this.traffic.set(value as TrafficKind);
+    this.loadStats();
   }
 
   // Only this cache's own key: the server re-signs everything it serves, paths
@@ -116,13 +134,6 @@ export class CacheDetailComponent implements OnInit {
   get installNetrcCommand(): string {
     return `nix run github:wavelens/gradient/latest#gradient-cli -- cache install-netrc --server ${this.serverUrl} --token <YOUR_TOKEN> --cache ${this.cacheName}`;
   }
-
-  readonly windows: { key: Window; label: string }[] = [
-    { key: 'minutes', label: 'Minutes' },
-    { key: 'hours', label: 'Hours' },
-    { key: 'days', label: 'Days' },
-    { key: 'weeks', label: 'Weeks' },
-  ];
 
   activePoints = computed<CacheMetricPoint[]>(() => {
     const s = this.stats();
@@ -180,7 +191,7 @@ export class CacheDetailComponent implements OnInit {
 
   loadStats(): void {
     this.statsLoading.set(true);
-    this.cachesService.getCacheStats(this.cacheName).subscribe({
+    this.cachesService.getCacheStats(this.cacheName, this.traffic()).subscribe({
       next: (stats) => {
         this.stats.set(stats);
         this.statsLoading.set(false);

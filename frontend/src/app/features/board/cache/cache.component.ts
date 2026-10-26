@@ -6,20 +6,22 @@
 
 import { Component, OnInit, OnDestroy, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
 import { BoardService } from '@core/services/board.service';
 import { LiveService } from '@core/services/live.service';
-import { CardGridComponent, LoadingSpinnerComponent, StatCardComponent } from '@gradient/ui/ui';
+import { CardGridComponent, LoadingSpinnerComponent, StatCardComponent, TabSwitchComponent } from '@gradient/ui/ui';
+import { oneOf, queryParamSignal } from '@shared/routing';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { clockTime, formatBytes, formatCount, formatDuration, formatPercent } from '@shared/text';
 import { firstLoad } from '../first-load';
-import { BoardCacheStats, BoardUpstreamCacheStats, BoardUpstreamCache } from '@core/models';
+import { BoardCacheStats, BoardUpstreamCacheStats, BoardUpstreamCache, TrafficKind } from '@core/models';
 
 @Component({
   selector: 'app-board-cache',
   standalone: true,
-  imports: [CommonModule, CardGridComponent, StatCardComponent, MetricChartComponent, LabelHelpComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, FormsModule, TabSwitchComponent, CardGridComponent, StatCardComponent, MetricChartComponent, LabelHelpComponent, LoadingSpinnerComponent],
   template: `
     @if (first.loading()) {
       <gr-loading-spinner message="Loading cache stats..." />
@@ -40,7 +42,10 @@ import { BoardCacheStats, BoardUpstreamCacheStats, BoardUpstreamCache } from '@c
         [categories]="trafficCats()"
         [colors]="['#17a2b8']"
         [valueFormatter]="bytes"
-      ></gr-metric-chart>
+      >
+        <gr-tab-switch slot="actions" ariaLabel="Traffic" [options]="trafficOptions" optionValue="value"
+                       [ngModel]="traffic()" (ngModelChange)="setTraffic($event)" />
+      </gr-metric-chart>
 
       <gr-metric-chart
         title="NAR requests per hour"
@@ -85,6 +90,11 @@ export class BoardCacheComponent implements OnInit, OnDestroy {
   protected first = firstLoad();
   stats = signal<BoardCacheStats | null>(null);
   upstreamCacheStats = signal<BoardUpstreamCacheStats | null>(null);
+  readonly trafficOptions: { label: string; value: TrafficKind }[] = [
+    { label: 'Total', value: 'total' },
+    { label: 'External', value: 'external' },
+  ];
+  traffic = queryParamSignal<TrafficKind>('traffic', 'total', oneOf(this.trafficOptions.map((o) => o.value)));
 
   trafficCats = computed(() => (this.stats()?.traffic ?? []).map((p) => clockTime(p.bucket_start)));
   trafficSeries = computed(() => [
@@ -121,8 +131,13 @@ export class BoardCacheComponent implements OnInit, OnDestroy {
     this.liveSub?.unsubscribe();
   }
 
+  setTraffic(traffic: TrafficKind): void {
+    this.traffic.set(traffic);
+    this.load();
+  }
+
   private load(): void {
-    this.board.getCache(24).pipe(this.first.track()).subscribe((s) => this.stats.set(s));
+    this.board.getCache(24, this.traffic()).pipe(this.first.track()).subscribe((s) => this.stats.set(s));
     this.board.getUpstreamCacheStats(24).pipe(this.first.track()).subscribe((u) => this.upstreamCacheStats.set(u));
   }
 }

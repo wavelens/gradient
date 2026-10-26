@@ -115,16 +115,37 @@ const CASCADES: &[(RollupGranularity, RollupGranularity, &str)] = &[
 
 const MINUTE_WINDOW: &str = "15 minutes";
 
-fn cache_traffic_sql() -> String {
+struct CacheTrafficMetric {
+    name: &'static str,
+    bytes: &'static str,
+    nars: &'static str,
+}
+
+const CACHE_TRAFFIC: &[CacheTrafficMetric] = &[
+    CacheTrafficMetric {
+        name: metric::CACHE_BYTES_SENT,
+        bytes: "bytes_sent",
+        nars: "nar_count",
+    },
+    CacheTrafficMetric {
+        name: metric::CACHE_BYTES_SENT_EXTERNAL,
+        bytes: "external_bytes_sent",
+        nars: "external_nar_count",
+    },
+];
+
+fn cache_traffic_sql(m: &CacheTrafficMetric) -> String {
+    let CacheTrafficMetric { name, bytes, nars } = m;
     format!(
         "INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-    SELECT uuidv7(), 'cache.bytes_sent', {minute}, cm.bucket_time, \
+    SELECT uuidv7(), '{name}', {minute}, cm.bucket_time, \
            jsonb_build_object('cache', cm.cache::text), hashtextextended(cm.cache::text, 0), \
-           sum(cm.nar_count)::bigint, sum(cm.bytes_sent), \
-           min(cm.bytes_sent), max(cm.bytes_sent), sum(power(cm.bytes_sent, 2)), NULL \
+           sum(cm.{nars})::bigint, sum(cm.{bytes}), \
+           min(cm.{bytes}), max(cm.{bytes}), sum(power(cm.{bytes}, 2)), NULL \
     FROM cache_metric cm \
     WHERE cm.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
+      AND cm.{nars} > 0 \
     GROUP BY cm.bucket_time, cm.cache \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
     DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
@@ -256,8 +277,10 @@ async fn run_rollup(ctx: &DbContext) {
         }
     }
 
-    if let Err(e) = db.execute_unprepared(&cache_traffic_sql()).await {
-        warn!(error = %e, "rollup cache-traffic failed");
+    for m in CACHE_TRAFFIC {
+        if let Err(e) = db.execute_unprepared(&cache_traffic_sql(m)).await {
+            warn!(metric = m.name, error = %e, "rollup cache-traffic failed");
+        }
     }
 
     if let Err(e) = db.execute_unprepared(&cache_storage_sql()).await {
@@ -488,10 +511,10 @@ mod tests {
             .map(build_count_sql)
             .chain(BUILD_DURATIONS.iter().map(build_duration_sql))
             .chain(eval_counts().iter().map(eval_count_sql))
+            .chain(CACHE_TRAFFIC.iter().map(cache_traffic_sql))
             .chain([
                 build_duration_attempt_sql(),
                 dispatch_wait_sql(),
-                cache_traffic_sql(),
                 cache_storage_sql(),
                 upstream_latency_sql(),
                 upstream_hits_sql(),

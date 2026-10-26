@@ -32,7 +32,7 @@ describe('CacheDetailComponent cache usage instructions', () => {
         { provide: CachesService, useValue: caches },
         {
           provide: ActivatedRoute,
-          useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'main' }) } },
+          useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) } },
         },
       ],
     });
@@ -77,7 +77,7 @@ describe('CacheDetailComponent loading', () => {
         {
           provide: ActivatedRoute,
           useValue: {
-            snapshot: { paramMap: convertToParamMap({ cache: 'main' }) },
+            snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) },
             parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', active: true, public: true } } }) },
           },
         },
@@ -111,7 +111,7 @@ describe('CacheDetailComponent header', () => {
             getCacheStats: () => NEVER,
           },
         },
-        { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'main' }) } } },
+        { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) } } },
         { provide: AuthService, useValue: { isAuthenticated: () => authenticated } },
         { provide: StarsService, useValue: { starred, set: () => of(true) } },
       ],

@@ -1239,6 +1239,12 @@ paths:
         schema:
           type: integer
           format: int64
+      - name: traffic
+        in: query
+        description: '`total` counts every NAR transfer of the cache. `external` counts only NARs sent over the HTTP binary cache and the `/proto` cache session.'
+        required: false
+        schema:
+          $ref: '#/components/schemas/TrafficKind'
       responses:
         '200':
           description: Cache statistics
@@ -4126,6 +4132,12 @@ paths:
         required: true
         schema:
           type: string
+      - name: traffic
+        in: query
+        description: '`total` counts every NAR transfer of the cache. `external` counts only NARs sent over the HTTP binary cache and the `/proto` cache session.'
+        required: false
+        schema:
+          $ref: '#/components/schemas/TrafficKind'
       responses:
         '200':
           description: Cache statistics
@@ -20527,6 +20539,11 @@ components:
         build_count:
           type: integer
           format: int64
+    TrafficKind:
+      type: string
+      enum:
+      - total
+      - external
     TransferOwnershipRequest:
       type: object
       required:

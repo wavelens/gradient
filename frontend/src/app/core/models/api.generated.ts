@@ -2455,6 +2455,8 @@ export interface TopProjectBuildTime {
   build_count: number;
 }
 
+export type TrafficKind = "total" | "external";
+
 export interface TransferOwnershipRequest {
   project: string;
 }

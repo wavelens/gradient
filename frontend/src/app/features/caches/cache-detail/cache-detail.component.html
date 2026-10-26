@@ -76,6 +76,15 @@
       >
         <gr-tab-switch
           slot="actions"
+          ariaLabel="Traffic"
+          [options]="trafficOptions"
+          optionLabel="label"
+          optionValue="key"
+          [ngModel]="traffic()"
+          (ngModelChange)="setTraffic($event)"
+          />
+        <gr-tab-switch
+          slot="actions"
           ariaLabel="Time window"
           [options]="windows"
           optionLabel="label"

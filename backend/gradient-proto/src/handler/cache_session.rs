@@ -7,6 +7,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use gradient_db::metrics::cache_traffic::{TrafficSource, minute_bucket};
 use gradient_types::ids::CacheId;
 use gradient_types::{StorePath, StorePathMapper};
 use tokio::sync::Semaphore;
@@ -136,11 +137,16 @@ impl CacheSession {
             let shutdown = handles.db.shutdown.clone();
             shutdown.spawn(async move {
                 let _slot = slot;
-                if let Err(e) =
-                    serve_nar_request(&handles, &writer, &mapper, &job_id, &store_path, 0, None)
-                        .await
+                match serve_nar_request(&handles, &writer, &mapper, &job_id, &store_path, 0, None)
+                    .await
                 {
-                    debug!(%store_path, error = %e, "cache NAR serve task failed");
+                    Ok(bytes) => handles.cache_traffic.record(
+                        cache_id,
+                        minute_bucket(gradient_types::now()),
+                        i64::try_from(bytes).unwrap_or(i64::MAX),
+                        TrafficSource::External,
+                    ),
+                    Err(e) => debug!(%store_path, error = %e, "cache NAR serve task failed"),
                 }
             });
         }
