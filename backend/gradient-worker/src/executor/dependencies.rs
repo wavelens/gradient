@@ -247,6 +247,7 @@ async fn import_derivation(
         attr,
         ifd: true,
         licenses: vec![],
+        runner: None,
     };
     let mut abort = imports.abort.clone();
     walk_and_publish(&imports, vec![root], &mut abort)

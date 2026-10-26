@@ -6,5 +6,6 @@
 
 pub mod eval_stats;
 mod resolver;
+mod runner_app;
 
 pub use self::resolver::WorkerPoolResolver;

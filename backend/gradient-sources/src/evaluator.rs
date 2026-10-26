@@ -7,7 +7,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_derivation::Derivation;
-use gradient_wire::types::License;
+use gradient_wire::types::{License, RunnerSpec};
 
 pub type ResolvedDerivation = (String, Result<Resolved>);
 
@@ -15,6 +15,7 @@ pub type ResolvedDerivation = (String, Result<Resolved>);
 pub struct Resolved {
     pub drv_path: String,
     pub licenses: Vec<License>,
+    pub runner: Option<RunnerSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

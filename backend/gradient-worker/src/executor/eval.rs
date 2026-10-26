@@ -26,7 +26,9 @@ use gradient_sources::{
 use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
 };
-use gradient_wire::types::{EvalMessageLevel, License, attr_eval_source};
+use gradient_wire::types::{
+    EvalMessageLevel, License, RunnerSpec, attr_eval_source, runner_image_attr,
+};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
@@ -431,10 +433,11 @@ pub(super) struct Root {
     pub(super) attr: String,
     pub(super) ifd: bool,
     pub(super) licenses: Vec<License>,
+    pub(super) runner: Option<RunnerSpec>,
 }
 
 enum Queued {
-    Root(Root),
+    Root(Box<Root>),
     Dependency(String),
 }
 
@@ -452,16 +455,21 @@ impl Queued {
         produced: Vec<String>,
     ) -> DiscoveredDerivation {
         let mut discovered = match self {
-            Queued::Root(Root {
-                drv_path,
-                attr,
-                ifd,
-                licenses,
-            }) => DiscoveredDerivation {
-                ifd,
-                licenses,
-                ..gradient_derivation::discovered_derivation(Some(attr), drv_path, drv)
-            },
+            Queued::Root(root) => {
+                let Root {
+                    drv_path,
+                    attr,
+                    ifd,
+                    licenses,
+                    runner,
+                } = *root;
+                DiscoveredDerivation {
+                    ifd,
+                    licenses,
+                    runner,
+                    ..gradient_derivation::discovered_derivation(Some(attr), drv_path, drv)
+                }
+            }
             Queued::Dependency(drv_path) => {
                 gradient_derivation::discovered_derivation(None, drv_path, drv)
             }
@@ -498,25 +506,41 @@ struct FoundAttrs {
 }
 
 impl FoundAttrs {
-    fn take(&mut self, (attr, resolved): ResolvedDerivation) -> Option<Root> {
+    fn take(&mut self, (attr, resolved): ResolvedDerivation) -> Vec<Root> {
         self.attrs += 1;
         match resolved {
-            Ok(Resolved { drv_path, licenses }) => {
-                let root = Root {
+            Ok(Resolved {
+                drv_path,
+                licenses,
+                runner,
+            }) => {
+                let image = runner
+                    .as_ref()
+                    .and_then(|spec| spec.image.clone())
+                    .map(|image| Root {
+                        drv_path: image,
+                        attr: runner_image_attr(&attr),
+                        ifd: false,
+                        licenses: vec![],
+                        runner: None,
+                    });
+                let program = Root {
                     drv_path,
                     attr,
                     ifd: false,
                     licenses,
+                    runner,
                 };
-                self.roots.push(root.clone());
-                Some(root)
+                let roots: Vec<Root> = std::iter::once(program).chain(image).collect();
+                self.roots.extend(roots.iter().cloned());
+                roots
             }
             Err(e) => {
                 self.failed.push(AttrError {
                     attr,
                     message: format!("{e:#}"),
                 });
-                None
+                vec![]
             }
         }
     }
@@ -556,7 +580,7 @@ impl<'a> ClosureWalker<'a> {
     fn add_root(&mut self, root: Root) {
         self.rooted.insert(root.drv_path.clone());
         self.visited.insert(root.drv_path.clone());
-        self.pending.push_front(Queued::Root(root));
+        self.pending.push_front(Queued::Root(Box::new(root)));
     }
 
     async fn walk_found(
@@ -573,7 +597,7 @@ impl<'a> ClosureWalker<'a> {
             };
             match next {
                 Some(attr) => {
-                    if let Some(root) = found.take(attr) {
+                    for root in found.take(attr) {
                         self.add_root(root);
                     }
                 }
@@ -1840,6 +1864,7 @@ mod tests {
                 Ok(Resolved {
                     drv_path: self.drv_path.clone(),
                     licenses: vec![gpl()],
+                    runner: None,
                 }),
             )]);
             self.walked.notified().await;
@@ -1946,6 +1971,81 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct ResolvesRunner(Resolved);
+
+    #[async_trait::async_trait]
+    impl DerivationResolver for ResolvesRunner {
+        async fn list_flake_derivations(
+            &self,
+            _: String,
+            _: Vec<String>,
+            _: &[(String, String)],
+            _: &dyn gradient_sources::EvalDependencies,
+            found: gradient_sources::FoundDerivations<'_>,
+        ) -> Result<FlakeDiscovery> {
+            found(vec![("apps.x86_64-linux.train".into(), Ok(self.0.clone()))]);
+            Ok(FlakeDiscovery::default())
+        }
+
+        async fn release_evaluators(&self) {}
+
+        async fn get_derivation(&self, _: String) -> Result<gradient_derivation::Derivation> {
+            std::future::pending().await
+        }
+
+        async fn get_features(&self, _: String) -> Result<(String, Vec<String>)> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_runner_root_carries_its_spec_and_its_image_is_a_second_root() {
+        let program = numbered_drv(1);
+        let image = numbered_drv(2);
+        let resolver = ResolvesRunner(Resolved {
+            drv_path: program.clone(),
+            licenses: vec![],
+            runner: Some(gradient_wire::types::RunnerSpec {
+                program: "/nix/store/aaaa-train/bin/train".into(),
+                image: Some(image.clone()),
+                ..Default::default()
+            }),
+        });
+        let drv_reader = FakeDrvReader::new()
+            .with_drv(program.clone(), drv_needing(&[]))
+            .with_drv(image.clone(), drv_needing(&[]));
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &make_flake_job("https://example.com/repo"),
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
+
+        let reported = reporter.all_eval_derivations();
+        let program_root = reported
+            .iter()
+            .find(|d| d.drv_path == program)
+            .expect("the program root is reported");
+        assert_eq!(program_root.attr, "apps.x86_64-linux.train");
+        assert!(program_root.runner.is_some());
+        let image_root = reported
+            .iter()
+            .find(|d| d.drv_path == image)
+            .expect("the image root is reported");
+        assert_eq!(
+            image_root.attr,
+            "apps.x86_64-linux.train.passthru.gradient.image"
+        );
+        assert_eq!(image_root.runner, None);
+    }
+
     fn numbered_drv(n: usize) -> String {
         format!("/nix/store/{n:032}-n{n}.drv")
     }
@@ -2036,6 +2136,7 @@ mod tests {
                 attr: "root".into(),
                 ifd: false,
                 licenses: vec![],
+                runner: None,
             }],
             &mut never_abort(),
         )
@@ -2110,6 +2211,7 @@ mod tests {
                 attr: "dynamic".into(),
                 ifd: false,
                 licenses: vec![],
+                runner: None,
             }],
             &mut never_abort(),
         )
