@@ -19,7 +19,7 @@ use tracing::{debug, error, warn};
 
 use crate::Scheduler;
 use crate::buildability::runner_waiting_reason;
-use crate::jobs::{PendingJob, PendingRunnerJob, runner_job_key};
+use crate::jobs::{PendingJob, PendingRunnerJob, RunnerAssignment, runner_job_key};
 
 pub(crate) struct RunnerDispatch {
     pub(crate) scheduler: Arc<Scheduler>,
@@ -109,7 +109,10 @@ fn runner_workers(workers: &[WorkerInfo], project: ProjectId) -> Vec<WorkerCaps>
         .collect()
 }
 
-fn pending_runner_job(row: &RunnerDispatchRow, api_url: &str) -> Option<PendingRunnerJob> {
+pub(crate) fn pending_runner_job(
+    row: &RunnerDispatchRow,
+    api_url: &str,
+) -> Option<PendingRunnerJob> {
     let spec: RunnerSpec = match serde_json::from_value(row.job.spec.clone()) {
         Ok(spec) => spec,
         Err(e) => {
@@ -144,7 +147,12 @@ fn pending_runner_job(row: &RunnerDispatchRow, api_url: &str) -> Option<PendingR
         ready_at: now,
         rescore_count: 0,
         api_url: api_url.to_owned(),
-        assignment: None,
+        assignment: row.open_attempt.map(|open| RunnerAssignment {
+            runner_job: row.job.id,
+            attempt: open.id,
+            number: u32::try_from(open.number).unwrap_or(0),
+            retries_cap: u32::try_from(row.job.retries_left).unwrap_or(0),
+        }),
         spec,
     })
 }

@@ -148,7 +148,18 @@ impl Scheduler {
             .transition(Transition::AbortEvaluationSharedBuilds { evaluation, hard })
             .await
         {
-            Ok(report) => report.aborted_shared_builds,
+            Ok(report) => {
+                if !report.aborted_runner_jobs.is_empty() {
+                    let keys = report
+                        .aborted_runner_jobs
+                        .iter()
+                        .copied()
+                        .map(crate::jobs::runner_job_key)
+                        .collect();
+                    self.cancel_jobs(evaluation, keys).await;
+                }
+                report.aborted_shared_builds
+            }
             Err(e) => {
                 warn!(error = %e, evaluation_id = %evaluation, "aborting the evaluation's shared builds did not reach the graph writer");
                 Vec::new()

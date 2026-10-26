@@ -298,6 +298,11 @@ pub enum SchedulerMsg {
         job_id: String,
         reply: RpcReplyPort<Option<(DispatchedJobId, PendingBuildJob)>>,
     },
+    ActiveRunnerAttempt {
+        worker: String,
+        job_id: String,
+        reply: RpcReplyPort<Option<gradient_types::ids::RunnerJobAttemptId>>,
+    },
     OwnsDispatch {
         worker: String,
         job_id: String,
@@ -484,8 +489,19 @@ impl SchedulerCore {
             let job_id = reattached.job_id.clone();
             let kind = reattached.job.job_kind();
             let ram_need = reattached.job.ram_need_with(None, false);
+            let devices = match &reattached.job {
+                PendingJob::Runner(runner) => self
+                    .pool
+                    .worker_caps(worker)
+                    .and_then(|caps| runner.requirement_for(&caps))
+                    .map(|requirement| requirement.devices),
+                PendingJob::Eval(_) | PendingJob::Build(_) => None,
+            };
             if self.tracker.restore_active(worker, reattached) {
                 self.occupy(worker, &job_id, kind, ram_need);
+                if let Some(devices) = devices {
+                    self.pool.hold_devices(worker, &job_id, devices);
+                }
             }
         }
     }
@@ -1196,6 +1212,13 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::ActiveJob { job_id, reply } => {
                 let _ = reply.send(core.tracker.active_job(&job_id).cloned());
+            }
+            SchedulerMsg::ActiveRunnerAttempt {
+                worker,
+                job_id,
+                reply,
+            } => {
+                let _ = reply.send(core.tracker.active_runner_attempt(&worker, &job_id));
             }
             SchedulerMsg::ActiveBuildDispatch {
                 worker,

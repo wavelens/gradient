@@ -1308,9 +1308,22 @@ impl JobTracker {
         }
     }
 
+    pub fn active_runner_attempt(
+        &self,
+        worker_id: &str,
+        job_id: &str,
+    ) -> Option<gradient_types::ids::RunnerJobAttemptId> {
+        let active = self.active.get(job_id).filter(|a| a.worker == worker_id)?;
+        match &active.job {
+            PendingJob::Runner(runner) => runner.assignment.map(|a| a.attempt),
+            PendingJob::Eval(_) | PendingJob::Build(_) => None,
+        }
+    }
+
     pub fn release_to_pending(&mut self, job_id: &str) {
         if let Some(active) = self.active.remove(job_id)
             && active.cluster.is_none()
+            && !matches!(active.job, PendingJob::Runner(_))
         {
             self.pending.insert(job_id.to_owned(), active.job);
         }
@@ -1597,6 +1610,7 @@ impl JobTracker {
     pub fn return_unreclaimed(&mut self, unreclaimed: &[(String, AwaitingReclaim)]) {
         for (job_id, held) in unreclaimed {
             if let Some(job) = &held.job
+                && !matches!(job, PendingJob::Runner(_))
                 && !self.contains_job(job_id)
             {
                 self.pending.insert(job_id.clone(), job.clone());

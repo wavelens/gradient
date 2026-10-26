@@ -65,7 +65,7 @@ impl Scheduler {
         }
     }
 
-    async fn drop_assignment(&self, worker_id: &str, job_id: &str) {
+    pub(crate) async fn drop_assignment(&self, worker_id: &str, job_id: &str) {
         let worker = worker_id.to_owned();
         let job_id = job_id.to_owned();
         let _ = self
@@ -90,6 +90,9 @@ impl Scheduler {
     }
 
     pub async fn job_rejected(&self, worker_id: &str, job_id: &str) {
+        if gradient_db::scheduling::assignment_record::runner_job_of_key(job_id).is_some() {
+            return self.runner_rejected(worker_id, job_id).await;
+        }
         let worker = worker_id.to_owned();
         let job_id = job_id.to_owned();
         let _ = self

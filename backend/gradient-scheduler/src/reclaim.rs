@@ -8,10 +8,11 @@ use std::collections::{HashMap, HashSet};
 
 use gradient_db::lookup::by_ids;
 use gradient_db::maintenance::recovery::KeptAssignment;
+use gradient_db::runner_jobs::dispatch::started as started_runner_jobs;
 use gradient_db::scheduling::assignment_record::{
     abandon_open_assignments, assignment_rows, eval_of_key,
     open_single_assignments_of_disconnected_workers, open_single_assignments_of_worker,
-    shared_build_of_key,
+    runner_job_of_key, shared_build_of_key,
 };
 use gradient_entity::dispatched_job::Model as MDispatchedJob;
 use gradient_graph::OrphanCause;
@@ -155,6 +156,8 @@ impl Scheduler {
         let build_ids: Vec<DerivationBuildId> =
             keys.iter().filter_map(|k| shared_build_of_key(k)).collect();
         let eval_ids: Vec<EvaluationId> = keys.iter().filter_map(|k| eval_of_key(k)).collect();
+        let runner_ids: Vec<RunnerJobId> =
+            keys.iter().filter_map(|k| runner_job_of_key(k)).collect();
 
         let builds: Vec<MDerivationBuild> =
             by_ids::<EDerivationBuild, _>(&self.db.worker_db, &build_ids)
@@ -187,6 +190,16 @@ impl Scheduler {
                 .into_iter()
                 .map(|(key, job)| (key, PendingJob::Eval(job))),
         );
+        let api_url = &self.db.config.server.serve_url;
+        for row in started_runner_jobs(&self.db.worker_db, &runner_ids).await? {
+            let key = crate::jobs::runner_job_key(row.job.id);
+            row_jobs.live.insert(key.clone());
+            if let Some(job) = crate::loops::pending_runner_job(&row, api_url)
+                .filter(|job| job.assignment.is_some())
+            {
+                row_jobs.jobs.insert(key, PendingJob::Runner(job));
+            }
+        }
         Ok(row_jobs)
     }
 
