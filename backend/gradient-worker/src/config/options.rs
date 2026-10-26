@@ -250,7 +250,8 @@ pub struct EvalArgs {
     /// `null` uses {file}`<services.gradient.worker.baseDir>/eval-cache`.
     pub cache_dir: Option<String>,
 
-    /// Whether to share eval cache blobs with other workers through the server.
+    /// Whether to share the eval cache with other workers through the server. Evaluations pull
+    /// the segments of other workers first and upload new rows as segments while they run.
     #[arg(default_value_t = true)]
     pub cache_share: bool,
 

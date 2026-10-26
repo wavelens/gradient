@@ -372,7 +372,7 @@
     "flag": "eval-cache-share",
     "env": "GRADIENT_WORKER_EVAL_CACHE_SHARE",
     "type": "bool",
-    "description": "Whether to share eval cache blobs with other workers through the server.",
+    "description": "Whether to share the eval cache with other workers through the server. Evaluations pull\nthe segments of other workers first and upload new rows as segments while they run.",
     "default": "true",
     "values": [
       "true",

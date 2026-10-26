@@ -510,7 +510,7 @@
     "flag": "upload-concurrency",
     "env": "GRADIENT_UPLOAD_CONCURRENCY",
     "type": "NonZeroUsize",
-    "description": "Number of uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all\nworkers and REST clients. Smaller uploads have a window of 128 of their own. Uploads\nhold their permit until the object is in storage. Other uploads wait for a permit in\nthe meantime.",
+    "description": "Number of uploads over 1 MiB (NARs and eval cache segments) admitted at once across all\nworkers and REST clients. Smaller uploads have a window of 128 of their own. Uploads\nhold their permit until the object is in storage. Other uploads wait for a permit in\nthe meantime.",
     "default": "8",
     "values": []
   },
@@ -773,7 +773,7 @@
     "flag": "eval-cache-max-total-bytes",
     "env": "GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES",
     "type": "u64",
-    "description": "Total size in bytes of shared eval cache blobs. Older blobs leave the cache until the\ntotal is within this size.",
+    "description": "Total size in bytes of the shared eval caches, counted after compaction. The eval cache\nof a flake fingerprint leaves with all its segments, least recently compacted first,\nuntil the total is within this size.",
     "default": "10737418240",
     "values": []
   },
@@ -783,7 +783,7 @@
     "flag": "eval-cache-max-age-days",
     "env": "GRADIENT_EVAL_CACHE_MAX_AGE_DAYS",
     "type": "u64",
-    "description": "Days after which eval cache blobs leave the cache, regardless of the size limit.",
+    "description": "Days since the last compaction after which the eval cache of a flake fingerprint leaves\nwith all its segments, regardless of the size limit.",
     "default": "30",
     "values": []
   },

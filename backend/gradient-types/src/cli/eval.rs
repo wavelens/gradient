@@ -19,12 +19,14 @@ pub struct EvalArgs {
     #[arg(default_value_t = DEFAULT_KEEP_EVALUATIONS as usize)]
     pub max_keep: usize,
 
-    /// Total size in bytes of shared eval cache blobs. Older blobs leave the cache until the
-    /// total is within this size.
+    /// Total size in bytes of the shared eval caches, counted after compaction. The eval cache
+    /// of a flake fingerprint leaves with all its segments, least recently compacted first,
+    /// until the total is within this size.
     #[arg(default_value_t = 10 * 1024 * 1024 * 1024)]
     pub cache_max_total_bytes: u64,
 
-    /// Days after which eval cache blobs leave the cache, regardless of the size limit.
+    /// Days since the last compaction after which the eval cache of a flake fingerprint leaves
+    /// with all its segments, regardless of the size limit.
     #[arg(default_value_t = 30)]
     pub cache_max_age_days: u64,
 
