@@ -61,7 +61,10 @@
       inherit (pkgs) gradient-nix;
       inherit gradient-report gradient-evalbench-inspector;
       store = pkgs.callPackage ./nix/scripts/store.nix { };
-      gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib; };
+      gradient = pkgs.callPackage ./nix/packages/gradient.nix {
+        inherit craneLib;
+        gitRev = self.rev or self.dirtyRev or null;
+      };
       gradient-logo = pkgs.callPackage ./nix/packages/gradient-logo.nix { };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { inherit gradient-logo; };
       gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix {

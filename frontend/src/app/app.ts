@@ -41,7 +41,9 @@ export class App {
 
   protected readonly footerLinks = FOOTER_LINKS;
   protected get version(): string | null {
-    return this.config.backendVersion ? `v${this.config.backendVersion}` : null;
+    const { backendVersion, backendCommit } = this.config;
+    if (!backendVersion) return null;
+    return backendCommit ? `v${backendVersion} · ${backendCommit.slice(0, 8)}` : `v${backendVersion}`;
   }
 
   constructor() {

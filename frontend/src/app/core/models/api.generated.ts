@@ -2127,6 +2127,7 @@ export interface SeriesPoint {
 
 export interface ServerConfig {
   version: string;
+  commit?: string | null;
   oidc_enabled: boolean;
   oidc_required: boolean;
   registration_enabled: boolean;

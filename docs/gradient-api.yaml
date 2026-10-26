@@ -19669,6 +19669,10 @@ components:
       properties:
         version:
           type: string
+        commit:
+          type:
+          - string
+          - 'null'
         oidc_enabled:
           type: boolean
         oidc_required:

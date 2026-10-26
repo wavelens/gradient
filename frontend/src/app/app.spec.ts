@@ -10,6 +10,7 @@ import { Router, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { App } from './app';
+import { ConfigService } from '@core/services/config.service';
 
 @Component({ template: 'page' })
 class PageStub {}
@@ -47,5 +48,13 @@ describe('App', () => {
     await TestBed.inject(Router).navigateByUrl('/bare');
     fixture.detectChanges();
     expect(footer()).toBeNull();
+  });
+
+  it('names the deployed commit next to the version in the footer', async () => {
+    Object.assign(TestBed.inject(ConfigService), { backendVersion: '2.0.1', backendCommit: '455a55591f5f49fe6251d936cdc94d44a7c87df5' });
+    const fixture = TestBed.createComponent(App);
+    await TestBed.inject(Router).navigateByUrl('/');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('gr-footer').textContent).toContain('v2.0.1 · 455a5559');
   });
 });
