@@ -143,7 +143,7 @@ impl Scheduler {
                         .and_then(|e| e.flake_source);
                     return match store_path {
                         Some(path) => {
-                            let follow_id = crate::jobs::eval_job_key(j.evaluation_id);
+                            let follow_id = crate::jobs::eval_job_key(j.evaluation_id, 0);
                             let mut follow = j.cached_followup(path);
                             if let Some(task) = follow.task_id {
                                 follow.estimate = self

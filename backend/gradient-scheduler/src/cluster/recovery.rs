@@ -23,7 +23,8 @@ impl Scheduler {
         job_id: &str,
         report: MemberReport,
     ) -> Result<()> {
-        let recorded = self.cluster.book.record(job_id, report).await;
+        let planned = self.split_member_closed(job_id, &report).await;
+        let recorded = self.cluster.book.record(job_id, report, planned).await;
         match recorded {
             Recorded::Held | Recorded::Deferred => Ok(()),
             Recorded::NotMember(report) => self.settle_single(report).await,
@@ -82,11 +83,17 @@ impl Scheduler {
             }
         };
 
-        let resolution = Resolution { fate, requeued };
+        let resolution = Resolution {
+            fate,
+            requeued,
+            split: self.cluster.book.split(attempt).await,
+        };
         let (reports, survivors) = self.cluster.book.drain(attempt, resolution).await;
+        let completion = split_completion(resolution, &reports);
         let mut dispositions: Vec<Disposition> = reports
             .into_iter()
             .map(|r| dispose(resolution, r))
+            .chain(completion)
             .collect();
         for job in self.abort_survivors(attempt, &survivors).await {
             dispositions.push(dispose(
@@ -228,4 +235,15 @@ impl Scheduler {
             })
             .await;
     }
+}
+
+fn split_completion(resolution: Resolution, reports: &[MemberReport]) -> Option<Disposition> {
+    if !resolution.split || resolution.fate != Fate::Complete {
+        return None;
+    }
+
+    reports.iter().find_map(|report| match report {
+        MemberReport::Completed { job } => Some(Disposition::Complete(job.clone())),
+        _ => None,
+    })
 }

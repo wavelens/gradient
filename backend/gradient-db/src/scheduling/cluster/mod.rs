@@ -16,5 +16,6 @@ pub use claim::{
 };
 pub use membership::{MemberOf, abort_dead_queued_clusters, cluster_membership};
 pub use recovery::{
-    ClusterRecovery, finish_cluster_job, recover_cluster_attempts, requeue_cluster_job,
+    ClusterRecovery, dissolve_unplaced_clusters, finish_cluster_job, recover_cluster_attempts,
+    requeue_cluster_job,
 };

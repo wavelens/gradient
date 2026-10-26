@@ -29,10 +29,6 @@ pub fn shared_build_of_key(job_id: &str) -> Option<DerivationBuildId> {
     job_id.strip_prefix(BUILD_KEY_PREFIX)?.parse().ok()
 }
 
-pub fn eval_job_key_sql(id_expr: &str) -> String {
-    format!("'{EVAL_KEY_PREFIX}' || {id_expr}::text")
-}
-
 pub fn build_job_key_sql(id_expr: &str) -> String {
     format!("'{BUILD_KEY_PREFIX}' || {id_expr}::text")
 }
@@ -426,11 +422,10 @@ mod tests {
 
     #[test]
     fn the_predicate_rebuilds_the_trackers_key() {
-        assert_eq!(eval_job_key_sql("ev.id"), "'eval:' || ev.id::text");
         assert_eq!(build_job_key_sql("db.id"), "'build:' || db.id::text");
         assert_eq!(
-            no_open_assignment_predicate(&eval_job_key_sql("ev.id")),
-            "NOT EXISTS (SELECT 1 FROM dispatched_job dj WHERE dj.job_id = 'eval:' || ev.id::text \
+            no_open_assignment_predicate(&build_job_key_sql("db.id")),
+            "NOT EXISTS (SELECT 1 FROM dispatched_job dj WHERE dj.job_id = 'build:' || db.id::text \
              AND dj.finished_at IS NULL)"
         );
     }

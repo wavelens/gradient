@@ -87,6 +87,7 @@ impl From<Fate> for ClusterAttemptOutcome {
 pub struct Resolution {
     pub fate: Fate,
     pub requeued: bool,
+    pub split: bool,
 }
 
 #[derive(Debug)]
@@ -118,7 +119,11 @@ pub enum Recorded {
     Late(Resolution, MemberReport),
 }
 
-pub fn verdict(members: &[AttemptMember]) -> Option<Fate> {
+pub fn verdict(members: &[AttemptMember], planned_split: bool) -> Option<Fate> {
+    if planned_split {
+        return split_verdict(members);
+    }
+
     let outcome = |m: &AttemptMember| m.report.as_ref().map(MemberReport::outcome);
     let succeeded = |m: &AttemptMember| outcome(m) == Some(MemberOutcome::Succeeded);
     if members.iter().any(|m| m.primary && succeeded(m)) || members.iter().all(succeeded) {
@@ -141,7 +146,29 @@ pub fn verdict(members: &[AttemptMember]) -> Option<Fate> {
         .then_some(Fate::Retry)
 }
 
+fn split_verdict(members: &[AttemptMember]) -> Option<Fate> {
+    let outcomes: Vec<Option<MemberOutcome>> = members
+        .iter()
+        .map(|m| m.report.as_ref().map(MemberReport::outcome))
+        .collect();
+    if outcomes.contains(&Some(MemberOutcome::Succeeded)) {
+        return Some(Fate::Complete);
+    }
+    if outcomes.contains(&Some(MemberOutcome::Aborted)) {
+        return Some(Fate::Abort);
+    }
+
+    outcomes
+        .iter()
+        .all(|o| matches!(o, Some(MemberOutcome::Failed | MemberOutcome::Lost)))
+        .then_some(Fate::Retry)
+}
+
 pub fn dispose(resolution: Resolution, report: MemberReport) -> Disposition {
+    if resolution.split && resolution.fate == Fate::Complete {
+        return Disposition::Nothing;
+    }
+
     if resolution.requeued {
         return match report {
             MemberReport::Completed { job }
@@ -236,6 +263,8 @@ mod tests {
                 resolving: false,
                 resolution: None,
                 resolved_at: None,
+                split: false,
+                planned: false,
             },
         )
         .await;
@@ -282,7 +311,7 @@ mod tests {
             member("b", false, None),
         ];
 
-        assert_eq!(verdict(&members), None);
+        assert_eq!(verdict(&members, false), None);
     }
 
     #[test]
@@ -294,9 +323,10 @@ mod tests {
         let resolution = Resolution {
             fate: Fate::Complete,
             requeued: false,
+            split: false,
         };
 
-        assert_eq!(verdict(&members), Some(Fate::Complete));
+        assert_eq!(verdict(&members, false), Some(Fate::Complete));
         let Disposition::Fail(_, failure) =
             dispose(resolution, MemberReport::Aborted { job: Some(job()) })
         else {
@@ -314,9 +344,10 @@ mod tests {
         let resolution = Resolution {
             fate: Fate::Retry,
             requeued: true,
+            split: false,
         };
 
-        assert_eq!(verdict(&members), Some(Fate::Retry));
+        assert_eq!(verdict(&members, false), Some(Fate::Retry));
         assert!(matches!(
             dispose(resolution, completed()),
             Disposition::Requeue(_)
@@ -332,6 +363,7 @@ mod tests {
         let resolution = Resolution {
             fate: Fate::Retry,
             requeued: false,
+            split: false,
         };
         for kind in [
             BuildFailureKind::Transient,
@@ -363,7 +395,48 @@ mod tests {
         assert_eq!(canceled.outcome(), MemberOutcome::Lost);
 
         let members = [member("a", false, Some(canceled)), member("b", false, None)];
-        assert_eq!(verdict(&members), Some(Fate::Retry));
+        assert_eq!(verdict(&members, false), Some(Fate::Retry));
+    }
+
+    #[test]
+    fn the_primary_lost_after_planning_does_not_retry_the_attempt() {
+        let lost = MemberReport::Lost { job: job() };
+        let members = [member("p", true, Some(lost)), member("c", false, None)];
+
+        assert_eq!(verdict(&members, true), None);
+    }
+
+    #[test]
+    fn the_primary_lost_before_planning_retries_the_attempt() {
+        let lost = MemberReport::Lost { job: job() };
+        let members = [member("p", true, Some(lost)), member("c", false, None)];
+
+        assert_eq!(verdict(&members, false), Some(Fate::Retry));
+    }
+
+    #[test]
+    fn a_planned_split_completes_with_any_member_and_retries_only_when_all_are_lost() {
+        let lost = || MemberReport::Lost { job: job() };
+        let finished = [
+            member("p", true, Some(lost())),
+            member("c", false, Some(completed())),
+        ];
+        let all_lost = [
+            member("p", true, Some(lost())),
+            member("c", false, Some(failed(BuildFailureKind::Permanent))),
+        ];
+
+        assert_eq!(verdict(&finished, true), Some(Fate::Complete));
+        assert_eq!(verdict(&all_lost, true), Some(Fate::Retry));
+        let resolution = Resolution {
+            fate: Fate::Complete,
+            requeued: false,
+            split: true,
+        };
+        assert!(matches!(
+            dispose(resolution, MemberReport::Aborted { job: Some(job()) }),
+            Disposition::Nothing
+        ));
     }
 
     #[test]
@@ -373,7 +446,7 @@ mod tests {
             member("b", false, None),
         ];
 
-        assert_eq!(verdict(&members), Some(Fate::Abort));
+        assert_eq!(verdict(&members, false), Some(Fate::Abort));
     }
 
     #[tokio::test]
@@ -387,19 +460,21 @@ mod tests {
         .await;
 
         assert!(matches!(
-            book.record("a", failed(BuildFailureKind::Permanent)).await,
+            book.record("a", failed(BuildFailureKind::Permanent), false)
+                .await,
             Recorded::Decided(_, Fate::Retry)
         ));
         let resolution = Resolution {
             fate: Fate::Retry,
             requeued: true,
+            split: false,
         };
         let (reports, survivors) = book.drain(attempt, resolution).await;
         assert_eq!(reports.len(), 1);
         assert_eq!(survivors.len(), 1);
 
         assert!(
-            matches!(book.record("b", completed()).await, Recorded::Late(r, _) if r == resolution)
+            matches!(book.record("b", completed(), false).await, Recorded::Late(r, _) if r == resolution)
         );
         assert_eq!(book.attempt_of("b").await, None);
     }
@@ -413,13 +488,15 @@ mod tests {
             [member("a", false, None), member("b", false, None)],
         )
         .await;
-        book.record("a", failed(BuildFailureKind::Permanent)).await;
+        book.record("a", failed(BuildFailureKind::Permanent), false)
+            .await;
         let (_, survivors) = book
             .drain(
                 attempt,
                 Resolution {
                     fate: Fate::Retry,
                     requeued: true,
+                    split: false,
                 },
             )
             .await;
@@ -441,7 +518,7 @@ mod tests {
         .await;
 
         assert!(matches!(
-            book.record("a", MemberReport::Lost { job: job() }).await,
+            book.record("a", MemberReport::Lost { job: job() }, false).await,
             Recorded::Preparing { worker, .. } if worker == "w-a"
         ));
     }

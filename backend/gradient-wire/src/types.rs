@@ -688,6 +688,9 @@ pub struct ClusterAddress {
     pub index: u32,
 }
 
+pub const SPLIT_PRIMARY_ROLE: &str = "split-evaluation-primary";
+pub const SPLIT_COMPANION_ROLE: &str = "split-evaluation-companion";
+
 #[derive(Proto, Debug, Clone, PartialEq, Eq)]
 pub struct ClusterMembership {
     pub attempt: String,

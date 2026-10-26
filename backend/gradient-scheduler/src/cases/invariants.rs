@@ -462,10 +462,12 @@ fn allowed_move(from: EvaluationStatus, to: EvaluationStatus) -> bool {
 }
 
 fn member_key(member: &cluster_member::Model) -> Option<String> {
-    member
-        .derivation_build
-        .map(build_job_key)
-        .or_else(|| member.evaluation.map(eval_job_key))
+    member.derivation_build.map(build_job_key).or_else(|| {
+        let index = member.eval_index.and_then(|i| u16::try_from(i).ok());
+        member
+            .evaluation
+            .map(|e| eval_job_key(e, index.unwrap_or(0)))
+    })
 }
 
 fn assert_unique<K: Hash + Eq + Debug, V: Debug>(
