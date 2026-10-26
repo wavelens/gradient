@@ -247,7 +247,7 @@ mod tests {
         async fn push(&self, segment: Vec<u8>) -> Result<()> {
             let fail = self
                 .failures_left
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
                 .is_ok();
             if fail {
                 anyhow::bail!("the server is unreachable");

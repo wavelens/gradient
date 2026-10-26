@@ -67,8 +67,8 @@
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `eval.cache.maxAgeDays` | unsigned int | `30` | `GRADIENT_EVAL_CACHE_MAX_AGE_DAYS` | Days after which eval cache blobs leave the cache, regardless of the size limit. |
-| `eval.cache.maxTotalBytes` | unsigned int | `10737418240` | `GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES` | Total size in bytes of shared eval cache blobs. Older blobs leave the cache until the total is within this size. |
+| `eval.cache.maxAgeDays` | unsigned int | `30` | `GRADIENT_EVAL_CACHE_MAX_AGE_DAYS` | Days since the last compaction after which the eval cache of a flake fingerprint leaves with all its segments, regardless of the size limit. |
+| `eval.cache.maxTotalBytes` | unsigned int | `10737418240` | `GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES` | Total size in bytes of the shared eval caches, counted after compaction. The eval cache of a flake fingerprint leaves with all its segments, least recently compacted first, until the total is within this size. |
 | `eval.cache.sweepIntervalSecs` | positive int | `3600` | `GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS` | Seconds between eval cache eviction passes. |
 | `eval.maxKeep` | unsigned int | `30` | `GRADIENT_EVAL_MAX_KEEP` | Maximum number of evaluations kept per task. It is the cap for the per-task setting, and new tasks start at the lower of 30 and this value. Set it to `0` to disable the limit. |
 
@@ -294,7 +294,7 @@
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `upload.bytesBudget` | positive int | `8589934592` | `GRADIENT_UPLOAD_BYTES_BUDGET` | Total size in bytes of admitted uploads. Uploads that exceed the remaining budget wait. An upload larger than the whole budget can run alone once nothing else is in flight. |
-| `upload.concurrency` | positive int | `8` | `GRADIENT_UPLOAD_CONCURRENCY` | Number of uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all workers and REST clients. Smaller uploads have a window of 128 of their own. Uploads hold their permit until the object is in storage. Other uploads wait for a permit in the meantime. |
+| `upload.concurrency` | positive int | `8` | `GRADIENT_UPLOAD_CONCURRENCY` | Number of uploads over 1 MiB (NARs and eval cache segments) admitted at once across all workers and REST clients. Smaller uploads have a window of 128 of their own. Uploads hold their permit until the object is in storage. Other uploads wait for a permit in the meantime. |
 | `upload.leaseIdleSecs` | positive int | `300` | `GRADIENT_UPLOAD_LEASE_IDLE_SECS` | Seconds granted worker uploads can go without data before they lose their permit and their workers receive a request to retry. |
 | `upload.restWaitSecs` | positive int | `30` | `GRADIENT_UPLOAD_REST_WAIT_SECS` | Seconds NAR uploads to the cache upload endpoint wait for a permit before getting a 503 answer with `Retry-After`. |
 
@@ -346,7 +346,7 @@
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `worker.eval.cache.dir` | null or string | `null` | `GRADIENT_WORKER_EVAL_CACHE_DIR` | Eval cache directory, exported to evaluation subprocesses as `NIX_CACHE_HOME`. `null` uses `<worker.baseDir>/eval-cache`. |
-| `worker.eval.cache.share` | bool | `true` | `GRADIENT_WORKER_EVAL_CACHE_SHARE` | Whether to share eval cache blobs with other workers through the server. |
+| `worker.eval.cache.share` | bool | `true` | `GRADIENT_WORKER_EVAL_CACHE_SHARE` | Whether to share the eval cache with other workers through the server. Evaluations pull the segments of other workers first and upload new rows as segments while they run. |
 | `worker.eval.forkWorkers` | null or (positive int) | `null` | `GRADIENT_WORKER_EVAL_FORK_WORKERS` | Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` sizes the pool to the host's core count, capped at 16. |
 | `worker.eval.maxConcurrent` | positive int | `1` | `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` | Maximum simultaneous evaluations. |
 | `worker.eval.maxMemory` | null or (positive int) | `null` | `GRADIENT_WORKER_EVAL_MAX_MEMORY` | Ceiling in MiB for the resident memory of all evaluation subprocesses together. Subprocesses leave the pool largest first while the total exceeds the ceiling. Conflicts with `worker.system.minFreeRamMb`. |

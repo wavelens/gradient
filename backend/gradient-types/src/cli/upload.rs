@@ -12,7 +12,7 @@ use gradient_derive::config_group;
 #[config_group("upload")]
 #[derive(Args, Debug, Clone)]
 pub struct UploadArgs {
-    /// Number of uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all
+    /// Number of uploads over 1 MiB (NARs and eval cache segments) admitted at once across all
     /// workers and REST clients. Smaller uploads have a window of 128 of their own. Uploads
     /// hold their permit until the object is in storage. Other uploads wait for a permit in
     /// the meantime.
