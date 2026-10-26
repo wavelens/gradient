@@ -33,6 +33,7 @@ use tracing::{error, info, warn};
 
 use crate::messages::{OrphanCause, RamShortage, SubstituteLog, Transition, TransitionReport};
 use crate::policy::{self, FailureOutcome, OrphanedBuild};
+use crate::runner;
 
 pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<TransitionReport> {
     match transition {
@@ -134,6 +135,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             gradient_db::status::release_evaluation_need(ctx, eval.id).await?;
             Ok(TransitionReport {
                 aborted_shared_builds,
+                aborted_runner_jobs: runner::abort_evaluation(ctx, eval.id).await?,
                 ..Default::default()
             })
         }
@@ -191,6 +193,59 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             not_enough_resources(ctx, &shortages).await?;
             Ok(TransitionReport::default())
         }
+        Transition::SettleRunnerJobs => {
+            runner::settle(ctx).await?;
+            Ok(TransitionReport::default())
+        }
+        Transition::RunnerJobAssigned {
+            runner_job,
+            attempt,
+            number,
+            assignment,
+            worker,
+            retries_cap,
+        } => {
+            let assignment = runner::Assignment {
+                runner_job,
+                attempt,
+                number,
+                assignment,
+                worker,
+                retries_cap,
+            };
+            Ok(TransitionReport {
+                already_aborted: !runner::assigned(ctx, assignment).await?,
+                ..Default::default()
+            })
+        }
+        Transition::RunnerProgramStarted { attempt } => {
+            runner::program_started(ctx, attempt).await?;
+            Ok(TransitionReport::default())
+        }
+        Transition::RunnerPhase {
+            attempt,
+            name,
+            payload,
+        } => {
+            runner::phase(ctx, attempt, name, payload).await?;
+            Ok(TransitionReport::default())
+        }
+        Transition::RunnerAttemptEnded {
+            attempt,
+            reason,
+            message,
+        } => {
+            runner::attempt_ended(ctx, attempt, reason, message).await?;
+            Ok(TransitionReport::default())
+        }
+        Transition::AbortRunnerJob { runner_job } => Ok(TransitionReport {
+            aborted_runner_jobs: if runner::abort(ctx, runner_job).await? {
+                vec![runner_job]
+            } else {
+                Vec::new()
+            },
+            ..Default::default()
+        }),
         Transition::PrioritizeBuild { shared_build } => {
             let Some(row) = EDerivationBuild::find_by_id(shared_build)
                 .one(&ctx.worker_db)
@@ -246,6 +301,7 @@ async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> 
         update_evaluation_status(ctx, eval, EvaluationStatus::Building).await?;
     }
 
+    gradient_db::runner_jobs::create::for_evaluation(&ctx.worker_db, evaluation_id).await?;
     gradient_db::status::check_evaluation_done(ctx, evaluation_id).await?;
     Ok(())
 }

@@ -5,10 +5,11 @@
  */
 
 use chrono::NaiveDateTime;
+use gradient_entity::runner_job::RunnerJobStatus;
 use gradient_types::{
-    CRunnerJobAttempt, CRunnerJobPhase, EEntryPoint, EEvaluation, ERunnerJob, ERunnerJobAttempt,
-    ERunnerJobPhase, ETask, EvaluationId, MRunnerJob, MRunnerJobAttempt, ProjectId,
-    RunnerJobAttemptId, RunnerJobId, TaskId,
+    CRunnerJob, CRunnerJobAttempt, CRunnerJobPhase, EEntryPoint, EEvaluation, ERunnerJob,
+    ERunnerJobAttempt, ERunnerJobPhase, ETask, EvaluationId, MRunnerJob, MRunnerJobAttempt,
+    ProjectId, RunnerJobAttemptId, RunnerJobId, TaskId,
 };
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
@@ -46,6 +47,20 @@ crate::sql! {
          FROM runner_job r JOIN entry_point e ON e.id = r.entry_point \
          WHERE r.evaluation = $1 ORDER BY e.eval",
         params = [EvaluationId];
+}
+
+pub async fn open_of_evaluation<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<Vec<RunnerJobId>, DbErr> {
+    ERunnerJob::find()
+        .select_only()
+        .column(CRunnerJob::Id)
+        .filter(CRunnerJob::Evaluation.eq(evaluation))
+        .filter(CRunnerJob::Status.is_in(RunnerJobStatus::OPEN))
+        .into_tuple()
+        .all(db)
+        .await
 }
 
 pub async fn of_evaluation<C: ConnectionTrait>(

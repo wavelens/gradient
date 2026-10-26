@@ -15,7 +15,7 @@ use sea_orm::{
 };
 use std::sync::LazyLock;
 
-use crate::sql::status::runner;
+use crate::sql::status::{runner, runner_in};
 
 static OPEN_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -49,9 +49,32 @@ static LOSSES_IN_A_ROW_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+static REQUEUE_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE runner_job SET status = {queued}, waiting_reason = NULL, \
+         retries_left = GREATEST(retries_left - $2, 0) \
+         WHERE id = $1 AND status IN ({started}) RETURNING *",
+        queued = runner(RunnerJobStatus::Queued),
+        started = runner_in(&[RunnerJobStatus::Starting, RunnerJobStatus::Running]),
+    )
+});
+
+static FINISH_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE runner_job SET status = $2, message = $3, waiting_reason = NULL, \
+         finished_at = (now() AT TIME ZONE 'UTC') \
+         WHERE id = $1 AND status IN ({open}) RETURNING *",
+        open = runner_in(&RunnerJobStatus::OPEN),
+    )
+});
+
 crate::sql_lazy! {
     OPEN_RUNNER_JOB_ATTEMPT = || OPEN_SQL.as_str(),
         params = [NewUuid, Int(3)];
+    REQUEUE_RUNNER_JOB = || REQUEUE_SQL.as_str(),
+        params = [NewUuid, Int(1)];
+    FINISH_RUNNER_JOB = || FINISH_SQL.as_str(),
+        params = [NewUuid, Int(4), Text("the program exited with 1")];
     RUNNER_PROGRAM_STARTED = || PROGRAM_STARTED_SQL.as_str(),
         params = [NewUuid];
     RUNNER_LOSSES_IN_A_ROW = || LOSSES_IN_A_ROW_SQL.as_str(),
@@ -132,6 +155,34 @@ pub async fn close<C: ConnectionTrait>(
         .await?
         .ok_or_else(|| DbErr::RecordNotFound(format!("runner job {}", closed.runner_job)))?;
     Ok(Some((job, closed)))
+}
+
+pub async fn requeue<C: ConnectionTrait>(
+    db: &C,
+    job: RunnerJobId,
+    consume_retry: bool,
+) -> Result<Option<MRunnerJob>, DbErr> {
+    MRunnerJob::find_by_statement(REQUEUE_RUNNER_JOB.bind([
+        Value::Uuid(Some(job.into_inner())),
+        Value::Int(Some(i32::from(consume_retry))),
+    ]))
+    .one(db)
+    .await
+}
+
+pub async fn finish<C: ConnectionTrait>(
+    db: &C,
+    job: RunnerJobId,
+    status: RunnerJobStatus,
+    message: Option<String>,
+) -> Result<Option<MRunnerJob>, DbErr> {
+    MRunnerJob::find_by_statement(FINISH_RUNNER_JOB.bind([
+        Value::Uuid(Some(job.into_inner())),
+        Value::SmallInt(Some(i16::from(status))),
+        Value::String(message),
+    ]))
+    .one(db)
+    .await
 }
 
 pub async fn losses_in_a_row<C: ConnectionTrait>(db: &C, job: RunnerJobId) -> Result<i64, DbErr> {

@@ -7,10 +7,11 @@
 use chrono::NaiveDateTime;
 use gradient_db::graph::repair::RepairScope;
 use gradient_db::status::BuildRefusal;
+use gradient_entity::runner_job_attempt::AttemptEndReason;
 use gradient_types::MCachedPath;
 use gradient_types::ids::{
     BuildAttemptId, CacheId, CachedPathId, DerivationBuildId, DerivationId, DispatchedJobId,
-    EvaluationId, ProjectId, TaskId,
+    EvaluationId, ProjectId, RunnerJobAttemptId, RunnerJobId, TaskId,
 };
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput, DiscoveredDerivation};
 
@@ -176,6 +177,31 @@ pub enum Transition {
     NotEnoughResources {
         shortages: Vec<RamShortage>,
     },
+    SettleRunnerJobs,
+    RunnerJobAssigned {
+        runner_job: RunnerJobId,
+        attempt: RunnerJobAttemptId,
+        number: u32,
+        assignment: DispatchedJobId,
+        worker: String,
+        retries_cap: u32,
+    },
+    RunnerProgramStarted {
+        attempt: RunnerJobAttemptId,
+    },
+    RunnerPhase {
+        attempt: RunnerJobAttemptId,
+        name: String,
+        payload: Vec<u8>,
+    },
+    RunnerAttemptEnded {
+        attempt: RunnerJobAttemptId,
+        reason: AttemptEndReason,
+        message: Option<String>,
+    },
+    AbortRunnerJob {
+        runner_job: RunnerJobId,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,6 +217,7 @@ pub struct TransitionReport {
     pub aborted_shared_builds: Vec<DerivationBuildId>,
     pub prioritized_shared_builds: Vec<DerivationBuildId>,
     pub already_aborted: bool,
+    pub aborted_runner_jobs: Vec<RunnerJobId>,
     pub substitute_log: Option<SubstituteLog>,
     pub refusal: Option<BuildRefusal>,
 }
