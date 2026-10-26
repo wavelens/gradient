@@ -23,7 +23,7 @@ use gradient_wire::types::{
 
 use super::{
     A, A_OUT, B, B_OUT, CaseShapes, ClusterAssignment, D, D_OUT, SchedulerCase, SlotKind, ago,
-    eval_key, failure, output_nar, w_all, w_eval, without_offers,
+    eval_key, failure, output_nar, w_all, w_eval, w_network_eval, without_offers,
 };
 
 const W1: &str = "w1";
@@ -1142,7 +1142,7 @@ async fn k29_startup_recovery_closes_an_unstarted_attempt_as_prepare_failed() {
 async fn k30_a_split_cluster_shrinks_to_the_free_seats() {
     let (c, e1, _) = cluster_ids();
     let case = SchedulerCase::start(split_of_three(c, e1)).await;
-    case.connect(W1, w_eval(), &[]).await;
+    case.connect(W1, w_network_eval(), &[]).await;
     case.connect(W2, w_eval(), &[]).await;
     case.assign_queued_evals().await;
     assert_eq!(

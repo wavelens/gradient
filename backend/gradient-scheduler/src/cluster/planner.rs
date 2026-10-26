@@ -54,9 +54,28 @@ fn zone_groups(same_zone: bool, slots: &[Slot]) -> BTreeMap<Option<String>, Vec<
 pub fn fillable_seats(cluster: &PendingCluster, slots: &[Slot], scores: &ScoreLookup) -> usize {
     zone_groups(cluster.same_zone, slots)
         .values()
-        .map(|group| matched_count(&eligibility(cluster, group, scores).1))
+        .map(|group| seats_with_primary(cluster, eligibility(cluster, group, scores).1))
         .max()
         .unwrap_or(0)
+}
+
+fn seats_with_primary(cluster: &PendingCluster, eligible: Vec<Vec<usize>>) -> usize {
+    let (primary, others): (Vec<_>, Vec<_>) = cluster
+        .members
+        .iter()
+        .zip(eligible)
+        .partition(|(m, _)| m.primary);
+    if primary.iter().any(|(_, fit)| fit.is_empty()) {
+        return 0;
+    }
+
+    let primary_first: Vec<Vec<usize>> = primary
+        .into_iter()
+        .chain(others)
+        .map(|(_, fit)| fit)
+        .collect();
+
+    matched_count(&primary_first)
 }
 
 fn eligibility<'a>(
@@ -229,6 +248,25 @@ mod tests {
         let placement = plan(&c, &slots, &ScoreLookup::new()).expect("placed");
 
         assert_eq!(workers(&placement), vec!["w2", "w1"]);
+    }
+
+    #[test]
+    fn free_seats_count_only_with_a_seat_for_the_primary() {
+        let primary = |pin| ClusterMember {
+            primary: true,
+            ..build_member("primary", pin)
+        };
+        let slots = [
+            slot("w1", None, "x86_64-linux"),
+            slot("w2", None, "x86_64-linux"),
+        ];
+        let others = || vec![build_member("a", None), build_member("b", None)];
+
+        let unseatable = cluster(false, [vec![primary(Some("w9"))], others()].concat());
+        let seatable = cluster(false, [vec![primary(Some("w2"))], others()].concat());
+
+        assert_eq!(fillable_seats(&unseatable, &slots, &ScoreLookup::new()), 0);
+        assert_eq!(fillable_seats(&seatable, &slots, &ScoreLookup::new()), 2);
     }
 
     #[test]
