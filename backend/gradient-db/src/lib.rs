@@ -48,6 +48,7 @@ pub mod projects;
 pub mod pull_request_summaries;
 pub mod roles;
 pub mod rows;
+pub mod runner_jobs;
 pub mod scheduling;
 pub mod sessions;
 pub mod sql;

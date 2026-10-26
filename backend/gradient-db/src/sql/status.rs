@@ -7,6 +7,7 @@
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::runner_job::RunnerJobStatus;
 use gradient_entity::transition::Transition;
 
 pub fn to<S: Into<i32> + Copy>(transition: Transition<S>) -> i32 {
@@ -41,6 +42,17 @@ pub fn attempt_reason(reason: AttemptFailureReason) -> i32 {
 pub fn build_in(set: &[BuildStatus]) -> String {
     set.iter()
         .map(|s| i32::from(*s).to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+pub fn runner(status: RunnerJobStatus) -> i16 {
+    status.into()
+}
+
+pub fn runner_in(set: &[RunnerJobStatus]) -> String {
+    set.iter()
+        .map(|s| i16::from(*s).to_string())
         .collect::<Vec<_>>()
         .join(", ")
 }

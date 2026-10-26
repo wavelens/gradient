@@ -44,8 +44,13 @@ pub async fn check_evaluation_done(
         return Ok(());
     }
 
-    let any_failed =
-        crate::graph::reachability::eval_any_shared_build_failed(db, evaluation_id).await?;
+    if crate::runner_jobs::has_open_runner_jobs(db, evaluation_id).await? {
+        return Ok(());
+    }
+
+    let any_failed = crate::graph::reachability::eval_any_shared_build_failed(db, evaluation_id)
+        .await?
+        || crate::runner_jobs::any_runner_job_failed(db, evaluation_id).await?;
 
     let eval_error_messages = EEvaluationMessage::find()
         .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
@@ -149,6 +154,8 @@ mod tests {
             .append_query_results([counters(0, 0)])
             .append_query_results([flag("blocked", false)])
             .append_query_results([vec![eval.clone()]])
+            .append_query_results([flag("open", false)])
+            .append_query_results([flag("failed", false)])
             .append_query_results([flag("failed", false)])
             .append_query_results([Vec::<MEvaluationMessage>::new()])
             .append_exec_results(vec![
@@ -172,6 +179,27 @@ mod tests {
         assert!(
             log.iter().any(|s| s.contains(r#"UPDATE \"evaluation\""#)),
             "the evaluation settles once nothing blocks it: {log:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_open_runner_job_keeps_the_evaluation_building() {
+        let eval = building();
+        let db = mock_db()
+            .append_query_results([counters(0, 0)])
+            .append_query_results([flag("blocked", false)])
+            .append_query_results([vec![eval.clone()]])
+            .append_query_results([flag("open", true)])
+            .into_connection();
+
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+        check_evaluation_done(&ctx, eval.id).await.unwrap();
+        drop(ctx);
+
+        let log = statements(pool.into_transaction_log());
+        assert!(
+            !log.iter().any(|s| s.contains(r#"UPDATE \"evaluation\""#)),
+            "an open runner job keeps the evaluation open: {log:?}"
         );
     }
 
@@ -212,6 +240,7 @@ mod tests {
             .append_query_results([counters(0, 0)])
             .append_query_results([flag("blocked", false)])
             .append_query_results([vec![eval.clone()]])
+            .append_query_results([flag("open", false)])
             .append_query_results([flag("failed", true)])
             .append_query_results([Vec::<MEvaluationMessage>::new()])
             .append_exec_results(vec![
