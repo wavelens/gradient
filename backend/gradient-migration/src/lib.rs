@@ -28,6 +28,7 @@ mod m20261024_000002_entry_point_licenses;
 mod m20261025_000000_derivation_build_probed_at;
 mod m20261026_000000_eval_cache_purged_at;
 mod m20261027_000000_eval_cost_estimates;
+mod m20261028_000000_split_evaluation;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -73,6 +74,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261025_000000_derivation_build_probed_at::Migration),
             Box::new(m20261026_000000_eval_cache_purged_at::Migration),
             Box::new(m20261027_000000_eval_cost_estimates::Migration),
+            Box::new(m20261028_000000_split_evaluation::Migration),
         ]
     }
 }

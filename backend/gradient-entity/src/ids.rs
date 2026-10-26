@@ -104,6 +104,7 @@ id_newtype!(EntryPointDepCountId);
 id_newtype!(EntryPointMessageId);
 id_newtype!(EvalCacheStoreId);
 id_newtype!(EvalSetCostId);
+id_newtype!(EvalShardId);
 id_newtype!(EvalSubtreeCostId);
 id_newtype!(EvaluationId);
 id_newtype!(EvaluationAttrCostId);

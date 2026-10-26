@@ -54,6 +54,8 @@ pub mod entry_point_dep_count;
 pub mod entry_point_message;
 pub mod eval_cache_store;
 pub mod eval_set_cost;
+pub mod eval_shard;
+pub mod eval_split;
 pub mod eval_subtree_cost;
 pub mod evaluation;
 pub mod evaluation_attr_cost;

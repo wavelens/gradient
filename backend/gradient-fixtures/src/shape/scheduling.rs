@@ -450,6 +450,7 @@ impl Shape {
             retry_budget,
             created_at,
             updated_at: created_at,
+            dissolve_after: None,
         });
         self
     }
@@ -617,6 +618,7 @@ fn member(
         role: role.into(),
         primary,
         pin: pin.map(str::to_owned),
+        ..Default::default()
     }
 }
 

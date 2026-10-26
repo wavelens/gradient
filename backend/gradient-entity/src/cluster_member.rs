@@ -23,6 +23,8 @@ pub struct Model {
     pub role: String,
     pub primary: bool,
     pub pin: Option<String>,
+    pub eval_index: Option<i16>,
+    pub min_free_ram_mb: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

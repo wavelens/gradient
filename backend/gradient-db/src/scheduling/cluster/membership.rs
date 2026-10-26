@@ -42,6 +42,7 @@ pub async fn abort_dead_queued_clusters<C: ConnectionTrait>(
 crate::sql! {
     MEMBERSHIP = r#"
 SELECT m.id AS member_id, m.cluster_job, m.evaluation, m.derivation_build, m.role, m."primary", m.pin,
+       m.eval_index, m.min_free_ram_mb, c.dissolve_after,
        c.status, c.same_zone, c.attempts, c.retry_budget, c.created_at, c.updated_at,
        (SELECT count(*) FROM cluster_member s WHERE s.cluster_job = m.cluster_job) AS member_count
 FROM cluster_member m
@@ -66,6 +67,9 @@ struct MemberRow {
     role: String,
     primary: bool,
     pin: Option<String>,
+    eval_index: Option<i16>,
+    min_free_ram_mb: Option<i32>,
+    dissolve_after: Option<NaiveDateTime>,
     status: ClusterJobStatus,
     same_zone: bool,
     attempts: i32,
@@ -86,6 +90,7 @@ impl From<MemberRow> for MemberOf {
                 retry_budget: r.retry_budget,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
+                dissolve_after: r.dissolve_after,
             },
             member: MClusterMember {
                 id: r.member_id,
@@ -95,6 +100,8 @@ impl From<MemberRow> for MemberOf {
                 role: r.role,
                 primary: r.primary,
                 pin: r.pin,
+                eval_index: r.eval_index,
+                min_free_ram_mb: r.min_free_ram_mb,
             },
             member_count: u32::try_from(r.member_count).unwrap_or(u32::MAX),
         }
@@ -188,6 +195,12 @@ mod tests {
             ("role", "server".into()),
             ("primary", true.into()),
             ("pin", Option::<String>::None.into()),
+            ("eval_index", Option::<i16>::None.into()),
+            ("min_free_ram_mb", Option::<i32>::None.into()),
+            (
+                "dissolve_after",
+                Option::<chrono::NaiveDateTime>::None.into(),
+            ),
             ("status", i16::from(ClusterJobStatus::Queued).into()),
             ("same_zone", true.into()),
             ("attempts", 0i32.into()),
