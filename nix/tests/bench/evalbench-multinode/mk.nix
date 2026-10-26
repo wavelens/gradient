@@ -118,6 +118,8 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
         })
       ];
 
+      services.postgresql.settings.log_min_duration_statement = 5000;
+
       virtualisation = {
         cores = SERVER_CORES;
         memorySize = 8192;

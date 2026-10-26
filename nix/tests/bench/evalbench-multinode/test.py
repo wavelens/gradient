@@ -108,11 +108,29 @@ def eval_phases(eval_id):
     )
 
 
+def save_slow_statements(label, since):
+    slowest = psql(
+        "SELECT round(max_exec_time) || ' ms max, ' || calls || ' calls, '"
+        " || round(total_exec_time) || ' ms total: ' || left(regexp_replace(query, '\\s+', ' ', 'g'), 400)"
+        " FROM pg_stat_statements ORDER BY max_exec_time DESC LIMIT 25"
+    )
+    logged = server.execute(
+        f"journalctl -u postgresql --since=@{since} --no-pager | grep -E 'duration:|canceling|STATEMENT'"
+    )[1]
+    path = pathlib.Path(server.out_dir) / f"slow-statements-{label}.txt"
+    path.write_text(f"{slowest}\n\n{logged}")
+
+
 def measure(token, task):
-    banner(f"evaluate {task} on {connected_workers(token)} workers")
+    workers = connected_workers(token)
+    banner(f"evaluate {task} on {workers} workers")
     psql("SELECT pg_stat_statements_reset();")
+    since = server.succeed("date +%s").strip()
     eval_id = api("POST", f"tasks/project/{task}/evaluate", token, body={})
-    status = wait_for_status(token, eval_id, EVALUATED, timeout=EVAL_TIMEOUT)
+    try:
+        status = wait_for_status(token, eval_id, EVALUATED, timeout=EVAL_TIMEOUT)
+    finally:
+        save_slow_statements(f"{task}-{workers}", since)
     statements = int(psql(
         "SELECT coalesce(sum(s.calls), 0) FROM pg_stat_statements s"
         " JOIN pg_roles r ON r.oid = s.userid WHERE r.rolname = 'gradient'"
