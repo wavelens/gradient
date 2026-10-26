@@ -6,8 +6,8 @@
 
 import { Component, OnInit, DestroyRef, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { CommonModule, Location } from '@angular/common';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { BoardService, AssignedJobDetail, InstanceContextView, Windowed } from '@core/services/board.service';
 import { Observable } from 'rxjs';
 import { EvaluationsService } from '@core/services/evaluations.service';
@@ -16,6 +16,7 @@ import { AuthService } from '@core/services/auth.service';
 import {
   ButtonComponent,
   DialogComponent,
+  IconComponent,
   LoadingSpinnerComponent,
   PopoverComponent,
   TableComponent,
@@ -42,9 +43,11 @@ interface RuleRow {
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LabelHelpComponent],
+  imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LabelHelpComponent],
   template: `
-    <a routerLink="/board/live" class="back">Back to Live Jobs</a>
+    <a routerLink="/board/live" class="back" (click)="goBack($event)">
+      <gr-icon name="arrow_back" size="sm" />{{ cameFromApp ? 'Back' : 'Live Jobs' }}
+    </a>
 
     @if (job(); as j) {
       <header class="head">
@@ -406,6 +409,9 @@ export class BoardJobDetailComponent implements OnInit {
   private execJobs = inject(ExecJobsService);
   private auth = inject(AuthService);
   private destroyRef = inject(DestroyRef);
+  private location = inject(Location);
+
+  protected readonly cameFromApp = !!inject(Router).currentNavigation()?.previousNavigation;
 
   job = signal<AssignedJobDetail | null>(null);
   pending = signal<PendingJobSummary | null>(null);
@@ -419,6 +425,12 @@ export class BoardJobDetailComponent implements OnInit {
   abortOpen = signal(false);
   aborting = signal(false);
   abortError = signal<string | null>(null);
+
+  goBack(event: MouseEvent): void {
+    if (!this.cameFromApp || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    event.preventDefault();
+    this.location.back();
+  }
 
   canAbort = computed(() => {
     const j = this.job();
