@@ -5,64 +5,37 @@
  */
 
 use crate::client::{GITHUB_API_URL, HostClient};
-use anyhow::{Context, Result, anyhow};
-use base64::{Engine, engine::general_purpose};
+use anyhow::{Context, Result};
 use hmac::{Hmac, KeyInit, Mac};
-use ring::signature::{self, RsaKeyPair};
-use serde::Deserialize;
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::debug;
 
 type HmacSha256 = Hmac<Sha256>;
 
+#[derive(Serialize, Deserialize)]
+struct AppClaims {
+    iat: u64,
+    exp: u64,
+    iss: String,
+}
+
+/// GitHub App manifests return PKCS#1 keys; PKCS#8 keys are accepted as well.
 pub fn generate_jwt(app_id: u64, private_key_pem: &str) -> Result<String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("system time before epoch")?
         .as_secs();
-
-    let iat = now - 60;
-    let exp = now + 600;
-
-    let header = general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256","typ":"JWT"}"#);
-    let payload = general_purpose::URL_SAFE_NO_PAD
-        .encode(format!(r#"{{"iat":{iat},"exp":{exp},"iss":"{app_id}"}}"#));
-    let signing_input = format!("{header}.{payload}");
-
-    let key_pair = parse_rsa_key(private_key_pem)?;
-
-    let rng = ring::rand::SystemRandom::new();
-    let mut signature = vec![0u8; key_pair.public().modulus_len()];
-    key_pair
-        .sign(
-            &signature::RSA_PKCS1_SHA256,
-            &rng,
-            signing_input.as_bytes(),
-            &mut signature,
-        )
-        .map_err(|e| anyhow!("RSA signing failed: {e:?}"))?;
-
-    let sig_b64 = general_purpose::URL_SAFE_NO_PAD.encode(&signature);
-    Ok(format!("{signing_input}.{sig_b64}"))
-}
-
-fn pem_to_der(pem: &str) -> Result<Vec<u8>> {
-    let body: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
-    general_purpose::STANDARD
-        .decode(body.trim())
-        .context("decode the base64 PEM body")
-}
-
-/// GitHub App manifests are returning PKCS#1 keys. PKCS#8 and PKCS#1 are both accepted.
-fn parse_rsa_key(pem: &str) -> Result<RsaKeyPair> {
-    let der = pem_to_der(pem).context("decode GitHub App private key PEM")?;
-    let is_pkcs1 = pem.contains("BEGIN RSA PRIVATE KEY");
-    if is_pkcs1 {
-        RsaKeyPair::from_der(&der).map_err(|e| anyhow!("invalid PKCS#1 RSA private key: {e:?}"))
-    } else {
-        RsaKeyPair::from_pkcs8(&der).map_err(|e| anyhow!("invalid PKCS#8 RSA private key: {e:?}"))
-    }
+    let claims = AppClaims {
+        iat: now - 60,
+        exp: now + 600,
+        iss: app_id.to_string(),
+    };
+    let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
+        .context("parse GitHub App private key PEM")?;
+    encode(&Header::new(Algorithm::RS256), &claims, &key).context("sign GitHub App JWT")
 }
 
 #[derive(Deserialize)]
@@ -245,24 +218,30 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
         );
     }
 
+    const TEST_RSA_PUBLIC_PEM: &str = "-----BEGIN PUBLIC KEY-----\n\
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvGqpmY6nUPo1IQU0QWdp\n\
+gD+9mJ6w0MqGk6ldyOLNlfieQustQ7A+ttid4QSZdLM2my7w9+hGIvl0NtZgLh+z\n\
+u5oebjurJaXBLZJFDv+daTCi5OfG5LWue63ucWUezmRI8ulV/JdJlDZuftVPulpn\n\
+44bZUvX86A4pxGF59gFcvdFOe+1qy9Mn+J1nmt06jMT2s27FfRX63aMCK4HwNmAe\n\
+ve7wAJmgcOPFaSS/rypo2dNwr02R0iJ4p4kzeCK3W0h1reqkQOBu7yMZ+tzzA+XX\n\
+aNCotJhCvWOCJPjgX0tp/5QfV7WchUittbY/8a5mYqEkq86kaN+cTmzWq4orVrAi\n\
+AwIDAQAB\n\
+-----END PUBLIC KEY-----\n";
+
     #[test]
     fn generate_jwt_signs_pkcs1_and_pkcs8_keys_that_verify() {
-        use ring::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
+        use jsonwebtoken::{DecodingKey, Validation, decode};
 
-        let pkcs1 = generate_jwt(7, TEST_RSA_PEM_PKCS1).expect("PKCS#1 must be accepted");
-        assert_eq!(pkcs1.split('.').count(), 3);
-
-        let jwt = generate_jwt(42, TEST_RSA_PEM).expect("generate_jwt failed");
-        let parts: Vec<&str> = jwt.split('.').collect();
-        let signing_input = format!("{}.{}", parts[0], parts[1]);
-        let sig = general_purpose::URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
-
-        let der = pem_to_der(TEST_RSA_PEM).unwrap();
-        let key_pair = RsaKeyPair::from_pkcs8(&der).unwrap();
-        let pub_key = key_pair.public().as_ref();
-        UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, pub_key)
-            .verify(signing_input.as_bytes(), &sig)
-            .expect("signature must verify");
+        let key = DecodingKey::from_rsa_pem(TEST_RSA_PUBLIC_PEM.as_bytes()).unwrap();
+        let validation = Validation::new(Algorithm::RS256);
+        for (app_id, pem) in [(7, TEST_RSA_PEM_PKCS1), (42, TEST_RSA_PEM)] {
+            let jwt = generate_jwt(app_id, pem).expect("key must be accepted");
+            let claims = decode::<AppClaims>(&jwt, &key, &validation)
+                .expect("signature must verify")
+                .claims;
+            assert_eq!(claims.iss, app_id.to_string());
+            assert_eq!(claims.exp - claims.iat, 660);
+        }
     }
 
     fn compute_github_sig(secret: &str, body: &[u8]) -> String {
@@ -325,26 +304,5 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
         ] {
             assert!(!verify_gitea_signature(secret, sig, body), "{sig}");
         }
-    }
-
-    #[test]
-    fn pem_to_der_decodes_single_and_multiline_bodies() {
-        let original = b"\x30\x82\x01\x22";
-        let b64 = general_purpose::STANDARD.encode(original);
-        let pem = format!("-----BEGIN TEST KEY-----\n{b64}\n-----END TEST KEY-----\n");
-        assert_eq!(pem_to_der(&pem).unwrap(), original);
-
-        let long = vec![0xAB; 96];
-        let b64 = general_purpose::STANDARD.encode(&long);
-        let (chunk1, rest) = b64.split_at(16);
-        let (chunk2, chunk3) = rest.split_at(16);
-        let pem = format!("-----BEGIN K-----\n{chunk1}\n{chunk2}\n{chunk3}\n-----END K-----\n");
-        assert_eq!(pem_to_der(&pem).unwrap(), long);
-    }
-
-    #[test]
-    fn pem_to_der_rejects_invalid_base64() {
-        let pem = "-----BEGIN TEST-----\nnot!valid!base64!!!\n-----END TEST-----\n";
-        assert!(pem_to_der(pem).is_err());
     }
 }

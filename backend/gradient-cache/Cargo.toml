@@ -31,7 +31,6 @@ server = [
     "dep:futures",
     "dep:object_store",
     "dep:ractor",
-    "dep:ring",
     "dep:sea-orm",
     "dep:serde",
     "dep:serde_json",
@@ -60,7 +59,6 @@ chrono              = { workspace = true, optional = true }
 futures             = { workspace = true, optional = true }
 object_store        = { workspace = true, optional = true }
 ractor              = { workspace = true, optional = true }
-ring                = { workspace = true, optional = true }
 sea-orm             = { workspace = true, optional = true }
 serde               = { workspace = true, optional = true }
 serde_json          = { workspace = true, optional = true }
