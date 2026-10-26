@@ -19,7 +19,8 @@ use crate::sql::status::runner;
 
 static OPEN_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "UPDATE runner_job SET status = {starting}, retries_left = LEAST(retries_left, $2) \
+        "UPDATE runner_job SET status = {starting}, waiting_reason = NULL, \
+         retries_left = LEAST(retries_left, $2) \
          WHERE id = $1 AND status = {queued}",
         starting = runner(RunnerJobStatus::Starting),
         queued = runner(RunnerJobStatus::Queued),
@@ -149,4 +150,41 @@ pub async fn open_of_job<C: ConnectionTrait>(
         .filter(CRunnerJobAttempt::EndedAt.is_null())
         .one(db)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::mock::{all_statements, mock_db};
+    use sea_orm::MockExecResult;
+
+    #[tokio::test]
+    async fn a_started_job_drops_its_wait_reason() {
+        let db = mock_db()
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .into_connection();
+
+        let opened = open(
+            &db,
+            RunnerJobId::now_v7(),
+            RunnerJobAttemptId::now_v7(),
+            1,
+            DispatchedJobId::now_v7(),
+            "w1",
+            2,
+        )
+        .await
+        .unwrap();
+
+        assert!(!opened);
+        let log = all_statements(db.into_transaction_log());
+        assert!(
+            log[0].sql.contains("waiting_reason = NULL"),
+            "{}",
+            log[0].sql
+        );
+    }
 }
