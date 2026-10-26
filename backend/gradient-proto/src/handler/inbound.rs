@@ -445,7 +445,14 @@ impl<'a> InboundContext<'a> {
                 fingerprint,
             } => {
                 if self.owns_split_member(&job_id).await {
-                    handle_eval_source_ready(self.scheduler, job_id, store_path, fingerprint).await;
+                    handle_eval_source_ready(
+                        self.scheduler,
+                        self.peer_id,
+                        job_id,
+                        store_path,
+                        fingerprint,
+                    )
+                    .await;
                 }
                 true
             }

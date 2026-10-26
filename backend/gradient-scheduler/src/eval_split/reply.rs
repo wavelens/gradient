@@ -14,7 +14,9 @@ use gradient_entity::eval_split::{
     Column as CEvalSplit, Entity as EEvalSplit, Model as MEvalSplit,
 };
 use gradient_types::ids::{EvalShardId, EvaluationId};
-use gradient_wire::types::{EvalShard, EvalShardOutcome, EvalShardSpec, FinishedShard};
+use gradient_wire::types::{
+    BuildFailureKind, EvalShard, EvalShardOutcome, EvalShardSpec, FinishedShard,
+};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
@@ -61,6 +63,13 @@ pub enum NextStep {
     Take,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceRecord {
+    Stored,
+    Skipped,
+    FailPrimary(String),
+}
+
 pub fn next_step(split: &SplitView, member: &MemberView) -> NextStep {
     match (&split.source, member.have_source) {
         (None, false) => NextStep::Wait,
@@ -102,23 +111,66 @@ impl Scheduler {
         Ok(outcome)
     }
 
+    pub async fn eval_source_ready(
+        &self,
+        worker_id: &str,
+        job_id: &str,
+        store_path: String,
+        fingerprint: String,
+    ) -> Result<()> {
+        let recorded = self
+            .record_eval_source(job_id, store_path, fingerprint)
+            .await?;
+        if let SourceRecord::FailPrimary(error) = recorded {
+            self.fail_split_primary(worker_id, job_id, &error).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn record_eval_source(
         &self,
         job_id: &str,
         store_path: String,
         fingerprint: String,
-    ) -> Result<()> {
+    ) -> Result<SourceRecord> {
         let Some((split, 0)) = self.split_of(job_id).await? else {
             warn!(%job_id, "eval source report from a job that is not a split primary");
-            return Ok(());
+            return Ok(SourceRecord::Skipped);
         };
 
-        EEvalSplit::update_many()
+        let stored = EEvalSplit::update_many()
             .col_expr(CEvalSplit::SourceStorePath, Expr::value(store_path))
             .col_expr(CEvalSplit::Fingerprint, Expr::value(fingerprint))
             .filter(CEvalSplit::Evaluation.eq(split.evaluation))
             .exec(&self.db.worker_db)
-            .await?;
+            .await;
+        let Err(e) = stored else {
+            return Ok(SourceRecord::Stored);
+        };
+        if split.planned_at.is_some() {
+            warn!(%job_id, error = %e, "storing the source of a planned split evaluation failed");
+            return Ok(SourceRecord::Skipped);
+        }
+
+        Ok(SourceRecord::FailPrimary(format!(
+            "storing the split evaluation source failed: {e}"
+        )))
+    }
+
+    async fn fail_split_primary(&self, worker_id: &str, job_id: &str, error: &str) -> Result<()> {
+        warn!(%job_id, %error, "failing the split primary so the attempt retries");
+        self.handle_job_failed(
+            worker_id,
+            job_id,
+            error,
+            BuildFailureKind::Transient,
+            &[],
+            None,
+        )
+        .await?;
+        self.abort_job(worker_id, job_id.to_owned(), error.to_owned())
+            .await;
 
         Ok(())
     }
@@ -364,6 +416,40 @@ mod tests {
         for (split, member, expected) in rows {
             assert_eq!(next_step(&split, &member), expected, "{split:?} {member:?}");
         }
+    }
+
+    async fn record_with_a_failing_store(planned: bool) -> SourceRecord {
+        let evaluation = EvaluationId::now_v7();
+        let db = mock_db()
+            .append_query_results([vec![split(evaluation, false, planned)]])
+            .append_exec_errors([sea_orm::DbErr::Custom("connection reset".into())])
+            .into_connection();
+
+        scheduler(db)
+            .record_eval_source(
+                &format!("eval:{evaluation}:0"),
+                "/nix/store/hp2qck8z9dvkm59ilarq57kc0bppc065-source".into(),
+                "fp".into(),
+            )
+            .await
+            .expect("recorded")
+    }
+
+    #[tokio::test]
+    async fn a_failed_source_store_fails_the_unplanned_primary() {
+        let SourceRecord::FailPrimary(error) = record_with_a_failing_store(false).await else {
+            panic!("an unplanned primary must fail");
+        };
+
+        assert!(error.contains("connection reset"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_planned_primary_is_not_failed_for_its_source() {
+        assert_eq!(
+            record_with_a_failing_store(true).await,
+            SourceRecord::Skipped
+        );
     }
 
     #[tokio::test]

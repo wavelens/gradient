@@ -57,12 +57,13 @@ pub(super) async fn send_reply(writer: &ProtoWriter, job_id: String, outcome: Ev
 
 pub(super) async fn handle_eval_source_ready(
     scheduler: &Scheduler,
+    worker_id: &str,
     job_id: String,
     store_path: String,
     fingerprint: String,
 ) {
     if let Err(e) = scheduler
-        .record_eval_source(&job_id, store_path, fingerprint)
+        .eval_source_ready(worker_id, &job_id, store_path, fingerprint)
         .await
     {
         warn!(%job_id, error = %e, "recording the split evaluation source failed");
