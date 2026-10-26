@@ -39,11 +39,8 @@ impl WorkerCaps {
     }
 
     pub fn can_run_build(&self, job: &BuildJob) -> bool {
-        let needs_network = job
-            .builds
-            .iter()
-            .any(|b| build_needs_network(b.kind, b.is_fixed_output));
-        let only_transfers = job.builds.iter().all(|b| b.kind != BuildSpecKind::Build);
+        let needs_network = build_needs_network(job.build.kind, job.build.is_fixed_output);
+        let only_transfers = job.build.kind != BuildSpecKind::Build;
         let runs_here = only_transfers
             || self.can_build(
                 &job.requirement.architecture,
@@ -106,7 +103,7 @@ mod tests {
 
     fn job_of(kind: BuildSpecKind) -> BuildJob {
         BuildJob {
-            builds: vec![gradient_wire::types::BuildSpec {
+            build: gradient_wire::types::BuildSpec {
                 build_id: "b1".into(),
                 drv_path: String::new(),
                 kind,
@@ -116,7 +113,7 @@ mod tests {
                 max_silent_secs: None,
                 build_cores: None,
                 input_realisations: Vec::new(),
-            }],
+            },
             requirement: gradient_wire::types::BuildRequirement {
                 architecture: "x86_64-linux".into(),
                 required_features: Vec::new(),

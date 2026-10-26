@@ -1042,5 +1042,5 @@ fn spec_kind(assignment: &Assignment) -> BuildSpecKind {
     let Job::Build(build) = &assignment.job else {
         panic!("a build job, got {:?}", assignment.job);
     };
-    build.builds[0].kind
+    build.build.kind
 }

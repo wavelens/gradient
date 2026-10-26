@@ -79,9 +79,7 @@ async fn c01_a_won_claim_opens_the_row_and_leaves_the_build_queued_until_the_sta
     let Job::Build(build) = &assignment.job else {
         panic!("after 4: a build job, got {:?}", assignment.job);
     };
-    let [spec] = build.builds.as_slice() else {
-        panic!("after 4: a single build spec, got {:?}", build.builds);
-    };
+    let spec = &build.build;
     let outputs: Vec<&str> = spec.outputs.iter().map(|o| o.path.as_str()).collect();
     assert_eq!(
         (
@@ -570,7 +568,7 @@ async fn c08_an_upstream_hit_before_the_claim_fails_the_build_claim_and_offers_a
         .await
         .expect("after 1: pending(build:A)");
     assert_eq!(
-        pending.job.builds[0].kind,
+        pending.job.build.kind,
         BuildSpecKind::Build,
         "after 1: pending kind"
     );
@@ -1995,10 +1993,7 @@ fn build_spec(assignment: &Assignment) -> &BuildSpec {
     let Job::Build(build) = &assignment.job else {
         panic!("a build job, got {:?}", assignment.job);
     };
-    let [spec] = build.builds.as_slice() else {
-        panic!("a single build spec, got {:?}", build.builds);
-    };
-    spec
+    &build.build
 }
 
 fn a_before_b<'k>(a: &'k str, b: &'k str) -> [(&'k str, u32, u64, bool); 2] {

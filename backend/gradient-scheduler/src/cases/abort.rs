@@ -1511,8 +1511,8 @@ async fn a20_aborting_one_of_two_evaluations_sharing_a_passthrough_keeps_the_sub
         panic!("after 1: a build job, got {:?}", assignment.job);
     };
     assert_eq!(
-        build.builds.first().map(|spec| spec.kind),
-        Some(BuildSpecKind::Substitute),
+        build.build.kind,
+        BuildSpecKind::Substitute,
         "after 1: result.job.kind"
     );
     let a1 = assignment.assignment_id();

@@ -85,7 +85,7 @@ pub enum FlakeStep {
 
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub struct BuildJob {
-    pub builds: Vec<BuildSpec>,
+    pub build: BuildSpec,
     pub requirement: BuildRequirement,
 }
 

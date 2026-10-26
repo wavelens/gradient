@@ -156,20 +156,25 @@ impl PendingJob {
     }
 
     pub fn as_candidate(&self, job_id: &str) -> JobCandidate {
-        let (builds, requirement) = match self {
-            PendingJob::Build(j) => (j.job.builds.as_slice(), Some(j.job.requirement.clone())),
-            PendingJob::Eval(_) => (&[][..], None),
+        let (drv_paths, output_paths, requirement) = match self {
+            PendingJob::Build(j) => (
+                vec![j.job.build.drv_path.clone()],
+                j.job
+                    .build
+                    .outputs
+                    .iter()
+                    .filter(|o| !o.path.is_empty())
+                    .map(|o| o.path.clone())
+                    .collect(),
+                Some(j.job.requirement.clone()),
+            ),
+            PendingJob::Eval(_) => (Vec::new(), Vec::new(), None),
         };
         JobCandidate {
             job_id: job_id.to_owned(),
             required_paths: self.required_paths().to_vec(),
-            drv_paths: builds.iter().map(|t| t.drv_path.clone()).collect(),
-            output_paths: builds
-                .iter()
-                .flat_map(|t| &t.outputs)
-                .filter(|o| !o.path.is_empty())
-                .map(|o| o.path.clone())
-                .collect(),
+            drv_paths,
+            output_paths,
             requirement,
         }
     }
@@ -184,10 +189,7 @@ impl PendingJob {
     pub(crate) fn into_job_with_cores(self, cores: Option<u32>) -> Job {
         match self.into_job() {
             Job::Build(mut build) => {
-                build
-                    .builds
-                    .iter_mut()
-                    .for_each(|spec| spec.build_cores = cores);
+                build.build.build_cores = cores;
                 Job::Build(build)
             }
             other => other,
@@ -297,13 +299,7 @@ impl PendingJob {
 
     pub fn substitute_outputs(&self) -> Option<u32> {
         match self {
-            PendingJob::Build(j) if j.substitute => Some(
-                j.job
-                    .builds
-                    .iter()
-                    .map(|b| clamp_to_u32(b.outputs.len()))
-                    .sum(),
-            ),
+            PendingJob::Build(j) if j.substitute => Some(clamp_to_u32(j.job.build.outputs.len())),
             _ => None,
         }
     }
@@ -2106,7 +2102,7 @@ mod tests {
             evaluation_id: EvaluationId::now_v7(),
             project_id: peer,
             job: BuildJob {
-                builds: vec![BuildSpec {
+                build: BuildSpec {
                     build_id: derivation_build.to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                     kind: BuildSpecKind::Build,
@@ -2116,7 +2112,7 @@ mod tests {
                     max_silent_secs: None,
                     build_cores: None,
                     input_realisations: Vec::new(),
-                }],
+                },
                 requirement: BuildRequirement {
                     architecture: architecture.into(),
                     required_features,

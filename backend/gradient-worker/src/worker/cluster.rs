@@ -227,7 +227,7 @@ mod tests {
             job_id: job_id.to_owned(),
             assignment_id: format!("dispatch-{job_id}"),
             job: Job::Build(BuildJob {
-                builds: Vec::new(),
+                build: Default::default(),
                 requirement: Default::default(),
             }),
             kind: JobKind::Build,

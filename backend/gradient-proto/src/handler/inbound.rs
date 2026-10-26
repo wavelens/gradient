@@ -1293,7 +1293,7 @@ pub(in crate::handler) mod fixture {
             evaluation_id: EvaluationId::now_v7(),
             project_id: ProjectId::now_v7(),
             job: BuildJob {
-                builds: vec![BuildSpec::default()],
+                build: BuildSpec::default(),
                 requirement: Default::default(),
             },
             required_paths: vec![],

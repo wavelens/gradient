@@ -150,19 +150,13 @@ impl JobContextView {
                 prefer_local_build: Some(b.prefer_local_build),
                 is_fixed_output: Some(b.is_fixed_output),
                 estimate: Some(EstimateView::new(&b.estimate, choice)),
-                derivations: Some(
-                    b.job
-                        .builds
-                        .iter()
-                        .map(|t| DerivationRef {
-                            build_id: t.build_id.clone(),
-                            drv_path: gradient_types::StorePath::parse_stored(&t.drv_path)
-                                .map(|sp| sp.base())
-                                .unwrap_or_else(|_| t.drv_path.clone()),
-                            pname: b.pname.clone(),
-                        })
-                        .collect(),
-                ),
+                derivations: Some(vec![DerivationRef {
+                    build_id: b.job.build.build_id.clone(),
+                    drv_path: gradient_types::StorePath::parse_stored(&b.job.build.drv_path)
+                        .map(|sp| sp.base())
+                        .unwrap_or_else(|_| b.job.build.drv_path.clone()),
+                    pname: b.pname.clone(),
+                }]),
                 ..common("Build", b.job.requirement.architecture.clone())
             },
             PendingJob::Eval(e) => Self {
@@ -188,7 +182,7 @@ mod tests {
             evaluation_id: EvaluationId::now_v7(),
             project_id: ProjectId::now_v7(),
             job: BuildJob {
-                builds: vec![BuildSpec {
+                build: BuildSpec {
                     build_id: "b1".into(),
                     drv_path: "/nix/store/aaa-curl.drv".into(),
                     kind: BuildSpecKind::Build,
@@ -198,7 +192,7 @@ mod tests {
                     max_silent_secs: None,
                     build_cores: None,
                     input_realisations: Vec::new(),
-                }],
+                },
                 requirement: gradient_wire::types::BuildRequirement {
                     architecture: "x86_64-linux".into(),
                     required_features: vec![],

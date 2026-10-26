@@ -207,13 +207,12 @@ fn outbound_fields(
     match msg {
         ServerMessage::AssignJob { job, .. } => match job {
             Job::Build(build) => {
-                for spec in &mut build.builds {
-                    paths.path(&mut spec.drv_path)?;
-                    for output in &mut spec.outputs {
-                        paths.path(&mut output.path)?;
-                    }
-                    outbound_realisations(&mut spec.input_realisations, paths)?;
+                let spec = &mut build.build;
+                paths.path(&mut spec.drv_path)?;
+                for output in &mut spec.outputs {
+                    paths.path(&mut output.path)?;
                 }
+                outbound_realisations(&mut spec.input_realisations, paths)?;
             }
             Job::Flake(flake) => {
                 if let FlakeSource::Cached { store_path } = &mut flake.source {
@@ -561,7 +560,7 @@ mod tests {
             job_id: "j1".into(),
             assignment_id: "a1".into(),
             job: Job::Build(BuildJob {
-                builds: vec![BuildSpec {
+                build: BuildSpec {
                     build_id: "b1".into(),
                     drv_path: format!("{S}-a.drv"),
                     kind: Default::default(),
@@ -578,7 +577,7 @@ mod tests {
                         output: "out".into(),
                         path: format!("/nix/store/{S}-dep"),
                     }],
-                }],
+                },
                 requirement: Default::default(),
             }),
             cluster: None,
@@ -590,10 +589,10 @@ mod tests {
         else {
             panic!("an AssignJob stays an AssignJob")
         };
-        assert_eq!(job.builds[0].drv_path, format!("{O}-a.drv"));
-        assert_eq!(job.builds[0].outputs[0].path, format!("/nix/store/{O}-a"));
+        assert_eq!(job.build.drv_path, format!("{O}-a.drv"));
+        assert_eq!(job.build.outputs[0].path, format!("/nix/store/{O}-a"));
         assert_eq!(
-            job.builds[0].input_realisations,
+            job.build.input_realisations,
             vec![Realisation {
                 drv_path: format!("/nix/store/{O}-dep.drv"),
                 output: "out".into(),

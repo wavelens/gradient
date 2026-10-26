@@ -591,7 +591,7 @@ impl BuildAssignMaps {
             }
         };
         let build_job = BuildJob {
-            builds: vec![BuildSpec {
+            build: BuildSpec {
                 build_id: shared_build.id.to_string(),
                 drv_path: derivation.store_path(),
                 kind,
@@ -615,7 +615,7 @@ impl BuildAssignMaps {
                     .get(&shared_build.derivation)
                     .cloned()
                     .unwrap_or_default(),
-            }],
+            },
             requirement,
         };
 

@@ -43,7 +43,7 @@ server
 5:{}
 6:{seq<{str,seq<{str,opt<{u64,u64}>}>,seq<str>,seq<str>,opt<{str,seq<str>}>}>,bool}
 7:{seq<{str,seq<{str,opt<{u64,u64}>}>,seq<str>,seq<str>,opt<{str,seq<str>}>}>}
-8:{str,str,[0:{{seq<[0:{},1:{},2:{}]>,[0:{str,str},1:{str}],seq<str>,opt<u64>,seq<{str,opt<str>}>,opt<{str,seq<str>,bool}>}},1:{{seq<{str,str,[0:{},1:{},2:{}],bool,seq<{str,str}>,opt<u64>,opt<u64>,opt<u32>,seq<{str,str,str}>}>,{str,seq<str>}}}],opt<{str,str,u32,u32}>}
+8:{str,str,[0:{{seq<[0:{},1:{},2:{}]>,[0:{str,str},1:{str}],seq<str>,opt<u64>,seq<{str,opt<str>}>,opt<{str,seq<str>,bool}>}},1:{{{str,str,[0:{},1:{},2:{}],bool,seq<{str,str}>,opt<u64>,opt<u64>,opt<u32>,seq<{str,str,str}>},{str,seq<str>}}}],opt<{str,str,u32,u32}>}
 9:{str,str}
 10:{str,seq<{str,u32,str,opt<str>,opt<str>}>}
 11:{str,{str,u32},bytes}

@@ -344,7 +344,7 @@ mod tests {
         assert_eq!(scores.unwrap(), vec![score]);
 
         let job = Job::Build(BuildJob {
-            builds: vec![],
+            build: gradient_wire::types::BuildSpec::default(),
             requirement: Default::default(),
         });
         let server_side = async {

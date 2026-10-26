@@ -448,36 +448,211 @@ impl JobExecutor {
         .await
     }
 
+    async fn collect_outputs<'a>(
+        &'a self,
+        build: &BuildSpec,
+        updater: &mut JobUpdater,
+        abort: &mut AbortSignal,
+        gc_handles: &mut Vec<GcRootHandle>,
+    ) -> Result<Vec<compress::OutputNar<'a>>> {
+        abort.check()?;
+        // The build must reach `Building` before anything that can fail. The server is only
+        // accepting `Building -> Failed`. An earlier `JobFailed` would leave the build in
+        // `Queued` forever.
+        updater.report_building(build.build_id.clone()).await?;
+
+        let (realised, missing) =
+            split_already_realised(self.store.as_ref(), named_outputs(build)).await;
+        if fully_realised(&realised, &missing) {
+            return self
+                .adopt_realised(build, realised, updater, gc_handles)
+                .await;
+        }
+        match build.kind {
+            BuildSpecKind::Substitute => {
+                self.substitute(build, realised, &missing, updater, gc_handles)
+                    .await
+            }
+            BuildSpecKind::Download => self.download(build, updater).await,
+            BuildSpecKind::Build => self.build_locally(build, updater, abort, gc_handles).await,
+        }
+    }
+
     async fn adopt_realised<'a>(
         &'a self,
-        build_task: &BuildSpec,
+        build: &BuildSpec,
         realised: Vec<(String, String)>,
         updater: &mut JobUpdater,
         gc_handles: &mut Vec<GcRootHandle>,
-        outputs: &mut Vec<compress::OutputNar<'a>>,
-    ) -> Result<()> {
+    ) -> Result<Vec<compress::OutputNar<'a>>> {
         if self.log_fetch_from_store {
-            build::forward_store_build_log(updater, &build_task.drv_path).await;
+            build::forward_store_build_log(updater, &build.drv_path).await;
         }
         for (_, path) in &realised {
             gc_handles.push(self.gcroots.add(path).await);
         }
         let reported = realised_outputs(&realised).await;
         updater
-            .report_build_output(build_task.build_id.clone(), reported, None, true)
+            .report_build_output(build.build_id.clone(), reported, None, true)
             .await?;
-        outputs.extend(
-            realised
-                .into_iter()
-                .map(|(_, store_path)| compress::OutputNar {
-                    build_id: build_task.build_id.clone(),
-                    store_path,
-                    source: nar::NarSource::Path {
-                        meta: Some(&*self.store),
-                    },
-                }),
-        );
-        Ok(())
+        Ok(realised
+            .into_iter()
+            .map(|(_, store_path)| compress::OutputNar {
+                build_id: build.build_id.clone(),
+                store_path,
+                source: nar::NarSource::Path {
+                    meta: Some(&*self.store),
+                },
+            })
+            .collect())
+    }
+
+    async fn substitute<'a>(
+        &'a self,
+        build: &BuildSpec,
+        realised: Vec<(String, String)>,
+        missing: &[(String, String)],
+        updater: &mut JobUpdater,
+        gc_handles: &mut Vec<GcRootHandle>,
+    ) -> Result<Vec<compress::OutputNar<'a>>> {
+        for (_, path) in &realised {
+            gc_handles.push(self.gcroots.add(path).await);
+        }
+
+        let mut progress =
+            updater.build_progress(build.build_id.clone(), BuildProgressPhase::Download);
+        let fetched = substitute::fetch_outputs(
+            &mut substitute::JobUpdaterIo(updater),
+            missing,
+            &mut progress,
+        )
+        .await
+        .map_err(|e| failure::classify_substitute_failure(&build.build_id, e))?;
+
+        let mut reported = realised_outputs(&realised).await;
+        reported.extend(fetched.iter().map(|f| {
+            BuildOutput {
+                name: f.name.clone(),
+                store_path: f.store_path.clone(),
+                hash: gradient_sources::get_hash_from_path(f.store_path.clone())
+                    .map(|(h, _)| h)
+                    .unwrap_or_default(),
+                nar_size: f.nar.as_ref().map(|n| n.nar_size as i64),
+                nar_hash: f.nar.as_ref().map(|n| n.nar_hash.clone()),
+                products: Vec::new(),
+            }
+        }));
+        updater
+            .report_build_output(build.build_id.clone(), reported, None, true)
+            .await?;
+
+        let local = realised
+            .into_iter()
+            .map(|(_, store_path)| compress::OutputNar {
+                build_id: build.build_id.clone(),
+                store_path,
+                source: nar::NarSource::Path {
+                    meta: Some(&*self.store),
+                },
+            });
+        let streamed = fetched.into_iter().filter_map(|f| {
+            f.nar.map(|raw| compress::OutputNar {
+                build_id: build.build_id.clone(),
+                store_path: f.store_path,
+                source: nar::NarSource::Stream {
+                    nar: raw.nar,
+                    nar_size: raw.nar_size,
+                    references: raw.references,
+                    deriver: raw.deriver,
+                    ca: raw.ca,
+                },
+            })
+        });
+        Ok(local.chain(streamed).collect())
+    }
+
+    async fn download<'a>(
+        &'a self,
+        build: &BuildSpec,
+        updater: &mut JobUpdater,
+    ) -> Result<Vec<compress::OutputNar<'a>>> {
+        let (store_path, raw) = {
+            let _phase = updater.phase(JobPhase::Download);
+            let mut progress =
+                updater.build_progress(build.build_id.clone(), BuildProgressPhase::Download);
+            download::download_output(&mut download::JobUpdaterIo(updater), build, &mut progress)
+                .await
+                .map_err(|e| failure::classify_download_failure(&build.build_id, e))?
+        };
+        let reported = vec![BuildOutput {
+            name: "out".to_owned(),
+            store_path: store_path.clone(),
+            hash: gradient_sources::get_hash_from_path(store_path.clone())
+                .map(|(h, _)| h)
+                .unwrap_or_default(),
+            nar_size: Some(raw.nar_size as i64),
+            nar_hash: Some(raw.nar_hash.clone()),
+            products: Vec::new(),
+        }];
+        updater
+            .report_build_output(build.build_id.clone(), reported, None, false)
+            .await?;
+        Ok(vec![compress::OutputNar {
+            build_id: build.build_id.clone(),
+            store_path,
+            source: nar::NarSource::Stream {
+                nar: raw.nar,
+                nar_size: raw.nar_size,
+                references: raw.references,
+                deriver: raw.deriver,
+                ca: raw.ca,
+            },
+        }])
+    }
+
+    async fn build_locally<'a>(
+        &'a self,
+        build: &BuildSpec,
+        updater: &mut JobUpdater,
+        abort: &mut AbortSignal,
+        gc_handles: &mut Vec<GcRootHandle>,
+    ) -> Result<Vec<compress::OutputNar<'a>>> {
+        gc_handles.push(self.gcroots.add(&build.drv_path).await);
+
+        updater.report_stage(BuildStage::Prefetch).await?;
+        {
+            let mut prefetch = updater.phase(JobPhase::Prefetch);
+            let fetched = crate::proto::prefetch::prefetch_inputs(&self.store, build, updater)
+                .await
+                .map_err(|e| failure::classify_prefetch_error(&build.build_id, e))?;
+            prefetch.record(fetched.paths, fetched.bytes);
+        }
+
+        updater.report_stage(BuildStage::Build).await?;
+        let _build = updater.phase(JobPhase::Build);
+        let built = build::build_derivation(
+            &self.store,
+            build,
+            updater,
+            abort,
+            self.log_limits,
+            self.log_fetch_from_store,
+            self.host,
+        )
+        .await?;
+        for o in &built {
+            gc_handles.push(self.gcroots.add(&o.store_path).await);
+        }
+        Ok(built
+            .into_iter()
+            .map(|o| compress::OutputNar {
+                build_id: build.build_id.clone(),
+                store_path: o.store_path,
+                source: nar::NarSource::Path {
+                    meta: Some(&*self.store),
+                },
+            })
+            .collect())
     }
 
     #[instrument(skip_all)]
@@ -488,157 +663,10 @@ impl JobExecutor {
         _credentials: &CredentialStore,
         mut abort: AbortSignal,
     ) -> Result<()> {
-        let mut outputs: Vec<compress::OutputNar<'_>> = Vec::new();
         let mut gc_handles: Vec<GcRootHandle> = Vec::new();
-        for build_task in &job.builds {
-            abort.check()?;
-            // The build must reach `Building` before anything that can fail. The server is only
-            // accepting `Building -> Failed`. An earlier `JobFailed` would leave the build in
-            // `Queued` forever.
-            updater.report_building(build_task.build_id.clone()).await?;
-
-            let (realised, missing) =
-                split_already_realised(self.store.as_ref(), named_outputs(build_task)).await;
-            if fully_realised(&realised, &missing) {
-                self.adopt_realised(build_task, realised, updater, &mut gc_handles, &mut outputs)
-                    .await?;
-                continue;
-            }
-
-            if build_task.kind == BuildSpecKind::Substitute {
-                for (_, path) in &realised {
-                    gc_handles.push(self.gcroots.add(path).await);
-                }
-
-                let mut progress = updater
-                    .build_progress(build_task.build_id.clone(), BuildProgressPhase::Download);
-                let fetched = substitute::fetch_outputs(
-                    &mut substitute::JobUpdaterIo(updater),
-                    &missing,
-                    &mut progress,
-                )
-                .await
-                .map_err(|e| failure::classify_substitute_failure(&build_task.build_id, e))?;
-
-                let mut reported = realised_outputs(&realised).await;
-                reported.extend(fetched.iter().map(|f| {
-                    BuildOutput {
-                        name: f.name.clone(),
-                        store_path: f.store_path.clone(),
-                        hash: gradient_sources::get_hash_from_path(f.store_path.clone())
-                            .map(|(h, _)| h)
-                            .unwrap_or_default(),
-                        nar_size: f.nar.as_ref().map(|n| n.nar_size as i64),
-                        nar_hash: f.nar.as_ref().map(|n| n.nar_hash.clone()),
-                        products: Vec::new(),
-                    }
-                }));
-                updater
-                    .report_build_output(build_task.build_id.clone(), reported, None, true)
-                    .await?;
-
-                outputs.extend(
-                    realised
-                        .into_iter()
-                        .map(|(_, store_path)| compress::OutputNar {
-                            build_id: build_task.build_id.clone(),
-                            store_path,
-                            source: nar::NarSource::Path {
-                                meta: Some(&*self.store),
-                            },
-                        }),
-                );
-                outputs.extend(fetched.into_iter().filter_map(|f| {
-                    f.nar.map(|raw| compress::OutputNar {
-                        build_id: build_task.build_id.clone(),
-                        store_path: f.store_path,
-                        source: nar::NarSource::Stream {
-                            nar: raw.nar,
-                            nar_size: raw.nar_size,
-                            references: raw.references,
-                            deriver: raw.deriver,
-                            ca: raw.ca,
-                        },
-                    })
-                }));
-                continue;
-            }
-
-            if build_task.kind == BuildSpecKind::Download {
-                let (store_path, raw) = {
-                    let _phase = updater.phase(JobPhase::Download);
-                    let mut progress = updater
-                        .build_progress(build_task.build_id.clone(), BuildProgressPhase::Download);
-                    download::download_output(
-                        &mut download::JobUpdaterIo(updater),
-                        build_task,
-                        &mut progress,
-                    )
-                    .await
-                    .map_err(|e| failure::classify_download_failure(&build_task.build_id, e))?
-                };
-                let reported = vec![BuildOutput {
-                    name: "out".to_owned(),
-                    store_path: store_path.clone(),
-                    hash: gradient_sources::get_hash_from_path(store_path.clone())
-                        .map(|(h, _)| h)
-                        .unwrap_or_default(),
-                    nar_size: Some(raw.nar_size as i64),
-                    nar_hash: Some(raw.nar_hash.clone()),
-                    products: Vec::new(),
-                }];
-                updater
-                    .report_build_output(build_task.build_id.clone(), reported, None, false)
-                    .await?;
-                outputs.push(compress::OutputNar {
-                    build_id: build_task.build_id.clone(),
-                    store_path,
-                    source: nar::NarSource::Stream {
-                        nar: raw.nar,
-                        nar_size: raw.nar_size,
-                        references: raw.references,
-                        deriver: raw.deriver,
-                        ca: raw.ca,
-                    },
-                });
-                continue;
-            }
-
-            gc_handles.push(self.gcroots.add(&build_task.drv_path).await);
-
-            updater.report_stage(BuildStage::Prefetch).await?;
-            {
-                let mut prefetch = updater.phase(JobPhase::Prefetch);
-                let fetched =
-                    crate::proto::prefetch::prefetch_inputs(&self.store, build_task, updater)
-                        .await
-                        .map_err(|e| failure::classify_prefetch_error(&build_task.build_id, e))?;
-                prefetch.record(fetched.paths, fetched.bytes);
-            }
-
-            updater.report_stage(BuildStage::Build).await?;
-            let _build = updater.phase(JobPhase::Build);
-            let built = build::build_derivation(
-                &self.store,
-                build_task,
-                updater,
-                &mut abort,
-                self.log_limits,
-                self.log_fetch_from_store,
-                self.host,
-            )
+        let outputs = self
+            .collect_outputs(&job.build, updater, &mut abort, &mut gc_handles)
             .await?;
-            for o in &built {
-                gc_handles.push(self.gcroots.add(&o.store_path).await);
-            }
-            outputs.extend(built.into_iter().map(|o| compress::OutputNar {
-                build_id: build_task.build_id.clone(),
-                store_path: o.store_path,
-                source: nar::NarSource::Path {
-                    meta: Some(&*self.store),
-                },
-            }));
-        }
 
         {
             let mut compress = updater.phase(JobPhase::Compress);

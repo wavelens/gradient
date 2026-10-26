@@ -1911,8 +1911,8 @@ async fn substitute(case: &SchedulerCase, worker: &str, key: &str) -> Dispatched
         panic!("a build job, got {:?}", assignment.job);
     };
     assert_eq!(
-        job.builds.first().map(|spec| spec.kind),
-        Some(BuildSpecKind::Substitute),
+        job.build.kind,
+        BuildSpecKind::Substitute,
         "result.job.kind of {key}"
     );
     assignment.assignment_id()

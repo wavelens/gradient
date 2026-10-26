@@ -470,7 +470,7 @@ async fn after_an_evaluation_build_and_upload_no_original_hash_is_stored() {
     let Job::Build(job) = &build.job else {
         panic!("a build job, got {:?}", build.job);
     };
-    let build_id = job.builds[0].build_id.clone();
+    let build_id = job.build.build_id.clone();
     worker
         .update(
             &build,

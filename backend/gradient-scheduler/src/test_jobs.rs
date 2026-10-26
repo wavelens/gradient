@@ -61,7 +61,7 @@ pub(crate) fn build_job(
         evaluation_id,
         project_id: peer,
         job: BuildJob {
-            builds: vec![BuildSpec {
+            build: BuildSpec {
                 build_id: derivation_build.to_string(),
                 drv_path: "aaaa-hello.drv".into(),
                 kind: BuildSpecKind::Build,
@@ -71,7 +71,7 @@ pub(crate) fn build_job(
                 max_silent_secs: None,
                 build_cores: None,
                 input_realisations: Vec::new(),
-            }],
+            },
             requirement: gradient_wire::types::BuildRequirement {
                 architecture: "x86_64-linux".into(),
                 required_features: vec![],
