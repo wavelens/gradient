@@ -199,27 +199,30 @@ struct DepCountRow {
     cnt: i64,
 }
 
-/// `MATERIALIZED` is stopping the planner from inlining the edge set. The edge set reads the
-/// evaluation's jobs only once: a new evaluation is missing from the statistics, and a second read
-/// of its jobs planned as a nested loop over both reads.
+/// `MATERIALIZED` is stopping the planner from inlining the jobs and the edge set. The closure
+/// joins the jobs by hash: the planner is underestimating a recursive closure and a probe of
+/// `build_job` per closure row cost up to five buffers per job.
 const DEP_COUNTS_SQL: &str = "WITH RECURSIVE seeds(ep, root_drv) AS (SELECT * FROM unnest($1::uuid[], $2::uuid[])), \
+    jobs AS MATERIALIZED ( \
+       SELECT bj.derivation, b.status FROM build_job bj \
+       JOIN derivation_build b ON b.id = bj.derivation_build \
+       WHERE bj.evaluation = $3 \
+    ), \
     edges AS MATERIALIZED ( \
        SELECT dd.derivation, dd.dependency FROM derivation_dependency dd \
-       WHERE dd.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $3 \
-                               UNION SELECT root_drv FROM seeds) \
+       WHERE dd.derivation IN (SELECT derivation FROM jobs UNION SELECT root_drv FROM seeds) \
     ), \
     closure(ep, drv) AS ( \
        SELECT ep, root_drv FROM seeds \
        UNION \
        SELECT c.ep, e.dependency FROM closure c JOIN edges e ON e.derivation = c.drv \
     ) \
-    SELECT c.ep AS entry_point, b.status AS status, COUNT(*) AS cnt \
+    SELECT c.ep AS entry_point, j.status AS status, COUNT(*) AS cnt \
     FROM closure c \
     JOIN seeds s ON s.ep = c.ep \
-    JOIN build_job bj ON bj.derivation = c.drv AND bj.evaluation = $3 \
-    JOIN derivation_build b ON b.id = bj.derivation_build \
+    JOIN jobs j ON j.derivation = c.drv \
     WHERE c.drv <> s.root_drv \
-    GROUP BY c.ep, b.status";
+    GROUP BY c.ep, j.status";
 
 crate::sql! {
     DEP_COUNTS_SQL_QUERY = DEP_COUNTS_SQL,
@@ -229,11 +232,6 @@ crate::sql! {
             EvaluationId,
         ],
         tier = Bulk,
-        budget = crate::sql::Budget::bulk().buffers(300_000)
-            .because("counts the closure of 64 entry points inside the fixture's largest \
-                      evaluation, ~98k jobs; the planner underestimates a new evaluation and \
-                      reads its edge set by index probes, 1.4 to 2.4 buffers per job across \
-                      e2e runs"),
         flags = [Walk];
 }
 
@@ -353,13 +351,17 @@ mod tests {
     }
 
     #[test]
-    fn the_edge_set_reads_the_evaluations_jobs_only_once() {
+    fn the_evaluations_jobs_are_read_once_and_joined_by_hash() {
         let sql = norm(DEP_COUNTS_SQL);
-        let edges = sql
-            .split("closure(ep, drv) AS (")
-            .next()
-            .expect("the edge set");
 
-        assert_eq!(edges.matches("build_job").count(), 1, "{edges}");
+        assert_eq!(sql.matches("build_job").count(), 1, "{sql}");
+        assert!(
+            sql.contains("jobs AS MATERIALIZED ( SELECT bj.derivation, b.status FROM build_job bj"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("JOIN jobs j ON j.derivation = c.drv"),
+            "the closure must join the hoisted jobs, not probe build_job per pair: {sql}"
+        );
     }
 }
