@@ -6,8 +6,10 @@
 # then a single-attribute flake standalone and with every worker up, and fails when a
 # target of #568 is missed. The summary is published before that verdict.
 
+from datetime import timedelta
+
 EVALUATED = {"Building", "Waiting", "Completed"}
-EVAL_TIMEOUT = 3600
+EVAL_TIMEOUT = 900
 POSTGRES_LOG = "/var/lib/postgresql/18/log/postgresql.log"
 CPUS = sorted(os.sched_getaffinity(0))
 
@@ -76,7 +78,7 @@ def reset_workers():
     for node in WORKER_NODES:
         node.wait_until_succeeds(
             f"journalctl -u gradient-worker --since=@{epoch} --no-pager | grep -q 'handshake successful'",
-            timeout=180,
+            timeout=timedelta(seconds=180),
         )
 
 
@@ -109,14 +111,19 @@ def eval_phases(eval_id):
     )
 
 
-def save_slow_statements(label):
-    slowest = psql(
+def statements_ranked_by(column):
+    return psql(
         "SELECT round(max_exec_time) || ' ms max, ' || calls || ' calls, '"
         " || round(total_exec_time) || ' ms total: ' || left(regexp_replace(query, '\\s+', ' ', 'g'), 400)"
-        " FROM pg_stat_statements ORDER BY max_exec_time DESC LIMIT 25"
+        f" FROM pg_stat_statements ORDER BY {column} DESC LIMIT 25"
     )
+
+
+def save_slow_statements(label):
+    slowest = statements_ranked_by("max_exec_time")
+    heaviest = statements_ranked_by("total_exec_time")
     logged = server.succeed(f"cat {POSTGRES_LOG}")
-    text = f"{slowest}\n\n{logged}"
+    text = f"by max time:\n{slowest}\n\nby total time:\n{heaviest}\n\n{logged}"
     (pathlib.Path(server.out_dir) / f"slow-statements-{label}.txt").write_text(text)
     print(f"slow statements of {label}:\n{text}")
 
