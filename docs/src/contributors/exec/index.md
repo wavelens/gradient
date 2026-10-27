@@ -53,6 +53,7 @@ flowchart LR
 - Exec jobs skip the RAM fit rule. Queue age orders the matching workers.
 - Only workers without draining and with access to the job's project count, for placement and for wait reasons.
 - `WaitingReason::ExecWorkers` can name the unmet labels, devices, mounts, node count or custom image.
+- `ExecUnmet` can hold only the architecture when zero exec workers of the job's architecture connect.
 
 ## Pre-Warm Counts
 

@@ -71,7 +71,7 @@ passthru.gradient = {
 
 | Field | Default | Effect |
 |---|---|---|
-| `labels` | `[ ]` | The worker must carry every label. Worker IDs act as labels too |
+| `labels` | `[ ]` | The worker must report every label |
 | `devices` | `[ ]` | Device classes and counts, held until the job ends |
 | `mounts` | worker default | Named host directories of the worker |
 | `network` | worker default | Internet access inside the job |
@@ -83,7 +83,7 @@ passthru.gradient = {
 | `maxSilent` | worker default | Seconds without output, capped by the worker |
 | `retries` | `0` | Restarts after a non-zero exit or a timeout, capped by the worker |
 
-- Workers can restrict every field. Requests outside the restriction rule that worker out. Downgrades of a request never happen.
+- Workers report the labels, devices and limits they allow. Requests outside those limits rule out that worker. Downgrades of a request never happen.
 - Lost workers lead to a restart without using a retry. Ten losses in a row fail the job.
 - Not available yet: `nodes` above 1, `secrets`, SSH sessions, outputs and phase markers in the UI.
 
