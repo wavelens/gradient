@@ -6,9 +6,12 @@
 
 use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use clap::{Args, Parser};
 use gradient_derive::config_group;
+use gradient_vm::{DeviceConfig, MountConfig, check_device};
+use serde::de::DeserializeOwned;
 
 /// CLI arguments and environment variables for `gradient-worker`.
 #[config_group(env = "worker", no_default)]
@@ -122,6 +125,8 @@ pub struct WorkerConfig {
     pub nar: NarArgs,
     #[command(flatten)]
     pub log: LogArgs,
+    #[command(flatten)]
+    pub exec: ExecArgs,
 }
 
 impl Default for WorkerConfig {
@@ -151,6 +156,7 @@ impl Default for WorkerConfig {
             build: BuildArgs::default(),
             nar: NarArgs::default(),
             log: LogArgs::default(),
+            exec: ExecArgs::default(),
         }
     }
 }
@@ -327,4 +333,157 @@ pub struct LogArgs {
     /// Directory receiving every closed stage span of the worker and its eval subprocesses as
     /// JSON lines, one file per process. `null` disables span tracing.
     pub trace_dir: Option<PathBuf>,
+}
+
+#[config_group("exec", env = "worker_exec")]
+#[derive(Args, Debug, Clone)]
+pub struct ExecArgs {
+    /// Guest image from `gradient.lib.mkWorkerImage` that exec job guests boot.
+    pub image: Option<PathBuf>,
+
+    /// Guests booted from {option}`services.gradient.worker.exec.image` and paused, waiting
+    /// for a job.
+    #[arg(default_value_t = 0)]
+    pub pre_warm: u32,
+
+    /// Most guests kept warm for upcoming exec jobs the server reports. The worker keeps the
+    /// larger of {option}`services.gradient.worker.exec.preWarm` and the reported count, capped
+    /// at this value. `0` ignores the server count.
+    #[arg(default_value_t = 0)]
+    pub max_pre_warm: u32,
+
+    /// Whether exec jobs may boot their own guest image instead of
+    /// {option}`services.gradient.worker.exec.image`.
+    #[arg(default_value = "false")]
+    pub allow_custom_images: bool,
+
+    /// Whether stopping or restarting the worker stops every guest. The server queues the
+    /// exec jobs of stopped guests again without using a retry. `false` keeps guests running
+    /// across a worker restart and the restarted worker reattaches to them.
+    #[arg(default_value = "true")]
+    pub stop_guests_with_worker: bool,
+
+    /// Labels an exec job can ask for. The worker ID is always a label too.
+    #[arg(value_delimiter = ',')]
+    pub labels: Vec<String>,
+
+    /// Host devices exec jobs can request, a JSON list in the environment variable. Each
+    /// entry has a `name` and exactly one source: `vfio` lists PCI addresses bound to
+    /// `vfio-pci`, one device each; `dev` names a device node; `usb` holds a `vendor:product`
+    /// ID.
+    #[arg(value_parser = json_devices, default_value = "[]")]
+    pub devices: std::vec::Vec<DeviceConfig>,
+
+    /// Host directories exec jobs can mount at {file}`/mnt/<name>`, a JSON list in the
+    /// environment variable. Each entry has a `name`, a `path`, `readOnly` and `perJob`; a
+    /// `perJob` mount gives every job a fresh directory below `path`.
+    #[arg(value_parser = json_list::<MountConfig>, default_value = "[]")]
+    pub mounts: std::vec::Vec<MountConfig>,
+
+    /// Network bridge the guest tap devices join.
+    #[arg(default_value = "gradient-guests")]
+    pub bridge: String,
+
+    /// IPv4 subnet of {option}`services.gradient.worker.exec.bridge`. The bridge takes the
+    /// first host address, each guest the address of its vsock CID.
+    #[arg(default_value = "10.233.0.0/16")]
+    pub subnet: String,
+
+    /// Path to the `cloud-hypervisor` binary, resolved via `PATH` by default.
+    #[arg(default_value = "cloud-hypervisor")]
+    pub cloud_hypervisor_bin: String,
+
+    /// Path to the `virtiofsd` binary, resolved via `PATH` by default.
+    #[arg(default_value = "virtiofsd")]
+    pub virtiofsd_bin: String,
+
+    /// Whether exec jobs may reach the network through
+    /// {option}`services.gradient.worker.exec.bridge`.
+    #[arg(default_value = "false")]
+    pub allow_network: bool,
+
+    /// Whether exec jobs may accept SSH sessions into their guest.
+    #[arg(default_value = "false")]
+    pub allow_ssh: bool,
+
+    /// Lowest and highest guest port exec jobs may forward, as `low,high`. `null` allows
+    /// ports 1024 to 65535.
+    #[arg(value_parser = PortRange::from_str)]
+    pub allow_ports: Option<PortRange>,
+
+    /// Most nodes an exec job may span.
+    #[arg(default_value_t = 1)]
+    pub allow_nodes: u32,
+
+    /// Device names from {option}`services.gradient.worker.exec.devices` exec jobs may
+    /// request. An empty list allows none.
+    #[arg(value_delimiter = ',')]
+    pub allow_devices: Vec<String>,
+
+    /// Mount names from {option}`services.gradient.worker.exec.mounts` exec jobs may
+    /// request. An empty list allows none.
+    #[arg(value_delimiter = ',')]
+    pub allow_mounts: Vec<String>,
+
+    /// Most seconds an exec job may run. The server lowers a larger request to this value.
+    /// `null` sets no cap.
+    pub allow_timeout: Option<u64>,
+
+    /// Most seconds an exec job may go without output. The server lowers a larger request to
+    /// this value. `null` sets no cap.
+    pub allow_max_silent: Option<u64>,
+
+    /// Most retries an exec job may request.
+    #[arg(default_value_t = 0)]
+    pub allow_retries: u32,
+
+    /// Whether an exec job that leaves `network` unset reaches the network.
+    #[arg(default_value = "false")]
+    pub defaults_network: bool,
+
+    /// Whether an exec job that leaves `ssh` unset accepts SSH sessions.
+    #[arg(default_value = "false")]
+    pub defaults_ssh: bool,
+
+    /// Mounts of an exec job that leaves `mounts` unset.
+    #[arg(value_delimiter = ',')]
+    pub defaults_mounts: Vec<String>,
+
+    /// Seconds without output after which an exec job that leaves `maxSilent` unset times
+    /// out. `null` sets no limit.
+    pub defaults_max_silent: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PortRange(pub u16, pub u16);
+
+impl FromStr for PortRange {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        let (low, high) = s
+            .split_once(',')
+            .ok_or_else(|| format!("{s:?} is not a `low,high` port range"))?;
+        let port = |p: &str| {
+            p.trim()
+                .parse::<u16>()
+                .map_err(|e| format!("port {p:?}: {e}"))
+        };
+        let (low, high) = (port(low)?, port(high)?);
+        if low > high {
+            return Err(format!("port range {low},{high} is reversed"));
+        }
+
+        Ok(Self(low, high))
+    }
+}
+
+fn json_list<T: DeserializeOwned>(s: &str) -> Result<Vec<T>, String> {
+    serde_json::from_str(s).map_err(|e| e.to_string())
+}
+
+fn json_devices(s: &str) -> Result<Vec<DeviceConfig>, String> {
+    let devices: Vec<DeviceConfig> = json_list(s)?;
+    devices.iter().try_for_each(check_device)?;
+    Ok(devices)
 }

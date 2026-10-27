@@ -9,10 +9,12 @@ mod options;
 pub use options::*;
 
 use std::num::{NonZeroU32, NonZeroUsize};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use gradient_eval::pool::MemoryGuard;
-use gradient_wire::types::GradientCapabilities;
+use gradient_vm::VmConfig;
+use gradient_wire::types::{ExecAllow, ExecDefaults, GradientCapabilities};
 
 pub fn host_system() -> String {
     let arch = std::env::consts::ARCH;
@@ -151,6 +153,62 @@ impl WorkerConfig {
             exec: self.capabilities.exec,
         }
     }
+
+    #[expect(dead_code, reason = "the exec host is not wired up yet")]
+    pub fn guests_dir(&self) -> PathBuf {
+        self.base_dir.join("guests")
+    }
+}
+
+#[expect(dead_code, reason = "the exec host is not wired up yet")]
+impl ExecArgs {
+    pub fn allow(&self) -> ExecAllow {
+        let PortRange(lowest, highest) = self.allow_ports.unwrap_or(PortRange(1024, 65535));
+        ExecAllow {
+            network: self.allow_network,
+            ssh: self.allow_ssh,
+            ports: (lowest, highest),
+            nodes: self.allow_nodes,
+            devices: self.allow_devices.clone(),
+            mounts: self.allow_mounts.clone(),
+            custom_images: self.allow_custom_images,
+            timeout_secs: self.allow_timeout,
+            max_silent_secs: self.allow_max_silent,
+            retries: self.allow_retries,
+        }
+    }
+
+    pub fn defaults(&self) -> ExecDefaults {
+        ExecDefaults {
+            network: self.defaults_network,
+            ssh: self.defaults_ssh,
+            mounts: self.defaults_mounts.clone(),
+            max_silent_secs: self.defaults_max_silent,
+        }
+    }
+
+    pub fn vm_config(&self, guests_dir: PathBuf, worker_exe: &Path) -> VmConfig {
+        VmConfig {
+            image: self.image.clone().unwrap_or_default(),
+            pre_warm: self.pre_warm,
+            max_pre_warm: self.max_pre_warm,
+            devices: self.devices.clone(),
+            mounts: self.mounts.clone(),
+            bridge: self.bridge.clone(),
+            subnet: self.subnet.clone(),
+            cloud_hypervisor_bin: self.cloud_hypervisor_bin.clone(),
+            virtiofsd_bin: self.virtiofsd_bin.clone(),
+            guests_dir,
+            supervisor_command: vec![
+                worker_exe.to_string_lossy().into_owned(),
+                "--exec-cloud-hypervisor-bin".to_owned(),
+                self.cloud_hypervisor_bin.clone(),
+                "--exec-virtiofsd-bin".to_owned(),
+                self.virtiofsd_bin.clone(),
+                "--guest-supervisor".to_owned(),
+            ],
+        }
+    }
 }
 
 fn parse_token_hashes(raw: &str) -> Vec<(String, String)> {
@@ -166,7 +224,72 @@ fn parse_token_hashes(raw: &str) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::CommandFactory;
+    use clap::{CommandFactory, Parser};
+
+    fn parse(args: &[&str]) -> Result<WorkerConfig, clap::Error> {
+        WorkerConfig::try_parse_from(std::iter::once("gradient-worker").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn devices_come_from_a_json_environment_value() {
+        let config = parse(&[
+            "--exec-devices",
+            r#"[{"name":"gpu:h100","vfio":["0000:17:00.0","0000:18:00.0"]},{"name":"camera","usb":"1d6b:0002"}]"#,
+        ])
+        .expect("valid devices");
+
+        assert_eq!(
+            config.exec.devices,
+            vec![
+                gradient_vm::DeviceConfig {
+                    name: "gpu:h100".into(),
+                    vfio: vec!["0000:17:00.0".into(), "0000:18:00.0".into()],
+                    dev: None,
+                    usb: None,
+                },
+                gradient_vm::DeviceConfig {
+                    name: "camera".into(),
+                    vfio: Vec::new(),
+                    dev: None,
+                    usb: Some("1d6b:0002".into()),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_reversed_port_range_is_refused() {
+        assert!(parse(&["--exec-allow-ports", "65535,1024"]).is_err());
+    }
+
+    #[test]
+    fn a_device_with_two_sources_is_refused() {
+        assert!(
+            parse(&[
+                "--exec-devices",
+                r#"[{"name":"gpu","vfio":["0000:17:00.0"],"dev":"/dev/kvm"}]"#,
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn the_vm_config_starts_the_supervisor_through_the_worker() {
+        let config = parse(&["--exec-max-pre-warm", "4"]).expect("valid options");
+        let vm = config
+            .exec
+            .vm_config(PathBuf::from("/guests"), Path::new("/bin/gw"));
+
+        assert_eq!(vm.max_pre_warm, 4);
+        assert_eq!(
+            vm.supervisor_command.first().map(String::as_str),
+            Some("/bin/gw")
+        );
+        assert_eq!(
+            vm.supervisor_command.last().map(String::as_str),
+            Some("--guest-supervisor")
+        );
+    }
 
     #[test]
     fn checked_in_options_file_is_current() {

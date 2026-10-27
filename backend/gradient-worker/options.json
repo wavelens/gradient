@@ -521,5 +521,273 @@
     "description": "Directory receiving every closed stage span of the worker and its eval subprocesses as\nJSON lines, one file per process. `null` disables span tracing.",
     "default": null,
     "values": []
+  },
+  {
+    "group": "exec",
+    "field": "image",
+    "flag": "exec-image",
+    "env": "GRADIENT_WORKER_EXEC_IMAGE",
+    "type": "Option<PathBuf>",
+    "description": "Guest image from `gradient.lib.mkWorkerImage` that exec job guests boot.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "pre_warm",
+    "flag": "exec-pre-warm",
+    "env": "GRADIENT_WORKER_EXEC_PRE_WARM",
+    "type": "u32",
+    "description": "Guests booted from {option}`services.gradient.worker.exec.image` and paused, waiting\nfor a job.",
+    "default": "0",
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "max_pre_warm",
+    "flag": "exec-max-pre-warm",
+    "env": "GRADIENT_WORKER_EXEC_MAX_PRE_WARM",
+    "type": "u32",
+    "description": "Most guests kept warm for upcoming exec jobs the server reports. The worker keeps the\nlarger of {option}`services.gradient.worker.exec.preWarm` and the reported count, capped\nat this value. `0` ignores the server count.",
+    "default": "0",
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "allow_custom_images",
+    "flag": "exec-allow-custom-images",
+    "env": "GRADIENT_WORKER_EXEC_ALLOW_CUSTOM_IMAGES",
+    "type": "bool",
+    "description": "Whether exec jobs may boot their own guest image instead of\n{option}`services.gradient.worker.exec.image`.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "exec",
+    "field": "stop_guests_with_worker",
+    "flag": "exec-stop-guests-with-worker",
+    "env": "GRADIENT_WORKER_EXEC_STOP_GUESTS_WITH_WORKER",
+    "type": "bool",
+    "description": "Whether stopping or restarting the worker stops every guest. The server queues the\nexec jobs of stopped guests again without using a retry. `false` keeps guests running\nacross a worker restart and the restarted worker reattaches to them.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "exec",
+    "field": "labels",
+    "flag": "exec-labels",
+    "env": "GRADIENT_WORKER_EXEC_LABELS",
+    "type": "Vec<String>",
+    "description": "Labels an exec job can ask for. The worker ID is always a label too.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "devices",
+    "flag": "exec-devices",
+    "env": "GRADIENT_WORKER_EXEC_DEVICES",
+    "type": "std::vec::Vec<DeviceConfig>",
+    "description": "Host devices exec jobs can request, a JSON list in the environment variable. Each\nentry has a `name` and exactly one source: `vfio` lists PCI addresses bound to\n`vfio-pci`, one device each; `dev` names a device node; `usb` holds a `vendor:product`\nID.",
+    "default": "[]",
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "mounts",
+    "flag": "exec-mounts",
+    "env": "GRADIENT_WORKER_EXEC_MOUNTS",
+    "type": "std::vec::Vec<MountConfig>",
+    "description": "Host directories exec jobs can mount at {file}`/mnt/<name>`, a JSON list in the\nenvironment variable. Each entry has a `name`, a `path`, `readOnly` and `perJob`; a\n`perJob` mount gives every job a fresh directory below `path`.",
+    "default": "[]",
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "bridge",
+    "flag": "exec-bridge",
+    "env": "GRADIENT_WORKER_EXEC_BRIDGE",
+    "type": "String",
+    "description": "Network bridge the guest tap devices join.",
+    "default": "gradient-guests",
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "subnet",
+    "flag": "exec-subnet",
+    "env": "GRADIENT_WORKER_EXEC_SUBNET",
+    "type": "String",
+    "description": "IPv4 subnet of {option}`services.gradient.worker.exec.bridge`. The bridge takes the\nfirst host address, each guest the address of its vsock CID.",
+    "default": "10.233.0.0/16",
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "cloud_hypervisor_bin",
+    "flag": "exec-cloud-hypervisor-bin",
+    "env": "GRADIENT_WORKER_EXEC_CLOUD_HYPERVISOR_BIN",
+    "type": "String",
+    "description": "Path to the `cloud-hypervisor` binary, resolved via `PATH` by default.",
+    "default": "cloud-hypervisor",
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "virtiofsd_bin",
+    "flag": "exec-virtiofsd-bin",
+    "env": "GRADIENT_WORKER_EXEC_VIRTIOFSD_BIN",
+    "type": "String",
+    "description": "Path to the `virtiofsd` binary, resolved via `PATH` by default.",
+    "default": "virtiofsd",
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "allow_network",
+    "flag": "exec-allow-network",
+    "env": "GRADIENT_WORKER_EXEC_ALLOW_NETWORK",
+    "type": "bool",
+    "description": "Whether exec jobs may reach the network through\n{option}`services.gradient.worker.exec.bridge`.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "exec",
+    "field": "allow_ssh",
+    "flag": "exec-allow-ssh",
+    "env": "GRADIENT_WORKER_EXEC_ALLOW_SSH",
+    "type": "bool",
+    "description": "Whether exec jobs may accept SSH sessions into their guest.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "exec",
+    "field": "allow_ports",
+    "flag": "exec-allow-ports",
+    "env": "GRADIENT_WORKER_EXEC_ALLOW_PORTS",
+    "type": "Option<PortRange>",
+    "description": "Lowest and highest guest port exec jobs may forward, as `low,high`. `null` allows\nports 1024 to 65535.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "allow_nodes",
+    "flag": "exec-allow-nodes",
+    "env": "GRADIENT_WORKER_EXEC_ALLOW_NODES",
+    "type": "u32",
+    "description": "Most nodes an exec job may span.",
+    "default": "1",
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "allow_devices",
+    "flag": "exec-allow-devices",
+    "env": "GRADIENT_WORKER_EXEC_ALLOW_DEVICES",
+    "type": "Vec<String>",
+    "description": "Device names from {option}`services.gradient.worker.exec.devices` exec jobs may\nrequest. An empty list allows none.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "allow_mounts",
+    "flag": "exec-allow-mounts",
+    "env": "GRADIENT_WORKER_EXEC_ALLOW_MOUNTS",
+    "type": "Vec<String>",
+    "description": "Mount names from {option}`services.gradient.worker.exec.mounts` exec jobs may\nrequest. An empty list allows none.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "allow_timeout",
+    "flag": "exec-allow-timeout",
+    "env": "GRADIENT_WORKER_EXEC_ALLOW_TIMEOUT",
+    "type": "Option<u64>",
+    "description": "Most seconds an exec job may run. The server lowers a larger request to this value.\n`null` sets no cap.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "allow_max_silent",
+    "flag": "exec-allow-max-silent",
+    "env": "GRADIENT_WORKER_EXEC_ALLOW_MAX_SILENT",
+    "type": "Option<u64>",
+    "description": "Most seconds an exec job may go without output. The server lowers a larger request to\nthis value. `null` sets no cap.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "allow_retries",
+    "flag": "exec-allow-retries",
+    "env": "GRADIENT_WORKER_EXEC_ALLOW_RETRIES",
+    "type": "u32",
+    "description": "Most retries an exec job may request.",
+    "default": "0",
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "defaults_network",
+    "flag": "exec-defaults-network",
+    "env": "GRADIENT_WORKER_EXEC_DEFAULTS_NETWORK",
+    "type": "bool",
+    "description": "Whether an exec job that leaves `network` unset reaches the network.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "exec",
+    "field": "defaults_ssh",
+    "flag": "exec-defaults-ssh",
+    "env": "GRADIENT_WORKER_EXEC_DEFAULTS_SSH",
+    "type": "bool",
+    "description": "Whether an exec job that leaves `ssh` unset accepts SSH sessions.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "exec",
+    "field": "defaults_mounts",
+    "flag": "exec-defaults-mounts",
+    "env": "GRADIENT_WORKER_EXEC_DEFAULTS_MOUNTS",
+    "type": "Vec<String>",
+    "description": "Mounts of an exec job that leaves `mounts` unset.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "defaults_max_silent",
+    "flag": "exec-defaults-max-silent",
+    "env": "GRADIENT_WORKER_EXEC_DEFAULTS_MAX_SILENT",
+    "type": "Option<u64>",
+    "description": "Seconds without output after which an exec job that leaves `maxSilent` unset times\nout. `null` sets no limit.",
+    "default": null,
+    "values": []
   }
 ]

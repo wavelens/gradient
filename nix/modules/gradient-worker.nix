@@ -9,7 +9,7 @@
   workerOptions = import ./options.nix {
     inherit lib;
     specs = builtins.fromJSON (builtins.readFile ../../backend/gradient-worker/options.json);
-    subGroups = { eval = [ "cache" ]; log = [ "level" ]; };
+    subGroups = { eval = [ "cache" ]; log = [ "level" ]; exec = [ "allow" "defaults" ]; };
     emptyListIsUnset = true;
 
     examples = {

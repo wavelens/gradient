@@ -360,6 +360,36 @@
 | `worker.eval.maxRss` | positive int | `2147483648` | `GRADIENT_WORKER_EVAL_MAX_RSS` | Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit restart after the call and free the Nix heap. A call growing past the limit is fine, with `worker.system.minFreeRamMb` as the host's guard. Keep it above a typical evaluation's heap. |
 | `worker.eval.metrics` | bool | `true` | `GRADIENT_WORKER_EVAL_METRICS` | Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots, flake graph). Disable it to skip that overhead. |
 
+## `worker.exec`
+
+| Option | Type | Default | Env | Description |
+|---|---|---|---|---|
+| `worker.exec.allow.customImages` | bool | `false` | - | Whether exec jobs may boot their own guest image instead of `worker.exec.image`. |
+| `worker.exec.allow.devices` | list of string | `[ ]` | - | Device names from `worker.exec.devices` exec jobs may request. An empty list allows none. |
+| `worker.exec.allow.maxSilent` | null or (unsigned int) | `null` | - | Most seconds an exec job may go without output. The server lowers a larger request to this value. `null` sets no cap. |
+| `worker.exec.allow.mounts` | list of string | `[ ]` | - | Mount names from `worker.exec.mounts` exec jobs may request. An empty list allows none. |
+| `worker.exec.allow.network` | bool | `false` | - | Whether exec jobs may reach the network through `worker.exec.bridge`. |
+| `worker.exec.allow.nodes` | unsigned int | `1` | - | Most nodes an exec job may span. |
+| `worker.exec.allow.ports` | null or string | `null` | - | Lowest and highest guest port exec jobs may forward, as `low,high`. `null` allows ports 1024 to 65535. |
+| `worker.exec.allow.retries` | unsigned int | `0` | - | Most retries an exec job may request. |
+| `worker.exec.allow.ssh` | bool | `false` | - | Whether exec jobs may accept SSH sessions into their guest. |
+| `worker.exec.allow.timeout` | null or (unsigned int) | `null` | - | Most seconds an exec job may run. The server lowers a larger request to this value. `null` sets no cap. |
+| `worker.exec.bridge` | string | `"gradient-guests"` | `GRADIENT_WORKER_EXEC_BRIDGE` | Network bridge the guest tap devices join. |
+| `worker.exec.cloudHypervisorBin` | string | `"cloud-hypervisor"` | `GRADIENT_WORKER_EXEC_CLOUD_HYPERVISOR_BIN` | Path to the `cloud-hypervisor` binary, resolved via `PATH` by default. |
+| `worker.exec.defaults.maxSilent` | null or (unsigned int) | `null` | - | Seconds without output after which an exec job that leaves `maxSilent` unset times out. `null` sets no limit. |
+| `worker.exec.defaults.mounts` | list of string | `[ ]` | - | Mounts of an exec job that leaves `mounts` unset. |
+| `worker.exec.defaults.network` | bool | `false` | - | Whether an exec job that leaves `network` unset reaches the network. |
+| `worker.exec.defaults.ssh` | bool | `false` | - | Whether an exec job that leaves `ssh` unset accepts SSH sessions. |
+| `worker.exec.devices` | string | `"[]"` | `GRADIENT_WORKER_EXEC_DEVICES` | Host devices exec jobs can request, a JSON list in the environment variable. Each entry has a `name` and exactly one source: `vfio` lists PCI addresses bound to `vfio-pci`, one device each; `dev` names a device node; `usb` holds a `vendor:product` ID. |
+| `worker.exec.image` | null or path | `null` | `GRADIENT_WORKER_EXEC_IMAGE` | Guest image from `gradient.lib.mkWorkerImage` that exec job guests boot. |
+| `worker.exec.labels` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_LABELS` | Labels an exec job can ask for. The worker ID is always a label too. |
+| `worker.exec.maxPreWarm` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_MAX_PRE_WARM` | Most guests kept warm for upcoming exec jobs the server reports. The worker keeps the larger of `worker.exec.preWarm` and the reported count, capped at this value. `0` ignores the server count. |
+| `worker.exec.mounts` | string | `"[]"` | `GRADIENT_WORKER_EXEC_MOUNTS` | Host directories exec jobs can mount at `/mnt/<name>`, a JSON list in the environment variable. Each entry has a `name`, a `path`, `readOnly` and `perJob`; a `perJob` mount gives every job a fresh directory below `path`. |
+| `worker.exec.preWarm` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_PRE_WARM` | Guests booted from `worker.exec.image` and paused, waiting for a job. |
+| `worker.exec.stopGuestsWithWorker` | bool | `true` | `GRADIENT_WORKER_EXEC_STOP_GUESTS_WITH_WORKER` | Whether stopping or restarting the worker stops every guest. The server queues the exec jobs of stopped guests again without using a retry. `false` keeps guests running across a worker restart and the restarted worker reattaches to them. |
+| `worker.exec.subnet` | string | `"10.233.0.0/16"` | `GRADIENT_WORKER_EXEC_SUBNET` | IPv4 subnet of `worker.exec.bridge`. The bridge takes the first host address, each guest the address of its vsock CID. |
+| `worker.exec.virtiofsdBin` | string | `"virtiofsd"` | `GRADIENT_WORKER_EXEC_VIRTIOFSD_BIN` | Path to the `virtiofsd` binary, resolved via `PATH` by default. |
+
 ## `worker.log`
 
 | Option | Type | Default | Env | Description |
