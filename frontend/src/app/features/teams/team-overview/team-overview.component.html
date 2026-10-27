@@ -90,21 +90,5 @@
         </gr-row-list>
       </gr-settings-section>
     }
-
-    <gr-settings-section title="Recent Evaluations" [card]="false" maxWidth="none">
-      @if (evaluations().length > 0) {
-        <gr-row-list>
-          @for (evaluation of evaluations(); track evaluation.id) {
-            <gr-row [link]="['/project', evaluation.project, 'log', evaluation.id]" linkLabel="Open evaluation">
-              <gr-status-icon slot="icon" [phase]="evaluationPhase(evaluation.status)" size="sm" />
-              {{ evaluation.project }}/{{ evaluation.task }}
-              <span slot="meta">{{ evaluation.created_at | date: 'medium' }}</span>
-            </gr-row>
-          }
-        </gr-row-list>
-      } @else {
-        <gr-empty-state icon="history" title="No evaluations" />
-      }
-    </gr-settings-section>
   }
 </gr-page-layout>

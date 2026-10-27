@@ -10,7 +10,6 @@ import { ApiService } from './api.service';
 import {
   TeamSummary,
   TeamResponse,
-  TeamEvaluation,
   PatchTeamRequest,
   TeamMemberItem,
   TeamRole,
@@ -44,10 +43,6 @@ export class TeamsService {
 
   get(team: string): Observable<TeamResponse> {
     return this.api.get<TeamResponse>(`teams/${team}`);
-  }
-
-  evaluations(team: string): Observable<TeamEvaluation[]> {
-    return this.api.get<TeamEvaluation[]>(`teams/${team}/evaluations`);
   }
 
   update(team: string, patch: PatchTeamRequest): Observable<string> {

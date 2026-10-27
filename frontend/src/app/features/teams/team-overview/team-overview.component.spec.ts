@@ -11,7 +11,7 @@ import { of } from 'rxjs';
 import { TeamOverviewComponent } from './team-overview.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
-import { TeamResponse, TeamEvaluation, TeamWorkerEntry } from '@core/models';
+import { TeamResponse, TeamWorkerEntry } from '@core/models';
 
 const team: TeamResponse = {
   id: 't1',
@@ -26,10 +26,6 @@ const team: TeamResponse = {
   new_project_role: null,
 };
 
-const evaluations: TeamEvaluation[] = [
-  { id: 'e1', project: 'web', task: 'app', status: 'Completed', created_at: '2026-10-04T10:00:00' },
-];
-
 function render(workers: TeamWorkerEntry[] = []): HTMLElement {
   TestBed.configureTestingModule({
     imports: [TeamOverviewComponent],
@@ -43,7 +39,6 @@ function render(workers: TeamWorkerEntry[] = []): HTMLElement {
           members: () => of([]),
           workers: () => of(workers),
           grants: () => of({ projects: [], caches: [] }),
-          evaluations: () => of(evaluations),
         },
       },
       { provide: AuthService, useValue: { user: signal({ superuser: false }) } },
@@ -59,12 +54,6 @@ function headings(element: HTMLElement): string[] {
 }
 
 describe('TeamOverviewComponent', () => {
-  it('links the recent evaluations of granted projects', () => {
-    const element = render();
-    expect(element.textContent).toContain('Recent Evaluations');
-    expect(element.querySelector('a[href="/project/web/log/e1"]')).not.toBeNull();
-  });
-
   it('hides the projects and caches section when the team has no grants', () => {
     expect(headings(render())).not.toContain('Projects and Caches');
   });
