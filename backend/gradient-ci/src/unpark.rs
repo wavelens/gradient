@@ -245,9 +245,10 @@ pub async fn find_approval_gated_eval(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_entity::evaluation::EvaluationKind;
     use gradient_fixtures::mock::mock_db;
     use gradient_fixtures::rows::worker_registration;
-    use sea_orm::MockExecResult;
+    use sea_orm::{Iterable, MockExecResult};
 
     fn waiting_eval(reason: WaitingReason) -> MEvaluation {
         gradient_entity::evaluation::Model {
@@ -372,10 +373,26 @@ mod tests {
         requeued.status = EvaluationStatus::Queued;
         requeued.waiting_reason = None;
 
+        let mut parked = vec![stranded.clone(), capability_mismatch];
+        parked.extend(EvaluationKind::iter().map(|kind| {
+            let mut e = waiting_eval(WaitingReason::workers(
+                vec![gradient_types::waiting_reason::UnmetRequirement {
+                    architecture: "x86_64-linux".into(),
+                    required_features: Vec::new(),
+                    build_count: 1,
+                }],
+                0,
+                Vec::new(),
+            ));
+            e.kind = kind;
+            e.task = Some(task.id);
+            e
+        }));
+
         let db = mock_db()
             .append_query_results([vec![worker_registration(true, true)]])
             .append_query_results([vec![task.clone()]])
-            .append_query_results([vec![stranded.clone(), capability_mismatch.clone()]])
+            .append_query_results([parked])
             .append_query_results([vec![requeued.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -400,43 +417,6 @@ mod tests {
             .await
             .unwrap();
         assert!(out.is_empty());
-    }
-
-    #[tokio::test]
-    async fn unpark_no_workers_preserves_build_stage_wait_with_no_connected_workers() {
-        let project = ProjectId::now_v7();
-        let task = make_task(project);
-        let mut parked = waiting_eval(WaitingReason::workers(
-            vec![gradient_types::waiting_reason::UnmetRequirement {
-                architecture: "x86_64-linux".into(),
-                required_features: Vec::new(),
-                build_count: 1,
-            }],
-            0,
-            Vec::new(),
-        ));
-        parked.kind = gradient_entity::evaluation::EvaluationKind::Ssh;
-        parked.task = Some(task.id);
-
-        let mut requeued = parked.clone();
-        requeued.status = EvaluationStatus::Queued;
-        requeued.waiting_reason = None;
-        let db = mock_db()
-            .append_query_results([vec![worker_registration(true, true)]])
-            .append_query_results([vec![task]])
-            .append_query_results([vec![parked]])
-            .append_query_results([vec![requeued]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .into_connection();
-
-        let out = unpark_no_workers_for_project(&db, project).await.unwrap();
-        assert!(
-            out.is_empty(),
-            "build-stage waits must not restart repository evaluation"
-        );
     }
 
     #[tokio::test]
