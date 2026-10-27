@@ -27,7 +27,7 @@ hyper-util     = { workspace = true }
 serde          = { workspace = true }
 serde_json     = { workspace = true }
 tokio          = { workspace = true, features = ["rt", "macros", "sync", "net", "fs", "io-util", "process", "time", "signal"] }
-tokio-util     = { workspace = true, features = ["codec"] }
+tokio-util     = { workspace = true, features = ["codec", "rt"] }
 tracing        = { workspace = true }
 uuid           = { workspace = true }
 zbus           = { workspace = true }
