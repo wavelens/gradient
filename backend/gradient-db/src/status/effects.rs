@@ -5,7 +5,7 @@
  */
 
 use crate::DbContext;
-use crate::graph::predicates::BUILDER_STATUSES;
+use crate::graph::predicates::BUILDS_ONCE_WANTED;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::DbErr;
@@ -53,8 +53,6 @@ fn ci_reports(status: BuildStatus) -> bool {
     matches!(status, BuildStatus::Queued | BuildStatus::Building) || status.is_terminal()
 }
 
-/// A thaw or skip of one round crosses [`BUILDER_STATUSES`] and moves the need one level
-/// further, so the rounds repeat until a round crosses nothing.
 #[tracing::instrument(level = "debug", skip_all, fields(changes = changes.len()))]
 pub async fn emit_transition_effects(
     ctx: &DbContext,
@@ -80,7 +78,7 @@ pub async fn emit_transition_effects(
 }
 
 fn is_builder(status: BuildStatus) -> bool {
-    BUILDER_STATUSES.contains(&status)
+    BUILDS_ONCE_WANTED.contains(&status)
 }
 
 fn need_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
@@ -252,9 +250,10 @@ mod tests {
 
     #[test]
     fn need_moves_are_every_crossing_of_the_builder_boundary() {
-        let thawed = DerivationId::now_v7();
+        let requeued = DerivationId::now_v7();
         let finished = DerivationId::now_v7();
         let aborted = DerivationId::now_v7();
+        let thawed = DerivationId::now_v7();
         let promoted = DerivationId::now_v7();
         let change = |derivation, from, to| TransitionChange {
             derivation,
@@ -264,12 +263,14 @@ mod tests {
 
         assert_eq!(
             need_moves(&[
-                change(thawed, BuildStatus::FailedPermanent, BuildStatus::Created),
+                change(requeued, BuildStatus::FailedPermanent, BuildStatus::Created),
                 change(finished, BuildStatus::Building, BuildStatus::Completed),
                 change(aborted, BuildStatus::Queued, BuildStatus::Aborted),
+                change(thawed, BuildStatus::Skipped, BuildStatus::Created),
                 change(promoted, BuildStatus::Created, BuildStatus::Queued),
             ]),
-            vec![thawed, finished, aborted],
+            vec![requeued, finished],
+            "an abort and a thaw stay inside what builds once wanted; the walk already stepped through them"
         );
     }
 

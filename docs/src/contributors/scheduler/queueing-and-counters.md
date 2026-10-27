@@ -66,7 +66,7 @@ Queue every touched shared build through `can_start::promote`. The call embeds t
 
 A shared build is **open** (`graph_sql::open_predicate`) when `fetchable` is false and its status is not `BuildStatus::TERMINAL_FAILURE`. Builders, `Skipped`, `Aborted`, and `Completed` shared builds with a missing dependency in the closure all qualify as open.
 
-- `graph_sql::open_closure_cte_body` defines one walk behind both the needs-build mark and its naming. Seeds step over runtime dependencies. A **builder** (`builder_predicate`: walked, probed, absent from a cache, in `BUILDER_STATUSES`) can also step over build dependencies.
+- `graph_sql::open_closure_cte_body` defines one walk behind both the needs-build mark and its naming. Seeds step over runtime dependencies. A **builder** (`builder_predicate`: walked, probed, absent from a cache, in `BUILDS_ONCE_WANTED`) can step over build dependencies too. The builder statuses plus `Skipped` and `Aborted` all sit in `BUILDS_ONCE_WANTED`. One walk can reach everything a thaw would build.
 - Only open shared builds are reachable. A `fetchable` or failed shared build ends the walk.
 - The walk can reach a passthrough but cannot step through it on a build dependency. No job ever builds the input closure of a passthrough output.
 - The needs-build mark lives in a column. The mark flows down from the entry points, while the can-start counters flow up from the leaves. A one-hop predicate cannot carry the downward direction.
@@ -77,7 +77,7 @@ A shared build is **open** (`graph_sql::open_predicate`) when `fetchable` is fal
 
 Follow each call with a `settle_need` call.
 
-- **Status transitions:** the transition-effects emitter (`status/effects.rs`) for every transition that moves into or out of `BUILDER_STATUSES`.
+- **Status transitions:** the transition-effects emitter (`status/effects.rs`) on every entry into and exit from `BUILDS_ONCE_WANTED`.
 - **Unchanged status:** `update_and_settle_need`, for events that move the needs-build mark without a status change.
     - Batch import (new builder, new entry point, adopted runtime dependencies, upstream hit, probe answer)
     - `demote_cached_output` and `lost_fetchability`

@@ -317,7 +317,7 @@ mod tests {
             sql.contains(
                 "WITH RECURSIVE pending(evaluation, derivation, builder) AS \
                  (SELECT bj.evaluation, bj.derivation, (w.walked AND db.probed \
-                 AND NOT db.cache_available AND db.status IN (0, 1, 2, 8)) FROM build_job bj"
+                 AND NOT db.cache_available AND db.status IN (0, 1, 2, 5, 8, 10)) FROM build_job bj"
             ),
             "{sql}"
         );
@@ -464,7 +464,7 @@ mod tests {
                  WHERE e.dependency = db.derivation \
                  AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
                  AND ((w.walked AND p.probed AND NOT p.cache_available \
-                 AND p.status IN (0, 1, 2, 8)) OR e.kind IN (1, 2)) AND ev.status IN ("
+                 AND p.status IN (0, 1, 2, 5, 8, 10)) OR e.kind IN (1, 2)) AND ev.status IN ("
             ),
             "{frontier}"
         );
