@@ -91,6 +91,7 @@ pub enum AgentToWorker {
     Phase { name: String, payload: Vec<u8> },
     SetupFailed { message: String },
     Exited { code: i32 },
+    JobLost,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]

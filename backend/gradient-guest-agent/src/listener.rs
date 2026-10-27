@@ -35,6 +35,7 @@ struct Progress {
 enum Outcome {
     Exited(i32),
     SetupFailed(String),
+    Lost,
 }
 
 struct Agent {
@@ -83,9 +84,7 @@ pub async fn listen(output: OutputLog, tasks: Shutdown, restarted: bool) -> Resu
 fn initial_progress(restarted: bool) -> Progress {
     Progress {
         started: false,
-        outcome: restarted.then(|| {
-            Outcome::SetupFailed("the guest agent restarted and lost the running job".to_owned())
-        }),
+        outcome: restarted.then_some(Outcome::Lost),
     }
 }
 
@@ -189,9 +188,16 @@ async fn stream_to_worker(
     let mut output_done = reader.is_none();
     loop {
         let now = progress.borrow_and_update().clone();
-        if let Some(Outcome::SetupFailed(message)) = now.outcome.clone() {
-            let _ = outgoing.send(AgentToWorker::SetupFailed { message }).await;
-            return;
+        match now.outcome.clone() {
+            Some(Outcome::SetupFailed(message)) => {
+                let _ = outgoing.send(AgentToWorker::SetupFailed { message }).await;
+                return;
+            }
+            Some(Outcome::Lost) => {
+                let _ = outgoing.send(AgentToWorker::JobLost).await;
+                return;
+            }
+            Some(Outcome::Exited(_)) | None => {}
         }
         if reader.is_some() && now.started && !sent_started {
             sent_started = true;
@@ -226,5 +232,24 @@ async fn next_chunk(reader: Option<&mut OutputReader>) -> Option<Vec<u8>> {
     match reader {
         Some(reader) => reader.next().await,
         None => std::future::pending().await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gradient_wire::guest::AgentToWorker;
+    use tokio::sync::{mpsc, watch};
+
+    use super::{initial_progress, stream_to_worker};
+
+    #[tokio::test]
+    async fn a_restarted_agent_reports_the_job_as_lost() {
+        let (_progress, receiver) = watch::channel(initial_progress(true));
+        let (outgoing, mut sent) = mpsc::channel(4);
+
+        stream_to_worker(receiver, None, outgoing).await;
+
+        assert_eq!(sent.recv().await, Some(AgentToWorker::JobLost));
+        assert_eq!(sent.recv().await, None);
     }
 }
