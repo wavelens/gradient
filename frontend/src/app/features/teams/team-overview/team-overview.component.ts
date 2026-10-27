@@ -73,6 +73,7 @@ export class TeamOverviewComponent implements OnInit {
 
   isAdmin = computed(() => this.team()?.role === 'admin' || this.authService.user()?.superuser === true);
   firstMembers = computed(() => this.members().slice(0, 5));
+  onlineWorkers = computed(() => this.workers().filter((worker) => worker.connected));
 
   ngOnInit(): void {
     this.teamName = this.route.snapshot.paramMap.get('team') || '';

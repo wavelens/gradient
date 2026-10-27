@@ -73,10 +73,19 @@ describe('TeamOverviewComponent', () => {
     expect(headings(render())).not.toContain('Projects and Caches');
   });
 
-  it('lists the team workers', () => {
-    const worker = { worker_id: 'w1', display_name: 'Builder', active: true, connected: true } as TeamWorkerEntry;
-    const element = render([worker]);
+  it('lists only the online team workers', () => {
+    const online = { worker_id: 'w1', display_name: 'Builder', active: true, connected: true } as TeamWorkerEntry;
+    const offline = { worker_id: 'w2', display_name: 'Sleeper', active: true, connected: false } as TeamWorkerEntry;
+    const element = render([online, offline]);
     expect(headings(element)).toContain('Workers');
     expect(element.textContent).toContain('Builder');
+    expect(element.textContent).not.toContain('Sleeper');
+  });
+
+  it('says so when no team worker is online', () => {
+    const offline = { worker_id: 'w2', display_name: 'Sleeper', active: true, connected: false } as TeamWorkerEntry;
+    const element = render([offline]);
+    expect(headings(element)).toContain('Workers');
+    expect(element.textContent).toContain('No online workers');
   });
 });
