@@ -21,6 +21,7 @@ pub const IDLE_SLOT_TTL: Duration = Duration::from_secs(25);
 pub enum SlotKind {
     Eval,
     Build,
+    Runner,
 }
 
 impl From<&ClusterMember> for SlotKind {
@@ -40,6 +41,7 @@ impl SlotKind {
         match self {
             SlotKind::Eval => JobKind::Flake,
             SlotKind::Build => JobKind::Build,
+            SlotKind::Runner => JobKind::Runner,
         }
     }
 }
@@ -49,6 +51,7 @@ impl From<&JobKind> for SlotKind {
         match kind {
             JobKind::Flake => Self::Eval,
             JobKind::Build => Self::Build,
+            JobKind::Runner => Self::Runner,
         }
     }
 }

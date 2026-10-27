@@ -299,6 +299,7 @@ impl WorkerPool {
             Some(WorkerSlot::Active(w)) => match kind {
                 JobKind::Flake => true,
                 JobKind::Build => w.has_build_capacity(),
+                JobKind::Runner => false,
             },
             Some(WorkerSlot::Draining(_)) => false,
             None => false,

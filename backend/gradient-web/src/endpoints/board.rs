@@ -880,6 +880,7 @@ fn aggregate_worker_load(
     for j in jobs {
         match j.kind {
             DispatchedJobKind::Build => bump_in_flight(&mut cap, "build"),
+            DispatchedJobKind::Runner => bump_in_flight(&mut cap, "runner"),
             DispatchedJobKind::Eval => {
                 if j.eval_step {
                     bump_in_flight(&mut cap, "eval");

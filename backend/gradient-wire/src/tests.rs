@@ -121,9 +121,104 @@ fn worker_metrics_from_an_older_peer_carry_no_lifetime() {
         download_speed_mbps: None,
         build_peak_ram_mb: None,
         lifetime_left_secs,
+        runner: None,
     };
     let old = RUNNING_JOBS_SINCE - 1;
     let decoded =
         from_bytes::<ClientMessage>(to_bytes(&metrics(Some(60)), old).unwrap(), old).unwrap();
     assert_eq!(decoded, metrics(None));
+}
+
+#[test]
+fn worker_capabilities_from_the_previous_version_carry_no_runner_inventory() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{ClientMessage, PROTO_VERSIONS};
+    use crate::types::{DeviceClass, RunnerInventory};
+
+    let caps = ClientMessage::WorkerCapabilities {
+        architectures: vec!["x86_64-linux".into()],
+        system_features: vec![],
+        max_concurrent_builds: 1,
+        cpu_count: 1,
+        ram_total_mb: 1,
+        cpu_core_score: 1,
+        zone: None,
+        endpoint: None,
+        build_cores: None,
+        runner: Some(Box::new(RunnerInventory {
+            labels: vec!["w1".into()],
+            devices: vec![DeviceClass {
+                name: "gpu:h100".into(),
+                total: 8,
+                free: 6,
+            }],
+            ..Default::default()
+        })),
+    };
+    let newest = *PROTO_VERSIONS.end();
+    assert_eq!(
+        from_bytes::<ClientMessage>(to_bytes(&caps, newest).unwrap(), newest).unwrap(),
+        caps
+    );
+    let older =
+        from_bytes::<ClientMessage>(to_bytes(&caps, newest - 1).unwrap(), newest - 1).unwrap();
+    assert!(matches!(
+        older,
+        ClientMessage::WorkerCapabilities { runner: None, .. }
+    ));
+}
+
+#[test]
+fn a_runner_job_and_a_phase_round_trip() {
+    use std::collections::BTreeMap;
+
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{ClientMessage, PROTO_VERSIONS};
+    use crate::types::{DeviceRequest, Job, JobContext, RunnerJob, RunnerRequirement};
+
+    let newest = *PROTO_VERSIONS.end();
+    let job = Job::Runner(Box::new(RunnerJob {
+        program: "/nix/store/aaaa-check".into(),
+        args: vec!["--x".into()],
+        env: BTreeMap::from([("WANDB_PROJECT".into(), "llm".into())]),
+        image: None,
+        requirement: RunnerRequirement {
+            devices: vec![DeviceRequest {
+                name: "gpu:h100".into(),
+                count: 8,
+            }],
+            ..Default::default()
+        },
+        context: JobContext::default(),
+        secrets: vec![],
+        keep_running: false,
+        timeout_secs: Some(1),
+        max_silent_secs: None,
+        attempt: 1,
+    }));
+    assert_eq!(
+        from_bytes::<Job>(to_bytes(&job, newest).unwrap(), newest).unwrap(),
+        job
+    );
+    let phase = ClientMessage::JobPhase {
+        job_id: "runner:x".into(),
+        name: "epoch-3".into(),
+        payload: vec![1, 2],
+    };
+    assert_eq!(phase.job_id(), Some("runner:x"));
+    assert_eq!(phase.variant_name(), "JobPhase");
+}
+
+#[test]
+fn pre_warm_vms_round_trips_and_names_no_job() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{PROTO_VERSIONS, ServerMessage};
+
+    let newest = *PROTO_VERSIONS.end();
+    let msg = ServerMessage::PreWarmVms { count: 3 };
+    assert_eq!(
+        from_bytes::<ServerMessage>(to_bytes(&msg, newest).unwrap(), newest).unwrap(),
+        msg
+    );
+    assert_eq!((msg.job_id(), msg.variant_name()), (None, "PreWarmVms"));
 }

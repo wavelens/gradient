@@ -219,6 +219,12 @@ fn outbound_fields(
                     paths.path(store_path)?;
                 }
             }
+            Job::Runner(runner) => {
+                paths.path(&mut runner.program)?;
+                if let Some(image) = &mut runner.image {
+                    paths.path(image)?;
+                }
+            }
         },
         ServerMessage::JobOffer { candidates } | ServerMessage::JobListChunk { candidates, .. } => {
             for candidate in candidates {

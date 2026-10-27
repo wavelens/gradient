@@ -224,6 +224,7 @@ impl<'a> InboundContext<'a> {
                 zone,
                 endpoint,
                 build_cores,
+                runner: _,
             } => {
                 self.on_worker_capabilities(WorkerCapabilities {
                     architectures,
@@ -247,6 +248,7 @@ impl<'a> InboundContext<'a> {
                 download_speed_mbps,
                 build_peak_ram_mb,
                 lifetime_left_secs,
+                runner: _,
             } => {
                 self.spawn_worker_metrics(WorkerMetrics {
                     cpu_usage_pct,
@@ -577,6 +579,7 @@ impl<'a> InboundContext<'a> {
                 true
             }
             ClientMessage::RunningJobs { assignments } => self.on_running_jobs(assignments).await,
+            ClientMessage::JobPhase { .. } => true,
         }
     }
 

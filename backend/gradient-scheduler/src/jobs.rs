@@ -1189,6 +1189,7 @@ impl JobTracker {
             kind: i16::from(match kind {
                 JobKind::Flake => DispatchedJobKind::Eval,
                 JobKind::Build => DispatchedJobKind::Build,
+                JobKind::Runner => DispatchedJobKind::Runner,
             }),
             winner: winner.map(str::to_owned),
             worker_context: worker_context.clone(),

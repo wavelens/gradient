@@ -40,7 +40,9 @@ pub(crate) fn decide_failure_outcome(
         BuildFailureKind::Aborted => FailureOutcome::Aborted,
         BuildFailureKind::Canceled => FailureOutcome::Canceled,
         BuildFailureKind::SubstituteUnavailable => requeue_or_exhaust(substitution),
-        BuildFailureKind::InputsUnavailable | BuildFailureKind::Transient => {
+        BuildFailureKind::InputsUnavailable
+        | BuildFailureKind::Transient
+        | BuildFailureKind::GuestBoot => {
             if (attempt + 1) < max_attempts as i32 {
                 FailureOutcome::Retry
             } else if cache_available {
@@ -152,6 +154,7 @@ pub(crate) fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureRea
         BuildFailureKind::Permanent => Some(AttemptFailureReason::BuilderNonzero),
         BuildFailureKind::Timeout => Some(AttemptFailureReason::WallClockTimeout),
         BuildFailureKind::Transient
+        | BuildFailureKind::GuestBoot
         | BuildFailureKind::CorruptEvalCache
         | BuildFailureKind::Aborted
         | BuildFailureKind::Canceled => None,

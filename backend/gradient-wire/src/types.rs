@@ -40,6 +40,8 @@ impl std::ops::BitOrAssign for GradientCapabilities {
 pub enum Job {
     Flake(FlakeJob),
     Build(BuildJob),
+    #[proto(43)]
+    Runner(Box<RunnerJob>),
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -169,6 +171,8 @@ pub enum JobUpdateKind {
         matched: Vec<String>,
     },
     Stage(BuildStage),
+    #[proto(43)]
+    ProgramStarted,
 }
 
 #[derive(Proto, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -377,6 +381,8 @@ pub struct DiscoveredDerivation {
     pub ifd: bool,
     #[proto(37, default)]
     pub licenses: Vec<License>,
+    #[proto(43, default)]
+    pub runner: Option<RunnerSpec>,
 }
 
 #[derive(Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -682,6 +688,8 @@ pub enum CredentialKind {
 pub enum JobKind {
     Flake,
     Build,
+    #[proto(43)]
+    Runner,
 }
 
 pub type AssignmentId = String;
@@ -732,6 +740,8 @@ pub enum BuildFailureKind {
     CorruptEvalCache,
     Aborted,
     Canceled,
+    #[proto(43)]
+    GuestBoot,
 }
 
 #[cfg(test)]

@@ -117,6 +117,7 @@ pub fn load_store(dir: &Path) -> StoreFixture {
             ),
             ifd: false,
             licenses: vec![],
+            runner: None,
         });
     }
 

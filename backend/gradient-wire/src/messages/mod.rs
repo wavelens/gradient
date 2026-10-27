@@ -22,6 +22,11 @@ pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, SegmentFetch,
     SegmentSource, UploadMetadata, UploadObject, UploadOutcome,
 };
+pub use crate::types::{
+    DeviceClass, DeviceRequest, DeviceRequestError, JobContext, Phase, RunnerAllow, RunnerDefaults,
+    RunnerInventory, RunnerJob, RunnerLimits, RunnerRequirement, RunnerSpec, SopsFile,
+    runner_image_attr,
+};
 pub use client::ClientMessage;
 pub use server::{FailedPeer, ServerMessage};
 

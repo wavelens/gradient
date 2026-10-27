@@ -54,7 +54,7 @@ async fn kill(case: &SchedulerCase, worker: &str, taken: &Assignment, cores: Opt
 fn sent_cores(taken: &Assignment) -> Option<u32> {
     match &taken.job {
         Job::Build(build) => build.build.build_cores,
-        Job::Flake(_) => None,
+        Job::Flake(_) | Job::Runner(_) => None,
     }
 }
 

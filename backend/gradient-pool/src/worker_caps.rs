@@ -26,6 +26,7 @@ impl WorkerCaps {
         match kind {
             JobKind::Flake => self.capabilities.eval || self.capabilities.network,
             JobKind::Build => self.capabilities.build,
+            JobKind::Runner => self.capabilities.exec,
         }
     }
 

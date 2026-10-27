@@ -311,6 +311,7 @@ async fn perform_setup(
             zone: config.zone.clone().filter(|z| !z.is_empty()),
             endpoint: config.endpoint.clone().filter(|e| !e.is_empty()),
             build_cores: config.build_cores().map(std::num::NonZeroU32::get),
+            runner: None,
         })
         .await?;
     }

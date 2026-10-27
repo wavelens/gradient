@@ -197,6 +197,11 @@ pub enum ServerMessage {
         job_id: String,
         outcome: EvalShardOutcome,
     },
+
+    #[proto(43)]
+    PreWarmVms {
+        count: u32,
+    },
 }
 
 impl ServerMessage {
@@ -251,6 +256,7 @@ impl ServerMessage {
             ServerMessage::FetchInput { .. } => "FetchInput",
             ServerMessage::InputProgress { .. } => "InputProgress",
             ServerMessage::EvalShardReply { .. } => "EvalShardReply",
+            ServerMessage::PreWarmVms { .. } => "PreWarmVms",
         }
     }
 

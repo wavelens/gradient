@@ -359,7 +359,7 @@ impl SchedulerJobEvents {
                     error!(%peer_id, %job_id, error = %e, "handle_build_output failed");
                 }
             }
-            JobUpdateKind::Compressing => {}
+            JobUpdateKind::Compressing | JobUpdateKind::ProgramStarted => {}
             JobUpdateKind::Stage(stage) => {
                 scheduler.enter_build_stage(peer_id, &job_id, stage).await;
             }

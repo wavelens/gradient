@@ -10,8 +10,8 @@ use crate::codec::Proto;
 use crate::types::{
     BuildFailureKind, BuildMetrics, BuildProgressPhase, CandidateScore, ClusterAddress,
     EvalMessageLevel, EvalProgress, EvalShardSpec, FinishedShard, GradientCapabilities,
-    InputOutcome, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode, RunningAssignment,
-    UploadMetadata, UploadObject,
+    InputOutcome, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode, RunnerInventory,
+    RunningAssignment, UploadMetadata, UploadObject,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -44,6 +44,8 @@ pub enum ClientMessage {
         endpoint: Option<String>,
         #[proto(34, default)]
         build_cores: Option<u32>,
+        #[proto(43, default)]
+        runner: Option<Box<RunnerInventory>>,
     },
 
     WorkerMetrics {
@@ -56,6 +58,8 @@ pub enum ClientMessage {
         build_peak_ram_mb: Option<Vec<(String, u64)>>,
         #[proto(42, default)]
         lifetime_left_secs: Option<u64>,
+        #[proto(43, default)]
+        runner: Option<Box<RunnerInventory>>,
     },
 
     RequestJobList,
@@ -246,6 +250,13 @@ pub enum ClientMessage {
     RunningJobs {
         assignments: Vec<RunningAssignment>,
     },
+
+    #[proto(43)]
+    JobPhase {
+        job_id: String,
+        name: String,
+        payload: Vec<u8>,
+    },
 }
 
 impl ClientMessage {
@@ -269,7 +280,8 @@ impl ClientMessage {
             | ClientMessage::InputRequest { job_id, .. }
             | ClientMessage::EvalSourceReady { job_id, .. }
             | ClientMessage::EvalShardsPlanned { job_id, .. }
-            | ClientMessage::EvalShardRequest { job_id, .. } => Some(job_id),
+            | ClientMessage::EvalShardRequest { job_id, .. }
+            | ClientMessage::JobPhase { job_id, .. } => Some(job_id),
             _ => None,
         }
     }
@@ -312,6 +324,7 @@ impl ClientMessage {
             ClientMessage::EvalShardsPlanned { .. } => "EvalShardsPlanned",
             ClientMessage::EvalShardRequest { .. } => "EvalShardRequest",
             ClientMessage::RunningJobs { .. } => "RunningJobs",
+            ClientMessage::JobPhase { .. } => "JobPhase",
         }
     }
 
