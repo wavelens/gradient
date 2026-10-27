@@ -126,6 +126,14 @@ export const routes: Routes = [
               ),
           },
           {
+            path: 'runner-jobs/:job',
+            title: 'Runner Job',
+            loadComponent: () =>
+              import('./features/runner-jobs/runner-job-page/runner-job-page.component').then(
+                (m) => m.RunnerJobPageComponent,
+              ),
+          },
+          {
             path: 'flake-inputs',
             title: 'Task Flake Inputs',
             canActivate: [authGuard],

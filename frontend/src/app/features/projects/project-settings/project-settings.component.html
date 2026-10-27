@@ -59,6 +59,18 @@
       />
     </gr-form-field>
 
+    @if (config.runnerEnabled) {
+      <gr-form-field>
+        <gr-checkbox
+          inputId="runner-enabled"
+          [(ngModel)]="formData.runner_enabled"
+          [binary]="true"
+          [appManagedDisable]="access()"
+          label="Run runner jobs"
+        />
+      </gr-form-field>
+    }
+
     @if (saveError()) {
       <gr-message-banner type="error">{{ saveError() }}</gr-message-banner>
     }

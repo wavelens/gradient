@@ -11,4 +11,11 @@ gr-metric-chart { margin-bottom: 1rem; }
 gr-table.workers { display: block; margin-top: 1rem; }
 
 .muted { color: var(--gr-text-muted); }
+
+.runner {
+  min-width: 12rem;
+
+  .labels { display: flex; flex-wrap: wrap; gap: $spacing-xs; margin-bottom: $spacing-xs; }
+  .device { display: flex; flex-direction: column; gap: $spacing-xs; font-size: $font-size-xs; }
+}
     

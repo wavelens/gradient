@@ -12,6 +12,7 @@ import { of } from 'rxjs';
 import { ProjectSettingsComponent } from './project-settings.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
+import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
 import { ProjectResponse } from '@core/models';
 
@@ -39,7 +40,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-function setup(access: AccessState): ComponentFixture<ProjectSettingsComponent> {
+function setup(access: AccessState, runnerEnabled = false): ComponentFixture<ProjectSettingsComponent> {
   TestBed.configureTestingModule({
     imports: [ProjectSettingsComponent],
     providers: [
@@ -60,6 +61,7 @@ function setup(access: AccessState): ComponentFixture<ProjectSettingsComponent> 
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
     ],
   });
+  TestBed.inject(ConfigService).runnerEnabled = runnerEnabled;
   const fixture = TestBed.createComponent(ProjectSettingsComponent);
   fixture.detectChanges();
   return fixture;
@@ -87,5 +89,21 @@ describe('ProjectSettingsComponent - access gating', () => {
     expect(save!.disabled).toBe(true);
     expect(del).not.toBeNull();
     expect(del!.disabled).toBe(true);
+  });
+});
+
+describe('ProjectSettingsComponent - runner switch', () => {
+  const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
+
+  it('hides the runner switch while the instance has runner jobs off', async () => {
+    const fixture = setup(admin);
+    await settled(fixture);
+    expect((fixture.nativeElement as HTMLElement).querySelector('#runner-enabled')).toBeNull();
+  });
+
+  it('shows the runner switch once the instance allows runner jobs', async () => {
+    const fixture = setup(admin, true);
+    await settled(fixture);
+    expect((fixture.nativeElement as HTMLElement).querySelector('#runner-enabled')).not.toBeNull();
   });
 });

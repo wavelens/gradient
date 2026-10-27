@@ -1,0 +1,26 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+@if (jobs().length > 0) {
+  <section class="runner-jobs">
+    <h3>Runner Jobs</h3>
+    <div class="job-list">
+      @for (job of jobs(); track job.id) {
+        <a class="job" [attr.data-phase]="phase(job.status)"
+           [routerLink]="['/project', project(), 'task', task(), 'runner-jobs', job.id]">
+          <gr-status-icon class="si" [phase]="phase(job.status)" [label]="job.status" size="sm" />
+          <span class="job-name">{{ job.entry_point }}</span>
+          <span class="job-detail">{{ detail(job) }}</span>
+          <span class="job-needs">
+            @if (job.nodes > 1) { <gr-badge>{{ job.nodes }} nodes</gr-badge> }
+            @for (label of job.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
+            @for (d of job.devices; track d.name) { <gr-badge severity="info">{{ device(d) }}</gr-badge> }
+          </span>
+        </a>
+      }
+    </div>
+  </section>
+}

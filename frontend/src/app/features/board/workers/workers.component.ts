@@ -10,15 +10,15 @@ import { RouterModule } from '@angular/router';
 import { BoardService } from '@core/services/board.service';
 import { firstLoad } from '../first-load';
 import { clockTime, formatMegabytes, formatPercent } from '@shared/text';
-import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
-import { MetricChartComponent } from '@shared/ui';
+import { BadgeComponent, LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
+import { MetricChartComponent, SegmentedBarComponent, ratioSegments } from '@shared/ui';
 import { workerAxisLabel } from '../worker-label';
-import { BoardWorker, BoardFleetPoint, WorkerLoad, LoadBucket } from '@core/models';
+import { BoardWorker, BoardFleetPoint, DeviceClass, WorkerLoad, LoadBucket } from '@core/models';
 
 @Component({
   selector: 'app-board-workers',
   standalone: true,
-  imports: [CommonModule, RouterModule, MetricChartComponent, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, MetricChartComponent, TableComponent, LoadingSpinnerComponent, BadgeComponent, SegmentedBarComponent],
   template: `
     @if (first.loading()) {
       <gr-loading-spinner message="Loading workers..." />
@@ -88,7 +88,7 @@ import { BoardWorker, BoardFleetPoint, WorkerLoad, LoadBucket } from '@core/mode
 
       <gr-table class="workers">
         <thead>
-          <tr><th>Worker</th><th>Projects</th><th>State</th><th>Load</th><th>CPU</th><th>RAM free</th><th>Arch</th></tr>
+          <tr><th>Worker</th><th>Projects</th><th>State</th><th>Load</th><th>CPU</th><th>RAM free</th><th>Arch</th><th>Runner</th></tr>
         </thead>
         <tbody>
           @for (w of workers(); track $index) {
@@ -104,9 +104,22 @@ import { BoardWorker, BoardFleetPoint, WorkerLoad, LoadBucket } from '@core/mode
               <td>{{ w.cpu_usage_pct != null ? percent(w.cpu_usage_pct) : '-' }}</td>
               <td>{{ megabytes(w.ram_free_mb) }}</td>
               <td class="mono">{{ w.architectures.join(', ') || '-' }}</td>
+              <td class="runner">
+                @if (w.runner; as runner) {
+                  <span class="labels">
+                    @for (label of runner.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
+                  </span>
+                  @for (d of runner.devices; track d.name) {
+                    <span class="device">
+                      <gr-segmented-bar [segments]="heldSegments(d)" />
+                      <span class="mono">{{ d.name }} {{ d.free }}/{{ d.total }} free</span>
+                    </span>
+                  }
+                } @else { - }
+              </td>
             </tr>
           } @empty {
-            <tr><td colspan="7" class="muted">No connected workers.</td></tr>
+            <tr><td colspan="8" class="muted">No connected workers.</td></tr>
           }
         </tbody>
       </gr-table>
@@ -123,6 +136,7 @@ export class BoardWorkersComponent implements OnInit {
   load = signal<WorkerLoad | null>(null);
 
   readonly megabytes = formatMegabytes;
+  readonly heldSegments = (d: DeviceClass) => ratioSegments(d.total - d.free, d.total);
   readonly percent = (value: number) => formatPercent(value / 100);
 
   fleetCats = computed(() => this.fleet().map((p) => clockTime(p.bucket_start)));

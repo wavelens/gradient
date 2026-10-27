@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
+import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import {
@@ -69,6 +70,7 @@ export class ProjectSettingsComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   private projectAccess = inject(ProjectAccessService);
   private crumbs = inject(BreadcrumbsService);
+  protected config = inject(ConfigService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
@@ -94,6 +96,7 @@ export class ProjectSettingsComponent implements OnInit {
     description: '',
     public: false,
     hide_build_requests: false,
+    runner_enabled: false,
   };
 
   ngOnInit(): void {
@@ -114,6 +117,7 @@ export class ProjectSettingsComponent implements OnInit {
           description: project.description,
           public: project.public,
           hide_build_requests: project.hide_build_requests,
+          runner_enabled: project.runner_enabled,
         };
         this.loading.set(false);
       },
@@ -150,6 +154,9 @@ export class ProjectSettingsComponent implements OnInit {
       display_name: this.formData.display_name,
       description: this.formData.description,
       hide_build_requests: this.formData.hide_build_requests,
+      ...(this.formData.runner_enabled !== this.project()?.runner_enabled
+        ? { runner_enabled: this.formData.runner_enabled }
+        : {}),
     }).subscribe({
       next: () => {
         visibilityCall.subscribe({

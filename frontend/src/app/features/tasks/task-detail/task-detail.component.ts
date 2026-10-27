@@ -37,6 +37,7 @@ import { saveResponse } from '@shared/download';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
+import { RunnerJobListComponent } from '@features/runner-jobs/runner-job-list/runner-job-list.component';
 import {
   StarTarget,
   TaskDetailsResponse,
@@ -58,6 +59,7 @@ import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commit
     SkeletonComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, ToastComponent, StarButtonComponent,
+    RunnerJobListComponent,
   ],
   providers: [MessageService],
   templateUrl: './task-detail.component.html',

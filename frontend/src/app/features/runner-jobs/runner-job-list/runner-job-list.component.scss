@@ -1,0 +1,66 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+.runner-jobs h3 { margin: $space-section 0 $spacing-sm; font-size: $font-size-md; }
+.job-list { display: flex; flex-direction: column; gap: $space-pair; }
+
+.job {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 400px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid var(--gr-border-subtle);
+  border-left: 4px solid var(--rail-c, var(--gr-border-subtle));
+  border-radius: $border-radius-md;
+  background-color: var(--gr-surface-control);
+  color: inherit;
+  text-decoration: none;
+
+  &:hover { border-color: var(--gr-text-muted); border-left-color: var(--rail-c, var(--gr-border-subtle)); }
+
+  &[data-phase='success'] { --rail-c: var(--ok); }
+  &[data-phase='failure'] { --rail-c: var(--err); }
+  &[data-phase='running'] { --rail-c: var(--run); }
+
+  .si { width: 24px; height: 24px; }
+
+  .job-name {
+    overflow: hidden;
+    font-size: $font-size-sm;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .job-detail {
+    overflow: hidden;
+    color: var(--gr-text-muted);
+    font-size: $font-size-xs;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .job-needs { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: $spacing-xs; }
+}
+
+@media (max-width: $breakpoint-sm) {
+  .job {
+    grid-template-areas:
+      'icon name'
+      'icon detail'
+      'icon needs';
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: $spacing-xs $spacing-sm;
+
+    .si { grid-area: icon; }
+    .job-name { grid-area: name; }
+    .job-detail { grid-area: detail; }
+    .job-needs { grid-area: needs; justify-content: flex-start; }
+  }
+}
