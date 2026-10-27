@@ -65,10 +65,6 @@ describe('TeamOverviewComponent', () => {
     expect(element.querySelector('a[href="/project/web/log/e1"]')).not.toBeNull();
   });
 
-  it('hides the workers section when the team has no workers', () => {
-    expect(headings(render())).not.toContain('Workers');
-  });
-
   it('hides the projects and caches section when the team has no grants', () => {
     expect(headings(render())).not.toContain('Projects and Caches');
   });
@@ -82,9 +78,11 @@ describe('TeamOverviewComponent', () => {
     expect(element.textContent).not.toContain('Sleeper');
   });
 
-  it('says so when no team worker is online', () => {
-    const offline = { worker_id: 'w2', display_name: 'Sleeper', active: true, connected: false } as TeamWorkerEntry;
-    const element = render([offline]);
+  it.each([
+    ['only offline workers', [{ worker_id: 'w2', display_name: 'Sleeper', active: true, connected: false } as TeamWorkerEntry]],
+    ['no workers', []],
+  ])('says so when no team worker is online with %s', (_, workers) => {
+    const element = render(workers);
     expect(headings(element)).toContain('Workers');
     expect(element.textContent).toContain('No online workers');
   });
