@@ -531,9 +531,8 @@ impl FoundAttrs {
                     licenses,
                     exec,
                 };
-                let roots: Vec<Root> = std::iter::once(program).chain(image).collect();
-                self.roots.extend(roots.iter().cloned());
-                roots
+                self.roots.push(program.clone());
+                std::iter::once(program).chain(image).collect()
             }
             Err(e) => {
                 self.failed.push(AttrError {
@@ -2017,7 +2016,7 @@ mod tests {
             .with_drv(image.clone(), drv_needing(&[]));
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(
+        let outcome = evaluate_derivations_with(
             &resolver,
             &drv_reader,
             &make_flake_job("https://example.com/repo"),
@@ -2028,6 +2027,12 @@ mod tests {
         .await
         .unwrap();
 
+        let nodes: Vec<&str> = outcome
+            .flake_nodes
+            .iter()
+            .map(|node| node.path.as_str())
+            .collect();
+        assert_eq!(nodes, vec!["apps.x86_64-linux.train"], "flake output nodes");
         let reported = reporter.all_eval_derivations();
         let program_root = reported
             .iter()
