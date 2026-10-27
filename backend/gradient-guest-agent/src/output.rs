@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::io::SeekFrom;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::watch;
 
 const READ_CHUNK: u64 = 64 * 1024;
@@ -62,11 +63,20 @@ impl OutputLog {
     }
 
     pub async fn append(&mut self, data: &[u8]) -> Result<()> {
-        self.file.write_all(data).await?;
-        self.file.flush().await?;
+        if let Err(e) = self.write(data).await {
+            self.file.set_len(self.written).await?;
+            self.file.seek(SeekFrom::Start(self.written)).await?;
+            return Err(e);
+        }
         self.written += data.len() as u64;
         let bytes = self.written;
         self.appended.send_modify(|written| written.bytes = bytes);
+        Ok(())
+    }
+
+    async fn write(&mut self, data: &[u8]) -> Result<()> {
+        self.file.write_all(data).await?;
+        self.file.flush().await?;
         Ok(())
     }
 

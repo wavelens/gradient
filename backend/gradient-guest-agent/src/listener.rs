@@ -5,6 +5,7 @@
  */
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use gradient_util::shutdown::Shutdown;
@@ -19,7 +20,10 @@ use tokio_vsock::{VMADDR_CID_ANY, VsockAddr, VsockListener, VsockStream};
 
 use crate::output::{OutputLog, OutputReader, OutputReaders};
 use crate::run::run;
-use crate::setup::prepare;
+use crate::setup::{PreparedJob, prepare};
+
+const ACCEPT_RETRY: Duration = Duration::from_millis(100);
+const SETUP_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Debug, Default)]
 struct Progress {
@@ -41,11 +45,11 @@ struct Agent {
     tasks: Shutdown,
 }
 
-pub async fn listen(output: OutputLog, tasks: Shutdown) -> Result<()> {
+pub async fn listen(output: OutputLog, tasks: Shutdown, restarted: bool) -> Result<()> {
     let agent = Arc::new(Agent {
         readers: output.readers(),
-        unclaimed_output: Mutex::new(Some(output)),
-        progress: watch::Sender::new(Progress::default()),
+        unclaimed_output: Mutex::new((!restarted).then_some(output)),
+        progress: watch::Sender::new(initial_progress(restarted)),
         kill: CancellationToken::new(),
         tasks,
     });
@@ -55,7 +59,14 @@ pub async fn listen(output: OutputLog, tasks: Shutdown) -> Result<()> {
 
     let mut current: Option<JoinHandle<()>> = None;
     loop {
-        let (stream, peer) = listener.accept().await?;
+        let (stream, peer) = match listener.accept().await {
+            Ok(accepted) => accepted,
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot accept a worker connection");
+                tokio::time::sleep(ACCEPT_RETRY).await;
+                continue;
+            }
+        };
         tracing::info!(%peer, "worker connected");
         if let Some(previous) = current.take() {
             previous.abort();
@@ -66,6 +77,26 @@ pub async fn listen(output: OutputLog, tasks: Shutdown) -> Result<()> {
                 tracing::warn!(error = %format!("{e:#}"), "worker connection ended");
             }
         }));
+    }
+}
+
+fn initial_progress(restarted: bool) -> Progress {
+    Progress {
+        started: false,
+        outcome: restarted.then(|| {
+            Outcome::SetupFailed("the guest agent restarted and lost the running job".to_owned())
+        }),
+    }
+}
+
+async fn prepare_until_stopped(job: &RunJob, agent: &Agent) -> Result<PreparedJob, String> {
+    tokio::select! {
+        prepared = prepare(job, &agent.tasks) => prepared,
+        () = agent.kill.cancelled() => Err("killed during setup".to_owned()),
+        () = tokio::time::sleep(SETUP_TIMEOUT) => Err(format!(
+            "setup did not finish within {} s",
+            SETUP_TIMEOUT.as_secs()
+        )),
     }
 }
 
@@ -113,7 +144,7 @@ fn start_job(agent: &Arc<Agent>, job: Box<RunJob>) -> Option<AgentToWorker> {
     let job_agent = Arc::clone(agent);
     agent.tasks.spawn(async move {
         let agent = job_agent;
-        let outcome = match prepare(&job, &agent.tasks).await {
+        let outcome = match prepare_until_stopped(&job, &agent).await {
             Ok(prepared) => {
                 let (started, started_rx) = oneshot::channel();
                 let mark_started = async {

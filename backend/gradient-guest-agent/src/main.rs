@@ -53,9 +53,10 @@ async fn serve() -> Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();
+    let restarted = tokio::fs::try_exists(OUTPUT_FILE).await?;
     let output = OutputLog::create(Path::new(OUTPUT_FILE)).await?;
     let tasks = Shutdown::new();
-    tokio::try_join!(listener::listen(output, tasks), http::serve())?;
+    tokio::try_join!(listener::listen(output, tasks, restarted), http::serve())?;
     Ok(())
 }
 

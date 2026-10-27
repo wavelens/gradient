@@ -241,6 +241,7 @@ async fn attach_usb(bus_ids: &[String]) -> Result<()> {
 async fn run_command(program: &str, args: &[&str]) -> Result<()> {
     let output = Command::new(program)
         .args(args)
+        .kill_on_drop(true)
         .output()
         .await
         .with_context(|| format!("run {program}"))?;

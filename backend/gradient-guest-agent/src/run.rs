@@ -11,7 +11,7 @@ use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
 use gradient_wire::guest::RunJob;
-use nix::sys::signal::{Signal, kill as send_signal};
+use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
@@ -27,7 +27,10 @@ const SYSTEM_PATH: &str = "/run/current-system/sw/bin";
 const PRE_SCRIPT: &str = "/etc/gradient/pre-script";
 const POST_SCRIPT: &str = "/etc/gradient/post-script";
 const KILL_GRACE: Duration = Duration::from_secs(10);
+const PIPE_DRAIN: Duration = Duration::from_secs(2);
+const POST_SCRIPT_TIMEOUT: Duration = Duration::from_secs(300);
 const SPAWN_FAILED: i32 = 127;
+const KILLED: i32 = 128 + Signal::SIGTERM as i32;
 
 pub fn program_command(
     job: &RunJob,
@@ -74,16 +77,20 @@ pub async fn run(
     kill: CancellationToken,
 ) -> i32 {
     let PreparedJob { program, env } = prepared;
-    let code = match run_script(PRE_SCRIPT, &env, output, &kill).await {
-        0 if !kill.is_cancelled() => run_program(program, output, started, &kill).await,
-        0 => SPAWN_FAILED,
+    let code = match run_script(PRE_SCRIPT, &env, output, kill.cancelled()).await {
+        0 if kill.is_cancelled() => {
+            note(output, "killed before the program started").await;
+            KILLED
+        }
+        0 => run_program(program, output, started, &kill).await,
         code => {
             note(output, &format!("pre-script exited with code {code}")).await;
             code
         }
     };
 
-    let post = run_script(POST_SCRIPT, &env, output, &CancellationToken::new()).await;
+    let deadline = tokio::time::sleep(POST_SCRIPT_TIMEOUT);
+    let post = run_script(POST_SCRIPT, &env, output, deadline).await;
     if post != 0 {
         note(output, &format!("post-script exited with code {post}")).await;
     }
@@ -99,7 +106,7 @@ async fn run_program(
     match spawn_piped(&mut program) {
         Ok(child) => {
             let _ = started.send(());
-            exit_code(stream_until_exit(child, output, kill).await)
+            exit_code(stream_until_exit(child, output, kill.cancelled()).await)
         }
         Err(e) => {
             note(output, &format!("cannot start the program: {e}")).await;
@@ -112,7 +119,7 @@ async fn run_script(
     path: &str,
     env: &BTreeMap<String, String>,
     output: &mut OutputLog,
-    kill: &CancellationToken,
+    stop: impl Future<Output = ()>,
 ) -> i32 {
     if !Path::new(path).exists() {
         return 0;
@@ -126,7 +133,7 @@ async fn run_script(
         .env("HOME", "/root")
         .envs(env);
     match spawn_piped(&mut command) {
-        Ok(child) => exit_code(stream_until_exit(child, output, kill).await),
+        Ok(child) => exit_code(stream_until_exit(child, output, stop).await),
         Err(e) => {
             note(output, &format!("cannot start {path}: {e}")).await;
             SPAWN_FAILED
@@ -139,35 +146,48 @@ fn spawn_piped(command: &mut Command) -> std::io::Result<Child> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .process_group(0)
         .spawn()
 }
 
 async fn stream_until_exit(
     mut child: Child,
     output: &mut OutputLog,
-    kill: &CancellationToken,
+    stop: impl Future<Output = ()>,
 ) -> std::io::Result<ExitStatus> {
-    let pid = child
+    let group = child
         .id()
         .and_then(|id| i32::try_from(id).ok())
         .map(Pid::from_raw);
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let exit = async {
-        pump(stdout, stderr, output).await;
-        child.wait().await
-    };
-    tokio::pin!(exit);
+    let pump = pump(child.stdout.take(), child.stderr.take(), output);
+    let exit = wait_or_stop(&mut child, group, stop);
+    tokio::pin!(pump, exit);
 
     tokio::select! {
-        status = &mut exit => return status,
-        _ = kill.cancelled() => signal(pid, Signal::SIGTERM),
+        () = &mut pump => exit.await,
+        status = &mut exit => {
+            if tokio::time::timeout(PIPE_DRAIN, &mut pump).await.is_err() {
+                signal_group(group, Signal::SIGKILL);
+            }
+            status
+        }
+    }
+}
+
+async fn wait_or_stop(
+    child: &mut Child,
+    group: Option<Pid>,
+    stop: impl Future<Output = ()>,
+) -> std::io::Result<ExitStatus> {
+    tokio::select! {
+        status = child.wait() => return status,
+        () = stop => signal_group(group, Signal::SIGTERM),
     }
     tokio::select! {
-        status = &mut exit => status,
-        _ = tokio::time::sleep(KILL_GRACE) => {
-            signal(pid, Signal::SIGKILL);
-            exit.await
+        status = child.wait() => status,
+        () = tokio::time::sleep(KILL_GRACE) => {
+            signal_group(group, Signal::SIGKILL);
+            child.wait().await
         }
     }
 }
@@ -209,9 +229,9 @@ async fn read_some(pipe: Option<&mut (impl AsyncRead + Unpin)>, buf: &mut [u8]) 
     }
 }
 
-fn signal(pid: Option<Pid>, signal: Signal) {
-    if let Some(pid) = pid {
-        let _ = send_signal(pid, signal);
+fn signal_group(group: Option<Pid>, signal: Signal) {
+    if let Some(group) = group {
+        let _ = killpg(group, signal);
     }
 }
 
@@ -236,9 +256,18 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ffi::OsStr;
 
-    use gradient_wire::guest::{ContextLayers, RunJob};
+    use std::time::Duration;
 
-    use super::program_command;
+    use gradient_wire::guest::{ContextLayers, RunJob};
+    use tokio::process::{Child, Command};
+    use tokio::sync::oneshot;
+    use tokio::time::timeout;
+    use tokio_util::sync::CancellationToken;
+
+    use super::{
+        KILLED, OutputLog, PreparedJob, exit_code, program_command, run, spawn_piped,
+        stream_until_exit,
+    };
 
     fn job() -> RunJob {
         RunJob {
@@ -291,5 +320,67 @@ mod tests {
             .and_then(|(_, value)| value);
 
         assert_eq!(job_var, Some(OsStr::new("j1")));
+    }
+
+    async fn output_log(dir: &tempfile::TempDir) -> OutputLog {
+        OutputLog::create(&dir.path().join("output.log"))
+            .await
+            .expect("create")
+    }
+
+    fn shell(script: &str) -> Child {
+        spawn_piped(Command::new("sh").args(["-c", script])).expect("spawn sh")
+    }
+
+    #[tokio::test]
+    async fn a_background_process_holding_the_pipes_does_not_hold_the_exit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut output = output_log(&dir).await;
+        let child = shell("sleep 60 & echo done; exit 3");
+
+        let status = timeout(
+            Duration::from_secs(20),
+            stream_until_exit(child, &mut output, std::future::pending()),
+        )
+        .await
+        .expect("the exit is not held by the background sleep");
+
+        assert_eq!(exit_code(status), 3);
+    }
+
+    #[tokio::test]
+    async fn a_kill_stops_the_whole_process_group() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut output = output_log(&dir).await;
+        let child = shell("sleep 60 & sleep 60");
+
+        let status = timeout(
+            Duration::from_secs(20),
+            stream_until_exit(
+                child,
+                &mut output,
+                tokio::time::sleep(Duration::from_millis(200)),
+            ),
+        )
+        .await
+        .expect("the kill ends the group");
+
+        assert_eq!(exit_code(status), KILLED);
+    }
+
+    #[tokio::test]
+    async fn a_kill_before_the_program_starts_is_a_sigterm_exit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut output = output_log(&dir).await;
+        let kill = CancellationToken::new();
+        kill.cancel();
+        let (started, started_rx) = oneshot::channel();
+        let prepared = PreparedJob {
+            program: Command::new("true"),
+            env: BTreeMap::new(),
+        };
+
+        assert_eq!(run(prepared, &mut output, started, kill).await, KILLED);
+        assert!(started_rx.await.is_err());
     }
 }
