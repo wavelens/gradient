@@ -11,6 +11,7 @@ from datetime import timedelta
 EVALUATED = {"Building", "Waiting", "Completed"}
 EVAL_TIMEOUT = 900
 POSTGRES_LOG = "/var/lib/postgresql/18/log/postgresql.log"
+SERVER_SPANS = "/var/lib/gradient/trace/server-*.jsonl"
 CPUS = sorted(os.sched_getaffinity(0))
 
 
@@ -128,16 +129,43 @@ def save_slow_statements(label):
     print(f"slow statements of {label}:\n{text}")
 
 
+def spans_since(line_count):
+    text = server.succeed(f"cat {SERVER_SPANS} | tail -n +{line_count + 1}")
+    return [json.loads(line) for line in text.splitlines() if line.startswith("{")]
+
+
+def save_slow_spans(label, line_count):
+    spans = spans_since(line_count)
+    (pathlib.Path(server.out_dir) / f"spans-{label}.jsonl").write_text(
+        "\n".join(json.dumps(span) for span in spans)
+    )
+    by_name = {}
+    for span in spans:
+        total, count, longest = by_name.get(span["name"], (0, 0, 0))
+        by_name[span["name"]] = (total + span["dur_us"], count + 1, max(longest, span["dur_us"]))
+    slowest = "\n".join(
+        f"{span['dur_us'] // 1000} ms {span['name']} {json.dumps(span['fields'])}"
+        for span in sorted(spans, key=lambda span: -span["dur_us"])[:25]
+    )
+    heaviest = "\n".join(
+        f"{total // 1000} ms total, {count} calls, {longest // 1000} ms max: {name}"
+        for name, (total, count, longest) in sorted(by_name.items(), key=lambda item: -item[1][0])[:25]
+    )
+    print(f"slowest spans of {label}:\n{slowest}\n\nspans by total time:\n{heaviest}")
+
+
 def measure(token, task):
     workers = connected_workers(token)
     banner(f"evaluate {task} on {workers} workers")
     psql("SELECT pg_stat_statements_reset();")
     server.succeed(f": > {POSTGRES_LOG}")
+    span_lines = int(server.succeed(f"cat {SERVER_SPANS} | wc -l"))
     eval_id = api("POST", f"tasks/project/{task}/evaluate", token, body={})
     try:
         status = wait_for_status(token, eval_id, EVALUATED, timeout=EVAL_TIMEOUT)
     finally:
         save_slow_statements(f"{task}-{workers}")
+        save_slow_spans(f"{task}-{workers}", span_lines)
     statements = int(psql(
         "SELECT coalesce(sum(s.calls), 0) FROM pg_stat_statements s"
         " JOIN pg_roles r ON r.oid = s.userid WHERE r.rolname = 'gradient'"

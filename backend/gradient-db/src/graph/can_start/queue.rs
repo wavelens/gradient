@@ -140,6 +140,7 @@ pub async fn promote<C: ConnectionTrait>(
     ))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn promote_closure<C>(
     db: &C,
     evaluation: EvaluationId,

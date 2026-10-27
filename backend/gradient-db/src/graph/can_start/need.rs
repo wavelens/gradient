@@ -236,6 +236,7 @@ RETURNING db.derivation, db.wanted
         params = [DerivationIds(64), Bools(false, 64)];
 }
 
+#[tracing::instrument(level = "debug", skip_all, fields(rows = region.len()))]
 async fn write_need(
     txn: &DatabaseTransaction,
     region: &[QueryResult],
@@ -276,6 +277,7 @@ where
     walk_need(db, &GAIN_NEED, roots).await
 }
 
+#[tracing::instrument(level = "debug", skip_all, fields(walk = walk.name, roots = roots.len()))]
 async fn walk_need<C>(
     db: &C,
     walk: &crate::sql::Query,
@@ -316,6 +318,7 @@ where
 /// Order is load-bearing on both sides.
 /// The thaw and the adoption of jobs must precede the promote, which needs a builder and a job.
 /// The skip must follow the un-promote, or it would try to settle a row still `Queued`.
+#[tracing::instrument(level = "debug", skip_all, fields(gained = moved.gained.len(), lost = moved.lost.len()))]
 pub(crate) async fn settle_need<C>(
     db: &C,
     moved: &NeedMoved,
@@ -369,6 +372,7 @@ where
     Ok(changes)
 }
 
+#[tracing::instrument(level = "debug", skip_all, fields(candidates = derivations.len()))]
 pub async fn settle_created<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],

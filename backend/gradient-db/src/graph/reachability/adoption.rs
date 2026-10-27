@@ -210,6 +210,7 @@ where
     adopt(db, &ADOPT_LIVE_QUERY, []).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn adopt_pending_closure<C>(db: &C, evaluation: EvaluationId) -> Result<Adopted, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,

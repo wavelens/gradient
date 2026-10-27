@@ -55,7 +55,7 @@ fn ci_reports(status: BuildStatus) -> bool {
 
 /// A thaw or skip of one round crosses [`BUILDER_STATUSES`] and moves the need one level
 /// further, so the rounds repeat until a round crosses nothing.
-#[tracing::instrument(level = "debug", skip_all)]
+#[tracing::instrument(level = "debug", skip_all, fields(changes = changes.len()))]
 pub async fn emit_transition_effects(
     ctx: &DbContext,
     changes: &[TransitionChange],
@@ -91,6 +91,7 @@ fn need_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
         .collect()
 }
 
+#[tracing::instrument(level = "debug", skip_all, fields(changes = changes.len()))]
 async fn move_need(ctx: &DbContext, changes: &[TransitionChange]) -> Result<Moved, DbErr> {
     let db = &ctx.worker_db;
     let mut moved_out = Moved::default();
@@ -113,6 +114,7 @@ struct Moved {
     gained: Vec<DerivationId>,
 }
 
+#[tracing::instrument(level = "debug", skip_all, fields(changes = changes.len()))]
 async fn announce(ctx: &DbContext, changes: &[TransitionChange]) -> Result<(), DbErr> {
     if changes.is_empty() {
         return Ok(());
