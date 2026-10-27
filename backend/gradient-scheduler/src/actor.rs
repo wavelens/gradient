@@ -491,11 +491,7 @@ impl SchedulerCore {
             let kind = reattached.job.job_kind();
             let ram_need = reattached.job.ram_need_with(None, false);
             let devices = match &reattached.job {
-                PendingJob::Exec(exec) => self
-                    .pool
-                    .worker_caps(worker)
-                    .and_then(|caps| exec.requirement_for(&caps))
-                    .map(|requirement| requirement.devices),
+                PendingJob::Exec(exec) => Some(exec.spec.devices.clone()),
                 PendingJob::Eval(_) | PendingJob::Build(_) => None,
             };
             if self.tracker.restore_active(worker, reattached) {
@@ -1561,5 +1557,47 @@ mod tests {
         core.candidates("w1", true);
 
         assert!(core.pool.sent_candidates_for("w1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_reattached_exec_job_holds_its_devices_before_the_inventory_arrives() {
+        use gradient_types::exec::{DeviceRequest, ExecSpec};
+        use gradient_wire::types::{DeviceClass, ExecInventory};
+        let mut core = core_with_a_128_gb_worker();
+        let job = crate::test_jobs::exec_job(ExecSpec {
+            devices: vec![DeviceRequest {
+                name: "gpu:h100".into(),
+                count: 4,
+            }],
+            ..ExecSpec::default()
+        });
+        let job_id = crate::jobs::exec_job_key(job.exec_job);
+
+        core.restore(
+            "w1",
+            vec![Reattached::single(
+                job_id,
+                DispatchedJobId::now_v7(),
+                PendingJob::Exec(job),
+            )],
+        );
+        core.pool.update_exec_inventory(
+            "w1",
+            Some(ExecInventory {
+                devices: vec![DeviceClass {
+                    name: "gpu:h100".into(),
+                    total: 8,
+                    free: 8,
+                }],
+                ..ExecInventory::default()
+            }),
+        );
+
+        let free = core
+            .pool
+            .worker_caps("w1")
+            .and_then(|caps| caps.exec)
+            .map(|exec| exec.devices[0].free);
+        assert_eq!(free, Some(4));
     }
 }
