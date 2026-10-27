@@ -129,13 +129,19 @@ def save_slow_statements(label):
     print(f"slow statements of {label}:\n{text}")
 
 
-def spans_since(line_count):
-    text = server.succeed(f"cat {SERVER_SPANS} | tail -n +{line_count + 1}")
-    return [json.loads(line) for line in text.splitlines() if line.startswith("{")]
+spans_seen = 0
 
 
-def save_slow_spans(label, line_count):
-    spans = spans_since(line_count)
+def unseen_spans():
+    global spans_seen
+    text = server.succeed(f"cat {SERVER_SPANS} | tail -n +{spans_seen + 1}")
+    lines = text.splitlines()
+    spans_seen += len(lines)
+    return [json.loads(line) for line in lines if line.startswith("{")]
+
+
+def save_slow_spans(label):
+    spans = unseen_spans()
     (pathlib.Path(server.out_dir) / f"spans-{label}.jsonl").write_text(
         "\n".join(json.dumps(span) for span in spans)
     )
@@ -143,15 +149,30 @@ def save_slow_spans(label, line_count):
     for span in spans:
         total, count, longest = by_name.get(span["name"], (0, 0, 0))
         by_name[span["name"]] = (total + span["dur_us"], count + 1, max(longest, span["dur_us"]))
-    slowest = "\n".join(
-        f"{span['dur_us'] // 1000} ms {span['name']} {json.dumps(span['fields'])}"
-        for span in sorted(spans, key=lambda span: -span["dur_us"])[:25]
-    )
     heaviest = "\n".join(
         f"{total // 1000} ms total, {count} calls, {longest // 1000} ms max: {name}"
         for name, (total, count, longest) in sorted(by_name.items(), key=lambda item: -item[1][0])[:25]
     )
-    print(f"slowest spans of {label}:\n{slowest}\n\nspans by total time:\n{heaviest}")
+    first = min((span["ts_us"] for span in spans), default=0)
+    timeline = "\n".join(
+        f"+{(span['ts_us'] - first) // 1000:>7} ms {span['dur_us'] // 1000:>6} ms {span['name']} {json.dumps(span['fields'])}"
+        for span in sorted(spans, key=lambda span: span["ts_us"])
+        if span["dur_us"] >= 1_000_000
+    )
+    print(f"spans by total time since the previous run, {label}:\n{heaviest}\n\nspans over a second:\n{timeline}")
+
+
+def wait_until_settled(eval_id):
+    deadline = time.monotonic() + EVAL_TIMEOUT
+    while int(psql(
+        "SELECT count(*) FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build"
+        f" WHERE bj.evaluation = '{eval_id}' AND db.status IN (1, 2)"
+    )):
+        assert time.monotonic() < deadline, (
+            f"evaluation {eval_id} still has queued or building shared builds after its abort:\n"
+            + server.succeed("journalctl -u gradient-server --no-pager -n 50")
+        )
+        time.sleep(2)
 
 
 def measure(token, task):
@@ -159,13 +180,12 @@ def measure(token, task):
     banner(f"evaluate {task} on {workers} workers")
     psql("SELECT pg_stat_statements_reset();")
     server.succeed(f": > {POSTGRES_LOG}")
-    span_lines = int(server.succeed(f"cat {SERVER_SPANS} | wc -l"))
     eval_id = api("POST", f"tasks/project/{task}/evaluate", token, body={})
     try:
         status = wait_for_status(token, eval_id, EVALUATED, timeout=EVAL_TIMEOUT)
     finally:
         save_slow_statements(f"{task}-{workers}")
-        save_slow_spans(f"{task}-{workers}", span_lines)
+        save_slow_spans(f"{task}-{workers}")
     statements = int(psql(
         "SELECT coalesce(sum(s.calls), 0) FROM pg_stat_statements s"
         " JOIN pg_roles r ON r.oid = s.userid WHERE r.rolname = 'gradient'"
@@ -185,6 +205,7 @@ def measure(token, task):
     }
     if status != "Completed":
         api("POST", f"evals/{eval_id}", token, body={"method": "abort"})
+        wait_until_settled(eval_id)
     return result
 
 

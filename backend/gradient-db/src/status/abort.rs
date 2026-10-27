@@ -13,6 +13,7 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use std::collections::HashSet;
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn abort_eval_shared_builds(
     ctx: &DbContext,
     evaluation: &MEvaluation,
@@ -54,6 +55,7 @@ pub async fn abort_eval_shared_builds(
 
 /// The abort only moves abortable shared builds. A failed attempt waiting for its retry stays as
 /// it is, and its need has to go with the evaluation.
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn release_evaluation_need(
     ctx: &DbContext,
     evaluation: EvaluationId,
@@ -74,6 +76,7 @@ pub async fn release_evaluation_need(
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all, fields(shared_builds = to_abort.len()))]
 pub(super) async fn abort_shared_builds(
     ctx: &DbContext,
     evaluation: &MEvaluation,
@@ -140,6 +143,7 @@ pub(super) async fn abort_shared_builds(
     Ok(abort_ids)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn ids_shared_with_other_evaluations(
     ctx: &DbContext,
     this_eval: EvaluationId,
