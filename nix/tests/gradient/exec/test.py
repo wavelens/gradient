@@ -130,7 +130,7 @@ def one_paused_guest(node):
 def guest_of_job(node, job_id):
     return node.succeed(
         f"for f in {GUESTS}/*/state.json; do "
-        f"jq -e --arg id {job_id} '.job.job_id == $id' $f >/dev/null && basename $(dirname $f); "
+        f"jq -e --arg id exec:{job_id} '.job.job_id == $id' $f >/dev/null && basename $(dirname $f); "
         "done; true").strip()
 
 
