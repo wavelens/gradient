@@ -63,7 +63,7 @@ def job(name):
     return api("GET", f"exec-jobs/{JOBS[name]}")
 
 
-def log(name, attempt=None):
+def job_log(name, attempt=None):
     query = f"?attempt={attempt}" if attempt else ""
     return api("GET", f"exec-jobs/{JOBS[name]}/log{query}")
 
@@ -81,7 +81,7 @@ def wait_status(name, status, timeout=600):
         if state["status"] in TERMINAL and state["status"] != status:
             raise Exception(
                 f"{name} ended {state['status']}, expected {status}: {json.dumps(state)}\n"
-                f"log:\n{log(name)}\n{fleet_tail()}"
+                f"log:\n{job_log(name)}\n{fleet_tail()}"
             )
         return None
 
@@ -93,7 +93,7 @@ def wait_running(name, tick):
         state = job(name)
         if state["status"] in TERMINAL:
             raise Exception(f"{name} ended {state['status']} before tick {tick}: {json.dumps(state)}")
-        return state["status"] == "running" and f"tick {tick}" in log(name).splitlines()
+        return state["status"] == "running" and f"tick {tick}" in job_log(name).splitlines()
 
     wait_for(f"{name} runs and prints tick {tick}", check)
 
@@ -199,14 +199,14 @@ stopper.wait_until_succeeds(
 banner("Phase 7: a networked job resolves a name and reaches the server")
 fetched = wait_status("fetch", "completed")
 assert end_reasons(fetched) == ["completed"], json.dumps(fetched)
-output = log("fetch")
+output = job_log("fetch")
 assert "served to the guest" in output, f"fetch did not reach the server:\n{output}"
 assert f"job={JOBS['fetch']} attempt=1" in output, f"fetch saw no job context:\n{output}"
 
 banner("Phase 8: a silent program times out")
 silent = wait_status("silent", "failed")
 assert end_reasons(silent) == ["timeout"], json.dumps(silent)
-assert "program produced no output for 5s (maxSilent exceeded)" in log("silent"), log("silent")
+assert "program produced no output for 5s (maxSilent exceeded)" in job_log("silent"), job_log("silent")
 
 banner("Phase 9: an aborted job stops")
 wait_running("abort", 3)
@@ -225,7 +225,7 @@ banner("Phase 11: a failing job uses its retry")
 failed = wait_status("fail", "failed")
 assert end_reasons(failed) == ["failed", "failed"], json.dumps(failed)
 assert failed["retries_left"] == 0, json.dumps(failed)
-assert "attempt 2 exits with 3" in log("fail", attempt=2), log("fail", attempt=2)
+assert "attempt 2 exits with 3" in job_log("fail", attempt=2), job_log("fail", attempt=2)
 
 banner("Phase 12: a worker keeping its guests resumes the job, a restarted agent loses its job")
 wait_running("long-keep", 5)
@@ -244,7 +244,7 @@ assert main_pid(keeper, keep_guest) == pid, "the kept guest unit changed its mai
 
 kept = wait_status("long-keep", "completed")
 assert end_reasons(kept) == ["completed"], json.dumps(kept)
-lines = log("long-keep").splitlines()
+lines = job_log("long-keep").splitlines()
 uneven = [n for n in range(1, 151) if lines.count(f"tick {n}") != 1]
 assert not uneven, f"ticks missing or repeated after the replay: {uneven}"
 
