@@ -6,8 +6,6 @@
 
 @use '../../styles/variables' as *;
 
-$header-height: 4.5rem;
-
 .main-header {
   display: grid;
   grid-template-columns: minmax(max-content, 1fr) minmax(0, 1400px) minmax(0, 1fr);

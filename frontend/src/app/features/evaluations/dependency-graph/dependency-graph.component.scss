@@ -10,7 +10,7 @@
   display: flex;
   flex: auto !important;
   flex-direction: column;
-  height: calc(100vh - 65px);
+  height: $below-header-height;
   overflow: hidden;
   min-height: 0;
 }

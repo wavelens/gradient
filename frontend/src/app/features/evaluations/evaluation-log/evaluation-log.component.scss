@@ -14,7 +14,7 @@
 
 :host {
   display: block;
-  height: calc(100vh - 65px);
+  height: $below-header-height;
   overflow: hidden;
 }
 
@@ -24,14 +24,14 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: calc(100vh - 65px);
+  height: $below-header-height;
   text-align: center;
 }
 
 .eval-layout {
   position: relative;
   display: flex;
-  height: calc(100vh - 65px);
+  height: $below-header-height;
   overflow: hidden;
 }
 

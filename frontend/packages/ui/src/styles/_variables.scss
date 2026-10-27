@@ -49,6 +49,10 @@ $control-height-sm: 28px;
 $focus-ring-width: 2px;
 $focus-ring-offset: 2px;
 
+// The header with its 1px bottom border. `dvh` excludes the phone browser bars `vh` would count.
+$header-height: 4.5rem;
+$below-header-height: calc(100dvh - #{$header-height} - 1px);
+
 // Z-index layers
 $z-dropdown: 1000;
 $z-sticky: 1020;
