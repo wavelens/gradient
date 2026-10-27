@@ -43,6 +43,7 @@ pub async fn latest<C: ConnectionTrait>(db: &C, job: ExecJobId) -> Result<Option
     Ok(EExecJobPhase::find()
         .filter(CExecJobPhase::ExecJob.eq(job))
         .order_by_desc(CExecJobPhase::CreatedAt)
+        .order_by_desc(CExecJobPhase::Id)
         .one(db)
         .await?
         .map(|phase| Phase {

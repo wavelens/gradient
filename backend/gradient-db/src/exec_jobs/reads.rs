@@ -43,7 +43,7 @@ pub struct ExecJobDetail {
 crate::sql! {
     EXEC_JOBS_OF_EVALUATION = "SELECT r.*, e.eval AS entry_point_name, \
          (SELECT p.name FROM exec_job_phase p WHERE p.exec_job = r.id \
-              ORDER BY p.created_at DESC LIMIT 1) AS last_phase_name \
+              ORDER BY p.created_at DESC, p.id DESC LIMIT 1) AS last_phase_name \
          FROM exec_job r JOIN entry_point e ON e.id = r.entry_point \
          WHERE r.evaluation = $1 ORDER BY e.eval",
         params = [EvaluationId];
@@ -114,6 +114,7 @@ pub async fn one<C: ConnectionTrait>(
         .column(CExecJobPhase::CreatedAt)
         .filter(CExecJobPhase::ExecJob.eq(job.id))
         .order_by_asc(CExecJobPhase::CreatedAt)
+        .order_by_asc(CExecJobPhase::Id)
         .into_model::<ExecJobPhaseRow>()
         .all(db)
         .await?;

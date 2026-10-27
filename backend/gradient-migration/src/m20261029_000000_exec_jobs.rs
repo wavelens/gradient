@@ -67,7 +67,7 @@ CREATE UNIQUE INDEX "uq-exec_job-entry_point" ON public.exec_job USING btree (en
 CREATE INDEX "idx-exec_job-program_derivation" ON public.exec_job USING btree (program_derivation);
 CREATE INDEX "idx-exec_job-image_derivation" ON public.exec_job USING btree (image_derivation) WHERE (image_derivation IS NOT NULL);
 CREATE INDEX "idx-exec_job_attempt-open" ON public.exec_job_attempt USING btree (exec_job) WHERE (ended_at IS NULL);
-CREATE INDEX "idx-exec_job_phase-job" ON public.exec_job_phase USING btree (exec_job, created_at DESC);
+CREATE INDEX "idx-exec_job_phase-job" ON public.exec_job_phase USING btree (exec_job, created_at DESC, id DESC);
 CREATE INDEX "idx-exec_job_phase-attempt" ON public.exec_job_phase USING btree (attempt);
 CREATE INDEX "idx-entry_point-exec" ON public.entry_point USING btree (evaluation) WHERE (exec IS NOT NULL);
 "#;

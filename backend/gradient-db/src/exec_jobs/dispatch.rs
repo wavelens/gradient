@@ -53,7 +53,7 @@ fn dispatch_rows_sql(filter: &str) -> String {
          LEFT JOIN derivation_output img ON img.derivation = r.image_derivation AND img.name = 'out' \
          LEFT JOIN exec_job_attempt oa ON oa.exec_job = r.id AND oa.ended_at IS NULL \
          LEFT JOIN LATERAL (SELECT p.name, p.payload FROM exec_job_phase p \
-              WHERE p.exec_job = r.id ORDER BY p.created_at DESC LIMIT 1) lp ON true \
+              WHERE p.exec_job = r.id ORDER BY p.created_at DESC, p.id DESC LIMIT 1) lp ON true \
          WHERE {filter} \
          ORDER BY r.created_at"
     )
