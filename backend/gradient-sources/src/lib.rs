@@ -21,8 +21,8 @@ pub use self::daemon::*;
 pub use self::error::StoreDaemonError;
 pub use self::evaluator::*;
 pub use self::git::{
-    BranchHead, HeadCommit, check_task_updates, checkout_commit, get_commit_info, head_commit,
-    resolve_remote_ref,
+    BranchHead, HeadCommit, check_task_updates, checkout_commit, checkout_commit_into,
+    get_commit_info, head_commit, resolve_remote_ref,
 };
 pub use self::secret::{decrypt_secret, encrypt_secret};
 pub use self::ssh_key::{decrypt_ssh_private_key, format_public_key, generate_ssh_key};

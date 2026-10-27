@@ -8,22 +8,33 @@ use super::ssh::with_private_key;
 use super::url::{git_transport_url, set_shallow_unless_local};
 use anyhow::{Context, Result};
 use git2::{Direction, FetchOptions, Oid, Remote, Repository};
+use std::path::Path;
 use tempfile::TempDir;
 use tracing::debug;
 
 pub fn checkout_commit(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<TempDir> {
-    with_private_key(ssh_key, || {
-        checkout_into_temp_dir(git_transport_url(url), commit)
-    })
-}
-
-fn checkout_into_temp_dir(url: &str, commit: &str) -> Result<TempDir> {
-    let oid = Oid::from_str(commit).with_context(|| format!("invalid commit SHA: {commit}"))?;
     let checkout = tempfile::Builder::new()
         .prefix("gradient-fetch-")
         .tempdir()
         .context("create the checkout directory")?;
-    let repo = Repository::init(checkout.path()).context("init the checkout")?;
+    checkout_commit_into(checkout.path(), url, commit, ssh_key)?;
+    Ok(checkout)
+}
+
+pub fn checkout_commit_into(
+    dir: &Path,
+    url: &str,
+    commit: &str,
+    ssh_key: Option<&str>,
+) -> Result<()> {
+    with_private_key(ssh_key, || {
+        check_out_into(dir, git_transport_url(url), commit)
+    })
+}
+
+fn check_out_into(dir: &Path, url: &str, commit: &str) -> Result<()> {
+    let oid = Oid::from_str(commit).with_context(|| format!("invalid commit SHA: {commit}"))?;
+    let repo = Repository::init(dir).context("init the checkout")?;
 
     Origin::new(&repo, url)?
         .fetch_commit(oid)
@@ -36,8 +47,10 @@ fn checkout_into_temp_dir(url: &str, commit: &str) -> Result<TempDir> {
     options.force();
     repo.checkout_tree(pinned.as_object(), Some(&mut options))
         .context("check out the tree")?;
+    repo.set_head_detached(oid)
+        .context("point HEAD at the commit")?;
 
-    Ok(checkout)
+    Ok(())
 }
 
 struct Origin<'a> {

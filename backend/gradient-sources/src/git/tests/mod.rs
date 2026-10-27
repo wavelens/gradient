@@ -6,7 +6,7 @@
 
 mod fixtures;
 
-use super::checkout::checkout_commit;
+use super::checkout::{checkout_commit, checkout_commit_into};
 use super::commit_info::{fetch_commit, head_refspec};
 use super::pktline::read_advertised_refs;
 use super::remote::{AdvertisedRef, BranchHead, branch_head, ls_remote_head};
@@ -355,6 +355,31 @@ fn a_commit_only_on_a_pull_request_ref_is_checked_out() {
     let url = format!("file://{}", dir.path().display());
 
     assert_eq!(checked_out_file(&url, pull), "fork");
+}
+
+#[test]
+fn a_commit_lands_in_the_given_directory() {
+    let origin = tempfile::TempDir::new().unwrap();
+    let repo = git2::Repository::init(origin.path()).unwrap();
+    let sig = git2::Signature::now("Ada", "ada@example.com").unwrap();
+    let mut tree = repo.treebuilder(None).unwrap();
+    tree.insert("flake.nix", repo.blob(b"{ }").unwrap(), 0o100644)
+        .unwrap();
+    let tree = repo.find_tree(tree.write().unwrap()).unwrap();
+    let sha = repo
+        .commit(Some("refs/heads/main"), &sig, &sig, "flake", &tree, &[])
+        .unwrap();
+    let work = tempfile::TempDir::new().unwrap();
+    let url = format!("file://{}", origin.path().display());
+
+    checkout_commit_into(work.path(), &url, &sha.to_string(), None).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(work.path().join("flake.nix")).unwrap(),
+        "{ }"
+    );
+    let checkout = git2::Repository::open(work.path()).unwrap();
+    assert_eq!(checkout.head().unwrap().peel_to_commit().unwrap().id(), sha);
 }
 
 struct GitDaemon(std::process::Child);
