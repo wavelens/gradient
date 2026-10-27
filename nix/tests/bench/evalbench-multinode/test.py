@@ -74,7 +74,7 @@ def reset_workers():
     for node in WORKER_NODES:
         node.systemctl("stop gradient-worker.service")
         node.succeed("rm -rf /var/lib/gradient-worker/eval-cache /var/lib/gradient-worker/www/.cache/nix")
-        node.succeed("nix-collect-garbage >&2")
+        node.succeed("nix-collect-garbage 2>&1 | grep -v \"^deleting '\" >&2")
         node.systemctl("start gradient-worker.service")
     for node in WORKER_NODES:
         node.wait_until_succeeds(
