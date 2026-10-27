@@ -2,8 +2,6 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
-from datetime import timedelta
-
 BASE = "http://localhost:8080"
 RUN = ("docker run -dt --name gradient --privileged --cgroupns=host "
        "-p 127.0.0.1:8080:80 -v gradient:/var/lib gradient-standalone:latest")
