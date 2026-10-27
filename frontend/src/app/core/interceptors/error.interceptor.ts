@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
+import { HttpContextToken, HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { Observable, catchError, retry, throwError, timer } from 'rxjs';
+
+export const SESSION_PROBE = new HttpContextToken(() => false);
 
 const THROTTLE_RETRIES = 3;
 const MIN_THROTTLE_WAIT_MS = 250;
@@ -43,6 +45,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
     catchError((error: HttpErrorResponse) => {
       switch (error.status) {
         case 401: {
+          if (req.context.get(SESSION_PROBE)) break;
           localStorage.removeItem('jwt_token');
           sessionStorage.removeItem('jwt_token');
           const pending = router.currentNavigation()?.finalUrl;
