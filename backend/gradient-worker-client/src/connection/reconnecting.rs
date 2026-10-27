@@ -325,7 +325,11 @@ mod tests {
         let mut closed = session().await;
         w.attach(closed.writer.clone()).await.unwrap();
         closed.flush.close();
-        assert!(closed.server.recv().await.is_err());
+        drop(closed.reader);
+        let ended = tokio::time::timeout(Duration::from_secs(5), closed.server.recv())
+            .await
+            .expect("the server sees the closed session");
+        assert!(ended.is_err());
 
         w.send(completed()).await.unwrap();
 
