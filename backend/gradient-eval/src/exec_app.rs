@@ -12,18 +12,32 @@ use serde::Deserialize;
 use crate::ipc::ExecApp;
 use crate::strip_nix_store_prefix;
 
-pub const EXEC_APP_EXPR: &str = r#"app: let g = app.passthru.gradient; ctx = builtins.getContext app.program;
-in builtins.unsafeDiscardStringContext (builtins.toJSON {
+pub const EXEC_APP_EXPR: &str = r#"app: let
+  g = app.passthru.gradient;
+  ctx = builtins.getContext app.program;
+  problem =
+    if !builtins.isAttrs g then "must be an attribute set, not a ${builtins.typeOf g}"
+    else if g ? image && !(builtins.isAttrs g.image && g.image ? config.system.build.toplevel)
+    then "image has no config.system.build.toplevel"
+    else null;
+in builtins.unsafeDiscardStringContext (builtins.toJSON (if problem != null then { inherit problem; } else {
   block = removeAttrs g [ "image" "sops" ];
   program = app.program;
   programDrvs = builtins.filter (k: ctx.${k} ? outputs) (builtins.attrNames ctx);
-})"#;
+}))"#;
 
 const IMAGE_TOPLEVEL: [&str; 4] = ["config", "system", "build", "toplevel"];
 
 #[derive(Deserialize)]
+#[serde(untagged)]
+enum AppJson {
+    Refused { problem: String },
+    Read(ReadApp),
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AppJson {
+struct ReadApp {
     block: serde_json::Value,
     program: String,
     program_drvs: Vec<String>,
@@ -46,10 +60,16 @@ pub fn is_exec_app(cursor: &AttrCursor) -> Result<bool> {
 }
 
 pub fn read_exec_app(cursor: &AttrCursor, state: &EvalState) -> Result<ExecApp> {
+    let json = app_json(cursor, state).map_err(|e| anyhow!("passthru.gradient: {e}"))?;
+    let app = parse_app(&json).map_err(|e| anyhow!(e))?;
+    let image =
+        image_drv(cursor, state).map_err(|e| anyhow!("passthru.gradient: image: {e}"))?;
+    exec_app(app, image.as_deref()).map_err(|e| anyhow!(e))
+}
+
+fn app_json(cursor: &AttrCursor, state: &EvalState) -> Result<String> {
     let read = state.eval_from_string(EXEC_APP_EXPR, "/")?;
-    let json = read.call(&cursor.value(state)?)?.as_string()?;
-    let image = image_drv(cursor, state)?;
-    exec_app_from_json(&json, image.as_deref()).map_err(|e| anyhow!(e))
+    Ok(read.call(&cursor.value(state)?)?.as_string()?)
 }
 
 fn image_drv(cursor: &AttrCursor, state: &EvalState) -> Result<Option<String>> {
@@ -65,20 +85,23 @@ fn image_drv(cursor: &AttrCursor, state: &EvalState) -> Result<Option<String>> {
         return Ok(None);
     };
     for name in IMAGE_TOPLEVEL {
-        at = at.maybe_get_attr(name)?.ok_or_else(|| {
-            anyhow!(
-                "passthru.gradient: image has no {}",
-                IMAGE_TOPLEVEL.join(".")
-            )
-        })?;
+        at = at
+            .maybe_get_attr(name)?
+            .ok_or_else(|| anyhow!("has no {}", IMAGE_TOPLEVEL.join(".")))?;
     }
 
     Ok(Some(at.drv_path(state)?))
 }
 
-pub fn exec_app_from_json(json: &str, image_drv: Option<&str>) -> Result<ExecApp, String> {
-    let app: AppJson = serde_json::from_str(json)
-        .map_err(|e| format!("passthru.gradient: unreadable app: {e}"))?;
+fn parse_app(json: &str) -> Result<ReadApp, String> {
+    match serde_json::from_str(json) {
+        Ok(AppJson::Read(app)) => Ok(app),
+        Ok(AppJson::Refused { problem }) => Err(format!("passthru.gradient: {problem}")),
+        Err(e) => Err(format!("passthru.gradient: unreadable app: {e}")),
+    }
+}
+
+fn exec_app(app: ReadApp, image_drv: Option<&str>) -> Result<ExecApp, String> {
     if !app.program.starts_with("/nix/store/") {
         return Err(format!(
             "passthru.gradient: program {:?} is not a store path",
@@ -105,6 +128,19 @@ pub fn exec_app_from_json(json: &str, image_drv: Option<&str>) -> Result<ExecApp
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn exec_app_from_json(json: &str, image_drv: Option<&str>) -> Result<ExecApp, String> {
+        exec_app(parse_app(json)?, image_drv)
+    }
+
+    #[test]
+    fn a_problem_found_by_the_expression_is_a_field_error() {
+        let json = r#"{"problem":"must be an attribute set, not a string"}"#;
+        assert_eq!(
+            exec_app_from_json(json, None).unwrap_err(),
+            "passthru.gradient: must be an attribute set, not a string"
+        );
+    }
 
     #[test]
     fn a_program_outside_the_store_is_a_field_error() {
