@@ -310,21 +310,7 @@ async fn add_batches(
     drv_paths: &[String],
 ) -> anyhow::Result<Added> {
     let handles = &session.handles;
-    let requested: HashSet<&str> = drv_paths.iter().map(String::as_str).collect();
-    let derivations: Vec<DiscoveredDerivation> = closure
-        .iter()
-        .map(|(path, drv)| {
-            let attr = requested.contains(path.as_str()).then(|| drv_name(path));
-            let mut discovered =
-                discovered_derivation(attr, StorePath::parse_stored(path)?.base(), drv);
-            for dependency in &mut discovered.dependencies {
-                *dependency = StorePath::parse_stored(dependency)?.base();
-            }
-
-            Ok(discovered)
-        })
-        .collect::<anyhow::Result<_>>()?;
-
+    let derivations = discovered(closure, drv_paths)?;
     for batch in derivations.chunks(RECORD_BATCH_SIZE) {
         let report = handles
             .graph
@@ -342,6 +328,33 @@ async fn add_batches(
     }
 
     Ok(Added::Yes)
+}
+
+fn discovered(
+    closure: &[(String, Derivation)],
+    drv_paths: &[String],
+) -> anyhow::Result<Vec<DiscoveredDerivation>> {
+    let requested: HashSet<&str> = drv_paths.iter().map(String::as_str).collect();
+    closure
+        .iter()
+        .map(|(path, drv)| {
+            let base = StorePath::parse_stored(path)?.base();
+            let attr = requested
+                .contains(path.as_str())
+                .then(|| entry_point_name(&base));
+            let mut discovered = discovered_derivation(attr, base, drv);
+            for dependency in &mut discovered.dependencies {
+                *dependency = StorePath::parse_stored(dependency)?.base();
+            }
+
+            Ok(discovered)
+        })
+        .collect()
+}
+
+// Entry points are unique per evaluation and name; many derivations share a name like `source`.
+fn entry_point_name(base: &str) -> String {
+    base.strip_suffix(".drv").unwrap_or(base).to_owned()
 }
 
 pub async fn run(
@@ -569,6 +582,20 @@ mod tests {
         assert!(sql.contains(&format!("\"started_by\" = '{user}'")), "{sql}");
         assert!(sql.contains("\"kind\" ="), "{sql}");
         assert!(sql.contains("\"status\" IN (2, 3, 4)"), "{sql}");
+    }
+
+    #[test]
+    fn requests_joining_one_evaluation_with_alike_named_derivations_keep_separate_entry_points() {
+        let first = format!("/nix/store/{}-source.drv", "a".repeat(32));
+        let second = format!("/nix/store/{}-source.drv", "b".repeat(32));
+
+        let entry_point = |path: &String| {
+            let found = discovered(&[(path.clone(), drv(&[]))], std::slice::from_ref(path))
+                .expect("discovered");
+            found[0].attr.clone()
+        };
+
+        assert_ne!(entry_point(&first), entry_point(&second));
     }
 
     #[test]
