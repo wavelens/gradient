@@ -62,8 +62,7 @@ pub fn is_exec_app(cursor: &AttrCursor) -> Result<bool> {
 pub fn read_exec_app(cursor: &AttrCursor, state: &EvalState) -> Result<ExecApp> {
     let json = app_json(cursor, state).map_err(|e| anyhow!("passthru.gradient: {e}"))?;
     let app = parse_app(&json).map_err(|e| anyhow!(e))?;
-    let image =
-        image_drv(cursor, state).map_err(|e| anyhow!("passthru.gradient: image: {e}"))?;
+    let image = image_drv(cursor, state).map_err(|e| anyhow!("passthru.gradient: image: {e}"))?;
     exec_app(app, image.as_deref()).map_err(|e| anyhow!(e))
 }
 
