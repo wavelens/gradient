@@ -7,6 +7,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use anyhow::Result;
+use gradient_db::eval_costs::TaskEvalCosts;
 use gradient_db::eval_shards::{self, NewShard};
 use gradient_entity::cluster_member::{Column as CClusterMember, Entity as EClusterMember};
 use gradient_entity::eval_shard::Model as MEvalShard;
@@ -105,7 +106,7 @@ impl Scheduler {
                 fingerprint,
             },
             NextStep::Plan => EvalShardOutcome::Plan,
-            NextStep::Take => self.take(split.evaluation, job_id, finished).await?,
+            NextStep::Take => self.take(&split, job_id, finished).await?,
         };
 
         Ok(outcome)
@@ -181,6 +182,21 @@ impl Scheduler {
             return Ok(());
         };
 
+        let shards = self.planned_shards(&split, specs).await?;
+        let txn = self.db.worker_db.begin().await?;
+        if mark_planned(&txn, split.evaluation).await? {
+            eval_shards::insert_shards(&txn, split.evaluation, &shards, None).await?;
+        }
+        txn.commit().await?;
+
+        Ok(())
+    }
+
+    async fn planned_shards(
+        &self,
+        split: &MEvalSplit,
+        specs: Vec<EvalShardSpec>,
+    ) -> Result<Vec<NewShard>> {
         let db = &self.db.worker_db;
         let members = EClusterMember::find()
             .filter(CClusterMember::ClusterJob.eq(split.cluster_job))
@@ -190,18 +206,8 @@ impl Scheduler {
             Some(task) => gradient_db::eval_costs::load_eval_costs(db, task).await?,
             None => Default::default(),
         };
-        let input = PlanInput::from(specs);
-        let members = usize::try_from(members).unwrap_or(1).max(1);
-        let planned = plan_shards(&costs, &input.listed, members, &split_params(members));
-        let shards = input.shards(planned);
 
-        let txn = db.begin().await?;
-        if mark_planned(&txn, split.evaluation).await? {
-            eval_shards::insert_shards(&txn, split.evaluation, &shards, None).await?;
-        }
-        txn.commit().await?;
-
-        Ok(())
+        Ok(packed(&costs, usize::try_from(members).unwrap_or(1), specs))
     }
 
     pub(crate) async fn split_of(&self, job_id: &str) -> Result<Option<(MEvalSplit, u16)>> {
@@ -217,14 +223,22 @@ impl Scheduler {
 
     async fn take(
         &self,
-        evaluation: EvaluationId,
+        split: &MEvalSplit,
         job_id: &str,
         finished: Option<FinishedShard>,
     ) -> Result<EvalShardOutcome> {
+        let evaluation = split.evaluation;
+        let deferred = match &finished {
+            Some(finished) if !finished.deferred.is_empty() => {
+                self.planned_shards(split, finished.deferred.clone())
+                    .await?
+            }
+            _ => Vec::new(),
+        };
         let txn = self.db.worker_db.begin().await?;
         let stale = match finished {
             Some(finished) => {
-                finish(&txn, job_id, finished).await?;
+                finish(&txn, job_id, &finished.id, deferred).await?;
                 Vec::new()
             }
             None => eval_shards::requeue_shards_of(&txn, job_id).await?,
@@ -269,18 +283,29 @@ fn wait() -> EvalShardOutcome {
     }
 }
 
-async fn finish(txn: &DatabaseTransaction, job_id: &str, finished: FinishedShard) -> Result<()> {
-    let Ok(shard) = finished.id.parse::<EvalShardId>() else {
-        warn!(%job_id, id = %finished.id, "finished shard with an unparsable id");
+async fn finish(
+    txn: &DatabaseTransaction,
+    job_id: &str,
+    id: &str,
+    deferred: Vec<NewShard>,
+) -> Result<()> {
+    let Ok(shard) = id.parse::<EvalShardId>() else {
+        warn!(%job_id, %id, "finished shard with an unparsable id");
         return Ok(());
     };
 
-    let deferred: Vec<NewShard> = finished.deferred.into_iter().map(new_shard).collect();
     if !eval_shards::finish_shard(txn, shard, job_id, &deferred).await? {
         warn!(%job_id, %shard, "finished shard is not running for this job");
     }
 
     Ok(())
+}
+
+fn packed(costs: &TaskEvalCosts, members: usize, specs: Vec<EvalShardSpec>) -> Vec<NewShard> {
+    let input = PlanInput::from(specs);
+    let members = members.max(1);
+    let planned = plan_shards(costs, &input.listed, members, &split_params(members));
+    input.shards(planned)
 }
 
 fn new_shard(spec: EvalShardSpec) -> NewShard {
@@ -470,6 +495,43 @@ mod tests {
             EvalShardOutcome::Wait {
                 retry_after_ms: RETRY_AFTER_MS
             }
+        );
+    }
+
+    #[test]
+    fn a_deferred_set_is_packed_into_shards_for_every_member() {
+        let names: Vec<String> = (0..400).map(|i| format!("p{i}")).collect();
+        let costs = TaskEvalCosts {
+            sets: vec![],
+            subtrees: names
+                .iter()
+                .map(|name| gradient_db::eval_costs::SubtreeCost {
+                    path: vec!["hydraJobs".into(), "python".into(), name.clone()],
+                    attrs: 1.0,
+                    ms_per_attr: 1000.0,
+                })
+                .collect(),
+        };
+        let deferred = EvalShardSpec {
+            set: vec!["hydraJobs".into(), "python".into()],
+            pattern: "hydraJobs.python.*".into(),
+            children: Some(names),
+        };
+
+        let shards = packed(&costs, 4, vec![deferred]);
+
+        assert!(shards.len() >= 8, "{}", shards.len());
+        assert!(
+            shards
+                .iter()
+                .all(|shard| shard.pattern == "hydraJobs.python.*")
+        );
+        assert_eq!(
+            shards
+                .iter()
+                .map(|shard| shard.children.as_ref().map_or(0, Vec::len))
+                .sum::<usize>(),
+            400
         );
     }
 
