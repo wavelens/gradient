@@ -16,6 +16,7 @@ Test structure and the patterns new tests follow. The source tree is the catalog
 | NixOS VM | `nix/tests/gradient/<name>/`, `nix/tests/harness/` | A booted machine with the packaged server, or a module against a scripted API |
 | SQL plan check | `backend/src/sql_gate/`, started by the e2e VM test | The plan of every registered statement at production scale |
 | Mock daemon | `backend/gradient-daemon/`, `nix/tests/store-spec/`, `nix/tests/gradient/scheduler/`, `nix/tests/gradient/cluster/` | Scheduler and workers against a scripted Nix store |
+| Nix headers | `nix/tests/nix-headers/` | Header tests of the patched Nix built with libc++ (clang, macOS) - skip the ones that also fail with libstdc++ |
 | Eval benchmark | `nix/tests/bench/evalbench/`, on request | Evaluation speed per stage, with a capture bundle per round ([Eval Benchmark](eval-benchmark.md)) |
 
 - Put tests for public entry points (an HTTP route, a CLI call) in a crate's `tests/` directory. Keep all other tests in a `#[cfg(test)]` module next to the code.

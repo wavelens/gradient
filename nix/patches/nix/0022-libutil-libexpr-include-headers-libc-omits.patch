@@ -1,0 +1,54 @@
+From 1990b7277b9ee58adc46d90ef2385750d115c774 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Tue, 27 Oct 2026 21:22:31 +0100
+Subject: [PATCH] libutil, libexpr: include headers libc++ omits
+
+std::hardware_destructive_interference_size is declared in <new> and
+std::atomic_flag in <atomic>. libstdc++ pulls both in transitively, libc++
+does not, so counter.hh, bump-memory-resource.hh and callback.hh fail to
+compile with clang when included first.
+---
+ src/libexpr/include/nix/expr/counter.hh              | 1 +
+ src/libutil/include/nix/util/bump-memory-resource.hh | 1 +
+ src/libutil/include/nix/util/callback.hh             | 1 +
+ 3 files changed, 3 insertions(+)
+
+diff --git a/src/libexpr/include/nix/expr/counter.hh b/src/libexpr/include/nix/expr/counter.hh
+index f679b23ca..cc2744b81 100644
+--- a/src/libexpr/include/nix/expr/counter.hh
++++ b/src/libexpr/include/nix/expr/counter.hh
+@@ -2,6 +2,7 @@
+ 
+ #include <atomic>
+ #include <cstdint>
++#include <new>
+ 
+ namespace nix {
+ 
+diff --git a/src/libutil/include/nix/util/bump-memory-resource.hh b/src/libutil/include/nix/util/bump-memory-resource.hh
+index 9ae6be048..cc8d77ddc 100644
+--- a/src/libutil/include/nix/util/bump-memory-resource.hh
++++ b/src/libutil/include/nix/util/bump-memory-resource.hh
+@@ -3,6 +3,7 @@
+ 
+ #include <atomic>
+ #include <memory_resource>
++#include <new>
+ 
+ namespace nix {
+ 
+diff --git a/src/libutil/include/nix/util/callback.hh b/src/libutil/include/nix/util/callback.hh
+index bec980ec9..6143ca57f 100644
+--- a/src/libutil/include/nix/util/callback.hh
++++ b/src/libutil/include/nix/util/callback.hh
+@@ -1,6 +1,7 @@
+ #pragma once
+ ///@file
+ 
++#include <atomic>
+ #include <cassert>
+ #include <future>
+ #include <functional>
+-- 
+2.55.0
+
