@@ -78,9 +78,9 @@ pub async fn unpark_storage_full_all<C: ConnectionTrait>(
     Ok(unparked)
 }
 
-/// This is unparking only the zero-workers shape that `park_if_no_workers` wrote. Other `Workers`
-/// parks belong to the build-dispatch repair pass. Callers are invoking this after any registration
-/// touch. The guard is preventing a re-queue -> re-park churn when nothing actionable changed.
+/// This unparks only the zero-workers, empty-unmet shape that `park_if_no_workers` wrote.
+/// Other `Workers` parks belong to the build-dispatch repair pass. Callers are invoking this
+/// after any registration touch. The guard prevents re-queue -> re-park churn when nothing changed.
 pub async fn unpark_no_workers_for_project<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -92,9 +92,10 @@ pub async fn unpark_no_workers_for_project<C: ConnectionTrait>(
         matches!(
             r,
             WaitingReason::Workers {
+                unmet,
                 connected_workers: 0,
                 ..
-            }
+            } if unmet.is_empty()
         )
     })
     .await
@@ -399,6 +400,43 @@ mod tests {
             .await
             .unwrap();
         assert!(out.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unpark_no_workers_preserves_build_stage_wait_with_no_connected_workers() {
+        let project = ProjectId::now_v7();
+        let task = make_task(project);
+        let mut parked = waiting_eval(WaitingReason::workers(
+            vec![gradient_types::waiting_reason::UnmetRequirement {
+                architecture: "x86_64-linux".into(),
+                required_features: Vec::new(),
+                build_count: 1,
+            }],
+            0,
+            Vec::new(),
+        ));
+        parked.kind = gradient_entity::evaluation::EvaluationKind::Ssh;
+        parked.task = Some(task.id);
+
+        let mut requeued = parked.clone();
+        requeued.status = EvaluationStatus::Queued;
+        requeued.waiting_reason = None;
+        let db = mock_db()
+            .append_query_results([vec![worker_registration(true, true)]])
+            .append_query_results([vec![task]])
+            .append_query_results([vec![parked]])
+            .append_query_results([vec![requeued]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let out = unpark_no_workers_for_project(&db, project).await.unwrap();
+        assert!(
+            out.is_empty(),
+            "build-stage waits must not restart repository evaluation"
+        );
     }
 
     #[tokio::test]
