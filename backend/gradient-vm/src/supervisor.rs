@@ -19,6 +19,7 @@ use tracing::{info, warn};
 use crate::vsock::connect_vsock;
 
 const SYSFS_USB_DEVICES: &str = "/sys/bus/usb/devices";
+const SYSFS_NET: &str = "/sys/class/net";
 const USBIPD: &str = "127.0.0.1:3240";
 const SOCKET_WAIT: Duration = Duration::from_secs(10);
 const RELAY_RETRY: Duration = Duration::from_secs(1);
@@ -135,6 +136,9 @@ impl Host {
     }
 
     async fn prepare_tap(&self, name: &str, bridge: &str) -> Result<SupervisorReply> {
+        if Path::new(SYSFS_NET).join(name).exists() {
+            run("ip", &["link", "del", "dev", name]).await?;
+        }
         run("ip", &["tuntap", "add", "dev", name, "mode", "tap"]).await?;
         lock(&self.taps).push(name.to_owned());
         run("ip", &["link", "set", name, "master", bridge, "up"]).await?;
