@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -28,6 +28,7 @@ pub const TAP_PREFIX: &str = "gr-tap-";
 const MAX_INTERFACE_NAME: usize = 15;
 const USBIPD: &str = "127.0.0.1:3240";
 const SOCKET_WAIT: Duration = Duration::from_secs(10);
+pub const SHARED_SOCKET_MODE: u32 = 0o660;
 const RELAY_RETRY: Duration = Duration::from_secs(1);
 
 pub fn run_supervisor(dir: &Path, config: SupervisorConfig) -> Result<()> {
@@ -38,6 +39,9 @@ pub fn run_supervisor(dir: &Path, config: SupervisorConfig) -> Result<()> {
 }
 
 async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
+    let group = std::fs::metadata(dir)
+        .with_context(|| format!("read the group of {}", dir.display()))?
+        .gid();
     let store = spawn_virtiofsd(
         &config.virtiofsd_bin,
         &dir.join("store.sock"),
@@ -54,12 +58,23 @@ async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
         .with_context(|| format!("start {cloud_hypervisor}"))?;
     let host = Arc::new(Host::new(dir, config));
     let control = bind(&dir.join("control.sock"))?;
+    share(&dir.join("control.sock"), group)?;
+    let api = dir.join("api.sock");
+    wait_for_socket(&api).await?;
+    share(&api, group)?;
+    let vsock = share_once_bound(dir.join("vsock.sock"), group);
+    tokio::pin!(vsock);
+    let mut vsock_shared = false;
     let mut terminate = signal(SignalKind::terminate())?;
     let mut sessions = JoinSet::new();
 
     let status = loop {
         tokio::select! {
             status = hypervisor.wait() => break status?,
+            shared = &mut vsock, if !vsock_shared => {
+                vsock_shared = true;
+                shared?;
+            }
             accepted = control.accept() => {
                 let (stream, _) = accepted?;
                 sessions.spawn(serve(Arc::clone(&host), stream));
@@ -406,6 +421,20 @@ fn spawn_virtiofsd(
 fn bind(socket: &Path) -> Result<UnixListener> {
     let _ = std::fs::remove_file(socket);
     UnixListener::bind(socket).with_context(|| format!("listen on {}", socket.display()))
+}
+
+fn share(socket: &Path, group: u32) -> Result<()> {
+    std::os::unix::fs::chown(socket, None, Some(group))
+        .with_context(|| format!("hand {} to group {group}", socket.display()))?;
+    std::fs::set_permissions(socket, std::fs::Permissions::from_mode(SHARED_SOCKET_MODE))
+        .with_context(|| format!("open {} to group {group}", socket.display()))
+}
+
+async fn share_once_bound(socket: PathBuf, group: u32) -> Result<()> {
+    while !tokio::fs::try_exists(&socket).await.unwrap_or(false) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    share(&socket, group)
 }
 
 async fn wait_for_socket(socket: &Path) -> Result<()> {

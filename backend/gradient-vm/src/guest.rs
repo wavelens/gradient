@@ -25,7 +25,7 @@ use crate::config::{MountConfig, VmConfig};
 use crate::devices::DeviceUnit;
 use crate::hypervisor::{GuestImage, HypervisorApi, vm_config};
 use crate::state::{GuestId, GuestState, HeldDevice, StoredRelay, write_state};
-use crate::supervisor::TAP_PREFIX;
+use crate::supervisor::{SHARED_SOCKET_MODE, TAP_PREFIX};
 use crate::unit::{GuestUnits, unit_name};
 
 pub const WORK_MOUNT_TAG: &str = "work";
@@ -208,8 +208,14 @@ impl Guest {
     }
 
     async fn start_vm(&mut self, image: &GuestImage) -> Result<()> {
-        wait_for_file(&self.dir.join("api.sock")).await?;
-        wait_for_file(&self.dir.join("store.sock")).await?;
+        let group = std::fs::metadata(&self.dir)
+            .with_context(|| format!("read the group of {}", self.dir.display()))?
+            .gid();
+        wait_for_file(&self.dir.join("api.sock"), |m| {
+            m.gid() == group && m.mode() & SHARED_SOCKET_MODE == SHARED_SOCKET_MODE
+        })
+        .await?;
+        wait_for_file(&self.dir.join("store.sock"), |_| true).await?;
 
         self.api
             .vm_create(&vm_config(image, &self.dir, self.state.cid))
@@ -441,19 +447,25 @@ fn vfio_id(n: usize) -> String {
     format!("vfio-{n}")
 }
 
-async fn wait_for_file(path: &Path) -> Result<()> {
+async fn wait_for_file(path: &Path, usable: impl Fn(&std::fs::Metadata) -> bool) -> Result<()> {
     let deadline = tokio::time::Instant::now() + SOCKET_WAIT;
-    while !tokio::fs::try_exists(path).await.unwrap_or(false) {
+    loop {
+        let found = tokio::fs::metadata(path).await.ok();
+        if found.as_ref().is_some_and(&usable) {
+            return Ok(());
+        }
         if tokio::time::Instant::now() >= deadline {
+            let seen = found.map_or("missing".to_owned(), |m| {
+                format!("uid {} gid {} mode {:o}", m.uid(), m.gid(), m.mode())
+            });
             bail!(
-                "{} did not appear within {}s",
+                "{} not usable within {}s ({seen})",
                 path.display(),
                 SOCKET_WAIT.as_secs()
             );
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    Ok(())
 }
 
 fn quiet(result: Result<()>, what: &str) {
