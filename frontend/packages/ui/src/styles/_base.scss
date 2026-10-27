@@ -128,6 +128,12 @@ a {
   > :first-child { flex: 1; min-width: 0; }
 }
 
+.form-actions {
+  display: flex;
+  gap: $spacing-md;
+  margin-top: $spacing-lg;
+}
+
 // A search control with its icon inside and a key hint at the end: the header
 // trigger and every in-page search field.
 .search-box {

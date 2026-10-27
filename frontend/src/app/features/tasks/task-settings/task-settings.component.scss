@@ -12,7 +12,6 @@
   max-width: 640px;
 }
 
-.form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }
 
 .danger-divider {
   border-top: 1px solid color-mix(in srgb, var(--gr-status-danger) 20%, transparent);

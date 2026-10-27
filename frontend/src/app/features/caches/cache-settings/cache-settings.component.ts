@@ -56,7 +56,6 @@ import { LabelHelpComponent } from '@shared/ui';
   ],
   templateUrl: './cache-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './cache-settings.component.scss',
 })
 export class CacheSettingsComponent implements OnInit {
   private route = inject(ActivatedRoute);
