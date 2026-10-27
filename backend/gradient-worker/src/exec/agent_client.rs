@@ -5,6 +5,7 @@
  */
 
 use anyhow::Result;
+use futures::Stream;
 use gradient_vm::ReadyAgent;
 use gradient_wire::guest::{AgentToWorker, GuestConnection, RunJob, WorkerToAgent};
 use tokio::net::UnixStream;
@@ -24,6 +25,10 @@ impl From<ReadyAgent> for AgentClient {
 }
 
 impl AgentClient {
+    pub fn agent_version(&self) -> &str {
+        &self.agent_version
+    }
+
     pub async fn attach(&mut self, output_offset: u64) -> Result<()> {
         self.conn
             .send(&WorkerToAgent::Attach { output_offset })
@@ -40,5 +45,9 @@ impl AgentClient {
 
     pub async fn next(&mut self) -> Result<Option<AgentToWorker>> {
         self.conn.recv::<AgentToWorker>().await
+    }
+
+    pub fn messages(&mut self) -> impl Stream<Item = Result<AgentToWorker>> + Unpin + '_ {
+        self.conn.incoming()
     }
 }

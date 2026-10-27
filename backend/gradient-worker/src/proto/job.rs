@@ -589,6 +589,30 @@ impl JobUpdater {
         self.log.send(&self.writer, data).await
     }
 
+    pub async fn send_log_note(&self, line: &str) -> Result<()> {
+        self.log
+            .send_note(&self.writer, format!("\n{line}\n").into_bytes())
+            .await
+    }
+
+    pub async fn skip_log_bytes(&self, bytes: u64) -> Result<()> {
+        self.log.skip(bytes).await
+    }
+
+    pub async fn report_program_started(&self) -> Result<()> {
+        self.send_update(JobUpdateKind::ProgramStarted).await
+    }
+
+    pub async fn send_job_phase(&self, name: String, payload: Vec<u8>) -> Result<()> {
+        self.writer
+            .send(ClientMessage::JobPhase {
+                job_id: self.job_id.clone(),
+                name,
+                payload,
+            })
+            .await
+    }
+
     async fn send_update(&self, update: JobUpdateKind) -> Result<()> {
         debug!(job_id = %self.job_id, ?update, "sending job update");
         self.writer

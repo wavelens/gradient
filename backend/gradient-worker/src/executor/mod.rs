@@ -26,17 +26,19 @@ pub mod timeline;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::{
     BuildJob, BuildOutput, BuildProgressPhase, BuildSpec, BuildSpecKind, BuildStage, FlakeJob,
     FlakeStep,
 };
+use gradient_wire::types::ExecJob;
 use tracing::instrument;
 
 use gradient_wire::messages::JobPhase;
 
 use crate::count::clamp_to_u32;
+use crate::exec::host::ExecHost;
 use crate::executor::timeline::PhaseGuard;
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
@@ -276,6 +278,7 @@ pub struct JobExecutor {
     pub(crate) log_limits: crate::executor::log_limit::LogRateLimits,
     pub(crate) log_fetch_from_store: bool,
     pub(crate) host: BuildHost,
+    pub(crate) exec: Option<Arc<ExecHost>>,
 }
 
 impl JobExecutor {
@@ -300,7 +303,13 @@ impl JobExecutor {
             log_limits,
             log_fetch_from_store,
             host,
+            exec: None,
         }
+    }
+
+    #[expect(dead_code, reason = "the worker builds its exec host in the next step")]
+    pub fn with_exec(self, exec: Option<Arc<ExecHost>>) -> Self {
+        Self { exec, ..self }
     }
 
     pub async fn shutdown(&self) {
@@ -679,6 +688,21 @@ impl JobExecutor {
 
         drop(gc_handles);
         Ok(())
+    }
+
+    #[instrument(skip_all, fields(job_id = %updater.job_id))]
+    pub async fn execute_exec_job(
+        &self,
+        job: ExecJob,
+        updater: &mut JobUpdater,
+        credentials: &CredentialStore,
+        abort: AbortSignal,
+    ) -> Result<()> {
+        let host = self
+            .exec
+            .as_deref()
+            .context("this worker runs no exec jobs")?;
+        crate::exec::job::execute(host, &self.store, job, updater, credentials, abort).await
     }
 }
 

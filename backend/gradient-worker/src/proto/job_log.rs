@@ -8,6 +8,7 @@ use std::future::Future;
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
@@ -40,6 +41,8 @@ struct Inner {
     dir: PathBuf,
     log: PathBuf,
     offset: PathBuf,
+    accepted_file: Option<PathBuf>,
+    accepted: AtomicU64,
     cap: u64,
     state: Mutex<State>,
     drained: watch::Sender<bool>,
@@ -69,31 +72,91 @@ fn file_key(job_id: &str) -> String {
 
 impl JobLog {
     pub fn open(dir: &Path, job_id: &str, cap: u64) -> Self {
+        Self::with_state(dir, job_id, cap, false, State::default(), 0)
+    }
+
+    pub fn open_resumable(dir: &Path, job_id: &str, cap: u64) -> Self {
+        Self::with_state(dir, job_id, cap, true, State::default(), 0)
+    }
+
+    fn with_state(
+        dir: &Path,
+        job_id: &str,
+        cap: u64,
+        resumable: bool,
+        state: State,
+        accepted: u64,
+    ) -> Self {
         let key = file_key(job_id);
+        let drained = !state.buffering;
         Self {
             inner: Arc::new(Inner {
                 job_id: job_id.to_owned(),
                 dir: dir.to_owned(),
                 log: dir.join(format!("{key}.log")),
                 offset: dir.join(format!("{key}.offset")),
+                accepted_file: resumable.then(|| dir.join(format!("{key}.accepted"))),
+                accepted: AtomicU64::new(accepted),
                 cap,
-                state: Mutex::new(State::default()),
-                drained: watch::Sender::new(true),
+                state: Mutex::new(state),
+                drained: watch::Sender::new(drained),
             }),
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "a reattached exec job resumes its output from here"
+        )
+    )]
+    pub fn accepted(&self) -> u64 {
+        self.inner.accepted.load(Ordering::SeqCst)
+    }
+
     pub async fn send(&self, writer: &impl LogChunkSender, data: Vec<u8>) -> Result<()> {
+        self.deliver(writer, data, true).await
+    }
+
+    pub async fn send_note(&self, writer: &impl LogChunkSender, data: Vec<u8>) -> Result<()> {
+        self.deliver(writer, data, false).await
+    }
+
+    pub async fn skip(&self, bytes: u64) -> Result<()> {
+        let _state = self.inner.state.lock().await;
+        self.count_accepted(bytes).await
+    }
+
+    async fn deliver(
+        &self,
+        writer: &impl LogChunkSender,
+        data: Vec<u8>,
+        counted: bool,
+    ) -> Result<()> {
         let data = Bytes::from(data);
+        let len = data.len() as u64;
         let mut state = self.inner.state.lock().await;
-        if !state.buffering {
-            if writer.send_now(self.chunk(data.clone())).await.is_ok() {
-                return Ok(());
+        let sent = !state.buffering && writer.send_now(self.chunk(data.clone())).await.is_ok();
+        if !sent {
+            if !state.buffering {
+                state.buffering = true;
+                self.inner.drained.send_replace(false);
             }
-            state.buffering = true;
-            self.inner.drained.send_replace(false);
+            self.append(&mut state, &data).await?;
         }
-        self.append(&mut state, &data).await
+        if counted {
+            self.count_accepted(len).await?;
+        }
+        Ok(())
+    }
+
+    async fn count_accepted(&self, bytes: u64) -> Result<()> {
+        let accepted = self.inner.accepted.fetch_add(bytes, Ordering::SeqCst) + bytes;
+        match &self.inner.accepted_file {
+            Some(path) => store_number(path, accepted).await,
+            None => Ok(()),
+        }
     }
 
     pub async fn replay(&self, writer: &impl LogChunkSender) -> Result<()> {
@@ -124,6 +187,9 @@ impl JobLog {
     pub fn remove(&self) {
         let _ = std::fs::remove_file(&self.inner.log);
         let _ = std::fs::remove_file(&self.inner.offset);
+        if let Some(accepted) = &self.inner.accepted_file {
+            let _ = std::fs::remove_file(accepted);
+        }
     }
 
     fn chunk(&self, data: Bytes) -> ClientMessage {
@@ -198,12 +264,17 @@ impl JobLog {
     }
 
     async fn store_offset(&self, offset: u64) -> Result<()> {
-        let written = self.inner.offset.with_extension("offset.tmp");
-        tokio::fs::write(&written, offset.to_string()).await?;
-        tokio::fs::rename(&written, &self.inner.offset)
-            .await
-            .context("store job log offset")
+        store_number(&self.inner.offset, offset).await
     }
+}
+
+async fn store_number(path: &Path, value: u64) -> Result<()> {
+    let mut written = path.as_os_str().to_owned();
+    written.push(".tmp");
+    tokio::fs::write(&written, value.to_string()).await?;
+    tokio::fs::rename(&written, path)
+        .await
+        .with_context(|| format!("store {}", path.display()))
 }
 
 fn unsent_log_bytes(state: &State) -> u64 {
@@ -301,6 +372,22 @@ mod tests {
         assert_eq!(attached.received(), b"ab");
         assert!(!dir.path().join("build_x.log").exists());
         assert!(!dir.path().join("build_x.offset").exists());
+    }
+
+    #[tokio::test]
+    async fn notes_leave_the_accepted_count_and_skipped_bytes_join_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = JobLog::open_resumable(dir.path(), "exec:x", JOB_LOG_BUFFER_CAP);
+        let attached = Recorder::attached();
+
+        log.send(&attached, b"hello".to_vec()).await.unwrap();
+        log.send_note(&attached, b"[note]".to_vec()).await.unwrap();
+        log.skip(3).await.unwrap();
+
+        assert_eq!(attached.received(), b"hello[note]");
+        assert_eq!(log.accepted(), 8);
+        let stored = std::fs::read_to_string(dir.path().join("exec_x.accepted")).unwrap();
+        assert_eq!(stored, "8");
     }
 
     #[tokio::test]

@@ -250,7 +250,12 @@ impl WorkerJobs {
         cluster: Option<String>,
     ) -> Registered {
         self.writer.forget_reports(&job_id);
-        let log = JobLog::open(&self.log_dir, &job_id, JOB_LOG_BUFFER_CAP);
+        let log = match kind {
+            JobKind::Exec => JobLog::open_resumable(&self.log_dir, &job_id, JOB_LOG_BUFFER_CAP),
+            JobKind::Flake | JobKind::Build => {
+                JobLog::open(&self.log_dir, &job_id, JOB_LOG_BUFFER_CAP)
+            }
+        };
         self.registry
             .lock()
             .register(job_id, kind, assignment_id, cluster, log)

@@ -49,7 +49,6 @@ impl BuildError {
     pub(crate) fn timeout(e: impl Into<anyhow::Error>) -> Self {
         Self::new(BuildFailureKind::Timeout, e.into())
     }
-    #[expect(dead_code, reason = "execute_exec_job reports guest boot failures")]
     pub(crate) fn guest_boot(e: impl Into<anyhow::Error>) -> Self {
         Self::new(BuildFailureKind::GuestBoot, e.into())
     }

@@ -1000,22 +1000,21 @@ async fn run_job(
     split: Option<SplitMember>,
 ) -> Result<()> {
     let job_abort = abort.clone();
-    let run = async move {
-        match job {
-            Job::Flake(flake_job) => {
-                executor
-                    .execute_flake_job(flake_job, updater, credentials, job_abort, split)
-                    .await
-            }
-            Job::Build(build_job) => {
-                executor
-                    .execute_build_job(build_job, updater, credentials, job_abort)
-                    .await
-            }
-            Job::Exec(_) => Err(anyhow::anyhow!("this worker does not run exec jobs")),
+    match job {
+        Job::Flake(flake_job) => {
+            let run = executor.execute_flake_job(flake_job, updater, credentials, job_abort, split);
+            until_aborted(run, abort).await
         }
-    };
-    until_aborted(run, abort).await
+        Job::Build(build_job) => {
+            let run = executor.execute_build_job(build_job, updater, credentials, job_abort);
+            until_aborted(run, abort).await
+        }
+        Job::Exec(exec_job) => {
+            executor
+                .execute_exec_job(*exec_job, updater, credentials, abort)
+                .await
+        }
+    }
 }
 
 pub(super) async fn until_aborted(

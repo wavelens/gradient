@@ -14,6 +14,8 @@ pub struct StoredJob {
     pub timeout_secs: Option<u64>,
     pub max_silent_secs: Option<u64>,
     pub started_at_unix: u64,
+    #[serde(default)]
+    pub sent_to_agent: bool,
 }
 
 #[cfg(test)]
@@ -33,6 +35,7 @@ mod tests {
             timeout_secs: Some(3600),
             max_silent_secs: None,
             started_at_unix: 1_790_000_000,
+            sent_to_agent: true,
         };
         let guest_id = GuestId::new();
         let state = GuestState {
