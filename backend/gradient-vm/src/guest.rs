@@ -360,7 +360,7 @@ impl Guest {
     }
 }
 
-pub fn guest_address(subnet: &str, cid: u32) -> Result<GuestNetwork> {
+pub fn guest_address(subnet: &str, cid: u32, nameservers: &[String]) -> Result<GuestNetwork> {
     let (network, prefix) = subnet
         .split_once('/')
         .ok_or_else(|| anyhow!("subnet {subnet} has no prefix length"))?;
@@ -377,10 +377,16 @@ pub fn guest_address(subnet: &str, cid: u32) -> Result<GuestNetwork> {
     if cid >= hosts {
         bail!("subnet {subnet} has no address for guest cid {cid}");
     }
+    let gateway = Ipv4Addr::from(base + 1).to_string();
+    let nameservers = match nameservers {
+        [] => vec![gateway.clone()],
+        configured => configured.to_vec(),
+    };
     Ok(GuestNetwork {
         address: Ipv4Addr::from(base + cid).to_string(),
         prefix,
-        gateway: Ipv4Addr::from(base + 1).to_string(),
+        gateway,
+        nameservers,
     })
 }
 
@@ -454,11 +460,12 @@ mod tests {
     #[test]
     fn a_guest_address_follows_its_cid() {
         assert_eq!(
-            guest_address("10.233.0.0/16", 3).unwrap(),
+            guest_address("10.233.0.0/16", 3, &[]).unwrap(),
             GuestNetwork {
                 address: "10.233.0.3".into(),
                 prefix: 16,
                 gateway: "10.233.0.1".into(),
+                nameservers: vec!["10.233.0.1".into()],
             }
         );
     }
@@ -479,6 +486,17 @@ mod tests {
         remove_guest_dirs(&dir, std::slice::from_ref(&per_job), true);
         assert!(!dir.exists());
         assert!(!per_job.exists());
+    }
+
+    #[test]
+    fn configured_nameservers_replace_the_gateway_as_resolver() {
+        let nameservers = ["9.9.9.9".to_owned()];
+        assert_eq!(
+            guest_address("10.233.0.0/16", 3, &nameservers)
+                .unwrap()
+                .nameservers,
+            nameservers
+        );
     }
 
     #[test]

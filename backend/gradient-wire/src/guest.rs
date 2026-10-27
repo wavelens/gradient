@@ -68,6 +68,7 @@ pub struct GuestNetwork {
     pub address: String,
     pub prefix: u8,
     pub gateway: String,
+    pub nameservers: Vec<String>,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -195,6 +196,7 @@ mod tests {
                 address: "10.233.0.3".into(),
                 prefix: 16,
                 gateway: "10.233.0.1".into(),
+                nameservers: vec!["10.233.0.1".into()],
             }),
             relays: vec![GuestRelay {
                 name: "tty0".into(),
