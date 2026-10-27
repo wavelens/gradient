@@ -7,3 +7,4 @@
 pub mod agent_client;
 pub mod inventory;
 pub mod state;
+pub mod watchdog;

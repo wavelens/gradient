@@ -5,7 +5,6 @@
  */
 
 use anyhow::{Context, Result};
-use futures::StreamExt as _;
 use gradient_derivation::parse_drv;
 use gradient_sources::{StoreDaemonError, get_hash_from_path};
 use gradient_util::hydra::parse_hydra_product_line;
@@ -25,6 +24,7 @@ use std::pin::{Pin, pin};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
+use crate::exec::watchdog::{Watchdog, Watched};
 use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
 
@@ -401,44 +401,6 @@ enum DrainOutcome {
     Aborted,
 }
 
-enum NextLog {
-    Message(LogMessage),
-    StreamEnd,
-    Aborted,
-}
-
-async fn next_log_event<S>(
-    mut logs: Pin<&mut S>,
-    silent: Option<std::time::Duration>,
-    abort: &mut super::AbortSignal,
-) -> Result<NextLog>
-where
-    S: futures::Stream<Item = LogMessage>,
-{
-    if abort.is_aborted() {
-        return Ok(NextLog::Aborted);
-    }
-    tokio::select! {
-        biased;
-        () = abort.aborted() => Ok(NextLog::Aborted),
-        item = logs.next() => Ok(match item {
-            Some(msg) => NextLog::Message(msg),
-            None => NextLog::StreamEnd,
-        }),
-        _ = maybe_silent_timeout(silent) => Err(anyhow::anyhow!(
-            "build produced no output for {}s (maxSilent exceeded)",
-            silent.map(|d| d.as_secs()).unwrap_or_default()
-        )),
-    }
-}
-
-async fn maybe_silent_timeout(silent: Option<std::time::Duration>) {
-    match silent {
-        Some(d) => tokio::time::sleep(d).await,
-        None => std::future::pending().await,
-    }
-}
-
 async fn drain_build_logs_with_timeout<S>(
     mut logs: Pin<&mut S>,
     updater: &mut JobUpdater,
@@ -454,12 +416,21 @@ where
     let mut limiter = LogRateLimiter::from(log_limits);
     let started = std::time::Instant::now();
     let mut limit_hit = false;
+    let mut watchdog = Watchdog::new(tokio::time::Instant::now(), None, silent);
     loop {
-        let msg = match next_log_event(logs.as_mut(), silent, abort).await? {
-            NextLog::Message(msg) => msg,
-            NextLog::StreamEnd => break,
-            NextLog::Aborted => return Ok(DrainOutcome::Aborted),
+        let msg = match watchdog.next(&mut logs, abort).await {
+            Watched::Item(msg) => msg,
+            Watched::End => break,
+            Watched::Aborted => return Ok(DrainOutcome::Aborted),
+            Watched::Silent(silent) => anyhow::bail!(
+                "build produced no output for {}s (maxSilent exceeded)",
+                silent.as_secs()
+            ),
+            Watched::TotalExceeded(total) => {
+                anyhow::bail!("build exceeded wall-clock timeout of {}s", total.as_secs())
+            }
         };
+        watchdog.saw_output();
         stats.total_msgs += 1;
         if let Some(line) = log_message_to_text(&msg) {
             if limit_hit {
@@ -720,53 +691,6 @@ mod tests {
 
         let pairs = output_pairs_from_built_or_drv(&built, &drv);
         assert!(pairs.is_empty());
-    }
-
-    use crate::executor::AbortSignal;
-
-    #[tokio::test]
-    async fn next_log_event_returns_aborted_when_already_set() {
-        let (tx, mut rx) = AbortSignal::channel();
-        tx.send(true).unwrap();
-        let stream = futures::stream::pending::<LogMessage>();
-        let mut stream = std::pin::pin!(stream);
-        let out = next_log_event(stream.as_mut(), None, &mut rx).await;
-        assert!(matches!(out, Ok(NextLog::Aborted)));
-    }
-
-    #[tokio::test]
-    async fn next_log_event_aborts_while_waiting_on_stalled_stream() {
-        let (tx, mut rx) = AbortSignal::channel();
-        let stream = futures::stream::pending::<LogMessage>();
-        let mut stream = std::pin::pin!(stream);
-        let mut fut = std::pin::pin!(next_log_event(stream.as_mut(), None, &mut rx));
-        assert!(futures::poll!(fut.as_mut()).is_pending());
-        tx.send(true).unwrap();
-        assert!(matches!(fut.await, Ok(NextLog::Aborted)));
-    }
-
-    #[tokio::test]
-    async fn next_log_event_reports_stream_end() {
-        let (_tx, mut rx) = AbortSignal::channel();
-        let stream = futures::stream::empty::<LogMessage>();
-        let mut stream = std::pin::pin!(stream);
-        let out = next_log_event(stream.as_mut(), None, &mut rx).await;
-        assert!(matches!(out, Ok(NextLog::StreamEnd)));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn next_log_event_errors_on_silent_timeout() {
-        let (_tx, mut rx) = AbortSignal::channel();
-        let stream = futures::stream::pending::<LogMessage>();
-        let mut stream = std::pin::pin!(stream);
-        let mut fut = std::pin::pin!(next_log_event(
-            stream.as_mut(),
-            Some(std::time::Duration::from_secs(5)),
-            &mut rx,
-        ));
-        assert!(futures::poll!(fut.as_mut()).is_pending());
-        tokio::time::advance(std::time::Duration::from_secs(6)).await;
-        assert!(fut.await.is_err());
     }
 
     #[tokio::test]
