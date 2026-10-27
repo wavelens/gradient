@@ -66,7 +66,7 @@ Queue every touched shared build through `can_start::promote`. The call embeds t
 
 A shared build is **open** (`graph_sql::open_predicate`) when `fetchable` is false and its status is not `BuildStatus::TERMINAL_FAILURE`. Builders, `Skipped`, `Aborted`, and `Completed` shared builds with a missing dependency in the closure all qualify as open.
 
-- `graph_sql::open_closure_cte_body` defines one walk behind both the needs-build mark and its naming. Seeds step over runtime dependencies. A **builder** (`builder_predicate`: walked, probed, absent from a cache, in `BUILDS_ONCE_WANTED`) can step over build dependencies too. The builder statuses plus `Skipped` and `Aborted` all sit in `BUILDS_ONCE_WANTED`. One walk can reach everything a thaw would build.
+- `graph_sql::open_closure_cte_body` defines one walk behind both the needs-build mark and its naming. Seeds step over runtime dependencies. A **builder** (`builder_predicate`: walked, probed, absent from a cache, in `BUILDER_STATUSES`) can step over build dependencies too. The need walk alone (`need_closure_cte_body_until`) can also step through `Skipped` and `Aborted` builds (`BUILDS_ONCE_WANTED`). One walk can reach everything a thaw would build. Naming walks stop at them until the thaw.
 - Only open shared builds are reachable. A `fetchable` or failed shared build ends the walk.
 - The walk can reach a passthrough but cannot step through it on a build dependency. No job ever builds the input closure of a passthrough output.
 - The needs-build mark lives in a column. The mark flows down from the entry points, while the can-start counters flow up from the leaves. A one-hop predicate cannot carry the downward direction.
