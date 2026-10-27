@@ -15,7 +15,7 @@ Workers declare their capabilities at the handshake. Capabilities cover the jobs
 |---|---|---|
 | `network` | on | Internet access. Needed to clone the repository, download missing inputs, substitute from upstream caches and run fixed-output builds |
 | `secrets` | on | The server may send the project SSH key. Needed to clone a repository behind an SSH URL |
-| `exec` | off | Declared and stored. No job checks it yet |
+| `exec` | off | Start [exec jobs](../guides/exec-jobs.md) on the worker |
 | `eval` | on | Walk the flake and report derivations |
 | `build` | on | Build derivations and upload the outputs |
 

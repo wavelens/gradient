@@ -45,6 +45,7 @@ services.gradient.state = {
 | `created_by` | string | - | Name of the user who created the project. |
 | `description` | null or string | `null` | Free-text description of the project. |
 | `display_name` | string | `name` | Name shown for the project in the UI. |
+| `exec_enabled` | bool | `false` | Set to `true` to start exec jobs of the project. Exec entry points of a project without it fail with a message. |
 | `hide_build_requests` | bool | `false` | Set to `true` to keep the project's automatic `build-request` task out of task listings in the web UI. |
 | `id` | null or string | `null` | UUID of the project. |
 | `members` | list of submodule | `[ ]` | Users that hold a role on the project. |
@@ -53,7 +54,6 @@ services.gradient.state = {
 | `name` | string | attribute name | Unique name of the project. |
 | `private_key_file` | string | - | Path to the SSH private key used for Git access. |
 | `public` | bool | `false` | Set to `true` to make the project visible to all users. |
-| `exec_enabled` | bool | `false` | Set to `true` to start exec jobs of the project. Exec entry points of a project without it fail with a message. |
 | `teams` | list of submodule | `[ ]` | Teams with access to the project. Team grants declared here and later removed from the list get cleaned up on the next state apply. Grants created through the API or by new-project settings remain untouched. |
 | `teams.*.role` | null or string | `null` | Role given to the team's users: one of the built-in `Admin`, `Write` or `View`, or a custom role of this project. Required when `users` is `true`. |
 | `teams.*.team` | string | - | Name of the team to grant on the project. |

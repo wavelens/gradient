@@ -343,7 +343,7 @@
 |---|---|---|---|---|
 | `worker.capabilities.build` | bool | `true` | `GRADIENT_WORKER_CAPABILITIES_BUILD` | Whether to run Nix builds. |
 | `worker.capabilities.eval` | bool | `true` | `GRADIENT_WORKER_CAPABILITIES_EVAL` | Whether to run Nix flake evaluations. |
-| `worker.capabilities.exec` | bool | `false` | `GRADIENT_WORKER_CAPABILITIES_EXEC` | Whether this worker advertises the `exec` capability. The server stores it but does not schedule by it yet. |
+| `worker.capabilities.exec` | bool | `false` | `GRADIENT_WORKER_CAPABILITIES_EXEC` | Whether this worker takes exec jobs. Exec jobs also need the server option `exec.enable`, the project switch `exec_enabled` and `enable_exec` on the worker registration. |
 | `worker.capabilities.federate` | bool | `false` | `GRADIENT_WORKER_CAPABILITIES_FEDERATE` | Whether to forward work and NARs between workers and servers (requires `discoverable`). |
 | `worker.capabilities.network` | bool | `true` | `GRADIENT_WORKER_CAPABILITIES_NETWORK` | Whether this worker may reach the internet. Cloning repositories, fetching flake inputs, substitutions, downloads and fixed-output builds run only on workers with it. |
 | `worker.capabilities.secrets` | bool | `true` | `GRADIENT_WORKER_CAPABILITIES_SECRETS` | Whether the server may send project credentials such as SSH keys to this worker. |
