@@ -73,8 +73,11 @@ def reset_workers():
     epoch = server.succeed("date +%s").strip()
     for node in WORKER_NODES:
         node.systemctl("stop gradient-worker.service")
-        node.succeed("rm -rf /var/lib/gradient-worker/eval-cache /var/lib/gradient-worker/www/.cache/nix")
-        node.succeed("nix-collect-garbage 2>&1 | grep -v \"^deleting '\" >&2")
+        node.succeed("rm -rf /var/lib/gradient-worker/eval-cache /var/lib/gradient-worker/www/.cache/nix /tmp/gc.done")
+        node.execute("(nix-collect-garbage > /tmp/gc.log 2>&1; touch /tmp/gc.done) &")
+    for node in WORKER_NODES:
+        node.wait_until_succeeds("test -e /tmp/gc.done", timeout=timedelta(seconds=600))
+        print(node.succeed("grep -v \"^deleting '\" /tmp/gc.log || true"))
         node.systemctl("start gradient-worker.service")
     for node in WORKER_NODES:
         node.wait_until_succeeds(
