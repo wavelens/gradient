@@ -29,7 +29,7 @@ import { RowComponent, RowListComponent } from '@gradient/ui/ui';
 export class DashboardStartComponent {
   readonly steps = [
     { icon: 'folder', title: 'Create a project', detail: 'A project groups tasks and members', link: '/projects' },
-    { icon: 'dns', title: 'Connect a worker', detail: 'Builds run on your own machines', link: '/projects' },
+    { icon: 'group', title: 'Create a team', detail: 'A team shares its members and workers with projects and caches', link: '/teams' },
     { icon: 'storage', title: 'Create or subscribe to a cache', detail: 'Serve build results to your machines', link: '/caches' },
   ];
 }
