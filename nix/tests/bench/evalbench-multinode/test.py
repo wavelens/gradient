@@ -135,9 +135,9 @@ spans_seen = 0
 def unseen_spans():
     global spans_seen
     text = server.succeed(f"cat {SERVER_SPANS} | tail -n +{spans_seen + 1}")
-    lines = text.splitlines()
-    spans_seen += len(lines)
-    return [json.loads(line) for line in lines if line.startswith("{")]
+    complete = text.split("\n")[:-1]
+    spans_seen += len(complete)
+    return [json.loads(line) for line in complete if line.startswith("{")]
 
 
 def save_slow_spans(label):
