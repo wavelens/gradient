@@ -243,24 +243,6 @@ pub async fn get_team(
 }
 
 #[utoipa::path(
-    get,
-    path = "/teams/{team}/evaluations",
-    operation_id = "getTeamEvaluations",
-    tag = "teams",
-    summary = "List recent team evaluations",
-    description = "The ten newest evaluations of projects granting the team with users. Members of the team and superusers can read it.",
-    params(TeamPath),
-    responses((status = OK, description = "OK", body = Vec<gradient_db::teams::evaluations::TeamEvaluation>), WebError)
-)]
-pub async fn get_team_evaluations(
-    TeamScope { team, db, .. }: TeamScope<Member>,
-) -> WebResult<Json<BaseResponse<Vec<gradient_db::teams::evaluations::TeamEvaluation>>>> {
-    Ok(ok_json(
-        gradient_db::teams::evaluations::recent_evaluations(&db.web_db, team.id, 10).await?,
-    ))
-}
-
-#[utoipa::path(
     patch,
     path = "/teams/{team}",
     operation_id = "patchTeam",

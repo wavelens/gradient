@@ -90,7 +90,6 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     teams::management::patch_team,
                     teams::management::delete_team
                 ))
-                .routes(routes!(teams::management::get_team_evaluations))
                 .routes(routes!(
                     teams::members::get_team_members,
                     teams::members::post_team_members,

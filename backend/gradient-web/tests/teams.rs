@@ -9,12 +9,10 @@ use gradient_entity::team_user::TeamRole;
 use gradient_entity::{team, team_user};
 use gradient_fixtures::mock::{all_statements, exec_ok, mock_db, ran};
 use gradient_fixtures::rows::{team, team_member};
-use gradient_fixtures::test_date;
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{bearer, make_test_server, signed_in, with_auth};
 use gradient_types::{CreatePermission, SessionId};
 use serde_json::{Value, json};
-use uuid::Uuid;
 
 #[tokio::test]
 async fn creating_a_team_respects_the_create_permission() {
@@ -144,42 +142,4 @@ async fn a_team_is_hidden_from_non_members() {
         .await;
 
     res.assert_status(StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn the_team_lists_recent_evaluations_of_its_granted_projects() {
-    let session_id = SessionId::now_v7();
-    let mut row = std::collections::BTreeMap::new();
-    row.insert("id", sea_orm::Value::Uuid(Some(Uuid::now_v7())));
-    row.insert("project", sea_orm::Value::String(Some("web".into())));
-    row.insert("task", sea_orm::Value::String(Some("app".into())));
-    row.insert("status", sea_orm::Value::Int(Some(3)));
-    row.insert(
-        "created_at",
-        sea_orm::Value::ChronoDateTime(Some(test_date())),
-    );
-    let conn = with_auth(mock_db(), session_id)
-        .append_query_results([vec![team()]])
-        .append_query_results([vec![team_member(TeamRole::Member)]])
-        .append_query_results([vec![row]])
-        .into_connection();
-    let server = make_test_server(conn.clone());
-
-    let res = server
-        .get("/api/v1/teams/platform/evaluations")
-        .add_header("authorization", bearer(session_id))
-        .await;
-
-    res.assert_status_ok();
-    let body: Value = res.json();
-    assert_eq!(body["message"][0]["project"], "web");
-    assert_eq!(body["message"][0]["task"], "app");
-    drop(server);
-    let only_shared_projects = all_statements(conn.into_transaction_log())
-        .into_iter()
-        .any(|s| s.sql.contains("\"includes_users\""));
-    assert!(
-        only_shared_projects,
-        "members only see projects granted with users"
-    );
 }

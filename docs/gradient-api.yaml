@@ -10779,40 +10779,6 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/teams/{team}/evaluations:
-    get:
-      tags:
-      - teams
-      summary: List recent team evaluations
-      description: The ten newest evaluations of projects granting the team with users. Members of the team and superusers can read it.
-      operationId: getTeamEvaluations
-      parameters:
-      - name: team
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/TeamEvaluation'
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - bearerAuth: []
   /api/v1/teams/{team}/grants:
     get:
       tags:
@@ -20262,26 +20228,6 @@ components:
           type: integer
           format: int32
           minimum: 0
-    TeamEvaluation:
-      type: object
-      required:
-      - id
-      - project
-      - task
-      - status
-      - created_at
-      properties:
-        id:
-          $ref: '#/components/schemas/EvaluationId'
-        project:
-          type: string
-        task:
-          type: string
-        status:
-          $ref: '#/components/schemas/EvaluationStatus'
-        created_at:
-          type: string
-          format: date-time
     TeamGrantEntry:
       type: object
       required:

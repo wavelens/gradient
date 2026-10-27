@@ -2351,14 +2351,6 @@ export interface TeamDemand {
   eval: number;
 }
 
-export interface TeamEvaluation {
-  id: EvaluationId;
-  project: string;
-  task: string;
-  status: EvaluationStatus;
-  created_at: string;
-}
-
 export interface TeamGrantEntry {
   team: string;
   display_name: string;
