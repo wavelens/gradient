@@ -19,11 +19,16 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+gradient-util = { workspace = true }
 gradient-wire = { workspace = true }
 
-anyhow     = { workspace = true }
-serde_json = { workspace = true }
-tokio      = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "fs", "io-util"] }
+anyhow      = { workspace = true }
+nix         = { workspace = true, features = ["signal", "term", "user"] }
+serde_json  = { workspace = true }
+tokio       = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "fs", "io-util", "net", "process", "time"] }
+tokio-util  = { workspace = true }
+tokio-vsock = { workspace = true }
+tracing     = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

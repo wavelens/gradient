@@ -28,7 +28,7 @@ pub enum WorkerToAgent {
     Kill,
 }
 
-#[derive(Proto, Debug, Clone, PartialEq)]
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
 pub struct RunJob {
     pub program: String,
     pub args: Vec<String>,

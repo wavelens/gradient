@@ -8,6 +8,13 @@
 mod context;
 #[allow(dead_code, reason = "the vsock listener reads it once it exists")]
 mod output;
+#[allow(dead_code, reason = "the vsock listener runs the job once it exists")]
+mod run;
+#[allow(
+    dead_code,
+    reason = "the vsock listener prepares the job once it exists"
+)]
+mod setup;
 
 use anyhow::Result;
 
