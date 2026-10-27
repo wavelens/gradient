@@ -70,7 +70,7 @@ fn job_env(job: &RunJob) -> BTreeMap<String, String> {
 
 async fn write_context(job: &RunJob) -> Result<()> {
     let json = serde_json::to_vec_pretty(&context_json(&job.context))?;
-    write_file(Path::new(CONTEXT_FILE), &json, 0o644).await
+    write_file(Path::new(CONTEXT_FILE), &json, 0o400).await
 }
 
 async fn write_secrets(job: &RunJob) -> Result<()> {
