@@ -96,7 +96,7 @@ export class ProjectSettingsComponent implements OnInit {
     description: '',
     public: false,
     hide_build_requests: false,
-    runner_enabled: false,
+    exec_enabled: false,
   };
 
   ngOnInit(): void {
@@ -117,7 +117,7 @@ export class ProjectSettingsComponent implements OnInit {
           description: project.description,
           public: project.public,
           hide_build_requests: project.hide_build_requests,
-          runner_enabled: project.runner_enabled,
+          exec_enabled: project.exec_enabled,
         };
         this.loading.set(false);
       },
@@ -154,8 +154,8 @@ export class ProjectSettingsComponent implements OnInit {
       display_name: this.formData.display_name,
       description: this.formData.description,
       hide_build_requests: this.formData.hide_build_requests,
-      ...(this.formData.runner_enabled !== this.project()?.runner_enabled
-        ? { runner_enabled: this.formData.runner_enabled }
+      ...(this.formData.exec_enabled !== this.project()?.exec_enabled
+        ? { exec_enabled: this.formData.exec_enabled }
         : {}),
     }).subscribe({
       next: () => {

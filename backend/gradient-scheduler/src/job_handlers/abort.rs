@@ -150,12 +150,12 @@ impl Scheduler {
             .await
         {
             Ok(report) => {
-                if !report.aborted_runner_jobs.is_empty() {
+                if !report.aborted_exec_jobs.is_empty() {
                     let keys = report
-                        .aborted_runner_jobs
+                        .aborted_exec_jobs
                         .iter()
                         .copied()
-                        .map(crate::jobs::runner_job_key)
+                        .map(crate::jobs::exec_job_key)
                         .collect();
                     self.cancel_jobs(evaluation, keys).await;
                 }

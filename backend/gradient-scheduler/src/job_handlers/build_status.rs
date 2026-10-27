@@ -8,7 +8,7 @@ use anyhow::Result;
 use gradient_db::lookup::by_id;
 use tracing::{info, warn};
 
-use gradient_entity::runner_job_attempt::AttemptEndReason;
+use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_graph::Transition;
 use gradient_types::*;
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput};
@@ -210,14 +210,9 @@ impl Scheduler {
 
                 Ok(())
             }
-            PendingJob::Runner(j) => {
-                super::runner_status::end_attempt(
-                    &self.graph,
-                    &j,
-                    AttemptEndReason::Completed,
-                    None,
-                )
-                .await
+            PendingJob::Exec(j) => {
+                super::exec_status::end_attempt(&self.graph, &j, AttemptEndReason::Completed, None)
+                    .await
             }
         }
     }
@@ -297,9 +292,9 @@ impl Scheduler {
 
                 r
             }
-            PendingJob::Runner(j) => {
-                let reason = super::runner_status::attempt_end_reason(failure.kind);
-                super::runner_status::end_attempt(
+            PendingJob::Exec(j) => {
+                let reason = super::exec_status::attempt_end_reason(failure.kind);
+                super::exec_status::end_attempt(
                     &self.graph,
                     &j,
                     reason,

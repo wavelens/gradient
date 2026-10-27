@@ -44,13 +44,13 @@ pub async fn check_evaluation_done(
         return Ok(());
     }
 
-    if crate::runner_jobs::has_open_runner_jobs(db, evaluation_id).await? {
+    if crate::exec_jobs::has_open_exec_jobs(db, evaluation_id).await? {
         return Ok(());
     }
 
     let any_failed = crate::graph::reachability::eval_any_shared_build_failed(db, evaluation_id)
         .await?
-        || crate::runner_jobs::any_runner_job_failed(db, evaluation_id).await?;
+        || crate::exec_jobs::any_exec_job_failed(db, evaluation_id).await?;
 
     let eval_error_messages = EEvaluationMessage::find()
         .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
@@ -183,7 +183,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_open_runner_job_keeps_the_evaluation_building() {
+    async fn an_open_exec_job_keeps_the_evaluation_building() {
         let eval = building();
         let db = mock_db()
             .append_query_results([counters(0, 0)])
@@ -199,7 +199,7 @@ mod tests {
         let log = statements(pool.into_transaction_log());
         assert!(
             !log.iter().any(|s| s.contains(r#"UPDATE \"evaluation\""#)),
-            "an open runner job keeps the evaluation open: {log:?}"
+            "an open exec job keeps the evaluation open: {log:?}"
         );
     }
 

@@ -13,11 +13,9 @@ use gradient_wire::types::{
 };
 use tokio::sync::mpsc;
 
-use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingRunnerJob};
+use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingExecJob};
 use gradient_pool::WorkerCaps;
-use gradient_types::runner::{
-    DeviceClass, RunnerAllow, RunnerDefaults, RunnerInventory, RunnerSpec,
-};
+use gradient_types::exec::{DeviceClass, ExecAllow, ExecDefaults, ExecInventory, ExecSpec};
 
 pub(crate) fn port() -> (Arc<dyn SessionPort>, mpsc::UnboundedReceiver<SessionSignal>) {
     let (tx, rx) = mpsc::unbounded_channel();
@@ -106,9 +104,9 @@ pub(crate) fn eval_worker_caps() -> GradientCapabilities {
     }
 }
 
-pub(crate) fn runner_job(spec: RunnerSpec) -> PendingRunnerJob {
-    PendingRunnerJob {
-        runner_job: RunnerJobId::now_v7(),
+pub(crate) fn exec_job(spec: ExecSpec) -> PendingExecJob {
+    PendingExecJob {
+        exec_job: ExecJobId::now_v7(),
         evaluation_id: EvaluationId::now_v7(),
         project_id: ProjectId::now_v7(),
         task_id: TaskId::now_v7(),
@@ -130,30 +128,30 @@ pub(crate) fn runner_job(spec: RunnerSpec) -> PendingRunnerJob {
     }
 }
 
-pub(crate) fn allow_all() -> RunnerAllow {
-    RunnerAllow {
+pub(crate) fn allow_all() -> ExecAllow {
+    ExecAllow {
         retries: u32::MAX,
         network: true,
         ssh: true,
         ports: (1, u16::MAX),
         nodes: 1,
         custom_images: true,
-        ..RunnerAllow::default()
+        ..ExecAllow::default()
     }
 }
 
-pub(crate) fn runner_caps(allow: RunnerAllow, defaults: RunnerDefaults) -> WorkerCaps {
+pub(crate) fn exec_caps(allow: ExecAllow, defaults: ExecDefaults) -> WorkerCaps {
     WorkerCaps {
         architectures: vec!["x86_64-linux".into()],
         capabilities: GradientCapabilities {
             exec: true,
             ..GradientCapabilities::default()
         },
-        runner: Some(RunnerInventory {
+        exec: Some(ExecInventory {
             labels: vec!["w1".into()],
             allow,
             defaults,
-            ..RunnerInventory::default()
+            ..ExecInventory::default()
         }),
         ..WorkerCaps::default()
     }
@@ -170,20 +168,20 @@ pub(crate) fn build_only_caps() -> WorkerCaps {
     }
 }
 
-pub(crate) fn eight_gpu_runner_caps() -> WorkerCaps {
-    eight_gpu_runner_caps_with_free(8)
+pub(crate) fn eight_gpu_exec_caps() -> WorkerCaps {
+    eight_gpu_exec_caps_with_free(8)
 }
 
-pub(crate) fn eight_gpu_runner_caps_with_free(free: u32) -> WorkerCaps {
-    let mut caps = runner_caps(
-        RunnerAllow {
+pub(crate) fn eight_gpu_exec_caps_with_free(free: u32) -> WorkerCaps {
+    let mut caps = exec_caps(
+        ExecAllow {
             devices: vec!["gpu:h100".into()],
             mounts: vec!["datasets".into()],
             ..allow_all()
         },
-        RunnerDefaults::default(),
+        ExecDefaults::default(),
     );
-    if let Some(inventory) = caps.runner.as_mut() {
+    if let Some(inventory) = caps.exec.as_mut() {
         inventory.devices = vec![DeviceClass {
             name: "gpu:h100".into(),
             total: 8,
@@ -194,9 +192,9 @@ pub(crate) fn eight_gpu_runner_caps_with_free(free: u32) -> WorkerCaps {
     caps
 }
 
-pub(crate) fn runner_caps_labelled(label: &str) -> WorkerCaps {
-    let mut caps = runner_caps(allow_all(), RunnerDefaults::default());
-    if let Some(inventory) = caps.runner.as_mut() {
+pub(crate) fn exec_caps_labelled(label: &str) -> WorkerCaps {
+    let mut caps = exec_caps(allow_all(), ExecDefaults::default());
+    if let Some(inventory) = caps.exec.as_mut() {
         inventory.labels.push(label.to_owned());
     }
     caps

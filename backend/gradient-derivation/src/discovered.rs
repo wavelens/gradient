@@ -47,7 +47,7 @@ pub fn discovered_derivation(
         pname,
         ifd: false,
         licenses: Vec::new(),
-        runner: None,
+        exec: None,
     }
 }
 

@@ -7,7 +7,7 @@
 use crate::codec::Proto;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
-pub use crate::runner::*;
+pub use crate::exec::*;
 
 #[derive(
     Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Default, utoipa::ToSchema,
@@ -41,7 +41,7 @@ pub enum Job {
     Flake(FlakeJob),
     Build(BuildJob),
     #[proto(43)]
-    Runner(Box<RunnerJob>),
+    Exec(Box<ExecJob>),
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -382,7 +382,7 @@ pub struct DiscoveredDerivation {
     #[proto(37, default)]
     pub licenses: Vec<License>,
     #[proto(43, default)]
-    pub runner: Option<RunnerSpec>,
+    pub exec: Option<ExecSpec>,
 }
 
 #[derive(Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -689,7 +689,7 @@ pub enum JobKind {
     Flake,
     Build,
     #[proto(43)]
-    Runner,
+    Exec,
 }
 
 pub type AssignmentId = String;

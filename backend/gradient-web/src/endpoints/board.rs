@@ -731,7 +731,7 @@ pub struct BoardWorker {
     pub cpu_usage_pct: Option<f32>,
     pub ram_free_mb: Option<i64>,
     pub ram_total_mb: Option<i64>,
-    pub runner: Option<gradient_types::runner::RunnerInventory>,
+    pub exec: Option<gradient_types::exec::ExecInventory>,
 }
 
 #[utoipa::path(
@@ -798,7 +798,7 @@ pub async fn get_board_workers(
                     .then_some(w.ram_free_mb.map(|v| v as i64))
                     .flatten(),
                 ram_total_mb: accessible.then_some(w.ram_total_mb as i64),
-                runner: if accessible { w.runner } else { None },
+                exec: if accessible { w.exec } else { None },
             }
         })
         .collect();
@@ -882,7 +882,7 @@ fn aggregate_worker_load(
     for j in jobs {
         match j.kind {
             DispatchedJobKind::Build => bump_in_flight(&mut cap, "build"),
-            DispatchedJobKind::Runner => bump_in_flight(&mut cap, "runner"),
+            DispatchedJobKind::Exec => bump_in_flight(&mut cap, "exec"),
             DispatchedJobKind::Eval => {
                 if j.eval_step {
                     bump_in_flight(&mut cap, "eval");
@@ -1453,7 +1453,7 @@ mod tests {
             disk_speed_mbps: None,
             upload_speed_mbps: None,
             download_speed_mbps: None,
-            runner: None,
+            exec: None,
         }
     }
 

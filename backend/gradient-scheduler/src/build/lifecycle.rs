@@ -6,7 +6,7 @@
 
 use gradient_db::lookup::by_id;
 use gradient_db::scheduling::assignment_record::{
-    eval_of_key, runner_job_of_key, shared_build_of_key,
+    eval_of_key, exec_job_of_key, shared_build_of_key,
 };
 use gradient_db::status::{
     EvaluationFailure, update_evaluation_status, update_evaluation_status_with_error,
@@ -123,8 +123,8 @@ pub(crate) async fn requeue_closed_keys(
         warn!(error = %e, "requeue orphaned builds did not reach the graph writer");
     }
 
-    for runner_job in keys.iter().filter_map(|key| runner_job_of_key(key)) {
-        crate::job_handlers::lose_open_attempt(db, graph, runner_job).await;
+    for exec_job in keys.iter().filter_map(|key| exec_job_of_key(key)) {
+        crate::job_handlers::lose_open_attempt(db, graph, exec_job).await;
     }
 
     for evaluation_id in keys.iter().filter_map(|key| eval_of_key(key)) {
@@ -199,7 +199,7 @@ pub(crate) async fn requeue_cluster_members(db: &DbContext, graph: &Graph, jobs:
         .startable_set
         .enter(jobs.iter().filter_map(|j| match j {
             PendingJob::Build(b) => Some(b.derivation),
-            PendingJob::Eval(_) | PendingJob::Runner(_) => None,
+            PendingJob::Eval(_) | PendingJob::Exec(_) => None,
         }));
 
     for job in jobs.iter().filter(|j| j.derivation_build().is_none()) {

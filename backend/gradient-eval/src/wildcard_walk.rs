@@ -11,13 +11,13 @@ pub trait WalkNode: Sized {
     fn child_names(&self) -> Result<Vec<String>>;
     fn child(&self, name: &str) -> Result<Option<Self>>;
     fn is_derivation(&self) -> Result<bool>;
-    fn is_runner_app(&self) -> Result<bool>;
+    fn is_exec_app(&self) -> Result<bool>;
     /// Opaque sets like NixOS options stay out of a `**` traversal.
     fn is_opaque(&self) -> Result<bool>;
 }
 
 pub fn is_leaf<N: WalkNode>(node: &N) -> Result<bool> {
-    Ok(node.is_derivation()? || node.is_runner_app()?)
+    Ok(node.is_derivation()? || node.is_exec_app()?)
 }
 
 pub fn collapse_deep(segs: &[String]) -> Vec<String> {
@@ -485,7 +485,7 @@ mod tests {
     #[derive(Default)]
     struct StubNode {
         derivation: bool,
-        runner_app: bool,
+        exec_app: bool,
         opaque: bool,
         throws: bool,
         type_set: bool,
@@ -503,7 +503,7 @@ mod tests {
 
         fn app() -> Self {
             StubNode {
-                runner_app: true,
+                exec_app: true,
                 opaque: true,
                 ..Default::default()
             }
@@ -569,9 +569,9 @@ mod tests {
             Ok(self.derivation)
         }
 
-        fn is_runner_app(&self) -> Result<bool> {
+        fn is_exec_app(&self) -> Result<bool> {
             self.force()?;
-            Ok(self.runner_app)
+            Ok(self.exec_app)
         }
 
         fn is_opaque(&self) -> Result<bool> {

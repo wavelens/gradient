@@ -219,9 +219,9 @@ fn outbound_fields(
                     paths.path(store_path)?;
                 }
             }
-            Job::Runner(runner) => {
-                paths.path(&mut runner.program)?;
-                if let Some(image) = &mut runner.image {
+            Job::Exec(exec) => {
+                paths.path(&mut exec.program)?;
+                if let Some(image) = &mut exec.image {
                     paths.path(image)?;
                 }
             }

@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use gradient_db::runner_jobs::upcoming::{UpcomingRunner, without_image};
+use gradient_db::exec_jobs::upcoming::{UpcomingExecJob, without_image};
 use gradient_pool::session_port::SessionSignal;
 use gradient_pool::{DeviceCount, WorkerCaps};
 use gradient_util::sync::Mutex;
@@ -36,23 +36,23 @@ impl PreWarmCounts {
 }
 
 pub(crate) fn pre_warm_counts(
-    upcoming: &[UpcomingRunner],
+    upcoming: &[UpcomingExecJob],
     workers: &[(String, WorkerCaps)],
 ) -> BTreeMap<String, u32> {
     workers
         .iter()
         .filter_map(|(id, caps)| {
-            let inventory = caps.runner.as_ref()?;
+            let inventory = caps.exec.as_ref()?;
             let count = upcoming
                 .iter()
-                .filter(|runner| runner.spec.image.is_none())
-                .filter(|runner| {
-                    let requirement = runner
+                .filter(|exec| exec.spec.image.is_none())
+                .filter(|exec| {
+                    let requirement = exec
                         .spec
-                        .requirement_on(&runner.architecture, &inventory.defaults);
-                    caps.fits_runner(&requirement, DeviceCount::Total)
+                        .requirement_on(&exec.architecture, &inventory.defaults);
+                    caps.fits_exec(&requirement, DeviceCount::Total)
                 })
-                .map(|runner| runner.spec.nodes.max(1))
+                .map(|exec| exec.spec.nodes.max(1))
                 .sum();
             Some((id.clone(), count))
         })
@@ -65,7 +65,7 @@ impl Scheduler {
         let upcoming = match without_image(&self.db.worker_db).await {
             Ok(upcoming) => upcoming,
             Err(e) => {
-                warn!(error = %e, "reading the upcoming runner jobs failed; no pre-warm count sent");
+                warn!(error = %e, "reading the upcoming exec jobs failed; no pre-warm count sent");
                 return;
             }
         };
@@ -94,29 +94,27 @@ impl Scheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_jobs::{
-        build_only_caps, eight_gpu_runner_caps_with_free, runner_caps_labelled,
-    };
-    use gradient_types::runner::{DeviceRequest, RunnerSpec};
+    use crate::test_jobs::{build_only_caps, eight_gpu_exec_caps_with_free, exec_caps_labelled};
+    use gradient_types::exec::{DeviceRequest, ExecSpec};
 
-    fn upcoming(spec: RunnerSpec) -> UpcomingRunner {
-        UpcomingRunner {
+    fn upcoming(spec: ExecSpec) -> UpcomingExecJob {
+        UpcomingExecJob {
             spec,
             architecture: "x86_64-linux".into(),
         }
     }
 
     #[test]
-    fn a_runner_counts_its_nodes_on_every_matching_worker() {
-        let upcoming = [upcoming(RunnerSpec {
+    fn an_exec_counts_its_nodes_on_every_matching_worker() {
+        let upcoming = [upcoming(ExecSpec {
             nodes: 2,
             labels: vec!["lab-a".into()],
-            ..RunnerSpec::default()
+            ..ExecSpec::default()
         })];
         let workers = [
-            ("w1".into(), runner_caps_labelled("lab-a")),
-            ("w2".into(), runner_caps_labelled("lab-a")),
-            ("w3".into(), runner_caps_labelled("lab-b")),
+            ("w1".into(), exec_caps_labelled("lab-a")),
+            ("w2".into(), exec_caps_labelled("lab-a")),
+            ("w3".into(), exec_caps_labelled("lab-b")),
             ("b1".into(), build_only_caps()),
         ];
         assert_eq!(
@@ -127,18 +125,18 @@ mod tests {
 
     #[test]
     fn busy_devices_still_count_and_a_custom_image_counts_nowhere() {
-        let gpus = RunnerSpec {
+        let gpus = ExecSpec {
             devices: vec![DeviceRequest {
                 name: "gpu:h100".into(),
                 count: 8,
             }],
-            ..RunnerSpec::default()
+            ..ExecSpec::default()
         };
-        let image = RunnerSpec {
+        let image = ExecSpec {
             image: Some("/nix/store/aaaa-toplevel.drv".into()),
-            ..RunnerSpec::default()
+            ..ExecSpec::default()
         };
-        let workers = [("w1".into(), eight_gpu_runner_caps_with_free(0))];
+        let workers = [("w1".into(), eight_gpu_exec_caps_with_free(0))];
         assert_eq!(
             pre_warm_counts(&[upcoming(gpus), upcoming(image)], &workers),
             BTreeMap::from([("w1".into(), 1)])

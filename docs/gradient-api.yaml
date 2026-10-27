@@ -735,7 +735,7 @@ paths:
       - admin
       summary: Get connected worker
       description: |-
-        Returns one connected worker with its capabilities, assigned job counts and runner inventory. Device `free` counts leave out devices held by assigned runner jobs.
+        Returns one connected worker with its capabilities, assigned job counts and exec inventory. Device `free` counts leave out devices held by assigned exec jobs.
 
         Same access as `listWorkers`. Answers 404 when no worker with this id is connected.
       operationId: getWorker
@@ -5419,6 +5419,44 @@ paths:
       security:
       - {}
       - bearerAuth: []
+  /api/v1/evals/{evaluation}/exec-jobs:
+    get:
+      tags:
+      - exec-jobs
+      summary: List exec jobs of an evaluation
+      description: |-
+        Returns every exec job of the evaluation, ordered by entry point, with its status, wait reason and last phase.
+
+        **Access:** Public projects, or members of the project.
+      operationId: listEvaluationExecJobs
+      parameters:
+      - name: evaluation
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/EvaluationId'
+      responses:
+        '200':
+          description: Exec jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExecJobSummary'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
   /api/v1/evals/{evaluation}/flake-graph:
     get:
       tags:
@@ -5660,44 +5698,6 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/evals/{evaluation}/runner-jobs:
-    get:
-      tags:
-      - runner-jobs
-      summary: List runner jobs of an evaluation
-      description: |-
-        Returns every runner job of the evaluation, ordered by entry point, with its status, wait reason and last phase.
-
-        **Access:** Public projects, or members of the project.
-      operationId: listEvaluationRunnerJobs
-      parameters:
-      - name: evaluation
-        in: path
-        required: true
-        schema:
-          $ref: '#/components/schemas/EvaluationId'
-      responses:
-        '200':
-          description: Runner jobs
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/RunnerJobSummary'
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - {}
-      - bearerAuth: []
   /api/v1/evals/{evaluation}/runtime-closure:
     get:
       tags:
@@ -5805,6 +5805,116 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security:
+      - bearerAuth: []
+  /api/v1/exec-jobs/{job}:
+    get:
+      tags:
+      - exec-jobs
+      summary: Get exec job
+      description: |-
+        Returns an exec job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt.
+
+        **Access:** Public projects, or members of the project.
+      operationId: getExecJob
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      responses:
+        '200':
+          description: Exec job
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/ExecJobResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
+  /api/v1/exec-jobs/{job}/abort:
+    post:
+      tags:
+      - exec-jobs
+      summary: Abort exec job
+      description: Stops an exec job that has not finished. The job becomes `Aborted`, its worker gets an abort for the running attempt and the job never restarts. Requires project membership or a superuser. Answers 409 when the job has already finished.
+      operationId: abortExecJob
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/exec-jobs/{job}/log:
+    get:
+      tags:
+      - exec-jobs
+      summary: Get exec job log
+      description: |-
+        Returns the program output of one attempt as a single string, the latest attempt unless `attempt` names its number. Empty string before the first attempt. Answers 404 for an attempt number the job does not have.
+
+        **Access:** Public projects, or members of the project.
+      operationId: getExecJobLog
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      - name: attempt
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+      responses:
+        '200':
+          description: Exec job log
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
       - bearerAuth: []
   /api/v1/gradient-ci/connections:
     post:
@@ -8122,116 +8232,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security:
-      - bearerAuth: []
-  /api/v1/runner-jobs/{job}:
-    get:
-      tags:
-      - runner-jobs
-      summary: Get runner job
-      description: |-
-        Returns a runner job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt.
-
-        **Access:** Public projects, or members of the project.
-      operationId: getRunnerJob
-      parameters:
-      - name: job
-        in: path
-        required: true
-        schema:
-          $ref: '#/components/schemas/RunnerJobId'
-      responses:
-        '200':
-          description: Runner job
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    $ref: '#/components/schemas/RunnerJobResponse'
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - {}
-      - bearerAuth: []
-  /api/v1/runner-jobs/{job}/abort:
-    post:
-      tags:
-      - runner-jobs
-      summary: Abort runner job
-      description: Stops a runner job that has not finished. The job becomes `Aborted`, its worker gets an abort for the running attempt and the job never restarts. Requires project membership or a superuser. Answers 409 when the job has already finished.
-      operationId: abortRunnerJob
-      parameters:
-      - name: job
-        in: path
-        required: true
-        schema:
-          $ref: '#/components/schemas/RunnerJobId'
-      responses:
-        '200':
-          description: Success
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    type: string
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - bearerAuth: []
-  /api/v1/runner-jobs/{job}/log:
-    get:
-      tags:
-      - runner-jobs
-      summary: Get runner job log
-      description: |-
-        Returns the program output of one attempt as a single string, the latest attempt unless `attempt` names its number. Empty string before the first attempt. Answers 404 for an attempt number the job does not have.
-
-        **Access:** Public projects, or members of the project.
-      operationId: getRunnerJobLog
-      parameters:
-      - name: job
-        in: path
-        required: true
-        schema:
-          $ref: '#/components/schemas/RunnerJobId'
-      - name: attempt
-        in: query
-        required: false
-        schema:
-          type: integer
-          format: int32
-      responses:
-        '200':
-          description: Runner job log
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    type: string
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - {}
       - bearerAuth: []
   /api/v1/search:
     get:
@@ -13750,9 +13750,9 @@ components:
           - integer
           - 'null'
           format: int64
-        runner:
+        exec:
           oneOf:
-          - $ref: '#/components/schemas/RunnerInventory'
+          - $ref: '#/components/schemas/ExecInventory'
           - type: 'null'
     BuildGraph:
       type: object
@@ -15643,6 +15643,323 @@ components:
           $ref: '#/components/schemas/TaskTriggerId'
         type:
           $ref: '#/components/schemas/TriggerType'
+    ExecAllow:
+      type: object
+      required:
+      - network
+      - ssh
+      - ports
+      - nodes
+      - devices
+      - mounts
+      - custom_images
+      - retries
+      properties:
+        network:
+          type: boolean
+        ssh:
+          type: boolean
+        ports:
+          type: array
+          items: false
+          prefixItems:
+          - type: integer
+            format: int32
+            minimum: 0
+          - type: integer
+            format: int32
+            minimum: 0
+        nodes:
+          type: integer
+          format: int32
+          minimum: 0
+        devices:
+          type: array
+          items:
+            type: string
+        mounts:
+          type: array
+          items:
+            type: string
+        custom_images:
+          type: boolean
+        timeout_secs:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        max_silent_secs:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        retries:
+          type: integer
+          format: int32
+          minimum: 0
+    ExecDefaults:
+      type: object
+      required:
+      - network
+      - ssh
+      - mounts
+      properties:
+        network:
+          type: boolean
+        ssh:
+          type: boolean
+        mounts:
+          type: array
+          items:
+            type: string
+        max_silent_secs:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+    ExecInventory:
+      type: object
+      required:
+      - labels
+      - devices
+      - mounts
+      - secrets
+      - allow
+      - defaults
+      - warm_guests
+      properties:
+        labels:
+          type: array
+          items:
+            type: string
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceClass'
+        mounts:
+          type: array
+          items:
+            type: string
+        secrets:
+          type: array
+          items:
+            type: string
+        allow:
+          $ref: '#/components/schemas/ExecAllow'
+        defaults:
+          $ref: '#/components/schemas/ExecDefaults'
+        warm_guests:
+          type: integer
+          format: int32
+          minimum: 0
+    ExecJobAttemptView:
+      type: object
+      required:
+      - number
+      - worker
+      - started_at
+      properties:
+        number:
+          type: integer
+          format: int32
+        worker:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        end_reason:
+          oneOf:
+          - $ref: '#/components/schemas/AttemptEndReason'
+          - type: 'null'
+        message:
+          type:
+          - string
+          - 'null'
+    ExecJobId:
+      type: string
+      format: uuid
+    ExecJobPhaseView:
+      type: object
+      required:
+      - name
+      - attempt
+      - created_at
+      properties:
+        name:
+          type: string
+        attempt:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+    ExecJobResponse:
+      type: object
+      required:
+      - id
+      - status
+      - entry_point
+      - evaluation
+      - task
+      - project
+      - nodes
+      - labels
+      - devices
+      - retries_left
+      - created_at
+      - attempts
+      - phases
+      properties:
+        id:
+          $ref: '#/components/schemas/ExecJobId'
+        status:
+          $ref: '#/components/schemas/ExecJobStatus'
+        entry_point:
+          type: string
+        evaluation:
+          $ref: '#/components/schemas/EvaluationId'
+        task:
+          type: string
+        project:
+          type: string
+        nodes:
+          type: integer
+          format: int32
+          minimum: 0
+        labels:
+          type: array
+          items:
+            type: string
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceRequest'
+        waiting_reason:
+          oneOf:
+          - $ref: '#/components/schemas/WaitingReason'
+          - type: 'null'
+        message:
+          type:
+          - string
+          - 'null'
+        retries_left:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        worker:
+          type:
+          - string
+          - 'null'
+        attempts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecJobAttemptView'
+        phases:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecJobPhaseView'
+    ExecJobStatus:
+      type: string
+      enum:
+      - queued
+      - starting
+      - running
+      - completed
+      - failed
+      - aborted
+      - created
+    ExecJobSummary:
+      type: object
+      required:
+      - id
+      - entry_point
+      - status
+      - nodes
+      - labels
+      - devices
+      properties:
+        id:
+          $ref: '#/components/schemas/ExecJobId'
+        entry_point:
+          type: string
+        status:
+          $ref: '#/components/schemas/ExecJobStatus'
+        waiting_reason:
+          oneOf:
+          - $ref: '#/components/schemas/WaitingReason'
+          - type: 'null'
+        message:
+          type:
+          - string
+          - 'null'
+        nodes:
+          type: integer
+          format: int32
+          minimum: 0
+        labels:
+          type: array
+          items:
+            type: string
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceRequest'
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        last_phase:
+          type:
+          - string
+          - 'null'
+    ExecUnmet:
+      type: object
+      required:
+      - labels
+      - devices
+      - mounts
+      - nodes
+      - custom_image
+      properties:
+        labels:
+          type: array
+          items:
+            type: string
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceRequest'
+        mounts:
+          type: array
+          items:
+            type: string
+        nodes:
+          type: integer
+          format: int32
+          minimum: 0
+        custom_image:
+          type: boolean
     ExpensiveBuild:
       type: object
       required:
@@ -17634,7 +17951,7 @@ components:
           type:
           - boolean
           - 'null'
-        runner_enabled:
+        exec_enabled:
           type:
           - boolean
           - 'null'
@@ -17954,7 +18271,7 @@ components:
       - private_key
       - public
       - hide_build_requests
-      - runner_enabled
+      - exec_enabled
       - created_by
       - created_at
       - managed
@@ -17975,7 +18292,7 @@ components:
           type: boolean
         hide_build_requests:
           type: boolean
-        runner_enabled:
+        exec_enabled:
           type: boolean
         created_by:
           $ref: '#/components/schemas/UserId'
@@ -17996,7 +18313,7 @@ components:
       - description
       - public
       - hide_build_requests
-      - runner_enabled
+      - exec_enabled
       - managed
       - created_by
       - created_at
@@ -18018,7 +18335,7 @@ components:
           type: boolean
         hide_build_requests:
           type: boolean
-        runner_enabled:
+        exec_enabled:
           type: boolean
         managed:
           type: boolean
@@ -18480,323 +18797,6 @@ components:
           type: string
         description:
           type: string
-    RunnerAllow:
-      type: object
-      required:
-      - network
-      - ssh
-      - ports
-      - nodes
-      - devices
-      - mounts
-      - custom_images
-      - retries
-      properties:
-        network:
-          type: boolean
-        ssh:
-          type: boolean
-        ports:
-          type: array
-          items: false
-          prefixItems:
-          - type: integer
-            format: int32
-            minimum: 0
-          - type: integer
-            format: int32
-            minimum: 0
-        nodes:
-          type: integer
-          format: int32
-          minimum: 0
-        devices:
-          type: array
-          items:
-            type: string
-        mounts:
-          type: array
-          items:
-            type: string
-        custom_images:
-          type: boolean
-        timeout_secs:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
-        max_silent_secs:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
-        retries:
-          type: integer
-          format: int32
-          minimum: 0
-    RunnerDefaults:
-      type: object
-      required:
-      - network
-      - ssh
-      - mounts
-      properties:
-        network:
-          type: boolean
-        ssh:
-          type: boolean
-        mounts:
-          type: array
-          items:
-            type: string
-        max_silent_secs:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
-    RunnerInventory:
-      type: object
-      required:
-      - labels
-      - devices
-      - mounts
-      - secrets
-      - allow
-      - defaults
-      - warm_guests
-      properties:
-        labels:
-          type: array
-          items:
-            type: string
-        devices:
-          type: array
-          items:
-            $ref: '#/components/schemas/DeviceClass'
-        mounts:
-          type: array
-          items:
-            type: string
-        secrets:
-          type: array
-          items:
-            type: string
-        allow:
-          $ref: '#/components/schemas/RunnerAllow'
-        defaults:
-          $ref: '#/components/schemas/RunnerDefaults'
-        warm_guests:
-          type: integer
-          format: int32
-          minimum: 0
-    RunnerJobAttemptView:
-      type: object
-      required:
-      - number
-      - worker
-      - started_at
-      properties:
-        number:
-          type: integer
-          format: int32
-        worker:
-          type: string
-        started_at:
-          type: string
-          format: date-time
-        ended_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        end_reason:
-          oneOf:
-          - $ref: '#/components/schemas/AttemptEndReason'
-          - type: 'null'
-        message:
-          type:
-          - string
-          - 'null'
-    RunnerJobId:
-      type: string
-      format: uuid
-    RunnerJobPhaseView:
-      type: object
-      required:
-      - name
-      - attempt
-      - created_at
-      properties:
-        name:
-          type: string
-        attempt:
-          type: integer
-          format: int32
-        created_at:
-          type: string
-          format: date-time
-    RunnerJobResponse:
-      type: object
-      required:
-      - id
-      - status
-      - entry_point
-      - evaluation
-      - task
-      - project
-      - nodes
-      - labels
-      - devices
-      - retries_left
-      - created_at
-      - attempts
-      - phases
-      properties:
-        id:
-          $ref: '#/components/schemas/RunnerJobId'
-        status:
-          $ref: '#/components/schemas/RunnerJobStatus'
-        entry_point:
-          type: string
-        evaluation:
-          $ref: '#/components/schemas/EvaluationId'
-        task:
-          type: string
-        project:
-          type: string
-        nodes:
-          type: integer
-          format: int32
-          minimum: 0
-        labels:
-          type: array
-          items:
-            type: string
-        devices:
-          type: array
-          items:
-            $ref: '#/components/schemas/DeviceRequest'
-        waiting_reason:
-          oneOf:
-          - $ref: '#/components/schemas/WaitingReason'
-          - type: 'null'
-        message:
-          type:
-          - string
-          - 'null'
-        retries_left:
-          type: integer
-          format: int32
-        created_at:
-          type: string
-          format: date-time
-        started_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        finished_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        worker:
-          type:
-          - string
-          - 'null'
-        attempts:
-          type: array
-          items:
-            $ref: '#/components/schemas/RunnerJobAttemptView'
-        phases:
-          type: array
-          items:
-            $ref: '#/components/schemas/RunnerJobPhaseView'
-    RunnerJobStatus:
-      type: string
-      enum:
-      - queued
-      - starting
-      - running
-      - completed
-      - failed
-      - aborted
-      - created
-    RunnerJobSummary:
-      type: object
-      required:
-      - id
-      - entry_point
-      - status
-      - nodes
-      - labels
-      - devices
-      properties:
-        id:
-          $ref: '#/components/schemas/RunnerJobId'
-        entry_point:
-          type: string
-        status:
-          $ref: '#/components/schemas/RunnerJobStatus'
-        waiting_reason:
-          oneOf:
-          - $ref: '#/components/schemas/WaitingReason'
-          - type: 'null'
-        message:
-          type:
-          - string
-          - 'null'
-        nodes:
-          type: integer
-          format: int32
-          minimum: 0
-        labels:
-          type: array
-          items:
-            type: string
-        devices:
-          type: array
-          items:
-            $ref: '#/components/schemas/DeviceRequest'
-        started_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        last_phase:
-          type:
-          - string
-          - 'null'
-    RunnerUnmet:
-      type: object
-      required:
-      - labels
-      - devices
-      - mounts
-      - nodes
-      - custom_image
-      properties:
-        labels:
-          type: array
-          items:
-            type: string
-        devices:
-          type: array
-          items:
-            $ref: '#/components/schemas/DeviceRequest'
-        mounts:
-          type: array
-          items:
-            type: string
-        nodes:
-          type: integer
-          format: int32
-          minimum: 0
-        custom_image:
-          type: boolean
     ScimErrorBody:
       type: object
       required:
@@ -18913,7 +18913,7 @@ components:
       - ssh_enabled
       - gradient_ci_enabled
       - gradient_ci_url
-      - runner_enabled
+      - exec_enabled
       properties:
         version:
           type: string
@@ -18953,7 +18953,7 @@ components:
           type:
           - string
           - 'null'
-        runner_enabled:
+        exec_enabled:
           type: boolean
     SessionId:
       type: string
@@ -20289,7 +20289,7 @@ components:
         - kind
         properties:
           unmet:
-            $ref: '#/components/schemas/RunnerUnmet'
+            $ref: '#/components/schemas/ExecUnmet'
           connected_workers:
             type: integer
             format: int32
@@ -20301,7 +20301,7 @@ components:
           kind:
             type: string
             enum:
-            - runner_workers
+            - exec_workers
     WalkMode:
       type: string
       enum:
@@ -20423,9 +20423,9 @@ components:
           items:
             $ref: '#/components/schemas/ProjectId'
           uniqueItems: true
-        runner:
+        exec:
           oneOf:
-          - $ref: '#/components/schemas/RunnerInventory'
+          - $ref: '#/components/schemas/ExecInventory'
           - type: 'null'
     WorkerLiveInfo:
       type: object
@@ -20657,8 +20657,8 @@ tags:
   description: Evaluation details, status, and log streaming
 - name: builds
   description: Build details, logs, artefact downloads, and dependency graph
-- name: runner-jobs
-  description: Runner jobs - status, wait reason, attempts, phases, logs and abort
+- name: exec-jobs
+  description: Exec jobs - status, wait reason, attempts, phases, logs and abort
 - name: build-requests
   description: Ad-hoc build requests from `gradient build` - CLI-uploaded source evaluated under a per-project build-request task. Flake inputs served over `git+ssh://` are fetched using the project's SSH key, and `input_overrides` can override remote flake inputs for the run.
 - name: workers

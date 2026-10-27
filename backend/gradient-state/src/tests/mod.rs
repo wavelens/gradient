@@ -57,7 +57,7 @@ fn project_task_cache_descriptions_optional() {
 }
 
 #[test]
-fn a_project_without_runner_enabled_keeps_runner_jobs_off() {
+fn a_project_without_exec_enabled_keeps_exec_jobs_off() {
     let json = r#"{
         "users": {
             "alice": {
@@ -79,7 +79,7 @@ fn a_project_without_runner_enabled_keeps_runner_jobs_off() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert!(!cfg.projects["acme"].runner_enabled);
+    assert!(!cfg.projects["acme"].exec_enabled);
 }
 
 #[test]

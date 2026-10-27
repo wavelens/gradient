@@ -126,15 +126,15 @@
       refusal = "import from derivation is not available during the eval driver"
       assert ifd_errors and refusal in ifd_errors[0]["message"], f"the driver must refuse the import: {responses[0]['errors']}"
 
-      banner("Assert runner apps are leaves and plain apps are skipped")
+      banner("Assert exec apps are leaves and plain apps are skipped")
       assert responses[3]["kind"] == "list_ok", responses[3]
       apps = {it["attr"].rsplit(".", 1)[1]: it for it in responses[3]["items"]}
       assert set(apps) == {"curl", "outside", "trainer"}, f"app leaves mismatch: {sorted(apps)}"
-      curl = apps["curl"]["runner"]
+      curl = apps["curl"]["exec"]
       assert curl["program_drv"].endswith("-check.drv"), curl
       assert json.loads(curl["block"]) == {"network": True, "devices": ["gpu:h100:8"]}, curl
       assert "is not a store path" in apps["outside"].get("error", ""), apps["outside"]
-      assert apps["trainer"]["runner"]["image_drv"].endswith(".drv"), apps["trainer"]
+      assert apps["trainer"]["exec"]["image_drv"].endswith(".drv"), apps["trainer"]
 
       banner("Assert fingerprint matches the eval-cache filename")
       assert responses[4]["kind"] == "fingerprint_ok", responses[4]

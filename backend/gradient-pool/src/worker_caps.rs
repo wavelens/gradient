@@ -8,8 +8,8 @@ use gradient_types::input::check_repository_url_is_ssh;
 use std::collections::BTreeMap;
 
 use gradient_wire::types::{
-    BuildJob, BuildSpecKind, DeviceClass, FlakeJob, FlakeSource, FlakeStep, JobKind,
-    RunnerInventory, RunnerRequirement,
+    BuildJob, BuildSpecKind, DeviceClass, ExecInventory, ExecRequirement, FlakeJob, FlakeSource,
+    FlakeStep, JobKind,
 };
 
 pub fn build_needs_network(kind: BuildSpecKind, is_fixed_output: bool) -> bool {
@@ -43,7 +43,7 @@ pub struct WorkerCaps {
     pub metrics: Option<crate::score::WorkerMetricsView>,
     pub zone: Option<String>,
     pub endpoint: Option<String>,
-    pub runner: Option<RunnerInventory>,
+    pub exec: Option<ExecInventory>,
 }
 
 impl WorkerCaps {
@@ -51,7 +51,7 @@ impl WorkerCaps {
         match kind {
             JobKind::Flake => self.capabilities.eval || self.capabilities.network,
             JobKind::Build => self.capabilities.build,
-            JobKind::Runner => self.capabilities.exec,
+            JobKind::Exec => self.capabilities.exec,
         }
     }
 
@@ -67,17 +67,17 @@ impl WorkerCaps {
         self.takes_jobs_of(&JobKind::Build) && self.runs_architecture(architecture) && features_ok
     }
 
-    pub fn can_run_runner(&self, req: &RunnerRequirement) -> bool {
-        self.fits_runner(req, DeviceCount::Free)
+    pub fn can_run_exec(&self, req: &ExecRequirement) -> bool {
+        self.fits_exec(req, DeviceCount::Free)
     }
 
-    pub fn fits_runner(&self, req: &RunnerRequirement, devices: DeviceCount) -> bool {
-        let Some(inventory) = self.runner.as_ref() else {
+    pub fn fits_exec(&self, req: &ExecRequirement, devices: DeviceCount) -> bool {
+        let Some(inventory) = self.exec.as_ref() else {
             return false;
         };
         let allow = &inventory.allow;
         let (lowest_port, highest_port) = allow.ports;
-        self.takes_jobs_of(&JobKind::Runner)
+        self.takes_jobs_of(&JobKind::Exec)
             && self.runs_architecture(&req.architecture)
             && req.labels.iter().all(|l| inventory.labels.contains(l))
             && devices_fit(req, inventory, devices)
@@ -126,7 +126,7 @@ impl WorkerCaps {
     }
 }
 
-fn devices_fit(req: &RunnerRequirement, inventory: &RunnerInventory, devices: DeviceCount) -> bool {
+fn devices_fit(req: &ExecRequirement, inventory: &ExecInventory, devices: DeviceCount) -> bool {
     let mut wanted: BTreeMap<&str, u32> = BTreeMap::new();
     for device in &req.devices {
         *wanted.entry(device.name.as_str()).or_default() += device.count;
@@ -144,8 +144,7 @@ fn devices_fit(req: &RunnerRequirement, inventory: &RunnerInventory, devices: De
 mod tests {
     use super::*;
     use gradient_wire::types::{
-        DeviceClass, DeviceRequest, GradientCapabilities, RunnerAllow, RunnerInventory,
-        RunnerRequirement,
+        DeviceClass, DeviceRequest, ExecAllow, ExecInventory, ExecRequirement, GradientCapabilities,
     };
 
     fn x86_worker(build: bool) -> WorkerCaps {
@@ -257,7 +256,7 @@ mod tests {
         assert!(!WorkerCaps::default().can_fetch(&repository("https://example.com/repo")));
     }
 
-    fn runner_worker() -> WorkerCaps {
+    fn exec_worker() -> WorkerCaps {
         let device = |name: &str, total: u32| DeviceClass {
             name: name.into(),
             total,
@@ -269,11 +268,11 @@ mod tests {
                 exec: true,
                 ..Default::default()
             },
-            runner: Some(RunnerInventory {
+            exec: Some(ExecInventory {
                 labels: vec!["w1".into(), "lab-a".into()],
                 devices: vec![device("gpu:h100", 8), device("kvm", 1)],
                 mounts: vec!["datasets".into(), "scratch".into()],
-                allow: RunnerAllow {
+                allow: ExecAllow {
                     network: true,
                     ssh: false,
                     ports: (1024, 65535),
@@ -289,8 +288,8 @@ mod tests {
         }
     }
 
-    fn req(edit: impl FnOnce(&mut RunnerRequirement)) -> RunnerRequirement {
-        let mut requirement = RunnerRequirement {
+    fn req(edit: impl FnOnce(&mut ExecRequirement)) -> ExecRequirement {
+        let mut requirement = ExecRequirement {
             architecture: "x86_64-linux".into(),
             ..Default::default()
         };
@@ -307,59 +306,59 @@ mod tests {
 
     #[test]
     fn every_label_must_be_present_and_the_worker_id_is_one() {
-        let w = runner_worker();
-        assert!(w.can_run_runner(&req(|r| r.labels = vec!["w1".into()])));
-        assert!(w.can_run_runner(&req(|r| r.labels = vec!["lab-a".into(), "w1".into()])));
-        assert!(!w.can_run_runner(&req(|r| r.labels = vec!["3d-printer".into()])));
+        let w = exec_worker();
+        assert!(w.can_run_exec(&req(|r| r.labels = vec!["w1".into()])));
+        assert!(w.can_run_exec(&req(|r| r.labels = vec!["lab-a".into(), "w1".into()])));
+        assert!(!w.can_run_exec(&req(|r| r.labels = vec!["3d-printer".into()])));
     }
 
     #[test]
     fn devices_need_enough_free_units_and_an_allowed_name() {
-        let w = runner_worker();
-        assert!(w.can_run_runner(&req(|r| r.devices = gpus(8))));
-        assert!(!w.can_run_runner(&req(|r| r.devices = gpus(9))));
-        assert!(!w.can_run_runner(&req(|r| r.devices = [gpus(4), gpus(5)].concat())));
+        let w = exec_worker();
+        assert!(w.can_run_exec(&req(|r| r.devices = gpus(8))));
+        assert!(!w.can_run_exec(&req(|r| r.devices = gpus(9))));
+        assert!(!w.can_run_exec(&req(|r| r.devices = [gpus(4), gpus(5)].concat())));
         let camera = vec![DeviceRequest {
             name: "camera".into(),
             count: 1,
         }];
-        assert!(!w.can_run_runner(&req(|r| r.devices = camera)));
+        assert!(!w.can_run_exec(&req(|r| r.devices = camera)));
     }
 
     #[test]
     fn busy_devices_fit_against_the_total_only() {
-        let mut w = runner_worker();
-        if let Some(inventory) = w.runner.as_mut() {
+        let mut w = exec_worker();
+        if let Some(inventory) = w.exec.as_mut() {
             inventory.devices[0].free = 0;
         }
-        assert!(!w.fits_runner(&req(|r| r.devices = gpus(8)), DeviceCount::Free));
-        assert!(w.fits_runner(&req(|r| r.devices = gpus(8)), DeviceCount::Total));
+        assert!(!w.fits_exec(&req(|r| r.devices = gpus(8)), DeviceCount::Free));
+        assert!(w.fits_exec(&req(|r| r.devices = gpus(8)), DeviceCount::Total));
     }
 
     #[test]
     fn mounts_network_ssh_and_ports_stay_inside_allow() {
-        let w = runner_worker();
-        assert!(w.can_run_runner(&req(|r| r.mounts = vec!["datasets".into()])));
-        assert!(!w.can_run_runner(&req(|r| r.mounts = vec!["checkpoints".into()])));
-        assert!(w.can_run_runner(&req(|r| r.network = true)));
+        let w = exec_worker();
+        assert!(w.can_run_exec(&req(|r| r.mounts = vec!["datasets".into()])));
+        assert!(!w.can_run_exec(&req(|r| r.mounts = vec!["checkpoints".into()])));
+        assert!(w.can_run_exec(&req(|r| r.network = true)));
         assert!(
-            !w.can_run_runner(&req(|r| r.ssh = true)),
+            !w.can_run_exec(&req(|r| r.ssh = true)),
             "allow beats the request"
         );
-        assert!(!w.can_run_runner(&req(|r| r.ports = vec![80])));
-        assert!(w.can_run_runner(&req(|r| r.ports = vec![6006])));
+        assert!(!w.can_run_exec(&req(|r| r.ports = vec![80])));
+        assert!(w.can_run_exec(&req(|r| r.ports = vec![6006])));
     }
 
     #[test]
     fn a_custom_image_needs_custom_images_and_a_worker_without_exec_runs_nothing() {
-        assert!(!runner_worker().can_run_runner(&req(|r| r.custom_image = true)));
-        let mut no_exec = runner_worker();
+        assert!(!exec_worker().can_run_exec(&req(|r| r.custom_image = true)));
+        let mut no_exec = exec_worker();
         no_exec.capabilities.exec = false;
-        assert!(!no_exec.can_run_runner(&req(|_| {})));
+        assert!(!no_exec.can_run_exec(&req(|_| {})));
         let no_inventory = WorkerCaps {
-            runner: None,
-            ..runner_worker()
+            exec: None,
+            ..exec_worker()
         };
-        assert!(!no_inventory.can_run_runner(&req(|_| {})));
+        assert!(!no_inventory.can_run_exec(&req(|_| {})));
     }
 }

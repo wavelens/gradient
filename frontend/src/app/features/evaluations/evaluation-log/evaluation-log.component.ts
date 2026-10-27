@@ -1647,7 +1647,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           network: 'fetch the flake sources',
           secrets: 'fetch the flake sources with the project SSH key',
           eval: 'run the evaluation',
-          exec: 'run runner jobs',
+          exec: 'run exec jobs',
         }[reason.capability];
         const workerWord = reason.connected_workers === 1 ? 'worker is' : 'workers are';
         return reason.connected_workers === 0
@@ -1673,11 +1673,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           : '';
         return `${reason.pending_shared_builds} ${buildWord} for an answer from the upstream caches.${failing}`;
       }
-      case 'runner_workers': {
+      case 'exec_workers': {
         const workerWord = reason.matching_workers === 1 ? 'worker' : 'workers';
         return reason.matching_workers > 0
           ? `Waiting for free devices on ${reason.matching_workers} ${workerWord}.`
-          : 'No connected worker offers what the runner job needs.';
+          : 'No connected worker offers what the exec job needs.';
       }
     }
   }

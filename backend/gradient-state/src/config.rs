@@ -39,7 +39,7 @@ pub struct StateProject {
     #[serde(default)]
     pub hide_build_requests: bool,
     #[serde(default)]
-    pub runner_enabled: bool,
+    pub exec_enabled: bool,
     pub created_by: String,
     /// An empty list is keeping the legacy auto-add of `created_by` as Admin. A non-empty list is
     /// authoritative and revoking unmatched memberships. Members referencing unknown users are

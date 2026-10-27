@@ -14,6 +14,7 @@ pub mod connection_failures;
 pub mod draining;
 pub mod eval;
 pub mod eval_split;
+pub mod exec_job;
 pub mod import_waits;
 pub mod input_waits;
 pub mod instance;
@@ -23,7 +24,6 @@ pub mod loops;
 mod pre_warm;
 pub mod probe;
 pub mod reclaim;
-pub mod runner_job;
 pub mod views;
 pub mod waiting_state;
 

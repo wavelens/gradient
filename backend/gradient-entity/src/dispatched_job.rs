@@ -35,7 +35,7 @@ pub enum DispatchedJobKind {
     #[sea_orm(num_value = 1)]
     Build = 1,
     #[sea_orm(num_value = 2)]
-    Runner = 2,
+    Exec = 2,
 }
 
 #[repr(i16)]

@@ -121,7 +121,7 @@ fn worker_metrics_from_an_older_peer_carry_no_lifetime() {
         download_speed_mbps: None,
         build_peak_ram_mb: None,
         lifetime_left_secs,
-        runner: None,
+        exec: None,
     };
     let old = RUNNING_JOBS_SINCE - 1;
     let decoded =
@@ -130,10 +130,10 @@ fn worker_metrics_from_an_older_peer_carry_no_lifetime() {
 }
 
 #[test]
-fn worker_capabilities_from_the_previous_version_carry_no_runner_inventory() {
+fn worker_capabilities_from_the_previous_version_carry_no_exec_inventory() {
     use crate::codec::{from_bytes, to_bytes};
     use crate::messages::{ClientMessage, PROTO_VERSIONS};
-    use crate::types::{DeviceClass, RunnerInventory};
+    use crate::types::{DeviceClass, ExecInventory};
 
     let caps = ClientMessage::WorkerCapabilities {
         architectures: vec!["x86_64-linux".into()],
@@ -145,7 +145,7 @@ fn worker_capabilities_from_the_previous_version_carry_no_runner_inventory() {
         zone: None,
         endpoint: None,
         build_cores: None,
-        runner: Some(Box::new(RunnerInventory {
+        exec: Some(Box::new(ExecInventory {
             labels: vec!["w1".into()],
             devices: vec![DeviceClass {
                 name: "gpu:h100".into(),
@@ -164,25 +164,25 @@ fn worker_capabilities_from_the_previous_version_carry_no_runner_inventory() {
         from_bytes::<ClientMessage>(to_bytes(&caps, newest - 1).unwrap(), newest - 1).unwrap();
     assert!(matches!(
         older,
-        ClientMessage::WorkerCapabilities { runner: None, .. }
+        ClientMessage::WorkerCapabilities { exec: None, .. }
     ));
 }
 
 #[test]
-fn a_runner_job_and_a_phase_round_trip() {
+fn an_exec_job_and_a_phase_round_trip() {
     use std::collections::BTreeMap;
 
     use crate::codec::{from_bytes, to_bytes};
     use crate::messages::{ClientMessage, PROTO_VERSIONS};
-    use crate::types::{DeviceRequest, Job, JobContext, RunnerJob, RunnerRequirement};
+    use crate::types::{DeviceRequest, ExecJob, ExecRequirement, Job, JobContext};
 
     let newest = *PROTO_VERSIONS.end();
-    let job = Job::Runner(Box::new(RunnerJob {
+    let job = Job::Exec(Box::new(ExecJob {
         program: "/nix/store/aaaa-check".into(),
         args: vec!["--x".into()],
         env: BTreeMap::from([("WANDB_PROJECT".into(), "llm".into())]),
         image: None,
-        requirement: RunnerRequirement {
+        requirement: ExecRequirement {
             devices: vec![DeviceRequest {
                 name: "gpu:h100".into(),
                 count: 8,
@@ -201,11 +201,11 @@ fn a_runner_job_and_a_phase_round_trip() {
         job
     );
     let phase = ClientMessage::JobPhase {
-        job_id: "runner:x".into(),
+        job_id: "exec:x".into(),
         name: "epoch-3".into(),
         payload: vec![1, 2],
     };
-    assert_eq!(phase.job_id(), Some("runner:x"));
+    assert_eq!(phase.job_id(), Some("exec:x"));
     assert_eq!(phase.variant_name(), "JobPhase");
 }
 

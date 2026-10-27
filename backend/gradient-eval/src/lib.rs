@@ -5,13 +5,13 @@
  */
 
 pub mod eval_worker;
+pub mod exec_app;
 pub mod flake_walk;
 mod frames;
 pub mod ipc;
 mod license;
 pub mod nix_eval;
 pub mod pool;
-pub mod runner_app;
 pub mod stats;
 pub mod wildcard_walk;
 

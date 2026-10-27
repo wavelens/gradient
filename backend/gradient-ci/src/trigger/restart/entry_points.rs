@@ -23,7 +23,7 @@ pub(super) async fn copy_entry_points<C: ConnectionTrait>(
             derivation: prev_ep.derivation,
             eval: prev_ep.eval.clone(),
             licenses: prev_ep.licenses.clone(),
-            runner: prev_ep.runner.clone(),
+            exec: prev_ep.exec.clone(),
             created_at: now,
             ..Default::default()
         }
@@ -72,9 +72,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_restart_keeps_the_runner_spec() {
+    async fn a_restart_keeps_the_exec_spec() {
         let previous = MEntryPoint {
-            runner: Some(serde_json::json!({ "program": "/nix/store/aaaa-train/bin/train" })),
+            exec: Some(serde_json::json!({ "program": "/nix/store/aaaa-train/bin/train" })),
             ..Default::default()
         };
         let db = mock_db()

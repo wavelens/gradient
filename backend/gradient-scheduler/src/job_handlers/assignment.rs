@@ -90,8 +90,8 @@ impl Scheduler {
     }
 
     pub async fn job_rejected(&self, worker_id: &str, job_id: &str) {
-        if gradient_db::scheduling::assignment_record::runner_job_of_key(job_id).is_some() {
-            return self.runner_rejected(worker_id, job_id).await;
+        if gradient_db::scheduling::assignment_record::exec_job_of_key(job_id).is_some() {
+            return self.exec_rejected(worker_id, job_id).await;
         }
         let worker = worker_id.to_owned();
         let job_id = job_id.to_owned();
@@ -202,15 +202,15 @@ pub(crate) async fn assigned_transition(
     worker_id: &str,
     rec: &AssignmentRecord,
 ) -> anyhow::Result<bool> {
-    let transition = match (rec.derivation_build, rec.runner) {
+    let transition = match (rec.derivation_build, rec.exec) {
         (Some(shared_build), _) => Transition::Assigned { shared_build },
-        (None, Some(runner)) => Transition::RunnerJobAssigned {
-            runner_job: runner.runner_job,
-            attempt: runner.attempt,
-            number: runner.number,
+        (None, Some(exec)) => Transition::ExecJobAssigned {
+            exec_job: exec.exec_job,
+            attempt: exec.attempt,
+            number: exec.number,
             assignment: rec.assignment_id,
             worker: worker_id.to_owned(),
-            retries_cap: runner.retries_cap,
+            retries_cap: exec.retries_cap,
         },
         (None, None) => return Ok(true),
     };
@@ -243,7 +243,7 @@ async fn claim(
     )
     .await
     .context("dispatched_job claim")?;
-    if !won || (rec.derivation_build.is_none() && rec.runner.is_none()) {
+    if !won || (rec.derivation_build.is_none() && rec.exec.is_none()) {
         return Ok(won);
     }
 

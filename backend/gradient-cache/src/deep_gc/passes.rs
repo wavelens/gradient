@@ -176,10 +176,10 @@ async fn pass_logs(
         .into_iter()
         .filter(|id| !builds.contains(id))
         .collect();
-    let runners = referenced_runner_attempts(db, &unreferenced).await?;
+    let exec_attempts = referenced_exec_attempts(db, &unreferenced).await?;
 
     for attempt_id in unreferenced {
-        if !runners.contains(&attempt_id) {
+        if !exec_attempts.contains(&attempt_id) {
             if let Err(e) = log_storage.delete(attempt_id).await {
                 warn!(error = %e, %attempt_id, "deep_gc: failed to delete orphan log");
             } else {
@@ -208,26 +208,26 @@ async fn referenced_build_attempts(
     .collect())
 }
 
-async fn referenced_runner_attempts(
+async fn referenced_exec_attempts(
     db: &WorkerDb,
     ids: &[BuildAttemptId],
 ) -> Result<HashSet<BuildAttemptId>> {
-    let ids: Vec<RunnerJobAttemptId> = ids
+    let ids: Vec<ExecJobAttemptId> = ids
         .iter()
-        .map(|id| RunnerJobAttemptId::new(id.into_inner()))
+        .map(|id| ExecJobAttemptId::new(id.into_inner()))
         .collect();
     Ok(gradient_db::fetch_in_chunks(&ids, |chunk| {
-        ERunnerJobAttempt::find()
+        EExecJobAttempt::find()
             .select_only()
-            .column(CRunnerJobAttempt::Id)
-            .filter(CRunnerJobAttempt::Id.is_in(chunk))
-            .into_tuple::<RunnerJobAttemptId>()
+            .column(CExecJobAttempt::Id)
+            .filter(CExecJobAttempt::Id.is_in(chunk))
+            .into_tuple::<ExecJobAttemptId>()
             .all(db)
     })
     .await
-    .context("query runner_job_attempts by id")?
+    .context("query exec_job_attempts by id")?
     .into_iter()
-    .map(gradient_db::runner_jobs::log_key)
+    .map(gradient_db::exec_jobs::log_key)
     .collect())
 }
 
@@ -376,12 +376,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deep_gc_keeps_runner_attempt_logs() {
+    async fn deep_gc_keeps_exec_attempt_logs() {
         let tmp = tempfile::tempdir().unwrap();
         let log: Arc<dyn LogStorage> = Arc::new(FileLogStorage::new(tmp.path()).await.unwrap());
-        let attempt = RunnerJobAttemptId::new(uuid::Uuid::from_u128(0x0300));
-        let key = gradient_db::runner_jobs::log_key(attempt);
-        log.append(key, "runner output").await.unwrap();
+        let attempt = ExecJobAttemptId::new(uuid::Uuid::from_u128(0x0300));
+        let key = gradient_db::exec_jobs::log_key(attempt);
+        log.append(key, "exec output").await.unwrap();
 
         let db = mock_db()
             .append_query_results([no_ids(), id_row(attempt.into_inner())])

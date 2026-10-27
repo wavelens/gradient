@@ -14,9 +14,9 @@ use nix_bindings::flake::{
 };
 use nix_bindings::{Context, EvalState, Store};
 
-use crate::ipc::{AttrError, DiscoveryShard, License, RunnerApp};
+use crate::exec_app;
+use crate::ipc::{AttrError, DiscoveryShard, ExecApp, License};
 use crate::license::licenses_of;
-use crate::runner_app;
 use crate::strip_nix_store_prefix;
 use crate::wildcard_walk::{self, WalkNode};
 
@@ -24,7 +24,7 @@ use crate::wildcard_walk::{self, WalkNode};
 pub struct Resolved {
     pub drv_path: String,
     pub licenses: Vec<License>,
-    pub runner: Option<RunnerApp>,
+    pub exec: Option<ExecApp>,
 }
 
 pub struct FlakeWalker<'a> {
@@ -118,13 +118,13 @@ impl<'a> FlakeWalker<'a> {
         }
 
         let licenses = licenses_of(&cursor, self.state);
-        if runner_app::is_runner_app(&cursor)? {
-            let app = runner_app::read_runner_app(&cursor, self.state)
-                .with_context(|| format!("read runner app '{attr_path}'"))?;
+        if exec_app::is_exec_app(&cursor)? {
+            let app = exec_app::read_exec_app(&cursor, self.state)
+                .with_context(|| format!("read exec app '{attr_path}'"))?;
             return Ok(Resolved {
                 drv_path: app.program_drv.clone(),
                 licenses,
-                runner: Some(app),
+                exec: Some(app),
             });
         }
 
@@ -135,7 +135,7 @@ impl<'a> FlakeWalker<'a> {
         Ok(Resolved {
             drv_path: strip_nix_store_prefix(&drv),
             licenses,
-            runner: None,
+            exec: None,
         })
     }
 }
@@ -211,8 +211,8 @@ impl WalkNode for CursorNode<'_> {
             .map_err(|e| anyhow!("is_derivation: {e}"))
     }
 
-    fn is_runner_app(&self) -> Result<bool> {
-        runner_app::is_runner_app(&self.cursor)
+    fn is_exec_app(&self) -> Result<bool> {
+        exec_app::is_exec_app(&self.cursor)
     }
 
     fn is_opaque(&self) -> Result<bool> {

@@ -10,7 +10,7 @@
 use anyhow::{Context, Result};
 use gradient_ci::reporting::eval_kind_str;
 use gradient_db::DbContext;
-use gradient_types::events::{Event, build, evaluation, runner_job};
+use gradient_types::events::{Event, build, evaluation, exec_job};
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, EntityTrait};
 use std::sync::Arc;
@@ -27,7 +27,7 @@ pub async fn enrich_with<C: ConnectionTrait>(
     Ok(match event {
         Event::BuildReported(b) => enrich_build(db, mapping, b).await?.map(Event::from),
         Event::EvaluationReported(e) => enrich_evaluation(db, mapping, e).await?.map(Event::from),
-        Event::RunnerJobReported(r) => enrich_runner_job(db, r).await?.map(Event::from),
+        Event::ExecJobReported(r) => enrich_exec_job(db, r).await?.map(Event::from),
         other => Some(other),
     })
 }
@@ -84,10 +84,10 @@ async fn enrich_build<C: ConnectionTrait>(
     Ok(Some(b))
 }
 
-async fn enrich_runner_job<C: ConnectionTrait>(
+async fn enrich_exec_job<C: ConnectionTrait>(
     db: &C,
-    mut r: runner_job::Reported,
-) -> Result<Option<runner_job::Reported>> {
+    mut r: exec_job::Reported,
+) -> Result<Option<exec_job::Reported>> {
     let Some(scope) = evaluation_scope(db, r.evaluation).await? else {
         return Ok(None);
     };
@@ -96,7 +96,7 @@ async fn enrich_runner_job<C: ConnectionTrait>(
     r.entry_point_name = EEntryPoint::find_by_id(r.entry_point)
         .one(db)
         .await
-        .context("look up the entry point of a runner job report")?
+        .context("look up the entry point of an exec job report")?
         .map(|entry_point| entry_point.eval);
     Ok(Some(r))
 }
@@ -225,7 +225,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_runner_job_event_names_its_task_project_and_entry_point() {
+    async fn an_exec_job_event_names_its_task_project_and_entry_point() {
         let evaluation = MEvaluation {
             id: EvaluationId::now_v7(),
             task: Some(TaskId::now_v7()),
@@ -247,20 +247,20 @@ mod tests {
             .append_query_results([vec![task.clone()]])
             .append_query_results([vec![entry_point.clone()]])
             .into_connection();
-        let event: Event = runner_job::Reported {
-            job: RunnerJobId::now_v7(),
+        let event: Event = exec_job::Reported {
+            job: ExecJobId::now_v7(),
             entry_point: entry_point.id,
             evaluation: evaluation.id,
-            status: i16::from(gradient_entity::runner_job::RunnerJobStatus::Queued),
+            status: i16::from(gradient_entity::exec_job::ExecJobStatus::Queued),
             ..Default::default()
         }
         .into();
         let mapping: Arc<dyn StorePathMapping> = Arc::new(gradient_entity::IdentityMapping);
 
-        let Some(Event::RunnerJobReported(reported)) =
+        let Some(Event::ExecJobReported(reported)) =
             enrich_with(&db, &mapping, event).await.unwrap()
         else {
-            panic!("the runner job is reported");
+            panic!("the exec job is reported");
         };
         assert_eq!(reported.task, Some(task.id));
         assert_eq!(reported.project, Some(task.project));

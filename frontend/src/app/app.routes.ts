@@ -126,11 +126,11 @@ export const routes: Routes = [
               ),
           },
           {
-            path: 'runner-jobs/:job',
-            title: 'Runner Job',
+            path: 'exec-jobs/:job',
+            title: 'Exec Job',
             loadComponent: () =>
-              import('./features/runner-jobs/runner-job-page/runner-job-page.component').then(
-                (m) => m.RunnerJobPageComponent,
+              import('./features/exec-jobs/exec-job-page/exec-job-page.component').then(
+                (m) => m.ExecJobPageComponent,
               ),
           },
           {

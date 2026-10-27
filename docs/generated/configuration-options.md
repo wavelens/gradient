@@ -72,6 +72,12 @@
 | `eval.cache.sweepIntervalSecs` | positive int | `3600` | `GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS` | Seconds between eval cache eviction passes. |
 | `eval.maxKeep` | unsigned int | `30` | `GRADIENT_EVAL_MAX_KEEP` | Maximum number of evaluations kept per task. It is the cap for the per-task setting, and new tasks start at the lower of 30 and this value. Set it to `0` to disable the limit. |
 
+## `exec`
+
+| Option | Type | Default | Env | Description |
+|---|---|---|---|---|
+| `exec.enable` | bool | `true` | `GRADIENT_EXEC_ENABLE` | Whether to enable exec jobs. When disabled, exec entry points fail with a message instead of starting a job. |
+
 ## `frontend`
 
 | Option | Type | Default | Env | Description |
@@ -232,12 +238,6 @@
 | `reverseProxy.caddy.useACMEHost` | null or string | `null` | - | Host of an existing ACME certificate, passed to `services.caddy.virtualHosts.<name>.useACMEHost`. Caddy reuses it instead of requesting a new certificate. `null` keeps certificate management with Caddy. |
 | `reverseProxy.nginx.enable` | bool | `!reverseProxy.caddy.enable` | - | Whether to enable an nginx virtual host for Gradient. |
 | `reverseProxy.nginx.manageTls` | bool | `true` | - | Whether to let nginx obtain and present the TLS certificate itself through the virtual host's `enableACME` and `forceSSL` settings. Disable it for upstream proxies (Traefik, Cloudflare, load balancers) that terminate TLS and forward plain HTTP to nginx. Keep `useTls` enabled in that case for `https://` URLs and `Secure` session cookies. Has no effect with `useTls` disabled. |
-
-## `runner`
-
-| Option | Type | Default | Env | Description |
-|---|---|---|---|---|
-| `runner.enable` | bool | `true` | `GRADIENT_RUNNER_ENABLE` | Whether to enable runner jobs. When disabled, runner entry points fail with a message instead of starting a job. |
 
 ## `s3`
 

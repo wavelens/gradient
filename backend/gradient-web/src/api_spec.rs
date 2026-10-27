@@ -43,7 +43,7 @@ const JSON: &str = "application/json";
         (name = "flake-inputs", description = "Per-task flake input URL overrides applied during evaluation fetch."),
         (name = "evals", description = "Evaluation details, status, and log streaming"),
         (name = "builds", description = "Build details, logs, artefact downloads, and dependency graph"),
-        (name = "runner-jobs", description = "Runner jobs - status, wait reason, attempts, phases, logs and abort"),
+        (name = "exec-jobs", description = "Exec jobs - status, wait reason, attempts, phases, logs and abort"),
         (name = "build-requests", description = "Ad-hoc build requests from `gradient build` - CLI-uploaded source evaluated under a per-project build-request task. Flake inputs served over `git+ssh://` are fetched using the project's SSH key, and `input_overrides` can override remote flake inputs for the run."),
         (name = "workers", description = "Worker registration and live status (proto workers connected via WebSocket)"),
         (name = "caches", description = "Binary cache management"),

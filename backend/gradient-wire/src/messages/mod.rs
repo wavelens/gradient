@@ -23,9 +23,8 @@ pub use crate::types::{
     SegmentSource, UploadMetadata, UploadObject, UploadOutcome,
 };
 pub use crate::types::{
-    DeviceClass, DeviceRequest, DeviceRequestError, JobContext, Phase, RunnerAllow, RunnerDefaults,
-    RunnerInventory, RunnerJob, RunnerLimits, RunnerRequirement, RunnerSpec, SopsFile,
-    runner_image_attr,
+    DeviceClass, DeviceRequest, DeviceRequestError, ExecAllow, ExecDefaults, ExecInventory,
+    ExecJob, ExecLimits, ExecRequirement, ExecSpec, JobContext, Phase, SopsFile, exec_image_attr,
 };
 pub use client::ClientMessage;
 pub use server::{FailedPeer, ServerMessage};

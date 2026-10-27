@@ -12,7 +12,7 @@ Jobs beyond the Nix sandbox.
 
 <div class="grid cards" markdown>
 
--   :material-play-network: **Runner Workers**
+-   :material-play-network: **Exec Workers**
 
     Workers that build outside the sandbox. Integration testing with network access, real hardware or deployment credentials.
 

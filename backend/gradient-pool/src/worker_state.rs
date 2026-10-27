@@ -12,7 +12,7 @@ use std::sync::atomic::AtomicI64;
 use gradient_types::ids::ProjectId;
 
 use gradient_wire::types::{
-    BuildStage, DeviceClass, DeviceRequest, GradientCapabilities, JobKind, RunnerInventory,
+    BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities, JobKind,
 };
 
 use crate::worker_caps::effective_free;
@@ -57,7 +57,7 @@ pub struct WorkerProfile {
     pub zone: Option<String>,
     pub endpoint: Option<String>,
     pub build_cores: Option<u32>,
-    pub runner: Option<RunnerInventory>,
+    pub exec: Option<ExecInventory>,
 }
 
 pub struct WorkerShared {
@@ -71,7 +71,7 @@ pub struct WorkerShared {
     pub zone: Option<String>,
     pub endpoint: Option<String>,
     pub build_cores: Option<u32>,
-    pub runner: Option<RunnerInventory>,
+    pub exec: Option<ExecInventory>,
     pub cpu_usage_pct: Option<f32>,
     pub ram_free_mb: Option<u64>,
     pub disk_speed_mbps: Option<f32>,
@@ -141,12 +141,12 @@ impl WorkerShared {
             zone: self.zone.clone(),
             endpoint: self.endpoint.clone(),
             build_cores: self.build_cores,
-            runner: self.runner.clone(),
+            exec: self.exec.clone(),
         }
     }
 
-    pub fn runner_inventory(&self) -> Option<RunnerInventory> {
-        let mut inventory = self.runner.clone()?;
+    pub fn exec_inventory(&self) -> Option<ExecInventory> {
+        let mut inventory = self.exec.clone()?;
         for class in &mut inventory.devices {
             class.free = effective_free(class, self.held_units(class));
         }
@@ -172,7 +172,7 @@ impl WorkerShared {
         self.zone = profile.zone.filter(|z| !z.is_empty());
         self.endpoint = profile.endpoint.filter(|e| !e.is_empty());
         self.build_cores = profile.build_cores;
-        self.runner = profile.runner;
+        self.exec = profile.exec;
     }
 }
 
@@ -224,7 +224,7 @@ impl TypedWorker<Active> {
                 zone: None,
                 endpoint: None,
                 build_cores: None,
-                runner: None,
+                exec: None,
                 cpu_usage_pct: None,
                 ram_free_mb: None,
                 disk_speed_mbps: None,

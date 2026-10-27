@@ -9,8 +9,8 @@ use bytes::Bytes;
 use crate::codec::Proto;
 use crate::types::{
     BuildFailureKind, BuildMetrics, BuildProgressPhase, CandidateScore, ClusterAddress,
-    EvalMessageLevel, EvalProgress, EvalShardSpec, FinishedShard, GradientCapabilities,
-    InputOutcome, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode, RunnerInventory,
+    EvalMessageLevel, EvalProgress, EvalShardSpec, ExecInventory, FinishedShard,
+    GradientCapabilities, InputOutcome, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode,
     RunningAssignment, UploadMetadata, UploadObject,
 };
 
@@ -45,7 +45,7 @@ pub enum ClientMessage {
         #[proto(34, default)]
         build_cores: Option<u32>,
         #[proto(43, default)]
-        runner: Option<Box<RunnerInventory>>,
+        exec: Option<Box<ExecInventory>>,
     },
 
     WorkerMetrics {
@@ -59,7 +59,7 @@ pub enum ClientMessage {
         #[proto(42, default)]
         lifetime_left_secs: Option<u64>,
         #[proto(43, default)]
-        runner: Option<Box<RunnerInventory>>,
+        exec: Option<Box<ExecInventory>>,
     },
 
     RequestJobList,

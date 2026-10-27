@@ -45,7 +45,7 @@ fn worker_metrics_keep_their_baseline_bytes() {
             download_speed_mbps: None,
             build_peak_ram_mb: None,
             lifetime_left_secs: None,
-            runner: None,
+            exec: None,
         },
         "050000c03f800101000000c00000",
     );

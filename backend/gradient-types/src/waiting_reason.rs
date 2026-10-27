@@ -44,15 +44,15 @@ pub enum WaitingReason {
         pending_shared_builds: u32,
         failing_upstream_caches: Vec<String>,
     },
-    RunnerWorkers {
-        unmet: RunnerUnmet,
+    ExecWorkers {
+        unmet: ExecUnmet,
         connected_workers: u32,
         matching_workers: u32,
     },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct RunnerUnmet {
+pub struct ExecUnmet {
     pub labels: Vec<String>,
     pub devices: Vec<DeviceRequest>,
     pub mounts: Vec<String>,
@@ -60,13 +60,13 @@ pub struct RunnerUnmet {
     pub custom_image: bool,
 }
 
-impl RunnerUnmet {
+impl ExecUnmet {
     fn is_empty(&self) -> bool {
         self == &Self::default()
     }
 }
 
-impl std::fmt::Display for RunnerUnmet {
+impl std::fmt::Display for ExecUnmet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut parts: Vec<String> = self.labels.iter().map(|l| format!("label:{l}")).collect();
         parts.sort();
@@ -176,9 +176,7 @@ impl WaitingReason {
                 EvalCapability::Eval => "eval".to_owned(),
                 EvalCapability::Exec => "exec".to_owned(),
             }),
-            Self::RunnerWorkers { unmet, .. } if !unmet.is_empty() => {
-                Some(format!("runner[{unmet}]"))
-            }
+            Self::ExecWorkers { unmet, .. } if !unmet.is_empty() => Some(format!("exec[{unmet}]")),
             _ => None,
         }
     }
@@ -228,9 +226,9 @@ mod tests {
     }
 
     #[test]
-    fn a_runner_workers_row_round_trips() {
-        let reason = WaitingReason::RunnerWorkers {
-            unmet: RunnerUnmet {
+    fn an_exec_workers_row_round_trips() {
+        let reason = WaitingReason::ExecWorkers {
+            unmet: ExecUnmet {
                 labels: vec!["3d-printer".into()],
                 devices: vec![DeviceRequest {
                     name: "gpu:h100".into(),

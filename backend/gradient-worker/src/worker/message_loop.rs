@@ -229,7 +229,7 @@ impl MessageLoopState {
             JobKind::Build => self
                 .running_fetches
                 .load(std::sync::atomic::Ordering::Acquire),
-            JobKind::Flake | JobKind::Runner => 0,
+            JobKind::Flake | JobKind::Exec => 0,
         };
         self.jobs.registry.lock().active(kind.clone()) + self.holds.held(&kind) + fetches
     }
@@ -238,7 +238,7 @@ impl MessageLoopState {
         match kind {
             JobKind::Flake => self.max_eval,
             JobKind::Build => self.max_build,
-            JobKind::Runner => 0,
+            JobKind::Exec => 0,
         }
     }
 
@@ -629,7 +629,7 @@ impl MessageLoopState {
         let kind = match &job {
             Job::Flake(_) => JobKind::Flake,
             Job::Build(_) => JobKind::Build,
-            Job::Runner(_) => JobKind::Runner,
+            Job::Exec(_) => JobKind::Exec,
         };
         let active_count = self.occupied(kind.clone());
         let max = self.max_for(kind.clone());
@@ -982,7 +982,7 @@ fn send_live_metrics(
                 lifetime_left_secs: exit_clock::clock()
                     .lifetime_left(&limits, Instant::now())
                     .map(|left| left.as_secs()),
-                runner: None,
+                exec: None,
             })
             .await
         {
@@ -1012,7 +1012,7 @@ async fn run_job(
                     .execute_build_job(build_job, updater, credentials, job_abort)
                     .await
             }
-            Job::Runner(_) => Err(anyhow::anyhow!("this worker does not run runner jobs")),
+            Job::Exec(_) => Err(anyhow::anyhow!("this worker does not run exec jobs")),
         }
     };
     until_aborted(run, abort).await

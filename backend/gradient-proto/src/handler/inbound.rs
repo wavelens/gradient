@@ -108,23 +108,23 @@ impl ActiveJobs {
     pub(crate) fn build(&self, job_id: &str) -> Option<DerivationBuildId> {
         match &self.0.lock().get(job_id)?.pending {
             PendingJob::Build(j) => Some(j.derivation_build),
-            PendingJob::Eval(_) | PendingJob::Runner(_) => None,
+            PendingJob::Eval(_) | PendingJob::Exec(_) => None,
         }
     }
 
     pub(crate) fn eval(&self, job_id: &str) -> Option<(EvaluationId, Option<TaskId>)> {
         match &self.0.lock().get(job_id)?.pending {
             PendingJob::Eval(j) => Some((j.evaluation_id, j.task_id)),
-            PendingJob::Build(_) | PendingJob::Runner(_) => None,
+            PendingJob::Build(_) | PendingJob::Exec(_) => None,
         }
     }
 
-    pub(crate) fn runner_attempt(
+    pub(crate) fn exec_attempt(
         &self,
         job_id: &str,
-    ) -> Option<gradient_types::ids::RunnerJobAttemptId> {
+    ) -> Option<gradient_types::ids::ExecJobAttemptId> {
         match &self.0.lock().get(job_id)?.pending {
-            PendingJob::Runner(j) => j.assignment.map(|a| a.attempt),
+            PendingJob::Exec(j) => j.assignment.map(|a| a.attempt),
             PendingJob::Eval(_) | PendingJob::Build(_) => None,
         }
     }
@@ -234,7 +234,7 @@ impl<'a> InboundContext<'a> {
                 zone,
                 endpoint,
                 build_cores,
-                runner,
+                exec,
             } => {
                 self.on_worker_capabilities(WorkerCapabilities {
                     architectures,
@@ -246,7 +246,7 @@ impl<'a> InboundContext<'a> {
                     zone,
                     endpoint,
                     build_cores,
-                    runner: runner.map(|inventory| *inventory),
+                    exec: exec.map(|inventory| *inventory),
                 })
                 .await;
                 true
@@ -259,7 +259,7 @@ impl<'a> InboundContext<'a> {
                 download_speed_mbps,
                 build_peak_ram_mb,
                 lifetime_left_secs,
-                runner,
+                exec,
             } => {
                 self.spawn_worker_metrics(WorkerMetrics {
                     cpu_usage_pct,
@@ -270,7 +270,7 @@ impl<'a> InboundContext<'a> {
                     build_peak_ram_mb,
                     exits_at: lifetime_left_secs
                         .map(|secs| Instant::now() + std::time::Duration::from_secs(secs)),
-                    runner: runner.map(|inventory| *inventory),
+                    exec: exec.map(|inventory| *inventory),
                 });
                 true
             }
@@ -607,10 +607,9 @@ impl<'a> InboundContext<'a> {
             warn!(peer_id = %self.peer_id, %job_id, %name, bytes = payload.len(), "phase payload over {MAX_PHASE_PAYLOAD} bytes; dropped");
             return;
         }
-        if self.active.runner_attempt(&job_id).is_none()
-            || !self.owns_handed_dispatch(&job_id).await
+        if self.active.exec_attempt(&job_id).is_none() || !self.owns_handed_dispatch(&job_id).await
         {
-            warn!(peer_id = %self.peer_id, %job_id, "phase for a runner job this session does not run");
+            warn!(peer_id = %self.peer_id, %job_id, "phase for an exec job this session does not run");
             return;
         }
         self.job_events
@@ -1017,14 +1016,11 @@ impl<'a> InboundContext<'a> {
 
     async fn on_log_chunk(&mut self, job_id: &str, data: &[u8]) {
         trace!(peer_id = %self.peer_id, %job_id, bytes = data.len(), "LogChunk");
-        let target = match (
-            self.active.build(job_id),
-            self.active.runner_attempt(job_id),
-        ) {
+        let target = match (self.active.build(job_id), self.active.exec_attempt(job_id)) {
             (Some(build), _) => LogTarget::Build(build),
-            (None, Some(attempt)) => LogTarget::RunnerAttempt(attempt),
+            (None, Some(attempt)) => LogTarget::ExecAttempt(attempt),
             (None, None) => {
-                debug!(peer_id = %self.peer_id, %job_id, "log chunk dropped: no build or runner job this session runs");
+                debug!(peer_id = %self.peer_id, %job_id, "log chunk dropped: no build or exec job this session runs");
                 return;
             }
         };
@@ -1455,12 +1451,12 @@ pub(in crate::handler) mod fixture {
         })
     }
 
-    pub(in crate::handler) fn pending_runner(
-        attempt: gradient_types::ids::RunnerJobAttemptId,
+    pub(in crate::handler) fn pending_exec(
+        attempt: gradient_types::ids::ExecJobAttemptId,
     ) -> PendingJob {
-        let runner_job = gradient_types::ids::RunnerJobId::now_v7();
-        PendingJob::Runner(gradient_scheduler::jobs::PendingRunnerJob {
-            runner_job,
+        let exec_job = gradient_types::ids::ExecJobId::now_v7();
+        PendingJob::Exec(gradient_scheduler::jobs::PendingExecJob {
+            exec_job,
             evaluation_id: EvaluationId::now_v7(),
             project_id: ProjectId::now_v7(),
             task_id: TaskId::now_v7(),
@@ -1478,8 +1474,8 @@ pub(in crate::handler) mod fixture {
             ready_at: gradient_types::now(),
             rescore_count: 0,
             api_url: "http://127.0.0.1:3000".into(),
-            assignment: Some(gradient_scheduler::jobs::RunnerAssignment {
-                runner_job,
+            assignment: Some(gradient_scheduler::jobs::ExecAssignment {
+                exec_job,
                 attempt,
                 number: 1,
                 retries_cap: 0,
@@ -2187,13 +2183,13 @@ mod running_jobs_tests {
 }
 
 #[cfg(test)]
-mod runner_report_tests {
-    use super::fixture::{TestSession, pending_runner};
+mod exec_report_tests {
+    use super::fixture::{TestSession, pending_exec};
     use super::*;
     use crate::handler::job_events::{ApplyJobEvent, JobEvent};
     use gradient_fixtures::mock::empty_db;
     use gradient_test_support::prelude::*;
-    use gradient_types::ids::RunnerJobAttemptId;
+    use gradient_types::ids::ExecJobAttemptId;
     use gradient_wire::types::MAX_PHASE_PAYLOAD;
 
     type Recorded = Arc<gradient_util::sync::Mutex<Vec<(String, usize)>>>;
@@ -2220,7 +2216,7 @@ mod runner_report_tests {
     async fn an_oversized_phase_is_dropped() {
         let state = test_state(empty_db());
         let (mut session, _sent, _admitted) = TestSession::new(&state).await;
-        let pending = pending_runner(RunnerJobAttemptId::now_v7());
+        let pending = pending_exec(ExecJobAttemptId::now_v7());
         let key = pending.job_key();
         let a1 = DispatchedJobId::now_v7();
         let (port, _signals) = tokio::sync::mpsc::unbounded_channel();

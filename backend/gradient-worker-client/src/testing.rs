@@ -125,7 +125,7 @@ impl ProtoPeer {
                 zone: None,
                 endpoint: None,
                 build_cores: None,
-                runner: None,
+                exec: None,
             })
             .await?;
         }

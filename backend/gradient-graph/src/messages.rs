@@ -7,11 +7,11 @@
 use chrono::NaiveDateTime;
 use gradient_db::graph::repair::RepairScope;
 use gradient_db::status::BuildRefusal;
-use gradient_entity::runner_job_attempt::AttemptEndReason;
+use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_types::MCachedPath;
 use gradient_types::ids::{
     BuildAttemptId, CacheId, CachedPathId, DerivationBuildId, DerivationId, DispatchedJobId,
-    EvaluationId, ProjectId, RunnerJobAttemptId, RunnerJobId, TaskId,
+    EvaluationId, ExecJobAttemptId, ExecJobId, ProjectId, TaskId,
 };
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput, DiscoveredDerivation};
 
@@ -45,7 +45,7 @@ pub struct RecordReport {
     pub skipped: bool,
     pub walked: usize,
     pub entry_points: Vec<DerivationId>,
-    pub runner_entry_points: usize,
+    pub exec_entry_points: usize,
     pub to_probe: Vec<DerivationId>,
 }
 
@@ -178,30 +178,30 @@ pub enum Transition {
     NotEnoughResources {
         shortages: Vec<RamShortage>,
     },
-    SettleRunnerJobs,
-    RunnerJobAssigned {
-        runner_job: RunnerJobId,
-        attempt: RunnerJobAttemptId,
+    SettleExecJobs,
+    ExecJobAssigned {
+        exec_job: ExecJobId,
+        attempt: ExecJobAttemptId,
         number: u32,
         assignment: DispatchedJobId,
         worker: String,
         retries_cap: u32,
     },
-    RunnerProgramStarted {
-        attempt: RunnerJobAttemptId,
+    ExecProgramStarted {
+        attempt: ExecJobAttemptId,
     },
-    RunnerPhase {
-        attempt: RunnerJobAttemptId,
+    ExecPhase {
+        attempt: ExecJobAttemptId,
         name: String,
         payload: Vec<u8>,
     },
-    RunnerAttemptEnded {
-        attempt: RunnerJobAttemptId,
+    ExecAttemptEnded {
+        attempt: ExecJobAttemptId,
         reason: AttemptEndReason,
         message: Option<String>,
     },
-    AbortRunnerJob {
-        runner_job: RunnerJobId,
+    AbortExecJob {
+        exec_job: ExecJobId,
     },
 }
 
@@ -218,7 +218,7 @@ pub struct TransitionReport {
     pub aborted_shared_builds: Vec<DerivationBuildId>,
     pub prioritized_shared_builds: Vec<DerivationBuildId>,
     pub already_aborted: bool,
-    pub aborted_runner_jobs: Vec<RunnerJobId>,
+    pub aborted_exec_jobs: Vec<ExecJobId>,
     pub substitute_log: Option<SubstituteLog>,
     pub refusal: Option<BuildRefusal>,
 }

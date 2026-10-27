@@ -27,7 +27,7 @@ use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
 };
 use gradient_wire::types::{
-    EvalMessageLevel, License, RunnerSpec, attr_eval_source, runner_image_attr,
+    EvalMessageLevel, ExecSpec, License, attr_eval_source, exec_image_attr,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -433,7 +433,7 @@ pub(super) struct Root {
     pub(super) attr: String,
     pub(super) ifd: bool,
     pub(super) licenses: Vec<License>,
-    pub(super) runner: Option<RunnerSpec>,
+    pub(super) exec: Option<ExecSpec>,
 }
 
 enum Queued {
@@ -461,12 +461,12 @@ impl Queued {
                     attr,
                     ifd,
                     licenses,
-                    runner,
+                    exec,
                 } = *root;
                 DiscoveredDerivation {
                     ifd,
                     licenses,
-                    runner,
+                    exec,
                     ..gradient_derivation::discovered_derivation(Some(attr), drv_path, drv)
                 }
             }
@@ -512,24 +512,24 @@ impl FoundAttrs {
             Ok(Resolved {
                 drv_path,
                 licenses,
-                runner,
+                exec,
             }) => {
-                let image = runner
+                let image = exec
                     .as_ref()
                     .and_then(|spec| spec.image.clone())
                     .map(|image| Root {
                         drv_path: image,
-                        attr: runner_image_attr(&attr),
+                        attr: exec_image_attr(&attr),
                         ifd: false,
                         licenses: vec![],
-                        runner: None,
+                        exec: None,
                     });
                 let program = Root {
                     drv_path,
                     attr,
                     ifd: false,
                     licenses,
-                    runner,
+                    exec,
                 };
                 let roots: Vec<Root> = std::iter::once(program).chain(image).collect();
                 self.roots.extend(roots.iter().cloned());
@@ -1864,7 +1864,7 @@ mod tests {
                 Ok(Resolved {
                     drv_path: self.drv_path.clone(),
                     licenses: vec![gpl()],
-                    runner: None,
+                    exec: None,
                 }),
             )]);
             self.walked.notified().await;
@@ -1972,10 +1972,10 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct ResolvesRunner(Resolved);
+    struct ResolvesExec(Resolved);
 
     #[async_trait::async_trait]
-    impl DerivationResolver for ResolvesRunner {
+    impl DerivationResolver for ResolvesExec {
         async fn list_flake_derivations(
             &self,
             _: String,
@@ -2000,13 +2000,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_runner_root_carries_its_spec_and_its_image_is_a_second_root() {
+    async fn an_exec_root_carries_its_spec_and_its_image_is_a_second_root() {
         let program = numbered_drv(1);
         let image = numbered_drv(2);
-        let resolver = ResolvesRunner(Resolved {
+        let resolver = ResolvesExec(Resolved {
             drv_path: program.clone(),
             licenses: vec![],
-            runner: Some(gradient_wire::types::RunnerSpec {
+            exec: Some(gradient_wire::types::ExecSpec {
                 program: "/nix/store/aaaa-train/bin/train".into(),
                 image: Some(image.clone()),
                 ..Default::default()
@@ -2034,7 +2034,7 @@ mod tests {
             .find(|d| d.drv_path == program)
             .expect("the program root is reported");
         assert_eq!(program_root.attr, "apps.x86_64-linux.train");
-        assert!(program_root.runner.is_some());
+        assert!(program_root.exec.is_some());
         let image_root = reported
             .iter()
             .find(|d| d.drv_path == image)
@@ -2043,7 +2043,7 @@ mod tests {
             image_root.attr,
             "apps.x86_64-linux.train.passthru.gradient.image"
         );
-        assert_eq!(image_root.runner, None);
+        assert_eq!(image_root.exec, None);
     }
 
     fn numbered_drv(n: usize) -> String {
@@ -2136,7 +2136,7 @@ mod tests {
                 attr: "root".into(),
                 ifd: false,
                 licenses: vec![],
-                runner: None,
+                exec: None,
             }],
             &mut never_abort(),
         )
@@ -2211,7 +2211,7 @@ mod tests {
                 attr: "dynamic".into(),
                 ifd: false,
                 licenses: vec![],
-                runner: None,
+                exec: None,
             }],
             &mut never_abort(),
         )

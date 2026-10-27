@@ -22,7 +22,7 @@ use crate::trigger_firing::TriggerDispatch;
 mod background;
 mod build;
 mod eval;
-mod runner;
+mod exec;
 
 use background::{
     AbandonedDispatchSweep, BuildHistoryRefit, EvalCompletionWatchdog, GraphConsistency,
@@ -30,7 +30,7 @@ use background::{
     UnreclaimedJobSweep, WorkerLiveness, WorkerSample,
 };
 use eval::EvalDispatch;
-use runner::RunnerDispatch;
+use exec::ExecDispatch;
 
 #[cfg(test)]
 pub(crate) use background::{
@@ -46,8 +46,8 @@ pub(crate) use eval::assign_queued_evals;
 pub(crate) use eval::pending_eval_jobs;
 pub(crate) use eval::project_id_for_eval;
 #[cfg(test)]
-pub(crate) use runner::assign_runner_jobs;
-pub(crate) use runner::{caps_of, pending_runner_job};
+pub(crate) use exec::assign_exec_jobs;
+pub(crate) use exec::{caps_of, pending_exec_job};
 
 pub(crate) const ASSIGN_TICK_SECS: u64 = 5;
 pub(super) const ASSIGN_TICK: Duration = Duration::from_secs(ASSIGN_TICK_SECS);
@@ -89,7 +89,7 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
                 ChildSpec::pass(EvalDispatch {
                     scheduler: Arc::clone(scheduler),
                 }),
-                ChildSpec::pass(RunnerDispatch {
+                ChildSpec::pass(ExecDispatch {
                     scheduler: Arc::clone(scheduler),
                 }),
                 build::child_spec(scheduler),

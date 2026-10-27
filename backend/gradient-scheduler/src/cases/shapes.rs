@@ -11,7 +11,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{ClusterJobId, EvaluationId};
 use gradient_graph::{NarCommit, UpstreamHit};
 use gradient_pool::WorkerProfile;
-use gradient_types::runner::RunnerInventory;
+use gradient_types::exec::ExecInventory;
 use gradient_wire::types::{
     BuildOutput, DerivationOutput, DiscoveredDerivation, GradientCapabilities, JobPhase,
     JobPhaseSpan,
@@ -97,18 +97,18 @@ impl Profile {
         self
     }
 
-    pub fn runner(mut self, inventory: RunnerInventory) -> Self {
+    pub fn exec(mut self, inventory: ExecInventory) -> Self {
         self.caps.exec = true;
-        self.hardware(|h| h.runner = Some(inventory))
+        self.hardware(|h| h.exec = Some(inventory))
     }
 }
 
-pub(crate) fn w_runner(inventory: RunnerInventory) -> Profile {
+pub(crate) fn w_exec(inventory: ExecInventory) -> Profile {
     Profile {
         caps: GradientCapabilities::default(),
         hardware: None,
     }
-    .runner(inventory)
+    .exec(inventory)
 }
 
 fn caps(network: bool, secrets: bool, eval: bool, build: bool) -> GradientCapabilities {

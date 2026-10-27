@@ -399,7 +399,7 @@ async fn after_an_evaluation_build_and_upload_no_original_hash_is_stored() {
             zone: None,
             endpoint: None,
             build_cores: None,
-            runner: None,
+            exec: None,
         })
         .await;
 

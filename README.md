@@ -76,7 +76,7 @@ All commands: [CLI Reference](https://wavelens.github.io/gradient/reference/cli/
 | Sign-in | Local accounts, LDAP, OIDC with roles for the whole instance | GitHub accounts | [OIDC](https://wavelens.github.io/gradient/guides/sso/) with provider groups mapped to roles per project, SCIM provisioning |
 | Integrations | Minimal JSON API | GitHub only | REST API, webhooks, Git Integrations and MCP server |
 | Web UI | Server-rendered pages | GitHub job logs | Responsive UI with live log streaming |
-| Runners | Not available | builtin | Soon; On Roadmap |
+| Exec jobs | Not available | builtin | Soon; On Roadmap |
 | Stars | ![](https://img.shields.io/github/stars/NixOS/hydra?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=high) | - | ![](https://img.shields.io/github/stars/wavelens/gradient?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=low) |
 
 ## Installation

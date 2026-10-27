@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use gradient_types::ids::ProjectId;
 use gradient_wire::types::{
-    BuildStage, DeviceRequest, GradientCapabilities, JobKind, RunnerInventory,
+    BuildStage, DeviceRequest, ExecInventory, GradientCapabilities, JobKind,
 };
 
 use crate::peer_auth::PeerAuth;
@@ -162,7 +162,7 @@ impl WorkerPool {
                 metrics: self.metrics_for(id),
                 zone: s.zone.clone(),
                 endpoint: s.endpoint.clone(),
-                runner: s.runner_inventory(),
+                exec: s.exec_inventory(),
             }
         })
     }
@@ -173,9 +173,9 @@ impl WorkerPool {
         }
     }
 
-    pub fn update_runner_inventory(&mut self, id: &str, runner: Option<RunnerInventory>) {
+    pub fn update_exec_inventory(&mut self, id: &str, exec: Option<ExecInventory>) {
         if let Some(slot) = self.workers.get_mut(id) {
-            slot.shared_mut().runner = runner;
+            slot.shared_mut().exec = exec;
         }
     }
 
@@ -308,7 +308,7 @@ impl WorkerPool {
             Some(WorkerSlot::Active(w)) => match kind {
                 JobKind::Flake => true,
                 JobKind::Build => w.has_build_capacity(),
-                JobKind::Runner => w.runner.is_some(),
+                JobKind::Exec => w.exec.is_some(),
             },
             Some(WorkerSlot::Draining(_)) => false,
             None => false,
@@ -356,7 +356,7 @@ impl WorkerPool {
                 .assigned_jobs
                 .entry(job_id.to_owned())
                 .or_insert_with(|| AssignedJob {
-                    kind: JobKind::Runner,
+                    kind: JobKind::Exec,
                     stage: None,
                     reserved_ram_mb: 0,
                     observed_ram_mb: 0,
@@ -453,7 +453,7 @@ impl WorkerPool {
             disk_speed_mbps: s.disk_speed_mbps,
             upload_speed_mbps: s.upload_speed_mbps,
             download_speed_mbps: s.download_speed_mbps,
-            runner: s.runner_inventory(),
+            exec: s.exec_inventory(),
         }
     }
 
@@ -499,7 +499,7 @@ pub struct WorkerInfo {
     pub upload_speed_mbps: Option<f32>,
     #[serde(skip)]
     pub download_speed_mbps: Option<f32>,
-    pub runner: Option<RunnerInventory>,
+    pub exec: Option<ExecInventory>,
 }
 
 #[cfg(test)]
@@ -641,7 +641,7 @@ mod tests {
                 zone: Some("fra1".into()),
                 endpoint: Some("10.0.0.7:7000".into()),
                 build_cores: Some(6),
-                runner: None,
+                exec: None,
             },
         );
 
@@ -1187,12 +1187,12 @@ mod tests {
 
     #[test]
     fn a_held_device_is_not_free_before_the_worker_reports_it() {
-        use gradient_wire::types::{DeviceClass, DeviceRequest, RunnerInventory};
+        use gradient_wire::types::{DeviceClass, DeviceRequest, ExecInventory};
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        pool.update_runner_inventory(
+        pool.update_exec_inventory(
             "w1",
-            Some(RunnerInventory {
+            Some(ExecInventory {
                 devices: vec![DeviceClass {
                     name: "gpu:h100".into(),
                     total: 8,
@@ -1203,21 +1203,21 @@ mod tests {
         );
         let free = |pool: &WorkerPool| {
             pool.worker_caps("w1")
-                .and_then(|caps| caps.runner)
-                .map(|runner| runner.devices[0].free)
+                .and_then(|caps| caps.exec)
+                .map(|exec| exec.devices[0].free)
         };
         pool.hold_devices(
             "w1",
-            "runner:1",
+            "exec:1",
             vec![DeviceRequest {
                 name: "gpu:h100".into(),
                 count: 8,
             }],
         );
         assert_eq!(free(&pool), Some(0));
-        pool.assign_job("w1", "runner:1", JobKind::Runner, 0);
+        pool.assign_job("w1", "exec:1", JobKind::Exec, 0);
         assert_eq!(free(&pool), Some(0), "the assignment keeps the hold");
-        pool.release_job("w1", "runner:1");
+        pool.release_job("w1", "exec:1");
         assert_eq!(free(&pool), Some(8));
     }
 }

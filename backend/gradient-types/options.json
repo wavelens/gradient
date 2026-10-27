@@ -1468,12 +1468,12 @@
     "values": []
   },
   {
-    "group": "runner",
+    "group": "exec",
     "field": "enable",
-    "flag": "runner-enable",
-    "env": "GRADIENT_RUNNER_ENABLE",
+    "flag": "exec-enable",
+    "env": "GRADIENT_EXEC_ENABLE",
     "type": "bool",
-    "description": "Whether to enable runner jobs. When disabled, runner entry points fail with a message\ninstead of starting a job.",
+    "description": "Whether to enable exec jobs. When disabled, exec entry points fail with a message\ninstead of starting a job.",
     "default": "true",
     "values": [
       "true",

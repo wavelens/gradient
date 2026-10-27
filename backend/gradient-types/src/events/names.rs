@@ -15,13 +15,13 @@ pub const BUILD_STATUS_CHANGED: &str = "build.status_changed";
 pub const BUILD_PROGRESS: &str = "build.progress";
 pub const BUILD_UNKNOWN: &str = "build.unknown";
 
-pub const RUNNER_JOB_QUEUED: &str = "runner_job.queued";
-pub const RUNNER_JOB_STARTED: &str = "runner_job.started";
-pub const RUNNER_JOB_PHASE: &str = "runner_job.phase";
-pub const RUNNER_JOB_COMPLETED: &str = "runner_job.completed";
-pub const RUNNER_JOB_FAILED: &str = "runner_job.failed";
-pub const RUNNER_JOB_ABORTED: &str = "runner_job.aborted";
-pub const RUNNER_JOB_UNKNOWN: &str = "runner_job.unknown";
+pub const EXEC_JOB_QUEUED: &str = "exec_job.queued";
+pub const EXEC_JOB_STARTED: &str = "exec_job.started";
+pub const EXEC_JOB_PHASE: &str = "exec_job.phase";
+pub const EXEC_JOB_COMPLETED: &str = "exec_job.completed";
+pub const EXEC_JOB_FAILED: &str = "exec_job.failed";
+pub const EXEC_JOB_ABORTED: &str = "exec_job.aborted";
+pub const EXEC_JOB_UNKNOWN: &str = "exec_job.unknown";
 
 pub const EVALUATION_QUEUED: &str = "evaluation.queued";
 pub const EVALUATION_STARTED: &str = "evaluation.started";

@@ -19,7 +19,7 @@ use gradient_wire::types::License;
 use std::sync::Arc;
 
 use super::eval_stats::{EvalStatsAccumulator, EvalStatsTotals};
-use super::runner_app::runner_spec;
+use super::exec_app::exec_spec;
 
 #[derive(Debug)]
 pub struct WorkerPoolResolver {
@@ -44,13 +44,13 @@ impl gradient_eval::pool::EvalDependencies for SourceDependencies<'_> {
 fn item_to_resolved(item: ResolvedItem) -> ResolvedDerivation {
     let result = match (item.drv_path, item.error) {
         (Some(drv_path), _) => item
-            .runner
-            .map(runner_spec)
+            .exec
+            .map(exec_spec)
             .transpose()
-            .map(|runner| Resolved {
+            .map(|exec| Resolved {
                 drv_path,
                 licenses: item.licenses.into_iter().map(wire_license).collect(),
-                runner,
+                exec,
             })
             .map_err(|msg| anyhow::anyhow!(msg)),
         (None, Some(msg)) => Err(anyhow::anyhow!(msg)),

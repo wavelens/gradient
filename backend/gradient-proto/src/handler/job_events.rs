@@ -312,7 +312,7 @@ impl ApplyJobEvent for SchedulerJobEvents {
                 payload,
             } => {
                 self.scheduler
-                    .handle_runner_phase(&self.peer_id, &job_id, name, payload)
+                    .handle_exec_phase(&self.peer_id, &job_id, name, payload)
                     .await;
             }
         }
@@ -377,7 +377,7 @@ impl SchedulerJobEvents {
             }
             JobUpdateKind::Compressing => {}
             JobUpdateKind::ProgramStarted => {
-                scheduler.handle_runner_started(peer_id, &job_id).await;
+                scheduler.handle_exec_started(peer_id, &job_id).await;
             }
             JobUpdateKind::Stage(stage) => {
                 scheduler.enter_build_stage(peer_id, &job_id, stage).await;

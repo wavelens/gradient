@@ -18,6 +18,7 @@ pub mod commits;
 pub mod dashboard;
 pub mod evals;
 pub mod events;
+pub mod exec_jobs;
 pub mod git_host_hooks;
 pub mod gradient_ci_connections;
 pub mod invites;
@@ -28,7 +29,6 @@ pub mod metrics;
 pub mod metrics_query;
 pub mod projects;
 mod refusal;
-pub mod runner_jobs;
 pub mod search;
 pub mod stars;
 pub mod stats;
@@ -154,7 +154,7 @@ pub struct ServerConfig {
     pub gradient_ci_enabled: bool,
     pub gradient_ci_url: String,
     pub logo_url: Option<String>,
-    pub runner_enabled: bool,
+    pub exec_enabled: bool,
 }
 
 #[utoipa::path(
@@ -194,7 +194,7 @@ pub async fn get_config(
             gradient_ci_enabled: state.config.gradient_ci.enable,
             gradient_ci_url: gradient_types::consts::GRADIENT_CI_URL.to_owned(),
             logo_url: state.config.server.frontend_logo_url.clone(),
-            runner_enabled: state.config.runner.enable,
+            exec_enabled: state.config.exec.enable,
         },
     };
 

@@ -393,7 +393,7 @@ fn export_project(
         private_key_file: String::new(),
         public: project.public,
         hide_build_requests: project.hide_build_requests,
-        runner_enabled: project.runner_enabled,
+        exec_enabled: project.exec_enabled,
         created_by: name_or_blank(username, project.created_by),
         members,
         teams,
@@ -794,17 +794,17 @@ mod tests {
     }
 
     #[test]
-    fn runner_enabled_survives_export_round_trip() {
+    fn exec_enabled_survives_export_round_trip() {
         let project = gradient_entity::project::Model {
             name: "acme".into(),
-            runner_enabled: true,
+            exec_enabled: true,
             ..Default::default()
         };
 
         let exported = export_project(&project, &HashMap::new(), Vec::new(), Vec::new());
         let reread: StateProject =
             serde_json::from_value(serde_json::to_value(&exported).unwrap()).unwrap();
-        assert!(reread.runner_enabled);
+        assert!(reread.exec_enabled);
     }
 
     #[test]

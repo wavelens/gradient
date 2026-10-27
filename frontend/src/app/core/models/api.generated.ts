@@ -249,7 +249,7 @@ export interface BoardWorker {
   cpu_usage_pct?: number | null;
   ram_free_mb?: number | null;
   ram_total_mb?: number | null;
-  runner?: RunnerInventory | null;
+  exec?: ExecInventory | null;
 }
 
 export interface BuildGraph {
@@ -909,6 +909,97 @@ export interface EvaluationSummary {
 export interface EvaluationTriggerSummary {
   id: TaskTriggerId;
   type: TriggerType;
+}
+
+export interface ExecAllow {
+  network: boolean;
+  ssh: boolean;
+  ports: never[];
+  nodes: number;
+  devices: string[];
+  mounts: string[];
+  custom_images: boolean;
+  timeout_secs?: number | null;
+  max_silent_secs?: number | null;
+  retries: number;
+}
+
+export interface ExecDefaults {
+  network: boolean;
+  ssh: boolean;
+  mounts: string[];
+  max_silent_secs?: number | null;
+}
+
+export interface ExecInventory {
+  labels: string[];
+  devices: DeviceClass[];
+  mounts: string[];
+  secrets: string[];
+  allow: ExecAllow;
+  defaults: ExecDefaults;
+  warm_guests: number;
+}
+
+export interface ExecJobAttemptView {
+  number: number;
+  worker: string;
+  started_at: string;
+  ended_at?: string | null;
+  end_reason?: AttemptEndReason | null;
+  message?: string | null;
+}
+
+export type ExecJobId = string;
+
+export interface ExecJobPhaseView {
+  name: string;
+  attempt: number;
+  created_at: string;
+}
+
+export interface ExecJobResponse {
+  id: ExecJobId;
+  status: ExecJobStatus;
+  entry_point: string;
+  evaluation: EvaluationId;
+  task: string;
+  project: string;
+  nodes: number;
+  labels: string[];
+  devices: DeviceRequest[];
+  waiting_reason?: WaitingReason | null;
+  message?: string | null;
+  retries_left: number;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  worker?: string | null;
+  attempts: ExecJobAttemptView[];
+  phases: ExecJobPhaseView[];
+}
+
+export type ExecJobStatus = "queued" | "starting" | "running" | "completed" | "failed" | "aborted" | "created";
+
+export interface ExecJobSummary {
+  id: ExecJobId;
+  entry_point: string;
+  status: ExecJobStatus;
+  waiting_reason?: WaitingReason | null;
+  message?: string | null;
+  nodes: number;
+  labels: string[];
+  devices: DeviceRequest[];
+  started_at?: string | null;
+  last_phase?: string | null;
+}
+
+export interface ExecUnmet {
+  labels: string[];
+  devices: DeviceRequest[];
+  mounts: string[];
+  nodes: number;
+  custom_image: boolean;
 }
 
 export interface ExpensiveBuild {
@@ -1609,7 +1700,7 @@ export interface PatchProjectRequest {
   display_name?: string | null;
   description?: string | null;
   hide_build_requests?: boolean | null;
-  runner_enabled?: boolean | null;
+  exec_enabled?: boolean | null;
 }
 
 export interface PatchRequest {
@@ -1726,7 +1817,7 @@ export interface Project {
   private_key: string;
   public: boolean;
   hide_build_requests: boolean;
-  runner_enabled: boolean;
+  exec_enabled: boolean;
   created_by: UserId;
   created_at: string;
   managed: boolean;
@@ -1742,7 +1833,7 @@ export interface ProjectResponse {
   public_key?: string | null;
   public: boolean;
   hide_build_requests: boolean;
-  runner_enabled: boolean;
+  exec_enabled: boolean;
   managed: boolean;
   created_by: UserId;
   created_at: string;
@@ -1923,97 +2014,6 @@ export interface RuleDescription {
   description: string;
 }
 
-export interface RunnerAllow {
-  network: boolean;
-  ssh: boolean;
-  ports: never[];
-  nodes: number;
-  devices: string[];
-  mounts: string[];
-  custom_images: boolean;
-  timeout_secs?: number | null;
-  max_silent_secs?: number | null;
-  retries: number;
-}
-
-export interface RunnerDefaults {
-  network: boolean;
-  ssh: boolean;
-  mounts: string[];
-  max_silent_secs?: number | null;
-}
-
-export interface RunnerInventory {
-  labels: string[];
-  devices: DeviceClass[];
-  mounts: string[];
-  secrets: string[];
-  allow: RunnerAllow;
-  defaults: RunnerDefaults;
-  warm_guests: number;
-}
-
-export interface RunnerJobAttemptView {
-  number: number;
-  worker: string;
-  started_at: string;
-  ended_at?: string | null;
-  end_reason?: AttemptEndReason | null;
-  message?: string | null;
-}
-
-export type RunnerJobId = string;
-
-export interface RunnerJobPhaseView {
-  name: string;
-  attempt: number;
-  created_at: string;
-}
-
-export interface RunnerJobResponse {
-  id: RunnerJobId;
-  status: RunnerJobStatus;
-  entry_point: string;
-  evaluation: EvaluationId;
-  task: string;
-  project: string;
-  nodes: number;
-  labels: string[];
-  devices: DeviceRequest[];
-  waiting_reason?: WaitingReason | null;
-  message?: string | null;
-  retries_left: number;
-  created_at: string;
-  started_at?: string | null;
-  finished_at?: string | null;
-  worker?: string | null;
-  attempts: RunnerJobAttemptView[];
-  phases: RunnerJobPhaseView[];
-}
-
-export type RunnerJobStatus = "queued" | "starting" | "running" | "completed" | "failed" | "aborted" | "created";
-
-export interface RunnerJobSummary {
-  id: RunnerJobId;
-  entry_point: string;
-  status: RunnerJobStatus;
-  waiting_reason?: WaitingReason | null;
-  message?: string | null;
-  nodes: number;
-  labels: string[];
-  devices: DeviceRequest[];
-  started_at?: string | null;
-  last_phase?: string | null;
-}
-
-export interface RunnerUnmet {
-  labels: string[];
-  devices: DeviceRequest[];
-  mounts: string[];
-  nodes: number;
-  custom_image: boolean;
-}
-
 export interface ScimErrorBody {
   schemas: string[];
   status: string;
@@ -2067,7 +2067,7 @@ export interface ServerConfig {
   gradient_ci_enabled: boolean;
   gradient_ci_url: string;
   logo_url?: string | null;
-  runner_enabled: boolean;
+  exec_enabled: boolean;
 }
 
 export type SessionId = string;
@@ -2545,10 +2545,10 @@ export type WaitingReason = {
   failing_upstream_caches: string[];
   kind: "upstream_caches";
 } | {
-  unmet: RunnerUnmet;
+  unmet: ExecUnmet;
   connected_workers: number;
   matching_workers: number;
-  kind: "runner_workers";
+  kind: "exec_workers";
 };
 
 export type WalkMode = "pruned" | "full";
@@ -2591,7 +2591,7 @@ export interface WorkerInfo {
   assigned_job_count: number;
   draining: boolean;
   authorized_peers?: ProjectId[] | null;
-  runner?: RunnerInventory | null;
+  exec?: ExecInventory | null;
 }
 
 export interface WorkerLiveInfo {

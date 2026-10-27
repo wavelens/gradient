@@ -27,7 +27,7 @@ All three payloads use one JSON structure: websocket messages, webhook bodies, a
 |---|---|---|
 | `build.<status>` | yes (entry points) | `build.queued`, `build.started`, `build.completed`, `build.failed`, `build.substituted` |
 | `evaluation.<phase>` | yes | `evaluation.queued`, `evaluation.building`, `evaluation.failed`, `evaluation.approval_granted` |
-| `runner_job.<status>` | yes | `runner_job.queued`, `runner_job.started`, `runner_job.phase`, `runner_job.completed`, `runner_job.failed`, `runner_job.aborted` |
+| `exec_job.<status>` | yes | `exec_job.queued`, `exec_job.started`, `exec_job.phase`, `exec_job.completed`, `exec_job.failed`, `exec_job.aborted` |
 | `project.*`, `task.*`, `cache.*` | yes | `project.create`, `task.star`, `task.action.update`, `cache.nar.upload`, `cache.member.create` |
 | `gc.*` | yes | `gc.swept`, `gc.deep_finished` |
 | `worker.demand` | yes, team webhooks only | waiting evaluations that need a system, feature, network, secrets or eval worker missing from the connected workers. Delivered once per team granting its workers to the project |

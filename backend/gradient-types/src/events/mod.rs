@@ -13,12 +13,12 @@ mod bus;
 pub mod cache;
 mod envelope;
 pub mod evaluation;
+pub mod exec_job;
 mod filter;
 pub mod gc;
 pub mod graph;
 pub mod names;
 pub mod proto;
-pub mod runner_job;
 pub mod webhook;
 pub mod worker;
 pub mod worker_demand;
@@ -173,7 +173,7 @@ events! {
     BuildStatusChanged(build::StatusChanged),
     BuildReported(build::Reported),
     BuildProgress(build::Progress),
-    RunnerJobReported(runner_job::Reported),
+    ExecJobReported(exec_job::Reported),
     EvaluationReported(evaluation::Reported),
     EvaluationProgress(evaluation::Progress),
     EvaluationActivity(evaluation::Activity),

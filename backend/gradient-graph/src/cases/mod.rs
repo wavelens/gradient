@@ -5,6 +5,7 @@
  */
 
 mod batch;
+mod exec;
 mod failure;
 mod gc;
 mod nar;
@@ -15,7 +16,6 @@ mod probe;
 mod queue;
 mod realisation;
 mod retire;
-mod runner;
 mod scenarios;
 mod sharing;
 mod signing;
@@ -105,9 +105,9 @@ impl Case {
         case
     }
 
-    pub async fn start_without_runner_jobs(shape: Shape) -> Self {
+    pub async fn start_without_exec_jobs(shape: Shape) -> Self {
         let (case, report) =
-            Self::start_configured(shape, None, |config| config.runner.enable = false).await;
+            Self::start_configured(shape, None, |config| config.exec.enable = false).await;
         assert_eq!(report.total(), 0, "drift after the seed: {report:?}");
         case
     }

@@ -12,7 +12,7 @@ gr-table.workers { display: block; margin-top: 1rem; }
 
 .muted { color: var(--gr-text-muted); }
 
-.runner {
+.exec {
   min-width: 12rem;
 
   .labels { display: flex; flex-wrap: wrap; gap: $spacing-xs; margin-bottom: $spacing-xs; }

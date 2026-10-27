@@ -13,9 +13,9 @@ use gradient_entity::dispatched_job::{
     Model as MDispatchedJob,
 };
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, RunnerJobId};
-use gradient_entity::runner_job::RunnerJobStatus;
-use gradient_types::{CDerivationBuild, CEvaluation, CRunnerJob};
+use gradient_entity::exec_job::ExecJobStatus;
+use gradient_entity::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ExecJobId};
+use gradient_types::{CDerivationBuild, CEvaluation, CExecJob};
 use sea_orm::sea_query::{Expr, InsertStatement, OnConflict, Query, Value};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, IntoActiveModel,
@@ -25,7 +25,7 @@ use std::collections::HashMap;
 
 pub const EVAL_KEY_PREFIX: &str = "eval:";
 pub const BUILD_KEY_PREFIX: &str = "build:";
-pub const RUNNER_KEY_PREFIX: &str = "runner:";
+pub const EXEC_KEY_PREFIX: &str = "exec:";
 
 pub fn shared_build_of_key(job_id: &str) -> Option<DerivationBuildId> {
     job_id.strip_prefix(BUILD_KEY_PREFIX)?.parse().ok()
@@ -35,12 +35,12 @@ pub fn eval_of_key(job_id: &str) -> Option<EvaluationId> {
     job_id.strip_prefix(EVAL_KEY_PREFIX)?.parse().ok()
 }
 
-pub fn runner_job_of_key(job_id: &str) -> Option<RunnerJobId> {
-    job_id.strip_prefix(RUNNER_KEY_PREFIX)?.parse().ok()
+pub fn exec_job_of_key(job_id: &str) -> Option<ExecJobId> {
+    job_id.strip_prefix(EXEC_KEY_PREFIX)?.parse().ok()
 }
 
-pub fn runner_job_key_sql(id_expr: &str) -> String {
-    format!("'{RUNNER_KEY_PREFIX}' || {id_expr}::text")
+pub fn exec_job_key_sql(id_expr: &str) -> String {
+    format!("'{EXEC_KEY_PREFIX}' || {id_expr}::text")
 }
 
 pub fn eval_job_key_sql(id_expr: &str) -> String {
@@ -67,8 +67,8 @@ pub enum ClaimGate {
     Eval {
         evaluation: EvaluationId,
     },
-    Runner {
-        runner_job: RunnerJobId,
+    Exec {
+        exec_job: ExecJobId,
     },
 }
 
@@ -95,11 +95,11 @@ impl ClaimGate {
                     EvaluationStatus::Aborted,
                 ]))
                 .to_owned(),
-            ClaimGate::Runner { runner_job } => Query::select()
+            ClaimGate::Exec { exec_job } => Query::select()
                 .expr(Expr::val(1))
-                .from(gradient_entity::runner_job::Entity)
-                .and_where(CRunnerJob::Id.eq(runner_job))
-                .and_where(CRunnerJob::Status.eq(RunnerJobStatus::Queued))
+                .from(gradient_entity::exec_job::Entity)
+                .and_where(CExecJob::Id.eq(exec_job))
+                .and_where(CExecJob::Status.eq(ExecJobStatus::Queued))
                 .to_owned(),
         };
 
@@ -389,13 +389,10 @@ mod tests {
     use sea_orm::{MockDatabase, MockExecResult, Statement};
 
     #[test]
-    fn a_runner_key_names_its_job() {
-        let id = gradient_entity::ids::RunnerJobId::now_v7();
-        assert_eq!(
-            runner_job_of_key(&format!("{RUNNER_KEY_PREFIX}{id}")),
-            Some(id)
-        );
-        assert_eq!(runner_job_of_key(&format!("{BUILD_KEY_PREFIX}{id}")), None);
+    fn an_exec_key_names_its_job() {
+        let id = gradient_entity::ids::ExecJobId::now_v7();
+        assert_eq!(exec_job_of_key(&format!("{EXEC_KEY_PREFIX}{id}")), Some(id));
+        assert_eq!(exec_job_of_key(&format!("{BUILD_KEY_PREFIX}{id}")), None);
     }
 
     fn closed_rows(rows_affected: u64) -> MockDatabase {

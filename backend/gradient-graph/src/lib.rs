@@ -13,13 +13,13 @@ pub mod writer;
 mod cases;
 mod claims;
 mod demote;
+mod exec;
 mod gc;
 mod known;
 mod nar;
 pub mod policy;
 mod record;
 mod requeue;
-mod runner;
 mod self_heal;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

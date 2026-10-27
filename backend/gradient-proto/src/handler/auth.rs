@@ -424,7 +424,7 @@ mod tests {
             private_key: String::new(),
             public: false,
             hide_build_requests: false,
-            runner_enabled: false,
+            exec_enabled: false,
             created_by: gradient_types::ids::UserId::nil(),
             created_at: gradient_types::now(),
             managed: false,

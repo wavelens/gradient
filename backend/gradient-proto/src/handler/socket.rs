@@ -66,7 +66,7 @@ fn sends_ssh_key(
     caps.is_some_and(|c| c.secrets)
         && match job {
             Job::Flake(flake_job) => flake_job.steps.contains(&FlakeStep::FetchFlake),
-            Job::Runner(_) => true,
+            Job::Exec(_) => true,
             Job::Build(_) => false,
         }
 }
@@ -154,7 +154,7 @@ async fn project_ssh_key(db: &DbContext, project_id: ProjectId) -> Option<String
 mod tests {
     use super::*;
     use gradient_wire::types::{
-        FlakeJob, FlakeSource, FlakeStep, GradientCapabilities, Job, JobContext, RunnerJob,
+        ExecJob, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities, Job, JobContext,
     };
 
     fn fetch_job() -> Job {
@@ -188,8 +188,8 @@ mod tests {
         assert!(sends_ssh_key(Some(&with_secrets), &fetch_job()));
     }
 
-    fn runner_job() -> Job {
-        Job::Runner(Box::new(RunnerJob {
+    fn exec_job() -> Job {
+        Job::Exec(Box::new(ExecJob {
             program: "/nix/store/aaaa-check".into(),
             args: vec![],
             env: Default::default(),
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn a_runner_job_gets_the_project_ssh_key_only_with_secrets() {
+    fn an_exec_job_gets_the_project_ssh_key_only_with_secrets() {
         let with_secrets = GradientCapabilities {
             exec: true,
             secrets: true,
@@ -219,9 +219,9 @@ mod tests {
             exec: true,
             ..Default::default()
         };
-        assert!(sends_ssh_key(Some(&with_secrets), &runner_job()));
-        assert!(!sends_ssh_key(Some(&without), &runner_job()));
-        assert!(!sends_ssh_key(None, &runner_job()));
+        assert!(sends_ssh_key(Some(&with_secrets), &exec_job()));
+        assert!(!sends_ssh_key(Some(&without), &exec_job()));
+        assert!(!sends_ssh_key(None, &exec_job()));
     }
 
     #[test]

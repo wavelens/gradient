@@ -156,14 +156,14 @@ pub struct ResolvedItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<AttrCost>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runner: Option<RunnerApp>,
+    pub exec: Option<ExecApp>,
 }
 
 #[derive(
     Debug, Clone, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize,
 )]
 #[rkyv(derive(Debug))]
-pub struct RunnerApp {
+pub struct ExecApp {
     pub block: String,
     pub program: String,
     pub program_drv: String,

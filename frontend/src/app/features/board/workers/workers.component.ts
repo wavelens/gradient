@@ -88,7 +88,7 @@ import { BoardWorker, BoardFleetPoint, DeviceClass, WorkerLoad, LoadBucket } fro
 
       <gr-table class="workers">
         <thead>
-          <tr><th>Worker</th><th>Projects</th><th>State</th><th>Load</th><th>CPU</th><th>RAM free</th><th>Arch</th><th>Runner</th></tr>
+          <tr><th>Worker</th><th>Projects</th><th>State</th><th>Load</th><th>CPU</th><th>RAM free</th><th>Arch</th><th>Exec</th></tr>
         </thead>
         <tbody>
           @for (w of workers(); track $index) {
@@ -104,12 +104,12 @@ import { BoardWorker, BoardFleetPoint, DeviceClass, WorkerLoad, LoadBucket } fro
               <td>{{ w.cpu_usage_pct != null ? percent(w.cpu_usage_pct) : '-' }}</td>
               <td>{{ megabytes(w.ram_free_mb) }}</td>
               <td class="mono">{{ w.architectures.join(', ') || '-' }}</td>
-              <td class="runner">
-                @if (w.runner; as runner) {
+              <td class="exec">
+                @if (w.exec; as exec) {
                   <span class="labels">
-                    @for (label of runner.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
+                    @for (label of exec.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
                   </span>
-                  @for (d of runner.devices; track d.name) {
+                  @for (d of exec.devices; track d.name) {
                     <span class="device">
                       <gr-segmented-bar [segments]="heldSegments(d)" />
                       <span class="mono">{{ d.name }} {{ d.free }}/{{ d.total }} free</span>

@@ -24,7 +24,7 @@ function projectFor(access: AccessState): ProjectResponse {
     description: '',
     public: false,
     hide_build_requests: false,
-    runner_enabled: false,
+    exec_enabled: false,
     managed: access.managed,
     created_by: 'u1',
     created_at: '2026-01-01T00:00:00',
@@ -40,7 +40,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-function setup(access: AccessState, runnerEnabled = false): ComponentFixture<ProjectSettingsComponent> {
+function setup(access: AccessState, execEnabled = false): ComponentFixture<ProjectSettingsComponent> {
   TestBed.configureTestingModule({
     imports: [ProjectSettingsComponent],
     providers: [
@@ -61,7 +61,7 @@ function setup(access: AccessState, runnerEnabled = false): ComponentFixture<Pro
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
     ],
   });
-  TestBed.inject(ConfigService).runnerEnabled = runnerEnabled;
+  TestBed.inject(ConfigService).execEnabled = execEnabled;
   const fixture = TestBed.createComponent(ProjectSettingsComponent);
   fixture.detectChanges();
   return fixture;
@@ -92,18 +92,18 @@ describe('ProjectSettingsComponent - access gating', () => {
   });
 });
 
-describe('ProjectSettingsComponent - runner switch', () => {
+describe('ProjectSettingsComponent - exec switch', () => {
   const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
 
-  it('hides the runner switch while the instance has runner jobs off', async () => {
+  it('hides the exec switch while the instance has exec jobs off', async () => {
     const fixture = setup(admin);
     await settled(fixture);
-    expect((fixture.nativeElement as HTMLElement).querySelector('#runner-enabled')).toBeNull();
+    expect((fixture.nativeElement as HTMLElement).querySelector('#exec-enabled')).toBeNull();
   });
 
-  it('shows the runner switch once the instance allows runner jobs', async () => {
+  it('shows the exec switch once the instance allows exec jobs', async () => {
     const fixture = setup(admin, true);
     await settled(fixture);
-    expect((fixture.nativeElement as HTMLElement).querySelector('#runner-enabled')).not.toBeNull();
+    expect((fixture.nativeElement as HTMLElement).querySelector('#exec-enabled')).not.toBeNull();
   });
 });

@@ -17,8 +17,8 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use crate::assign_mode::decide_build_spec_kind;
 use crate::count::clamp_to_u32;
 use gradient_pool::{DeviceCount, WorkerCaps, build_needs_network};
-use gradient_types::runner::{DeviceRequest, RunnerInventory, RunnerSpec};
-use gradient_types::waiting_reason::{EvalCapability, RunnerUnmet};
+use gradient_types::exec::{DeviceRequest, ExecInventory, ExecSpec};
+use gradient_types::waiting_reason::{EvalCapability, ExecUnmet};
 use gradient_wire::types::{BuildSpecKind, JobKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,12 +226,12 @@ impl BuildabilityChecker {
     }
 }
 
-pub(crate) fn runner_waiting_reason(
-    spec: &RunnerSpec,
+pub(crate) fn exec_waiting_reason(
+    spec: &ExecSpec,
     architecture: &str,
     workers: &[WorkerCaps],
 ) -> Option<WaitingReason> {
-    let exec_workers: Vec<&WorkerCaps> = workers.iter().filter(|w| runs_runners(w)).collect();
+    let exec_workers: Vec<&WorkerCaps> = workers.iter().filter(|w| runs_exec_jobs(w)).collect();
     if exec_workers.is_empty() {
         return Some(WaitingReason::eval_workers(
             EvalCapability::Exec,
@@ -241,18 +241,18 @@ pub(crate) fn runner_waiting_reason(
 
     let fits = |worker: &WorkerCaps, devices: DeviceCount| {
         let defaults = worker
-            .runner
+            .exec
             .as_ref()
             .map(|inventory| inventory.defaults.clone())
             .unwrap_or_default();
-        worker.fits_runner(&spec.requirement_on(architecture, &defaults), devices)
+        worker.fits_exec(&spec.requirement_on(architecture, &defaults), devices)
     };
     if exec_workers.iter().any(|w| fits(w, DeviceCount::Free)) {
         return None;
     }
 
-    Some(WaitingReason::RunnerWorkers {
-        unmet: runner_unmet(spec, architecture, workers),
+    Some(WaitingReason::ExecWorkers {
+        unmet: exec_unmet(spec, architecture, workers),
         connected_workers: clamp_to_u32(workers.len()),
         matching_workers: clamp_to_u32(
             exec_workers
@@ -263,19 +263,15 @@ pub(crate) fn runner_waiting_reason(
     })
 }
 
-pub(crate) fn runner_unmet(
-    spec: &RunnerSpec,
-    architecture: &str,
-    workers: &[WorkerCaps],
-) -> RunnerUnmet {
-    let inventories: Vec<&RunnerInventory> = workers
+pub(crate) fn exec_unmet(spec: &ExecSpec, architecture: &str, workers: &[WorkerCaps]) -> ExecUnmet {
+    let inventories: Vec<&ExecInventory> = workers
         .iter()
-        .filter(|w| runs_runners(w) && w.architectures.iter().any(|a| a == architecture))
-        .filter_map(|w| w.runner.as_ref())
+        .filter(|w| runs_exec_jobs(w) && w.architectures.iter().any(|a| a == architecture))
+        .filter_map(|w| w.exec.as_ref())
         .collect();
-    let offered = |offers: &dyn Fn(&RunnerInventory) -> bool| inventories.iter().any(|i| offers(i));
+    let offered = |offers: &dyn Fn(&ExecInventory) -> bool| inventories.iter().any(|i| offers(i));
 
-    RunnerUnmet {
+    ExecUnmet {
         labels: spec
             .labels
             .iter()
@@ -306,11 +302,11 @@ pub(crate) fn runner_unmet(
     }
 }
 
-fn runs_runners(worker: &WorkerCaps) -> bool {
-    worker.takes_jobs_of(&JobKind::Runner) && worker.runner.is_some()
+fn runs_exec_jobs(worker: &WorkerCaps) -> bool {
+    worker.takes_jobs_of(&JobKind::Exec) && worker.exec.is_some()
 }
 
-fn offers_device(inventory: &RunnerInventory, device: &DeviceRequest) -> bool {
+fn offers_device(inventory: &ExecInventory, device: &DeviceRequest) -> bool {
     inventory.allow.devices.contains(&device.name)
         && inventory
             .devices
@@ -645,7 +641,7 @@ mod tests {
     fn a_job_without_any_exec_worker_waits_for_exec() {
         use crate::test_jobs::build_only_caps;
         let reason =
-            runner_waiting_reason(&RunnerSpec::default(), "x86_64-linux", &[build_only_caps()]);
+            exec_waiting_reason(&ExecSpec::default(), "x86_64-linux", &[build_only_caps()]);
         assert_eq!(
             reason,
             Some(WaitingReason::eval_workers(EvalCapability::Exec, 1))
@@ -654,23 +650,23 @@ mod tests {
 
     #[test]
     fn the_wait_reason_names_what_no_worker_offers() {
-        use crate::test_jobs::eight_gpu_runner_caps;
-        let spec = RunnerSpec {
+        use crate::test_jobs::eight_gpu_exec_caps;
+        let spec = ExecSpec {
             labels: vec!["3d-printer".into()],
             devices: vec![DeviceRequest {
                 name: "gpu:h100".into(),
                 count: 16,
             }],
             mounts: Some(vec!["datasets".into()]),
-            ..RunnerSpec::default()
+            ..ExecSpec::default()
         };
-        let Some(WaitingReason::RunnerWorkers {
+        let Some(WaitingReason::ExecWorkers {
             unmet,
             connected_workers,
             matching_workers,
-        }) = runner_waiting_reason(&spec, "x86_64-linux", &[eight_gpu_runner_caps()])
+        }) = exec_waiting_reason(&spec, "x86_64-linux", &[eight_gpu_exec_caps()])
         else {
-            panic!("runner wait")
+            panic!("exec wait")
         };
         assert_eq!(unmet.labels, vec!["3d-printer".to_owned()]);
         assert_eq!(
@@ -686,22 +682,22 @@ mod tests {
 
     #[test]
     fn busy_devices_count_as_matching_workers() {
-        use crate::test_jobs::eight_gpu_runner_caps_with_free;
-        let spec = RunnerSpec {
+        use crate::test_jobs::eight_gpu_exec_caps_with_free;
+        let spec = ExecSpec {
             devices: vec![DeviceRequest {
                 name: "gpu:h100".into(),
                 count: 8,
             }],
-            ..RunnerSpec::default()
+            ..ExecSpec::default()
         };
-        let Some(WaitingReason::RunnerWorkers {
+        let Some(WaitingReason::ExecWorkers {
             unmet,
             matching_workers,
             ..
-        }) = runner_waiting_reason(&spec, "x86_64-linux", &[eight_gpu_runner_caps_with_free(0)])
+        }) = exec_waiting_reason(&spec, "x86_64-linux", &[eight_gpu_exec_caps_with_free(0)])
         else {
-            panic!("runner wait")
+            panic!("exec wait")
         };
-        assert_eq!((unmet, matching_workers), (RunnerUnmet::default(), 1));
+        assert_eq!((unmet, matching_workers), (ExecUnmet::default(), 1));
     }
 }

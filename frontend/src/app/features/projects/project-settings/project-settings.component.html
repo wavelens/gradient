@@ -59,14 +59,14 @@
       />
     </gr-form-field>
 
-    @if (config.runnerEnabled) {
+    @if (config.execEnabled) {
       <gr-form-field>
         <gr-checkbox
-          inputId="runner-enabled"
-          [(ngModel)]="formData.runner_enabled"
+          inputId="exec-enabled"
+          [(ngModel)]="formData.exec_enabled"
           [binary]="true"
           [appManagedDisable]="access()"
-          label="Run runner jobs"
+          label="Run exec jobs"
         />
       </gr-form-field>
     }

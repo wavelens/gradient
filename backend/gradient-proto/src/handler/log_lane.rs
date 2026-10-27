@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use gradient_db::WorkerDb;
 use gradient_storage::LogStorage;
-use gradient_types::ids::{DerivationBuildId, RunnerJobAttemptId};
+use gradient_types::ids::{DerivationBuildId, ExecJobAttemptId};
 use gradient_util::shutdown::Shutdown;
 use tokio::sync::{mpsc, oneshot};
 use tracing::debug;
@@ -19,7 +19,7 @@ const LOG_QUEUE: usize = 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum LogTarget {
     Build(DerivationBuildId),
-    RunnerAttempt(RunnerJobAttemptId),
+    ExecAttempt(ExecJobAttemptId),
 }
 
 enum Entry {
@@ -90,7 +90,7 @@ async fn append_to_storage(
     data: &[u8],
 ) {
     let attempt = match target {
-        LogTarget::RunnerAttempt(attempt) => gradient_db::runner_jobs::log_key(attempt),
+        LogTarget::ExecAttempt(attempt) => gradient_db::exec_jobs::log_key(attempt),
         LogTarget::Build(build) => {
             match gradient_db::scheduling::build_attempt::running_attempt_id(db, build)
                 .await
@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_runner_chunk_reaches_the_attempt_log() {
+    async fn an_exec_chunk_reaches_the_attempt_log() {
         let shutdown = Shutdown::new();
         let written = Arc::new(gradient_util::sync::Mutex::new(Vec::new()));
         let lane = LogLane::spawn(&shutdown, {
@@ -152,15 +152,15 @@ mod tests {
                 async move { written.lock().push((target, data)) }
             }
         });
-        let attempt = RunnerJobAttemptId::now_v7();
+        let attempt = ExecJobAttemptId::now_v7();
 
-        lane.append(LogTarget::RunnerAttempt(attempt), b"hi".to_vec())
+        lane.append(LogTarget::ExecAttempt(attempt), b"hi".to_vec())
             .await;
         let _ = lane.flushed().await.await;
 
         assert_eq!(
             *written.lock(),
-            vec![(LogTarget::RunnerAttempt(attempt), b"hi".to_vec())]
+            vec![(LogTarget::ExecAttempt(attempt), b"hi".to_vec())]
         );
     }
 

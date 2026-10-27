@@ -202,7 +202,7 @@ impl Scheduler {
                 errors,
             })
             .await?;
-        if report.runner_entry_points > 0 {
+        if report.exec_entry_points > 0 {
             self.refresh_pre_warm().await;
         }
 

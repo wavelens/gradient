@@ -54,7 +54,7 @@ pub struct WorkerMetrics {
     pub download_speed_mbps: Option<f32>,
     pub build_peak_ram_mb: Option<Vec<(String, u64)>>,
     pub exits_at: Option<Instant>,
-    pub runner: Option<gradient_wire::types::RunnerInventory>,
+    pub exec: Option<gradient_wire::types::ExecInventory>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -299,10 +299,10 @@ pub enum SchedulerMsg {
         job_id: String,
         reply: RpcReplyPort<Option<(DispatchedJobId, PendingBuildJob)>>,
     },
-    ActiveRunnerAttempt {
+    ActiveExecAttempt {
         worker: String,
         job_id: String,
-        reply: RpcReplyPort<Option<gradient_types::ids::RunnerJobAttemptId>>,
+        reply: RpcReplyPort<Option<gradient_types::ids::ExecJobAttemptId>>,
     },
     OwnsDispatch {
         worker: String,
@@ -491,10 +491,10 @@ impl SchedulerCore {
             let kind = reattached.job.job_kind();
             let ram_need = reattached.job.ram_need_with(None, false);
             let devices = match &reattached.job {
-                PendingJob::Runner(runner) => self
+                PendingJob::Exec(exec) => self
                     .pool
                     .worker_caps(worker)
-                    .and_then(|caps| runner.requirement_for(&caps))
+                    .and_then(|caps| exec.requirement_for(&caps))
                     .map(|requirement| requirement.devices),
                 PendingJob::Eval(_) | PendingJob::Build(_) => None,
             };
@@ -608,11 +608,11 @@ impl SchedulerCore {
                     assignment.pending.job_kind(),
                     assignment.ram_need,
                 );
-                if let gradient_wire::types::Job::Runner(runner) = &assignment.job {
+                if let gradient_wire::types::Job::Exec(exec) = &assignment.job {
                     self.pool.hold_devices(
                         worker,
                         assignment.job_id(),
-                        runner.requirement.devices.clone(),
+                        exec.requirement.devices.clone(),
                     );
                 }
                 AssignOutcome::Assigned(assignment)
@@ -979,8 +979,8 @@ impl Actor for CoreActor {
                 );
                 core.pool
                     .observe_build_ram(&worker, metrics.build_peak_ram_mb);
-                if metrics.runner.is_some() {
-                    core.pool.update_runner_inventory(&worker, metrics.runner);
+                if metrics.exec.is_some() {
+                    core.pool.update_exec_inventory(&worker, metrics.exec);
                 }
                 let _ = reply.send(());
             }
@@ -1217,12 +1217,12 @@ impl Actor for CoreActor {
             SchedulerMsg::ActiveJob { job_id, reply } => {
                 let _ = reply.send(core.tracker.active_job(&job_id).cloned());
             }
-            SchedulerMsg::ActiveRunnerAttempt {
+            SchedulerMsg::ActiveExecAttempt {
                 worker,
                 job_id,
                 reply,
             } => {
-                let _ = reply.send(core.tracker.active_runner_attempt(&worker, &job_id));
+                let _ = reply.send(core.tracker.active_exec_attempt(&worker, &job_id));
             }
             SchedulerMsg::ActiveBuildDispatch {
                 worker,
