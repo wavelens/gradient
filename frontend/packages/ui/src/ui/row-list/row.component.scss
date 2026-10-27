@@ -149,6 +149,8 @@
 
   .row-actions {
     grid-area: actions;
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
   .row-chevron {

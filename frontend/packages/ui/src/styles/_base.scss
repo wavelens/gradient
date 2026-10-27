@@ -395,6 +395,7 @@ div[slot='action'],
 .nav-card__meta > div,
 .page-layout__actions > div {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: $spacing-sm;
 }
