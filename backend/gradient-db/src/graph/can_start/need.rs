@@ -178,14 +178,15 @@ fn need_sql(stop_region_at: &str) -> String {
     );
     let entered = format!(
         "entered(derivation) AS (SELECT pe.dependency FROM \
-         (SELECT e.derivation AS parent, e.dependency, e.kind \
+         (SELECT e.derivation AS parent, e.dependency \
           FROM (SELECT DISTINCT derivation FROM region) r \
-          JOIN derivation_dependency e ON e.dependency = r.derivation OFFSET 0) pe \
-         WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent) \
-           AND EXISTS (SELECT 1 FROM derivation_build p \
-                       JOIN derivation pw ON pw.id = p.derivation \
-                       WHERE p.derivation = pe.parent AND p.wanted AND {open} \
-                         AND (({builder}) OR pe.kind IN (1, 2))))",
+          JOIN derivation_dependency e ON e.dependency = r.derivation \
+          CROSS JOIN LATERAL (SELECT 1 FROM derivation_build p \
+                              JOIN derivation pw ON pw.id = p.derivation \
+                              WHERE p.derivation = e.derivation AND p.wanted AND {open} \
+                                AND (({builder}) OR e.kind IN (1, 2)) OFFSET 0) wanting \
+          OFFSET 0) pe \
+         WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent))",
         open = open_predicate("p"),
         builder = builds_once_wanted_predicate("p", "pw"),
     );
@@ -731,8 +732,7 @@ mod tests {
         );
         assert!(
             walk.contains(
-                "OFFSET 0) pe WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent) \
-                 AND EXISTS ("
+                "OFFSET 0) pe WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent))"
             ),
             "the seed must come from wanters OUTSIDE the region and the parents are gathered \
              once so that the region is hashed once against them: {walk}"
@@ -755,18 +755,20 @@ mod tests {
         assert!(
             walk.contains(
                 "entered(derivation) AS (SELECT pe.dependency FROM \
-                 (SELECT e.derivation AS parent, e.dependency, e.kind \
+                 (SELECT e.derivation AS parent, e.dependency \
                  FROM (SELECT DISTINCT derivation FROM region) r \
-                 JOIN derivation_dependency e ON e.dependency = r.derivation OFFSET 0) pe \
-                 WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent) \
-                 AND EXISTS (SELECT 1 FROM derivation_build p \
+                 JOIN derivation_dependency e ON e.dependency = r.derivation \
+                 CROSS JOIN LATERAL (SELECT 1 FROM derivation_build p \
                  JOIN derivation pw ON pw.id = p.derivation \
-                 WHERE p.derivation = pe.parent AND p.wanted \
+                 WHERE p.derivation = e.derivation AND p.wanted \
                  AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
                  AND ((pw.walked AND p.probed AND NOT p.cache_available \
-                 AND p.status IN (0, 1, 2, 5, 8, 10)) OR pe.kind IN (1, 2))))"
+                 AND p.status IN (0, 1, 2, 5, 8, 10)) OR e.kind IN (1, 2)) OFFSET 0) wanting \
+                 OFFSET 0) pe \
+                 WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent))"
             ),
-            "{walk}"
+            "the parent probe is a lateral lookup by key, never a semi join the planner can \
+             turn into a materialised filter: {walk}"
         );
         assert!(
             walk.contains(
