@@ -22,6 +22,8 @@ pub struct DeviceRequest {
 pub enum DeviceRequestError {
     #[error("device name is empty")]
     Empty,
+    #[error("device name has an empty part before or after a colon")]
+    EmptyPart,
     #[error("device count \"{0}\" is out of range")]
     BadCount(String),
     #[error("device count must be at least 1")]
@@ -41,6 +43,9 @@ impl DeviceRequest {
         };
         if name.is_empty() {
             return Err(DeviceRequestError::Empty);
+        }
+        if name.split(':').any(str::is_empty) {
+            return Err(DeviceRequestError::EmptyPart);
         }
         if count == 0 {
             return Err(DeviceRequestError::ZeroCount);
@@ -276,6 +281,19 @@ mod tests {
             DeviceRequest::parse(""),
             Err(DeviceRequestError::Empty)
         ));
+    }
+
+    #[test]
+    fn a_device_name_with_an_empty_part_is_refused() {
+        for device in ["gpu:", "gpu::8", ":h100", "gpu::h100"] {
+            assert!(
+                matches!(
+                    DeviceRequest::parse(device),
+                    Err(DeviceRequestError::EmptyPart)
+                ),
+                "{device}"
+            );
+        }
     }
 
     #[test]
