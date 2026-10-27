@@ -201,9 +201,17 @@ def wait_until_settled(eval_id):
         time.sleep(2)
 
 
+def wait_until_delivered():
+    deadline = time.monotonic() + EVAL_TIMEOUT
+    while int(psql("SELECT count(*) FROM pending_delivery WHERE delivered_at IS NULL AND failed_at IS NULL")):
+        assert time.monotonic() < deadline, "the delivery queue of the previous run never drained"
+        time.sleep(2)
+
+
 def measure(token, task):
     workers = connected_workers(token)
     banner(f"evaluate {task} on {workers} workers")
+    wait_until_delivered()
     psql("SELECT pg_stat_statements_reset();")
     server.succeed(f": > {POSTGRES_LOG}")
     eval_id = api("POST", f"tasks/project/{task}/evaluate", token, body={})
