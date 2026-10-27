@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
+members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
+default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
 resolver     = "2"
 
 [workspace.package]
@@ -49,6 +49,7 @@ gradient-storage      = { path = "gradient-storage" }
 gradient-test-support = { path = "gradient-test-support" }
 gradient-types        = { path = "gradient-types" }
 gradient-util         = { path = "gradient-util" }
+gradient-vm           = { path = "gradient-vm" }
 gradient-web          = { path = "gradient-web" }
 gradient-wire         = { path = "gradient-wire" }
 gradient-derive       = { path = "gradient-derive" }
@@ -64,6 +65,8 @@ tokio        = { version = "1.50", default-features = false, features = ["rt-mul
 tokio-test   = { version = "0.4", default-features = false }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
 tokio-util   = { version = "0.7", default-features = false }
+tokio-vsock  = { version = "0.7", default-features = false }
+zbus         = { version = "5", default-features = false, features = ["tokio"] }
 
 # Procedural macros
 proc-macro2 = { version = "1", default-features = false, features = ["proc-macro"] }
@@ -139,6 +142,8 @@ email_address        = { version = "0.2", default-features = false }
 governor             = { version = "0.10", default-features = false, features = ["std"] }
 http                 = { version = "1.4", default-features = false }
 http-body-util       = { version = "0.1", default-features = false }
+hyper                = { version = "1", default-features = false, features = ["client", "http1"] }
+hyper-util           = { version = "0.1", default-features = false, features = ["tokio"] }
 jsonwebtoken         = { version = "11.0", default-features = false, features = ["aws_lc_rs"] }
 lettre               = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "rustls-native-certs", "aws-lc-rs"] }
 reqwest              = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "stream", "charset", "http2", "multipart", "brotli", "gzip", "deflate", "zstd"] }

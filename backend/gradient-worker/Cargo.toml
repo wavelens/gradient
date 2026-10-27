@@ -25,6 +25,7 @@ gradient-derivation = { workspace = true }
 gradient-derive = { workspace = true }
 gradient-util = { workspace = true }
 gradient-types = { workspace = true }
+gradient-vm = { workspace = true }
 gradient-wire = { workspace = true }
 gradient-worker-client = { workspace = true }
 gradient-storage = { workspace = true }
@@ -70,4 +71,5 @@ zstd                  = { workspace = true }
 
 [dev-dependencies]
 gradient-test-support = { workspace = true }
+tokio                 = { workspace = true, features = ["test-util"] }
 wiremock              = { workspace = true }
