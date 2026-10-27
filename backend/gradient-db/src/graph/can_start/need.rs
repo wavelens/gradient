@@ -160,11 +160,16 @@ pub struct NeedMoved {
     pub lost: Vec<DerivationId>,
 }
 
-static UPDATE_NEED_SQL: LazyLock<String> = LazyLock::new(|| {
-    let region = crate::graph::walks::open_closure_cte_body(
+static UPDATE_NEED_SQL: LazyLock<String> = LazyLock::new(|| need_sql(""));
+
+static GAIN_NEED_SQL: LazyLock<String> = LazyLock::new(|| need_sql("dep.wanted"));
+
+fn need_sql(stop_region_at: &str) -> String {
+    let region = crate::graph::walks::open_closure_cte_body_until(
         "region",
         "SELECT NULL::uuid AS evaluation, unnest($1::uuid[]) AS derivation, true AS builder",
         None,
+        stop_region_at,
     );
     let entered = format!(
         "entered(derivation) AS (SELECT pe.dependency FROM region r, \
@@ -201,10 +206,15 @@ static UPDATE_NEED_SQL: LazyLock<String> = LazyLock::new(|| {
          FROM region r LEFT JOIN (SELECT DISTINCT derivation FROM wanted) d \
            ON d.derivation = r.derivation ORDER BY r.derivation",
     )
-});
+}
 
 crate::sql_lazy! {
     UPDATE_NEED = || UPDATE_NEED_SQL.as_str(),
+        params = [DerivationIds(64)],
+        tier = Walk,
+        flags = [Walk, DefaultWorkMem];
+
+    GAIN_NEED = || GAIN_NEED_SQL.as_str(),
         params = [DerivationIds(64)],
         tier = Walk,
         flags = [Walk, DefaultWorkMem];
@@ -255,13 +265,31 @@ pub(crate) async fn update_need<C>(db: &C, roots: &[DerivationId]) -> Result<Nee
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
+    walk_need(db, &UPDATE_NEED, roots).await
+}
+
+pub(crate) async fn gain_need<C>(db: &C, roots: &[DerivationId]) -> Result<NeedMoved, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    walk_need(db, &GAIN_NEED, roots).await
+}
+
+async fn walk_need<C>(
+    db: &C,
+    walk: &crate::sql::Query,
+    roots: &[DerivationId],
+) -> Result<NeedMoved, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     if roots.is_empty() {
         return Ok(NeedMoved::default());
     }
 
-    let txn = crate::graph::walks::begin_walk(db, &UPDATE_NEED).await?;
+    let txn = crate::graph::walks::begin_walk(db, walk).await?;
     let _lock = lock_shared_builds(&txn, roots).await?;
-    let region = txn.query_all_raw(UPDATE_NEED.bind([ids(roots)])).await?;
+    let region = txn.query_all_raw(walk.bind([ids(roots)])).await?;
     let rows = write_need(&txn, &region).await?;
     txn.commit().await?;
 
@@ -301,10 +329,41 @@ where
         crate::task_board::dep_counts::bump_graph_version(db, &adopted.evaluations()).await?;
         changes.extend(promote(db, gained).await?);
     }
-    for lost in moved.lost.chunks(crate::IN_CHUNK_SIZE) {
+    changes.extend(settle_lost(db, &moved.lost).await?);
+
+    Ok(changes)
+}
+
+async fn settle_lost<C: ConnectionTrait>(
+    db: &C,
+    lost: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr> {
+    let mut changes = Vec::new();
+    for lost in lost.chunks(crate::IN_CHUNK_SIZE) {
         changes.extend(unpromote_ungated(db, lost).await?);
         changes.extend(skip_unwanted(db, lost).await?);
     }
+
+    Ok(changes)
+}
+
+pub(crate) async fn settle_batch_need<C>(
+    db: &C,
+    roots: &[DerivationId],
+    moved: &NeedMoved,
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let mut changes = thaw_wanted(db, &moved.gained).await?;
+    let mut below = roots.to_vec();
+    below.extend_from_slice(&moved.gained);
+    below.sort_unstable();
+    below.dedup();
+    let adopted = crate::graph::reachability::adopt_unnamed_below(db, &below).await?;
+    crate::task_board::dep_counts::bump_graph_version(db, &adopted.evaluations()).await?;
+    changes.extend(promote(db, &moved.gained).await?);
+    changes.extend(settle_lost(db, &moved.lost).await?);
 
     Ok(changes)
 }
@@ -334,6 +393,16 @@ where
 {
     let moved = update_need(db, roots).await?;
     let changes = settle_need(db, &moved).await?;
+
+    Ok(SettledNeed { moved, changes })
+}
+
+pub async fn gain_and_settle_need<C>(db: &C, roots: &[DerivationId]) -> Result<SettledNeed, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let moved = gain_need(db, roots).await?;
+    let changes = settle_batch_need(db, roots, &moved).await?;
 
     Ok(SettledNeed { moved, changes })
 }
@@ -518,6 +587,86 @@ mod tests {
             .iter()
             .position(|s| s.contains("INSERT INTO build_job"))
             .expect("then given its jobs");
+        let promote = log
+            .iter()
+            .position(|s| s.contains("queued_at = coalesce(db.queued_at"))
+            .expect("and then promoted");
+        assert!(thaw < adopt && adopt < promote, "{log:?}");
+    }
+
+    #[test]
+    fn a_batch_walk_does_not_enter_a_wanted_shared_build() {
+        let gain = norm(GAIN_NEED_SQL.as_str());
+        let stop = " AND NOT (dep.wanted) OFFSET 0) s)";
+        assert_eq!(
+            gain.matches(stop).count(),
+            1,
+            "only the region stops; the wanted walk within it does not: {gain}"
+        );
+        assert_eq!(
+            gain.replacen(" AND NOT (dep.wanted)", "", 1),
+            norm(UPDATE_NEED_SQL.as_str()),
+            "the batch walk is the full walk with a stop"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_batch_move_names_below_its_roots_and_below_what_gained() {
+        let root = DerivationId::now_v7();
+        let on = DerivationId::now_v7();
+        let off = DerivationId::now_v7();
+        let empty = Vec::<BTreeMap<String, Value>>::new();
+        let db = mock_db()
+            .append_exec_results([exec(0), exec(1), exec(0)])
+            .append_query_results([vec![need_row(on, true), need_row(off, false)]])
+            .append_query_results([vec![need_row(on, true), need_row(off, false)]])
+            .append_query_results([
+                vec![transition_row(on, 10, 0)],
+                empty.clone(),
+                vec![drv(on)],
+            ])
+            .append_query_results([empty, vec![transition_row(off, 0, 10)]])
+            .into_connection();
+
+        let settled = gain_and_settle_need(&db, &[root]).await.unwrap();
+
+        assert_eq!(settled.moved.gained, vec![on]);
+        assert_eq!(settled.moved.lost, vec![off]);
+        let log = db.into_transaction_log();
+        let adopt = log
+            .iter()
+            .flat_map(|t| t.statements())
+            .find(|s| s.sql.contains("INSERT INTO build_job"))
+            .expect("the batch names what it reaches")
+            .clone();
+        assert!(
+            adopt
+                .sql
+                .contains("x.evaluation = c.evaluation AND x.derivation = e.dependency"),
+            "the naming walk stops at a name: {}",
+            adopt.sql
+        );
+        let mut below: Vec<uuid::Uuid> = vec![root.into_inner(), on.into_inner()];
+        below.sort_unstable();
+        assert_eq!(
+            adopt.values.map(|v| v.0),
+            Some(vec![Value::from(below)]),
+            "the roots and the gained shared build seed the naming walk together"
+        );
+        let log = statements(log);
+        assert!(
+            log.iter()
+                .any(|s| norm(s).contains("AND NOT (dep.wanted) OFFSET 0) s)")),
+            "{log:?}"
+        );
+        let thaw = log
+            .iter()
+            .position(|s| s.contains("db.status IN (5, 10) AND db.wanted"))
+            .expect("what became wanted is thawed");
+        let adopt = log
+            .iter()
+            .position(|s| s.contains("INSERT INTO build_job"))
+            .expect("then named");
         let promote = log
             .iter()
             .position(|s| s.contains("queued_at = coalesce(db.queued_at"))
