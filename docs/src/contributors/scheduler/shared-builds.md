@@ -72,13 +72,13 @@ Every other message flush the queue first. A write after a batch or a commit can
 |---|---|---|
 | `CALL_TIMEOUT` | 30 s | Wait for the graph writer to exist after a restart |
 | `GRAPH_TX_BUDGET` | 120 s | Per transaction. Past this budget, the transaction will roll back and the caller will receive `graph transaction exceeded 120s` as an error. Also set as the transaction's `statement_timeout`. The rollback must wait for the running statement, and only Postgres can end that statement |
-| `GRAPH_TX_ATTEMPTS` | 3 | Attempts of a transaction aborted with SQLSTATE `40P01`, `40001` or `25P02` |
+| `GRAPH_TX_ATTEMPTS` | 5 | Attempts of a transaction aborted with SQLSTATE `40P01`, `40001` or `25P02`. The writer will wait 250 ms times the attempt count before the next attempt |
 
 - Callers wait for replies with no deadline. The graph writer can still apply a message from a caller that gave up. A caller-side timeout would report a write that later lands as failed. A worker session stuck behind a backlog will block its reader as backpressure.
 - A deadlock inside one batch will fail the whole flush (`escalate_retryable`), and `transact` will retry that flush.
 - Status updates and their effects return every database error to the `transact` function. A `SELECT 1` probe before `COMMIT` can convert a transaction aborted with a merely logged error into a `25P02` error. Postgres would otherwise roll back silently on that `COMMIT`.
 - A retry can re-send board events and probe requests already sent in an aborted attempt.
-- `Transition::Repair` (`gradient_db::graph::repair::repair_build_graph`) and cache demotion run inside the graph writer. The consistency check (`consistency_check_pass`, `gradient-scheduler`) runs outside, with no retries. Its next pass will pick up the remaining work.
+- `Transition::Repair` (`gradient_db::graph::repair::repair_build_graph`) and cache demotion run inside the graph writer. The consistency check (`consistency_check_pass`, `gradient-scheduler`) is outside the writer, without retries. Its chunk locks never wait. Chunks locked by the graph writer stay skipped until the next pass.
 - The graph writer can keep no state between messages. A restart will lose only batches still queued, and their callers will get an error.
 
 ## Concurrent Walks
