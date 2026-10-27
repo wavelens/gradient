@@ -119,8 +119,7 @@ impl<'a> FlakeWalker<'a> {
 
         let licenses = licenses_of(&cursor, self.state);
         if exec_app::is_exec_app(&cursor)? {
-            let app = exec_app::read_exec_app(&cursor, self.state)
-                .with_context(|| format!("read exec app '{attr_path}'"))?;
+            let app = exec_app::read_exec_app(&cursor, self.state)?;
             return Ok(Resolved {
                 drv_path: app.program_drv.clone(),
                 licenses,
