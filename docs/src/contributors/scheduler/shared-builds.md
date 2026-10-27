@@ -78,7 +78,8 @@ Every other message flush the queue first. A write after a batch or a commit can
 - A deadlock inside one batch will fail the whole flush (`escalate_retryable`), and `transact` will retry that flush.
 - Status updates and their effects return every database error to the `transact` function. A `SELECT 1` probe before `COMMIT` can convert a transaction aborted with a merely logged error into a `25P02` error. Postgres would otherwise roll back silently on that `COMMIT`.
 - A retry can re-send board events and probe requests already sent in an aborted attempt.
-- `Transition::Repair` (`gradient_db::graph::repair::repair_build_graph`) and cache demotion run inside the graph writer. The consistency check (`consistency_check_pass`, `gradient-scheduler`) is outside the writer, without retries. Its chunk locks never wait. Chunks locked by the graph writer stay skipped until the next pass.
+- `Transition::Repair` (`gradient_db::graph::repair::repair_build_graph`), `Transition::ConsistencyCheck` (`graph_consistency_report`) and cache demotion all run inside the graph writer.
+- No batch can block the consistency check and a deadlock between the two is impossible. Its chunk locks still never wait, for a second instance of the writer.
 - The graph writer can keep no state between messages. A restart will lose only batches still queued, and their callers will get an error.
 
 ## Concurrent Walks

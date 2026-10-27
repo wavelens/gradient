@@ -119,6 +119,12 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             gradient_db::graph::repair::repair_build_graph(ctx, scope).await?;
             Ok(TransitionReport::default())
         }
+        Transition::ConsistencyCheck => Ok(TransitionReport {
+            consistency: Some(
+                gradient_db::graph::consistency::graph_consistency_report(ctx).await?,
+            ),
+            ..Default::default()
+        }),
         Transition::AbortEvaluationSharedBuilds { evaluation, hard } => {
             let Some(eval) = EEvaluation::find_by_id(evaluation)
                 .one(&ctx.worker_db)
