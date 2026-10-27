@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#[allow(dead_code, reason = "the job run reads it once it exists")]
+mod context;
 #[allow(dead_code, reason = "the vsock listener reads it once it exists")]
 mod output;
 
