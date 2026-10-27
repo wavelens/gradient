@@ -128,6 +128,10 @@ impl Guest {
         self.api.vm_resume().await
     }
 
+    pub async fn is_paused(&self) -> bool {
+        matches!(self.api.vm_info().await, Ok(info) if info.state == "Paused")
+    }
+
     pub async fn plug(&mut self, plan: &PlugPlan) -> Result<PluggedDevices> {
         let mut plugged = PluggedDevices {
             groups: device_groups(&plan.units),
@@ -157,6 +161,7 @@ impl Guest {
     }
 
     pub async fn teardown(mut self, units: &GuestUnits) {
+        self.control = None;
         let vfio = self
             .state
             .devices_held

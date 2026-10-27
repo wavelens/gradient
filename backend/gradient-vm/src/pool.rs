@@ -89,9 +89,23 @@ impl GuestPool {
     }
 
     pub fn adopt_warm(self: &Arc<Self>, guest: Guest) {
+        let surplus = lock(&self.slots).offer(guest, self.target(), self.draining());
+        if let Some(guest) = surplus {
+            self.retire(guest, ());
+        }
+    }
+
+    pub fn retire<Held: Send + 'static>(self: &Arc<Self>, guest: Guest, held: Held) {
         let pool = Arc::clone(self);
-        self.tasks
-            .spawn(async move { pool.keep_or_stop(guest).await });
+        self.tasks.spawn(async move {
+            guest.teardown(&pool.units).await;
+            drop(held);
+        });
+    }
+
+    pub fn stop_warm_in_background(self: &Arc<Self>) {
+        let pool = Arc::clone(self);
+        self.tasks.spawn(async move { pool.stop_warm().await });
     }
 
     pub fn set_upcoming_exec_jobs(self: &Arc<Self>, count: u32) {

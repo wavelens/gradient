@@ -88,7 +88,14 @@ pub async fn apply(
         remove_guest_dirs(&dir, &state.per_job_dirs, true);
     }
     for state in plan.warm {
-        pool.adopt_warm(Guest::from_state(config, state));
+        let guest = Guest::from_state(config, state);
+        match guest.is_paused().await {
+            true => pool.adopt_warm(guest),
+            false => {
+                info!(guest = %guest.id(), "stopping a guest that never finished its boot");
+                pool.retire(guest, ());
+            }
+        }
     }
     plan.busy
         .into_iter()
