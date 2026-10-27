@@ -53,6 +53,8 @@ pub enum WaitingReason {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ExecUnmet {
+    #[serde(default)]
+    pub architecture: Option<String>,
     pub labels: Vec<String>,
     pub devices: Vec<DeviceRequest>,
     pub mounts: Vec<String>,
@@ -68,8 +70,14 @@ impl ExecUnmet {
 
 impl std::fmt::Display for ExecUnmet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut parts: Vec<String> = self.labels.iter().map(|l| format!("label:{l}")).collect();
-        parts.sort();
+        let mut labels: Vec<String> = self.labels.iter().map(|l| format!("label:{l}")).collect();
+        labels.sort();
+        let mut parts: Vec<String> = self
+            .architecture
+            .iter()
+            .map(|a| format!("architecture:{a}"))
+            .collect();
+        parts.extend(labels);
         let mut devices: Vec<String> = self.devices.iter().map(|d| format!("device:{d}")).collect();
         devices.sort();
         parts.extend(devices);

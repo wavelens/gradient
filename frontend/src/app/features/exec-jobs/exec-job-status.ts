@@ -27,8 +27,9 @@ export function deviceLabel(device: DeviceRequest): string {
   return device.count === 1 ? device.name : `${device.name}:${device.count}`;
 }
 
-function unmetParts(unmet: ExecUnmet): string[] {
+export function unmetParts(unmet: ExecUnmet): string[] {
   return [
+    ...(unmet.architecture ? [`architecture ${unmet.architecture}`] : []),
     ...unmet.labels.map((label) => `label ${label}`),
     ...unmet.devices.map(deviceLabel),
     ...unmet.mounts.map((mount) => `mount ${mount}`),

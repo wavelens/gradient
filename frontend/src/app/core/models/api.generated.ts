@@ -970,6 +970,7 @@ export interface ExecOffer {
 }
 
 export interface ExecUnmet {
+  architecture?: string | null;
   labels: string[];
   devices: DeviceRequest[];
   mounts: string[];

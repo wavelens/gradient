@@ -269,9 +269,16 @@ pub(crate) fn exec_unmet(spec: &ExecSpec, architecture: &str, workers: &[WorkerC
         .filter(|w| runs_exec_jobs(w) && w.architectures.iter().any(|a| a == architecture))
         .filter_map(|w| w.exec.as_ref())
         .collect();
+    if inventories.is_empty() {
+        return ExecUnmet {
+            architecture: Some(architecture.to_owned()),
+            ..ExecUnmet::default()
+        };
+    }
     let offered = |offers: &dyn Fn(&ExecInventory) -> bool| inventories.iter().any(|i| offers(i));
 
     ExecUnmet {
+        architecture: None,
         labels: spec
             .labels
             .iter()
@@ -678,6 +685,31 @@ mod tests {
         );
         assert!(unmet.mounts.is_empty());
         assert_eq!((connected_workers, matching_workers), (1, 0));
+    }
+
+    #[test]
+    fn exec_workers_of_another_architecture_name_only_the_architecture() {
+        use crate::test_jobs::eight_gpu_exec_caps;
+        let spec = ExecSpec {
+            labels: vec!["3d-printer".into()],
+            ..ExecSpec::default()
+        };
+        let Some(WaitingReason::ExecWorkers {
+            unmet,
+            matching_workers,
+            ..
+        }) = exec_waiting_reason(&spec, "aarch64-linux", &[eight_gpu_exec_caps()])
+        else {
+            panic!("exec wait")
+        };
+        assert_eq!(
+            unmet,
+            ExecUnmet {
+                architecture: Some("aarch64-linux".into()),
+                ..ExecUnmet::default()
+            }
+        );
+        assert_eq!(matching_workers, 0);
     }
 
     #[test]

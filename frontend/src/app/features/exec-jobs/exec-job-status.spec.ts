@@ -43,6 +43,16 @@ describe('waitingReasonText', () => {
     expect(waitingReasonText(reason)).toBe('needs label 3d-printer, gpu:h100:16');
   });
 
+  it('names a missing architecture', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: { architecture: 'aarch64-linux', labels: [], devices: [], mounts: [], nodes: 0, custom_image: false },
+      connected_workers: 2,
+      matching_workers: 0,
+    };
+    expect(waitingReasonText(reason)).toBe('needs architecture aarch64-linux');
+  });
+
   it('counts the matching workers whose devices are busy', () => {
     const reason: WaitingReason = {
       kind: 'exec_workers',
