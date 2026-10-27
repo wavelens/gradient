@@ -30,6 +30,18 @@ pub(crate) fn advisory_filter(
     ))
 }
 
+pub(crate) fn try_advisory_filter(shared_builds_param: &str) -> (String, String) {
+    let with = format!(
+        "shared_build_keys AS MATERIALIZED (SELECT DISTINCT hashtext(a::text) AS k \
+         FROM unnest({shared_builds_param}::uuid[]) AS a ORDER BY k), \
+         shared_build_locks AS (SELECT bool_and(pg_try_advisory_xact_lock({ns}, k)) AS locked \
+         FROM shared_build_keys)",
+        ns = SHARED_BUILD_LOCK_NAMESPACE,
+    );
+
+    (with, "(SELECT locked FROM shared_build_locks)".to_owned())
+}
+
 pub(crate) fn producer_filter(hashes_param: &str) -> (String, String) {
     key_pass(&format!(
         "SELECT hashtext(o.derivation::text) AS k, true AS own \
@@ -73,6 +85,17 @@ mod tests {
             "{with}"
         );
         assert_eq!(pred, "(SELECT n FROM shared_build_locks) >= 0");
+    }
+
+    #[test]
+    fn the_try_pass_never_waits_for_a_key() {
+        let (with, pred) = try_advisory_filter("$1");
+        assert!(
+            with.contains("bool_and(pg_try_advisory_xact_lock(643, k)) AS locked"),
+            "{with}"
+        );
+        assert!(!with.contains("pg_advisory_xact_lock("), "{with}");
+        assert_eq!(pred, "(SELECT locked FROM shared_build_locks)");
     }
 
     #[test]
