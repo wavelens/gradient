@@ -881,9 +881,10 @@ impl BatchWriter<'_> {
         task_id: TaskId,
         derivations: &[DiscoveredDerivation],
         drv_path_to_id: &HashMap<String, DerivationId>,
-    ) -> Result<Vec<DerivationId>> {
+    ) -> Result<(Vec<DerivationId>, usize)> {
         let now = gradient_types::now();
         let refused = self.refused_runner_attrs(task_id, derivations).await?;
+        let mut runners = 0;
 
         let mut active_entry_points: Vec<AEntryPoint> = Vec::new();
         let mut entry_point_drvs: Vec<DerivationId> = Vec::new();
@@ -895,6 +896,7 @@ impl BatchWriter<'_> {
 
             if let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) {
                 entry_point_drvs.push(drv_id);
+                runners += usize::from(d.runner.is_some());
                 active_entry_points.push(
                     MEntryPoint {
                         id: EntryPointId::now_v7(),
@@ -922,7 +924,7 @@ impl BatchWriter<'_> {
             }
         }
 
-        Ok(entry_point_drvs)
+        Ok((entry_point_drvs, runners))
     }
 
     async fn refused_runner_attrs(
@@ -1065,13 +1067,13 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
             .await?;
         writer.add_system_features(&batch.derivations, ids).await;
         let adopted = writer.adopt_references(&resolved, &newly_walked).await?;
-        report.entry_points = match batch.task {
+        (report.entry_points, report.runner_entry_points) = match batch.task {
             Some(task) => {
                 writer
                     .process_entry_points(task, &batch.derivations, ids)
                     .await?
             }
-            None => Vec::new(),
+            None => (Vec::new(), 0),
         };
         report.to_probe = writer
             .advance_can_start(

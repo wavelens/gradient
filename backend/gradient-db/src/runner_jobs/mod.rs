@@ -10,6 +10,7 @@ pub mod dispatch;
 pub mod phases;
 pub mod reads;
 pub mod settle;
+pub mod upcoming;
 
 use gradient_entity::runner_job::RunnerJobStatus;
 use gradient_types::{BuildAttemptId, EvaluationId, RunnerJobAttemptId};

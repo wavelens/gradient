@@ -16,9 +16,12 @@ use gradient_pool::session_port::SessionSignal;
 use gradient_types::WaitingReason;
 use gradient_types::runner::{RunnerInventory, RunnerSpec};
 use gradient_wire::types::BuildFailureKind;
-use gradient_wire::types::{Job, JobKind};
+use gradient_wire::types::{DiscoveredDerivation, Job, JobKind};
 
-use super::{A, A_OUT, SchedulerCase, failure, w_runner};
+use super::{
+    A, A_OUT, CaseShapes, SchedulerCase, drv, eval_key, failure, w_all, w_runner, with_attr,
+    with_output,
+};
 use crate::test_jobs::allow_all;
 
 const W1: &str = "w1";
@@ -248,5 +251,162 @@ async fn an_abort_sends_abort_job_and_ends_aborted() {
             .any(|s| matches!(s, SessionSignal::Abort { job_id, .. } if *job_id == key)),
         "after 1: the worker was told to abort {key}"
     );
+    case.finish().await;
+}
+
+const EVALUATOR: &str = "we";
+const SECOND_ATTR: &str = "apps.x86_64-linux.b";
+
+fn pre_warms(signals: &[SessionSignal]) -> Vec<u32> {
+    signals
+        .iter()
+        .filter_map(|signal| match signal {
+            SessionSignal::PreWarmVms { count } => Some(*count),
+            _ => None,
+        })
+        .collect()
+}
+
+fn runner_root() -> DiscoveredDerivation {
+    DiscoveredDerivation {
+        runner: Some(spec()),
+        ..with_attr(with_output(drv(A, &[]), A_OUT), ATTR)
+    }
+}
+
+fn queued_evaluation_with_a_cached_program(evaluation: EvaluationId) -> Shape {
+    shape()
+        .evalq(evaluation)
+        .derivation(A)
+        .walked()
+        .probed()
+        .drv_cached()
+        .output(A_OUT)
+        .build_status(BuildStatus::Completed)
+        .cached_output(A)
+}
+
+async fn runner_recorded_mid_stream(
+    case: &SchedulerCase,
+    evaluation: EvaluationId,
+) -> (String, DispatchedJobId) {
+    case.db
+        .execute("UPDATE project SET runner_enabled = true")
+        .await;
+    case.connect(W1, w_runner(inventory()), &[]).await;
+    case.connect(EVALUATOR, w_all(), &[]).await;
+    let assignment = case.evalrun(EVALUATOR, evaluation).await;
+    let key = eval_key(evaluation);
+    case.advance_evaluation(EVALUATOR, &key, EvaluationStatus::EvaluatingDerivation)
+        .await;
+    case.signals(W1);
+    case.report_eval_result(EVALUATOR, &key, vec![runner_root()])
+        .await;
+    (key, assignment)
+}
+
+#[tokio::test]
+async fn a_runner_entry_point_recorded_mid_stream_sends_pre_warm_vms() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(queued_evaluation_with_a_cached_program(e1)).await;
+
+    runner_recorded_mid_stream(&case, e1).await;
+
+    assert_eq!(pre_warms(&case.signals(W1)), vec![1], "after 1: W1");
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_job_waiting_for_its_build_counts_and_dispatch_drops_it() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(queued_evaluation_with_a_cached_program(e1)).await;
+    let (key, assignment) = runner_recorded_mid_stream(&case, e1).await;
+    case.signals(W1);
+
+    case.complete(EVALUATOR, &key, assignment, Vec::new(), 0)
+        .await;
+    case.settled().await;
+    assert_eq!(
+        the_job(&case).await.status,
+        RunnerJobStatus::Created,
+        "after 1: the job waits for its build"
+    );
+    case.scheduler.refresh_pre_warm().await;
+    assert!(
+        pre_warms(&case.signals(W1)).is_empty(),
+        "after 1: the count stays 1"
+    );
+
+    case.assign_runner_jobs().await;
+    case.request_job(W1, JobKind::Runner)
+        .await
+        .expect("after 2: W1 gets the runner job");
+    case.assign_runner_jobs().await;
+
+    assert_eq!(
+        pre_warms(&case.signals(W1)).last(),
+        Some(&0),
+        "after 2: the dispatched job counts nowhere"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn an_aborted_evaluation_drops_its_runners() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(queued_evaluation_with_a_cached_program(e1)).await;
+    runner_recorded_mid_stream(&case, e1).await;
+    case.signals(W1);
+
+    case.abort_evaluation(e1).await;
+
+    assert_eq!(pre_warms(&case.signals(W1)), vec![0], "after 1: W1");
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_custom_image_or_finished_job_counts_nowhere() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(runner_shape(e1).entry_point(SECOND_ATTR)).await;
+    let spec = serde_json::to_string(&spec()).expect("the spec encodes");
+    case.db
+        .execute(&format!("UPDATE entry_point SET runner = '{spec}'::jsonb"))
+        .await;
+    case.db
+        .execute(&format!(
+            "INSERT INTO runner_job (id, evaluation, entry_point, program_derivation, \
+             image_derivation, requirement, spec, retries_left, status, created_at) \
+             SELECT gen_random_uuid(), e.evaluation, e.id, e.derivation, \
+             CASE WHEN e.eval = '{ATTR}' THEN e.derivation END, '{{}}'::jsonb, e.runner, 0, \
+             CASE WHEN e.eval = '{ATTR}' THEN 0 ELSE 3 END, now() AT TIME ZONE 'UTC' \
+             FROM entry_point e"
+        ))
+        .await;
+    case.connect(W1, w_runner(inventory()), &[]).await;
+
+    case.scheduler.refresh_pre_warm().await;
+
+    assert!(
+        pre_warms(&case.signals(W1)).is_empty(),
+        "after 1: no count for W1"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_reconnected_worker_gets_its_count_again() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(runner_shape(e1)).await;
+    let spec = serde_json::to_string(&spec()).expect("the spec encodes");
+    case.db
+        .execute(&format!("UPDATE entry_point SET runner = '{spec}'::jsonb"))
+        .await;
+    case.connect(W1, w_runner(inventory()), &[]).await;
+    assert_eq!(pre_warms(&case.signals(W1)), vec![1], "after 1: W1");
+
+    case.disconnect(W1).await;
+    case.connect(W1, w_runner(inventory()), &[]).await;
+
+    assert_eq!(pre_warms(&case.signals(W1)), vec![1], "after 2: W1");
     case.finish().await;
 }

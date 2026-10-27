@@ -83,6 +83,7 @@ pub(crate) async fn assign_runner_jobs(scheduler: &Scheduler) -> anyhow::Result<
         debug!(%key, "runner job enqueued");
     }
 
+    scheduler.refresh_pre_warm().await;
     Ok(())
 }
 

@@ -57,6 +57,9 @@ pub enum SessionSignal {
         project: ProjectId,
         request: String,
     },
+    PreWarmVms {
+        count: u32,
+    },
 }
 
 pub trait SessionPort: Send + Sync + 'static {

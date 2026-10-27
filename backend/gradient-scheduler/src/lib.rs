@@ -20,6 +20,7 @@ pub mod instance;
 pub mod jobs;
 pub mod log_substitution;
 pub mod loops;
+mod pre_warm;
 pub mod probe;
 pub mod reclaim;
 pub mod runner_job;
@@ -82,6 +83,7 @@ pub struct Scheduler {
     pub(crate) input_waits: input_waits::InputWaits,
     pub(crate) workers: worker_memory::WorkerMemory,
     pub(crate) split_decisions: eval_split::create::SplitDecisions,
+    pub(crate) pre_warm: pre_warm::PreWarmCounts,
     expected_reclaims: Arc<gradient_util::sync::Mutex<Vec<KeptAssignment>>>,
 }
 
@@ -109,6 +111,7 @@ impl Scheduler {
             input_waits: input_waits::InputWaits::default(),
             workers: worker_memory::WorkerMemory::default(),
             split_decisions: Default::default(),
+            pre_warm: pre_warm::PreWarmCounts::default(),
             expected_reclaims: Arc::default(),
         }
     }

@@ -192,3 +192,11 @@ pub(crate) fn eight_gpu_runner_caps_with_free(free: u32) -> WorkerCaps {
     }
     caps
 }
+
+pub(crate) fn runner_caps_labelled(label: &str) -> WorkerCaps {
+    let mut caps = runner_caps(allow_all(), RunnerDefaults::default());
+    if let Some(inventory) = caps.runner.as_mut() {
+        inventory.labels.push(label.to_owned());
+    }
+    caps
+}

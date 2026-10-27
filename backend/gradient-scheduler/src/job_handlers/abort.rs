@@ -53,6 +53,7 @@ impl Scheduler {
                     .collect();
                 scheduler.cancel_jobs(evaluation_id, job_ids).await;
             }
+            scheduler.refresh_pre_warm().await;
         });
     }
 

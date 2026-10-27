@@ -192,7 +192,8 @@ impl Scheduler {
             }
         }
 
-        self.graph
+        let report = self
+            .graph
             .record(RecordBatch {
                 evaluation: job.evaluation_id,
                 task: job.task_id,
@@ -201,6 +202,9 @@ impl Scheduler {
                 errors,
             })
             .await?;
+        if report.runner_entry_points > 0 {
+            self.refresh_pre_warm().await;
+        }
 
         Ok(())
     }

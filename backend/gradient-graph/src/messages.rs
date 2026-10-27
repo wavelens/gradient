@@ -45,6 +45,7 @@ pub struct RecordReport {
     pub skipped: bool,
     pub walked: usize,
     pub entry_points: Vec<DerivationId>,
+    pub runner_entry_points: usize,
     pub to_probe: Vec<DerivationId>,
 }
 

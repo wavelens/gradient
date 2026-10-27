@@ -276,6 +276,14 @@ impl Actor for SessionActor {
                     myself.stop(Some("write failed".into()));
                 }
             }
+            SessionMsg::Signal(SessionSignal::PreWarmVms { count }) => {
+                if send_server_msg(&st.writer, &ServerMessage::PreWarmVms { count })
+                    .await
+                    .is_err()
+                {
+                    myself.stop(Some("write failed".into()));
+                }
+            }
             SessionMsg::Signal(SessionSignal::ImportResult {
                 job_id,
                 request_id,
@@ -775,6 +783,46 @@ pub(in crate::handler) mod tests {
                 attempt: "a1".into(),
                 reason: "member lost".into(),
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn pre_warm_vms_reaches_the_worker() {
+        let (socket, mut client) = connected_pair().await;
+        let state = test_state(empty_db());
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        scheduler.spawn_core(None).await.unwrap();
+        let (actor, _join) = Actor::spawn(
+            None,
+            SessionActor,
+            SessionArgs {
+                peer_id: "w1".into(),
+                handles: SessionHandles::from_state(&state),
+                scheduler: Arc::clone(&scheduler),
+                socket,
+                capabilities: GradientCapabilities::default(),
+                authorized_peers: HashSet::new(),
+                dialed: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        actor
+            .send_message(SessionMsg::Signal(SessionSignal::PreWarmVms { count: 2 }))
+            .unwrap();
+
+        let frame = client
+            .next()
+            .await
+            .expect("a frame")
+            .expect("no transport error");
+        let Message::Binary(bytes) = frame else {
+            panic!("expected a binary frame, got {frame:?}");
+        };
+        assert_eq!(
+            from_bytes::<ServerMessage>(bytes, *PROTO_VERSIONS.end()).unwrap(),
+            ServerMessage::PreWarmVms { count: 2 }
         );
     }
 

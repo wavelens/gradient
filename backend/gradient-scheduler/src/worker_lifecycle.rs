@@ -100,6 +100,7 @@ impl Scheduler {
         let caps_json = serde_json::to_value(&capabilities).unwrap_or(serde_json::Value::Null);
         let projects = authorized_peers.iter().copied().collect();
         self.workers.forget(worker_id);
+        self.pre_warm.forget(worker_id);
         let mut registered = self
             .reattach_worker(
                 worker_id,
@@ -282,6 +283,7 @@ impl Scheduler {
             .await;
         debug!(%worker_id, "worker capabilities updated");
         self.build_kick.kick();
+        self.refresh_pre_warm().await;
     }
 
     pub async fn update_worker_metrics(&self, worker_id: &str, metrics: WorkerMetrics) {
@@ -310,6 +312,7 @@ impl Scheduler {
     pub async fn unregister_worker(&self, worker_id: &str) {
         let grace = self.reclaim_grace_of(worker_id);
         self.workers.forget(worker_id);
+        self.pre_warm.forget(worker_id);
         self.close_worker_connection(worker_id).await;
         let worker = worker_id.to_owned();
         let gone = self
