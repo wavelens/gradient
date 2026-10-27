@@ -9,18 +9,21 @@ use std::sync::Arc;
 
 use gradient_db::WorkerDb;
 use gradient_storage::LogStorage;
-use gradient_types::ids::DerivationBuildId;
+use gradient_types::ids::{DerivationBuildId, RunnerJobAttemptId};
 use gradient_util::shutdown::Shutdown;
 use tokio::sync::{mpsc, oneshot};
 use tracing::debug;
 
 const LOG_QUEUE: usize = 1024;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LogTarget {
+    Build(DerivationBuildId),
+    RunnerAttempt(RunnerJobAttemptId),
+}
+
 enum Entry {
-    Chunk {
-        build: DerivationBuildId,
-        data: Vec<u8>,
-    },
+    Chunk { target: LogTarget, data: Vec<u8> },
     Flush(oneshot::Sender<()>),
     After(oneshot::Receiver<()>),
 }
@@ -32,14 +35,14 @@ pub(super) struct LogLane {
 impl LogLane {
     pub(super) fn spawn<F, Fut>(shutdown: &Shutdown, append: F) -> Self
     where
-        F: Fn(DerivationBuildId, Vec<u8>) -> Fut + Send + 'static,
+        F: Fn(LogTarget, Vec<u8>) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send,
     {
         let (tx, mut rx) = mpsc::channel(LOG_QUEUE);
         shutdown.spawn(async move {
             while let Some(entry) = rx.recv().await {
                 match entry {
-                    Entry::Chunk { build, data } => append(build, data).await,
+                    Entry::Chunk { target, data } => append(target, data).await,
                     Entry::Flush(done) => {
                         let _ = done.send(());
                     }
@@ -57,15 +60,15 @@ impl LogLane {
         db: WorkerDb,
         log_storage: Arc<dyn LogStorage>,
     ) -> Self {
-        Self::spawn(shutdown, move |build, data| {
+        Self::spawn(shutdown, move |target, data| {
             let db = db.clone();
             let log_storage = Arc::clone(&log_storage);
-            async move { append_to_storage(&db, log_storage.as_ref(), build, &data).await }
+            async move { append_to_storage(&db, log_storage.as_ref(), target, &data).await }
         })
     }
 
-    pub(super) async fn append(&self, build: DerivationBuildId, data: Vec<u8>) {
-        let _ = self.tx.send(Entry::Chunk { build, data }).await;
+    pub(super) async fn append(&self, target: LogTarget, data: Vec<u8>) {
+        let _ = self.tx.send(Entry::Chunk { target, data }).await;
     }
 
     pub(super) async fn after(&self, applied: oneshot::Receiver<()>) {
@@ -83,22 +86,30 @@ impl LogLane {
 async fn append_to_storage(
     db: &WorkerDb,
     log_storage: &dyn LogStorage,
-    build: DerivationBuildId,
+    target: LogTarget,
     data: &[u8],
 ) {
-    let Some(attempt) = gradient_db::scheduling::build_attempt::running_attempt_id(db, build)
-        .await
-        .unwrap_or(None)
-    else {
-        debug!(%build, bytes = data.len(), "log chunk dropped: no running attempt for the shared build");
-        return;
+    let attempt = match target {
+        LogTarget::RunnerAttempt(attempt) => gradient_db::runner_jobs::log_key(attempt),
+        LogTarget::Build(build) => {
+            match gradient_db::scheduling::build_attempt::running_attempt_id(db, build)
+                .await
+                .unwrap_or(None)
+            {
+                Some(attempt) => attempt,
+                None => {
+                    debug!(%build, bytes = data.len(), "log chunk dropped: no running attempt for the shared build");
+                    return;
+                }
+            }
+        }
     };
 
     if let Err(e) = log_storage
         .append(attempt, &String::from_utf8_lossy(data))
         .await
     {
-        debug!(%build, error = %e, "log append failed");
+        debug!(?target, error = %e, "log append failed");
     }
 }
 
@@ -121,13 +132,36 @@ mod tests {
                 }
             }
         });
-        let build = DerivationBuildId::now_v7();
+        let build = LogTarget::Build(DerivationBuildId::now_v7());
 
         lane.append(build, b"one".to_vec()).await;
         lane.append(build, b"two".to_vec()).await;
         let _ = lane.flushed().await.await;
 
         assert_eq!(*written.lock(), vec![b"one".to_vec(), b"two".to_vec()]);
+    }
+
+    #[tokio::test]
+    async fn a_runner_chunk_reaches_the_attempt_log() {
+        let shutdown = Shutdown::new();
+        let written = Arc::new(gradient_util::sync::Mutex::new(Vec::new()));
+        let lane = LogLane::spawn(&shutdown, {
+            let written = Arc::clone(&written);
+            move |target, data| {
+                let written = Arc::clone(&written);
+                async move { written.lock().push((target, data)) }
+            }
+        });
+        let attempt = RunnerJobAttemptId::now_v7();
+
+        lane.append(LogTarget::RunnerAttempt(attempt), b"hi".to_vec())
+            .await;
+        let _ = lane.flushed().await.await;
+
+        assert_eq!(
+            *written.lock(),
+            vec![(LogTarget::RunnerAttempt(attempt), b"hi".to_vec())]
+        );
     }
 
     #[tokio::test]
@@ -141,7 +175,7 @@ mod tests {
                 async move { written.lock().push(data) }
             }
         });
-        let build = DerivationBuildId::now_v7();
+        let build = LogTarget::Build(DerivationBuildId::now_v7());
         let (start_applied, applied) = oneshot::channel();
 
         lane.append(build, b"before".to_vec()).await;

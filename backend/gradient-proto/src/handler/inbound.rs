@@ -26,7 +26,7 @@ use gradient_wire::messages::{
 };
 use gradient_wire::types::{
     BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
-    EvalShardOutcome,
+    EvalShardOutcome, MAX_PHASE_PAYLOAD,
 };
 
 use super::SessionHandles;
@@ -36,7 +36,7 @@ use super::dialed::{DialedSession, refresh_dialed_peers};
 use super::eval_cache::handle_eval_cache_pull;
 use super::eval_split::{handle_eval_shards_planned, handle_eval_source_ready, send_reply};
 use super::job_events::{JobEvent, JobEvents};
-use super::log_lane::LogLane;
+use super::log_lane::{LogLane, LogTarget};
 use super::nar_serve::{ServeSlot, serve_nar_request};
 use super::refusal::refuse;
 use super::socket::{
@@ -116,6 +116,16 @@ impl ActiveJobs {
         match &self.0.lock().get(job_id)?.pending {
             PendingJob::Eval(j) => Some((j.evaluation_id, j.task_id)),
             PendingJob::Build(_) | PendingJob::Runner(_) => None,
+        }
+    }
+
+    pub(crate) fn runner_attempt(
+        &self,
+        job_id: &str,
+    ) -> Option<gradient_types::ids::RunnerJobAttemptId> {
+        match &self.0.lock().get(job_id)?.pending {
+            PendingJob::Runner(j) => j.assignment.map(|a| a.attempt),
+            PendingJob::Eval(_) | PendingJob::Build(_) => None,
         }
     }
 
@@ -224,7 +234,7 @@ impl<'a> InboundContext<'a> {
                 zone,
                 endpoint,
                 build_cores,
-                runner: _,
+                runner,
             } => {
                 self.on_worker_capabilities(WorkerCapabilities {
                     architectures,
@@ -236,7 +246,7 @@ impl<'a> InboundContext<'a> {
                     zone,
                     endpoint,
                     build_cores,
-                    runner: None,
+                    runner: runner.map(|inventory| *inventory),
                 })
                 .await;
                 true
@@ -249,7 +259,7 @@ impl<'a> InboundContext<'a> {
                 download_speed_mbps,
                 build_peak_ram_mb,
                 lifetime_left_secs,
-                runner: _,
+                runner,
             } => {
                 self.spawn_worker_metrics(WorkerMetrics {
                     cpu_usage_pct,
@@ -260,6 +270,7 @@ impl<'a> InboundContext<'a> {
                     build_peak_ram_mb,
                     exits_at: lifetime_left_secs
                         .map(|secs| Instant::now() + std::time::Duration::from_secs(secs)),
+                    runner: runner.map(|inventory| *inventory),
                 });
                 true
             }
@@ -580,8 +591,35 @@ impl<'a> InboundContext<'a> {
                 true
             }
             ClientMessage::RunningJobs { assignments } => self.on_running_jobs(assignments).await,
-            ClientMessage::JobPhase { .. } => true,
+            ClientMessage::JobPhase {
+                job_id,
+                name,
+                payload,
+            } => {
+                self.on_job_phase(job_id, name, payload).await;
+                true
+            }
         }
+    }
+
+    async fn on_job_phase(&self, job_id: String, name: String, payload: Vec<u8>) {
+        if payload.len() > MAX_PHASE_PAYLOAD {
+            warn!(peer_id = %self.peer_id, %job_id, %name, bytes = payload.len(), "phase payload over {MAX_PHASE_PAYLOAD} bytes; dropped");
+            return;
+        }
+        if self.active.runner_attempt(&job_id).is_none()
+            || !self.owns_handed_dispatch(&job_id).await
+        {
+            warn!(peer_id = %self.peer_id, %job_id, "phase for a runner job this session does not run");
+            return;
+        }
+        self.job_events
+            .push(JobEvent::Phase {
+                job_id,
+                name,
+                payload,
+            })
+            .await;
     }
 
     async fn admit(&self, msg: ClientMessage) -> Option<(ClientMessage, Option<StorePathMapper>)> {
@@ -979,12 +1017,18 @@ impl<'a> InboundContext<'a> {
 
     async fn on_log_chunk(&mut self, job_id: &str, data: &[u8]) {
         trace!(peer_id = %self.peer_id, %job_id, bytes = data.len(), "LogChunk");
-        match self.active.build(job_id) {
-            Some(build) => self.logs.append(build, data.to_vec()).await,
-            None => {
-                debug!(peer_id = %self.peer_id, %job_id, "log chunk dropped: not a build this session runs")
+        let target = match (
+            self.active.build(job_id),
+            self.active.runner_attempt(job_id),
+        ) {
+            (Some(build), _) => LogTarget::Build(build),
+            (None, Some(attempt)) => LogTarget::RunnerAttempt(attempt),
+            (None, None) => {
+                debug!(peer_id = %self.peer_id, %job_id, "log chunk dropped: no build or runner job this session runs");
+                return;
             }
-        }
+        };
+        self.logs.append(target, data.to_vec()).await;
     }
 
     fn on_build_progress(&self, build_id: &str, progress: BuildProgress) {
@@ -1408,6 +1452,38 @@ pub(in crate::handler) mod fixture {
             eval_index: 0,
             prioritized: false,
             build_request: false,
+        })
+    }
+
+    pub(in crate::handler) fn pending_runner(
+        attempt: gradient_types::ids::RunnerJobAttemptId,
+    ) -> PendingJob {
+        let runner_job = gradient_types::ids::RunnerJobId::now_v7();
+        PendingJob::Runner(gradient_scheduler::jobs::PendingRunnerJob {
+            runner_job,
+            evaluation_id: EvaluationId::now_v7(),
+            project_id: ProjectId::now_v7(),
+            task_id: TaskId::now_v7(),
+            entry_point: "apps.x86_64-linux.train".into(),
+            repository: "https://example.com/repo".into(),
+            commit: "abc123".into(),
+            architecture: "x86_64-linux".into(),
+            spec: Default::default(),
+            image_path: None,
+            retries_left: 0,
+            attempts_done: 0,
+            last_phase: None,
+            required_paths: vec![],
+            queued_at: gradient_types::now(),
+            ready_at: gradient_types::now(),
+            rescore_count: 0,
+            api_url: "http://127.0.0.1:3000".into(),
+            assignment: Some(gradient_scheduler::jobs::RunnerAssignment {
+                runner_job,
+                attempt,
+                number: 1,
+                retries_cap: 0,
+            }),
         })
     }
 
@@ -2062,7 +2138,10 @@ mod running_jobs_tests {
 
         assert_eq!(session.active.build(&key), Some(shared_build));
         let _ = session.logs.flushed().await.await;
-        assert_eq!(*written.lock(), vec![(shared_build, b"line".to_vec())]);
+        assert_eq!(
+            *written.lock(),
+            vec![(LogTarget::Build(shared_build), b"line".to_vec())]
+        );
     }
 
     #[tokio::test]
@@ -2104,5 +2183,79 @@ mod running_jobs_tests {
         assert!(ctx.handle(running("nope".into()), uploads).await);
 
         assert!(sent.try_recv().is_err());
+    }
+}
+
+#[cfg(test)]
+mod runner_report_tests {
+    use super::fixture::{TestSession, pending_runner};
+    use super::*;
+    use crate::handler::job_events::{ApplyJobEvent, JobEvent};
+    use gradient_fixtures::mock::empty_db;
+    use gradient_test_support::prelude::*;
+    use gradient_types::ids::RunnerJobAttemptId;
+    use gradient_wire::types::MAX_PHASE_PAYLOAD;
+
+    type Recorded = Arc<gradient_util::sync::Mutex<Vec<(String, usize)>>>;
+
+    struct Phases(Recorded);
+
+    impl ApplyJobEvent for Phases {
+        async fn apply(&self, event: JobEvent) {
+            if let JobEvent::Phase { name, payload, .. } = event {
+                self.0.lock().push((name, payload.len()));
+            }
+        }
+    }
+
+    fn phase(job_id: &str, name: &str, payload: Vec<u8>) -> ClientMessage {
+        ClientMessage::JobPhase {
+            job_id: job_id.into(),
+            name: name.into(),
+            payload,
+        }
+    }
+
+    #[tokio::test]
+    async fn an_oversized_phase_is_dropped() {
+        let state = test_state(empty_db());
+        let (mut session, _sent, _admitted) = TestSession::new(&state).await;
+        let pending = pending_runner(RunnerJobAttemptId::now_v7());
+        let key = pending.job_key();
+        let a1 = DispatchedJobId::now_v7();
+        let (port, _signals) = tokio::sync::mpsc::unbounded_channel();
+        session
+            .scheduler
+            .reattach_worker(
+                "w1",
+                Default::default(),
+                HashSet::new(),
+                Arc::new(port),
+                vec![Reattached::single(key.clone(), a1, pending.clone())],
+                true,
+            )
+            .await
+            .expect("the worker registers");
+        session.active.insert(
+            key.clone(),
+            ActiveJob {
+                assignment_id: a1,
+                pending,
+                cluster: None,
+            },
+        );
+        let recorded = Recorded::default();
+        session.job_events = JobEvents::spawn(&state.shutdown, "w1", Phases(Arc::clone(&recorded)));
+
+        let (mut ctx, uploads) = session.split();
+        let oversized = phase(&key, "too-big", vec![0; MAX_PHASE_PAYLOAD + 1]);
+        assert!(ctx.handle(oversized, uploads).await);
+        assert!(
+            ctx.handle(phase(&key, "epoch-3", vec![1, 2]), uploads)
+                .await
+        );
+        session.job_events.finish().await;
+
+        assert_eq!(*recorded.lock(), vec![("epoch-3".to_owned(), 2)]);
     }
 }

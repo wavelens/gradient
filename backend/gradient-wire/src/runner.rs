@@ -239,6 +239,8 @@ fn capped(value: Option<u64>, cap: Option<u64>) -> Option<u64> {
     }
 }
 
+pub const MAX_PHASE_PAYLOAD: usize = 65536;
+
 pub fn runner_image_attr(attr: &str) -> String {
     format!("{attr}.passthru.gradient.image")
 }

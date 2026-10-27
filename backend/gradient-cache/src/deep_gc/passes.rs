@@ -171,7 +171,30 @@ async fn pass_logs(
         return Ok(());
     }
 
-    let referenced: HashSet<BuildAttemptId> = gradient_db::fetch_in_chunks(&on_disk, |chunk| {
+    let builds = referenced_build_attempts(db, &on_disk).await?;
+    let unreferenced: Vec<BuildAttemptId> = on_disk
+        .into_iter()
+        .filter(|id| !builds.contains(id))
+        .collect();
+    let runners = referenced_runner_attempts(db, &unreferenced).await?;
+
+    for attempt_id in unreferenced {
+        if !runners.contains(&attempt_id) {
+            if let Err(e) = log_storage.delete(attempt_id).await {
+                warn!(error = %e, %attempt_id, "deep_gc: failed to delete orphan log");
+            } else {
+                report.orphan_logs_removed += 1;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn referenced_build_attempts(
+    db: &WorkerDb,
+    ids: &[BuildAttemptId],
+) -> Result<HashSet<BuildAttemptId>> {
+    Ok(gradient_db::fetch_in_chunks(ids, |chunk| {
         EBuildAttempt::find()
             .select_only()
             .column(CBuildAttempt::Id)
@@ -182,18 +205,30 @@ async fn pass_logs(
     .await
     .context("query build_attempts by id")?
     .into_iter()
-    .collect();
+    .collect())
+}
 
-    for attempt_id in on_disk {
-        if !referenced.contains(&attempt_id) {
-            if let Err(e) = log_storage.delete(attempt_id).await {
-                warn!(error = %e, %attempt_id, "deep_gc: failed to delete orphan log");
-            } else {
-                report.orphan_logs_removed += 1;
-            }
-        }
-    }
-    Ok(())
+async fn referenced_runner_attempts(
+    db: &WorkerDb,
+    ids: &[BuildAttemptId],
+) -> Result<HashSet<BuildAttemptId>> {
+    let ids: Vec<RunnerJobAttemptId> = ids
+        .iter()
+        .map(|id| RunnerJobAttemptId::new(id.into_inner()))
+        .collect();
+    Ok(gradient_db::fetch_in_chunks(&ids, |chunk| {
+        ERunnerJobAttempt::find()
+            .select_only()
+            .column(CRunnerJobAttempt::Id)
+            .filter(CRunnerJobAttempt::Id.is_in(chunk))
+            .into_tuple::<RunnerJobAttemptId>()
+            .all(db)
+    })
+    .await
+    .context("query runner_job_attempts by id")?
+    .into_iter()
+    .map(gradient_db::runner_jobs::log_key)
+    .collect())
 }
 
 /// This is the only sweep of upload partials. A walk per session, request or maintenance tick would
@@ -312,6 +347,7 @@ mod tests {
                 gradient_entity::build_attempt::Model,
             >::new(
             )])
+            .append_query_results([no_ids()])
             .into_connection();
         let nar = NarStore::local(tmp.path()).unwrap();
         let state = make_state(nar, log, db);
@@ -326,6 +362,44 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(report.orphan_logs_removed, 1);
+    }
+
+    fn no_ids() -> Vec<std::collections::BTreeMap<&'static str, sea_orm::Value>> {
+        Vec::new()
+    }
+
+    fn id_row(id: uuid::Uuid) -> Vec<std::collections::BTreeMap<&'static str, sea_orm::Value>> {
+        vec![std::collections::BTreeMap::from([(
+            "id",
+            sea_orm::Value::from(id),
+        )])]
+    }
+
+    #[tokio::test]
+    async fn deep_gc_keeps_runner_attempt_logs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log: Arc<dyn LogStorage> = Arc::new(FileLogStorage::new(tmp.path()).await.unwrap());
+        let attempt = RunnerJobAttemptId::new(uuid::Uuid::from_u128(0x0300));
+        let key = gradient_db::runner_jobs::log_key(attempt);
+        log.append(key, "runner output").await.unwrap();
+
+        let db = mock_db()
+            .append_query_results([no_ids(), id_row(attempt.into_inner())])
+            .into_connection();
+        let nar = NarStore::local(tmp.path()).unwrap();
+        let state = make_state(nar, Arc::clone(&log), db);
+
+        let mut report = DeepGcReport::default();
+        pass_logs(
+            &state.worker_db,
+            state.log_storage.as_ref(),
+            &log_shard(key),
+            &mut report,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.orphan_logs_removed, 0);
+        assert_eq!(log.list_shard(&log_shard(key)).await.unwrap(), vec![key]);
     }
 
     #[test]
@@ -344,10 +418,7 @@ mod tests {
         log.write_chunk(kept, 0, b"z").await.unwrap();
 
         let db = mock_db()
-            .append_query_results([vec![std::collections::BTreeMap::from([(
-                "id",
-                sea_orm::Value::from(kept.into_inner()),
-            )])]])
+            .append_query_results([id_row(kept.into_inner()), no_ids()])
             .into_connection();
         let nar = NarStore::local(tmp.path()).unwrap();
         let state = make_state(nar, Arc::clone(&log), db);

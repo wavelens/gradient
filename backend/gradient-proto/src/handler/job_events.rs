@@ -67,6 +67,11 @@ pub(super) enum JobEvent {
         have_source: bool,
         finished: Option<FinishedShard>,
     },
+    Phase {
+        job_id: String,
+        name: String,
+        payload: Vec<u8>,
+    },
 }
 
 impl JobEvent {
@@ -78,6 +83,7 @@ impl JobEvent {
             | JobEvent::ImportRequest { job_id, .. }
             | JobEvent::InputRequest { job_id, .. }
             | JobEvent::ShardRequest { job_id, .. }
+            | JobEvent::Phase { job_id, .. }
             | JobEvent::InputFetched {
                 fetch_id: job_id, ..
             } => job_id,
@@ -97,6 +103,7 @@ impl JobEvent {
             JobEvent::InputRequest { .. } => "input_request",
             JobEvent::InputFetched { .. } => "input_fetched",
             JobEvent::ShardRequest { .. } => "shard_request",
+            JobEvent::Phase { .. } => "phase",
         }
     }
 
@@ -299,6 +306,15 @@ impl ApplyJobEvent for SchedulerJobEvents {
                 )
                 .await;
             }
+            JobEvent::Phase {
+                job_id,
+                name,
+                payload,
+            } => {
+                self.scheduler
+                    .handle_runner_phase(&self.peer_id, &job_id, name, payload)
+                    .await;
+            }
         }
     }
 }
@@ -359,7 +375,10 @@ impl SchedulerJobEvents {
                     error!(%peer_id, %job_id, error = %e, "handle_build_output failed");
                 }
             }
-            JobUpdateKind::Compressing | JobUpdateKind::ProgramStarted => {}
+            JobUpdateKind::Compressing => {}
+            JobUpdateKind::ProgramStarted => {
+                scheduler.handle_runner_started(peer_id, &job_id).await;
+            }
             JobUpdateKind::Stage(stage) => {
                 scheduler.enter_build_stage(peer_id, &job_id, stage).await;
             }

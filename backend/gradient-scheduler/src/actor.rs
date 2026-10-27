@@ -54,6 +54,7 @@ pub struct WorkerMetrics {
     pub download_speed_mbps: Option<f32>,
     pub build_peak_ram_mb: Option<Vec<(String, u64)>>,
     pub exits_at: Option<Instant>,
+    pub runner: Option<gradient_wire::types::RunnerInventory>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -978,6 +979,9 @@ impl Actor for CoreActor {
                 );
                 core.pool
                     .observe_build_ram(&worker, metrics.build_peak_ram_mb);
+                if metrics.runner.is_some() {
+                    core.pool.update_runner_inventory(&worker, metrics.runner);
+                }
                 let _ = reply.send(());
             }
             SchedulerMsg::MarkDraining { worker, reply } => {
