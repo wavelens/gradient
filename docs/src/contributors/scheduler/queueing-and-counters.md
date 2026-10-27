@@ -77,7 +77,7 @@ A shared build is **open** (`graph_sql::open_predicate`) when `fetchable` is fal
 
 Follow each call with a `settle_need` call.
 
-- **Status transitions:** the transition-effects emitter (`status/effects.rs`) on every entry into and exit from `BUILDS_ONCE_WANTED` and on every abort, since the aborted job mark changes what an entry point wants.
+- **Status transitions:** the transition-effects emitter (`status/effects.rs`) on every entry into and exit from `BUILDS_ONCE_WANTED` and on every move into or out of `Aborted`. The aborted job mark can change what an entry point wants.
 - **Unchanged status:** `update_and_settle_need`, for events that move the needs-build mark without a status change.
     - Batch import (new builder, new entry point, adopted runtime dependencies, upstream hit, probe answer)
     - `demote_cached_output` and `lost_fetchability`

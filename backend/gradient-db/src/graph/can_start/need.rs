@@ -329,13 +329,31 @@ where
     let mut changes = Vec::new();
     for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
         changes.extend(thaw_wanted(db, gained).await?);
-        let adopted = crate::graph::reachability::adopt_below_named(db, gained).await?;
-        crate::task_board::dep_counts::bump_graph_version(db, &adopted.evaluations()).await?;
+        name_below_named(db, gained).await?;
         changes.extend(promote(db, gained).await?);
     }
     changes.extend(settle_lost(db, &moved.lost).await?);
 
     Ok(changes)
+}
+
+async fn name_below_named<C>(db: &C, gained: &[DerivationId]) -> Result<(), DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let mut evaluations = Vec::new();
+    loop {
+        let adopted = crate::graph::reachability::adopt_below_named(db, gained).await?;
+        if adopted.pairs.is_empty() {
+            break;
+        }
+        evaluations.extend(adopted.evaluations());
+    }
+    evaluations.sort_unstable();
+    evaluations.dedup();
+    crate::task_board::dep_counts::bump_graph_version(db, &evaluations).await?;
+
+    Ok(())
 }
 
 async fn settle_lost<C: ConnectionTrait>(

@@ -84,7 +84,11 @@ fn is_builder(status: BuildStatus) -> bool {
 fn need_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
     changes
         .iter()
-        .filter(|c| is_builder(c.from) != is_builder(c.to) || c.to == BuildStatus::Aborted)
+        .filter(|c| {
+            is_builder(c.from) != is_builder(c.to)
+                || c.to == BuildStatus::Aborted
+                || c.from == BuildStatus::Aborted
+        })
         .map(|c| c.derivation)
         .collect()
 }
@@ -255,6 +259,7 @@ mod tests {
         let aborted = DerivationId::now_v7();
         let thawed = DerivationId::now_v7();
         let promoted = DerivationId::now_v7();
+        let retried = DerivationId::now_v7();
         let change = |derivation, from, to| TransitionChange {
             derivation,
             from,
@@ -268,9 +273,10 @@ mod tests {
                 change(aborted, BuildStatus::Queued, BuildStatus::Aborted),
                 change(thawed, BuildStatus::Skipped, BuildStatus::Created),
                 change(promoted, BuildStatus::Created, BuildStatus::Queued),
+                change(retried, BuildStatus::Aborted, BuildStatus::Created),
             ]),
-            vec![requeued, finished, aborted],
-            "a thaw stays inside what builds once wanted, the walk stepped through it; an abort marks the job and moves the need anyway"
+            vec![requeued, finished, aborted, retried],
+            "a thaw stays inside what builds once wanted, the walk stepped through it; an abort and its retry change the job mark and move the need"
         );
     }
 
