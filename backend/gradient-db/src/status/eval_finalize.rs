@@ -14,6 +14,7 @@ use tracing::info;
 /// The counters are only answering "not yet".
 /// A naming and a transition in flight together can miss each other.
 /// The exact reads are confirming zero instead.
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn check_evaluation_done(
     ctx: &DbContext,
     evaluation_id: EvaluationId,

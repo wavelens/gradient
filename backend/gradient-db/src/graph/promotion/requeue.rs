@@ -99,6 +99,7 @@ crate::sql_fn! {
         status_write = StatusWrite::build(BuildStatus::REQUEUE);
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn requeue_failed_closure<C>(
     db: &C,
     scope: RepairScope,

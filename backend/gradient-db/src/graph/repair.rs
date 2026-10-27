@@ -47,6 +47,7 @@ impl RepairReport {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all, fields(?scope))]
 pub async fn repair_build_graph(
     ctx: &DbContext,
     scope: RepairScope,
