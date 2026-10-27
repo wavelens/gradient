@@ -6,9 +6,10 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import type { ExecJobSummary } from '@core/models';
+import { ApiError } from '@core/services/api.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { ExecJobListComponent } from './exec-job-list.component';
 
@@ -72,6 +73,33 @@ describe('ExecJobListComponent', () => {
       fixture.detectChanges();
 
       expect((fixture.nativeElement as HTMLElement).textContent).toContain('apps.x86_64-linux.train');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops polling once the server refuses the list and retries while it is unreachable', () => {
+    vi.useFakeTimers();
+    try {
+      const refused = vi.fn(() => throwError(() => new ApiError('Evaluation not found', 404)));
+      const unreachable = vi.fn(() => throwError(() => new ApiError('Bad Gateway', 502)));
+      for (const forEvaluation of [refused, unreachable]) {
+        TestBed.resetTestingModule();
+        TestBed.configureTestingModule({
+          imports: [ExecJobListComponent],
+          providers: [provideRouter([]), { provide: ExecJobsService, useValue: { forEvaluation } }],
+        });
+        const fixture = TestBed.createComponent(ExecJobListComponent);
+        fixture.componentRef.setInput('evaluation', 'e1');
+        fixture.componentRef.setInput('project', 'acme');
+        fixture.componentRef.setInput('task', 'demo');
+        fixture.detectChanges();
+        vi.advanceTimersByTime(3 * 4000);
+        fixture.destroy();
+      }
+
+      expect(refused).toHaveBeenCalledTimes(1);
+      expect(unreachable).toHaveBeenCalledTimes(4);
     } finally {
       vi.useRealTimers();
     }

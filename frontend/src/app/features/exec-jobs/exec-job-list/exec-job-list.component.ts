@@ -10,6 +10,7 @@ import { Subscription, catchError, interval, of, startWith, switchMap, takeWhile
 import { BadgeComponent } from '@gradient/ui/ui';
 import { StatusIconComponent } from '@shared/ui';
 import type { ExecJobSummary } from '@core/models';
+import { ApiError } from '@core/services/api.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { deviceLabel, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 
@@ -55,10 +56,13 @@ export class ExecJobListComponent implements OnChanges {
     const evaluation = this.evaluation();
     this.poll = interval(POLL_MS).pipe(
       startWith(0),
-      switchMap(() => this.execJobs.forEvaluation(evaluation).pipe(catchError(() => of(null)))),
-      takeWhile((jobs) => this.evaluationRunning() || jobs === null || jobs.some((job) => isOpenExecJob(job.status)), true),
+      switchMap(() => this.execJobs.forEvaluation(evaluation).pipe(
+        catchError((error: unknown) => of(error instanceof ApiError && !error.unreachable ? 'refused' as const : null)),
+      )),
+      takeWhile((jobs) => jobs !== 'refused'
+        && (this.evaluationRunning() || jobs === null || jobs.some((job) => isOpenExecJob(job.status))), true),
     ).subscribe((jobs) => {
-      if (jobs) this.jobs.set(jobs);
+      if (Array.isArray(jobs)) this.jobs.set(jobs);
     });
   }
 
