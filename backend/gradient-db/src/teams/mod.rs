@@ -5,7 +5,6 @@
  */
 
 pub mod demand;
-pub mod evaluations;
 pub mod grants;
 pub mod invitations;
 pub mod mail;
