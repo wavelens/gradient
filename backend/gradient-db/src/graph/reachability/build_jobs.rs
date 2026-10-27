@@ -6,7 +6,7 @@
 
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect, Value};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
 use std::sync::LazyLock;
 
 static EVAL_BLOCKED_SQL: LazyLock<String> = LazyLock::new(|| {
@@ -53,28 +53,18 @@ pub async fn eval_blocked<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
 ) -> Result<bool, DbErr> {
-    flag(db, &EVAL_BLOCKED, evaluation, "blocked").await
+    EVAL_BLOCKED
+        .scalar(db, [evaluation.into()], "blocked")
+        .await
 }
 
 pub async fn eval_any_shared_build_failed<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
 ) -> Result<bool, DbErr> {
-    flag(db, &EVAL_ANY_SHARED_BUILD_FAILED, evaluation, "failed").await
-}
-
-/// A missing row is an error, not `false`.
-/// A silent "nothing blocks" would settle an evaluation with builds still running.
-async fn flag<C: ConnectionTrait>(
-    db: &C,
-    query: &crate::sql::Query,
-    evaluation: EvaluationId,
-    column: &str,
-) -> Result<bool, DbErr> {
-    db.query_one_raw(query.bind([Value::Uuid(Some(evaluation.into_inner()))]))
-        .await?
-        .ok_or_else(|| DbErr::Custom(format!("{} returned no row", query.name)))?
-        .try_get::<bool>("", column)
+    EVAL_ANY_SHARED_BUILD_FAILED
+        .scalar(db, [evaluation.into()], "failed")
+        .await
 }
 
 pub async fn shared_build_status<C: ConnectionTrait>(

@@ -12,7 +12,7 @@
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::transition::Transition;
-use sea_orm::{DatabaseBackend, Statement, Value};
+use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement, TryGetable, Value};
 use std::borrow::Cow;
 
 use super::{Budget, Param};
@@ -123,6 +123,18 @@ impl Query {
 
     pub fn stmt(&self) -> Statement {
         self.bind([])
+    }
+
+    pub async fn scalar<C, I, T>(&self, db: &C, values: I, column: &str) -> Result<T, DbErr>
+    where
+        C: ConnectionTrait,
+        I: IntoIterator<Item = Value>,
+        T: TryGetable,
+    {
+        db.query_one_raw(self.bind(values))
+            .await?
+            .ok_or_else(|| DbErr::Custom(format!("{} returned no row", self.name)))?
+            .try_get::<T>("", column)
     }
 }
 

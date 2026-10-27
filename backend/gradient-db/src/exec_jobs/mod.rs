@@ -14,7 +14,7 @@ pub mod upcoming;
 
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_types::{BuildAttemptId, EvaluationId, ExecJobAttemptId};
-use sea_orm::{ConnectionTrait, DbErr, Value};
+use sea_orm::{ConnectionTrait, DbErr};
 use std::sync::LazyLock;
 
 use crate::sql::status::exec_in;
@@ -50,24 +50,16 @@ pub async fn has_open_exec_jobs<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
 ) -> Result<bool, DbErr> {
-    flag(db, &HAS_OPEN_EXEC_JOBS, evaluation, "open").await
+    HAS_OPEN_EXEC_JOBS
+        .scalar(db, [evaluation.into()], "open")
+        .await
 }
 
 pub async fn any_exec_job_failed<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
 ) -> Result<bool, DbErr> {
-    flag(db, &ANY_EXEC_JOB_FAILED, evaluation, "failed").await
-}
-
-async fn flag<C: ConnectionTrait>(
-    db: &C,
-    query: &crate::sql::Query,
-    evaluation: EvaluationId,
-    column: &str,
-) -> Result<bool, DbErr> {
-    db.query_one_raw(query.bind([Value::Uuid(Some(evaluation.into_inner()))]))
-        .await?
-        .ok_or_else(|| DbErr::Custom(format!("{} returned no row", query.name)))?
-        .try_get::<bool>("", column)
+    ANY_EXEC_JOB_FAILED
+        .scalar(db, [evaluation.into()], "failed")
+        .await
 }
