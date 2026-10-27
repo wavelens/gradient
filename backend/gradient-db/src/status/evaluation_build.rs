@@ -83,6 +83,8 @@ pub async fn retry_evaluation_build(
         .collect();
     mark_aborted(ctx, evaluation.id, &retried, false).await?;
     emit_transition_effects(ctx, &thawed).await?;
+    let need = crate::graph::can_start::update_and_settle_need(db, &retried).await?;
+    emit_transition_effects(ctx, &need.changes).await?;
 
     let failed = crate::graph::promotion::repair_dependency_failed(db, evaluation.id).await?;
     emit_transition_effects(ctx, &failed).await?;
