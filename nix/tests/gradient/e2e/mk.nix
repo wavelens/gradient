@@ -1002,7 +1002,8 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         server.sleep(15)
         j = assert_no_server_panic(since_seconds=attempt * 15 + 15)
         if any(needle in j for needle in (
-            "update needed", "Force evaluation", "trigger created evaluation", "Queued"
+            "update needed", "Force evaluation", "trigger created evaluation", "Queued",
+            "Evaluation of the remote head in progress",
         )):
             detected = True
             banner(f"Repository update detected on attempt {attempt}")
