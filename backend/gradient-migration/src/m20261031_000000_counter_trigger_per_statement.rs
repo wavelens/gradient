@@ -11,9 +11,12 @@ const UP: &str = r#"
 DROP TRIGGER evaluation_shared_build_moved ON public.derivation_build;
 CREATE OR REPLACE FUNCTION public.evaluation_shared_build_moved() RETURNS trigger
     LANGUAGE plpgsql
-    AS $$ BEGIN INSERT INTO evaluation_shared_build_delta (evaluation, named, active, failed, queued, building) SELECT bj.evaluation, 0, sum(nc.active - oc.active)::int, sum(nc.failed - oc.failed)::int, sum(nc.queued - oc.queued)::int, sum(nc.building - oc.building)::int FROM new_rows n JOIN old_rows o ON o.id = n.id CROSS JOIN LATERAL evaluation_shared_build_counts(n.status, n.wanted) nc CROSS JOIN LATERAL evaluation_shared_build_counts(o.status, o.wanted) oc JOIN build_job bj ON bj.derivation_build = n.id JOIN evaluation e ON e.id = bj.evaluation WHERE (o.status IS DISTINCT FROM n.status OR o.wanted IS DISTINCT FROM n.wanted) AND e.status IN (0, 8, 1, 2, 3, 4) AND (nc.active, nc.failed, nc.queued, nc.building) IS DISTINCT FROM (oc.active, oc.failed, oc.queued, oc.building) GROUP BY bj.evaluation; RETURN NULL; END $$;
+    AS $$ BEGIN INSERT INTO evaluation_shared_build_delta (evaluation, named, active, failed, queued, building) SELECT m.evaluation, 0, m.active, m.failed, m.queued, m.building FROM (SELECT d.evaluation, sum(d.active)::int AS active, sum(d.failed)::int AS failed, sum(d.queued)::int AS queued, sum(d.building)::int AS building FROM (SELECT bj.evaluation, c.active, c.failed, c.queued, c.building FROM new_rows n CROSS JOIN LATERAL evaluation_shared_build_counts(n.status, n.wanted) c JOIN build_job bj ON bj.derivation_build = n.id UNION ALL SELECT bj.evaluation, -c.active, -c.failed, -c.queued, -c.building FROM old_rows o CROSS JOIN LATERAL evaluation_shared_build_counts(o.status, o.wanted) c JOIN build_job bj ON bj.derivation_build = o.id) d GROUP BY d.evaluation) m JOIN evaluation e ON e.id = m.evaluation WHERE e.status IN (0, 8, 1, 2, 3, 4) AND (m.active, m.failed, m.queued, m.building) <> (0, 0, 0, 0); RETURN NULL; END $$;
 CREATE TRIGGER evaluation_shared_build_moved AFTER UPDATE ON public.derivation_build REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION public.evaluation_shared_build_moved();
 "#;
+
+// The old and new transition tables are summed separately: a join between the two has no row
+// estimate and the plan PL/pgSQL caches for it after a one-row update loops over every pair.
 
 const DOWN: &str = r#"
 DROP TRIGGER evaluation_shared_build_moved ON public.derivation_build;
