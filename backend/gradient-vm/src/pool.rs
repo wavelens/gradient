@@ -25,8 +25,7 @@ const BOOT_RETRY: Duration = Duration::from_secs(30);
 pub struct GuestPool {
     config: VmConfig,
     units: GuestUnits,
-    warm: Mutex<Vec<Guest>>,
-    booting: AtomicU32,
+    slots: Mutex<Slots<Guest>>,
     upcoming_exec_jobs: AtomicU32,
     draining: AtomicBool,
     reserved_cids: Mutex<BTreeSet<u32>>,
@@ -38,8 +37,7 @@ impl GuestPool {
         Arc::new(Self {
             config,
             units,
-            warm: Mutex::default(),
-            booting: AtomicU32::new(0),
+            slots: Mutex::new(Slots::new()),
             upcoming_exec_jobs: AtomicU32::new(0),
             draining: AtomicBool::new(false),
             reserved_cids: Mutex::default(),
@@ -56,10 +54,7 @@ impl GuestPool {
     }
 
     pub async fn take(self: &Arc<Self>) -> Result<Guest, GuestBootError> {
-        let warm = {
-            let mut warm = lock(&self.warm);
-            (!warm.is_empty()).then(|| warm.remove(0))
-        };
+        let warm = lock(&self.slots).take();
         let guest = match warm {
             Some(guest) => Ok(guest),
             None => self.boot_one().await,
@@ -69,14 +64,8 @@ impl GuestPool {
     }
 
     pub fn refill(self: &Arc<Self>) {
-        let wanted = wanted_boots(
-            self.warm_count(),
-            self.booting.load(Ordering::SeqCst),
-            self.target(),
-            self.draining.load(Ordering::SeqCst),
-        );
+        let wanted = lock(&self.slots).start_boots(self.target(), self.draining());
         for _ in 0..wanted {
-            self.booting.fetch_add(1, Ordering::SeqCst);
             let pool = Arc::clone(self);
             self.tasks.spawn(async move { pool.boot_into_pool().await });
         }
@@ -94,12 +83,7 @@ impl GuestPool {
     }
 
     pub fn trim(self: &Arc<Self>) {
-        let doomed = {
-            let mut warm = lock(&self.warm);
-            let surplus = surplus(count(warm.len()), self.target()) as usize;
-            let keep = warm.len().saturating_sub(surplus);
-            warm.split_off(keep)
-        };
+        let doomed = lock(&self.slots).surplus(self.target());
         for guest in doomed {
             let pool = Arc::clone(self);
             self.tasks
@@ -120,11 +104,11 @@ impl GuestPool {
     }
 
     pub fn warm_count(&self) -> u32 {
-        count(lock(&self.warm).len())
+        count(lock(&self.slots).warm.len())
     }
 
     pub async fn stop_warm(&self) {
-        let warm = std::mem::take(&mut *lock(&self.warm));
+        let warm = std::mem::take(&mut lock(&self.slots).warm);
         for guest in warm {
             guest.teardown(&self.units).await;
         }
@@ -132,7 +116,7 @@ impl GuestPool {
 
     pub async fn stop_all_units(&self) {
         self.set_draining();
-        lock(&self.warm).clear();
+        lock(&self.slots).warm.clear();
         match self.units.list().await {
             Ok(units) => {
                 for (id, _) in units {
@@ -183,30 +167,68 @@ impl GuestPool {
                 Err(e) => warn!(error = %e, "warm guest boot failed, retrying in 30s"),
             }
             tokio::time::sleep(BOOT_RETRY).await;
-            let booting = self.booting.load(Ordering::SeqCst);
-            let still_wanted = !self.draining.load(Ordering::SeqCst)
-                && self.warm_count() + booting <= self.target();
-            if !still_wanted {
-                self.booting.fetch_sub(1, Ordering::SeqCst);
+            if !lock(&self.slots).retry_boot(self.target(), self.draining()) {
                 return;
             }
         }
     }
 
     async fn keep_or_stop(&self, guest: Guest) {
-        let surplus_guest = {
-            let mut warm = lock(&self.warm);
-            self.booting.fetch_sub(1, Ordering::SeqCst);
-            if self.draining.load(Ordering::SeqCst) || count(warm.len()) >= self.target() {
-                Some(guest)
-            } else {
-                warm.push(guest);
-                None
-            }
-        };
+        let surplus_guest = lock(&self.slots).finish_boot(guest, self.target(), self.draining());
         if let Some(guest) = surplus_guest {
             guest.teardown(&self.units).await;
         }
+    }
+
+    fn draining(&self) -> bool {
+        self.draining.load(Ordering::SeqCst)
+    }
+}
+
+struct Slots<T> {
+    warm: Vec<T>,
+    booting: u32,
+}
+
+impl<T> Slots<T> {
+    fn new() -> Self {
+        Self {
+            warm: Vec::new(),
+            booting: 0,
+        }
+    }
+
+    fn take(&mut self) -> Option<T> {
+        (!self.warm.is_empty()).then(|| self.warm.remove(0))
+    }
+
+    fn start_boots(&mut self, target: u32, draining: bool) -> u32 {
+        let wanted = wanted_boots(count(self.warm.len()), self.booting, target, draining);
+        self.booting += wanted;
+        wanted
+    }
+
+    fn finish_boot(&mut self, guest: T, target: u32, draining: bool) -> Option<T> {
+        self.booting = self.booting.saturating_sub(1);
+        if draining || count(self.warm.len()) >= target {
+            return Some(guest);
+        }
+        self.warm.push(guest);
+        None
+    }
+
+    fn retry_boot(&mut self, target: u32, draining: bool) -> bool {
+        let wanted = !draining && count(self.warm.len()) + self.booting <= target;
+        if !wanted {
+            self.booting = self.booting.saturating_sub(1);
+        }
+        wanted
+    }
+
+    fn surplus(&mut self, target: u32) -> Vec<T> {
+        let surplus = surplus(count(self.warm.len()), target) as usize;
+        let keep = self.warm.len().saturating_sub(surplus);
+        self.warm.split_off(keep)
     }
 }
 
@@ -242,6 +264,35 @@ mod tests {
         assert_eq!(wanted_boots(1, 1, 3, false), 1);
         assert_eq!(wanted_boots(3, 0, 3, false), 0);
         assert_eq!(wanted_boots(0, 0, 3, true), 0);
+    }
+
+    #[test]
+    fn a_second_refill_counts_the_boots_of_the_first() {
+        let mut slots = Slots::<u32>::new();
+        assert_eq!(slots.start_boots(3, false), 3);
+        assert_eq!(slots.start_boots(3, false), 0);
+        assert_eq!(slots.finish_boot(7, 3, false), None);
+        assert_eq!(slots.start_boots(3, false), 0);
+        assert_eq!(slots.take(), Some(7));
+        assert_eq!(slots.start_boots(3, false), 1);
+    }
+
+    #[test]
+    fn a_boot_finishing_at_a_full_pool_is_handed_back() {
+        let mut slots = Slots::<u32>::new();
+        assert_eq!(slots.start_boots(1, false), 1);
+        assert_eq!(slots.finish_boot(1, 1, false), None);
+        assert_eq!(slots.finish_boot(2, 1, false), Some(2));
+        assert_eq!(slots.booting, 0);
+    }
+
+    #[test]
+    fn a_failed_boot_stops_retrying_once_the_target_drops() {
+        let mut slots = Slots::<u32>::new();
+        assert_eq!(slots.start_boots(2, false), 2);
+        assert!(slots.retry_boot(2, false));
+        assert!(!slots.retry_boot(1, false));
+        assert_eq!(slots.booting, 1);
     }
 
     #[test]
