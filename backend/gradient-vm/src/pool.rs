@@ -120,12 +120,17 @@ impl GuestPool {
         self.draining.store(true, Ordering::SeqCst);
     }
 
+    pub fn reopen(self: &Arc<Self>) {
+        self.draining.store(false, Ordering::SeqCst);
+        self.refill();
+    }
+
     pub fn warm_count(&self) -> u32 {
         count(lock(&self.slots).warm.len())
     }
 
     pub async fn stop_warm(&self) {
-        self.stop_boots().await;
+        self.set_draining();
         let warm = std::mem::take(&mut lock(&self.slots).warm);
         for guest in warm {
             guest.teardown(&self.units).await;
@@ -213,7 +218,7 @@ impl GuestPool {
         }
     }
 
-    async fn stop_boots(&self) {
+    pub async fn stop_boots(&self) {
         self.set_draining();
         self.stopping.cancel();
         self.tasks.close();
