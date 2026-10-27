@@ -176,6 +176,16 @@
     "values": []
   },
   {
+    "group": "",
+    "field": "guest_supervisor",
+    "flag": "guest-supervisor",
+    "env": "GRADIENT_WORKER_GUEST_SUPERVISOR",
+    "type": "Option<PathBuf>",
+    "description": "Run as the root supervisor of the guest in this directory (internal - do not set manually).",
+    "default": null,
+    "values": []
+  },
+  {
     "group": "capabilities",
     "field": "federate",
     "flag": "capabilities-federate",

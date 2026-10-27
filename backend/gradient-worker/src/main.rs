@@ -60,6 +60,14 @@ fn main() -> Result<()> {
         }),
     });
 
+    if let Some(dir) = &config.guest_supervisor {
+        return gradient_vm::run_supervisor(
+            dir,
+            &config.exec.cloud_hypervisor_bin,
+            &config.exec.virtiofsd_bin,
+        );
+    }
+
     if config.eval_subprocess {
         return nix::eval_worker::run_eval_worker(config.eval.metrics).map_err(anyhow::Error::from);
     }

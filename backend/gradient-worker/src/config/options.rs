@@ -111,6 +111,10 @@ pub struct WorkerConfig {
     #[arg(hide = true)]
     pub eval_driver: Option<String>,
 
+    /// Run as the root supervisor of the guest in this directory (internal - do not set manually).
+    #[arg(hide = true)]
+    pub guest_supervisor: Option<PathBuf>,
+
     #[command(flatten)]
     pub capabilities: CapabilitiesArgs,
     #[command(flatten)]
@@ -149,6 +153,7 @@ impl Default for WorkerConfig {
             max_lifetime: None,
             eval_subprocess: false,
             eval_driver: None,
+            guest_supervisor: None,
             capabilities: CapabilitiesArgs::default(),
             system: SystemArgs::default(),
             nix_daemon: NixDaemonArgs::default(),

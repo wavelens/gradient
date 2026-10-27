@@ -20,13 +20,14 @@
       log.traceDir = "/var/lib/gradient-worker/trace";
     };
 
-    withoutEnvironment = [ [ "peers" ] [ "sshBin" ] [ "evalSubprocess" ] [ "evalDriver" ] ];
+    withoutEnvironment = [ [ "peers" ] [ "sshBin" ] [ "evalSubprocess" ] [ "evalDriver" ] [ "guestSupervisor" ] ];
 
     writtenByHand = [
       [ "peers" ]
       [ "sshBin" ]
       [ "evalSubprocess" ]
       [ "evalDriver" ]
+      [ "guestSupervisor" ]
       [ "system" "architectures" ]
       [ "system" "features" ]
       [ "nixDaemon" "maxConnections" ]
