@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![allow(clippy::disallowed_methods, reason = "test SSH server")]
+
 use crate::git::commit_info::{fetch_commit, head_refspec};
 use crate::git::remote::ls_remote_head;
 use russh::keys::{PrivateKey, PublicKey};
