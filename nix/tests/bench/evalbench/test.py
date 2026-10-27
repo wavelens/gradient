@@ -6,7 +6,6 @@
 # (spans, pcaps, Postgres statistics) whose timings the summary reports, then again
 # under perf and strace, whose overhead would distort those timings.
 
-from datetime import timedelta
 import subprocess
 
 RUNS = [
