@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, booleanAttribute, computed, input, ChangeDetectionStrategy } from '@angular/core';
+import { Component, booleanAttribute, computed, inject, input, ChangeDetectionStrategy } from '@angular/core';
+import { SubmitDirective } from '../form-field/submit.directive';
 
 export type ButtonSeverity = 'primary' | 'secondary' | 'success' | 'warn' | 'danger';
 
@@ -35,7 +36,8 @@ export type ButtonSeverity = 'primary' | 'secondary' | 'success' | 'warn' | 'dan
     '[class.gr-button--icon-only]': '!label() && !!icon()',
     '[class.gr-button--loading]': 'loading()',
     '[attr.aria-busy]': 'loading() ? "true" : null',
-    '[attr.aria-disabled]': 'loading() ? "true" : null',
+    '[class.gr-button--blocked]': 'blocked()',
+    '[attr.aria-disabled]': 'loading() || blocked() ? "true" : null',
     '[attr.tabindex]': 'loading() ? "-1" : null',
   },
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -49,6 +51,9 @@ export class ButtonComponent {
   size = input<'small' | 'normal'>('normal');
   loading = input(false, { transform: booleanAttribute });
   text = input(false, { transform: booleanAttribute });
+
+  private submit = inject(SubmitDirective, { optional: true, self: true });
+  protected blocked = computed(() => this.submit?.blocked() ?? false);
 
   protected severityClass = computed(() => `gr-button--${this.severity() || 'primary'}`);
 }

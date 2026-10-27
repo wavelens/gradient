@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, ElementRef, effect, inject, input, computed, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
+import { Component, DestroyRef, ElementRef, effect, inject, input, computed, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 import { AbstractControl, NgControl } from '@angular/forms';
+import { FormErrors } from './form-errors';
 
 type FieldControl = AbstractControl | NgControl | null;
 
@@ -42,6 +43,7 @@ export class FormFieldComponent {
   private hostRef = inject(ElementRef<HTMLElement>);
 
   constructor() {
+    inject(FormErrors, { optional: true })?.track(this.showError, inject(DestroyRef));
     effect(() => {
       const control = (this.hostRef.nativeElement as HTMLElement).querySelector<HTMLElement>(
         'input, textarea, select, [role=combobox]',

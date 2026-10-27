@@ -30,7 +30,8 @@
       <textarea grInput id="proj-desc" [(ngModel)]="formData.description" rows="3" [appManagedDisable]="access()"></textarea>
     </gr-form-field>
 
-    <gr-form-field label="Repository URL" for="proj-repo">
+    <gr-form-field label="Repository URL" for="proj-repo" [invalid]="!!repositoryError" [error]="repositoryError ?? ''">
+      <gr-label-help slot="label" doc="concepts/projects-and-tasks/#repository-url" title="Accepted forms: ssh://git@host/path, git@host:path, https://host/path" />
       <div class="repo-row phone-icon-buttons">
         <input grInput id="proj-repo" [(ngModel)]="formData.repository" [appManagedDisable]="access()" />
         <button *appWritable="access()" grButton type="button" label="Test connection" icon="lan"
@@ -38,10 +39,16 @@
                 [disabled]="checkingRepo() || !formData.repository.trim()"
                 (click)="testConnection()"></button>
       </div>
-      @if (repoCheck(); as r) {
-        <p class="repo-check" [class.repo-check--error]="!r.ok" role="status">{{ r.message }}</p>
+      @if (repositoryReachable; as reachable) {
+        <span slot="hint" class="repo-reachable" role="status">{{ reachable }}</span>
       }
     </gr-form-field>
+
+    @if (sshKey()) {
+      <gr-form-field label="Project SSH Key" for="proj-ssh-key" hint="Add it as a deploy key on the Git host to clone over SSH.">
+        <gr-copy-field inputId="proj-ssh-key" [value]="sshKey()" />
+      </gr-form-field>
+    }
 
     <gr-form-field label="Evaluation Wildcard" for="proj-wildcard">
       <gr-label-help slot="label" doc="reference/wildcards/" title="Pattern for selecting which outputs to evaluate" />
@@ -112,7 +119,7 @@
         grButton
         label="Save Changes"
         icon="check"
-        (click)="saveSettings()"
+        (grSubmit)="saveSettings()"
         [loading]="saving()"
         [appManagedDisable]="access()"
       ></button>

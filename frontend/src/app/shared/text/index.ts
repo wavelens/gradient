@@ -8,5 +8,6 @@ export * from './clock-time';
 export * from './device-name';
 export * from './permission-label';
 export * from './relative-time';
+export * from './repository-url';
 export * from './slug';
 export * from './units';

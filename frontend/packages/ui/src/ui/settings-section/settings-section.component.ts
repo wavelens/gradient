@@ -6,11 +6,13 @@
 
 import { Component, input, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormErrors } from '../form-field/form-errors';
 
 @Component({
   selector: 'gr-settings-section',
   standalone: true,
   imports: [CommonModule],
+  providers: [FormErrors],
   templateUrl: './settings-section.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './settings-section.component.scss',

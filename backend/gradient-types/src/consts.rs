@@ -11,6 +11,7 @@ use std::sync::LazyLock;
 use uuid::uuid;
 
 pub const PORT_RANGE: RangeInclusive<usize> = 1..=65535;
+pub const REPOSITORY_URL_FORMS: &str = "ssh://git@host/path, git@host:path or https://host/path";
 pub const GRADIENT_CI_URL: &str = "https://servers.gradient.ci";
 pub const GRADIENT_CI_PROTO_URL: &str = "wss://servers.gradient.ci/proto";
 

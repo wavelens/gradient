@@ -617,10 +617,10 @@ pub async fn post_task_check_repository(
     }: TaskScope<RequiresUnmanaged<can::EditTask>>,
     body: Option<Json<CheckRepositoryRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let repository = match body.and_then(|Json(b)| b.repository) {
-        Some(repository) => validated_repository(repository)?,
-        None => task.repository,
-    };
+    let repository = validated_repository(
+        body.and_then(|Json(b)| b.repository)
+            .unwrap_or(task.repository),
+    )?;
     let head = resolve_remote_ref(&db, &project, &repository, None)
         .await
         .map_err(|e| TaskRefusal::RepositoryCheckFailed {

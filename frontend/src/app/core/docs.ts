@@ -13,6 +13,7 @@ export type DocLink =
   | 'concepts/projects-and-tasks/#project'
   | 'concepts/projects-and-tasks/#task'
   | 'concepts/projects-and-tasks/#concurrency'
+  | 'concepts/projects-and-tasks/#repository-url'
   | 'concepts/workers/#capabilities'
   | 'guides/actions/'
   | 'guides/flake-updates/#1-track-the-inputs'

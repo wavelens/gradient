@@ -10,6 +10,7 @@ import { ESCAPE } from '@angular/cdk/keycodes';
 import { Overlay, OverlayRef } from '@angular/cdk/overlay';
 import { TemplatePortal } from '@angular/cdk/portal';
 import { detachAnimated } from '../overlay/overlay-animation';
+import { FormErrors } from '../form-field/form-errors';
 import {
   Component,
   OnDestroy,
@@ -33,6 +34,7 @@ let dialogSeq = 0;
   selector: 'gr-dialog',
   standalone: true,
   imports: [IconComponent, CdkTrapFocus],
+  providers: [FormErrors],
   template: `
     <ng-template #panel>
       <div

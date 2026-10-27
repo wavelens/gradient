@@ -31,6 +31,22 @@
   <gr-password-input inputId="sg-pw" [(ngModel)]="password" />
 </gr-form-field>
 
+<h2>Submit guard</h2>
+<p>Bind <code>(grSubmit)</code> instead of <code>(click)</code> on a save button. It stays blocked
+   while any form field in the same settings section or dialog shows an error.</p>
+<gr-settings-section title="Guarded form">
+  <gr-form-field
+    label="Repository URL"
+    for="sg-repo"
+    error="Invalid repository URL; use ssh://git@host/path, git@host:path or https://host/path"
+    [invalid]="urlInvalid()"
+  >
+    <input grInput id="sg-repo" value="ssh://git@host:user/repo.git" />
+  </gr-form-field>
+  <button grButton label="Toggle error" severity="secondary" (click)="urlInvalid.set(!urlInvalid())"></button>
+  <button grButton label="Save ({{ submits() }})" icon="check" (grSubmit)="submits.set(submits() + 1)"></button>
+</gr-settings-section>
+
 <h2>Name with availability check</h2>
 <p>A slug field that reports whether the name is free. The caller performs the check and
    reports its state; every outcome is worded here, once.</p>

@@ -26,8 +26,13 @@ pub enum InputError {
     InvalidCommitHashLength,
     #[error("URLs pointing to local files are not allowed")]
     LocalFileUrlNotAllowed,
-    #[error("Invalid repository URL")]
+    #[error("Invalid repository URL; use {forms}", forms = REPOSITORY_URL_FORMS)]
     InvalidRepositoryUrl,
+    #[error(
+        "`{scheme}://` expects a port number after the host, not `{port}`; drop `{scheme}://` for the `host:path` form or use {forms}",
+        forms = REPOSITORY_URL_FORMS
+    )]
+    RepositoryUrlPortInvalid { scheme: String, port: String },
     #[error("Evaluation wildcard cannot have leading or trailing whitespace")]
     EvaluationWildcardWhitespace,
     #[error("Evaluation wildcard cannot have consecutive commas")]
