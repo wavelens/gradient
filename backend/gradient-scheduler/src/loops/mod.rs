@@ -47,7 +47,7 @@ pub(crate) use eval::pending_eval_jobs;
 pub(crate) use eval::project_id_for_eval;
 #[cfg(test)]
 pub(crate) use exec::assign_exec_jobs;
-pub(crate) use exec::{caps_of, pending_exec_job};
+pub(crate) use exec::{caps_of, pending_exec_job, serves_project};
 
 pub(crate) const ASSIGN_TICK_SECS: u64 = 5;
 pub(super) const ASSIGN_TICK: Duration = Duration::from_secs(ASSIGN_TICK_SECS);

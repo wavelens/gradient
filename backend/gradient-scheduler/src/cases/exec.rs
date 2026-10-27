@@ -10,7 +10,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::{self, ExecJobStatus};
 use gradient_entity::exec_job_attempt;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
-use gradient_entity::ids::{DispatchedJobId, EvaluationId};
+use gradient_entity::ids::{DispatchedJobId, EvaluationId, ProjectId};
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::WaitingReason;
@@ -25,6 +25,7 @@ use super::{
 use crate::test_jobs::allow_all;
 
 const W1: &str = "w1";
+const W2: &str = "w2";
 const ATTR: &str = "apps.x86_64-linux.a";
 
 fn exec_shape(evaluation: EvaluationId) -> Shape {
@@ -411,5 +412,26 @@ async fn a_reconnected_worker_gets_its_count_again() {
     case.connect(W1, w_exec(inventory()), &[]).await;
 
     assert_eq!(pre_warms(&case.signals(W1)), vec![1], "after 2: W1");
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_worker_of_another_project_gets_no_count() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(exec_shape(e1)).await;
+    let spec = serde_json::to_string(&spec()).expect("the spec encodes");
+    case.db
+        .execute(&format!("UPDATE entry_point SET exec = '{spec}'::jsonb"))
+        .await;
+
+    case.connect(W2, w_exec(inventory()), &[ProjectId::now_v7()])
+        .await;
+    case.connect(W1, w_exec(inventory()), &[]).await;
+
+    assert_eq!(pre_warms(&case.signals(W1)), vec![1], "after 1: W1");
+    assert!(
+        pre_warms(&case.signals(W2)).is_empty(),
+        "after 1: no count for W2"
+    );
     case.finish().await;
 }

@@ -14,7 +14,7 @@ use gradient_wire::types::{
 use tokio::sync::mpsc;
 
 use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingExecJob};
-use gradient_pool::WorkerCaps;
+use gradient_pool::{WorkerCaps, WorkerInfo};
 use gradient_types::exec::{DeviceClass, ExecAllow, ExecDefaults, ExecInventory, ExecSpec};
 
 pub(crate) fn port() -> (Arc<dyn SessionPort>, mpsc::UnboundedReceiver<SessionSignal>) {
@@ -198,4 +198,25 @@ pub(crate) fn exec_caps_labelled(label: &str) -> WorkerCaps {
         inventory.labels.push(label.to_owned());
     }
     caps
+}
+
+pub(crate) fn worker_info(id: &str, caps: WorkerCaps) -> WorkerInfo {
+    WorkerInfo {
+        id: id.to_owned(),
+        capabilities: caps.capabilities,
+        architectures: caps.architectures,
+        system_features: caps.system_features,
+        max_concurrent_builds: 1,
+        assigned_job_count: 0,
+        assigned_build_count: 0,
+        draining: false,
+        authorized_peers: None,
+        cpu_usage_pct: None,
+        ram_free_mb: None,
+        ram_total_mb: 0,
+        disk_speed_mbps: None,
+        upload_speed_mbps: None,
+        download_speed_mbps: None,
+        exec: caps.exec,
+    }
 }

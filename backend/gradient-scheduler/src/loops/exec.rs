@@ -95,15 +95,18 @@ pub(crate) fn caps_of(worker: &WorkerInfo) -> WorkerCaps {
     }
 }
 
+pub(crate) fn serves_project(worker: &WorkerInfo, project: ProjectId) -> bool {
+    !worker.draining
+        && worker
+            .authorized_peers
+            .as_ref()
+            .is_none_or(|peers| peers.contains(&project))
+}
+
 fn exec_workers(workers: &[WorkerInfo], project: ProjectId) -> Vec<WorkerCaps> {
     workers
         .iter()
-        .filter(|w| !w.draining)
-        .filter(|w| {
-            w.authorized_peers
-                .as_ref()
-                .is_none_or(|peers| peers.contains(&project))
-        })
+        .filter(|w| serves_project(w, project))
         .map(caps_of)
         .collect()
 }

@@ -9,11 +9,12 @@ use std::sync::Arc;
 
 use gradient_db::exec_jobs::upcoming::{UpcomingExecJob, without_image};
 use gradient_pool::session_port::SessionSignal;
-use gradient_pool::{DeviceCount, WorkerCaps};
+use gradient_pool::{DeviceCount, WorkerInfo};
 use gradient_util::sync::Mutex;
 use tracing::warn;
 
 use crate::Scheduler;
+use crate::loops::{caps_of, serves_project};
 
 #[derive(Clone, Default)]
 pub(crate) struct PreWarmCounts {
@@ -37,15 +38,17 @@ impl PreWarmCounts {
 
 pub(crate) fn pre_warm_counts(
     upcoming: &[UpcomingExecJob],
-    workers: &[(String, WorkerCaps)],
+    workers: &[WorkerInfo],
 ) -> BTreeMap<String, u32> {
     workers
         .iter()
-        .filter_map(|(id, caps)| {
+        .filter_map(|worker| {
+            let caps = caps_of(worker);
             let inventory = caps.exec.as_ref()?;
             let count = upcoming
                 .iter()
                 .filter(|exec| exec.spec.image.is_none())
+                .filter(|exec| serves_project(worker, exec.project))
                 .filter(|exec| {
                     let requirement = exec
                         .spec
@@ -54,7 +57,7 @@ pub(crate) fn pre_warm_counts(
                 })
                 .map(|exec| exec.spec.nodes.max(1))
                 .sum();
-            Some((id.clone(), count))
+            Some((worker.id.clone(), count))
         })
         .collect()
 }
@@ -69,12 +72,7 @@ impl Scheduler {
                 return;
             }
         };
-        let workers: Vec<(String, WorkerCaps)> = self
-            .board_workers()
-            .await
-            .iter()
-            .map(|worker| (worker.id.clone(), crate::loops::caps_of(worker)))
-            .collect();
+        let workers = self.board_workers().await;
         let changed = self
             .pre_warm
             .changed(pre_warm_counts(&upcoming, &workers))
@@ -94,13 +92,22 @@ impl Scheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_jobs::{build_only_caps, eight_gpu_exec_caps_with_free, exec_caps_labelled};
+    use crate::test_jobs::{
+        build_only_caps, eight_gpu_exec_caps_with_free, exec_caps_labelled, worker_info,
+    };
+    use gradient_types::ProjectId;
     use gradient_types::exec::{DeviceRequest, ExecSpec};
+    use std::collections::HashSet;
 
     fn upcoming(spec: ExecSpec) -> UpcomingExecJob {
+        upcoming_of(ProjectId::nil(), spec)
+    }
+
+    fn upcoming_of(project: ProjectId, spec: ExecSpec) -> UpcomingExecJob {
         UpcomingExecJob {
             spec,
             architecture: "x86_64-linux".into(),
+            project,
         }
     }
 
@@ -112,10 +119,10 @@ mod tests {
             ..ExecSpec::default()
         })];
         let workers = [
-            ("w1".into(), exec_caps_labelled("lab-a")),
-            ("w2".into(), exec_caps_labelled("lab-a")),
-            ("w3".into(), exec_caps_labelled("lab-b")),
-            ("b1".into(), build_only_caps()),
+            worker_info("w1", exec_caps_labelled("lab-a")),
+            worker_info("w2", exec_caps_labelled("lab-a")),
+            worker_info("w3", exec_caps_labelled("lab-b")),
+            worker_info("b1", build_only_caps()),
         ];
         assert_eq!(
             pre_warm_counts(&upcoming, &workers),
@@ -136,10 +143,42 @@ mod tests {
             image: Some("/nix/store/aaaa-toplevel.drv".into()),
             ..ExecSpec::default()
         };
-        let workers = [("w1".into(), eight_gpu_exec_caps_with_free(0))];
+        let workers = [worker_info("w1", eight_gpu_exec_caps_with_free(0))];
         assert_eq!(
             pre_warm_counts(&[upcoming(gpus), upcoming(image)], &workers),
             BTreeMap::from([("w1".into(), 1)])
+        );
+    }
+
+    #[test]
+    fn a_worker_counts_only_jobs_of_projects_it_serves() {
+        let mine = ProjectId::now_v7();
+        let other = ProjectId::now_v7();
+        let upcoming = [
+            upcoming_of(mine, ExecSpec::default()),
+            upcoming_of(other, ExecSpec::default()),
+        ];
+        let restricted = worker_info("restricted", exec_caps_labelled("lab-a"));
+        let open = worker_info("open", exec_caps_labelled("lab-a"));
+        let draining = worker_info("draining", exec_caps_labelled("lab-a"));
+        let workers = [
+            WorkerInfo {
+                authorized_peers: Some(HashSet::from([mine])),
+                ..restricted
+            },
+            open,
+            WorkerInfo {
+                draining: true,
+                ..draining
+            },
+        ];
+        assert_eq!(
+            pre_warm_counts(&upcoming, &workers),
+            BTreeMap::from([
+                ("draining".into(), 0),
+                ("open".into(), 2),
+                ("restricted".into(), 1),
+            ])
         );
     }
 
