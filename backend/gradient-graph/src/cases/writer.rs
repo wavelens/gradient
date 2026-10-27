@@ -24,7 +24,7 @@ use super::{
 };
 use crate::messages::{NarCommit, Transition};
 use crate::test_ctx::{Batch, BatchReport};
-use crate::writer::GRAPH_TX_BUDGET;
+use crate::writer::{GRAPH_TX_ATTEMPTS, GRAPH_TX_BUDGET};
 
 const NOTE_TRANSACTIONS: &str = "
     CREATE TABLE written_in (source text, top_level text);
@@ -296,10 +296,13 @@ async fn m06_a_deadlock_or_serialization_error_retries_the_transaction_a_unique_
     case.zero_drift("step 1").await;
 
     let c = entry_point(C, C_OUT, "pkg.c");
-    let serialization = walk_with_error(&case, e1, c, "40001", 1..=3).await;
+    let serialization = walk_with_error(&case, e1, c, "40001", 1..=GRAPH_TX_ATTEMPTS).await;
 
     assert!(serialization.result.is_err(), "after 2: error");
-    assert_eq!(serialization.attempts, 3, "after 2: error after 3 attempts");
+    assert_eq!(
+        serialization.attempts, GRAPH_TX_ATTEMPTS,
+        "after 2: error once every attempt failed"
+    );
     let c = case.find_derivation(C).await;
     assert_eq!(c, None, "after 2: no derivation(C)");
     case.zero_drift("step 2").await;
@@ -325,7 +328,7 @@ async fn m07_a_transaction_aborted_by_a_swallowed_error_is_rolled_back_not_commi
         &case,
         "22P02",
         Injection::Swallowed,
-        1..=3,
+        1..=GRAPH_TX_ATTEMPTS,
         |scoped| async move {
             let started = Transition::BuildStarted {
                 shared_build,
@@ -343,7 +346,10 @@ async fn m07_a_transaction_aborted_by_a_swallowed_error_is_rolled_back_not_commi
         error.to_string().contains("aborted before commit"),
         "after 1: {error:#}"
     );
-    assert_eq!(swallowed.attempts, 3, "after 1: every attempt is aborted");
+    assert_eq!(
+        swallowed.attempts, GRAPH_TX_ATTEMPTS,
+        "after 1: every attempt is aborted"
+    );
     let status = case.sb(B).await.status;
     assert_eq!(status, BuildStatus::Queued, "after 1: sb(B).status");
     let attempts = case.attempts(B).await;

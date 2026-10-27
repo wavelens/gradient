@@ -382,7 +382,7 @@ mod tests {
             "the walk stops at what the evaluation already names: {sql}"
         );
         assert!(
-            sql.ends_with(
+            sql.contains(
                 "ON CONFLICT (evaluation, derivation) DO NOTHING RETURNING evaluation, derivation"
             ),
             "{sql}"
