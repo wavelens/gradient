@@ -9,6 +9,7 @@
   specs,
   subGroups ? { },
   enabledGroups ? [ ],
+  groupSwitches ? { },
   writtenByHand ? [ ],
   withoutEnvironment ? [ ],
   examples ? { },
@@ -71,9 +72,10 @@
     else toString value;
 
   isEnabled = cfg: spec:
-    !(lib.elem spec.group enabledGroups)
-    || spec.field == "enable"
-    || lib.getAttrFromPath [ (camel spec.group) "enable" ] cfg;
+    (!(lib.elem spec.group enabledGroups)
+      || spec.field == "enable"
+      || lib.getAttrFromPath [ (camel spec.group) "enable" ] cfg)
+    && (!(groupSwitches ? ${spec.group}) || lib.getAttrFromPath groupSwitches.${spec.group} cfg);
 
   isSet = value: value != null && !(emptyListIsUnset && value == [ ]);
 in {

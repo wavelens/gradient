@@ -4,12 +4,73 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ lib, pkgs, config, ... }: let
+{ lib, pkgs, config, options, ... }: let
   cfg = config.services.gradient.worker;
+  exec = cfg.exec;
+
+  execByHand = [
+    [ "exec" "image" ]
+    [ "exec" "devices" ]
+    [ "exec" "mounts" ]
+    [ "exec" "allow" "ports" ]
+    [ "exec" "cloudHypervisorBin" ]
+    [ "exec" "virtiofsdBin" ]
+  ];
+
+  subnetParts = lib.splitString "/" exec.subnet;
+  subnetOctets = lib.splitString "." (lib.head subnetParts);
+  bridgeAddress = lib.concatStringsSep "." (lib.take 3 subnetOctets ++ [ (toString (lib.toInt (lib.last subnetOctets) + 1)) ]);
+  execOptionsSet = lib.any (option: option.highestPrio < (lib.mkOptionDefault null).priority)
+    (lib.collect lib.isOption options.services.gradient.worker.exec);
+  hasDevice = source: lib.any (device: device.${source} != null && device.${source} != [ ]) exec.devices;
+
+  execConfig = lib.mkIf cfg.capabilities.exec {
+    security.polkit = {
+      enable = true;
+      extraConfig = ''
+        polkit.addRule(function(action, subject) {
+          if (action.id == "org.freedesktop.systemd1.manage-units" &&
+              subject.user == "gradient-worker" &&
+              (action.lookup("unit") || "").indexOf("gradient-guest-") == 0) {
+            return polkit.Result.YES;
+          }
+        });
+      '';
+    };
+
+    users.users.gradient-worker.extraGroups = [ "kvm" ];
+
+    services.udev.extraRules = lib.mkIf (hasDevice "vfio") ''
+      SUBSYSTEM=="vfio", GROUP="gradient-worker", MODE="0660"
+    '';
+
+    boot.kernelModules = lib.mkIf (hasDevice "usb") [ "usbip-host" ];
+
+    systemd.services.usbipd = lib.mkIf (hasDevice "usb") {
+      description = "USB/IP server for Gradient exec job devices";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network.target" ];
+      serviceConfig.ExecStart = "${lib.getExe' cfg.packages.usbip "usbipd"} -4";
+    };
+
+    networking = {
+      bridges.${exec.bridge}.interfaces = [ ];
+      interfaces.${exec.bridge}.ipv4.addresses = [{
+        address = bridgeAddress;
+        prefixLength = lib.toInt (lib.last subnetParts);
+      }];
+      nat = lib.mkIf exec.allow.network {
+        enable = true;
+        internalInterfaces = [ exec.bridge ];
+      };
+    };
+  };
+
   workerOptions = import ./options.nix {
     inherit lib;
     specs = builtins.fromJSON (builtins.readFile ../../backend/gradient-worker/options.json);
     subGroups = { eval = [ "cache" ]; log = [ "level" ]; exec = [ "allow" "defaults" ]; };
+    groupSwitches.exec = [ "capabilities" "exec" ];
     emptyListIsUnset = true;
 
     examples = {
@@ -20,9 +81,9 @@
       log.traceDir = "/var/lib/gradient-worker/trace";
     };
 
-    withoutEnvironment = [ [ "peers" ] [ "sshBin" ] [ "evalSubprocess" ] [ "evalDriver" ] [ "guestSupervisor" ] ];
+    withoutEnvironment = [ [ "peers" ] [ "sshBin" ] [ "evalSubprocess" ] [ "evalDriver" ] [ "guestSupervisor" ] ] ++ execByHand;
 
-    writtenByHand = [
+    writtenByHand = execByHand ++ [
       [ "peers" ]
       [ "sshBin" ]
       [ "evalSubprocess" ]
@@ -78,6 +139,132 @@ in {
         defaultText = lib.literalExpression "config.programs.ssh.package";
         description = ''
           OpenSSH package used as {env}`GIT_SSH_COMMAND` to fetch private flake inputs.
+        '';
+      };
+
+      cloudHypervisor = lib.mkPackageOption pkgs "cloud-hypervisor" { };
+      virtiofsd = lib.mkPackageOption pkgs "virtiofsd" { };
+
+      usbip = lib.mkOption {
+        type = lib.types.package;
+        default = config.boot.kernelPackages.usbip;
+        defaultText = lib.literalExpression "config.boot.kernelPackages.usbip";
+        description = ''
+          USB/IP package with {command}`usbipd` and {command}`usbip`, for
+          {option}`services.gradient.worker.exec.devices` entries with `usb`.
+        '';
+      };
+    };
+
+    exec = {
+      image = lib.mkOption {
+        type = lib.types.package;
+        default = (pkgs.nixos {
+          imports = [ ./guest.nix ];
+          gradient.guest.enable = true;
+        }).config.system.build.gradientGuest;
+        defaultText = lib.literalExpression "gradient.lib.mkWorkerImage { modules = [ ]; }";
+        example = lib.literalExpression "gradient.lib.mkWorkerImage { modules = [ ./worker-guest.nix ]; }";
+        description = ''
+          Guest image for exec jobs, built with `gradient.lib.mkWorkerImage`.
+        '';
+      };
+
+      devices = lib.mkOption {
+        type = lib.types.listOf (lib.types.submodule {
+          options = {
+            name = lib.mkOption {
+              type = lib.types.str;
+              example = "gpu:h100";
+              description = "Device class name that exec jobs ask for.";
+            };
+
+            vfio = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              example = [ "0000:17:00.0" "0000:18:00.0" ];
+              description = ''
+                PCI addresses of the devices in this class, a device per address. The worker
+                hot-plugs them into the guest over VFIO. Bind each device to {file}`vfio-pci` first.
+              '';
+            };
+
+            dev = lib.mkOption {
+              type = lib.types.nullOr lib.types.path;
+              default = null;
+              example = "/dev/ttyUSB0";
+              description = "Host device file for the guest, relayed over vsock.";
+            };
+
+            usb = lib.mkOption {
+              type = lib.types.nullOr (lib.types.strMatching "[0-9a-f]{4}:[0-9a-f]{4}");
+              default = null;
+              example = "1d6b:0002";
+              description = "USB device as `vendor:product`, attached to the guest over USB/IP.";
+            };
+          };
+        });
+        default = [ ];
+        example = lib.literalExpression ''
+          [
+            { name = "gpu:h100"; vfio = [ "0000:17:00.0" "0000:18:00.0" ]; }
+            { name = "kvm"; dev = "/dev/kvm"; }
+            { name = "camera"; usb = "1d6b:0002"; }
+          ]
+        '';
+        description = ''
+          Devices that exec jobs can ask for. Set exactly `vfio`, `dev` or `usb` per entry.
+          Devices held by a job stay out of reach for other jobs.
+        '';
+      };
+
+      mounts = lib.mkOption {
+        type = lib.types.listOf (lib.types.submodule {
+          options = {
+            name = lib.mkOption {
+              type = lib.types.str;
+              example = "datasets";
+              description = "Mount name that exec jobs ask for. Guests find the mount at {file}`/mnt/<name>`.";
+            };
+
+            path = lib.mkOption {
+              type = lib.types.path;
+              example = "/srv/datasets";
+              description = "Host directory for the guest, shared over virtiofs.";
+            };
+
+            readOnly = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Whether to share the directory read-only.";
+            };
+
+            perJob = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Whether to give each job a fresh directory below `path`, deleted after the job.
+              '';
+            };
+          };
+        });
+        default = [ ];
+        example = lib.literalExpression ''
+          [
+            { name = "datasets"; path = "/srv/datasets"; readOnly = true; }
+            { name = "scratch"; path = "/srv/scratch"; perJob = true; }
+          ]
+        '';
+        description = "Host directories that exec jobs can ask for.";
+      };
+
+      allow.ports = lib.mkOption {
+        type = lib.types.nullOr (lib.types.listOf lib.types.port);
+        default = null;
+        example = [ 1024 65535 ];
+        description = ''
+          First and last port of the range that exec jobs can ask for. `null` allows ports
+          1024 to 65535.
         '';
       };
     };
@@ -285,7 +472,7 @@ in {
     };
   };
 
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf cfg.enable (lib.mkMerge [ {
     assertions = [
       {
         assertion = cfg.serverUrl != null || cfg.discoverable;
@@ -302,6 +489,14 @@ in {
       {
         assertion = !(cfg.system.minFreeRamMb != 0 && cfg.eval.maxMemory != null);
         message = "services.gradient.worker.system.minFreeRamMb and services.gradient.worker.eval.maxMemory are alternatives, unset either";
+      }
+      {
+        assertion = execOptionsSet -> cfg.capabilities.exec;
+        message = "The services.gradient.worker.exec options depend on capabilities.exec. Enable capabilities.exec or unset services.gradient.worker.exec.";
+      }
+      {
+        assertion = exec.allow.ports == null || lib.length exec.allow.ports == 2;
+        message = "services.gradient.worker.exec.allow.ports: a list of the first and last port, not ${toString (lib.length exec.allow.ports)} ports";
       }
     ];
 
@@ -334,7 +529,7 @@ in {
           path = [
             cfg.packages.git
             cfg.packages.ssh
-          ];
+          ] ++ lib.optional cfg.capabilities.exec pkgs.iproute2;
 
           serviceConfig = {
             Type = "notify";
@@ -351,7 +546,8 @@ in {
             ProtectProc = "invisible";
             ProtectSystem = "strict";
             ReadWritePaths = lib.optionals (cfg.gcrootsDir != "") [ cfg.gcrootsDir ]
-              ++ lib.optional (cfg.log.traceDir != null) cfg.log.traceDir;
+              ++ lib.optional (cfg.log.traceDir != null) cfg.log.traceDir
+              ++ map (mount: mount.path) (lib.filter (mount: mount.perJob) exec.mounts);
             Restart = "on-failure";
             RestartSec = 10;
             KillMode = "mixed";
@@ -377,6 +573,14 @@ in {
             GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
           } // lib.optionalAttrs (cfg.acceptedServerTokensFile != null) {
             GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE = "%d/gradient_worker_accepted_server_tokens";
+          } // lib.optionalAttrs cfg.capabilities.exec {
+            GRADIENT_WORKER_EXEC_IMAGE = "${exec.image}";
+            GRADIENT_WORKER_EXEC_DEVICES = builtins.toJSON exec.devices;
+            GRADIENT_WORKER_EXEC_MOUNTS = builtins.toJSON exec.mounts;
+            GRADIENT_WORKER_EXEC_CLOUD_HYPERVISOR_BIN = lib.getExe' cfg.packages.cloudHypervisor "cloud-hypervisor";
+            GRADIENT_WORKER_EXEC_VIRTIOFSD_BIN = lib.getExe cfg.packages.virtiofsd;
+          } // lib.optionalAttrs (cfg.capabilities.exec && exec.allow.ports != null) {
+            GRADIENT_WORKER_EXEC_ALLOW_PORTS = lib.concatMapStringsSep "," toString exec.allow.ports;
           } // workerOptions.environment cfg // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
         };
       };
@@ -435,5 +639,5 @@ in {
         group = "gradient-worker";
       };
     };
-  };
+  } execConfig ]);
 }

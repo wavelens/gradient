@@ -370,25 +370,31 @@
 | `worker.exec.allow.mounts` | list of string | `[ ]` | - | Mount names from `worker.exec.mounts` exec jobs may request. An empty list allows none. |
 | `worker.exec.allow.network` | bool | `false` | - | Whether exec jobs may reach the network through `worker.exec.bridge`. |
 | `worker.exec.allow.nodes` | unsigned int | `1` | - | Most nodes an exec job may span. |
-| `worker.exec.allow.ports` | null or string | `null` | - | Lowest and highest guest port exec jobs may forward, as `low,high`. `null` allows ports 1024 to 65535. |
+| `worker.exec.allow.ports` | null or (list of port) | `null` | - | First and last port of the range that exec jobs can ask for. `null` allows ports 1024 to 65535. |
 | `worker.exec.allow.retries` | unsigned int | `0` | - | Most retries an exec job may request. |
 | `worker.exec.allow.ssh` | bool | `false` | - | Whether exec jobs may accept SSH sessions into their guest. |
 | `worker.exec.allow.timeout` | null or (unsigned int) | `null` | - | Most seconds an exec job may run. The server lowers a larger request to this value. `null` sets no cap. |
 | `worker.exec.bridge` | string | `"gradient-guests"` | `GRADIENT_WORKER_EXEC_BRIDGE` | Network bridge the guest tap devices join. |
-| `worker.exec.cloudHypervisorBin` | string | `"cloud-hypervisor"` | `GRADIENT_WORKER_EXEC_CLOUD_HYPERVISOR_BIN` | Path to the `cloud-hypervisor` binary, resolved via `PATH` by default. |
 | `worker.exec.defaults.maxSilent` | null or (unsigned int) | `null` | - | Seconds without output after which an exec job that leaves `maxSilent` unset times out. `null` sets no limit. |
 | `worker.exec.defaults.mounts` | list of string | `[ ]` | - | Mounts of an exec job that leaves `mounts` unset. |
 | `worker.exec.defaults.network` | bool | `false` | - | Whether an exec job that leaves `network` unset reaches the network. |
 | `worker.exec.defaults.ssh` | bool | `false` | - | Whether an exec job that leaves `ssh` unset accepts SSH sessions. |
-| `worker.exec.devices` | string | `"[]"` | `GRADIENT_WORKER_EXEC_DEVICES` | Host devices exec jobs can request, a JSON list in the environment variable. Each entry has a `name` and exactly one source: `vfio` lists PCI addresses bound to `vfio-pci`, one device each; `dev` names a device node; `usb` holds a `vendor:product` ID. |
-| `worker.exec.image` | null or path | `null` | `GRADIENT_WORKER_EXEC_IMAGE` | Guest image from `gradient.lib.mkWorkerImage` that exec job guests boot. |
+| `worker.exec.devices` | list of (submodule) | `[ ]` | `GRADIENT_WORKER_EXEC_DEVICES` | Devices that exec jobs can ask for. Set exactly `vfio`, `dev` or `usb` per entry. Devices held by a job stay out of reach for other jobs. |
+| `worker.exec.devices.*.dev` | null or path | `null` | - | Host device file for the guest, relayed over vsock. |
+| `worker.exec.devices.*.name` | string | - | - | Device class name that exec jobs ask for. |
+| `worker.exec.devices.*.usb` | null or string matching the pattern [0-9a-f]{4}:[0-9a-f]{4} | `null` | - | USB device as `vendor:product`, attached to the guest over USB/IP. |
+| `worker.exec.devices.*.vfio` | list of string | `[ ]` | - | PCI addresses of the devices in this class, a device per address. The worker hot-plugs them into the guest over VFIO. Bind each device to `vfio-pci` first. |
+| `worker.exec.image` | package | derived | `GRADIENT_WORKER_EXEC_IMAGE` | Guest image for exec jobs, built with `gradient.lib.mkWorkerImage`. |
 | `worker.exec.labels` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_LABELS` | Labels an exec job can ask for. The worker ID is always a label too. |
 | `worker.exec.maxPreWarm` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_MAX_PRE_WARM` | Most guests kept warm for upcoming exec jobs the server reports. The worker keeps the larger of `worker.exec.preWarm` and the reported count, capped at this value. `0` ignores the server count. |
-| `worker.exec.mounts` | string | `"[]"` | `GRADIENT_WORKER_EXEC_MOUNTS` | Host directories exec jobs can mount at `/mnt/<name>`, a JSON list in the environment variable. Each entry has a `name`, a `path`, `readOnly` and `perJob`; a `perJob` mount gives every job a fresh directory below `path`. |
+| `worker.exec.mounts` | list of (submodule) | `[ ]` | `GRADIENT_WORKER_EXEC_MOUNTS` | Host directories that exec jobs can ask for. |
+| `worker.exec.mounts.*.name` | string | - | - | Mount name that exec jobs ask for. Guests find the mount at `/mnt/<name>`. |
+| `worker.exec.mounts.*.path` | path | - | - | Host directory for the guest, shared over virtiofs. |
+| `worker.exec.mounts.*.perJob` | bool | `false` | - | Whether to give each job a fresh directory below `path`, deleted after the job. |
+| `worker.exec.mounts.*.readOnly` | bool | `false` | - | Whether to share the directory read-only. |
 | `worker.exec.preWarm` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_PRE_WARM` | Guests booted from `worker.exec.image` and paused, waiting for a job. |
 | `worker.exec.stopGuestsWithWorker` | bool | `true` | `GRADIENT_WORKER_EXEC_STOP_GUESTS_WITH_WORKER` | Whether stopping or restarting the worker stops every guest. The server queues the exec jobs of stopped guests again without using a retry. `false` keeps guests running across a worker restart and the restarted worker reattaches to them. |
 | `worker.exec.subnet` | string | `"10.233.0.0/16"` | `GRADIENT_WORKER_EXEC_SUBNET` | IPv4 subnet of `worker.exec.bridge`. The bridge takes the first host address, each guest the address of its vsock CID. |
-| `worker.exec.virtiofsdBin` | string | `"virtiofsd"` | `GRADIENT_WORKER_EXEC_VIRTIOFSD_BIN` | Path to the `virtiofsd` binary, resolved via `PATH` by default. |
 
 ## `worker.log`
 
@@ -421,9 +427,12 @@
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
+| `worker.packages.cloudHypervisor` | package | derived | - | The cloud-hypervisor package to use. |
 | `worker.packages.git` | package | derived | - | Git package available to the worker for cloning repositories. |
 | `worker.packages.gradient` | package | derived | - | The gradient package to use. |
 | `worker.packages.ssh` | package | derived | - | OpenSSH package used as `GIT_SSH_COMMAND` to fetch private flake inputs. |
+| `worker.packages.usbip` | package | derived | - | USB/IP package with `usbipd` and `usbip`, for `worker.exec.devices` entries with `usb`. |
+| `worker.packages.virtiofsd` | package | derived | - | The virtiofsd package to use. |
 
 ## `worker.reverseProxy`
 
