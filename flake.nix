@@ -142,6 +142,8 @@
       GRADIENT_SENTRY_ENABLE = "false";
     };
   }) // {
+    lib.mkWorkerImage = import ./nix/worker-image.nix { inherit self nixpkgs; };
+
     lib.tests = {
       topologies.direct = import ./nix/tests/harness/topologies/direct.nix;
       contract = import ./nix/tests/harness/contract.nix;
@@ -178,6 +180,7 @@
 
     nixosModules = rec {
       client = ./nix/modules/gradient-client;
+      guest = ./nix/modules/guest.nix;
       gradient = { config, lib, ... }: {
         imports = [ ./nix/modules/gradient.nix ];
         nixpkgs.overlays = lib.mkIf (config.services.gradient.enable || config.services.gradient.worker.enable) [

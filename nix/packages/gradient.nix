@@ -130,14 +130,15 @@ craneLib.buildPackage (commonArgs // rec {
   # The suite is its own check to keep full DWARF off the ~105 test targets.
   doCheck = false;
 
-  outputs = [ "out" "gate" "daemon" ];
+  outputs = [ "out" "gate" "daemon" "guest" ];
   cargoExtraArgs = "--locked --features sql-gate,api-spec,gradient-daemon/mock";
 
   postInstall = ''
-    mkdir -p $gate/bin $daemon/bin
+    mkdir -p $gate/bin $daemon/bin $guest/bin
     mv $out/bin/gradient-sql-gate $gate/bin/
     mv $out/bin/gradient-api-spec $gate/bin/
     mv $out/bin/gradient-daemon $daemon/bin/
+    mv $out/bin/gradient-guest-agent $guest/bin/
   '';
 
   passthru.clippy = craneLib.cargoClippy (commonArgs // {
