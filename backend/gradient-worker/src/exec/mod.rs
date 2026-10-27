@@ -6,6 +6,7 @@
 
 pub mod agent_client;
 pub mod checkout;
+pub mod context;
 pub mod inventory;
 pub mod state;
 pub mod watchdog;
