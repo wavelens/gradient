@@ -202,6 +202,23 @@ async fn an_accepted_exec_keeps_its_image_from_a_later_batch() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn a_repeated_batch_counts_no_new_exec_entry_point() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(shape().evaluation(e1)).await;
+    switch_exec_jobs_on(&case).await;
+
+    let first = case.walk(case.tasked(e1, vec![exec_root()]).await).await;
+    let again = case.walk(case.tasked(e1, vec![exec_root()]).await).await;
+
+    assert_eq!(
+        first.exec_entry_points, 1,
+        "after 1: one new exec entry point"
+    );
+    assert_eq!(again.exec_entry_points, 0, "after 2: nothing new");
+    case.finish().await;
+}
+
 async fn walked_exec(spec: ExecSpec) -> (Case, EvaluationId) {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(shape().evaluation(e1)).await;

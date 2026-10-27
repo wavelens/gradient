@@ -884,7 +884,7 @@ impl BatchWriter<'_> {
     ) -> Result<(Vec<DerivationId>, usize)> {
         let now = gradient_types::now();
         let refused = self.refused_exec_attrs(task_id, derivations).await?;
-        let mut exec_entry_points = 0;
+        let mut exec_ids: HashSet<EntryPointId> = HashSet::new();
 
         let mut active_entry_points: Vec<AEntryPoint> = Vec::new();
         let mut entry_point_drvs: Vec<DerivationId> = Vec::new();
@@ -895,11 +895,14 @@ impl BatchWriter<'_> {
             }
 
             if let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) {
+                let id = EntryPointId::now_v7();
                 entry_point_drvs.push(drv_id);
-                exec_entry_points += usize::from(d.exec.is_some());
+                if d.exec.is_some() {
+                    exec_ids.insert(id);
+                }
                 active_entry_points.push(
                     MEntryPoint {
-                        id: EntryPointId::now_v7(),
+                        id,
                         task: task_id,
                         evaluation: self.evaluation_id,
                         derivation: drv_id,
@@ -914,13 +917,17 @@ impl BatchWriter<'_> {
             }
         }
 
+        let mut exec_entry_points = 0;
         for chunk in active_entry_points.chunks(BATCH_SIZE) {
-            if let Err(e) = insert_entry_points(chunk.to_vec())
-                .exec(&self.ctx.worker_db)
+            match insert_entry_points(chunk.to_vec())
+                .exec_with_returning_keys(&self.ctx.worker_db)
                 .await
-                && !matches!(e, sea_orm::DbErr::RecordNotInserted)
             {
-                error!(error = %e, "failed to insert entry points");
+                Ok(inserted) => {
+                    exec_entry_points += inserted.iter().filter(|id| exec_ids.contains(id)).count();
+                }
+                Err(sea_orm::DbErr::RecordNotInserted) => {}
+                Err(e) => error!(error = %e, "failed to insert entry points"),
             }
         }
 
