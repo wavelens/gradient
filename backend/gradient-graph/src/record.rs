@@ -22,7 +22,7 @@ use gradient_types::*;
 use gradient_wire::types::{DiscoveredDerivation, License, attr_eval_source};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
-    QueryFilter, Value,
+    QueryFilter, QuerySelect, Value,
 };
 use tracing::{debug, error, warn};
 
@@ -933,26 +933,66 @@ impl BatchWriter<'_> {
         derivations: &[DiscoveredDerivation],
     ) -> Result<HashSet<String>> {
         let image_suffix = exec_image_attr("");
-        let is_image = |d: &DiscoveredDerivation| d.attr.ends_with(&image_suffix);
-        if !derivations.iter().any(|d| d.exec.is_some() || is_image(d)) {
+        let images: Vec<(&str, &str)> = derivations
+            .iter()
+            .filter_map(|d| {
+                let program = d.attr.strip_suffix(image_suffix.as_str())?;
+                Some((d.attr.as_str(), program))
+            })
+            .collect();
+        if images.is_empty() && derivations.iter().all(|d| d.exec.is_none()) {
             return Ok(HashSet::new());
         }
 
         let instance_enabled = self.ctx.config.exec.enable;
         let project_enabled = self.project_runs_exec_jobs(task_id).await?;
         let mut refused = HashSet::new();
+        let mut accepted = HashSet::new();
         for d in derivations {
-            if let Some(spec) = &d.exec {
-                if let Some(message) = exec_refusal(instance_enabled, project_enabled, spec.nodes) {
+            let Some(spec) = &d.exec else { continue };
+            match exec_refusal(instance_enabled, project_enabled, spec.nodes) {
+                Some(message) => {
                     self.refuse_exec(&d.attr, message).await;
-                    refused.extend([d.attr.clone(), exec_image_attr(&d.attr)]);
+                    refused.insert(d.attr.clone());
                 }
-            } else if is_image(d) && exec_refusal(instance_enabled, project_enabled, 1).is_some() {
-                refused.insert(d.attr.clone());
+                None => {
+                    accepted.insert(d.attr.as_str());
+                }
             }
         }
 
+        let programs_elsewhere: Vec<&str> = images
+            .iter()
+            .map(|(_, program)| *program)
+            .filter(|program| !accepted.contains(program))
+            .collect();
+        let stored = self.stored_exec_entry_points(&programs_elsewhere).await?;
+        refused.extend(
+            images
+                .iter()
+                .filter(|(_, program)| !accepted.contains(program) && !stored.contains(*program))
+                .map(|(image, _)| (*image).to_owned()),
+        );
+
         Ok(refused)
+    }
+
+    async fn stored_exec_entry_points(&self, attrs: &[&str]) -> Result<HashSet<String>> {
+        if attrs.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        let stored: Vec<String> = EEntryPoint::find()
+            .select_only()
+            .column(CEntryPoint::Eval)
+            .filter(CEntryPoint::Evaluation.eq(self.evaluation_id))
+            .filter(CEntryPoint::Eval.is_in(attrs.iter().copied()))
+            .filter(CEntryPoint::Exec.is_not_null())
+            .into_tuple()
+            .all(self.db())
+            .await
+            .context("fetch the exec entry points of images")?;
+        Ok(stored.into_iter().collect())
     }
 
     async fn project_runs_exec_jobs(&self, task_id: TaskId) -> Result<bool> {
