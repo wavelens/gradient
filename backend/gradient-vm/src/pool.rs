@@ -88,6 +88,12 @@ impl GuestPool {
         }
     }
 
+    pub fn adopt_warm(self: &Arc<Self>, guest: Guest) {
+        let pool = Arc::clone(self);
+        self.tasks
+            .spawn(async move { pool.keep_or_stop(guest).await });
+    }
+
     pub fn set_upcoming_exec_jobs(self: &Arc<Self>, count: u32) {
         let before = self.target();
         self.upcoming_exec_jobs.store(count, Ordering::SeqCst);
@@ -140,6 +146,10 @@ impl GuestPool {
     pub async fn stop_all_units(&self) {
         self.stop_boots().await;
         lock(&self.slots).warm.clear();
+        self.stop_every_unit().await;
+    }
+
+    pub async fn stop_every_unit(&self) {
         let still_running = match self.units.list().await {
             Ok(units) => self.stop_units(units).await,
             Err(e) => {
