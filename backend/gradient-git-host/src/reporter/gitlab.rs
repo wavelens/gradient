@@ -99,7 +99,7 @@ impl From<MrResponse> for PullRequestSnapshot {
             head_sha: mr.sha,
             head_branch: mr.source_branch,
             head_clone_url: None,
-            is_fork,
+            is_fork: Some(is_fork),
             title: mr.title,
         }
     }

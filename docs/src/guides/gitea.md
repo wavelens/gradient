@@ -181,6 +181,11 @@ A task links the two integrations. Triggers point to the inbound integration, ac
 
 The **Pull Request (reporter)** trigger include a setting called **Require maintainer approval for PRs from non-writers** (`require_approval` in `config`). This setting controls the approval check.
 
+Pull requests from the [AGit flow](https://docs.gitea.com/usage/issues-prs/agit/) (`git push origin HEAD:refs/for/main`) get evaluated too.
+
+- Read access is enough for such a push. These pull requests wait for approval the same way fork pull requests do, unless a repository writer pushed them.
+- Branch filters match the AGit topic on Forgejo and `refs/pull/<number>/head` on Gitea.
+
 Only repository writers can send `/gradient` commands. Accepted commands receive a 👀 reaction, rejected ones a 😕.
 
 ## Troubleshooting

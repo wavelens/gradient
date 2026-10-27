@@ -10,6 +10,7 @@ use super::{
 };
 use crate::client::HostClient;
 use crate::pr::{BranchCommit, PrRef};
+use crate::webhook::GiteaPullRequest;
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -69,53 +70,13 @@ struct PermissionResponse {
     permission: String,
 }
 
-#[derive(Deserialize)]
-struct PrResponse {
-    head: GiteaPrRef,
-    #[serde(default)]
-    base: Option<GiteaPrRef>,
-    #[serde(default)]
-    title: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct GiteaPrRef {
-    sha: String,
-    #[serde(rename = "ref")]
-    ref_: Option<String>,
-    #[serde(default)]
-    repo: Option<GiteaPrRepo>,
-}
-
-#[derive(Deserialize)]
-struct GiteaPrRepo {
-    #[serde(default)]
-    full_name: Option<String>,
-    #[serde(default)]
-    clone_url: Option<String>,
-}
-
-impl From<PrResponse> for PullRequestSnapshot {
-    fn from(pr: PrResponse) -> Self {
-        let head_branch = pr.head.ref_.clone().unwrap_or_default();
-        let head_full = pr.head.repo.as_ref().and_then(|r| r.full_name.clone());
-        let base_full = pr
-            .base
-            .as_ref()
-            .and_then(|b| b.repo.as_ref())
-            .and_then(|r| r.full_name.clone());
-        let is_fork =
-            matches!((head_full.as_deref(), base_full.as_deref()), (Some(h), Some(b)) if h != b);
-        let head_clone_url = if is_fork {
-            pr.head.repo.as_ref().and_then(|r| r.clone_url.clone())
-        } else {
-            None
-        };
+impl From<GiteaPullRequest> for PullRequestSnapshot {
+    fn from(pr: GiteaPullRequest) -> Self {
         Self {
+            head_branch: pr.head_branch().unwrap_or_default(),
+            head_clone_url: pr.fork_repo(None).and_then(|r| r.clone_url.clone()),
+            is_fork: pr.is_fork(None),
             head_sha: pr.head.sha,
-            head_branch,
-            head_clone_url,
-            is_fork,
             title: pr.title,
         }
     }
@@ -197,7 +158,7 @@ impl CiReporter for GiteaReporter {
         repo: &str,
         pr_number: u64,
     ) -> Result<Option<PullRequestSnapshot>> {
-        let pr: Option<PrResponse> = self
+        let pr: Option<GiteaPullRequest> = self
             .client
             .get_json_optional(&format!("/repos/{owner}/{repo}/pulls/{pr_number}"))
             .await?;
@@ -271,6 +232,23 @@ mod tests {
         }
         let err = GiteaReporter::new(test_client(), "http://169.254.169.254/", "tok").unwrap_err();
         assert!(format!("{err}").contains("Rejected Gitea base_url"));
+    }
+
+    #[test]
+    fn agit_pull_request_snapshot_is_untrusted_and_fetched_from_the_base_repo() {
+        let repo =
+            r#"{ "full_name": "org/repo", "clone_url": "https://gitea.example.com/org/repo.git" }"#;
+        let body = format!(
+            r#"{{
+                "head": {{ "sha": "abc", "ref": "refs/pull/7/head", "label": "", "repo": {repo} }},
+                "base": {{ "sha": "def", "ref": "main", "label": "main", "repo": {repo} }}
+            }}"#
+        );
+        let pr: GiteaPullRequest = serde_json::from_str(&body).unwrap();
+        let snapshot = PullRequestSnapshot::from(pr);
+        assert_eq!(snapshot.is_fork, None);
+        assert_eq!(snapshot.head_clone_url, None);
+        assert_eq!(snapshot.head_branch, "refs/pull/7/head");
     }
 
     #[test]
