@@ -157,7 +157,7 @@ def save_slow_spans(label):
     timeline = "\n".join(
         f"+{(span['ts_us'] - first) // 1000:>7} ms {span['dur_us'] // 1000:>6} ms {span['name']} {json.dumps(span['fields'])}"
         for span in sorted(spans, key=lambda span: span["ts_us"])
-        if span["dur_us"] >= 1_000_000
+        if span["dur_us"] >= 1_000_000 and span["target"].startswith(("gradient_graph", "gradient_db"))
     )
     print(f"spans by total time since the previous run, {label}:\n{heaviest}\n\nspans over a second:\n{timeline}")
 
