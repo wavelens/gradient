@@ -13471,6 +13471,20 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SeriesPoint'
+    BoardExec:
+      type: object
+      required:
+      - labels
+      - devices
+      properties:
+        labels:
+          type: array
+          items:
+            type: string
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceClass'
     BoardFleetPoint:
       type: object
       required:
@@ -13752,7 +13766,7 @@ components:
           format: int64
         exec:
           oneOf:
-          - $ref: '#/components/schemas/ExecInventory'
+          - $ref: '#/components/schemas/BoardExec'
           - type: 'null'
     BuildGraph:
       type: object

@@ -168,6 +168,11 @@ export interface BoardCacheStats {
   storage: SeriesPoint[];
 }
 
+export interface BoardExec {
+  labels: string[];
+  devices: DeviceClass[];
+}
+
 export interface BoardFleetPoint {
   bucket_start: string;
   connected: number;
@@ -249,7 +254,7 @@ export interface BoardWorker {
   cpu_usage_pct?: number | null;
   ram_free_mb?: number | null;
   ram_total_mb?: number | null;
-  exec?: ExecInventory | null;
+  exec?: BoardExec | null;
 }
 
 export interface BuildGraph {
