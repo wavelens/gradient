@@ -50,7 +50,6 @@ import { AccessState } from '@core/models';
   ],
   templateUrl: './profile.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './profile.component.scss',
 })
 export class ProfileComponent implements OnInit {
   private userService = inject(UserService);

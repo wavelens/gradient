@@ -49,8 +49,8 @@
     @if (saved()) {
       <gr-message-banner type="success">Changes saved.</gr-message-banner>
     }
-    <div>
-      <button *appWritable="access()" grButton label="Save" icon="save" [loading]="saving()" (click)="save()"
+    <div class="form-actions">
+      <button *appWritable="access()" grButton label="Save Changes" icon="check" [loading]="saving()" (click)="save()"
         [appManagedDisable]="access()"></button>
     </div>
 
@@ -66,7 +66,7 @@
     }
 
     @if (access().canEdit) {
-      <gr-settings-section title="Danger Zone" [danger]="true" [card]="false" maxWidth="none">
+      <gr-settings-section title="Danger Zone" danger>
         <gr-row>
           Delete Team
           <span slot="meta">Removes the team, its grants, requests, invitations and workers.</span>
