@@ -95,6 +95,7 @@ in {
     };
 
     networking.useDHCP = false;
+    networking.usePredictableInterfaceNames = false;
     networking.firewall.enable = lib.mkDefault false;
     documentation.enable = false;
     system.stateVersion = lib.mkDefault lib.trivial.release;
