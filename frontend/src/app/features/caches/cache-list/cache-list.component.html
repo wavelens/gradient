@@ -130,10 +130,10 @@
       required
       inputId="cache-name"
       placeholder="cache-name"
-      [state]="nameCheckState()"
+      [state]="names.state()"
       [ngModel]="newCache.name"
       (ngModelChange)="onCacheNameChange($event)"
-      (input)="onCacheNameUserInput()"
+      (input)="names.markEdited()"
       name="cacheName"
     />
 
@@ -170,7 +170,7 @@
       grButton
       label="Create"
       (click)="createCache()"
-      [disabled]="!newCache.name || !newCache.display_name || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking' || creating()"
+      [disabled]="!newCache.name || !newCache.display_name || names.blocksSubmit() || creating()"
       [loading]="creating()"
     ></button>
   </div>

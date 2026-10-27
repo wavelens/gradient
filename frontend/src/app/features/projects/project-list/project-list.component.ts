@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnDestroy, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Subject, EMPTY } from 'rxjs';
-import { debounceTime, switchMap } from 'rxjs/operators';
 import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
@@ -28,7 +26,7 @@ import {
   PageLayoutComponent,
   SelectComponent,
 } from '@gradient/ui/ui';
-import { slugify } from '@shared/text';
+import { nameAvailability } from '@shared/forms';
 import { Project, ProjectSummary } from '@core/models';
 
 @Component({
@@ -57,7 +55,7 @@ import { Project, ProjectSummary } from '@core/models';
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './project-list.component.scss',
 })
-export class ProjectListComponent implements OnInit, OnDestroy {
+export class ProjectListComponent implements OnInit {
   readonly visibilityOptions = [
     { label: 'Private', value: false },
     { label: 'Public', value: true },
@@ -66,7 +64,7 @@ export class ProjectListComponent implements OnInit, OnDestroy {
   private projectsService = inject(ProjectsService);
   protected authService = inject(AuthService);
   private config = inject(ConfigService);
-  private nameCheck$ = new Subject<string>();
+  protected names = nameAvailability((name) => this.projectsService.checkProjectNameAvailable(name));
 
   get canCreateProject(): boolean {
     if (!this.authService.isAuthenticated()) return false;
@@ -80,7 +78,6 @@ export class ProjectListComponent implements OnInit, OnDestroy {
   showCreateDialog = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
-  nameCheckState = signal<'idle' | 'invalid' | 'checking' | 'available' | 'taken'>('idle');
 
   newProject = {
     name: '',
@@ -88,8 +85,6 @@ export class ProjectListComponent implements OnInit, OnDestroy {
     description: '',
     public: false,
   };
-
-  protected projectNameEditedByUser = false;
 
   publicProjects = signal<Project[]>([]);
   publicTotal = signal(0);
@@ -103,16 +98,6 @@ export class ProjectListComponent implements OnInit, OnDestroy {
       this.loading.set(false);
     }
     this.loadPublicProjects();
-    this.nameCheck$.pipe(
-      debounceTime(400),
-      switchMap((name) => name ? this.projectsService.checkProjectNameAvailable(name) : EMPTY),
-    ).subscribe((available) => {
-      this.nameCheckState.set(available ? 'available' : 'taken');
-    });
-  }
-
-  ngOnDestroy(): void {
-    this.nameCheck$.complete();
   }
 
   loadProjects(page = this.projectsPage()): void {
@@ -146,33 +131,19 @@ export class ProjectListComponent implements OnInit, OnDestroy {
 
   openCreateDialog(): void {
     this.newProject = { name: '', display_name: '', description: '', public: false };
-    this.projectNameEditedByUser = false;
-    this.nameCheckState.set('idle');
+    this.names.reset();
     this.createError.set(null);
     this.showCreateDialog.set(true);
   }
 
   onProjectDisplayNameChange(value: string): void {
-    if (!this.projectNameEditedByUser) {
-      const slug = slugify(value);
-      this.newProject.name = slug;
-      this.onProjectNameChange(slug);
-    }
-  }
-
-  onProjectNameUserInput(): void {
-    this.projectNameEditedByUser = true;
+    const name = this.names.suggest(value);
+    if (name !== null) this.newProject.name = name;
   }
 
   onProjectNameChange(name: string): void {
-    if (!name) { this.nameCheckState.set('idle'); this.nameCheck$.next(''); return; }
-    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
-      this.nameCheckState.set('invalid');
-      this.nameCheck$.next(''); // cancel any pending debounce without making an API call
-      return;
-    }
-    this.nameCheckState.set('checking');
-    this.nameCheck$.next(name);
+    this.newProject.name = name;
+    this.names.check(name);
   }
 
   get filteredPublicProjects(): Project[] {

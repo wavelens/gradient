@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnDestroy, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Subject, forkJoin, EMPTY } from 'rxjs';
-import { debounceTime, switchMap } from 'rxjs/operators';
+import { forkJoin } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -30,7 +29,8 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { EvalStatusBadgeComponent, LabelHelpComponent, StarButtonComponent } from '@shared/ui';
-import { repositoryUrlError, slugify } from '@shared/text';
+import { repositoryUrlError } from '@shared/text';
+import { nameAvailability } from '@shared/forms';
 import { StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 
 const RESERVED_TASK_NAMES = ['build-request'];
@@ -63,14 +63,17 @@ const RESERVED_TASK_NAMES = ['build-request'];
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './project-detail.component.scss',
 })
-export class ProjectDetailComponent implements OnInit, OnDestroy {
+export class ProjectDetailComponent implements OnInit {
   private route = inject(ActivatedRoute);
   protected authService = inject(AuthService);
   private projectsService = inject(ProjectsService);
   private tasksService = inject(TasksService);
   private stars = inject(StarsService);
   private crumbs = inject(BreadcrumbsService);
-  private nameCheck$ = new Subject<string>();
+  protected names = nameAvailability(
+    (name) => this.tasksService.checkTaskNameAvailable(this.projectName, name),
+    RESERVED_TASK_NAMES,
+  );
 
   loading = signal(true);
   project = signal<ProjectResponse | null>(null);
@@ -81,7 +84,6 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   creating = signal(false);
   createError = signal<string | null>(null);
   starred = signal(false);
-  nameCheckState = signal<'idle' | 'invalid' | 'reserved' | 'checking' | 'available' | 'taken'>('idle');
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.project(this.projectName));
@@ -95,23 +97,11 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     wildcard: 'packages.x86_64-linux.**',
   };
 
-  protected taskNameEditedByUser = false;
-
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.starTarget = { kind: 'project', project: this.projectName };
     this.stars.starred(this.starTarget).subscribe((starred) => this.starred.set(starred));
     this.loadProjectData();
-    this.nameCheck$.pipe(
-      debounceTime(400),
-      switchMap((name) => name ? this.tasksService.checkTaskNameAvailable(this.projectName, name) : EMPTY),
-    ).subscribe((available) => {
-      this.nameCheckState.set(available ? 'available' : 'taken');
-    });
-  }
-
-  ngOnDestroy(): void {
-    this.nameCheck$.complete();
   }
 
   loadProjectData(): void {
@@ -138,38 +128,19 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
 
   openCreateDialog(): void {
     this.newTask = { name: '', display_name: '', description: '', repository: '', wildcard: 'packages.x86_64-linux.**' };
-    this.taskNameEditedByUser = false;
-    this.nameCheckState.set('idle');
+    this.names.reset();
     this.createError.set(null);
     this.showCreateDialog.set(true);
   }
 
   onTaskDisplayNameChange(value: string): void {
-    if (!this.taskNameEditedByUser) {
-      const slug = slugify(value);
-      this.newTask.name = slug;
-      this.onTaskNameChange(slug);
-    }
-  }
-
-  onTaskNameUserInput(): void {
-    this.taskNameEditedByUser = true;
+    const name = this.names.suggest(value);
+    if (name !== null) this.newTask.name = name;
   }
 
   onTaskNameChange(name: string): void {
-    if (!name) { this.nameCheckState.set('idle'); this.nameCheck$.next(''); return; }
-    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
-      this.nameCheckState.set('invalid');
-      this.nameCheck$.next(''); // cancel any pending debounce without making an API call
-      return;
-    }
-    if (RESERVED_TASK_NAMES.includes(name.toLowerCase())) {
-      this.nameCheckState.set('reserved');
-      this.nameCheck$.next('');
-      return;
-    }
-    this.nameCheckState.set('checking');
-    this.nameCheck$.next(name);
+    this.newTask.name = name;
+    this.names.check(name);
   }
 
   get wildcardInvalid(): boolean {
@@ -184,14 +155,10 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   createTask(): void {
-    if (!this.newTask.name || !this.newTask.display_name || !this.newTask.repository) {
+    if (!this.newTask.name || !this.newTask.display_name || !this.newTask.repository || this.names.blocksSubmit()) {
       return;
     }
     if (this.repositoryError || this.wildcardInvalid) return;
-    if (RESERVED_TASK_NAMES.includes(this.newTask.name.trim().toLowerCase())) {
-      this.nameCheckState.set('reserved');
-      return;
-    }
 
     this.creating.set(true);
     this.createError.set(null);

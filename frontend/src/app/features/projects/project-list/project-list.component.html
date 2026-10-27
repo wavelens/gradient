@@ -96,10 +96,10 @@
       required
       inputId="name"
       placeholder="project-name"
-      [state]="nameCheckState()"
+      [state]="names.state()"
       [ngModel]="newProject.name"
       (ngModelChange)="onProjectNameChange($event)"
-      (input)="onProjectNameUserInput()"
+      (input)="names.markEdited()"
       (keyup.enter)="createProject()"
       name="projectName"
     />
@@ -137,7 +137,7 @@
       grButton
       label="Create"
       (click)="createProject()"
-      [disabled]="!newProject.name || !newProject.display_name || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking' || creating()"
+      [disabled]="!newProject.name || !newProject.display_name || names.blocksSubmit() || creating()"
       [loading]="creating()"
     ></button>
   </div>

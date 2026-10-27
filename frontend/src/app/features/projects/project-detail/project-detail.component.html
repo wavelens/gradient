@@ -81,10 +81,10 @@ width="550px"
     required
     inputId="proj-name"
     placeholder="task-name"
-    [state]="nameCheckState()"
+    [state]="names.state()"
     [ngModel]="newTask.name"
     (ngModelChange)="onTaskNameChange($event)"
-    (input)="onTaskNameUserInput()"
+    (input)="names.markEdited()"
     (keyup.enter)="createTask()"
     name="taskName"
   />
@@ -146,7 +146,7 @@ width="550px"
     grButton
     label="Create"
     (grSubmit)="createTask()"
-    [disabled]="!newTask.name || !newTask.display_name || !newTask.repository || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'reserved' || nameCheckState() === 'checking' || creating()"
+    [disabled]="!newTask.name || !newTask.display_name || !newTask.repository || wildcardInvalid || names.blocksSubmit() || creating()"
     [loading]="creating()"
   ></button>
 </div>

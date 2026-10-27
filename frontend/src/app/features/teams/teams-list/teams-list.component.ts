@@ -20,10 +20,12 @@ import {
   InputDirective,
   LoadingSpinnerComponent,
   MessageBannerComponent,
+  NameFieldComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
 } from '@gradient/ui/ui';
+import { nameAvailability } from '@shared/forms';
 
 @Component({
   selector: 'app-teams-list',
@@ -39,6 +41,7 @@ import {
     InputDirective,
     LoadingSpinnerComponent,
     MessageBannerComponent,
+    NameFieldComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
@@ -63,6 +66,28 @@ export class TeamsListComponent implements OnInit {
   creating = signal(false);
   error = signal<string | null>(null);
   form = { name: '', displayName: '' };
+  protected names = nameAvailability((name) => this.teams.checkTeamNameAvailable(name));
+
+  openCreate(): void {
+    this.form = { name: '', displayName: '' };
+    this.names.reset();
+    this.error.set(null);
+    this.showCreate.set(true);
+  }
+
+  onDisplayNameChange(value: string): void {
+    const name = this.names.suggest(value);
+    if (name !== null) this.form.name = name;
+  }
+
+  onNameChange(name: string): void {
+    this.form.name = name;
+    this.names.check(name);
+  }
+
+  canSubmit(): boolean {
+    return !!this.form.displayName && !!this.form.name && !this.names.blocksSubmit();
+  }
 
   ngOnInit(): void {
     this.teams.list().subscribe({
@@ -75,7 +100,7 @@ export class TeamsListComponent implements OnInit {
   }
 
   create(): void {
-    if (!this.form.name || !this.form.displayName) return;
+    if (!this.canSubmit()) return;
     this.creating.set(true);
     this.error.set(null);
     this.teams.create(this.form.name, this.form.displayName).subscribe({

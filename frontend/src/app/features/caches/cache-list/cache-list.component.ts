@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnDestroy, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Subject, EMPTY } from 'rxjs';
-import { debounceTime, switchMap } from 'rxjs/operators';
 import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
@@ -28,7 +26,7 @@ import {
   PageLayoutComponent,
   SelectComponent,
 } from '@gradient/ui/ui';
-import { slugify } from '@shared/text';
+import { nameAvailability } from '@shared/forms';
 import { Cache } from '@core/models';
 
 @Component({
@@ -57,7 +55,7 @@ import { Cache } from '@core/models';
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cache-list.component.scss',
 })
-export class CacheListComponent implements OnInit, OnDestroy {
+export class CacheListComponent implements OnInit {
   readonly visibilityOptions = [
     { label: 'Private', value: false },
     { label: 'Public', value: true },
@@ -66,7 +64,7 @@ export class CacheListComponent implements OnInit, OnDestroy {
   private cachesService = inject(CachesService);
   protected authService = inject(AuthService);
   private config = inject(ConfigService);
-  private nameCheck$ = new Subject<string>();
+  protected names = nameAvailability((name) => this.cachesService.checkCacheNameAvailable(name));
 
   get canCreateCache(): boolean {
     if (!this.authService.isAuthenticated()) return false;
@@ -78,7 +76,6 @@ export class CacheListComponent implements OnInit, OnDestroy {
   showCreateDialog = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
-  nameCheckState = signal<'idle' | 'invalid' | 'checking' | 'available' | 'taken'>('idle');
 
   newCache: {
     name: string;
@@ -96,8 +93,6 @@ export class CacheListComponent implements OnInit, OnDestroy {
     public: false,
   };
 
-  protected cacheNameEditedByUser = false;
-
   publicCaches = signal<Cache[]>([]);
   publicLoading = signal(false);
 
@@ -108,16 +103,6 @@ export class CacheListComponent implements OnInit, OnDestroy {
       this.loading.set(false);
     }
     this.loadPublicCaches();
-    this.nameCheck$.pipe(
-      debounceTime(400),
-      switchMap((name) => name ? this.cachesService.checkCacheNameAvailable(name) : EMPTY),
-    ).subscribe((available) => {
-      this.nameCheckState.set(available ? 'available' : 'taken');
-    });
-  }
-
-  ngOnDestroy(): void {
-    this.nameCheck$.complete();
   }
 
   loadCaches(): void {
@@ -147,33 +132,19 @@ export class CacheListComponent implements OnInit, OnDestroy {
 
   openCreateDialog(): void {
     this.newCache = { name: '', display_name: '', description: '', priority: 50, local_priority: null, public: false };
-    this.cacheNameEditedByUser = false;
-    this.nameCheckState.set('idle');
+    this.names.reset();
     this.createError.set(null);
     this.showCreateDialog.set(true);
   }
 
   onCacheDisplayNameChange(value: string): void {
-    if (!this.cacheNameEditedByUser) {
-      const slug = slugify(value);
-      this.newCache.name = slug;
-      this.onCacheNameChange(slug);
-    }
-  }
-
-  onCacheNameUserInput(): void {
-    this.cacheNameEditedByUser = true;
+    const name = this.names.suggest(value);
+    if (name !== null) this.newCache.name = name;
   }
 
   onCacheNameChange(name: string): void {
-    if (!name) { this.nameCheckState.set('idle'); this.nameCheck$.next(''); return; }
-    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
-      this.nameCheckState.set('invalid');
-      this.nameCheck$.next(''); // cancel any pending debounce without making an API call
-      return;
-    }
-    this.nameCheckState.set('checking');
-    this.nameCheck$.next(name);
+    this.newCache.name = name;
+    this.names.check(name);
   }
 
   createCache(): void {
