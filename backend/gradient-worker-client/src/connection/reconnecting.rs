@@ -22,7 +22,6 @@ pub struct ReconnectingWriter {
 #[derive(Default)]
 struct Inner {
     state: Mutex<State>,
-    send_order: tokio::sync::Mutex<()>,
     session: watch::Sender<Session>,
 }
 
@@ -78,43 +77,55 @@ impl ReconnectingWriter {
                     session: session.number,
                     sent_reports: Vec::new(),
                 }),
-                send_order: tokio::sync::Mutex::new(()),
                 session: watch::Sender::new(session),
             }),
         }
     }
 
+    /// Queued messages go out first: the writer stays detached until the queue is empty, so a
+    /// concurrent send queues behind them instead of overtaking.
     pub async fn attach(&self, writer: ProtoWriter) -> Result<()> {
-        let _order = self.inner.send_order.lock().await;
-        let mut queue = match &mut *self.inner.state.lock() {
-            State::Detached { queue } => std::mem::take(queue),
-            State::Attached { .. } => VecDeque::new(),
-        };
         let mut sent_reports = Vec::new();
-        while let Some(msg) = queue.pop_front() {
+        while let Some(msg) = self.next_queued_or_attach(&writer, &mut sent_reports) {
             if let Err(e) = writer.send(msg.clone()).await {
-                let mut requeued = VecDeque::from(sent_reports);
-                requeued.push_back(msg);
-                requeued.extend(queue);
-                *self.inner.state.lock() = State::Detached { queue: requeued };
+                self.requeue_front(sent_reports.into_iter().chain([msg]));
                 return Err(e);
             }
             if final_report_job(&msg).is_some() {
                 sent_reports.push(msg);
             }
         }
+        Ok(())
+    }
+
+    fn next_queued_or_attach(
+        &self,
+        writer: &ProtoWriter,
+        sent_reports: &mut Vec<ClientMessage>,
+    ) -> Option<ClientMessage> {
+        let mut state = self.inner.state.lock();
+        if let State::Detached { queue } = &mut *state
+            && let Some(msg) = queue.pop_front()
+        {
+            return Some(msg);
+        }
         let number = self.inner.session.borrow().number + 1;
-        let version = writer.version();
-        *self.inner.state.lock() = State::Attached {
-            writer,
+        *state = State::Attached {
+            writer: writer.clone(),
             session: number,
-            sent_reports,
+            sent_reports: std::mem::take(sent_reports),
         };
         self.inner.session.send_replace(Session {
             number,
-            version: Some(version),
+            version: Some(writer.version()),
         });
-        Ok(())
+        None
+    }
+
+    fn requeue_front(&self, sent: impl DoubleEndedIterator<Item = ClientMessage>) {
+        if let State::Detached { queue } = &mut *self.inner.state.lock() {
+            sent.rev().for_each(|msg| queue.push_front(msg));
+        }
     }
 
     pub fn detach(&self) {
@@ -136,22 +147,17 @@ impl ReconnectingWriter {
     }
 
     pub async fn send(&self, msg: ClientMessage) -> Result<()> {
-        let _order = self.inner.send_order.lock().await;
-        let Some((writer, session)) = self.current() else {
-            self.enqueue(msg);
-            return Ok(());
-        };
-        if writer.send(msg.clone()).await.is_err() {
-            self.lose(session);
-            self.enqueue(msg);
-        } else if final_report_job(&msg).is_some() {
-            self.keep_sent_report(msg);
+        while let Some((writer, session)) = self.current_or_enqueue(&msg) {
+            if writer.send(msg.clone()).await.is_err() {
+                self.lose(session);
+            } else if final_report_job(&msg).is_none() || self.keep_sent_report(&msg, session) {
+                return Ok(());
+            }
         }
         Ok(())
     }
 
     pub async fn send_now(&self, msg: ClientMessage) -> Result<()> {
-        let _order = self.inner.send_order.lock().await;
         let (writer, session) = self.current().ok_or(SessionLost)?;
         if writer.send(msg).await.is_err() {
             self.lose(session);
@@ -229,25 +235,35 @@ impl ReconnectingWriter {
         }
     }
 
-    fn keep_sent_report(&self, msg: ClientMessage) {
+    fn keep_sent_report(&self, msg: &ClientMessage, sent_on: u64) -> bool {
         match &mut *self.inner.state.lock() {
-            State::Attached { sent_reports, .. } => sent_reports.push(msg),
-            State::Detached { queue } => queue.push_back(msg),
+            State::Attached {
+                session,
+                sent_reports,
+                ..
+            } if *session == sent_on => sent_reports.push(msg.clone()),
+            State::Attached { .. } => return false,
+            State::Detached { queue } => queue.push_back(msg.clone()),
         }
+        true
     }
 
     fn mark_detached(&self) {
         self.inner.session.send_modify(|s| s.version = None);
     }
 
-    fn enqueue(&self, msg: ClientMessage) {
-        let mut state = self.inner.state.lock();
-        let State::Detached { queue } = &mut *state else {
-            unreachable!("only a detached writer queues");
-        };
-        match queue.iter_mut().find(|queued| supersedes(queued, &msg)) {
-            Some(queued) => *queued = msg,
-            None => queue.push_back(msg),
+    fn current_or_enqueue(&self, msg: &ClientMessage) -> Option<(ProtoWriter, u64)> {
+        match &mut *self.inner.state.lock() {
+            State::Attached {
+                writer, session, ..
+            } => Some((writer.clone(), *session)),
+            State::Detached { queue } => {
+                match queue.iter_mut().find(|queued| supersedes(queued, msg)) {
+                    Some(queued) => *queued = msg.clone(),
+                    None => queue.push_back(msg.clone()),
+                }
+                None
+            }
         }
     }
 }
