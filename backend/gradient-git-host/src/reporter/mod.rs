@@ -102,7 +102,7 @@ pub struct PullRequestSnapshot {
     pub head_sha: String,
     pub head_branch: String,
     pub head_clone_url: Option<String>,
-    pub is_fork: bool,
+    pub is_fork: Option<bool>,
     pub title: Option<String>,
 }
 

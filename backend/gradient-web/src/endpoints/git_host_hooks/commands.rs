@@ -353,7 +353,7 @@ async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bo
     let approval_ctx = PullRequestApprovalContext {
         pr_number: Some(ctx.pr_number),
         pr_author: None,
-        is_fork: Some(snapshot.is_fork),
+        is_fork: snapshot.is_fork,
         sender: Some(ctx.sender.to_string()),
     };
     let source_comment_json = ctx.reaction_target.as_ref().map(|t| {

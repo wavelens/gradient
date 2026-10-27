@@ -124,7 +124,7 @@ impl From<GithubPrResponse> for PullRequestSnapshot {
             head_sha: pr.head.sha,
             head_branch: pr.head.ref_,
             head_clone_url,
-            is_fork,
+            is_fork: Some(is_fork),
             title: pr.title,
         }
     }

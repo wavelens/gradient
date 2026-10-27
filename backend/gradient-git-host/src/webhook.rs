@@ -193,14 +193,65 @@ pub struct GiteaPullRequest {
     pub user: Option<GiteaUser>,
     #[serde(default)]
     pub title: Option<String>,
+    #[serde(default)]
+    pub flow: Option<i64>,
+}
+
+const FORGEJO_AGIT_FLOW: i64 = 1;
+
+impl GiteaPullRequest {
+    // Any reader can push an AGit head. Gitea marks it only by an empty label, Forgejo by `flow`.
+    fn is_agit(&self) -> bool {
+        let unlabelled_pull_ref = self.head.label.as_deref().unwrap_or_default().is_empty()
+            && self
+                .head
+                .git_ref
+                .as_deref()
+                .is_some_and(|r| r.starts_with("refs/pull/"));
+        self.flow == Some(FORGEJO_AGIT_FLOW) || unlabelled_pull_ref
+    }
+
+    pub fn head_branch(&self) -> Option<String> {
+        self.head
+            .label
+            .clone()
+            .filter(|label| !label.is_empty())
+            .or_else(|| self.head.git_ref.clone())
+    }
+
+    pub fn is_fork(&self, base_repo_full_name: Option<&str>) -> Option<bool> {
+        if self.is_agit() {
+            return None;
+        }
+
+        let base_full = self
+            .base
+            .as_ref()
+            .and_then(|b| b.repo.as_ref())
+            .and_then(|r| r.full_name.as_deref())
+            .or(base_repo_full_name);
+        let head_full = self.head.repo.as_ref().and_then(|r| r.full_name.as_deref());
+        match (head_full, base_full) {
+            (Some(h), Some(b)) => Some(h != b),
+            _ => None,
+        }
+    }
+
+    pub fn fork_repo(&self, base_repo_full_name: Option<&str>) -> Option<&GiteaRepoStub> {
+        match self.is_fork(base_repo_full_name) {
+            Some(true) => self.head.repo.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Deserialize)]
 pub struct GiteaPRRef {
     pub sha: String,
     #[serde(rename = "ref")]
-    pub branch: Option<String>,
-    pub name: Option<String>,
+    pub git_ref: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
     #[serde(default)]
     pub repo: Option<GiteaRepoStub>,
 }
@@ -622,24 +673,9 @@ impl ParsedPullRequestEvent {
             "gitea",
             "pull_request.head.sha",
         )?;
-        let branch = payload.pull_request.head.branch.clone().or(payload
-            .pull_request
-            .head
-            .name
-            .clone());
-        let base_full = payload
-            .pull_request
-            .base
-            .as_ref()
-            .and_then(|b| b.repo.as_ref())
-            .and_then(|r| r.full_name.clone())
-            .or_else(|| payload.repository.full_name.clone());
-        let head_repo = payload.pull_request.head.repo.as_ref();
-        let head_full = head_repo.and_then(|r| r.full_name.clone());
-        let is_fork = match (head_full.as_deref(), base_full.as_deref()) {
-            (Some(h), Some(b)) => Some(h != b),
-            _ => None,
-        };
+        let base_full = payload.repository.full_name.as_deref();
+        let is_fork = payload.pull_request.is_fork(base_full);
+        let fork_repo = payload.pull_request.fork_repo(base_full);
         let pr_author = payload
             .pull_request
             .user
@@ -649,23 +685,18 @@ impl ParsedPullRequestEvent {
             .sender
             .as_ref()
             .and_then(|s| s.username.clone().or_else(|| s.login.clone()));
-        let mut repository_urls = Vec::with_capacity(4);
-        let mut head_repo_clone_url: Option<String> = None;
-        if let (Some(true), Some(repo)) = (is_fork, head_repo) {
-            if let Some(url) = repo.clone_url.clone() {
-                head_repo_clone_url = Some(url.clone());
-                repository_urls.push(url);
-            }
-            if let Some(url) = repo.ssh_url.clone() {
-                repository_urls.push(url);
-            }
-        }
+        let head_repo_clone_url = fork_repo.and_then(|r| r.clone_url.clone());
+        let mut repository_urls: Vec<String> = fork_repo
+            .into_iter()
+            .flat_map(|r| [r.clone_url.clone(), r.ssh_url.clone()])
+            .flatten()
+            .collect();
         repository_urls.extend(gitea_repo_urls(&payload.repository));
         Some(Self {
             commit_hash,
             repository_urls,
             action: payload.action,
-            branch,
+            branch: payload.pull_request.head_branch(),
             pr_number: payload.pull_request.number,
             pr_author,
             sender,
@@ -1178,14 +1209,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_gitea_pr_falls_back_to_name_field_for_branch() {
+    fn parse_gitea_pr_falls_back_to_label_for_branch() {
         let body = format!(
             r#"{{
                 "action": "synchronize",
                 "pull_request": {{
                     "head": {{
                         "sha": "{VALID_SHA}",
-                        "name": "fallback-branch"
+                        "label": "fallback-branch"
                     }}
                 }},
                 "repository": {{
@@ -1195,6 +1226,71 @@ mod tests {
         );
         let ev = ParsedPullRequestEvent::from_gitea(body.as_bytes()).unwrap();
         assert_eq!(ev.branch, Some("fallback-branch".to_string()));
+    }
+
+    fn gitea_same_repo_pr(forgejo_flow: Option<u8>, head_ref: &str, label: &str) -> Vec<u8> {
+        let flow = forgejo_flow.map_or_else(String::new, |f| format!(r#""flow": {f},"#));
+        format!(
+            r#"{{
+                "action": "opened",
+                "pull_request": {{
+                    {flow}
+                    "head": {{
+                        "sha": "{VALID_SHA}",
+                        "ref": "{head_ref}",
+                        "label": "{label}",
+                        "repo": {{
+                            "full_name": "org/repo",
+                            "clone_url": "https://gitea.example.com/org/repo.git"
+                        }}
+                    }},
+                    "base": {{
+                        "sha": "{VALID_SHA}",
+                        "ref": "main",
+                        "label": "main",
+                        "repo": {{ "full_name": "org/repo" }}
+                    }}
+                }},
+                "repository": {{
+                    "full_name": "org/repo",
+                    "clone_url": "https://gitea.example.com/org/repo.git",
+                    "ssh_url": "git@gitea.example.com:org/repo.git"
+                }}
+            }}"#
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn gitea_agit_pr_is_untrusted_and_built_from_the_base_repo() {
+        let body = gitea_same_repo_pr(None, "refs/pull/7/head", "");
+        let ev = ParsedPullRequestEvent::from_gitea(&body).unwrap();
+        assert_eq!(ev.is_fork, None);
+        assert_eq!(ev.head_repo_clone_url, None);
+        assert_eq!(ev.branch.as_deref(), Some("refs/pull/7/head"));
+        assert_eq!(
+            ev.repository_urls,
+            [
+                "https://gitea.example.com/org/repo.git",
+                "git@gitea.example.com:org/repo.git"
+            ]
+        );
+    }
+
+    #[test]
+    fn forgejo_agit_pr_is_untrusted_and_named_by_its_topic() {
+        let body = gitea_same_repo_pr(Some(1), "refs/pull/7/head", "alice/topic");
+        let ev = ParsedPullRequestEvent::from_gitea(&body).unwrap();
+        assert_eq!(ev.is_fork, None);
+        assert_eq!(ev.branch.as_deref(), Some("alice/topic"));
+    }
+
+    #[test]
+    fn gitea_same_repo_pr_with_a_deleted_branch_stays_trusted() {
+        let body = gitea_same_repo_pr(Some(0), "refs/pull/3/head", "feature");
+        let ev = ParsedPullRequestEvent::from_gitea(&body).unwrap();
+        assert_eq!(ev.is_fork, Some(false));
+        assert_eq!(ev.branch.as_deref(), Some("feature"));
     }
 
     #[test]
