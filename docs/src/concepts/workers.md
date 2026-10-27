@@ -54,7 +54,7 @@ Workers only receive jobs from projects with a cache subscription.
 
 Each [team](teams.md) can have workers. A team worker works with a single token for the entire team. Projects that granted the team get read-only access to these workers.
 
-Manage team workers on the team's **Workers** page.
+Manage team workers in the **Workers** section of the team page.
 
 | Setting | Effect |
 |---|---|

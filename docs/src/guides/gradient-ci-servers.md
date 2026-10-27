@@ -34,7 +34,7 @@ Run builds for more than one project? Pick a team connection. One key then handl
 
     Only a team Admin can perform this connection.
 
-    1. Open the team's **Workers** page and select **Connect Gradient.CI Servers**.
+    1. Open the **Workers** section of the team page and select **Connect Gradient.CI Servers**.
     2. Pick **Open servers.gradient.ci** in the dialog.
     3. Sign in, name the key and select **Create key**. The connection token appear once on the page.
     4. Copy the token into the **Connection token** field and select **Connect**.
@@ -60,7 +60,7 @@ A new connection grants `network`, `eval` and `build`. All three appear as **All
 
 - **Edit** on the entry changes the allowed [capabilities](../concepts/workers.md#capabilities).
 - **Deactivate** pauses the connection without a deletion.
-- Edit team connections on the team's **Workers** page.
+- Edit team connections in the **Workers** section of the team page.
 
 ## Offline Reasons
 
@@ -80,7 +80,7 @@ Workers that are offline display their most recent failure. Only members who man
 
 - **Disconnect** on a project entry removes the project connection.
 - **Stop Workers** on a team grant removes the team connection from that project.
-- **Delete** on the team's **Workers** page removes the team connection from every project.
+- **Delete** in the **Workers** section of the team page removes the team connection from every project.
 - The key on servers.gradient.ci remains in place until deleted on the servers.gradient.ci keys page.
 
 ## Turn the Offer Off

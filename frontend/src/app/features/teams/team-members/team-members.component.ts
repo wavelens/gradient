@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, RouterModule } from '@angular/router';
-import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { UserService } from '@core/services/user.service';
 import {
@@ -27,7 +25,6 @@ import {
   FormFieldComponent,
   LoadingSpinnerComponent,
   MessageBannerComponent,
-  PageLayoutComponent,
   RowComponent,
   RowListComponent,
   SelectComponent,
@@ -40,7 +37,6 @@ import {
   imports: [
     DatePipe,
     FormsModule,
-    RouterModule,
     AutoCompleteComponent,
     BadgeComponent,
     ButtonComponent,
@@ -49,7 +45,6 @@ import {
     FormFieldComponent,
     LoadingSpinnerComponent,
     MessageBannerComponent,
-    PageLayoutComponent,
     RowComponent,
     RowListComponent,
     SelectComponent,
@@ -59,9 +54,7 @@ import {
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class TeamMembersComponent implements OnInit {
-  private route = inject(ActivatedRoute);
   private teams = inject(TeamsService);
-  private crumbs = inject(BreadcrumbsService);
   private users = inject(UserService);
 
   readonly roles: { label: string; value: TeamRole }[] = [
@@ -69,9 +62,7 @@ export class TeamMembersComponent implements OnInit {
     { label: 'Member', value: 'member' },
   ];
 
-  teamName = '';
-  breadcrumb = computed(() => this.crumbs.team(this.teamName, { label: 'Members' }));
-  team = signal<TeamResponse | null>(null);
+  team = input.required<TeamResponse>();
   loading = signal(true);
   members = signal<TeamMemberItem[]>([]);
   invitations = signal<PendingInvitationItem[]>([]);
@@ -84,14 +75,14 @@ export class TeamMembersComponent implements OnInit {
 
   readonly sourceLabels: Record<TeamMemberSource, string | null> = { api: null, state: 'State', group: 'Group' };
 
-  canEdit = computed(() => this.team()?.role === 'admin');
+  canEdit = computed(() => this.team().role === 'admin');
+  countLabel = computed(() => `${this.members().length} ${this.members().length === 1 ? 'member' : 'members'}`);
+
+  private get teamName(): string {
+    return this.team().name;
+  }
 
   ngOnInit(): void {
-    this.teamName = this.route.snapshot.paramMap.get('team') || '';
-    this.teams.get(this.teamName).subscribe((team) => {
-      this.team.set(team);
-      this.crumbs.rememberTeam(this.teamName, team.display_name);
-    });
     this.load();
   }
 

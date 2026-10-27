@@ -162,7 +162,7 @@ export class WorkersComponent implements OnInit {
     const rowLocked = this.access().managed;
     if (worker.team) {
       return [
-        ...(this.canOpenTeam(worker.team) ? [{ label: 'Manage on team', icon: 'groups', routerLink: ['/team', worker.team, 'workers'] }] : []),
+        ...(this.canOpenTeam(worker.team) ? [{ label: 'Manage on team', icon: 'groups', routerLink: ['/team', worker.team] }] : []),
         ...(canEdit ? [{ label: 'Fire Test', icon: 'bolt', disabled: busy, command: () => this.fireTest(worker) }] : []),
       ];
     }

@@ -7,11 +7,14 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
 import { TeamOverviewComponent } from './team-overview.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
-import { TeamResponse, TeamWorkerEntry } from '@core/models';
+import { ConfigService } from '@core/services/config.service';
+import { TeamResponse } from '@core/models';
 
 const team: TeamResponse = {
   id: 't1',
@@ -26,18 +29,22 @@ const team: TeamResponse = {
   new_project_role: null,
 };
 
-function render(workers: TeamWorkerEntry[] = []): HTMLElement {
+function render(): HTMLElement {
   TestBed.configureTestingModule({
     imports: [TeamOverviewComponent],
     providers: [
       provideRouter([]),
+      provideHttpClient(),
+      provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ team: 'platform' }) } } },
+      { provide: ConfigService, useValue: { gradientCiEnabled: false } },
       {
         provide: TeamsService,
         useValue: {
           get: () => of(team),
           members: () => of([]),
-          workers: () => of(workers),
+          invitations: () => of([]),
+          workers: () => of([]),
           grants: () => of({ projects: [], caches: [] }),
         },
       },
@@ -54,25 +61,11 @@ function headings(element: HTMLElement): string[] {
 }
 
 describe('TeamOverviewComponent', () => {
+  it('manages members and workers on the team page itself', () => {
+    expect(headings(render())).toEqual(expect.arrayContaining(['Members', 'Workers']));
+  });
+
   it('hides the projects and caches section when the team has no grants', () => {
     expect(headings(render())).not.toContain('Projects and Caches');
-  });
-
-  it('lists only the online team workers', () => {
-    const online = { worker_id: 'w1', display_name: 'Builder', active: true, connected: true } as TeamWorkerEntry;
-    const offline = { worker_id: 'w2', display_name: 'Sleeper', active: true, connected: false } as TeamWorkerEntry;
-    const element = render([online, offline]);
-    expect(headings(element)).toContain('Workers');
-    expect(element.textContent).toContain('Builder');
-    expect(element.textContent).not.toContain('Sleeper');
-  });
-
-  it.each([
-    ['only offline workers', [{ worker_id: 'w2', display_name: 'Sleeper', active: true, connected: false } as TeamWorkerEntry]],
-    ['no workers', []],
-  ])('says so when no team worker is online with %s', (_, workers) => {
-    const element = render(workers);
-    expect(headings(element)).toContain('Workers');
-    expect(element.textContent).toContain('No online workers');
   });
 });

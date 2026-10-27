@@ -9,17 +9,9 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
+import { TeamResponse, TeamGrants, TeamRequestItem } from '@core/models';
 import {
-  TeamResponse,
-  TeamMemberItem,
-  TeamWorkerEntry,
-  TeamGrants,
-  TeamRequestItem,
-} from '@core/models';
-import {
-  BadgeComponent,
   ButtonComponent,
-  EmptyStateComponent,
   LoadingSpinnerComponent,
   MessageBannerComponent,
   PageLayoutComponent,
@@ -27,16 +19,18 @@ import {
   RowListComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
+import { TeamMembersComponent } from '../team-members/team-members.component';
+import { TeamWorkersComponent } from '../team-workers/team-workers.component';
 
 @Component({
   selector: 'app-team-overview',
   standalone: true,
   imports: [
     RouterModule,
-    BadgeComponent,
     ButtonComponent,
-    EmptyStateComponent,
     LoadingSpinnerComponent,
+    TeamMembersComponent,
+    TeamWorkersComponent,
     MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
@@ -55,8 +49,6 @@ export class TeamOverviewComponent implements OnInit {
   teamName = '';
   breadcrumb = computed(() => this.crumbs.team(this.teamName));
   team = signal<TeamResponse | null>(null);
-  members = signal<TeamMemberItem[]>([]);
-  workers = signal<TeamWorkerEntry[]>([]);
   grants = signal<TeamGrants>({ projects: [], caches: [] });
   requests = signal<TeamRequestItem[]>([]);
   loading = signal(true);
@@ -64,9 +56,6 @@ export class TeamOverviewComponent implements OnInit {
   error = signal<string | null>(null);
 
   isAdmin = computed(() => this.team()?.role === 'admin' || this.authService.user()?.superuser === true);
-  firstMembers = computed(() => this.members().slice(0, 5));
-  onlineWorkers = computed(() => this.workers().filter((worker) => worker.connected));
-
   ngOnInit(): void {
     this.teamName = this.route.snapshot.paramMap.get('team') || '';
     this.teams.get(this.teamName).subscribe({
@@ -81,8 +70,6 @@ export class TeamOverviewComponent implements OnInit {
         this.loading.set(false);
       },
     });
-    this.teams.members(this.teamName).subscribe({ next: (members) => this.members.set(members) });
-    this.teams.workers(this.teamName).subscribe({ next: (workers) => this.workers.set(workers) });
     this.loadGrants();
   }
 

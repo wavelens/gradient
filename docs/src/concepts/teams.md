@@ -46,7 +46,7 @@ Activation of the team's workers within an existing grant requires a team Admin.
 
 ## Team Workers
 
-Register a team worker once on the team's **Workers** page. The worker can then take jobs from every project that grants access to the team's workers.
+Register a team worker once in the **Workers** section of the team page. The worker can then take jobs from every project that grants access to the team's workers.
 
 - **Peers file**: one line per token, in the form `<team id>:<token>` or `*:<token>`. Details in the [peers file](../guides/remote-worker.md#peers-file).
 - **Caches**: projects without a [cache subscription](caches.md) do not accept team workers.

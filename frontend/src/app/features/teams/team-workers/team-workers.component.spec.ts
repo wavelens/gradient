@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
@@ -33,7 +33,9 @@ const connection: TeamWorkerEntry = {
   connected: true,
 };
 
-function setup(role: 'admin' | 'member' = 'admin') {
+const offline = { ...connection, worker_id: 'w2', display_name: 'Sleeper', gradient_ci: false, connected: false };
+
+function setup(role: 'admin' | 'member' = 'admin', workers: TeamWorkerEntry[] = [connection]) {
   const updateWorker = vi.fn().mockReturnValue(of('updated'));
   TestBed.configureTestingModule({
     imports: [TeamWorkersComponent],
@@ -41,16 +43,13 @@ function setup(role: 'admin' | 'member' = 'admin') {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ team: 'platform' }) } } },
       { provide: AuthService, useValue: { user: signal({ superuser: false }) } },
       { provide: ConfigService, useValue: { gradientCiEnabled: true, gradientCiUrl: 'https://servers.gradient.ci' } },
-      {
-        provide: TeamsService,
-        useValue: { get: () => of({ ...team, role }), workers: () => of([connection]), updateWorker },
-      },
+      { provide: TeamsService, useValue: { workers: () => of(workers), updateWorker } },
     ],
   });
   const fixture = TestBed.createComponent(TeamWorkersComponent);
+  fixture.componentRef.setInput('team', { ...team, role });
   fixture.detectChanges();
   return { fixture, updateWorker, root: fixture.nativeElement as HTMLElement };
 }
@@ -80,6 +79,24 @@ describe('TeamWorkersComponent', () => {
     button(dialog, 'Save')!.click();
 
     expect(updateWorker).toHaveBeenCalledWith('platform', 'g1', { enable_secrets: true });
+  });
+
+  it('hides offline workers until asked to show them', () => {
+    const { fixture, root } = setup('admin', [connection, offline]);
+    expect(root.textContent).toContain('Gradient.CI Servers');
+    expect(root.textContent).not.toContain('Sleeper');
+
+    button(root, 'Show Offline (1)')!.click();
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Sleeper');
+  });
+
+  it.each([
+    ['only offline workers', [offline]],
+    ['no workers', []],
+  ])('says no worker is online with %s', (_, workers) => {
+    const { root } = setup('member', workers);
+    expect(root.textContent).toContain('No online workers');
   });
 
   it('links a Gradient.CI connection to its site', () => {

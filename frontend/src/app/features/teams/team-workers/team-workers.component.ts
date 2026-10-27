@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, RouterModule } from '@angular/router';
-import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
@@ -34,9 +32,9 @@ import {
   InputDirective,
   LoadingSpinnerComponent,
   MessageBannerComponent,
-  PageLayoutComponent,
   RowComponent,
   RowListComponent,
+  SettingsSectionComponent,
 } from '@gradient/ui/ui';
 
 @Component({
@@ -46,7 +44,6 @@ import {
     AllowedCapabilitiesComponent,
     FormsModule,
     GradientCiConnectComponent,
-    RouterModule,
     BadgeComponent,
     ButtonComponent,
     CopyFieldComponent,
@@ -56,24 +53,21 @@ import {
     InputDirective,
     LoadingSpinnerComponent,
     MessageBannerComponent,
-    PageLayoutComponent,
     RowComponent,
     RowListComponent,
+    SettingsSectionComponent,
   ],
   templateUrl: './team-workers.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class TeamWorkersComponent implements OnInit {
-  private route = inject(ActivatedRoute);
   private teams = inject(TeamsService);
-  private crumbs = inject(BreadcrumbsService);
   private authService = inject(AuthService);
   config = inject(ConfigService);
 
-  teamName = '';
-  breadcrumb = computed(() => this.crumbs.team(this.teamName, { label: 'Workers' }));
-  team = signal<TeamResponse | null>(null);
+  team = input.required<TeamResponse>();
   workers = signal<TeamWorkerEntry[]>([]);
+  showOffline = signal(false);
   loading = signal(true);
   busy = signal<string | null>(null);
   error = signal<string | null>(null);
@@ -85,13 +79,19 @@ export class TeamWorkersComponent implements OnInit {
   editAllowed: AllowedCapabilities = ALL_ALLOWED;
   form: RegisterWorkerRequest = { worker_id: '', display_name: '' };
 
-  isAdmin = computed(() => this.team()?.role === 'admin' || this.authService.user()?.superuser === true);
+  isAdmin = computed(() => this.team().role === 'admin' || this.authService.user()?.superuser === true);
+  offlineCount = computed(() => this.workers().filter((worker) => !worker.connected).length);
+  shownWorkers = computed(() => (this.showOffline() ? this.workers() : this.workers().filter((worker) => worker.connected)));
   canConnectGradientCi = computed(
     () => this.isAdmin() && this.config.gradientCiEnabled && !this.workers().some((w) => w.gradient_ci),
   );
 
   statusOf = (workerId: string): Observable<WorkerConnection | undefined> =>
     this.teams.workers(this.teamName).pipe(map((workers) => workers.find((w) => w.worker_id === workerId)));
+
+  get teamName(): string {
+    return this.team().name;
+  }
 
   get gradientCiHost(): string {
     return gradientCiHost(this.config.gradientCiUrl);
@@ -102,13 +102,6 @@ export class TeamWorkersComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.teamName = this.route.snapshot.paramMap.get('team') || '';
-    this.teams.get(this.teamName).subscribe({
-      next: (team) => {
-        this.team.set(team);
-        this.crumbs.rememberTeam(this.teamName, team.display_name);
-      },
-    });
     this.load();
   }
 
