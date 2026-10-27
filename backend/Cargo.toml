@@ -130,7 +130,6 @@ sqlx              = { version = "0.9", default-features = false, features = ["tl
 sqlx-core         = { version = "0.9", default-features = false, features = ["rustls-native-certs"] }
 
 # HTTP / networking
-async-ssh2-lite      = { version = "0.5", default-features = false, features = ["tokio"] }
 axum                 = { version = "0.8", default-features = false }
 axum-streams         = { version = "0.30", default-features = false, features = ["json"] }
 axum_typed_multipart = { version = "0.16", default-features = false, features = ["tempfile_3"] }
@@ -149,7 +148,7 @@ utoipa               = { version = "6", default-features = false, features = ["m
 utoipa-axum          = { version = "0.3", default-features = false }
 
 # Object store / git
-git2         = { version = "0.21", default-features = false, features = ["https", "ssh"] }
+git2         = { version = "0.21", default-features = false, features = ["https"] }
 libc         = { version = "0.2", default-features = false }
 listenfd     = { version = "1.0", default-features = false }
 nix          = { version = "0.31", default-features = false, features = ["fs", "mount", "sched", "signal"] }

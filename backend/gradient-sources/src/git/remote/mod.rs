@@ -5,46 +5,13 @@
  */
 
 mod git_protocol;
-mod https;
-mod ssh;
 
+use super::ssh::with_private_key;
 use super::url::git_transport_url;
 use crate::SourceError;
 use git_protocol::ls_remote_head_git_protocol;
-use git2::RemoteCallbacks;
+use git2::Direction;
 use gradient_types::branch_key;
-use https::ls_remote_head_no_creds;
-use ssh::ls_remote_head_ssh;
-
-/// libgit2 has no SSH host-key verifier and is treating `CertificatePassthrough` as a rejection.
-/// SSH host keys are accepted unconditionally, and HTTPS verification is left to libgit2's TLS.
-pub fn accept_cert(cert: &git2::cert::Cert<'_>) -> git2::CertificateCheckStatus {
-    if cert.as_hostkey().is_some() {
-        git2::CertificateCheckStatus::CertificateOk
-    } else {
-        git2::CertificateCheckStatus::CertificatePassthrough
-    }
-}
-
-pub fn fetch_options_with_ssh(ssh_key: Option<&str>) -> git2::FetchOptions<'static> {
-    let mut fo = git2::FetchOptions::new();
-    fo.remote_callbacks(callbacks_with_ssh(ssh_key));
-    fo
-}
-
-pub(in crate::git) fn callbacks_with_ssh(ssh_key: Option<&str>) -> RemoteCallbacks<'static> {
-    let mut callbacks = RemoteCallbacks::new();
-    callbacks.certificate_check(|cert, _valid| Ok(accept_cert(cert)));
-
-    if let Some(key) = ssh_key {
-        let key = key.to_owned();
-        callbacks.credentials(move |_url, username_from_url, _allowed| {
-            git2::Cred::ssh_key_from_memory(username_from_url.unwrap_or("git"), None, &key, None)
-        });
-    }
-
-    callbacks
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BranchHead {
@@ -61,15 +28,28 @@ pub(in crate::git) struct AdvertisedRef {
 pub(in crate::git) fn ls_remote_head(
     url: &str,
     private_key: Option<&str>,
-    public_key: Option<&str>,
     branch: Option<&str>,
 ) -> Result<BranchHead, SourceError> {
     let url = git_transport_url(url);
-    match (private_key, public_key) {
-        (Some(priv_key), Some(pub_key)) => ls_remote_head_ssh(url, priv_key, pub_key, branch),
-        _ if url.starts_with("git://") => ls_remote_head_git_protocol(url, branch),
-        _ => ls_remote_head_no_creds(url, branch),
+    if url.starts_with("git://") && private_key.is_none() {
+        return ls_remote_head_git_protocol(url, branch);
     }
+
+    with_private_key(private_key, || ls_remote_head_libgit2(url, branch))
+}
+
+fn ls_remote_head_libgit2(url: &str, branch: Option<&str>) -> Result<BranchHead, SourceError> {
+    let git_error = |e: git2::Error| SourceError::GitCommandFailed {
+        stderr: e.message().to_string(),
+    };
+    let mut remote =
+        git2::Remote::create_detached(url).map_err(|e| SourceError::GitCommand(e.to_string()))?;
+    let conn = remote
+        .connect_auth(Direction::Fetch, None, None)
+        .map_err(git_error)?;
+    let list = conn.list().map_err(git_error)?;
+
+    branch_head(&advertised(list), branch)
 }
 
 fn advertised(list: &[git2::RemoteHead<'_>]) -> Vec<AdvertisedRef> {

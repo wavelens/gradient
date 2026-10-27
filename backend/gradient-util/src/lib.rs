@@ -17,6 +17,7 @@ pub mod nar;
 pub mod net;
 pub mod nix_hash;
 pub mod shutdown;
+pub mod ssh;
 pub mod store_path;
 pub mod supervision;
 pub mod sync;

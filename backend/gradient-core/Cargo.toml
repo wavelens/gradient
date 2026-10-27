@@ -69,7 +69,6 @@ uuid                  = { workspace = true }
 zstd                  = { workspace = true }
 
 async-compression = { workspace = true }
-async-ssh2-lite   = { workspace = true }
 cron              = { workspace = true }
 crypter           = { workspace = true }
 ed25519-compact   = { workspace = true }

@@ -62,16 +62,11 @@ impl TaskGitContext<'_> {
         branch: Option<&str>,
     ) -> Result<BranchHead, SourceError> {
         let url = self.task.repository.clone();
-        let ssh_creds = self.ssh_creds.clone();
+        let private_key = self.private_key.clone();
         let branch_owned = branch.map(|b| b.to_owned());
 
         tokio::task::spawn_blocking(move || {
-            let branch_ref = branch_owned.as_deref();
-            if let Some((private_key, public_key)) = ssh_creds {
-                ls_remote_head(&url, Some(&private_key), Some(&public_key), branch_ref)
-            } else {
-                ls_remote_head(&url, None, None, branch_ref)
-            }
+            ls_remote_head(&url, private_key.as_deref(), branch_owned.as_deref())
         })
         .await
         .map_err(|e| SourceError::GitExecution {

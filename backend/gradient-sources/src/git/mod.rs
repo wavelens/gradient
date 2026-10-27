@@ -9,6 +9,7 @@ mod commit_info;
 mod context;
 mod pktline;
 mod remote;
+mod ssh;
 mod update_check;
 mod url;
 
@@ -21,7 +22,8 @@ use tracing::instrument;
 
 pub use checkout::checkout_commit;
 pub use commit_info::HeadCommit;
-pub use remote::{BranchHead, accept_cert, fetch_options_with_ssh};
+pub use remote::BranchHead;
+pub(crate) use ssh::with_private_key;
 
 #[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
 pub async fn check_task_updates(
@@ -66,12 +68,13 @@ pub async fn resolve_remote_ref(
     url: &str,
     branch: Option<&str>,
 ) -> Result<Vec<u8>, SourceError> {
-    let ssh_creds = if gradient_types::input::check_repository_url_is_ssh(url) {
-        Some(crate::ssh_key::decrypt_ssh_private_key(
+    let private_key = if gradient_types::input::check_repository_url_is_ssh(url) {
+        let (private_key, _) = crate::ssh_key::decrypt_ssh_private_key(
             &ctx.config.secrets.crypt_file,
             project.clone(),
             &ctx.config.server.serve_url,
-        )?)
+        )?;
+        Some(private_key)
     } else {
         None
     };
@@ -79,14 +82,8 @@ pub async fn resolve_remote_ref(
     let url = url.to_owned();
     let branch = branch.map(|b| b.to_owned());
 
-    let head = tokio::task::spawn_blocking(move || match ssh_creds {
-        Some((private_key, public_key)) => remote::ls_remote_head(
-            &url,
-            Some(&private_key),
-            Some(&public_key),
-            branch.as_deref(),
-        ),
-        None => remote::ls_remote_head(&url, None, None, branch.as_deref()),
+    let head = tokio::task::spawn_blocking(move || {
+        remote::ls_remote_head(&url, private_key.as_deref(), branch.as_deref())
     })
     .await
     .map_err(|e| SourceError::GitExecution {

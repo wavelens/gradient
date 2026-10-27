@@ -296,7 +296,7 @@ fn the_default_branch_of_a_local_remote_follows_head() {
     repo.set_head("refs/heads/main").unwrap();
     let url = format!("file://{}", dir.path().display());
 
-    let head = ls_remote_head(&url, None, None, None).unwrap();
+    let head = ls_remote_head(&url, None, None).unwrap();
     assert_eq!(head.branch, "refs/heads/main");
     assert_eq!(head.commit, main.as_bytes());
 }

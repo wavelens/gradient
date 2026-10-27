@@ -439,19 +439,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-ssh2-lite"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e00ee230bcd18bf15547e674950ace76b13fcda3ea1a33acca27e2eab245b58a"
-dependencies = [
- "async-trait",
- "futures-util",
- "libssh2-sys",
- "ssh2",
- "tokio",
-]
-
-[[package]]
 name = "async-stream"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2531,7 +2518,6 @@ version = "2.0.1"
 dependencies = [
  "anyhow",
  "async-compression",
- "async-ssh2-lite",
  "async-trait",
  "base64 0.23.1",
  "blake3",
@@ -2984,6 +2970,7 @@ dependencies = [
  "harmonia-utils-hash",
  "hex",
  "reqwest",
+ "russh",
  "sea-orm",
  "serde",
  "serde_json",
@@ -3176,6 +3163,7 @@ dependencies = [
  "prometheus",
  "ractor",
  "reqwest",
+ "russh",
  "rustls",
  "rustls-native-certs",
  "serde_json",
@@ -4390,7 +4378,6 @@ checksum = "7f7c568b25d7489bc3fb2988ed69ab111d2944d2f5fec3d5c987fe545ea97b50"
 dependencies = [
  "cc",
  "libc",
- "libssh2-sys",
  "libz-sys",
  "openssl-sys",
  "pkg-config",
@@ -4428,20 +4415,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1d20bef17f513b9b3004532233187769cd072d790971f4e4da0e346eb6401e8"
 dependencies = [
  "cc",
- "pkg-config",
- "vcpkg",
-]
-
-[[package]]
-name = "libssh2-sys"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f5eb74291e8691cab524a01274a1b1e7742b1a94f29d8b101d8aadc8372c1cd"
-dependencies = [
- "cc",
- "libc",
- "libz-sys",
- "openssl-sys",
  "pkg-config",
  "vcpkg",
 ]
@@ -7655,18 +7628,6 @@ dependencies = [
  "ssh-cipher 0.3.0",
  "ssh-encoding 0.3.0",
  "zeroize",
-]
-
-[[package]]
-name = "ssh2"
-version = "0.9.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c95eb3c09e378543395a3fa9796f897861862466ee331d59140ade4ea0dcfdfc"
-dependencies = [
- "bitflags",
- "libc",
- "libssh2-sys",
- "parking_lot",
 ]
 
 [[package]]
