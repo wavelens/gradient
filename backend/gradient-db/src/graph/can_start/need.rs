@@ -99,15 +99,17 @@ pub async fn settle_skipped<C: ConnectionTrait>(db: &C) -> Result<Vec<Transition
 
 pub(crate) static RECOUNT_WANTED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "WITH RECURSIVE {cte} \
+        "WITH RECURSIVE {cte}, \
+         reached AS MATERIALIZED (SELECT DISTINCT derivation FROM wanted) \
          UPDATE derivation_build db \
-         SET wanted = (db.derivation IN (SELECT derivation FROM wanted)), \
-             updated_at = (now() AT TIME ZONE 'UTC') \
-         WHERE ({open} OR db.fetchable) \
-           AND db.wanted <> (db.derivation IN (SELECT derivation FROM wanted)) \
+         SET wanted = x.wanted, updated_at = (now() AT TIME ZONE 'UTC') \
+         FROM (SELECT s.derivation, (r.derivation IS NOT NULL) AS wanted \
+               FROM derivation_build s LEFT JOIN reached r ON r.derivation = s.derivation \
+               WHERE ({open} OR s.fetchable)) x \
+         WHERE db.derivation = x.derivation AND db.wanted <> x.wanted \
          RETURNING db.derivation, db.wanted",
         cte = crate::graph::walks::open_closure_cte_body("wanted", &open_entry_points(), None),
-        open = open_predicate("db"),
+        open = open_predicate("s"),
     )
 });
 
@@ -381,11 +383,17 @@ mod tests {
             "{sql}"
         );
         assert!(
-            sql.contains("SET wanted = (db.derivation IN (SELECT derivation FROM wanted))"),
-            "{sql}"
+            sql.contains(
+                "reached AS MATERIALIZED (SELECT DISTINCT derivation FROM wanted) \
+                 UPDATE derivation_build db SET wanted = x.wanted"
+            ) && sql.contains(
+                "FROM derivation_build s LEFT JOIN reached r ON r.derivation = s.derivation"
+            ),
+            "membership in the walk is a join, never a subplan rescanned per shared build: {sql}"
         );
+        assert!(!sql.contains("IN (SELECT derivation FROM wanted)"), "{sql}");
         assert!(
-            sql.contains("db.wanted <> (db.derivation IN (SELECT derivation FROM wanted))"),
+            sql.contains("WHERE db.derivation = x.derivation AND db.wanted <> x.wanted"),
             "rewriting agreeing rows reports drift that is not there: {sql}"
         );
         assert!(
@@ -452,8 +460,8 @@ mod tests {
         let sql = norm(RECOUNT_WANTED_SQL.as_str());
         assert!(
             sql.contains(&format!(
-                "WHERE ({} OR db.fetchable) AND db.wanted <>",
-                norm(&open_predicate("db"))
+                "WHERE ({} OR s.fetchable)) x",
+                norm(&open_predicate("s"))
             )),
             "{sql}"
         );
