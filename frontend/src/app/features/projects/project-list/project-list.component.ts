@@ -21,12 +21,11 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
-  NameFieldComponent,
   NavCardComponent,
   PageLayoutComponent,
   SelectComponent,
 } from '@gradient/ui/ui';
-import { nameAvailability } from '@shared/forms';
+import { NameFieldsComponent, nameAvailability } from '@shared/forms';
 import { Project, ProjectSummary } from '@core/models';
 
 @Component({
@@ -49,7 +48,7 @@ import { Project, ProjectSummary } from '@core/models';
     CardGridComponent,
     BadgeComponent,
     SelectComponent,
-    NameFieldComponent,
+    NameFieldsComponent,
   ],
   templateUrl: './project-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -134,16 +133,6 @@ export class ProjectListComponent implements OnInit {
     this.names.reset();
     this.createError.set(null);
     this.showCreateDialog.set(true);
-  }
-
-  onProjectDisplayNameChange(value: string): void {
-    const name = this.names.suggest(value);
-    if (name !== null) this.newProject.name = name;
-  }
-
-  onProjectNameChange(name: string): void {
-    this.newProject.name = name;
-    this.names.check(name);
   }
 
   get filteredPublicProjects(): Project[] {
