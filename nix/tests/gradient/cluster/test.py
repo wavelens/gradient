@@ -152,7 +152,7 @@ assert_no_single_member_rows("kill-pair", ["k1", "k2"])
 daemon(victim, "release", {"node": "kill-pair/k1"})
 victim.succeed("systemctl start gradient-worker")
 victim.wait_until_succeeds(
-    "journalctl -u gradient-worker --no-pager --since=-180s | grep -q 'handshake successful'", timeout=180
+    "journalctl -u gradient-worker --no-pager --since=-180s | grep -q 'handshake successful'", timeout=timedelta(seconds=180)
 )
 assert_clean()
 

@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
+from datetime import timedelta
 import json
 import shlex
 
@@ -22,7 +23,7 @@ def api(machine, base, method, path, token=None, body=None):
 
 
 def assert_serving(machine, base):
-    machine.wait_until_succeeds(f"curl -sf {base}/api/v1/health", timeout=600)
+    machine.wait_until_succeeds(f"curl -sf {base}/api/v1/health", timeout=timedelta(seconds=600))
     machine.succeed(f"curl -sf {base}/ | grep -qi '<html'")
 
 

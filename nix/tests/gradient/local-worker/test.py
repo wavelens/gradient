@@ -6,6 +6,7 @@
 # flags. Proves the module provisions the worker's credentials itself and that
 # a project created afterwards picks the worker up without a registration step.
 
+from datetime import timedelta
 import json
 
 API = "http://127.0.0.1:3000/api/v1"
@@ -47,7 +48,7 @@ banner("Server provisions the team worker from generated state")
 machine.wait_for_unit("gradient-server.service")
 machine.wait_for_open_port(3000)
 machine.wait_for_unit("gradient-worker.service")
-machine.wait_until_succeeds("journalctl -u gradient-server.service | grep -q 'Created team worker'", timeout=60)
+machine.wait_until_succeeds("journalctl -u gradient-server.service | grep -q 'Created team worker'", timeout=timedelta(seconds=60))
 
 banner("A new project enables the worker with no registration step")
 admin = api("POST", "auth/basic/login", body=json.dumps({

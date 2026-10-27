@@ -185,7 +185,7 @@ assert [w.name for w, entry in builds_of("hang", "c1") if entry["ok"]] == [survi
 daemon(hanging, "release", {"node": "hang/c1"})
 hanging.succeed("systemctl start gradient-worker")
 hanging.wait_until_succeeds(
-    "journalctl -u gradient-worker --no-pager --since=-120s | grep -q 'handshake successful'", timeout=180
+    "journalctl -u gradient-worker --no-pager --since=-120s | grep -q 'handshake successful'", timeout=timedelta(seconds=180)
 )
 assert_clean()
 latency_report("hang")
@@ -206,12 +206,12 @@ server_since = server.succeed("date +%s").strip()
 frozen.succeed("systemctl kill --signal=STOP gradient-worker")
 if requires("the server's presumed-dead verdict", "distinct-upstream-workers"):
     server.wait_until_succeeds(
-        f"journalctl -u gradient-server --no-pager --since=@{server_since} | grep -q 'presumed dead'", timeout=120
+        f"journalctl -u gradient-server --no-pager --since=@{server_since} | grep -q 'presumed dead'", timeout=timedelta(seconds=120)
     )
 wait_evaluation(e, "Completed")
 frozen.succeed("systemctl kill --signal=CONT gradient-worker")
 frozen.wait_until_succeeds(
-    f"journalctl -u gradient-worker --no-pager --since=@{since} | grep -q 'reconnected successfully'", timeout=120
+    f"journalctl -u gradient-worker --no-pager --since=@{since} | grep -q 'reconnected successfully'", timeout=timedelta(seconds=120)
 )
 assert [w.name for w, entry in builds_of("frozen", "c1") if entry["ok"]] == [survivor.name]
 daemon(frozen, "release", {"node": "frozen/c1"})

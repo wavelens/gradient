@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
+from datetime import timedelta
+
 BASE = "http://localhost:8080"
 RUN = ("docker run -dt --name gradient --privileged --cgroupns=host "
        "-p 127.0.0.1:8080:80 -v gradient:/var/lib gradient-standalone:latest")
@@ -22,7 +24,7 @@ def dump_container():
 def start_container():
     machine.succeed(RUN)
     try:
-        machine.wait_until_succeeds(f"{LOGIN_JOURNAL} | grep -q 'log in with admin / '", timeout=600)
+        machine.wait_until_succeeds(f"{LOGIN_JOURNAL} | grep -q 'log in with admin / '", timeout=timedelta(seconds=600))
         assert_serving(machine, BASE)
     except Exception:
         dump_container()

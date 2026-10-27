@@ -6,6 +6,7 @@
 # (spans, pcaps, Postgres statistics) whose timings the summary reports, then again
 # under perf and strace, whose overhead would distort those timings.
 
+from datetime import timedelta
 import subprocess
 
 RUNS = [
@@ -23,7 +24,7 @@ def wait_workers_since(epoch):
     for node in WORKER_NODES:
         node.wait_until_succeeds(
             f"journalctl -u gradient-worker --since=@{epoch} --no-pager | grep -q 'handshake successful'",
-            timeout=180,
+            timeout=timedelta(seconds=180),
         )
 
 

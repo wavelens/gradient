@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Shared by the mock-daemon suites; mk.nix prepends FLAKES, RESOLVED and the topology prelude (WORKER_NODES, fleet_units).
 
+from datetime import timedelta
+
 API = "http://gradient.local/api/v1"
 TOKEN = ""
 
@@ -27,7 +29,7 @@ def login():
     body = json.dumps({"loginname": "admin", "password": "admin_password"})
     reply = server.wait_until_succeeds(
         f"curl -sf -X POST -H 'Content-Type: application/json' -d '{body}' {API}/auth/basic/login",
-        timeout=180,
+        timeout=timedelta(seconds=180),
     )
     TOKEN = json.loads(reply)["message"]
 
