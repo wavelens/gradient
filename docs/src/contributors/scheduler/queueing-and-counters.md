@@ -101,7 +101,8 @@ Apply each needs-build move in `can_start::settle_need` in a fixed order.
 - Entry points of an `Aborted` evaluation need nothing. Otherwise the aborted evaluation keeps its own builds wanted, and the next check thaws them.
 - Entry points of a `Completed` or `Failed` evaluation still need the closure below them. The retire step builds a retired output under such an entry point again.
 - Call `status::release_evaluation_need` to update the need below the entry points of an aborted evaluation, inside the abort transition. Every abort sends it: hard aborts after aborting the unshared builds, soft aborts and the stuck-evaluation recovery without touching builds.
-- `update_need` and `settle_need` are crate-private. Other crates call `update_and_settle_need`, and every needs-build move can skip and thaw inline. The consistency check's `settle_skipped` acts as the table-wide backstop and reports `skipped_moves`.
+- `update_need` and `settle_need` are crate-private. Other crates call `update_and_settle_need` and every needs-build move can skip and thaw inline. The consistency check's `settle_skipped` acts as the table-wide backstop and reports `skipped_moves`.
+- The batch writer can call `gain_and_settle_need` instead. Its region walk will not enter a shared build already wanted. Its naming walk (`adopt_unnamed_below`) will stop at a shared build the evaluation already named. Both walks then cost about the batch's own rows, not the whole closure.
 - Writers of `Created` call `can_start::settle_created` on the rows they wrote. Unwanted rows go to `Skipped`, startable rows to `Queued`. The retire step, the batch writer, the thaws and the retries count as such writers.
 
 ## Evaluation Verdict
