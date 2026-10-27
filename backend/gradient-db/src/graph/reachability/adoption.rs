@@ -6,7 +6,7 @@
 
 use crate::graph::{
     predicates::{builder_predicate, open_predicate},
-    walks::open_closure_cte,
+    walks::{open_closure_cte, open_closure_cte_until},
 };
 
 use gradient_entity::evaluation::EvaluationStatus;
@@ -50,15 +50,20 @@ fn named_open(scope: &str) -> String {
 
 fn adopt_sql(seed_select: &str) -> String {
     format!(
-        "{cte} INSERT INTO build_job \
-         (id, evaluation, derivation, derivation_build, score, score_breakdown, created_at) \
-         SELECT uuidv7(), p.evaluation, p.derivation, db.id, 0, '{{}}'::jsonb, \
-         (now() AT TIME ZONE 'UTC') \
-         FROM pending p JOIN derivation_build db ON db.derivation = p.derivation \
-         ON CONFLICT (evaluation, derivation) DO NOTHING \
-         RETURNING evaluation, derivation",
+        "{cte} {insert}",
         cte = open_closure_cte("pending", seed_select),
+        insert = adopt_insert(),
     )
+}
+
+fn adopt_insert() -> &'static str {
+    "INSERT INTO build_job \
+     (id, evaluation, derivation, derivation_build, score, score_breakdown, created_at) \
+     SELECT uuidv7(), p.evaluation, p.derivation, db.id, 0, '{}'::jsonb, \
+     (now() AT TIME ZONE 'UTC') \
+     FROM pending p JOIN derivation_build db ON db.derivation = p.derivation \
+     ON CONFLICT (evaluation, derivation) DO NOTHING \
+     RETURNING evaluation, derivation"
 }
 
 static ADOPT_LIVE: LazyLock<String> = LazyLock::new(|| {
@@ -71,8 +76,8 @@ static ADOPT_LIVE: LazyLock<String> = LazyLock::new(|| {
 static ADOPT_EVAL: LazyLock<String> =
     LazyLock::new(|| adopt_sql(&named_open("bj.evaluation = $1")));
 
-static ADOPT_BELOW_NAMED: LazyLock<String> = LazyLock::new(|| {
-    adopt_sql(&format!(
+fn below_named_parents() -> String {
+    format!(
         "SELECT pj.evaluation, db.derivation, ({builder}) FROM derivation_build db \
          JOIN derivation w ON w.id = db.derivation \
          JOIN derivation_dependency e ON e.dependency = db.derivation \
@@ -87,11 +92,38 @@ static ADOPT_BELOW_NAMED: LazyLock<String> = LazyLock::new(|| {
         parent_open = open_predicate("p"),
         parent_builder = builder_predicate("p", "pw"),
         live = crate::sql::status::eval_in(&EvaluationStatus::ACTIVE),
-    ))
+    )
+}
+
+static ADOPT_BELOW_NAMED: LazyLock<String> = LazyLock::new(|| adopt_sql(&below_named_parents()));
+
+static ADOPT_UNNAMED_BELOW: LazyLock<String> = LazyLock::new(|| {
+    let named_roots = named_open(&format!(
+        "bj.derivation = ANY($1::uuid[]) AND EXISTS (SELECT 1 FROM evaluation ev \
+         WHERE ev.id = bj.evaluation AND ev.status IN ({live}))",
+        live = crate::sql::status::eval_in(&EvaluationStatus::ACTIVE),
+    ));
+    format!(
+        "{cte} {insert}",
+        cte = open_closure_cte_until(
+            "pending",
+            &format!("{named_roots} UNION {}", below_named_parents()),
+            "EXISTS (SELECT 1 FROM build_job x \
+             WHERE x.evaluation = c.evaluation AND x.derivation = e.dependency)",
+        ),
+        insert = adopt_insert(),
+    )
 });
 
 crate::sql_lazy! {
     ADOPT_BELOW_NAMED_QUERY = || ADOPT_BELOW_NAMED.as_str(),
+        params = [DerivationIds(64)],
+        tier = Walk,
+        flags = [Walk];
+}
+
+crate::sql_lazy! {
+    ADOPT_UNNAMED_BELOW_QUERY = || ADOPT_UNNAMED_BELOW.as_str(),
         params = [DerivationIds(64)],
         tier = Walk,
         flags = [Walk];
@@ -202,6 +234,18 @@ where
     adopt(db, &ADOPT_BELOW_NAMED_QUERY, [ids.into()]).await
 }
 
+pub async fn adopt_unnamed_below<C>(db: &C, derivations: &[DerivationId]) -> Result<Adopted, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    if derivations.is_empty() {
+        return Ok(Adopted::default());
+    }
+
+    let ids: Vec<uuid::Uuid> = derivations.iter().map(|d| d.into_inner()).collect();
+    adopt(db, &ADOPT_UNNAMED_BELOW_QUERY, [ids.into()]).await
+}
+
 async fn adopt<C, V>(db: &C, query: &crate::sql::Query, values: V) -> Result<Adopted, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -295,6 +339,57 @@ mod tests {
                  RETURNING evaluation, derivation"
             ),
             "{sql}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_batch_names_below_its_roots_and_stops_at_a_name() {
+        let d = DerivationId::now_v7();
+        let db = mock_db()
+            .append_exec_results([exec()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .into_connection();
+
+        assert!(
+            adopt_unnamed_below(&db, &[d])
+                .await
+                .unwrap()
+                .pairs
+                .is_empty()
+        );
+        let log = statements(db.into_transaction_log());
+        let sql = norm(&log[1]);
+        let live = crate::sql::status::eval_in(&EvaluationStatus::ACTIVE);
+        assert!(
+            sql.contains(&format!(
+                "FROM build_job bj JOIN derivation_build db ON db.derivation = bj.derivation \
+                 JOIN derivation w ON w.id = db.derivation \
+                 WHERE bj.derivation = ANY($1::uuid[]) AND EXISTS (SELECT 1 FROM evaluation ev \
+                 WHERE ev.id = bj.evaluation AND ev.status IN ({live})) AND (NOT db.fetchable"
+            )),
+            "a named root seeds its own evaluations: {sql}"
+        );
+        assert!(
+            sql.contains("UNION SELECT pj.evaluation, db.derivation, (pw.walked")
+                || sql.contains("UNION SELECT pj.evaluation, db.derivation, (w.walked"),
+            "a root below a named wanted parent seeds that parent's evaluations: {sql}"
+        );
+        assert!(
+            sql.contains(
+                "AND NOT (EXISTS (SELECT 1 FROM build_job x WHERE x.evaluation = c.evaluation \
+                 AND x.derivation = e.dependency)) OFFSET 0) s)"
+            ),
+            "the walk stops at what the evaluation already names: {sql}"
+        );
+        assert!(
+            sql.ends_with(
+                "ON CONFLICT (evaluation, derivation) DO NOTHING RETURNING evaluation, derivation"
+            ),
+            "{sql}"
+        );
+        assert!(
+            !norm(&ADOPT_BELOW_NAMED).contains("x.evaluation = c.evaluation"),
+            "the full walk below a gained shared build keeps naming everything it reaches"
         );
     }
 

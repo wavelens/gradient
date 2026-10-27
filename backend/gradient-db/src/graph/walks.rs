@@ -189,7 +189,28 @@ pub fn open_closure_cte(name: &str, seed_select: &str) -> String {
     )
 }
 
+pub fn open_closure_cte_until(name: &str, seed_select: &str, stop_at: &str) -> String {
+    format!(
+        "WITH RECURSIVE {}",
+        open_closure_cte_body_until(name, seed_select, None, stop_at)
+    )
+}
+
 pub fn open_closure_cte_body(name: &str, seed_select: &str, within: Option<&str>) -> String {
+    open_closure_cte_body_until(name, seed_select, within, "")
+}
+
+pub fn open_closure_cte_body_until(
+    name: &str,
+    seed_select: &str,
+    within: Option<&str>,
+    stop_at: &str,
+) -> String {
+    let stop = if stop_at.is_empty() {
+        String::new()
+    } else {
+        format!(" AND NOT ({stop_at})")
+    };
     let step = lateral_step(
         name,
         "c.evaluation, s.next, s.builder",
@@ -199,7 +220,7 @@ pub fn open_closure_cte_body(name: &str, seed_select: &str, within: Option<&str>
              JOIN derivation_build dep ON dep.derivation = e.dependency \
              JOIN derivation w ON w.id = dep.derivation \
              WHERE e.derivation = c.derivation AND (c.builder OR e.kind IN (1, 2)) \
-               AND {open}",
+               AND {open}{stop}",
             builder = builder_predicate("dep", "w"),
             open = open_predicate("dep"),
         ),
@@ -483,6 +504,28 @@ mod tests {
                 norm(&open_predicate("dep"))
             )),
             "no set is the unrestricted walk"
+        );
+    }
+
+    #[test]
+    fn a_walk_with_a_stop_does_not_enter_what_the_stop_names() {
+        let cte = norm(&open_closure_cte_body_until(
+            "x",
+            "SELECT 1",
+            None,
+            "dep.wanted",
+        ));
+        assert!(
+            cte.ends_with(&format!(
+                "AND {} AND NOT (dep.wanted) OFFSET 0) s)",
+                norm(&open_predicate("dep"))
+            )),
+            "{cte}"
+        );
+        assert_eq!(
+            open_closure_cte_body_until("x", "SELECT 1", None, ""),
+            open_closure_cte_body("x", "SELECT 1", None),
+            "an empty stop is the unrestricted walk"
         );
     }
 }

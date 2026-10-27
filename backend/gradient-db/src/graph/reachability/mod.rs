@@ -9,7 +9,7 @@ mod build_jobs;
 mod outputs;
 
 pub use adoption::{
-    Adopted, adopt_below_named, adopt_pending_closure, adopt_pending_closures,
+    Adopted, adopt_below_named, adopt_pending_closure, adopt_pending_closures, adopt_unnamed_below,
     pending_orphan_frontier, pending_orphans_among,
 };
 pub use build_jobs::{

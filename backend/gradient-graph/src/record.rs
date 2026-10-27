@@ -729,18 +729,12 @@ impl BatchWriter<'_> {
         roots.sort_unstable();
         roots.dedup();
 
-        let mut changes = Vec::new();
-        let mut gained_need = Vec::new();
-        for chunk in roots.chunks(gradient_db::IN_CHUNK_SIZE) {
-            let settled = gradient_db::graph::can_start::update_and_settle_need(db, chunk)
-                .await
-                .context("settle what this batch needs built")?;
-            gained_need.extend_from_slice(&settled.moved.gained);
-            changes.extend(settled.changes);
-        }
-        gradient_db::status::emit_transition_effects(self.ctx, &changes).await?;
+        let settled = gradient_db::graph::can_start::gain_and_settle_need(db, &roots)
+            .await
+            .context("settle what this batch needs built")?;
+        gradient_db::status::emit_transition_effects(self.ctx, &settled.changes).await?;
 
-        Ok(gained_need)
+        Ok(settled.moved.gained)
     }
 
     async fn settle_created(&self, ids: &HashMap<String, DerivationId>) -> Result<()> {
