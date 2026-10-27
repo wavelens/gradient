@@ -172,14 +172,15 @@ fn need_sql(stop_region_at: &str) -> String {
         stop_region_at,
     );
     let entered = format!(
-        "entered(derivation) AS (SELECT pe.dependency FROM region r, \
-         LATERAL (SELECT e.derivation AS parent, e.dependency, e.kind \
-                  FROM derivation_dependency e WHERE e.dependency = r.derivation OFFSET 0) pe, \
-         LATERAL (SELECT 1 FROM derivation_build p \
-                  JOIN derivation pw ON pw.id = p.derivation \
-                  WHERE p.derivation = pe.parent AND p.wanted AND {open} \
-                    AND (({builder}) OR pe.kind IN (1, 2)) OFFSET 0) q \
-         WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent))",
+        "entered(derivation) AS (SELECT pe.dependency FROM \
+         (SELECT e.derivation AS parent, e.dependency, e.kind \
+          FROM (SELECT DISTINCT derivation FROM region) r \
+          JOIN derivation_dependency e ON e.dependency = r.derivation OFFSET 0) pe \
+         WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent) \
+           AND EXISTS (SELECT 1 FROM derivation_build p \
+                       JOIN derivation pw ON pw.id = p.derivation \
+                       WHERE p.derivation = pe.parent AND p.wanted AND {open} \
+                         AND (({builder}) OR pe.kind IN (1, 2))))",
         open = open_predicate("p"),
         builder = builder_predicate("p", "pw"),
     );
@@ -702,9 +703,11 @@ mod tests {
         );
         assert!(
             walk.contains(
-                "WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent))"
+                "OFFSET 0) pe WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent) \
+                 AND EXISTS ("
             ),
-            "the seed must come from wanters OUTSIDE the region: {walk}"
+            "the seed must come from wanters OUTSIDE the region and the parents are gathered \
+             once so that the region is hashed once against them: {walk}"
         );
         assert!(
             walk.contains(
@@ -723,15 +726,17 @@ mod tests {
         );
         assert!(
             walk.contains(
-                "entered(derivation) AS (SELECT pe.dependency FROM region r, \
-                 LATERAL (SELECT e.derivation AS parent, e.dependency, e.kind \
-                 FROM derivation_dependency e WHERE e.dependency = r.derivation OFFSET 0) pe, \
-                 LATERAL (SELECT 1 FROM derivation_build p \
+                "entered(derivation) AS (SELECT pe.dependency FROM \
+                 (SELECT e.derivation AS parent, e.dependency, e.kind \
+                 FROM (SELECT DISTINCT derivation FROM region) r \
+                 JOIN derivation_dependency e ON e.dependency = r.derivation OFFSET 0) pe \
+                 WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent) \
+                 AND EXISTS (SELECT 1 FROM derivation_build p \
                  JOIN derivation pw ON pw.id = p.derivation \
                  WHERE p.derivation = pe.parent AND p.wanted \
                  AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
                  AND ((pw.walked AND p.probed AND NOT p.cache_available \
-                 AND p.status IN (0, 1, 2, 8)) OR pe.kind IN (1, 2)) OFFSET 0) q"
+                 AND p.status IN (0, 1, 2, 8)) OR pe.kind IN (1, 2))))"
             ),
             "{walk}"
         );
