@@ -4,24 +4,28 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" title="Workers">
-  @if (isAdmin()) {
-    <div slot="actions">
-      @if (canConnectGradientCi()) {
-        <button grButton label="Connect Gradient.CI Servers" icon="link" severity="secondary" (click)="showGradientCiConnect.set(true)"></button>
-      }
+<gr-settings-section title="Workers" [card]="false" maxWidth="none">
+  <div slot="actions">
+    @if (offlineCount() > 0) {
+      <button grButton [label]="showOffline() ? 'Hide Offline' : 'Show Offline (' + offlineCount() + ')'" icon="visibility"
+        severity="secondary" (click)="showOffline.set(!showOffline())"></button>
+    }
+    @if (canConnectGradientCi()) {
+      <button grButton label="Connect Gradient.CI Servers" icon="link" severity="secondary" (click)="showGradientCiConnect.set(true)"></button>
+    }
+    @if (isAdmin()) {
       <button grButton label="Register Worker" icon="add" (click)="showRegister.set(true)"></button>
-    </div>
-  }
+    }
+  </div>
   @if (error(); as message) {
     <gr-message-banner type="error">{{ message }}</gr-message-banner>
   }
 
   @if (loading()) {
     <gr-loading-spinner message="Loading workers..." />
-  } @else if (workers().length > 0) {
+  } @else if (shownWorkers().length > 0) {
     <gr-row-list>
-      @for (worker of workers(); track worker.worker_id) {
+      @for (worker of shownWorkers(); track worker.worker_id) {
         <gr-row [icon]="worker.gradient_ci ? 'cloud' : 'construction'">
           {{ worker.display_name }}
           <div slot="meta">
@@ -64,10 +68,10 @@
       }
     </gr-row-list>
   } @else {
-    <gr-empty-state icon="construction" title="No workers"
-      message="A team worker serves every project that grants the team's workers." />
+    <gr-empty-state icon="construction" title="No online workers"
+      message="A team worker builds for every project that grants the team's workers." />
   }
-</gr-page-layout>
+</gr-settings-section>
 
 <gr-dialog header="Register Worker" [(visible)]="showRegister" width="480px">
   <gr-form-field label="Worker ID" for="team-worker-id" hint="The worker's UUID from services.gradient.worker.id.">
@@ -88,7 +92,7 @@
 <gr-dialog header="Worker Registered" [visible]="issuedToken() !== null" width="520px" [closable]="false">
   @if (issuedToken(); as token) {
     <gr-form-field label="Token">
-      <span slot="hint">Shown once. Put <code>{{ team()?.id }}:{{ token }}</code> or <code>*:{{ token }}</code> into the worker's peers file.</span>
+      <span slot="hint">Shown once. Put <code>{{ team().id }}:{{ token }}</code> or <code>*:{{ token }}</code> into the worker's peers file.</span>
       <gr-copy-field [value]="token" />
     </gr-form-field>
   }

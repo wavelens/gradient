@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of, throwError } from 'rxjs';
@@ -40,11 +40,9 @@ function setup(removeMember = vi.fn().mockReturnValue(of('User removed')), manag
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ team: 'platform' }) } } },
       {
         provide: TeamsService,
         useValue: {
-          get: () => of({ ...team, managed }),
           members: () => of(members),
           invitations: () => of([]),
           addMember,
@@ -56,6 +54,7 @@ function setup(removeMember = vi.fn().mockReturnValue(of('User removed')), manag
     ],
   });
   const fixture = TestBed.createComponent(TeamMembersComponent);
+  fixture.componentRef.setInput('team', { ...team, managed });
   fixture.detectChanges();
   return { fixture, addMember, removeMember };
 }

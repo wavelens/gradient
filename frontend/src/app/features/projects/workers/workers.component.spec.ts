@@ -202,7 +202,7 @@ describe('WorkersComponent - team workers', () => {
       .find((el) => (el.textContent ?? '').trim() === 'Team platform');
     expect(badge, 'Team badge').toBeTruthy();
     const menu = menuOf(fixture, workerOfTeam);
-    expect(itemOf(menu, 'Manage on team')?.routerLink).toEqual(['/team', 'platform', 'workers']);
+    expect(itemOf(menu, 'Manage on team')?.routerLink).toEqual(['/team', 'platform']);
     expect(itemOf(menu, 'Edit')).toBeUndefined();
     expect(itemOf(menu, 'Deactivate')).toBeUndefined();
     expect(itemOf(menu, 'Delete')).toBeUndefined();

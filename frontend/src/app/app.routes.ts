@@ -469,18 +469,6 @@ export const routes: Routes = [
           import('./features/teams/team-settings/team-settings.component').then((m) => m.TeamSettingsComponent),
       },
       {
-        path: 'team/:team/members',
-        title: 'Team Members',
-        loadComponent: () =>
-          import('./features/teams/team-members/team-members.component').then((m) => m.TeamMembersComponent),
-      },
-      {
-        path: 'team/:team/workers',
-        title: 'Team Workers',
-        loadComponent: () =>
-          import('./features/teams/team-workers/team-workers.component').then((m) => m.TeamWorkersComponent),
-      },
-      {
         path: 'team/:team/webhooks',
         title: 'Team Webhooks',
         data: { webhookScope: 'team' },
