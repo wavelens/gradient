@@ -6,7 +6,7 @@
 
 <gr-page-layout title="Teams">
   @if (canCreateTeam) {
-    <button slot="actions" grButton label="New Team" icon="add" (click)="showCreate.set(true)"></button>
+    <button slot="actions" grButton label="New Team" icon="add" (click)="openCreate()"></button>
   }
   @if (loading()) {
     <gr-loading-spinner message="Loading teams..." />
@@ -29,14 +29,29 @@
   @if (error(); as message) {
     <gr-message-banner type="error">{{ message }}</gr-message-banner>
   }
-  <gr-form-field label="Name" for="team-name" hint="Lowercase letters, digits and dashes.">
-    <input grInput id="team-name" [(ngModel)]="form.name" />
+  <gr-form-field label="Display Name" for="team-display-name" required>
+    <input
+      grInput
+      id="team-display-name"
+      placeholder="My Team"
+      [(ngModel)]="form.displayName"
+      (ngModelChange)="onDisplayNameChange($event)"
+      (keyup.enter)="create()"
+    />
   </gr-form-field>
-  <gr-form-field label="Display Name" for="team-display-name">
-    <input grInput id="team-display-name" [(ngModel)]="form.displayName" />
-  </gr-form-field>
+  <gr-name-field
+    required
+    inputId="team-name"
+    placeholder="team-name"
+    name="teamName"
+    [state]="names.state()"
+    [ngModel]="form.name"
+    (ngModelChange)="onNameChange($event)"
+    (input)="names.markEdited()"
+    (keyup.enter)="create()"
+  />
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showCreate.set(false)"></button>
-    <button grButton label="Create" [loading]="creating()" (click)="create()"></button>
+    <button grButton label="Create" [loading]="creating()" [disabled]="!canSubmit()" (click)="create()"></button>
   </div>
 </gr-dialog>

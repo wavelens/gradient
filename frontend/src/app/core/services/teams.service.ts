@@ -34,6 +34,10 @@ export class TeamsService {
     return this.api.get<TeamSummary[]>('teams');
   }
 
+  checkTeamNameAvailable(name: string): Observable<boolean> {
+    return this.api.get<boolean>(`teams/available?name=${encodeURIComponent(name)}`);
+  }
+
   create(name: string, displayName: string): Observable<string> {
     return this.api.put<string>('teams', { name, display_name: displayName });
   }
