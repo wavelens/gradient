@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use gradient_db::WorkerDb;
 use gradient_db::evaluations::watchdog::LostCompletion;
-use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_graph::{Graph, RequeueScope, Transition};
 use gradient_types::ids::DispatchedJobId;
@@ -43,7 +43,7 @@ pub(crate) fn liveness_period(config: &RuntimeConfig) -> Option<Duration> {
 }
 
 pub(crate) struct GraphConsistency {
-    pub(crate) db: DbContext,
+    pub(crate) graph: Arc<Graph>,
     pub(crate) period: Duration,
 }
 
@@ -57,12 +57,20 @@ impl Pass for GraphConsistency {
     }
 
     async fn run(&self) -> Result<(), PassError> {
-        consistency_check_pass(&self.db).await.map_err(Into::into)
+        consistency_check_pass(&self.graph)
+            .await
+            .map_err(Into::into)
     }
 }
 
-async fn consistency_check_pass(db: &DbContext) -> anyhow::Result<()> {
-    let report = gradient_db::graph::consistency::graph_consistency_report(db).await?;
+async fn consistency_check_pass(graph: &Graph) -> anyhow::Result<()> {
+    let Some(report) = graph
+        .transition(Transition::ConsistencyCheck)
+        .await?
+        .consistency
+    else {
+        return Ok(());
+    };
     if report.total() > 0 {
         warn!(
             counter_drift = report.counter_drift,

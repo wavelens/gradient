@@ -15,7 +15,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
 use sea_orm::{ConnectionTrait, DbErr, Statement};
 
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ConsistencyReport {
     pub counter_drift: i64,
     pub walk_drift: i64,

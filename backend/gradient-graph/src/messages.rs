@@ -5,6 +5,7 @@
  */
 
 use chrono::NaiveDateTime;
+use gradient_db::graph::consistency::ConsistencyReport;
 use gradient_db::graph::repair::RepairScope;
 use gradient_db::status::BuildRefusal;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
@@ -152,6 +153,7 @@ pub enum Transition {
     Repair {
         scope: RepairScope,
     },
+    ConsistencyCheck,
     AbortEvaluationSharedBuilds {
         evaluation: EvaluationId,
         hard: bool,
@@ -221,6 +223,7 @@ pub struct TransitionReport {
     pub aborted_exec_jobs: Vec<ExecJobId>,
     pub substitute_log: Option<SubstituteLog>,
     pub refusal: Option<BuildRefusal>,
+    pub consistency: Option<ConsistencyReport>,
 }
 
 impl From<gradient_db::status::BuildRefusal> for TransitionReport {

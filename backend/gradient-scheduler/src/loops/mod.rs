@@ -147,7 +147,7 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
         secs => {
             let period = Duration::from_secs(secs);
             children.push(ChildSpec::pass(GraphConsistency {
-                db: scheduler.db.clone(),
+                graph: Arc::clone(&scheduler.graph),
                 period,
             }));
             children.push(ChildSpec::pass(GraphStuckReheal {
