@@ -165,6 +165,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) -> Result<(), D
 
     crate::task_board::dep_counts::bump_graph_version(db, &moved).await?;
 
+    let mut reports: Vec<gradient_types::events::Event> = Vec::new();
     for c in changes {
         let Some(jobs) = jobs_by_drv.get(&c.derivation) else {
             continue;
@@ -179,9 +180,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) -> Result<(), D
                 });
 
             if ci_reports(c.to) && entry_keys.contains(&(job.evaluation, job.derivation)) {
-                crate::deliveries::events::record(
-                    db,
-                    &ctx.events,
+                reports.push(
                     gradient_types::events::build::Reported {
                         build_id: job.id,
                         derivation_build: job.derivation_build,
@@ -189,12 +188,14 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) -> Result<(), D
                         derivation: job.derivation,
                         status: i16::from(c.to),
                         ..Default::default()
-                    },
-                )
-                .await?;
+                    }
+                    .into(),
+                );
             }
         }
     }
+
+    crate::deliveries::events::record_many(db, &ctx.events, reports).await?;
 
     if changes.iter().any(|c| {
         matches!(c.to, BuildStatus::Completed | BuildStatus::Substituted) && c.from != c.to

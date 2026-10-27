@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::deliveries::pending::{PendingDeliveryKind, enqueue};
+use crate::deliveries::pending::{PendingDeliveryKind, enqueue, enqueue_many};
 use gradient_types::events::{Event, EventBus, evaluation};
 use gradient_types::{MEvaluation, WaitingReason};
 use sea_orm::{ConnectionTrait, DbErr};
@@ -15,14 +15,36 @@ pub async fn record<C: ConnectionTrait>(
     event: impl Into<Event>,
 ) -> Result<(), DbErr> {
     let event = event.into();
+    let (key, payload) = delivery_row(&event)?;
+    enqueue(db, PendingDeliveryKind::Event, key, payload).await?;
+    bus.publish(event);
+    Ok(())
+}
+
+pub async fn record_many<C: ConnectionTrait>(
+    db: &C,
+    bus: &EventBus,
+    events: Vec<Event>,
+) -> Result<(), DbErr> {
+    let rows = events
+        .iter()
+        .map(delivery_row)
+        .collect::<Result<Vec<_>, DbErr>>()?;
+    enqueue_many(db, PendingDeliveryKind::Event, rows).await?;
+    for event in events {
+        bus.publish(event);
+    }
+
+    Ok(())
+}
+
+fn delivery_row(event: &Event) -> Result<(String, serde_json::Value), DbErr> {
     debug_assert!(event.durable(), "{} is firehose only", event.name());
     let key = event
         .key()
         .unwrap_or_else(|| format!("{}:{}", event.name(), uuid::Uuid::now_v7()));
-    let payload = serde_json::to_value(&event).map_err(|e| DbErr::Custom(e.to_string()))?;
-    enqueue(db, PendingDeliveryKind::Event, key, payload).await?;
-    bus.publish(event);
-    Ok(())
+    let payload = serde_json::to_value(event).map_err(|e| DbErr::Custom(e.to_string()))?;
+    Ok((key, payload))
 }
 
 /// A freshly inserted evaluation is never passing through `update_evaluation_status`.
