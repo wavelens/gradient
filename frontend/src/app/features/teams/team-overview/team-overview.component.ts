@@ -5,7 +5,6 @@
  */
 
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
-import { DatePipe } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
@@ -16,10 +15,7 @@ import {
   TeamWorkerEntry,
   TeamGrants,
   TeamRequestItem,
-  TeamEvaluation,
 } from '@core/models';
-import { evaluationPhase } from '@shared/evaluation';
-import { StatusIconComponent } from '@shared/ui';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -36,7 +32,6 @@ import {
   selector: 'app-team-overview',
   standalone: true,
   imports: [
-    DatePipe,
     RouterModule,
     BadgeComponent,
     ButtonComponent,
@@ -47,7 +42,6 @@ import {
     RowComponent,
     RowListComponent,
     SettingsSectionComponent,
-    StatusIconComponent,
   ],
   templateUrl: './team-overview.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -65,8 +59,6 @@ export class TeamOverviewComponent implements OnInit {
   workers = signal<TeamWorkerEntry[]>([]);
   grants = signal<TeamGrants>({ projects: [], caches: [] });
   requests = signal<TeamRequestItem[]>([]);
-  evaluations = signal<TeamEvaluation[]>([]);
-  readonly evaluationPhase = evaluationPhase;
   loading = signal(true);
   busy = signal<string | null>(null);
   error = signal<string | null>(null);
@@ -91,7 +83,6 @@ export class TeamOverviewComponent implements OnInit {
     });
     this.teams.members(this.teamName).subscribe({ next: (members) => this.members.set(members) });
     this.teams.workers(this.teamName).subscribe({ next: (workers) => this.workers.set(workers) });
-    this.teams.evaluations(this.teamName).subscribe({ next: (evaluations) => this.evaluations.set(evaluations) });
     this.loadGrants();
   }
 
