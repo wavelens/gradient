@@ -252,6 +252,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         display_name: Some(input.get("Display Name")),
                         description: Some(input.get("Description")),
                         hide_build_requests: None,
+                        exec_enabled: None,
                     },
                 )
                 .await
