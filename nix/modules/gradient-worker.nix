@@ -36,7 +36,7 @@
         polkit.addRule(function(action, subject) {
           if (action.id == "org.freedesktop.systemd1.manage-units" &&
               subject.user == "gradient-worker" &&
-              (action.lookup("unit") || "").indexOf("gradient-guest-") == 0) {
+              /^gradient-guest-[0-9a-f]{32}\.service$/.test(action.lookup("unit") || "")) {
             return polkit.Result.YES;
           }
         });
