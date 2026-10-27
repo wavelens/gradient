@@ -39,6 +39,7 @@
 
 .allowed-summary {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: $spacing-xs;
   font-size: $font-size-xs;
@@ -50,6 +51,8 @@
   padding: 1px $spacing-sm;
   border-radius: 999px;
   font-weight: 500;
+  white-space: nowrap;
+  overflow-wrap: normal;
   background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
   color: var(--gr-status-danger);
 
