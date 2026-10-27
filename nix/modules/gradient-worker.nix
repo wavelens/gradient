@@ -18,8 +18,12 @@
   ];
 
   subnetParts = lib.splitString "/" exec.subnet;
-  subnetOctets = lib.splitString "." (lib.head subnetParts);
-  bridgeAddress = lib.concatStringsSep "." (lib.take 3 subnetOctets ++ [ (toString (lib.toInt (lib.last subnetOctets) + 1)) ]);
+  prefixLength = lib.toInt (lib.last subnetParts);
+  addressToInt = address: lib.foldl (sum: octet: sum * 256 + lib.toInt octet) 0 (lib.splitString "." address);
+  intToAddress = value: lib.concatMapStringsSep "." (place: toString (lib.mod (value / place) 256)) [ 16777216 65536 256 1 ];
+  subnetSize = lib.foldl (size: _: size * 2) 1 (lib.range 1 (32 - prefixLength));
+  subnetStart = addressToInt (lib.head subnetParts);
+  bridgeAddress = intToAddress (subnetStart - lib.mod subnetStart subnetSize + 1);
   execOptionsSet = lib.any (option: option.highestPrio < (lib.mkOptionDefault null).priority)
     (lib.collect lib.isOption options.services.gradient.worker.exec);
   guestDnsForwarder = exec.allow.network && exec.nameservers == [ ];
@@ -84,7 +88,7 @@
       bridges.${exec.bridge}.interfaces = [ ];
       interfaces.${exec.bridge}.ipv4.addresses = [{
         address = bridgeAddress;
-        prefixLength = lib.toInt (lib.last subnetParts);
+        inherit prefixLength;
       }];
       nat = lib.mkIf exec.allow.network {
         enable = true;
