@@ -5,7 +5,7 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpErrorResponse, HttpHeaders, HttpResponse } from '@angular/common/http';
+import { HttpClient, HttpContext, HttpErrorResponse, HttpHeaders, HttpResponse } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 import { environment } from '@environments/environment';
@@ -30,6 +30,11 @@ export class ApiError extends Error {
   }
 }
 
+interface RequestOptions {
+  headers?: HttpHeaders;
+  context?: HttpContext;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private http = inject(HttpClient);
@@ -42,7 +47,7 @@ export class ApiService {
     method: string,
     endpoint: string,
     body?: unknown,
-    options?: { headers?: HttpHeaders }
+    options?: RequestOptions
   ): Observable<T> {
     const url = `${this.baseUrl}/${endpoint}`;
 
@@ -76,7 +81,7 @@ export class ApiService {
   /**
    * GET request
    */
-  get<T>(endpoint: string, options?: { headers?: HttpHeaders }): Observable<T> {
+  get<T>(endpoint: string, options?: RequestOptions): Observable<T> {
     return this.request<T>('GET', endpoint, undefined, options);
   }
 
@@ -94,28 +99,28 @@ export class ApiService {
   /**
    * POST request
    */
-  post<T>(endpoint: string, body?: unknown, options?: { headers?: HttpHeaders }): Observable<T> {
+  post<T>(endpoint: string, body?: unknown, options?: RequestOptions): Observable<T> {
     return this.request<T>('POST', endpoint, body, options);
   }
 
   /**
    * PUT request
    */
-  put<T>(endpoint: string, body?: unknown, options?: { headers?: HttpHeaders }): Observable<T> {
+  put<T>(endpoint: string, body?: unknown, options?: RequestOptions): Observable<T> {
     return this.request<T>('PUT', endpoint, body, options);
   }
 
   /**
    * PATCH request
    */
-  patch<T>(endpoint: string, body?: unknown, options?: { headers?: HttpHeaders }): Observable<T> {
+  patch<T>(endpoint: string, body?: unknown, options?: RequestOptions): Observable<T> {
     return this.request<T>('PATCH', endpoint, body, options);
   }
 
   /**
    * DELETE request
    */
-  delete<T>(endpoint: string, body?: unknown, options?: { headers?: HttpHeaders }): Observable<T> {
+  delete<T>(endpoint: string, body?: unknown, options?: RequestOptions): Observable<T> {
     return this.request<T>('DELETE', endpoint, body, options);
   }
 }

@@ -5,11 +5,13 @@
  */
 
 import { Injectable, signal, computed, inject } from '@angular/core';
+import { HttpContext } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { BehaviorSubject, Observable, filter, of, take } from 'rxjs';
 import { tap, switchMap, finalize, catchError, map } from 'rxjs/operators';
 import { ApiError, ApiService } from './api.service';
 import { MakeUserRequest, UserInfoResponse } from '@core/models';
+import { SESSION_PROBE } from '@core/interceptors/error.interceptor';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -111,7 +113,7 @@ export class AuthService {
   /// outage into a login screen; the state stays unknown until a real answer
   /// comes back.
   private probe(): Observable<boolean> {
-    return this.api.get<UserInfoResponse>('user').pipe(
+    return this.api.get<UserInfoResponse>('user', { context: new HttpContext().set(SESSION_PROBE, true) }).pipe(
       tap((user) => {
         this.userSignal.set(user);
         this.unreachableSignal.set(false);

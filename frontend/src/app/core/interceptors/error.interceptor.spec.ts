@@ -4,16 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { HttpErrorResponse, HttpHeaders, HttpRequest, HttpResponse } from '@angular/common/http';
+import { HttpContext, HttpErrorResponse, HttpHeaders, HttpRequest, HttpResponse } from '@angular/common/http';
 import { TestBed } from '@angular/core/testing';
 import { Router, UrlTree, provideRouter } from '@angular/router';
 import { defer, firstValueFrom, of, throwError } from 'rxjs';
-import { errorInterceptor } from './error.interceptor';
+import { SESSION_PROBE, errorInterceptor } from './error.interceptor';
 
-function unauthorized(): Promise<unknown> {
+function unauthorized(context = new HttpContext()): Promise<unknown> {
   return TestBed.runInInjectionContext(() =>
     firstValueFrom(
-      errorInterceptor(new HttpRequest('GET', '/api/v1/x'), () =>
+      errorInterceptor(new HttpRequest('GET', '/api/v1/x', { context }), () =>
         throwError(() => new HttpErrorResponse({ status: 401 })),
       ),
     ),
@@ -51,6 +51,14 @@ describe('errorInterceptor on 401', () => {
     vi.spyOn(router, 'url', 'get').mockReturnValue('/account/login');
     await unauthorized();
     expect(navigate).toHaveBeenCalledWith(['/account/login'], {});
+  });
+
+  /// An expired session cookie 401s the probe on a public page too; the route guards decide, not the probe.
+  it('leaves a rejected session probe to the route guards', async () => {
+    vi.spyOn(router, 'currentNavigation').mockReturnValue(null);
+    vi.spyOn(router, 'url', 'get').mockReturnValue('/project/acme');
+    await unauthorized(new HttpContext().set(SESSION_PROBE, true));
+    expect(navigate).not.toHaveBeenCalled();
   });
 });
 
