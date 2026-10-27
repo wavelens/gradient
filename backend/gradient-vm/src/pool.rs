@@ -16,9 +16,9 @@ use tracing::{info, warn};
 
 use crate::agent::GuestBootError;
 use crate::config::VmConfig;
-use crate::guest::Guest;
+use crate::guest::{Guest, remove_guest_dirs};
 use crate::hypervisor::GuestImage;
-use crate::state::read_states;
+use crate::state::{GuestId, read_states};
 use crate::unit::GuestUnits;
 
 const FIRST_CID: u32 = 3;
@@ -135,25 +135,29 @@ impl GuestPool {
     pub async fn stop_all_units(&self) {
         self.stop_boots().await;
         lock(&self.slots).warm.clear();
-        match self.units.list().await {
-            Ok(units) => {
-                for (id, _) in units {
-                    if let Err(e) = self.units.stop(&id).await {
-                        warn!(guest = %id, error = %e, "could not stop a guest unit");
-                    }
-                }
+        let still_running = match self.units.list().await {
+            Ok(units) => self.stop_units(units).await,
+            Err(e) => {
+                warn!(error = %e, "could not list guest units");
+                return;
             }
-            Err(e) => warn!(error = %e, "could not list guest units"),
-        }
+        };
         for (id, state) in read_states(&self.config.guests_dir) {
             let per_job_dirs = state.map(|state| state.per_job_dirs).unwrap_or_default();
             let dir = self.config.guests_dir.join(id.to_string());
-            for dir in per_job_dirs.iter().chain([&dir]) {
-                if let Err(e) = std::fs::remove_dir_all(dir) {
-                    warn!(dir = %dir.display(), error = %e, "could not remove a guest directory");
-                }
+            remove_guest_dirs(&dir, &per_job_dirs, !still_running.contains(&id));
+        }
+    }
+
+    async fn stop_units(&self, units: Vec<(GuestId, bool)>) -> BTreeSet<GuestId> {
+        let mut still_running = BTreeSet::new();
+        for (id, _) in units {
+            if let Err(e) = self.units.stop(&id).await {
+                warn!(guest = %id, error = %e, "could not stop a guest unit");
+                still_running.insert(id);
             }
         }
+        still_running
     }
 
     pub fn next_cid(&self) -> u32 {

@@ -176,16 +176,14 @@ impl Guest {
         }
         quiet(self.api.vmm_shutdown().await, "stop cloud-hypervisor");
         self.control = None;
-        if let Err(e) = units.stop(&self.state.guest_id).await {
-            warn!(guest = %self.state.guest_id, error = %e, "could not stop the guest unit");
-        }
-        for dir in self.state.per_job_dirs.iter().chain([&self.dir]) {
-            if let Err(e) = std::fs::remove_dir_all(dir)
-                && e.kind() != std::io::ErrorKind::NotFound
-            {
-                warn!(dir = %dir.display(), error = %e, "could not remove a guest directory");
+        let stopped = match units.stop(&self.state.guest_id).await {
+            Ok(()) => true,
+            Err(e) => {
+                warn!(guest = %self.state.guest_id, error = %e, "could not stop the guest unit");
+                false
             }
-        }
+        };
+        remove_guest_dirs(&self.dir, &self.state.per_job_dirs, stopped);
     }
 
     async fn start_unit(&self, units: &GuestUnits, config: &VmConfig) -> Result<()> {
@@ -398,6 +396,20 @@ pub fn device_groups(units: &[(String, DeviceUnit)]) -> Vec<String> {
     groups.into_iter().map(str::to_owned).collect()
 }
 
+pub fn remove_guest_dirs(dir: &Path, per_job_dirs: &[PathBuf], unit_stopped: bool) {
+    if !unit_stopped {
+        warn!(dir = %dir.display(), "keeping the guest directory of a unit that did not stop");
+        return;
+    }
+    for dir in per_job_dirs.iter().map(PathBuf::as_path).chain([dir]) {
+        if let Err(e) = std::fs::remove_dir_all(dir)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            warn!(dir = %dir.display(), error = %e, "could not remove a guest directory");
+        }
+    }
+}
+
 fn relay_name(class: &str, relays: &[GuestRelay]) -> String {
     let taken = |name: &str| relays.iter().any(|relay| relay.name == name);
     if !taken(class) {
@@ -448,6 +460,24 @@ mod tests {
                 gateway: "10.233.0.1".into(),
             }
         );
+    }
+
+    #[test]
+    fn the_state_file_stays_while_the_unit_is_still_running() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("guest");
+        let per_job = root.path().join("job");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::create_dir(&per_job).unwrap();
+        std::fs::write(dir.join("state.json"), "{}").unwrap();
+
+        remove_guest_dirs(&dir, std::slice::from_ref(&per_job), false);
+        assert!(dir.join("state.json").exists());
+        assert!(per_job.exists());
+
+        remove_guest_dirs(&dir, std::slice::from_ref(&per_job), true);
+        assert!(!dir.exists());
+        assert!(!per_job.exists());
     }
 
     #[test]
