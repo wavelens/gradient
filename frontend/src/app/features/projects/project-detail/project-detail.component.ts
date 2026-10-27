@@ -27,9 +27,10 @@ import {
   NameFieldComponent,
   NavCardComponent,
   PageLayoutComponent,
+  SubmitDirective,
 } from '@gradient/ui/ui';
 import { EvalStatusBadgeComponent, LabelHelpComponent, StarButtonComponent } from '@shared/ui';
-import { slugify } from '@shared/text';
+import { repositoryUrlError, slugify } from '@shared/text';
 import { StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 
 const RESERVED_TASK_NAMES = ['build-request'];
@@ -56,6 +57,7 @@ const RESERVED_TASK_NAMES = ['build-request'];
     FormFieldComponent,
     NameFieldComponent,
     StarButtonComponent,
+    SubmitDirective,
   ],
   templateUrl: './project-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -177,10 +179,15 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     return parts.some((p) => !p || p.startsWith('.') || /\s/.test(p));
   }
 
+  get repositoryError(): string | null {
+    return repositoryUrlError(this.newTask.repository.trim());
+  }
+
   createTask(): void {
     if (!this.newTask.name || !this.newTask.display_name || !this.newTask.repository) {
       return;
     }
+    if (this.repositoryError || this.wildcardInvalid) return;
     if (RESERVED_TASK_NAMES.includes(this.newTask.name.trim().toLowerCase())) {
       this.nameCheckState.set('reserved');
       return;

@@ -122,9 +122,8 @@
           grButton
           label="Save Changes"
           icon="check"
-          (click)="saveSettings()"
+          (grSubmit)="saveSettings()"
           [loading]="saving()"
-          [disabled]="priorityInvalid || maxStorageInvalid"
           [appManagedDisable]="access()"
         ></button>
       </div>

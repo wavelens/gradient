@@ -24,6 +24,8 @@ import {
   NameCheckState,
   TabSwitchComponent,
   TableComponent,
+  SettingsSectionComponent,
+  SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 
@@ -34,7 +36,7 @@ import { LabelHelpComponent } from '@shared/ui';
     FormsModule, ButtonComponent, CheckboxComponent, SelectComponent, SelectButtonComponent,
     AutoCompleteComponent, MenuComponent, PopoverComponent, TooltipDirective, InputDirective,
     FormFieldComponent, LabelHelpComponent, DialogComponent, PasswordInputComponent, NameFieldComponent,
-    TabSwitchComponent, TableComponent,
+    TabSwitchComponent, TableComponent, SettingsSectionComponent, SubmitDirective,
   ],
   templateUrl: './components.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -46,6 +48,8 @@ export class ComponentsComponent {
   nameStates: NameCheckState[] = ['idle', 'checking', 'available', 'taken', 'invalid', 'reserved'];
   password = signal('');
   nameInvalid = signal(false);
+  urlInvalid = signal(true);
+  submits = signal(0);
   accepted = signal(false);
   region = signal('eu');
   window = signal('hours');

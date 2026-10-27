@@ -15,6 +15,7 @@ import {
   AutoCompleteComponent,
   ButtonComponent,
   CheckboxComponent,
+  CopyFieldComponent,
   DialogComponent,
   FormFieldComponent,
   InputDirective,
@@ -25,8 +26,10 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
+  SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
+import { repositoryUrlError } from '@shared/text';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { TaskResponse, ConcurrencyPolicy } from '@core/models';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
@@ -44,6 +47,7 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
     AutoCompleteComponent,
     SelectComponent,
     CheckboxComponent,
+    CopyFieldComponent,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,
@@ -54,6 +58,7 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
     MessageBannerComponent,
     RowComponent,
     RowListComponent,
+    SubmitDirective,
   ],
   templateUrl: './task-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -83,6 +88,7 @@ export class TaskSettingsComponent implements OnInit {
   transferError = signal<string | null>(null);
   transferSuccess = signal(false);
   transferProjectSuggestions = signal<string[]>([]);
+  sshKey = signal('');
 
   projectName = '';
   taskName = '';
@@ -124,6 +130,10 @@ export class TaskSettingsComponent implements OnInit {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
     this.loadTask();
+    this.projectsService.getSSHKey(this.projectName).subscribe({
+      next: (key) => this.sshKey.set(key),
+      error: (error) => console.error('Failed to load SSH key:', error),
+    });
   }
 
   loadTask(): void {
@@ -157,20 +167,36 @@ export class TaskSettingsComponent implements OnInit {
     });
   }
 
-  repoCheck = signal<{ ok: boolean; message: string } | null>(null);
+  repoCheck = signal<{ url: string; ok: boolean; message: string } | null>(null);
   checkingRepo = signal(false);
 
+  private currentRepoCheck(): { ok: boolean; message: string } | null {
+    const check = this.repoCheck();
+    return check?.url === this.formData.repository.trim() ? check : null;
+  }
+
+  get repositoryError(): string | null {
+    const check = this.currentRepoCheck();
+    return repositoryUrlError(this.formData.repository.trim()) ?? (check && !check.ok ? check.message : null);
+  }
+
+  get repositoryReachable(): string | null {
+    const check = this.currentRepoCheck();
+    return check?.ok ? check.message : null;
+  }
+
   testConnection(): void {
+    const url = this.formData.repository.trim();
     this.checkingRepo.set(true);
     this.repoCheck.set(null);
-    this.tasksService.checkRepository(this.projectName, this.taskName, this.formData.repository.trim()).subscribe({
+    this.tasksService.checkRepository(this.projectName, this.taskName, url).subscribe({
       next: (head) => {
         this.checkingRepo.set(false);
-        this.repoCheck.set({ ok: true, message: `Reachable, head at ${head.slice(0, 12)}` });
+        this.repoCheck.set({ url, ok: true, message: `Reachable, head at ${head.slice(0, 12)}` });
       },
       error: (error) => {
         this.checkingRepo.set(false);
-        this.repoCheck.set({ ok: false, message: error.message || 'Repository unreachable.' });
+        this.repoCheck.set({ url, ok: false, message: error.message || 'Repository unreachable.' });
       },
     });
   }

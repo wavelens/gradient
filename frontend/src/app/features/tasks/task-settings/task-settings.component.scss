@@ -25,10 +25,4 @@
   input { flex: 1; min-width: 0; }
 }
 
-.repo-check {
-  margin: $spacing-xs 0 0;
-  color: var(--gr-status-success);
-  font-size: $font-size-sm;
-
-  &--error { color: var(--gr-status-danger); }
-}
+.repo-reachable { color: var(--gr-status-success); }

@@ -99,7 +99,14 @@ width="550px"
     ></textarea>
   </gr-form-field>
 
-  <gr-form-field label="Repository URL *" for="proj-repo" hint="Git repository URL to evaluate">
+  <gr-form-field
+    label="Repository URL *"
+    for="proj-repo"
+    hint="Git repository URL to evaluate"
+    [invalid]="!!repositoryError"
+    [error]="repositoryError ?? ''"
+  >
+    <gr-label-help slot="label" doc="concepts/projects-and-tasks/#repository-url" title="Accepted forms: ssh://git@host/path, git@host:path, https://host/path" />
     <input
       grInput
       id="proj-repo"
@@ -138,8 +145,8 @@ width="550px"
   <button
     grButton
     label="Create"
-    (click)="createTask()"
-    [disabled]="!newTask.name || !newTask.display_name || !newTask.repository || wildcardInvalid || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'reserved' || nameCheckState() === 'checking' || creating()"
+    (grSubmit)="createTask()"
+    [disabled]="!newTask.name || !newTask.display_name || !newTask.repository || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'reserved' || nameCheckState() === 'checking' || creating()"
     [loading]="creating()"
   ></button>
 </div>

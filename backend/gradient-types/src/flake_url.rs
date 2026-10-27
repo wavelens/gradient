@@ -52,14 +52,52 @@ impl FromStr for RepositoryUrl {
             return Err(InputError::LocalFileUrlNotAllowed);
         }
 
-        let looks_like_url = s.contains("://") || s.contains('@') || s.contains(':');
-        if !looks_like_url {
-            return Err(InputError::InvalidRepositoryUrl);
+        match s.split_once("://") {
+            Some((scheme, rest)) => check_authority(scheme, rest)?,
+            None if !s.contains('@') && !s.contains(':') => {
+                return Err(InputError::InvalidRepositoryUrl);
+            }
+            None => {}
         }
 
         Ok(Self {
             url: Self::normalize(s),
         })
+    }
+}
+
+fn check_authority(scheme: &str, rest: &str) -> Result<(), InputError> {
+    let authority = rest
+        .split_once('/')
+        .map_or(rest, |(authority, _)| authority);
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let (host, port) = split_host_port(host_port).ok_or(InputError::InvalidRepositoryUrl)?;
+
+    if host.is_empty() {
+        return Err(InputError::InvalidRepositoryUrl);
+    }
+
+    match port {
+        Some(port) if port.parse::<u16>().is_err() => Err(InputError::RepositoryUrlPortInvalid {
+            scheme: scheme.to_owned(),
+            port: port.to_owned(),
+        }),
+        _ => Ok(()),
+    }
+}
+
+fn split_host_port(host_port: &str) -> Option<(&str, Option<&str>)> {
+    match host_port.strip_prefix('[') {
+        Some(bracketed) => {
+            let (host, after) = bracketed.split_once(']')?;
+            Some((host, after.strip_prefix(':')))
+        }
+        None => Some(match host_port.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (host_port, None),
+        }),
     }
 }
 
@@ -139,6 +177,52 @@ mod tests {
             "file:/local/repo".parse::<RepositoryUrl>().unwrap_err(),
             InputError::LocalFileUrlNotAllowed,
         );
+    }
+
+    #[test]
+    fn repo_url_scheme_with_scp_path_names_the_bad_port() {
+        assert_eq!(
+            "ssh://git@git.example.de:user/repo.git"
+                .parse::<RepositoryUrl>()
+                .unwrap_err(),
+            InputError::RepositoryUrlPortInvalid {
+                scheme: "ssh".into(),
+                port: "user".into(),
+            },
+        );
+        assert_eq!(
+            "https://host:8o8o/repo"
+                .parse::<RepositoryUrl>()
+                .unwrap_err(),
+            InputError::RepositoryUrlPortInvalid {
+                scheme: "https".into(),
+                port: "8o8o".into(),
+            },
+        );
+    }
+
+    #[test]
+    fn repo_url_scheme_with_port_or_ipv6_host_is_accepted() {
+        for input in [
+            "ssh://git@git.example.de:2222/user/repo.git",
+            "git+ssh://git@[::1]:22/srv/repo",
+            "ssh://[::1]/srv/repo",
+            "https://git.example.de:8443/user/repo",
+            "git@git.example.de:user/repo.git",
+        ] {
+            assert!(input.parse::<RepositoryUrl>().is_ok(), "{input}");
+        }
+    }
+
+    #[test]
+    fn repo_url_scheme_without_host_is_rejected() {
+        for input in ["https:///repo", "ssh://git@/repo", "ssh://[::1/repo"] {
+            assert_eq!(
+                input.parse::<RepositoryUrl>().unwrap_err(),
+                InputError::InvalidRepositoryUrl,
+                "{input}"
+            );
+        }
     }
 
     #[test]

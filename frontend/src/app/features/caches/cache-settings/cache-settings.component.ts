@@ -22,6 +22,7 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
+  SubmitDirective,
 } from '@gradient/ui/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
@@ -43,6 +44,7 @@ import { CacheResponse } from '@core/models';
     PageLayoutComponent,
     FormFieldComponent,
     SettingsSectionComponent,
+    SubmitDirective,
     MessageBannerComponent,
     RowComponent,
     SelectComponent,

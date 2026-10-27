@@ -77,7 +77,10 @@ function setup(
       },
       {
         provide: ProjectsService,
-        useValue: { getProject: () => of({ id: 'o', display_name: 'Acme' }) },
+        useValue: {
+          getProject: () => of({ id: 'o', display_name: 'Acme' }),
+          getSSHKey: () => of('ssh-ed25519 AAAA acme@gradient'),
+        },
       },
     ],
   });
@@ -112,10 +115,18 @@ describe('TaskSettingsComponent - access gating', () => {
   });
 });
 
+async function typeRepository(fixture: ComponentFixture<TaskSettingsComponent>, url: string) {
+  await fixture.whenStable();
+  const input = (fixture.nativeElement as HTMLElement).querySelector('#proj-repo') as HTMLInputElement;
+  input.value = url;
+  input.dispatchEvent(new Event('input'));
+  fixture.detectChanges();
+}
+
 describe('TaskSettingsComponent - repository connection test', () => {
   const editor = { managed: false, canEdit: true };
   const status = (fixture: ComponentFixture<TaskSettingsComponent>) =>
-    (fixture.nativeElement as HTMLElement).querySelector('.repo-check')?.textContent?.trim() ?? '';
+    (fixture.nativeElement as HTMLElement).querySelector('.repo-reachable, .field-error')?.textContent?.trim() ?? '';
 
   it('reports the head it reached', () => {
     const fixture = setup(editor);
@@ -131,13 +142,6 @@ describe('TaskSettingsComponent - repository connection test', () => {
     expect(status(fixture)).toContain('Permission denied (publickey)');
   });
 
-  async function typeRepository(fixture: ComponentFixture<TaskSettingsComponent>, url: string) {
-    await fixture.whenStable();
-    const input = (fixture.nativeElement as HTMLElement).querySelector('#proj-repo') as HTMLInputElement;
-    input.value = url;
-    input.dispatchEvent(new Event('input'));
-    fixture.detectChanges();
-  }
 
   it('tests an edited URL without saving it', async () => {
     const checkRepository = vi.fn(() => of('abc1234def5678'));
@@ -154,6 +158,14 @@ describe('TaskSettingsComponent - repository connection test', () => {
     await typeRepository(fixture, '  ');
     const btn = findByText(fixture.nativeElement, 'test connection') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
+  });
+
+  it('drops a failed check once the URL is edited', async () => {
+    const fixture = setup(editor, () => throwError(() => new Error('Permission denied (publickey)')));
+    (findByText(fixture.nativeElement, 'test connection') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    await typeRepository(fixture, 'git@example.org:other.git');
+    expect(status(fixture)).toBe('');
   });
 
   it('is not offered to a viewer', () => {
@@ -193,5 +205,37 @@ describe('TaskSettingsComponent - retrying failed builds', () => {
       'demo',
       expect.objectContaining({ retry_failed_builds: false }),
     );
+  });
+});
+
+describe('TaskSettingsComponent - repository URL errors', () => {
+  const editor = { managed: false, canEdit: true };
+
+  it('explains an ssh:// URL with an scp path and blocks saving', async () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup(editor, undefined, updateTask);
+    await typeRepository(fixture, 'ssh://git@git.example.de:user/repo.git');
+
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.field-error')?.textContent).toContain('git@host:path');
+    (findByText(root, 'save changes') as HTMLButtonElement).click();
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it('blocks saving while the last connection test failed', async () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup(editor, () => throwError(() => new Error('Permission denied (publickey)')), updateTask);
+    const root = fixture.nativeElement as HTMLElement;
+    (findByText(root, 'test connection') as HTMLButtonElement).click();
+    fixture.detectChanges();
+
+    (findByText(root, 'save changes') as HTMLButtonElement).click();
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it('shows the project SSH key next to the repository URL', () => {
+    const fixture = setup(editor);
+    const key = (fixture.nativeElement as HTMLElement).querySelector('#proj-ssh-key') as HTMLInputElement;
+    expect(key.value).toBe('ssh-ed25519 AAAA acme@gradient');
   });
 });

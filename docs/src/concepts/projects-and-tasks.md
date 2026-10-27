@@ -25,12 +25,25 @@ flowchart LR
 
 | Part | Purpose |
 |---|---|
-| Repository URL | Location of the flake |
+| Repository URL | Location of the flake, see [Repository URL](#repository-url) |
 | Evaluation Wildcard | Which flake outputs to build, see [wildcards](../reference/wildcards.md) |
 | Triggers | Start condition and branch of an evaluation: push, pull request, polling (every 300 s by default) or a cron schedule |
 | Actions | Follow-up steps: mail, web request, Git host status, flake update pull request |
 | Flake Input Overrides | Replace a flake input for every evaluation, e.g. a newer nixpkgs |
 | Keep Evaluations | How many finished evaluations stay, 30 by default |
+
+## Repository URL
+
+| Form | Example |
+|---|---|
+| SSH URL | `ssh://git@git.example.com/org/repo.git` |
+| SSH URL with port | `ssh://git@git.example.com:2222/org/repo.git` |
+| SCP-like SSH | `git@git.example.com:org/repo.git` |
+| HTTPS | `https://git.example.com/org/repo.git` |
+
+- **SSH Key**: Both SSH forms use the project SSH key for authentication. Add that key as a deploy key on the Git host.
+- **Port**: A port number alone can follow the host in an `ssh://` URL. A path directly after `host:` can appear in the SCP-like form alone, without `ssh://`.
+- **Local Files**: `file://` URLs have no support.
 
 ## Default Trigger
 
