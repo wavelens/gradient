@@ -29,6 +29,9 @@
   provides = [ "distinct-upstream-workers" ];
 
   pythonPrelude = ''
+    import datetime
+
+
     def fleet_units():
         return [(node, "gradient-worker") for node in WORKER_NODES]
 
@@ -37,7 +40,8 @@
         for node in WORKER_NODES:
             node.wait_for_unit("gradient-worker.service")
             node.wait_until_succeeds(
-                "journalctl -u gradient-worker --no-pager | grep -q 'handshake successful'", timeout=180
+                "journalctl -u gradient-worker --no-pager | grep -q 'handshake successful'",
+                timeout=datetime.timedelta(seconds=180),
             )
   '';
 }

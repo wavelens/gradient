@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
+from datetime import timedelta
+
 # Each capture is a transient unit stopped with SIGINT, which tcpdump, perf and
 # strace all answer by flushing their output and exiting.
 
@@ -13,7 +15,7 @@ def start_capture(node, unit, command, output):
     node.succeed(
         f"systemd-run --unit={unit} --collect --property=KillSignal=SIGINT -- {command}"
     )
-    node.wait_until_succeeds(f"test -e {output}", timeout=180)
+    node.wait_until_succeeds(f"test -e {output}", timeout=timedelta(seconds=180))
 
 
 def stop_capture(node, unit):
@@ -72,7 +74,7 @@ def start_wait_sampler():
     server.wait_until_succeeds(
         psql_command("SELECT 1 FROM pg_stat_activity WHERE query LIKE 'CALL sample_waits%'",
                      database="postgres") + " | grep -q 1",
-        timeout=30,
+        timeout=timedelta(seconds=30),
     )
 
 

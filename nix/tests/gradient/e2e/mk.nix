@@ -298,6 +298,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
 
   testScript = { nodes, ... }:
     ''
+    from datetime import timedelta
     import json
     import time
 
@@ -1422,7 +1423,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     print(server.succeed(f"{CLI} cache upload main {upload_path}"))
 
     client.wait_until_succeeds(
-        f"{CURL} -sf {CACHE}/{upload_hash}.narinfo -o /dev/null", timeout=60
+        f"{CURL} -sf {CACHE}/{upload_hash}.narinfo -o /dev/null", timeout=timedelta(seconds=60)
     )
     print(client.succeed(f"{CURL} {CACHE}/{upload_hash}.narinfo -i --fail"))
 
@@ -1441,11 +1442,11 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     print(server.succeed(f"{CLI} cache upload main {debug_path}"))
 
     client.wait_until_succeeds(
-        f"{CURL} -sf {CACHE}/{debug_hash}.narinfo -o /dev/null", timeout=60
+        f"{CURL} -sf {CACHE}/{debug_hash}.narinfo -o /dev/null", timeout=timedelta(seconds=60)
     )
 
     client.wait_until_succeeds(
-        f"{CURL} -sf {CACHE}/debuginfo/{build_id} -o /dev/null", timeout=60
+        f"{CURL} -sf {CACHE}/debuginfo/{build_id} -o /dev/null", timeout=timedelta(seconds=60)
     )
     redirect = client.succeed(f"{CURL} -sf {CACHE}/debuginfo/{build_id}")
     print(redirect)
@@ -2488,7 +2489,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             node.succeed("systemctl daemon-reload && systemctl restart gradient-worker.service")
             node.wait_until_succeeds(
                 f"journalctl -u gradient-worker --no-pager --since=@{since} | grep -q 'handshake successful'",
-                timeout=180,
+                timeout=timedelta(seconds=180),
             )
 
         server.succeed(
@@ -2563,7 +2564,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     server.wait_for_open_port(3000)
     if own_session:
         builder.wait_until_succeeds(
-            "journalctl -u gradient-worker --no-pager | grep -q 'reconnected successfully'", timeout=180
+            "journalctl -u gradient-worker --no-pager | grep -q 'reconnected successfully'", timeout=timedelta(seconds=180)
         )
 
     banner("Phase 12b: SIGTERM stops the worker")
@@ -2607,7 +2608,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     server.succeed("systemctl start gradient-server.service")
     server.wait_for_open_port(3000)
 
-    server.wait_until_succeeds("grep -q restart /root/hook.log", timeout=120)
+    server.wait_until_succeeds("grep -q restart /root/hook.log", timeout=timedelta(seconds=120))
     assert sql("SELECT delivered_at IS NOT NULL FROM pending_delivery WHERE key = 'restart-probe';") == "t", \
         "the row must settle, not be redelivered on every tick"
 
