@@ -78,15 +78,19 @@ static ADOPT_EVAL: LazyLock<String> =
 
 fn below_named_parents() -> String {
     format!(
-        "SELECT pj.evaluation, db.derivation, ({builder}) FROM derivation_build db \
+        "SELECT parent.evaluation, db.derivation, ({builder}) \
+         FROM unnest($1::uuid[]) AS g(derivation) \
+         JOIN derivation_build db ON db.derivation = g.derivation \
          JOIN derivation w ON w.id = db.derivation \
          JOIN derivation_dependency e ON e.dependency = db.derivation \
-         JOIN derivation_build p ON p.derivation = e.derivation \
-         JOIN derivation pw ON pw.id = p.derivation \
-         JOIN build_job pj ON pj.derivation = p.derivation \
-         JOIN evaluation ev ON ev.id = pj.evaluation \
-         WHERE db.derivation = ANY($1::uuid[]) AND {open} AND p.wanted AND {parent_open} \
-           AND (({parent_builder}) OR e.kind IN (1, 2)) AND ev.status IN ({live})",
+         CROSS JOIN LATERAL (SELECT pj.evaluation FROM derivation_build p \
+                             JOIN derivation pw ON pw.id = p.derivation \
+                             JOIN build_job pj ON pj.derivation = p.derivation \
+                             JOIN evaluation ev ON ev.id = pj.evaluation \
+                             WHERE p.derivation = e.derivation AND p.wanted AND {parent_open} \
+                               AND (({parent_builder}) OR e.kind IN (1, 2)) \
+                               AND ev.status IN ({live}) OFFSET 0) parent \
+         WHERE {open}",
         builder = builder_predicate("db", "w"),
         open = open_predicate("db"),
         parent_open = open_predicate("p"),
@@ -371,9 +375,13 @@ mod tests {
             "a named root seeds its own evaluations: {sql}"
         );
         assert!(
-            sql.contains("UNION SELECT pj.evaluation, db.derivation, (pw.walked")
-                || sql.contains("UNION SELECT pj.evaluation, db.derivation, (w.walked"),
-            "a root below a named wanted parent seeds that parent's evaluations: {sql}"
+            sql.contains(
+                "UNION SELECT parent.evaluation, db.derivation, (w.walked AND db.probed \
+                 AND NOT db.cache_available AND db.status IN (0, 1, 2, 8)) \
+                 FROM unnest($1::uuid[]) AS g(derivation)"
+            ) && sql.contains("CROSS JOIN LATERAL (SELECT pj.evaluation FROM derivation_build p"),
+            "a root below a named wanted parent seeds that parent's evaluations, the parent \
+             looked up by key from the gained row: {sql}"
         );
         assert!(
             sql.contains(
