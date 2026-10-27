@@ -39,6 +39,7 @@ impl ExecHost {
             }
             false => host.reattach().await?,
         };
+        host.pool.refill();
         Ok((host, resumed))
     }
 
