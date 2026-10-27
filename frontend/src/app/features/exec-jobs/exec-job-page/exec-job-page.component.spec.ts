@@ -63,6 +63,13 @@ describe('ExecJobPageComponent', () => {
     expect(abortButton(fixture.nativeElement)).toBeUndefined();
   });
 
+  it('puts abort among the page actions, which phones show icon-only', () => {
+    const { fixture } = setup('running');
+    const actions = (fixture.nativeElement as HTMLElement).querySelector('.page-layout__actions.phone-icon-buttons');
+    const button = actions ? abortButton(actions as HTMLElement) : undefined;
+    expect(button?.querySelector('.gr-button__icon')).toBeTruthy();
+  });
+
   it('asks in the dialog before it aborts', () => {
     const { fixture, abort } = setup('running');
     abortButton(fixture.nativeElement)?.click();
