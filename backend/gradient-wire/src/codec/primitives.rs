@@ -63,6 +63,20 @@ impl Proto for i64 {
     }
 }
 
+impl Proto for i32 {
+    fn encode(&self, version: u16, out: &mut BytesMut) -> Result<(), EncodeError> {
+        i64::from(*self).encode(version, out)
+    }
+
+    fn decode(input: &mut Bytes, version: u16) -> Result<Self, DecodeError> {
+        i32::try_from(i64::decode(input, version)?).map_err(|_| DecodeError::OutOfRange("i32"))
+    }
+
+    fn describe(_: u16, out: &mut String) {
+        out.push_str("i32");
+    }
+}
+
 impl Proto for f32 {
     fn encode(&self, _: u16, out: &mut BytesMut) -> Result<(), EncodeError> {
         out.put_f32_le(*self);

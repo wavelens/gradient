@@ -14,6 +14,7 @@ pub mod codec;
 pub mod constants;
 pub mod error;
 mod exec;
+pub mod guest;
 pub mod limiter;
 pub mod messages;
 pub mod rejection;

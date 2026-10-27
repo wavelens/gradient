@@ -30,9 +30,10 @@ subtle            = { workspace = true }
 thiserror         = { workspace = true }
 tokio             = { workspace = true, features = ["sync", "net", "rt", "time", "macros"] }
 tokio-tungstenite = { workspace = true }
+tokio-util        = { workspace = true, features = ["codec"] }
 tracing           = { workspace = true }
 utoipa            = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "test-util"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "test-util", "io-util"] }
 uuid  = { workspace = true }
