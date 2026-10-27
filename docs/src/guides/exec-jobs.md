@@ -35,7 +35,60 @@ Exec apps of a project without the switch fail with a message on the task page.
 | `exec jobs are disabled on this instance` | `exec.enable` is off |
 | `exec jobs are disabled for this project` | The project switch is off |
 
-## 2. Declare an App
+## 2. Set Up an Exec Worker
+
+Exec workers start every job in a fresh cloud-hypervisor guest. The host needs `/dev/kvm`.
+
+```nix
+# configuration.nix
+services.gradient.worker = {
+  capabilities.exec = true;
+  exec = {
+    image = gradient.lib.mkWorkerImage { # (1)!
+      modules = [ ./worker-guest.nix ];
+    };
+    preWarm = 2; # (2)!
+    maxPreWarm = 8; # (3)!
+    labels = [ "lab-a" ];
+    devices = [ # (4)!
+      { name = "gpu:h100"; vfio = [ "0000:17:00.0" "0000:18:00.0" ]; }
+      { name = "camera"; usb = "1d6b:0002"; }
+    ];
+    mounts = [ # (5)!
+      { name = "datasets"; path = "/srv/datasets"; readOnly = true; }
+      { name = "scratch"; path = "/srv/scratch"; perJob = true; }
+    ];
+    allow = { # (6)!
+      network = true;
+      devices = [ "gpu:h100" "camera" ];
+      mounts = [ "datasets" "scratch" ];
+      retries = 2;
+    };
+    defaults.mounts = [ "scratch" ];
+  };
+};
+```
+
+1.  A NixOS system for the guests. `gradient.guest.cpus`, `gradient.guest.memoryMb`, `gradient.guest.preScript` and `gradient.guest.postScript` tune every guest. Workers without `image` boot a plain guest image.
+2.  Guests booted and paused ahead, waiting for a job.
+3.  Upper bound for warm guests for upcoming exec jobs on the server. Leave at `0` for a fixed `preWarm`.
+4.  Set exactly `vfio`, `dev` or `usb` per device. Bind each VFIO device to `vfio-pci` first.
+5.  Guests find a mount at `/mnt/<name>`. `perJob` mounts give every job a fresh directory below `path`.
+6.  Workers send `allow` and `defaults` to the server. The server can apply both at placement.
+
+- Networked jobs join the bridge `exec.bridge` with an address from `exec.subnet`. NAT rules on the host connect the bridge to the outside.
+- Guests resolve names through a DNS forwarder on the bridge. Addresses in `exec.nameservers` replace the forwarder.
+- The full option list is in [Configuration](../reference/configuration.md).
+
+| `exec.stopGuestsWithWorker` | Worker restart |
+|---|---|
+| `true` (default) | All guests stop. Running jobs restart in a new attempt without using a retry |
+| `false` | Guests keep going. The restarted worker can reattach and resume the log of the same attempt |
+
+!!! warning
+    Polkit rules from the module let the worker user start and stop `gradient-guest-*` units. Those units run as root. The worker user is root-equivalent on the host.
+
+## 3. Declare an App
 
 Apps with `passthru.gradient` turn into exec jobs. Apps without the block stay plain `nix run` apps.
 
@@ -51,7 +104,7 @@ apps.x86_64-linux.check = {
 - Workers build the closure of `program` first. Exec jobs can start once the program is in the cache.
 - Field errors fail only the affected app, with a message. Other apps and builds of the evaluation stay unaffected.
 
-## 3. Ask for Hardware
+## 4. Ask for Hardware
 
 ```nix
 passthru.gradient = {
@@ -85,7 +138,26 @@ passthru.gradient = {
 
 - Workers report the labels, devices and limits they allow. Requests outside those limits rule out that worker. Downgrades of a request never happen.
 - Lost workers lead to a restart without using a retry. Ten losses in a row fail the job.
-- Not available yet: `nodes` above 1, `secrets`, SSH sessions, outputs and phase markers in the UI.
+- Not available yet: `nodes` above 1, `image`, `secrets`, SSH sessions, outputs and phase markers in the UI.
+
+## 5. Read the Job Context
+
+Programs start as the user `gradient` in `/work`, a checkout of the evaluated commit. Context values arrive as environment variables and in `/run/gradient/context.json`.
+
+| Variable | Value |
+|---|---|
+| `GRADIENT_JOB`, `GRADIENT_EVALUATION`, `GRADIENT_TASK`, `GRADIENT_PROJECT` | IDs of the job and its origin |
+| `GRADIENT_COMMIT`, `GRADIENT_ENTRY_POINT` | Commit and app attribute |
+| `GRADIENT_ATTEMPT` | Attempt number, starting at 1 |
+| `GRADIENT_PHASE`, `GRADIENT_PHASE_PAYLOAD_FILE` | Last phase of an earlier attempt |
+| `GRADIENT_API`, `GRADIENT_TOKEN` | Server API and the job token, empty for now |
+| `GRADIENT_WORKER`, `GRADIENT_ZONE` | Worker ID and zone |
+| `GRADIENT_DEVICES`, `GRADIENT_GPU_INDICES` | Device handles in the guest as JSON, GPU indices |
+| `GRADIENT_MOUNT_<NAME>` | Path of a mount |
+| `GRADIENT_NODE_INDEX`, `GRADIENT_NODE_COUNT`, `GRADIENT_MASTER_ADDR`, `GRADIENT_MASTER_PORT`, `GRADIENT_PEERS` | Cluster values, a single node for now |
+
+- `args` and `env` accept placeholders like `@gradient.job.commit@` or `@gradient.worker.zone@`. Unknown placeholders fail the job.
+- Timeouts terminate the attempt. with a log line, `program produced no output for <n>s (maxSilent exceeded)` or `program exceeded wall-clock timeout of <n>s`.
 
 ## Verify Deployment
 
