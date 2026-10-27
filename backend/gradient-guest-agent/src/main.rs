@@ -4,25 +4,72 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#[allow(dead_code, reason = "the job run reads it once it exists")]
 mod context;
-#[allow(dead_code, reason = "the vsock listener reads it once it exists")]
+mod http;
+mod listener;
 mod output;
-#[allow(dead_code, reason = "the vsock listener runs the job once it exists")]
 mod run;
-#[allow(
-    dead_code,
-    reason = "the vsock listener prepares the job once it exists"
-)]
 mod setup;
 
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
 use anyhow::Result;
+use clap::{Parser, Subcommand};
+use gradient_util::shutdown::Shutdown;
+
+use output::OutputLog;
+
+const OUTPUT_FILE: &str = "/run/gradient/output.log";
+
+#[derive(Parser)]
+#[command(name = "gradient-guest-agent", version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    Phase { name: String, file: Option<PathBuf> },
+    Upload { file: PathBuf, path: Option<String> },
+}
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    serve().await
+async fn main() -> Result<ExitCode> {
+    match Cli::parse().command {
+        None => serve().await.map(|()| ExitCode::SUCCESS),
+        Some(Command::Phase { name, file }) => {
+            post("/phase", &[("name", &name)], file.as_deref()).await
+        }
+        Some(Command::Upload { file, path }) => {
+            let path = path.unwrap_or_else(|| file_name(&file));
+            post("/upload", &[("path", &path)], Some(&file)).await
+        }
+    }
 }
 
 async fn serve() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
+    let output = OutputLog::create(Path::new(OUTPUT_FILE)).await?;
+    let tasks = Shutdown::new();
+    tokio::try_join!(listener::listen(output, tasks), http::serve())?;
     Ok(())
+}
+
+async fn post(route: &str, query: &[(&str, &str)], file: Option<&Path>) -> Result<ExitCode> {
+    let answer = http::post_file(route, query, file).await?;
+    if answer.ok {
+        return Ok(ExitCode::SUCCESS);
+    }
+    eprintln!("{}", answer.body);
+    Ok(ExitCode::FAILURE)
+}
+
+fn file_name(file: &Path) -> String {
+    file.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }

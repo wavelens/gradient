@@ -74,10 +74,6 @@ impl OutputLog {
         self.readers.clone()
     }
 
-    pub fn reader_from(&self, offset: u64) -> OutputReader {
-        self.readers.reader_from(offset)
-    }
-
     pub fn close(&self) {
         self.appended.send_modify(|written| written.closed = true);
     }
@@ -139,7 +135,7 @@ mod tests {
             .expect("create");
         log.append(b"hello world").await.expect("append");
 
-        let mut reader = log.reader_from(6);
+        let mut reader = log.readers().reader_from(6);
         assert_eq!(reader.next().await, Some(b"world".to_vec()));
     }
 
@@ -149,7 +145,7 @@ mod tests {
         let mut log = OutputLog::create(&dir.path().join("output.log"))
             .await
             .expect("create");
-        let mut reader = log.reader_from(0);
+        let mut reader = log.readers().reader_from(0);
 
         let collect = async {
             let mut bytes = Vec::new();
