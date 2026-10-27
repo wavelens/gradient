@@ -18,5 +18,5 @@ pub use self::aggregate::{Aggregate, aggregate};
 pub use self::input_request::InputRequest;
 pub use self::peer_auth::PeerAuth;
 pub use self::worker_caps::{DeviceCount, WorkerCaps, build_needs_network};
-pub use self::worker_pool::{WorkerInfo, WorkerPool, WorkerSlot};
+pub use self::worker_pool::{ExecOffer, WorkerInfo, WorkerPool, WorkerSlot};
 pub use self::worker_state::{WorkerProfile, WorkerShared};

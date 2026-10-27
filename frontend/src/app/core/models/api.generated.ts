@@ -168,11 +168,6 @@ export interface BoardCacheStats {
   storage: SeriesPoint[];
 }
 
-export interface BoardExec {
-  labels: string[];
-  devices: DeviceClass[];
-}
-
 export interface BoardFleetPoint {
   bucket_start: string;
   connected: number;
@@ -254,7 +249,7 @@ export interface BoardWorker {
   cpu_usage_pct?: number | null;
   ram_free_mb?: number | null;
   ram_total_mb?: number | null;
-  exec?: BoardExec | null;
+  exec?: ExecOffer | null;
 }
 
 export interface BuildGraph {
@@ -916,36 +911,6 @@ export interface EvaluationTriggerSummary {
   type: TriggerType;
 }
 
-export interface ExecAllow {
-  network: boolean;
-  ssh: boolean;
-  ports: never[];
-  nodes: number;
-  devices: string[];
-  mounts: string[];
-  custom_images: boolean;
-  timeout_secs?: number | null;
-  max_silent_secs?: number | null;
-  retries: number;
-}
-
-export interface ExecDefaults {
-  network: boolean;
-  ssh: boolean;
-  mounts: string[];
-  max_silent_secs?: number | null;
-}
-
-export interface ExecInventory {
-  labels: string[];
-  devices: DeviceClass[];
-  mounts: string[];
-  secrets: string[];
-  allow: ExecAllow;
-  defaults: ExecDefaults;
-  warm_guests: number;
-}
-
 export interface ExecJobAttemptView {
   number: number;
   worker: string;
@@ -997,6 +962,11 @@ export interface ExecJobSummary {
   devices: DeviceRequest[];
   started_at?: string | null;
   last_phase?: string | null;
+}
+
+export interface ExecOffer {
+  labels: string[];
+  devices: DeviceClass[];
 }
 
 export interface ExecUnmet {
@@ -2596,7 +2566,7 @@ export interface WorkerInfo {
   assigned_job_count: number;
   draining: boolean;
   authorized_peers?: ProjectId[] | null;
-  exec?: ExecInventory | null;
+  exec?: ExecOffer | null;
 }
 
 export interface WorkerLiveInfo {

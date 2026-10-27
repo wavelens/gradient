@@ -731,13 +731,7 @@ pub struct BoardWorker {
     pub cpu_usage_pct: Option<f32>,
     pub ram_free_mb: Option<i64>,
     pub ram_total_mb: Option<i64>,
-    pub exec: Option<BoardExec>,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct BoardExec {
-    pub labels: Vec<String>,
-    pub devices: Vec<gradient_types::exec::DeviceClass>,
+    pub exec: Option<gradient_pool::ExecOffer>,
 }
 
 #[utoipa::path(
@@ -804,10 +798,7 @@ pub async fn get_board_workers(
                     .then_some(w.ram_free_mb.map(|v| v as i64))
                     .flatten(),
                 ram_total_mb: accessible.then_some(w.ram_total_mb as i64),
-                exec: w.exec.filter(|_| accessible).map(|inventory| BoardExec {
-                    labels: inventory.labels,
-                    devices: inventory.devices,
-                }),
+                exec: w.exec.filter(|_| accessible).map(Into::into),
             }
         })
         .collect();

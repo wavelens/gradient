@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use gradient_types::ids::ProjectId;
 use gradient_wire::types::{
-    BuildStage, DeviceRequest, ExecInventory, GradientCapabilities, JobKind,
+    BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities, JobKind,
 };
 
 use crate::peer_auth::PeerAuth;
@@ -499,7 +499,31 @@ pub struct WorkerInfo {
     pub upload_speed_mbps: Option<f32>,
     #[serde(skip)]
     pub download_speed_mbps: Option<f32>,
+    #[serde(serialize_with = "serialize_exec_offer")]
+    #[schema(value_type = Option<ExecOffer>)]
     pub exec: Option<ExecInventory>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
+pub struct ExecOffer {
+    pub labels: Vec<String>,
+    pub devices: Vec<DeviceClass>,
+}
+
+impl From<ExecInventory> for ExecOffer {
+    fn from(inventory: ExecInventory) -> Self {
+        Self {
+            labels: inventory.labels,
+            devices: inventory.devices,
+        }
+    }
+}
+
+fn serialize_exec_offer<S: serde::Serializer>(
+    exec: &Option<ExecInventory>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serde::Serialize::serialize(&exec.clone().map(ExecOffer::from), serializer)
 }
 
 #[cfg(test)]
@@ -1219,5 +1243,44 @@ mod tests {
         assert_eq!(free(&pool), Some(0), "the assignment keeps the hold");
         pool.release_job("w1", "exec:1");
         assert_eq!(free(&pool), Some(8));
+    }
+
+    #[test]
+    fn a_listed_worker_shows_only_exec_labels_and_devices() {
+        use gradient_wire::types::{ExecAllow, ExecDefaults};
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.update_exec_inventory(
+            "w1",
+            Some(ExecInventory {
+                labels: vec!["w1".into()],
+                devices: vec![DeviceClass {
+                    name: "kvm".into(),
+                    total: 1,
+                    free: 1,
+                }],
+                mounts: vec!["datasets".into()],
+                secrets: vec!["hf-token".into()],
+                allow: ExecAllow {
+                    custom_images: true,
+                    ..ExecAllow::default()
+                },
+                defaults: ExecDefaults {
+                    network: true,
+                    ..ExecDefaults::default()
+                },
+                warm_guests: 2,
+            }),
+        );
+
+        let listed = serde_json::to_value(&pool.all_workers()[0]).expect("serializes");
+
+        assert_eq!(
+            listed["exec"],
+            serde_json::json!({
+                "labels": ["w1"],
+                "devices": [{ "name": "kvm", "total": 1, "free": 1 }],
+            })
+        );
     }
 }

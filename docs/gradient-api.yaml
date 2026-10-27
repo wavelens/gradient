@@ -735,7 +735,7 @@ paths:
       - admin
       summary: Get connected worker
       description: |-
-        Returns one connected worker with its capabilities, assigned job counts and exec inventory. Device `free` counts leave out devices held by assigned exec jobs.
+        Returns one connected worker with its capabilities, assigned job counts, exec labels and exec devices. Device `free` counts leave out devices held by assigned exec jobs.
 
         Same access as `listWorkers`. Answers 404 when no worker with this id is connected.
       operationId: getWorker
@@ -13471,20 +13471,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SeriesPoint'
-    BoardExec:
-      type: object
-      required:
-      - labels
-      - devices
-      properties:
-        labels:
-          type: array
-          items:
-            type: string
-        devices:
-          type: array
-          items:
-            $ref: '#/components/schemas/DeviceClass'
     BoardFleetPoint:
       type: object
       required:
@@ -13766,7 +13752,7 @@ components:
           format: int64
         exec:
           oneOf:
-          - $ref: '#/components/schemas/BoardExec'
+          - $ref: '#/components/schemas/ExecOffer'
           - type: 'null'
     BuildGraph:
       type: object
@@ -15657,118 +15643,6 @@ components:
           $ref: '#/components/schemas/TaskTriggerId'
         type:
           $ref: '#/components/schemas/TriggerType'
-    ExecAllow:
-      type: object
-      required:
-      - network
-      - ssh
-      - ports
-      - nodes
-      - devices
-      - mounts
-      - custom_images
-      - retries
-      properties:
-        network:
-          type: boolean
-        ssh:
-          type: boolean
-        ports:
-          type: array
-          items: false
-          prefixItems:
-          - type: integer
-            format: int32
-            minimum: 0
-          - type: integer
-            format: int32
-            minimum: 0
-        nodes:
-          type: integer
-          format: int32
-          minimum: 0
-        devices:
-          type: array
-          items:
-            type: string
-        mounts:
-          type: array
-          items:
-            type: string
-        custom_images:
-          type: boolean
-        timeout_secs:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
-        max_silent_secs:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
-        retries:
-          type: integer
-          format: int32
-          minimum: 0
-    ExecDefaults:
-      type: object
-      required:
-      - network
-      - ssh
-      - mounts
-      properties:
-        network:
-          type: boolean
-        ssh:
-          type: boolean
-        mounts:
-          type: array
-          items:
-            type: string
-        max_silent_secs:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
-    ExecInventory:
-      type: object
-      required:
-      - labels
-      - devices
-      - mounts
-      - secrets
-      - allow
-      - defaults
-      - warm_guests
-      properties:
-        labels:
-          type: array
-          items:
-            type: string
-        devices:
-          type: array
-          items:
-            $ref: '#/components/schemas/DeviceClass'
-        mounts:
-          type: array
-          items:
-            type: string
-        secrets:
-          type: array
-          items:
-            type: string
-        allow:
-          $ref: '#/components/schemas/ExecAllow'
-        defaults:
-          $ref: '#/components/schemas/ExecDefaults'
-        warm_guests:
-          type: integer
-          format: int32
-          minimum: 0
     ExecJobAttemptView:
       type: object
       required:
@@ -15947,6 +15821,20 @@ components:
           type:
           - string
           - 'null'
+    ExecOffer:
+      type: object
+      required:
+      - labels
+      - devices
+      properties:
+        labels:
+          type: array
+          items:
+            type: string
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceClass'
     ExecUnmet:
       type: object
       required:
@@ -20439,7 +20327,7 @@ components:
           uniqueItems: true
         exec:
           oneOf:
-          - $ref: '#/components/schemas/ExecInventory'
+          - $ref: '#/components/schemas/ExecOffer'
           - type: 'null'
     WorkerLiveInfo:
       type: object

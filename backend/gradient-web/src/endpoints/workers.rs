@@ -56,7 +56,7 @@ pub async fn get_workers(
     operation_id = "getWorker",
     tag = "admin",
     summary = "Get connected worker",
-    description = "Returns one connected worker with its capabilities, assigned job counts and exec inventory. Device `free` counts leave out devices held by assigned exec jobs.\n\nSame access as `listWorkers`. Answers 404 when no worker with this id is connected.",
+    description = "Returns one connected worker with its capabilities, assigned job counts, exec labels and exec devices. Device `free` counts leave out devices held by assigned exec jobs.\n\nSame access as `listWorkers`. Answers 404 when no worker with this id is connected.",
     params(("worker" = String, Path)),
     responses((status = OK, description = "Worker", body = WorkerInfo), WebError)
 )]
