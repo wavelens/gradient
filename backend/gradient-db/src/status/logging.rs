@@ -8,7 +8,8 @@ use crate::DbContext;
 use anyhow::{Context, Result};
 use gradient_types::*;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
+    ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, Iterable, PaginatorTrait,
+    QueryFilter,
 };
 use tracing::{error, warn};
 
@@ -150,8 +151,7 @@ pub async fn record_phase_events(
     phase: i16,
     at: chrono::NaiveDateTime,
 ) -> Result<(), sea_orm::DbErr> {
-    // Postgres is capping binds at 65535, and each row is carrying 6 columns.
-    const INSERT_CHUNK: usize = 8192;
+    let insert_chunk = 65535 / gradient_entity::phase_event::Column::iter().count();
     let rows: Vec<_> = subject_ids
         .iter()
         .map(|&subject_id| {
@@ -168,7 +168,7 @@ pub async fn record_phase_events(
         })
         .collect();
 
-    for chunk in rows.chunks(INSERT_CHUNK) {
+    for chunk in rows.chunks(insert_chunk) {
         gradient_entity::phase_event::Entity::insert_many(chunk.to_vec())
             .exec(db)
             .await?;
