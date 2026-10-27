@@ -21,6 +21,7 @@ pub fn config(host_key: PrivateKey) -> russh::server::Config {
         auth_rejection_time: Duration::from_secs(1),
         auth_rejection_time_initial: Some(Duration::ZERO),
         inactivity_timeout: Some(Duration::from_secs(3600)),
+        preferred: gradient_util::ssh::ALGORITHMS,
         ..Default::default()
     }
 }

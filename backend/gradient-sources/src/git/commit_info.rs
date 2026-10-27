@@ -5,10 +5,9 @@
  */
 
 use super::context::TaskGitContext;
-use super::remote::accept_cert;
+use super::ssh::with_private_key;
 use super::url::{git_transport_url, set_shallow_unless_local};
 use crate::SourceError;
-use git2::RemoteCallbacks;
 use gradient_types::input::vec_to_hex;
 use tracing::{debug, instrument};
 
@@ -22,9 +21,13 @@ pub struct HeadCommit {
 
 pub(crate) fn fetch_commit(
     url: &str,
-    ssh_creds: Option<(String, String)>,
+    private_key: Option<&str>,
     refspec: &str,
 ) -> Result<HeadCommit, SourceError> {
+    with_private_key(private_key, || fetch_commit_into_temp_repo(url, refspec))
+}
+
+fn fetch_commit_into_temp_repo(url: &str, refspec: &str) -> Result<HeadCommit, SourceError> {
     let git_error = |e: git2::Error| SourceError::GitCommandFailed {
         stderr: e.message().to_string(),
     };
@@ -34,7 +37,6 @@ pub(crate) fn fetch_commit(
     let repo = git2::Repository::init_bare(temp_dir.path()).map_err(git_error)?;
 
     let mut fo = git2::FetchOptions::new();
-    fo.remote_callbacks(callbacks(ssh_creds));
     set_shallow_unless_local(&mut fo, url);
 
     repo.remote_anonymous(url)
@@ -59,23 +61,6 @@ pub(crate) fn head_refspec(branch: Option<&str>) -> String {
     branch.map_or_else(|| "HEAD".to_owned(), |b| format!("refs/heads/{b}"))
 }
 
-fn callbacks(ssh_creds: Option<(String, String)>) -> RemoteCallbacks<'static> {
-    let mut callbacks = RemoteCallbacks::new();
-    callbacks.certificate_check(|cert, _valid| Ok(accept_cert(cert)));
-    if let Some((private_key, public_key)) = ssh_creds {
-        callbacks.credentials(move |_url, username_from_url, _allowed| {
-            git2::Cred::ssh_key_from_memory(
-                username_from_url.unwrap_or("git"),
-                Some(&public_key),
-                &private_key,
-                None,
-            )
-        });
-    }
-
-    callbacks
-}
-
 impl TaskGitContext<'_> {
     pub(super) async fn head_commit(
         &self,
@@ -94,9 +79,9 @@ impl TaskGitContext<'_> {
 
     async fn fetch_commit(&self, refspec: String) -> Result<HeadCommit, SourceError> {
         let url = git_transport_url(&self.task.repository).to_string();
-        let ssh_creds = self.ssh_creds.clone();
+        let private_key = self.private_key.clone();
 
-        tokio::task::spawn_blocking(move || fetch_commit(&url, ssh_creds, &refspec))
+        tokio::task::spawn_blocking(move || fetch_commit(&url, private_key.as_deref(), &refspec))
             .await
             .map_err(|e| SourceError::GitExecution {
                 error: e.to_string(),

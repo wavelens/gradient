@@ -203,9 +203,12 @@ fn git_checkout(
     ref_: Option<&str>,
     ssh_key: Option<&str>,
 ) -> Result<(String, i64, tempfile::TempDir)> {
+    crate::git::with_private_key(ssh_key, || clone_and_check_out(url, ref_))
+}
+
+fn clone_and_check_out(url: &str, ref_: Option<&str>) -> Result<(String, i64, tempfile::TempDir)> {
     let tmp = tempfile::tempdir().context("create git temp dir")?;
     let repo = git2::build::RepoBuilder::new()
-        .fetch_options(crate::fetch_options_with_ssh(ssh_key))
         .clone(url, tmp.path())
         .with_context(|| format!("clone {url}"))?;
 
