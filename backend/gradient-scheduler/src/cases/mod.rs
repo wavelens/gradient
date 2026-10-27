@@ -114,6 +114,13 @@ impl SchedulerCase {
         case
     }
 
+    pub async fn start_then(shape: Shape, seed: impl AsyncFnOnce(&Self)) -> Self {
+        let case = Self::start_seeded(shape, |_| {}).await;
+        seed(&case).await;
+        case.assert_drift("the seed").await;
+        case
+    }
+
     pub async fn start_with_unstored_outputs(shape: Shape, unstored: i64) -> Self {
         let case = Self::start_seeded(shape, |_| {}).await;
         case.set_unstored_outputs(unstored);

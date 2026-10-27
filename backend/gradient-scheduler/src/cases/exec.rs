@@ -80,8 +80,14 @@ async fn seed_queued_job(case: &SchedulerCase, spec: &ExecSpec) {
         .await;
 }
 
-async fn dispatched(case: &SchedulerCase, spec: &ExecSpec) -> (String, DispatchedJobId) {
-    seed_queued_job(case, spec).await;
+async fn with_queued_job(evaluation: EvaluationId, spec: ExecSpec) -> SchedulerCase {
+    SchedulerCase::start_then(exec_shape(evaluation), async |case| {
+        seed_queued_job(case, &spec).await;
+    })
+    .await
+}
+
+async fn dispatched(case: &SchedulerCase) -> (String, DispatchedJobId) {
     case.connect(W1, w_exec(inventory()), &[]).await;
     case.assign_exec_jobs().await;
     let assignment = case
@@ -106,8 +112,7 @@ async fn the_job(case: &SchedulerCase) -> exec_job::Model {
 #[tokio::test]
 async fn a_queued_exec_job_reaches_a_matching_exec_worker() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(exec_shape(e1)).await;
-    seed_queued_job(&case, &spec()).await;
+    let case = with_queued_job(e1, spec()).await;
     case.connect(W1, w_exec(inventory()), &[]).await;
 
     case.assign_exec_jobs().await;
@@ -143,12 +148,11 @@ async fn a_queued_exec_job_reaches_a_matching_exec_worker() {
 #[tokio::test]
 async fn an_unplaceable_job_stores_its_wait_reason() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(exec_shape(e1)).await;
     let printer = ExecSpec {
         labels: vec!["3d-printer".into()],
         ..spec()
     };
-    seed_queued_job(&case, &printer).await;
+    let case = with_queued_job(e1, printer).await;
     case.connect(W1, w_exec(inventory()), &[]).await;
 
     case.assign_exec_jobs().await;
@@ -174,15 +178,15 @@ async fn an_unplaceable_job_stores_its_wait_reason() {
 #[tokio::test]
 async fn a_lost_worker_requeues_its_exec_job_without_a_retry() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(exec_shape(e1)).await;
-    dispatched(
-        &case,
-        &ExecSpec {
+    let case = with_queued_job(
+        e1,
+        ExecSpec {
             retries: 2,
             ..spec()
         },
     )
     .await;
+    dispatched(&case).await;
 
     case.disconnect(W1).await;
 
@@ -203,15 +207,15 @@ async fn a_lost_worker_requeues_its_exec_job_without_a_retry() {
 #[tokio::test]
 async fn a_non_zero_exit_reported_by_the_worker_restarts_the_job() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(exec_shape(e1)).await;
-    let (key, assignment) = dispatched(
-        &case,
-        &ExecSpec {
+    let case = with_queued_job(
+        e1,
+        ExecSpec {
             retries: 1,
             ..spec()
         },
     )
     .await;
+    let (key, assignment) = dispatched(&case).await;
 
     case.fail(W1, &key, assignment, failure(BuildFailureKind::Permanent))
         .await;
@@ -233,8 +237,8 @@ async fn a_non_zero_exit_reported_by_the_worker_restarts_the_job() {
 #[tokio::test]
 async fn an_abort_sends_abort_job_and_ends_aborted() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(exec_shape(e1)).await;
-    let (key, _) = dispatched(&case, &spec()).await;
+    let case = with_queued_job(e1, spec()).await;
+    let (key, _) = dispatched(&case).await;
     case.signals(W1);
 
     let aborted = case
@@ -371,21 +375,24 @@ async fn an_aborted_evaluation_drops_its_exec_jobs() {
 #[tokio::test]
 async fn a_custom_image_or_finished_job_counts_nowhere() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(exec_shape(e1).entry_point(SECOND_ATTR)).await;
     let spec = serde_json::to_string(&spec()).expect("the spec encodes");
-    case.db
-        .execute(&format!("UPDATE entry_point SET exec = '{spec}'::jsonb"))
-        .await;
-    case.db
-        .execute(&format!(
-            "INSERT INTO exec_job (id, evaluation, entry_point, program_derivation, \
-             image_derivation, requirement, spec, retries_left, status, created_at) \
-             SELECT gen_random_uuid(), e.evaluation, e.id, e.derivation, \
-             CASE WHEN e.eval = '{ATTR}' THEN e.derivation END, '{{}}'::jsonb, e.exec, 0, \
-             CASE WHEN e.eval = '{ATTR}' THEN 0 ELSE 3 END, now() AT TIME ZONE 'UTC' \
-             FROM entry_point e"
-        ))
-        .await;
+    let shape = exec_shape(e1).entry_point(SECOND_ATTR);
+    let case = SchedulerCase::start_then(shape, async |case| {
+        case.db
+            .execute(&format!("UPDATE entry_point SET exec = '{spec}'::jsonb"))
+            .await;
+        case.db
+            .execute(&format!(
+                "INSERT INTO exec_job (id, evaluation, entry_point, program_derivation, \
+                 image_derivation, requirement, spec, retries_left, status, created_at) \
+                 SELECT gen_random_uuid(), e.evaluation, e.id, e.derivation, \
+                 CASE WHEN e.eval = '{ATTR}' THEN e.derivation END, '{{}}'::jsonb, e.exec, 0, \
+                 CASE WHEN e.eval = '{ATTR}' THEN 0 ELSE 3 END, now() AT TIME ZONE 'UTC' \
+                 FROM entry_point e"
+            ))
+            .await;
+    })
+    .await;
     case.connect(W1, w_exec(inventory()), &[]).await;
 
     case.scheduler.refresh_pre_warm().await;
@@ -400,11 +407,7 @@ async fn a_custom_image_or_finished_job_counts_nowhere() {
 #[tokio::test]
 async fn a_reconnected_worker_gets_its_count_again() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(exec_shape(e1)).await;
-    let spec = serde_json::to_string(&spec()).expect("the spec encodes");
-    case.db
-        .execute(&format!("UPDATE entry_point SET exec = '{spec}'::jsonb"))
-        .await;
+    let case = with_queued_job(e1, spec()).await;
     case.connect(W1, w_exec(inventory()), &[]).await;
     assert_eq!(pre_warms(&case.signals(W1)), vec![1], "after 1: W1");
 
@@ -418,11 +421,7 @@ async fn a_reconnected_worker_gets_its_count_again() {
 #[tokio::test]
 async fn a_worker_of_another_project_gets_no_count() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(exec_shape(e1)).await;
-    let spec = serde_json::to_string(&spec()).expect("the spec encodes");
-    case.db
-        .execute(&format!("UPDATE entry_point SET exec = '{spec}'::jsonb"))
-        .await;
+    let case = with_queued_job(e1, spec()).await;
 
     case.connect(W2, w_exec(inventory()), &[ProjectId::now_v7()])
         .await;
