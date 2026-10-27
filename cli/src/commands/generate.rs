@@ -19,8 +19,10 @@ pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
         Commands::Apikey => {
             let token = generate_api_token();
+            let digest = key_file_digest(&token);
+            out.ok(&serde_json::json!({"token": token, "key_file_digest": digest}));
             out.human(format!("API token: {token}"));
-            out.human(format!("key_file digest: {}", key_file_digest(&token)));
+            out.human(format!("key_file digest: {digest}"));
             out.human("");
             out.human("Write the digest to the file referenced by key_file.");
             out.human("Authenticate with 'Authorization: Bearer <API token>'.");

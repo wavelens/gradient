@@ -133,7 +133,8 @@ pub async fn handle(cmd: Commands, out: Output) {
                     ),
                 );
             }
-            set_value(ConfigKey::SelectedProject, project, true);
+            set_value(ConfigKey::SelectedProject, project.clone(), true);
+            out.ok(&serde_json::json!({"selected": true, "project": project}));
             out.human("Project selected.");
         }
 

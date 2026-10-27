@@ -309,6 +309,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                 );
             });
 
+            out.ok(&serde_json::json!({
+                "installed": true,
+                "cache": cache,
+                "machine": machine_host,
+                "netrc_file": netrc_file,
+            }));
             out.human(format!(
                 "netrc credentials for cache '{}' (machine '{}') installed into '{}'.",
                 cache, machine_host, netrc_file
