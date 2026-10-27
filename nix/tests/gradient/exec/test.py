@@ -34,9 +34,11 @@ def fleet_tail():
         parts.append(f"--- {node.name} worker journal ---\n" + node.execute(
             "journalctl -u gradient-worker --no-pager -n 60")[1])
         parts.append(f"--- {node.name} guest consoles ---\n" + node.execute(
-            f"tail -n 15 {GUESTS}/*/console.log 2>/dev/null")[1])
+            f"for f in {GUESTS}/*/console.log; do tr -cd '\\11\\12\\40-\\176' < $f | tail -n 40; done")[1])
         parts.append(f"--- {node.name} guest units ---\n" + node.execute(
-            f"ls -ln {GUESTS}/*/; journalctl -u 'gradient-guest-*' --no-pager -n 60")[1])
+            f"ls -ln {GUESTS}/*/; for s in {GUESTS}/*/api.sock; do "
+            "curl -s --max-time 5 --unix-socket $s http://localhost/api/v1/vm.info | jq -c .state; done; "
+            "journalctl -u 'gradient-guest-*' --no-pager -n 60")[1])
     return "\n".join(parts)
 
 

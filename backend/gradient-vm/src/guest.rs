@@ -18,7 +18,7 @@ use gradient_wire::guest::{
 use serde::Serialize;
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::agent::{GUEST_BOOT_TIMEOUT, GuestBootError, wait_ready};
 use crate::config::{MountConfig, VmConfig};
@@ -217,12 +217,16 @@ impl Guest {
         .await?;
         wait_for_file(&self.dir.join("store.sock"), |_| true).await?;
 
+        let guest = &self.state.guest_id;
         self.api
             .vm_create(&vm_config(image, &self.dir, self.state.cid))
             .await?;
         self.api.vm_boot().await?;
+        info!(%guest, "guest booted; waiting for its agent");
         drop(wait_ready(&self.vsock_socket(), GUEST_BOOT_TIMEOUT).await?);
-        self.api.vm_pause().await
+        self.api.vm_pause().await?;
+        info!(%guest, "warm guest paused");
+        Ok(())
     }
 
     async fn plug_devices(
