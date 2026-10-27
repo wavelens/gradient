@@ -232,6 +232,10 @@ crate::sql! {
             EvaluationId,
         ],
         tier = Bulk,
+        budget = crate::sql::Budget::bulk().buffers(400_000)
+            .because("the fixture's largest evaluation names ~98k jobs; the planner estimates \
+                      a new evaluation at one job and probes derivation_build per job, up to \
+                      three buffers each"),
         flags = [Walk];
 }
 
