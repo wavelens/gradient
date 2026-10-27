@@ -12,6 +12,7 @@ pub const SPLIT_MIN_GAIN: f64 = 0.9;
 pub const NEAR_BEST: f64 = 1.05;
 pub const SHARDS_PER_MEMBER: f64 = 4.0;
 pub const MIN_SHARD_ROUND_TRIPS: f64 = 20.0;
+pub const UNKNOWN_CHILD_MS: f64 = 100.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SplitParams {
@@ -121,11 +122,11 @@ pub fn listed_from_history(costs: &TaskEvalCosts) -> Vec<ListedSet> {
     let paths: BTreeSet<&Vec<String>> = costs.sets.iter().map(|set| &set.path).collect();
     paths
         .iter()
-        .filter(|path| !paths.iter().any(|other| is_strictly_below(path, other)))
         .map(|path| ListedSet {
             path: path.to_vec(),
             children: children_of(costs, path),
         })
+        .filter(|set| !set.children.is_empty())
         .collect()
 }
 
@@ -134,12 +135,14 @@ fn is_strictly_below(path: &[String], ancestor: &[String]) -> bool {
 }
 
 fn children_of(costs: &TaskEvalCosts, set: &[String]) -> Vec<String> {
-    let subtree_paths = costs.subtrees.iter().map(|subtree| &subtree.path);
-    let set_paths = costs.sets.iter().map(|other| &other.path);
-    let children: BTreeSet<&String> = subtree_paths
-        .chain(set_paths)
+    let sets: HashSet<&[String]> = costs.sets.iter().map(|set| set.path.as_slice()).collect();
+    let children: BTreeSet<&String> = costs
+        .subtrees
+        .iter()
+        .map(|subtree| &subtree.path)
         .filter(|path| is_strictly_below(path, set))
         .map(|path| &path[set.len()])
+        .filter(|child| !sets.contains(child_path(set, child).as_slice()))
         .collect();
 
     children.into_iter().cloned().collect()
@@ -209,7 +212,7 @@ impl CostIndex {
         known
             .len()
             .checked_sub(1)
-            .map_or(0.0, |last| known[last / 2])
+            .map_or(UNKNOWN_CHILD_MS, |last| known[last / 2])
     }
 }
 
@@ -265,8 +268,11 @@ fn one_member_wall_ms(
     shards: &[PlannedShard],
     params: &SplitParams,
 ) -> f64 {
-    let sets: HashSet<&[String]> = shards.iter().map(|shard| shard.set.as_slice()).collect();
-    let startup_ms: f64 = sets.iter().map(|set| startup_of(startups, set)).sum();
+    let mut paid = HashSet::new();
+    let startup_ms: f64 = shards
+        .iter()
+        .map(|shard| unpaid_startup_ms(startups, &mut paid, &shard.set))
+        .sum();
     let work_ms: f64 = shards.iter().map(|shard| shard.predicted_ms).sum();
 
     startup_ms + work_ms / params.subprocesses.max(1) as f64
@@ -283,10 +289,7 @@ fn simulate(
     let mut paid: Vec<HashSet<&[String]>> = vec![HashSet::new(); members];
     for shard in shards {
         let member = first_free(&free_at_ms);
-        if paid[member].insert(shard.set.as_slice()) {
-            free_at_ms[member] += startup_of(startups, &shard.set);
-        }
-
+        free_at_ms[member] += unpaid_startup_ms(startups, &mut paid[member], &shard.set);
         free_at_ms[member] += shard.predicted_ms / subprocesses + params.round_trip_ms;
     }
 
@@ -302,8 +305,16 @@ fn first_free(free_at_ms: &[f64]) -> usize {
         .map_or(0, |(member, _)| member)
 }
 
-fn startup_of(startups: &HashMap<&[String], f64>, set: &[String]) -> f64 {
-    startups.get(set).copied().unwrap_or(0.0)
+fn unpaid_startup_ms<'a>(
+    startups: &HashMap<&[String], f64>,
+    paid: &mut HashSet<&'a [String]>,
+    set: &'a [String],
+) -> f64 {
+    (1..=set.len())
+        .map(|len| &set[..len])
+        .filter(|prefix| paid.insert(prefix))
+        .filter_map(|prefix| startups.get(prefix))
+        .sum()
 }
 
 #[cfg(test)]
@@ -412,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_subtrees_count_toward_their_ancestor() {
+    fn a_nested_set_is_listed_on_its_own_and_pays_its_ancestors() {
         let costs = TaskEvalCosts {
             sets: vec![
                 set(&["lp", "x86"], 3000.0),
@@ -430,11 +441,41 @@ mod tests {
         assert_eq!(
             listed,
             vec![ListedSet {
-                path: segs(&["lp", "x86"]),
-                children: segs(&["python3Packages"]),
+                path: segs(&["lp", "x86", "python3Packages"]),
+                children: segs(&["numpy", "requests"]),
             }]
         );
         assert_eq!(shards.len(), 1);
-        assert_eq!(shards[0].predicted_ms, 3500.0);
+        assert_eq!(shards[0].predicted_ms, 3000.0);
+        assert_eq!(
+            predict_wall_ms(&costs, &shards, 1, &params(1)),
+            3000.0 + 500.0 + 3000.0 / 4.0
+        );
+    }
+
+    #[test]
+    fn a_large_nested_set_is_spread_over_every_member() {
+        let mut costs = flat_flake(&["hydraJobs", "python"], 300.0, 400, 1000.0);
+        costs.sets.push(set(&["hydraJobs"], 10_000.0));
+
+        let forecast = forecast_wall_ms(&costs, &params(4));
+
+        assert!(
+            forecast.windows(2).all(|pair| pair[1] < pair[0]),
+            "{forecast:?}"
+        );
+        assert_eq!(choose_members(&costs, &params(4)), 4);
+    }
+
+    #[test]
+    fn children_without_any_history_cost_a_nominal_amount() {
+        let listed = [ListedSet {
+            path: segs(&["s"]),
+            children: segs(&["a", "b", "c"]),
+        }];
+
+        let shards = plan_shards(&TaskEvalCosts::default(), &listed, 1, &params(1));
+
+        assert_eq!(shards[0].predicted_ms, 3.0 * UNKNOWN_CHILD_MS);
     }
 }
