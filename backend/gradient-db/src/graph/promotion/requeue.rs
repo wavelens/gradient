@@ -83,8 +83,7 @@ pub(super) fn requeue_failed_shared_builds_sql() -> String {
         UPDATE derivation_build db
         SET status = {created}, attempt = 0{FORGET_STALE_UPSTREAM_MISS},
             updated_at = (now() AT TIME ZONE 'UTC')
-        WHERE db.derivation = ANY($1) AND db.status IN ({requeueable})
-          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)
+        WHERE db.derivation = ANY($1) AND db.status IN ({requeueable}){SKIP_BLOCKED}
         RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
         created = crate::sql::status::to(BuildStatus::REQUEUE),
@@ -164,7 +163,10 @@ fn kept_failed_cte_body() -> String {
     )
 }
 
-const SKIP_KEPT: &str = "\n          AND db.derivation NOT IN (SELECT derivation FROM kept_failed)";
+const SKIP_KEPT: &str =
+    "\n          AND NOT EXISTS (SELECT 1 FROM kept_failed x WHERE x.derivation = db.derivation)";
+const SKIP_BLOCKED: &str = "\n          AND NOT EXISTS \
+     (SELECT 1 FROM deterministic_blocked x WHERE x.derivation = db.derivation)";
 
 fn requeue_failed_closure_fresh_sql() -> String {
     format!(
@@ -189,9 +191,7 @@ pub(super) fn requeue_failed_closure_blocked_sql() -> String {
         requeue_ctes("SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1"),
         kept_failed_cte_body(),
         requeue_closure_update(
-            &format!(
-                "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked){SKIP_KEPT}"
-            ),
+            &format!("{SKIP_BLOCKED}{SKIP_KEPT}"),
             FORGET_STALE_UPSTREAM_MISS,
         ),
     )
@@ -271,10 +271,7 @@ pub(super) fn requeue_failed_import_closure_sql() -> String {
     format!(
         "{}\n{}",
         requeue_ctes("SELECT unnest($1::uuid[])"),
-        requeue_closure_update(
-            "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)",
-            FORGET_STALE_UPSTREAM_MISS,
-        ),
+        requeue_closure_update(SKIP_BLOCKED, FORGET_STALE_UPSTREAM_MISS),
     )
 }
 
@@ -371,7 +368,8 @@ mod tests {
         );
         assert!(
             sql.contains(&format!(
-                "db.status IN ({}) AND db.derivation NOT IN (SELECT derivation FROM kept_failed) RETURNING",
+                "db.status IN ({}) AND NOT EXISTS \
+                 (SELECT 1 FROM kept_failed x WHERE x.derivation = db.derivation) RETURNING",
                 crate::sql::status::build_in(&BuildStatus::REQUEUEABLE)
             )),
             "{sql}"
@@ -407,8 +405,10 @@ mod tests {
                 "the dependents of the aborted build stay failed: {sql}"
             );
             assert!(
-                sql.contains("db.derivation NOT IN (SELECT derivation FROM kept_failed)"),
-                "{sql}"
+                sql.contains(
+                    "NOT EXISTS (SELECT 1 FROM kept_failed x WHERE x.derivation = db.derivation)"
+                ),
+                "an anti join, never a NOT IN rescanned per shared build: {sql}"
             );
         }
     }
@@ -538,7 +538,10 @@ mod tests {
                 "must close upward over parents so DependencyFailed victims are caught: {sql}"
             );
             assert!(
-                sql.contains("db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)"),
+                sql.contains(
+                    "NOT EXISTS (SELECT 1 FROM deterministic_blocked x \
+                     WHERE x.derivation = db.derivation)"
+                ) && !sql.contains("NOT IN (SELECT"),
                 "the thaw must skip the whole poisoned subtree: {sql}"
             );
             assert!(

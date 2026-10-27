@@ -230,7 +230,9 @@ mod tests {
             .find(|s| s.contains("db.status IN (4, 5, 6, 9)"))
             .expect("the unstick thaws");
         assert!(
-            thaw.contains("NOT IN (SELECT derivation FROM deterministic_blocked)"),
+            thaw.contains(
+                "NOT EXISTS (SELECT 1 FROM deterministic_blocked x WHERE x.derivation = db.derivation)"
+            ),
             "{thaw}"
         );
     }
