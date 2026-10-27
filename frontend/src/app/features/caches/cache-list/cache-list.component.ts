@@ -21,12 +21,11 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
-  NameFieldComponent,
   NavCardComponent,
   PageLayoutComponent,
   SelectComponent,
 } from '@gradient/ui/ui';
-import { nameAvailability } from '@shared/forms';
+import { NameFieldsComponent, nameAvailability } from '@shared/forms';
 import { Cache } from '@core/models';
 
 @Component({
@@ -49,7 +48,7 @@ import { Cache } from '@core/models';
     CardGridComponent,
     BadgeComponent,
     SelectComponent,
-    NameFieldComponent,
+    NameFieldsComponent,
   ],
   templateUrl: './cache-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -135,16 +134,6 @@ export class CacheListComponent implements OnInit {
     this.names.reset();
     this.createError.set(null);
     this.showCreateDialog.set(true);
-  }
-
-  onCacheDisplayNameChange(value: string): void {
-    const name = this.names.suggest(value);
-    if (name !== null) this.newCache.name = name;
-  }
-
-  onCacheNameChange(name: string): void {
-    this.newCache.name = name;
-    this.names.check(name);
   }
 
   createCache(): void {

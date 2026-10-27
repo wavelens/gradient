@@ -5,7 +5,6 @@
  */
 
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { TeamsService } from '@core/services/teams.service';
 import { ConfigService } from '@core/services/config.service';
@@ -16,35 +15,29 @@ import {
   ButtonComponent,
   DialogComponent,
   EmptyStateComponent,
-  FormFieldComponent,
-  InputDirective,
   LoadingSpinnerComponent,
   MessageBannerComponent,
-  NameFieldComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
 } from '@gradient/ui/ui';
-import { nameAvailability } from '@shared/forms';
+import { NameFieldsComponent, nameAvailability } from '@shared/forms';
 
 @Component({
   selector: 'app-teams-list',
   standalone: true,
   imports: [
-    FormsModule,
     RouterModule,
     BadgeComponent,
     ButtonComponent,
     DialogComponent,
     EmptyStateComponent,
-    FormFieldComponent,
-    InputDirective,
-    LoadingSpinnerComponent,
+        LoadingSpinnerComponent,
     MessageBannerComponent,
-    NameFieldComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
+    NameFieldsComponent,
   ],
   templateUrl: './teams-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -73,16 +66,6 @@ export class TeamsListComponent implements OnInit {
     this.names.reset();
     this.error.set(null);
     this.showCreate.set(true);
-  }
-
-  onDisplayNameChange(value: string): void {
-    const name = this.names.suggest(value);
-    if (name !== null) this.form.name = name;
-  }
-
-  onNameChange(name: string): void {
-    this.form.name = name;
-    this.names.check(name);
   }
 
   canSubmit(): boolean {

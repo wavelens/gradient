@@ -23,14 +23,13 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
-  NameFieldComponent,
   NavCardComponent,
   PageLayoutComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { EvalStatusBadgeComponent, LabelHelpComponent, StarButtonComponent } from '@shared/ui';
 import { repositoryUrlError } from '@shared/text';
-import { nameAvailability } from '@shared/forms';
+import { NameFieldsComponent, nameAvailability } from '@shared/forms';
 import { StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 
 const RESERVED_TASK_NAMES = ['build-request'];
@@ -55,9 +54,9 @@ const RESERVED_TASK_NAMES = ['build-request'];
     NavCardComponent,
     PageLayoutComponent,
     FormFieldComponent,
-    NameFieldComponent,
     StarButtonComponent,
     SubmitDirective,
+    NameFieldsComponent,
   ],
   templateUrl: './project-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -131,16 +130,6 @@ export class ProjectDetailComponent implements OnInit {
     this.names.reset();
     this.createError.set(null);
     this.showCreateDialog.set(true);
-  }
-
-  onTaskDisplayNameChange(value: string): void {
-    const name = this.names.suggest(value);
-    if (name !== null) this.newTask.name = name;
-  }
-
-  onTaskNameChange(name: string): void {
-    this.newTask.name = name;
-    this.names.check(name);
   }
 
   get wildcardInvalid(): boolean {

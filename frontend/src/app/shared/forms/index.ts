@@ -5,3 +5,4 @@
  */
 
 export * from './name-availability';
+export * from './name-fields.component';

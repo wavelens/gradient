@@ -81,27 +81,12 @@
     </div>
   }
   <div>
-    <gr-form-field label="Display Name *" for="display_name">
-      <input
-        grInput
-        id="display_name"
-        [(ngModel)]="newProject.display_name"
-        placeholder="My Project"
-        (ngModelChange)="onProjectDisplayNameChange($event)"
-        (keyup.enter)="createProject()"
-      />
-    </gr-form-field>
-
-    <gr-name-field
-      required
-      inputId="name"
-      placeholder="project-name"
-      [state]="names.state()"
-      [ngModel]="newProject.name"
-      (ngModelChange)="onProjectNameChange($event)"
-      (input)="names.markEdited()"
-      (keyup.enter)="createProject()"
-      name="projectName"
+    <app-name-fields
+      noun="project"
+      [names]="names"
+      [(displayName)]="newProject.display_name"
+      [(name)]="newProject.name"
+      (submitted)="createProject()"
     />
 
     <gr-form-field label="Description" for="description">

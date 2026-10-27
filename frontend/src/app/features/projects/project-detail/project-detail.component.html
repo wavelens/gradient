@@ -66,27 +66,12 @@ width="550px"
   </div>
 }
 <div>
-  <gr-form-field label="Display Name *" for="proj-display">
-    <input
-      grInput
-      id="proj-display"
-      [(ngModel)]="newTask.display_name"
-      placeholder="My Task"
-      (ngModelChange)="onTaskDisplayNameChange($event)"
-      (keyup.enter)="createTask()"
-    />
-  </gr-form-field>
-
-  <gr-name-field
-    required
-    inputId="proj-name"
-    placeholder="task-name"
-    [state]="names.state()"
-    [ngModel]="newTask.name"
-    (ngModelChange)="onTaskNameChange($event)"
-    (input)="names.markEdited()"
-    (keyup.enter)="createTask()"
-    name="taskName"
+  <app-name-fields
+    noun="task"
+    [names]="names"
+    [(displayName)]="newTask.display_name"
+    [(name)]="newTask.name"
+    (submitted)="createTask()"
   />
 
   <gr-form-field label="Description" for="proj-desc">

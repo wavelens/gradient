@@ -116,25 +116,12 @@
     </div>
   }
   <div>
-    <gr-form-field label="Display Name *" for="cache-display">
-      <input
-        grInput
-        id="cache-display"
-        [(ngModel)]="newCache.display_name"
-        placeholder="My Cache"
-        (ngModelChange)="onCacheDisplayNameChange($event)"
-      />
-    </gr-form-field>
-
-    <gr-name-field
-      required
-      inputId="cache-name"
-      placeholder="cache-name"
-      [state]="names.state()"
-      [ngModel]="newCache.name"
-      (ngModelChange)="onCacheNameChange($event)"
-      (input)="names.markEdited()"
-      name="cacheName"
+    <app-name-fields
+      noun="cache"
+      [names]="names"
+      [(displayName)]="newCache.display_name"
+      [(name)]="newCache.name"
+      (submitted)="createCache()"
     />
 
     <gr-form-field label="Description" for="cache-desc">
