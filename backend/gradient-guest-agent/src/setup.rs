@@ -27,6 +27,7 @@ pub const PROGRAM_USER: &str = "gradient";
 const CONTEXT_FILE: &str = "/run/gradient/context.json";
 const SECRETS_DIR: &str = "/run/gradient/secrets";
 const PHASE_PAYLOAD_FILE: &str = "/run/gradient/phase-payload";
+const RESOLV_CONF: &str = "/etc/resolv.conf";
 const DEVICE_LINK_DIR: &str = "/dev/gradient";
 const DEVICE_GROUP: &str = "dialout";
 const INTERFACE_WAIT: Duration = Duration::from_secs(10);
@@ -138,7 +139,28 @@ async fn configure_network(network: &GuestNetwork) -> Result<()> {
     let address = format!("{}/{}", network.address, network.prefix);
     run_command("ip", &["link", "set", "dev", &interface, "up"]).await?;
     run_command("ip", &["addr", "add", &address, "dev", &interface]).await?;
-    run_command("ip", &["route", "add", "default", "via", &network.gateway]).await
+    run_command("ip", &["route", "add", "default", "via", &network.gateway]).await?;
+    write_resolv_conf(Path::new(RESOLV_CONF), &network.nameservers).await
+}
+
+async fn write_resolv_conf(path: &Path, nameservers: &[String]) -> Result<()> {
+    if nameservers.is_empty() {
+        return Ok(());
+    }
+
+    let lines: String = nameservers
+        .iter()
+        .map(|nameserver| format!("nameserver {nameserver}\n"))
+        .collect();
+    match tokio::fs::remove_file(path).await {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            return Err(e).with_context(|| format!("remove {}", path.display()));
+        }
+        _ => {}
+    }
+    tokio::fs::write(path, lines)
+        .await
+        .with_context(|| format!("write {}", path.display()))
 }
 
 async fn guest_interface() -> Result<String> {
@@ -253,4 +275,31 @@ async fn run_command(program: &str, args: &[&str]) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_resolv_conf;
+
+    #[tokio::test]
+    async fn the_nameservers_replace_a_linked_resolv_conf() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("static-resolv.conf");
+        std::fs::write(&target, "nameserver 127.0.0.53\n").expect("target");
+        let path = dir.path().join("resolv.conf");
+        std::os::unix::fs::symlink(&target, &path).expect("symlink");
+
+        write_resolv_conf(&path, &["10.233.0.1".to_owned(), "9.9.9.9".to_owned()])
+            .await
+            .expect("write");
+
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "nameserver 10.233.0.1\nnameserver 9.9.9.9\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read"),
+            "nameserver 127.0.0.53\n"
+        );
+    }
 }
