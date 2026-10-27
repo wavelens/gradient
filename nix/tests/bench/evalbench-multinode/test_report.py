@@ -43,6 +43,12 @@ class ReportTest(unittest.TestCase):
             "small flake: ran on 2 jobs",
         ])
 
+    def test_a_half_measured_small_flake_renders_the_large_runs_only(self):
+        runs = {1: run(100_000)}
+        small = {"standalone": run(10_000)}
+        self.assertEqual(verdicts(runs, small), [])
+        self.assertNotIn("small flake", render(runs, small))
+
     def test_targets_met_report_nothing_and_render_every_run(self):
         runs = {n: run(100_000 // n, jobs=n) for n in range(1, 5)}
         small = {"standalone": run(10_000), "multinode": run(10_500)}
