@@ -46,33 +46,35 @@ pub struct PlannedShard {
 }
 
 pub fn choose_members(costs: &TaskEvalCosts, params: &SplitParams) -> usize {
-    if costs.subtrees.is_empty() || params.max_members < 2 {
-        return 1;
-    }
-
-    let listed = listed_from_history(costs);
-    let wall_ms = |members: usize| {
-        let shards = plan_shards(costs, &listed, members, params);
-        predict_wall_ms(costs, &shards, members, params)
-    };
-
-    let alone_ms = wall_ms(1);
-    let split: Vec<(usize, f64)> = (2..=params.max_members)
-        .map(|members| (members, wall_ms(members)))
-        .collect();
-    let fastest_ms = split
-        .iter()
-        .map(|(_, ms)| *ms)
-        .fold(f64::INFINITY, f64::min);
-    let Some(&(members, ms)) = split.iter().find(|(_, ms)| *ms <= fastest_ms * NEAR_BEST) else {
+    let forecast = forecast_wall_ms(costs, params);
+    let Some((&alone_ms, split)) = forecast.split_first() else {
         return 1;
     };
 
-    if ms <= alone_ms * SPLIT_MIN_GAIN {
-        members
+    let fastest_ms = split.iter().copied().fold(f64::INFINITY, f64::min);
+    let Some(members) = split.iter().position(|ms| *ms <= fastest_ms * NEAR_BEST) else {
+        return 1;
+    };
+
+    if split[members] <= alone_ms * SPLIT_MIN_GAIN {
+        members + 2
     } else {
         1
     }
+}
+
+pub fn forecast_wall_ms(costs: &TaskEvalCosts, params: &SplitParams) -> Vec<f64> {
+    if costs.subtrees.is_empty() || params.max_members < 2 {
+        return Vec::new();
+    }
+
+    let listed = listed_from_history(costs);
+    (1..=params.max_members)
+        .map(|members| {
+            let shards = plan_shards(costs, &listed, members, params);
+            predict_wall_ms(costs, &shards, members, params)
+        })
+        .collect()
 }
 
 pub fn plan_shards(
