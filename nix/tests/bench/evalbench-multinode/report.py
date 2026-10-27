@@ -48,8 +48,12 @@ def statement_verdicts(runs):
     return failed
 
 
+def small_complete(small):
+    return bool(small) and "standalone" in small and "multinode" in small
+
+
 def small_verdicts(small):
-    if not small:
+    if not small_complete(small):
         return []
 
     standalone, multinode = small["standalone"], small["multinode"]
@@ -75,7 +79,7 @@ def run_line(runs, n):
 
 def render(runs, small):
     lines = [run_line(runs, n) for n in sorted(runs)]
-    if small:
+    if small_complete(small):
         standalone, multinode = small["standalone"], small["multinode"]
         lines.append(f"small flake: {standalone['wall_ms'] / 1000:.1f} s standalone,"
                      f" {multinode['wall_ms'] / 1000:.1f} s with 4 workers up on {jobs_text(multinode['jobs'])}")

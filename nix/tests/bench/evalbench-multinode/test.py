@@ -162,6 +162,20 @@ def save_slow_spans(label):
     print(f"spans by total time since the previous run, {label}:\n{heaviest}\n\nspans over a second:\n{timeline}")
 
 
+def save_eval_costs(label):
+    text = psql(
+        "SELECT array_to_string(s.path, '.') || ': startup ' || round(coalesce(s.startup_ms, 0)) || ' ms, '"
+        " || s.samples || ' samples, ' || count(t.id) || ' children, '"
+        " || round(coalesce(sum(t.attrs * t.ms_per_attr), 0)) || ' ms work, median child '"
+        " || round(coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY t.attrs * t.ms_per_attr), 0)) || ' ms, max child '"
+        " || round(coalesce(max(t.attrs * t.ms_per_attr), 0)) || ' ms'"
+        " FROM eval_set_cost s LEFT JOIN eval_subtree_cost t ON t.task = s.task"
+        " AND cardinality(t.path) = cardinality(s.path) + 1 AND t.path[1:cardinality(s.path)] = s.path"
+        " GROUP BY s.id, s.path, s.startup_ms, s.samples ORDER BY s.path"
+    )
+    print(f"learned costs after {label}:\n{text}")
+
+
 def active_statements():
     return psql(
         "SELECT to_char(now(), 'HH24:MI:SS') || ' ' || coalesce(wait_event_type || '/' || wait_event, 'running')"
@@ -198,6 +212,7 @@ def measure(token, task):
     finally:
         save_slow_statements(f"{task}-{workers}")
         save_slow_spans(f"{task}-{workers}")
+        save_eval_costs(f"{task}-{workers}")
     statements = int(psql(
         "SELECT coalesce(sum(s.calls), 0) FROM pg_stat_statements s"
         " JOIN pg_roles r ON r.oid = s.userid WHERE r.rolname = 'gradient'"
