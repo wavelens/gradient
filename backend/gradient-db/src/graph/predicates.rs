@@ -36,6 +36,15 @@ pub const NEED_BUILD_STATUSES: [BuildStatus; 5] = [
     BuildStatus::Skipped,
 ];
 
+pub const BUILDS_ONCE_WANTED: [BuildStatus; 6] = [
+    BuildStatus::Created,
+    BuildStatus::Queued,
+    BuildStatus::Building,
+    BuildStatus::Aborted,
+    BuildStatus::FailedTransient,
+    BuildStatus::Skipped,
+];
+
 pub fn blocks_evaluation(status: BuildStatus, wanted: bool) -> bool {
     if !NEED_BUILD_STATUSES.contains(&status) {
         return false;
@@ -64,7 +73,7 @@ pub fn builder_predicate(shared_build: &str, walked: &str) -> String {
     format!(
         "{walked}.walked AND {shared_build}.probed AND NOT {shared_build}.cache_available \
          AND {shared_build}.status IN ({pending})",
-        pending = crate::sql::status::build_in(&BUILDER_STATUSES),
+        pending = crate::sql::status::build_in(&BUILDS_ONCE_WANTED),
     )
 }
 
@@ -295,6 +304,20 @@ mod tests {
         assert!(
             sql.contains("FROM build_job bj WHERE bj.derivation = db.derivation"),
             "an unnamed shared build is still not promotable: {sql}"
+        );
+    }
+
+    #[test]
+    fn the_walk_steps_through_every_builder_and_everything_a_thaw_would_build() {
+        for status in BUILDER_STATUSES {
+            assert!(BUILDS_ONCE_WANTED.contains(&status), "{status:?}");
+        }
+        for status in BuildStatus::THAW_WANTED.from {
+            assert!(BUILDS_ONCE_WANTED.contains(status), "{status:?}");
+        }
+        assert_eq!(
+            BUILDS_ONCE_WANTED.len(),
+            BUILDER_STATUSES.len() + BuildStatus::THAW_WANTED.from.len()
         );
     }
 

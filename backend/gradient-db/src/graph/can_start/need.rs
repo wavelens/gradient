@@ -740,14 +740,14 @@ mod tests {
                  WHERE p.derivation = pe.parent AND p.wanted \
                  AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
                  AND ((pw.walked AND p.probed AND NOT p.cache_available \
-                 AND p.status IN (0, 1, 2, 8)) OR pe.kind IN (1, 2))))"
+                 AND p.status IN (0, 1, 2, 5, 8, 10)) OR pe.kind IN (1, 2))))"
             ),
             "{walk}"
         );
         assert!(
             walk.contains(
                 "FROM seeds s, LATERAL (SELECT (w.walked AND rb.probed AND NOT rb.cache_available \
-                 AND rb.status IN (0, 1, 2, 8)) AS builder FROM derivation_build rb \
+                 AND rb.status IN (0, 1, 2, 5, 8, 10)) AS builder FROM derivation_build rb \
                  JOIN derivation w ON w.id = rb.derivation WHERE rb.derivation = s.derivation \
                  AND (NOT rb.fetchable AND rb.status NOT IN (4, 6, 9)) OFFSET 0) b"
             ),
