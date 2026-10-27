@@ -100,8 +100,8 @@ flowchart LR
 | Part | Location |
 |---|---|
 | Guest unit | Transient `gradient-guest-<id>.service` in `gradient-guests.slice`, started over D-Bus |
-| Supervisor | Main process of the unit, `gradient-worker --guest-supervisor <dir>` as root |
-| Guest directory | `/var/lib/gradient-worker/guests/<id>/`, mode `2770` |
+| Supervisor | Main process of the unit, `gradient-worker --guest-supervisor <dir>` as root with the worker's group |
+| Guest directory | `/var/lib/gradient-worker/guests/<id>/`, mode `0770` |
 | Files | `state.json`, `console.log`, `api.sock`, `vsock.sock`, `control.sock`, `store.sock`, `work/`, `mounts/<name>.sock` |
 
 - Supervisors own cloud-hypervisor, every virtiofsd, the taps and the USB/IP bindings. Guests never belong to the worker process.

@@ -77,7 +77,7 @@ impl GuestUnits {
         Ok(Self { manager })
     }
 
-    pub async fn start(&self, id: &GuestId, argv: Vec<String>) -> Result<()> {
+    pub async fn start(&self, id: &GuestId, argv: Vec<String>, group: u32) -> Result<()> {
         let Some(program) = argv.first().cloned() else {
             bail!("guest unit without a command");
         };
@@ -86,6 +86,7 @@ impl GuestUnits {
         let mut properties = vec![
             ("Description", Value::from(format!("Gradient guest {id}"))),
             ("ExecStart", Value::from(exec_start)),
+            ("Group", Value::from(group.to_string())),
             ("UMask", Value::from(0o007_u32)),
             ("LimitMEMLOCK", Value::from(u64::MAX)),
             ("KillMode", Value::from("control-group")),

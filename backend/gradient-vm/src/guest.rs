@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -195,12 +195,16 @@ impl Guest {
     async fn start_unit(&self, units: &GuestUnits, config: &VmConfig) -> Result<()> {
         std::fs::create_dir_all(&self.dir)
             .with_context(|| format!("create {}", self.dir.display()))?;
-        std::fs::set_permissions(&self.dir, std::fs::Permissions::from_mode(0o2770))?;
+        std::fs::set_permissions(&self.dir, std::fs::Permissions::from_mode(0o770))
+            .with_context(|| format!("open {} to the guest unit", self.dir.display()))?;
+        let group = std::fs::metadata(&self.dir)
+            .with_context(|| format!("read the group of {}", self.dir.display()))?
+            .gid();
         self.save()?;
 
         let mut argv = config.supervisor_command.clone();
         argv.push(self.dir.display().to_string());
-        units.start(&self.state.guest_id, argv).await
+        units.start(&self.state.guest_id, argv, group).await
     }
 
     async fn start_vm(&mut self, image: &GuestImage) -> Result<()> {
