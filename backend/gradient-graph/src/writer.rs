@@ -30,7 +30,8 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// Postgres is enforcing the budget per statement as well.
 /// The rollback is waiting for the running statement and cannot bound it alone.
 pub const GRAPH_TX_BUDGET: Duration = Duration::from_secs(120);
-pub const GRAPH_TX_ATTEMPTS: u32 = 3;
+pub const GRAPH_TX_ATTEMPTS: u32 = 5;
+const GRAPH_TX_RETRY_DELAY: Duration = Duration::from_millis(250);
 pub const RECORD_ROW_BUDGET: usize = 5000;
 pub const NAR_COMMIT_BUDGET: usize = 128;
 pub const NAR_FLUSH_TIME: Duration = Duration::from_millis(100);
@@ -388,6 +389,7 @@ where
         match transact_once(ctx, budget, &work).await {
             Err(e) if attempt < GRAPH_TX_ATTEMPTS && is_retryable(&e) => {
                 warn!(attempt, error = %e, "graph transaction retried");
+                tokio::time::sleep(GRAPH_TX_RETRY_DELAY * attempt).await;
                 attempt += 1;
             }
             outcome => return outcome,
