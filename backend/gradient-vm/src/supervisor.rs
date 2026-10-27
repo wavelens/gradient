@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -20,6 +21,7 @@ use crate::vsock::connect_vsock;
 
 const SYSFS_USB_DEVICES: &str = "/sys/bus/usb/devices";
 const SYSFS_NET: &str = "/sys/class/net";
+pub const GUEST_USER_ID: u32 = 1000;
 const USBIPD: &str = "127.0.0.1:3240";
 const SOCKET_WAIT: Duration = Duration::from_secs(10);
 const RELAY_RETRY: Duration = Duration::from_secs(1);
@@ -38,6 +40,7 @@ async fn supervise(dir: &Path, cloud_hypervisor: &str, virtiofsd: &str) -> Resul
         &dir.join("store.sock"),
         Path::new("/nix/store"),
         true,
+        &[],
     )?;
     let mut hypervisor = Command::new(cloud_hypervisor)
         .arg("--api-socket")
@@ -127,7 +130,10 @@ impl Host {
         let mounts = self.dir.join("mounts");
         tokio::fs::create_dir_all(&mounts).await?;
         let socket = mounts.join(format!("{tag}.sock"));
-        let child = spawn_virtiofsd(&self.virtiofsd, &socket, shared, read_only)?;
+        let worker = std::fs::metadata(&self.dir)
+            .with_context(|| format!("read the owner of {}", self.dir.display()))?;
+        let ids = owner_translation(worker.uid(), worker.gid());
+        let child = spawn_virtiofsd(&self.virtiofsd, &socket, shared, read_only, &ids)?;
         lock(&self.children).push(child);
         wait_for_socket(&socket).await?;
         Ok(SupervisorReply::MountSocket {
@@ -249,7 +255,23 @@ pub fn usb_bus_id(sysfs_usb_devices: &Path, vendor_product: &str) -> Option<Stri
     })
 }
 
-fn spawn_virtiofsd(bin: &str, socket: &Path, shared: &Path, read_only: bool) -> Result<Child> {
+fn owner_translation(worker_uid: u32, worker_gid: u32) -> [String; 4] {
+    let all = u32::MAX;
+    [
+        format!("--translate-uid=squash-guest:0:{worker_uid}:{all}"),
+        format!("--translate-uid=host:{worker_uid}:{GUEST_USER_ID}:1"),
+        format!("--translate-gid=squash-guest:0:{worker_gid}:{all}"),
+        format!("--translate-gid=host:{worker_gid}:{GUEST_USER_ID}:1"),
+    ]
+}
+
+fn spawn_virtiofsd(
+    bin: &str,
+    socket: &Path,
+    shared: &Path,
+    read_only: bool,
+    ids: &[String],
+) -> Result<Child> {
     let _ = std::fs::remove_file(socket);
     let mut command = Command::new(bin);
     command
@@ -257,6 +279,7 @@ fn spawn_virtiofsd(bin: &str, socket: &Path, shared: &Path, read_only: bool) -> 
         .arg(format!("--shared-dir={}", shared.display()))
         .arg("--sandbox=none")
         .arg("--cache=auto")
+        .args(ids)
         .kill_on_drop(true);
     if read_only {
         command.arg("--readonly");
