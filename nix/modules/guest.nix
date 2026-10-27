@@ -18,7 +18,7 @@
     cmdline = lib.concatStringsSep " " ([ "init=${toplevel}/init" ] ++ config.boot.kernelParams);
   });
 
-  script = name: text: {
+  script = text: {
     mode = "0755";
     text = ''
       #!${pkgs.runtimeShell}
@@ -95,6 +95,7 @@ in {
     };
 
     networking.useDHCP = false;
+    networking.firewall.enable = lib.mkDefault false;
     documentation.enable = false;
     system.stateVersion = lib.mkDefault lib.trivial.release;
 
@@ -112,8 +113,8 @@ in {
     '';
 
     environment = {
-      etc."gradient/pre-script" = script "pre-script" cfg.preScript;
-      etc."gradient/post-script" = script "post-script" cfg.postScript;
+      etc."gradient/pre-script" = script cfg.preScript;
+      etc."gradient/post-script" = script cfg.postScript;
       systemPackages = [
         usbip
         (agentCommand "gradient-phase" "phase")
@@ -124,7 +125,7 @@ in {
     systemd.services.gradient-guest-agent = {
       description = "Guest Agent from Gradient";
       wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.iproute2 pkgs.util-linux usbip ];
+      path = [ pkgs.git pkgs.iproute2 pkgs.util-linux usbip ];
       serviceConfig = {
         ExecStart = lib.getExe' cfg.package "gradient-guest-agent";
         Restart = "always";

@@ -40,6 +40,9 @@
 
     users.users.gradient-worker.extraGroups = [ "kvm" ];
 
+    systemd.tmpfiles.rules = map (mount: "d ${mount.path} 0770 gradient-worker gradient-worker -")
+      (lib.filter (mount: mount.perJob) exec.mounts);
+
     services.udev.extraRules = lib.mkIf (hasDevice "vfio") ''
       SUBSYSTEM=="vfio", GROUP="gradient-worker", MODE="0660"
     '';
@@ -50,7 +53,11 @@
       description = "USB/IP server for Gradient exec job devices";
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
-      serviceConfig.ExecStart = "${lib.getExe' cfg.packages.usbip "usbipd"} -4";
+      serviceConfig = {
+        ExecStart = "${lib.getExe' cfg.packages.usbip "usbipd"} -4";
+        IPAddressAllow = "localhost";
+        IPAddressDeny = "any";
+      };
     };
 
     networking = {
@@ -163,7 +170,7 @@ in {
           imports = [ ./guest.nix ];
           gradient.guest.enable = true;
         }).config.system.build.gradientGuest;
-        defaultText = lib.literalExpression "gradient.lib.mkWorkerImage { modules = [ ]; }";
+        defaultText = lib.literalExpression "(pkgs.nixos { imports = [ ./guest.nix ]; gradient.guest.enable = true; }).config.system.build.gradientGuest";
         example = lib.literalExpression "gradient.lib.mkWorkerImage { modules = [ ./worker-guest.nix ]; }";
         description = ''
           Guest image for exec jobs, built with `gradient.lib.mkWorkerImage`.
@@ -192,6 +199,7 @@ in {
             dev = lib.mkOption {
               type = lib.types.nullOr lib.types.path;
               default = null;
+              apply = lib.mapNullable toString;
               example = "/dev/ttyUSB0";
               description = "Host device file for the guest, relayed over vsock.";
             };
@@ -229,6 +237,7 @@ in {
 
             path = lib.mkOption {
               type = lib.types.path;
+              apply = toString;
               example = "/srv/datasets";
               description = "Host directory for the guest, shared over virtiofs.";
             };
@@ -529,7 +538,8 @@ in {
           path = [
             cfg.packages.git
             cfg.packages.ssh
-          ] ++ lib.optional cfg.capabilities.exec pkgs.iproute2;
+          ] ++ lib.optional cfg.capabilities.exec pkgs.iproute2
+            ++ lib.optional (cfg.capabilities.exec && hasDevice "usb") cfg.packages.usbip;
 
           serviceConfig = {
             Type = "notify";
