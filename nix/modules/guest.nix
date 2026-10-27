@@ -100,9 +100,11 @@ in {
     system.stateVersion = lib.mkDefault lib.trivial.release;
 
     users = {
-      groups = { kvm = { }; dialout = { }; video = { }; render = { }; };
+      groups = { gradient.gid = 1000; kvm = { }; dialout = { }; video = { }; render = { }; };
       users.gradient = {
         isNormalUser = true;
+        uid = 1000;
+        group = "gradient";
         home = "/home/gradient";
         description = "User for the Gradient exec job";
       };
