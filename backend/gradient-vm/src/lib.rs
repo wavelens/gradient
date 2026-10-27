@@ -7,7 +7,9 @@
 pub mod config;
 pub mod devices;
 pub mod state;
+pub mod unit;
 
 pub use config::{DeviceConfig, MountConfig, VmConfig, check_device};
 pub use devices::{DeviceCount, DeviceHold, DeviceInventory, DeviceUnit, HostProbe, SysfsProbe};
 pub use state::{GuestId, GuestState, HeldDevice, StoredRelay, read_states, write_state};
+pub use unit::{GuestUnits, guest_id_of, unit_name};
