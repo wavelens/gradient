@@ -364,7 +364,7 @@ mod tests {
             };
             if self
                 .accepts
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
                 .is_err()
             {
                 return Err(SessionLost.into());
