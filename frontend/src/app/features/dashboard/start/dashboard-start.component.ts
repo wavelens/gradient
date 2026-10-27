@@ -5,21 +5,24 @@
  */
 
 import { ChangeDetectionStrategy, Component } from '@angular/core';
-import { CardGridComponent, NavCardComponent } from '@gradient/ui/ui';
+import { RowComponent, RowListComponent } from '@gradient/ui/ui';
 
 @Component({
   selector: 'app-dashboard-start',
   standalone: true,
-  imports: [CardGridComponent, NavCardComponent],
+  imports: [RowComponent, RowListComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <section class="section">
       <h2>Where do I start?</h2>
-      <gr-card-grid min="240px">
+      <gr-row-list>
         @for (s of steps; track s.title) {
-          <gr-nav-card [icon]="s.icon" [title]="s.title" [description]="s.detail" [link]="[s.link]" />
+          <gr-row [icon]="s.icon" [linkLabel]="s.title" [link]="[s.link]">
+            {{ s.title }}
+            <span slot="meta">{{ s.detail }}</span>
+          </gr-row>
         }
-      </gr-card-grid>
+      </gr-row-list>
     </section>
   `,
 })
