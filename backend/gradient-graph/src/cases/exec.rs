@@ -416,6 +416,35 @@ async fn ten_losses_in_a_row_fail_the_job() {
 }
 
 #[tokio::test]
+async fn a_stale_attempt_number_leaves_the_job_queued() {
+    let (case, e1) = queued_case(with_retries(3)).await;
+    let first = assign(&case, e1, 1, 5).await;
+    end_attempt(&case, first, AttemptEndReason::Lost).await;
+
+    let report = case
+        .transition(Transition::ExecJobAssigned {
+            exec_job: job(&case, e1).await.id,
+            attempt: ExecJobAttemptId::now_v7(),
+            number: 1,
+            assignment: DispatchedJobId::now_v7(),
+            worker: "w2".into(),
+            retries_cap: 5,
+        })
+        .await;
+
+    assert!(
+        report.already_aborted,
+        "after 2: the stale number is refused"
+    );
+    assert_eq!(
+        job(&case, e1).await.status,
+        ExecJobStatus::Queued,
+        "after 2: the job"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn an_abort_never_restarts() {
     let (case, e1) = queued_case(with_retries(3)).await;
     let attempt = assign(&case, e1, 1, 5).await;

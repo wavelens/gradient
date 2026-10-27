@@ -22,7 +22,9 @@ static OPEN_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE exec_job SET status = {starting}, waiting_reason = NULL, \
          retries_left = LEAST(retries_left, $2) \
-         WHERE id = $1 AND status = {queued}",
+         WHERE id = $1 AND status = {queued} \
+         AND NOT EXISTS (SELECT 1 FROM exec_job_attempt a \
+              WHERE a.exec_job = $1 AND a.number >= $3)",
         starting = exec(ExecJobStatus::Starting),
         queued = exec(ExecJobStatus::Queued),
     )
@@ -76,7 +78,7 @@ static ABORT_SQL: LazyLock<String> = LazyLock::new(|| finish_sql(ExecJobStatus::
 
 crate::sql_lazy! {
     OPEN_EXEC_JOB_ATTEMPT = || OPEN_SQL.as_str(),
-        params = [NewUuid, Int(3)],
+        params = [NewUuid, Int(3), Int(1)],
         status_write = StatusWrite::exec_job(ExecJobStatus::Starting);
     REQUEUE_EXEC_JOB = || REQUEUE_SQL.as_str(),
         params = [NewUuid, Int(1)],
@@ -117,6 +119,7 @@ pub async fn open<C: ConnectionTrait>(
         .execute_raw(OPEN_EXEC_JOB_ATTEMPT.bind([
             Value::Uuid(Some(job.into_inner())),
             Value::Int(Some(retries_cap)),
+            Value::Int(Some(number)),
         ]))
         .await?;
     if started.rows_affected() != 1 {
