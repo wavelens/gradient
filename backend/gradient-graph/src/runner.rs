@@ -62,16 +62,18 @@ pub(crate) struct Assignment {
 }
 
 pub(crate) async fn settle(ctx: &DbContext) -> Result<()> {
+    let refused = settle::refused(&ctx.worker_db, ctx.config.runner.enable).await?;
     let settled = settle::waiting(&ctx.worker_db).await?;
     for job in &settled.queued {
         announce(ctx, job, None, None).await;
     }
 
-    for job in &settled.failed {
+    let failed: Vec<_> = refused.iter().chain(&settled.failed).collect();
+    for job in &failed {
         announce(ctx, job, None, None).await;
     }
 
-    finish_evaluations(ctx, settled.failed.iter().map(|job| job.evaluation)).await
+    finish_evaluations(ctx, failed.iter().map(|job| job.evaluation)).await
 }
 
 pub(crate) async fn assigned(ctx: &DbContext, assignment: Assignment) -> Result<bool> {

@@ -62,6 +62,9 @@ async fn seed_queued_job(case: &SchedulerCase, spec: &RunnerSpec) {
     let retries = spec.retries;
     let spec = serde_json::to_string(spec).expect("the spec encodes");
     case.db
+        .execute("UPDATE project SET runner_enabled = true")
+        .await;
+    case.db
         .execute(&format!(
             "UPDATE entry_point SET runner = '{spec}'::jsonb WHERE eval = '{ATTR}'"
         ))

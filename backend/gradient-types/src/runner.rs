@@ -9,15 +9,18 @@ pub use gradient_wire::types::{
     RunnerInventory, RunnerLimits, RunnerRequirement, RunnerSpec, SopsFile, runner_image_attr,
 };
 
+pub const DISABLED_ON_INSTANCE: &str = "runner jobs are disabled on this instance";
+pub const DISABLED_FOR_PROJECT: &str = "runner jobs are disabled for this project";
+
 pub fn runner_refusal(
     instance_enabled: bool,
     project_enabled: bool,
     nodes: u32,
 ) -> Option<&'static str> {
     if !instance_enabled {
-        Some("runner jobs are disabled on this instance")
+        Some(DISABLED_ON_INSTANCE)
     } else if !project_enabled {
-        Some("runner jobs are disabled for this project")
+        Some(DISABLED_FOR_PROJECT)
     } else if nodes > 1 {
         Some("runner jobs with more than one node are not supported yet")
     } else {

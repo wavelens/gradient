@@ -10,7 +10,8 @@ use gradient_types::MRunnerJob;
 use sea_orm::{ConnectionTrait, DbErr, FromQueryResult};
 use std::sync::LazyLock;
 
-use crate::sql::status::{build_in, runner};
+use crate::sql::status::{build_in, runner, runner_in};
+use gradient_types::runner::{DISABLED_FOR_PROJECT, DISABLED_ON_INSTANCE};
 
 #[derive(Debug, Default)]
 pub struct Settled {
@@ -53,11 +54,50 @@ static FAIL_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+fn refuse_sql(message: &str, from: &str, condition: &str) -> String {
+    format!(
+        "UPDATE runner_job r SET status = {failed}, finished_at = (now() AT TIME ZONE 'UTC'), \
+         waiting_reason = NULL, message = '{message}' {from} \
+         WHERE r.status IN ({waiting}) {condition} RETURNING r.*",
+        failed = runner(RunnerJobStatus::Failed),
+        waiting = runner_in(&[RunnerJobStatus::Created, RunnerJobStatus::Queued]),
+    )
+}
+
+static REFUSE_ALL_SQL: LazyLock<String> =
+    LazyLock::new(|| refuse_sql(DISABLED_ON_INSTANCE, "", ""));
+
+static REFUSE_DISABLED_PROJECTS_SQL: LazyLock<String> = LazyLock::new(|| {
+    refuse_sql(
+        DISABLED_FOR_PROJECT,
+        "FROM evaluation ev JOIN task t ON t.id = ev.task JOIN project p ON p.id = t.project",
+        "AND ev.id = r.evaluation AND NOT p.runner_enabled",
+    )
+});
+
 crate::sql_lazy! {
     QUEUE_CACHED_RUNNER_JOBS = || QUEUE_SQL.as_str(),
         params = [];
     FAIL_UNBUILT_RUNNER_JOBS = || FAIL_SQL.as_str(),
         params = [];
+    REFUSE_WAITING_RUNNER_JOBS = || REFUSE_ALL_SQL.as_str(),
+        params = [];
+    REFUSE_RUNNER_JOBS_OF_DISABLED_PROJECTS = || REFUSE_DISABLED_PROJECTS_SQL.as_str(),
+        params = [];
+}
+
+pub async fn refused<C: ConnectionTrait>(
+    db: &C,
+    instance_enabled: bool,
+) -> Result<Vec<MRunnerJob>, DbErr> {
+    let statement = if instance_enabled {
+        &REFUSE_RUNNER_JOBS_OF_DISABLED_PROJECTS
+    } else {
+        &REFUSE_WAITING_RUNNER_JOBS
+    };
+    MRunnerJob::find_by_statement(statement.stmt())
+        .all(db)
+        .await
 }
 
 pub async fn waiting<C: ConnectionTrait>(db: &C) -> Result<Settled, DbErr> {

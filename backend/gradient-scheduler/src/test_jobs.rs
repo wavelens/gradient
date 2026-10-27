@@ -132,6 +132,7 @@ pub(crate) fn runner_job(spec: RunnerSpec) -> PendingRunnerJob {
 
 pub(crate) fn allow_all() -> RunnerAllow {
     RunnerAllow {
+        retries: u32::MAX,
         network: true,
         ssh: true,
         ports: (1, u16::MAX),

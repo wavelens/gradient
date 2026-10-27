@@ -307,6 +307,30 @@ async fn a_failed_program_build_fails_the_job() {
 }
 
 #[tokio::test]
+async fn a_job_whose_project_switched_runner_jobs_off_fails_at_settle() {
+    let (case, e1) = runner_case(spec()).await;
+    case.sql("UPDATE project SET runner_enabled = false").await;
+
+    case.transition(Transition::SettleRunnerJobs).await;
+
+    let job = job(&case, e1).await;
+    assert_eq!(
+        (job.status, job.message.as_deref()),
+        (
+            RunnerJobStatus::Failed,
+            Some("runner jobs are disabled for this project")
+        ),
+        "after 1: the job"
+    );
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Failed,
+        "after 1: the evaluation"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn a_non_zero_exit_restarts_until_no_retry_is_left() {
     let (case, e1) = queued_case(with_retries(1)).await;
 
