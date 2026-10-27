@@ -45,6 +45,13 @@
   margin-bottom: $space-pair;
 }
 
+.metric-chart__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: $spacing-sm;
+}
+
 .metric-chart__actions:empty {
   display: none;
 }
