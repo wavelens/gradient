@@ -6,9 +6,9 @@
 
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct DeviceConfig {
     pub name: String,
     #[serde(default)]
@@ -17,7 +17,7 @@ pub struct DeviceConfig {
     pub usb: Option<String>,
 }
 
-#[derive(Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct MountConfig {
     pub name: String,
     pub path: PathBuf,
@@ -40,6 +40,15 @@ pub struct VmConfig {
     pub virtiofsd_bin: String,
     pub guests_dir: PathBuf,
     pub supervisor_command: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SupervisorConfig {
+    pub cloud_hypervisor_bin: String,
+    pub virtiofsd_bin: String,
+    pub devices: Vec<DeviceConfig>,
+    pub mounts: Vec<MountConfig>,
+    pub bridge: String,
 }
 
 pub fn check_device(device: &DeviceConfig) -> Result<(), String> {

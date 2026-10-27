@@ -25,6 +25,7 @@ use crate::config::{MountConfig, VmConfig};
 use crate::devices::DeviceUnit;
 use crate::hypervisor::{GuestImage, HypervisorApi, vm_config};
 use crate::state::{GuestId, GuestState, HeldDevice, StoredRelay, write_state};
+use crate::supervisor::TAP_PREFIX;
 use crate::unit::{GuestUnits, unit_name};
 
 pub const WORK_MOUNT_TAG: &str = "work";
@@ -313,7 +314,7 @@ impl Guest {
 
     async fn plug_network(&mut self, network: &GuestNetwork) -> Result<()> {
         let cid = self.state.cid;
-        let tap = format!("gr-tap-{cid}");
+        let tap = format!("{TAP_PREFIX}{cid}");
         self.request(SupervisorRequest::PrepareTap {
             name: tap.clone(),
             bridge: self.bridge.clone(),

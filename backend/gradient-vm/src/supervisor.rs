@@ -5,11 +5,11 @@
  */
 
 use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use gradient_wire::guest::{GuestConnection, SupervisorReply, SupervisorRequest};
 use tokio::net::{TcpStream, UnixListener, UnixStream};
 use tokio::process::{Child, Command};
@@ -17,37 +17,42 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::task::JoinSet;
 use tracing::{info, warn};
 
+use crate::config::SupervisorConfig;
+use crate::guest::WORK_MOUNT_TAG;
 use crate::vsock::connect_vsock;
 
 const SYSFS_USB_DEVICES: &str = "/sys/bus/usb/devices";
 const SYSFS_NET: &str = "/sys/class/net";
 pub const GUEST_USER_ID: u32 = 1000;
+pub const TAP_PREFIX: &str = "gr-tap-";
+const MAX_INTERFACE_NAME: usize = 15;
 const USBIPD: &str = "127.0.0.1:3240";
 const SOCKET_WAIT: Duration = Duration::from_secs(10);
 const RELAY_RETRY: Duration = Duration::from_secs(1);
 
-pub fn run_supervisor(dir: &Path, cloud_hypervisor: &str, virtiofsd: &str) -> Result<()> {
+pub fn run_supervisor(dir: &Path, config: SupervisorConfig) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(supervise(dir, cloud_hypervisor, virtiofsd))
+    runtime.block_on(supervise(dir, config))
 }
 
-async fn supervise(dir: &Path, cloud_hypervisor: &str, virtiofsd: &str) -> Result<()> {
-    let host = Arc::new(Host::new(dir, virtiofsd));
+async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
     let store = spawn_virtiofsd(
-        virtiofsd,
+        &config.virtiofsd_bin,
         &dir.join("store.sock"),
         Path::new("/nix/store"),
         true,
         &[],
     )?;
+    let cloud_hypervisor = &config.cloud_hypervisor_bin;
     let mut hypervisor = Command::new(cloud_hypervisor)
         .arg("--api-socket")
         .arg(format!("path={}", dir.join("api.sock").display()))
         .kill_on_drop(true)
         .spawn()
         .with_context(|| format!("start {cloud_hypervisor}"))?;
+    let host = Arc::new(Host::new(dir, config));
     let control = bind(&dir.join("control.sock"))?;
     let mut terminate = signal(SignalKind::terminate())?;
     let mut sessions = JoinSet::new();
@@ -77,7 +82,7 @@ async fn supervise(dir: &Path, cloud_hypervisor: &str, virtiofsd: &str) -> Resul
 
 struct Host {
     dir: PathBuf,
-    virtiofsd: String,
+    config: SupervisorConfig,
     children: Mutex<Vec<Child>>,
     taps: Mutex<Vec<String>>,
     usb_bus_ids: Mutex<Vec<String>>,
@@ -85,10 +90,10 @@ struct Host {
 }
 
 impl Host {
-    fn new(dir: &Path, virtiofsd: &str) -> Self {
+    fn new(dir: &Path, config: SupervisorConfig) -> Self {
         Self {
             dir: dir.to_owned(),
-            virtiofsd: virtiofsd.to_owned(),
+            config,
             children: Mutex::default(),
             taps: Mutex::default(),
             usb_bus_ids: Mutex::default(),
@@ -97,7 +102,18 @@ impl Host {
     }
 
     async fn handle(&self, request: SupervisorRequest) -> SupervisorReply {
-        let result = match request {
+        let bound_usb = lock(&self.usb_bus_ids).clone();
+        let result = match check_request(&self.config, &self.dir, &bound_usb, &request) {
+            Ok(()) => self.serve_request(request).await,
+            Err(e) => Err(e),
+        };
+        result.unwrap_or_else(|e| SupervisorReply::Failed {
+            message: format!("{e:#}"),
+        })
+    }
+
+    async fn serve_request(&self, request: SupervisorRequest) -> Result<SupervisorReply> {
+        match request {
             SupervisorRequest::PrepareMount {
                 tag,
                 dir,
@@ -112,10 +128,7 @@ impl Host {
                 self.relay(guest_port, HostEnd::File(PathBuf::from(path)))
             }
             SupervisorRequest::RelayUsbip { guest_port } => self.relay(guest_port, HostEnd::Usbipd),
-        };
-        result.unwrap_or_else(|e| SupervisorReply::Failed {
-            message: format!("{e:#}"),
-        })
+        }
     }
 
     async fn prepare_mount(
@@ -124,16 +137,21 @@ impl Host {
         shared: &Path,
         read_only: bool,
     ) -> Result<SupervisorReply> {
-        if tag.is_empty() || tag.contains('/') || tag.starts_with('.') {
-            bail!("invalid mount tag {tag:?}");
-        }
+        let shared_type = std::fs::symlink_metadata(shared)
+            .with_context(|| format!("inspect {}", shared.display()))?
+            .file_type();
+        ensure!(
+            shared_type.is_dir(),
+            "{} is not a directory",
+            shared.display()
+        );
         let mounts = self.dir.join("mounts");
         tokio::fs::create_dir_all(&mounts).await?;
         let socket = mounts.join(format!("{tag}.sock"));
         let worker = std::fs::metadata(&self.dir)
             .with_context(|| format!("read the owner of {}", self.dir.display()))?;
         let ids = owner_translation(worker.uid(), worker.gid());
-        let child = spawn_virtiofsd(&self.virtiofsd, &socket, shared, read_only, &ids)?;
+        let child = spawn_virtiofsd(&self.config.virtiofsd_bin, &socket, shared, read_only, &ids)?;
         lock(&self.children).push(child);
         wait_for_socket(&socket).await?;
         Ok(SupervisorReply::MountSocket {
@@ -238,6 +256,102 @@ async fn relay_once(vsock: &Path, guest_port: u32, host_end: &HostEnd) -> Result
     Ok(())
 }
 
+pub fn check_request(
+    config: &SupervisorConfig,
+    dir: &Path,
+    bound_usb: &[String],
+    request: &SupervisorRequest,
+) -> Result<()> {
+    let usb_configured = |vendor_product: &str| {
+        config
+            .devices
+            .iter()
+            .any(|device| device.usb.as_deref() == Some(vendor_product))
+    };
+    match request {
+        SupervisorRequest::PrepareMount {
+            tag,
+            dir: shared,
+            read_only,
+        } => check_mount(config, dir, tag, Path::new(shared), *read_only),
+        SupervisorRequest::PrepareTap { name, bridge } => {
+            ensure!(
+                *bridge == config.bridge,
+                "bridge {bridge:?} is not the guest bridge"
+            );
+            ensure!(is_tap_name(name), "{name:?} is not a guest tap name");
+            Ok(())
+        }
+        SupervisorRequest::BindUsb { vendor_product } => {
+            ensure!(
+                usb_configured(vendor_product),
+                "USB device {vendor_product} is not configured"
+            );
+            Ok(())
+        }
+        SupervisorRequest::UnbindUsb { bus_id } => {
+            ensure!(
+                bound_usb.contains(bus_id),
+                "USB device {bus_id} is not bound for this guest"
+            );
+            Ok(())
+        }
+        SupervisorRequest::RelayDevice { path, .. } => {
+            let configured = config
+                .devices
+                .iter()
+                .any(|device| device.dev.as_deref() == Some(Path::new(path)));
+            ensure!(configured, "device {path} is not configured");
+            Ok(())
+        }
+        SupervisorRequest::RelayUsbip { .. } => {
+            ensure!(
+                !bound_usb.is_empty(),
+                "no USB device is bound for this guest"
+            );
+            Ok(())
+        }
+    }
+}
+
+fn check_mount(
+    config: &SupervisorConfig,
+    dir: &Path,
+    tag: &str,
+    shared: &Path,
+    read_only: bool,
+) -> Result<()> {
+    if tag == WORK_MOUNT_TAG {
+        ensure!(
+            shared == dir.join("work"),
+            "{} is not the guest work directory",
+            shared.display()
+        );
+        return Ok(());
+    }
+    let Some(mount) = config.mounts.iter().find(|mount| mount.name == tag) else {
+        bail!("mount {tag:?} is not configured");
+    };
+    ensure!(read_only || !mount.read_only, "mount {tag:?} is read-only");
+    let allowed = if mount.per_job {
+        shared.parent() == Some(mount.path.as_path())
+            && matches!(shared.components().next_back(), Some(Component::Normal(_)))
+    } else {
+        shared == mount.path
+    };
+    ensure!(
+        allowed,
+        "{} is not a directory of mount {tag:?}",
+        shared.display()
+    );
+    Ok(())
+}
+
+fn is_tap_name(name: &str) -> bool {
+    let cid = name.strip_prefix(TAP_PREFIX).unwrap_or_default();
+    name.len() <= MAX_INTERFACE_NAME && !cid.is_empty() && cid.bytes().all(|b| b.is_ascii_digit())
+}
+
 pub fn usb_bus_id(sysfs_usb_devices: &Path, vendor_product: &str) -> Option<String> {
     let (vendor, product) = vendor_product.split_once(':')?;
     let mut entries: Vec<_> = std::fs::read_dir(sysfs_usb_devices)
@@ -328,6 +442,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{DeviceConfig, MountConfig};
 
     fn usb_device(root: &Path, name: &str, vendor: &str, product: Option<&str>) {
         let dir = root.join(name);
@@ -346,5 +461,100 @@ mod tests {
 
         assert_eq!(usb_bus_id(root.path(), "1d6b:0002"), Some("1-2".to_owned()));
         assert_eq!(usb_bus_id(root.path(), "ffff:0001"), None);
+    }
+
+    fn worker_config() -> SupervisorConfig {
+        let mount = |name: &str, read_only, per_job| MountConfig {
+            name: name.to_owned(),
+            path: PathBuf::from(format!("/srv/{name}")),
+            read_only,
+            per_job,
+        };
+        SupervisorConfig {
+            cloud_hypervisor_bin: "cloud-hypervisor".to_owned(),
+            virtiofsd_bin: "virtiofsd".to_owned(),
+            devices: vec![
+                DeviceConfig {
+                    name: "serial".to_owned(),
+                    vfio: Vec::new(),
+                    dev: Some(PathBuf::from("/dev/ttyUSB0")),
+                    usb: None,
+                },
+                DeviceConfig {
+                    name: "camera".to_owned(),
+                    vfio: Vec::new(),
+                    dev: None,
+                    usb: Some("1d6b:0002".to_owned()),
+                },
+            ],
+            mounts: vec![
+                mount("cache", false, false),
+                mount("datasets", true, false),
+                mount("scratch", false, true),
+            ],
+            bridge: "gradient-guests".to_owned(),
+        }
+    }
+
+    fn mount(tag: &str, dir: &str, read_only: bool) -> SupervisorRequest {
+        SupervisorRequest::PrepareMount {
+            tag: tag.to_owned(),
+            dir: dir.to_owned(),
+            read_only,
+        }
+    }
+
+    fn allowed(request: SupervisorRequest) -> bool {
+        let bound = ["1-2".to_owned()];
+        check_request(&worker_config(), Path::new("/guests/g1"), &bound, &request).is_ok()
+    }
+
+    #[test]
+    fn only_configured_mount_directories_are_shared() {
+        assert!(allowed(mount("work", "/guests/g1/work", false)));
+        assert!(allowed(mount("cache", "/srv/cache", false)));
+        assert!(allowed(mount("datasets", "/srv/datasets", true)));
+        assert!(allowed(mount("scratch", "/srv/scratch/job-1", false)));
+
+        assert!(!allowed(mount("work", "/etc", false)));
+        assert!(!allowed(mount("cache", "/srv/cache/sub", false)));
+        assert!(!allowed(mount("datasets", "/srv/datasets", false)));
+        assert!(!allowed(mount("scratch", "/srv/scratch", false)));
+        assert!(!allowed(mount("scratch", "/srv/scratch/..", false)));
+        assert!(!allowed(mount("scratch", "/srv/scratch/a/b", false)));
+        assert!(!allowed(mount("root", "/", false)));
+    }
+
+    #[test]
+    fn only_guest_taps_on_the_guest_bridge_are_made() {
+        let tap = |name: &str, bridge: &str| SupervisorRequest::PrepareTap {
+            name: name.to_owned(),
+            bridge: bridge.to_owned(),
+        };
+        assert!(allowed(tap("gr-tap-7", "gradient-guests")));
+        assert!(!allowed(tap("gr-tap-7", "br-lan")));
+        assert!(!allowed(tap("eth0", "gradient-guests")));
+        assert!(!allowed(tap("gr-tap-", "gradient-guests")));
+        assert!(!allowed(tap("gr-tap-123456789", "gradient-guests")));
+    }
+
+    #[test]
+    fn only_configured_devices_are_handed_out() {
+        let relay = |path: &str| SupervisorRequest::RelayDevice {
+            path: path.to_owned(),
+            guest_port: 7100,
+        };
+        let bind = |vendor_product: &str| SupervisorRequest::BindUsb {
+            vendor_product: vendor_product.to_owned(),
+        };
+        let unbind = |bus_id: &str| SupervisorRequest::UnbindUsb {
+            bus_id: bus_id.to_owned(),
+        };
+        assert!(allowed(relay("/dev/ttyUSB0")));
+        assert!(!allowed(relay("/dev/sda")));
+        assert!(allowed(bind("1d6b:0002")));
+        assert!(!allowed(bind("046d:c52b")));
+        assert!(allowed(unbind("1-2")));
+        assert!(!allowed(unbind("3-1")));
     }
 }

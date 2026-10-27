@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use gradient_eval::pool::MemoryGuard;
-use gradient_vm::VmConfig;
+use gradient_vm::{SupervisorConfig, VmConfig};
 use gradient_wire::types::{ExecAllow, ExecDefaults, GradientCapabilities};
 
 pub fn host_system() -> String {
@@ -205,10 +205,30 @@ impl ExecArgs {
                 self.cloud_hypervisor_bin.clone(),
                 "--exec-virtiofsd-bin".to_owned(),
                 self.virtiofsd_bin.clone(),
+                "--exec-devices".to_owned(),
+                to_json(&self.devices),
+                "--exec-mounts".to_owned(),
+                to_json(&self.mounts),
+                "--exec-bridge".to_owned(),
+                self.bridge.clone(),
                 "--guest-supervisor".to_owned(),
             ],
         }
     }
+
+    pub fn supervisor_config(&self) -> SupervisorConfig {
+        SupervisorConfig {
+            cloud_hypervisor_bin: self.cloud_hypervisor_bin.clone(),
+            virtiofsd_bin: self.virtiofsd_bin.clone(),
+            devices: self.devices.clone(),
+            mounts: self.mounts.clone(),
+            bridge: self.bridge.clone(),
+        }
+    }
+}
+
+fn to_json<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "[]".to_owned())
 }
 
 fn parse_token_hashes(raw: &str) -> Vec<(String, String)> {
@@ -288,6 +308,31 @@ mod tests {
         assert_eq!(
             vm.supervisor_command.last().map(String::as_str),
             Some("--guest-supervisor")
+        );
+    }
+
+    #[test]
+    fn the_supervisor_reads_the_devices_mounts_and_bridge_of_its_worker() {
+        let worker = parse(&[
+            "--exec-devices",
+            r#"[{"name":"camera","usb":"1d6b:0002"},{"name":"serial","dev":"/dev/ttyUSB0"}]"#,
+            "--exec-mounts",
+            r#"[{"name":"scratch","path":"/srv/scratch","perJob":true}]"#,
+            "--exec-bridge",
+            "br-guests",
+        ])
+        .expect("valid options");
+        let command = worker
+            .exec
+            .vm_config(PathBuf::from("/guests"), Path::new("/bin/gw"))
+            .supervisor_command;
+        let supervisor =
+            WorkerConfig::try_parse_from(command.iter().map(String::as_str).chain(["/guests/g1"]))
+                .expect("the supervisor command parses");
+
+        assert_eq!(
+            supervisor.exec.supervisor_config(),
+            worker.exec.supervisor_config()
         );
     }
 

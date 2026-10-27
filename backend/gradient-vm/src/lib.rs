@@ -16,7 +16,7 @@ pub mod unit;
 pub mod vsock;
 
 pub use agent::{GUEST_BOOT_TIMEOUT, GuestBootError, ReadyAgent, wait_ready};
-pub use config::{DeviceConfig, MountConfig, VmConfig, check_device};
+pub use config::{DeviceConfig, MountConfig, SupervisorConfig, VmConfig, check_device};
 pub use devices::{DeviceCount, DeviceHold, DeviceInventory, DeviceUnit, HostProbe, SysfsProbe};
 pub use guest::{Guest, PlugPlan, PluggedDevices, WORK_MOUNT_TAG, device_groups, guest_address};
 pub use hypervisor::{GuestImage, HypervisorApi, PciDeviceInfo, VmInfo, vm_config};

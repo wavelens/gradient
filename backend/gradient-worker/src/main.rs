@@ -61,11 +61,7 @@ fn main() -> Result<()> {
     });
 
     if let Some(dir) = &config.guest_supervisor {
-        return gradient_vm::run_supervisor(
-            dir,
-            &config.exec.cloud_hypervisor_bin,
-            &config.exec.virtiofsd_bin,
-        );
+        return gradient_vm::run_supervisor(dir, config.exec.supervisor_config());
     }
 
     if config.eval_subprocess {
