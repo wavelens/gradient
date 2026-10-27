@@ -5,13 +5,14 @@
  */
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result, bail};
-use gradient_vm::{DeviceInventory, GuestPool, GuestUnits, SysfsProbe};
+use gradient_vm::{DeviceInventory, GuestPool, GuestUnits, SysfsProbe, plan_reattach, read_states};
 use gradient_wire::types::ExecInventory;
+use tokio_util::sync::CancellationToken;
 
 use super::inventory::advertised;
+use super::reattach::{ResumedJob, resumable};
 use crate::config::{ExecArgs, WorkerConfig};
 use crate::executor::AbortSignal;
 
@@ -21,11 +22,31 @@ pub struct ExecHost {
     pub config: ExecArgs,
     pub worker_id: String,
     pub zone: Option<String>,
-    stopping_with_guests_kept: AtomicBool,
+    worker_stop: CancellationToken,
 }
 
 impl ExecHost {
-    pub async fn new(config: &WorkerConfig, worker_id: String) -> Result<Arc<ExecHost>> {
+    pub async fn start(
+        config: &WorkerConfig,
+        worker_id: String,
+        worker_stop: CancellationToken,
+    ) -> Result<(Arc<ExecHost>, Vec<ResumedJob>)> {
+        let host = Self::new(config, worker_id, worker_stop).await?;
+        let resumed = match host.config.stop_guests_with_worker {
+            true => {
+                host.pool.stop_every_unit().await;
+                Vec::new()
+            }
+            false => host.reattach().await?,
+        };
+        Ok((host, resumed))
+    }
+
+    async fn new(
+        config: &WorkerConfig,
+        worker_id: String,
+        worker_stop: CancellationToken,
+    ) -> Result<Arc<ExecHost>> {
         if config.exec.image.is_none() {
             bail!("capabilities.exec needs exec.image, the guest image exec jobs boot");
         }
@@ -39,8 +60,16 @@ impl ExecHost {
             config: config.exec.clone(),
             worker_id,
             zone: config.zone.clone().filter(|zone| !zone.is_empty()),
-            stopping_with_guests_kept: AtomicBool::new(false),
+            worker_stop,
         }))
+    }
+
+    async fn reattach(&self) -> Result<Vec<ResumedJob>> {
+        let units = self.pool.units().list().await?;
+        let states = read_states(&self.pool.config().guests_dir);
+        let plan = plan_reattach(&units, states);
+        let busy = gradient_vm::reattach::apply(plan, &self.pool, &self.devices).await;
+        Ok(resumable(busy, self.pool.units()).await)
     }
 
     pub fn inventory(&self) -> ExecInventory {
@@ -60,6 +89,13 @@ impl ExecHost {
         self.pool.reopen();
     }
 
+    pub async fn stop_resumed(&self, resumed: Vec<ResumedJob>) {
+        for job in resumed {
+            tracing::warn!(job_id = %job.stored.job_id, "no server URL to report a resumed exec job to, stopping its guest");
+            job.guest.guest.teardown(self.pool.units()).await;
+        }
+    }
+
     pub async fn stop_with_worker(&self) {
         match self.config.stop_guests_with_worker {
             true => self.pool.stop_all_units().await,
@@ -67,11 +103,9 @@ impl ExecHost {
         }
     }
 
-    pub fn keep_guests_through_the_stop(&self) {
-        self.stopping_with_guests_kept.store(true, Ordering::SeqCst);
-    }
-
     pub fn leaves_guest_running(&self, abort: &AbortSignal) -> bool {
-        !abort.was_requested() && self.stopping_with_guests_kept.load(Ordering::SeqCst)
+        !abort.was_requested()
+            && !self.config.stop_guests_with_worker
+            && self.worker_stop.is_cancelled()
     }
 }

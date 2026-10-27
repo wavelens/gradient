@@ -29,7 +29,9 @@ use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
 use config::WorkerConfig;
+use connection_state::Disconnected;
 use exec::host::ExecHost;
+use exec::reattach::ResumedJob;
 use gradient_util::logging::{LogSetup, LogWriter, TraceSetup};
 use gradient_worker_client::reconnect::{
     RunOutcome, SessionEnd, backoff_after_session, retry_reconnect,
@@ -97,13 +99,14 @@ fn main() -> Result<()> {
             );
         }
 
-        if let Err(e) = worker::clear_job_logs(&config) {
-            warn!(error = %e, "could not empty the job log directory");
-        }
-
-        let exec = start_exec_host(&config).await?;
         let stop = CancellationToken::new();
         install_signal_handler(stop.clone());
+        let (exec, resumed) = start_exec_host(&config, &stop).await?;
+
+        let kept_logs: Vec<String> = resumed.iter().map(|job| job.stored.job_id.clone()).collect();
+        if let Err(e) = worker::clear_job_logs(&config, &kept_logs) {
+            warn!(error = %e, "could not empty the job log directory");
+        }
 
         let sessions = TaskTracker::new();
 
@@ -165,9 +168,13 @@ fn main() -> Result<()> {
         sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
         let served = match server_url {
             Some(server_url) => {
-                run_outbound(config, &server_url, stop, &sessions, exec.clone()).await
+                let worker = Worker::start(config.clone(), exec.clone(), resumed).await?;
+                run_outbound(worker, &server_url, stop, &sessions, config.exit_limits()).await
             }
             None => {
+                if let Some(exec) = &exec {
+                    exec.stop_resumed(resumed).await;
+                }
                 serve_incoming_only(&stop, &sessions, config.exit_limits()).await;
                 Ok(())
             }
@@ -179,12 +186,16 @@ fn main() -> Result<()> {
     })
 }
 
-async fn start_exec_host(config: &WorkerConfig) -> Result<Option<Arc<ExecHost>>> {
+async fn start_exec_host(
+    config: &WorkerConfig,
+    stop: &CancellationToken,
+) -> Result<(Option<Arc<ExecHost>>, Vec<ResumedJob>)> {
     if !config.capabilities.exec {
-        return Ok(None);
+        return Ok((None, Vec::new()));
     }
     let worker_id = worker::load_or_generate_id(&config.base_dir, config.id.as_deref())?;
-    Ok(Some(ExecHost::new(config, worker_id).await?))
+    let (exec, resumed) = ExecHost::start(config, worker_id, stop.clone()).await?;
+    Ok((Some(exec), resumed))
 }
 
 async fn serve_incoming_only(
@@ -202,22 +213,21 @@ async fn serve_incoming_only(
 }
 
 async fn run_outbound(
-    config: WorkerConfig,
+    worker: Worker<Disconnected>,
     server_url: &str,
     stop: CancellationToken,
     sessions: &TaskTracker,
-    exec: Option<Arc<ExecHost>>,
+    limits: exit_clock::ExitLimits,
 ) -> Result<()> {
     let mut backoff = INITIAL_BACKOFF;
-    let limits = config.exit_limits();
 
     let initial = tokio::select! {
         _ = stop.cancelled() => None,
         () = exit_deadline(limits) => None,
-        w = async {
+        conn = async {
             loop {
-                match Worker::connect(config.clone(), server_url, exec.clone()).await {
-                    Ok(w) => break w,
+                match worker.connect(server_url).await {
+                    Ok(conn) => break conn,
                     Err(e) => {
                         error!(
                             error = %e,
@@ -229,13 +239,15 @@ async fn run_outbound(
                     }
                 }
             }
-        } => Some(w),
+        } => Some(conn),
     };
-    let Some(mut worker) = initial else {
+    let Some(conn) = initial else {
         info!("shutdown requested or exit limit reached during initial connect");
+        stop.cancel();
         wait_for_inbound_sessions(sessions).await;
         return Ok(());
     };
+    let mut worker = worker.into_connected(conn);
     backoff = INITIAL_BACKOFF;
 
     let executor_handle = worker.executor_handle();
@@ -281,7 +293,7 @@ async fn run_outbound(
             _ = stop.cancelled() => None,
             () = exit_deadline(limits) => None,
             conn = retry_reconnect(
-                async || disconnected.reconnect(server_url).await,
+                async || disconnected.connect(server_url).await,
                 |delay| tokio::time::sleep(delay),
                 backoff,
                 MAX_BACKOFF,
@@ -295,6 +307,7 @@ async fn run_outbound(
             }
             None => {
                 info!("shutdown requested or exit limit reached during reconnect");
+                stop.cancel();
                 wait_for_inbound_sessions(sessions).await;
                 executor_handle.shutdown().await;
                 return Ok(());

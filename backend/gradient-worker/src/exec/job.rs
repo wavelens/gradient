@@ -476,7 +476,7 @@ fn program_store_path(program: &str) -> Result<&str, BuildError> {
     Ok(&program[..STORE_DIR.len() + name.len()])
 }
 
-async fn unless_aborted<T>(abort: &AbortSignal, work: impl Future<Output = T>) -> Result<T> {
+pub async fn unless_aborted<T>(abort: &AbortSignal, work: impl Future<Output = T>) -> Result<T> {
     let mut abort = abort.clone();
     tokio::select! {
         biased;

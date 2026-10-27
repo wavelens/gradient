@@ -10,5 +10,6 @@ pub mod context;
 pub mod host;
 pub mod inventory;
 pub mod job;
+pub mod reattach;
 pub mod state;
 pub mod watchdog;

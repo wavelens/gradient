@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use futures::future::BoxFuture;
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::{ClientMessage, JobKind, RUNNING_JOBS_SINCE, RunningAssignment};
 use gradient_worker_client::connection::ProtoWriter;
@@ -31,7 +32,7 @@ use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::EvalCacheReceiver;
 use crate::proto::eval_shard_replies::EvalShardReplies;
 use crate::proto::job::JobUpdater;
-use crate::proto::job_log::{JOB_LOG_BUFFER_CAP, JobLog};
+use crate::proto::job_log::{JOB_LOG_BUFFER_CAP, JobLog, file_key};
 
 pub(super) type JobDone = (String, Result<()>);
 
@@ -202,13 +203,23 @@ pub(super) async fn report_when_drained(
     }
 }
 
-pub(crate) fn clear_job_logs(config: &WorkerConfig) -> std::io::Result<()> {
+pub(crate) fn clear_job_logs(config: &WorkerConfig, kept_jobs: &[String]) -> std::io::Result<()> {
     let dir = config.job_log_dir();
-    match std::fs::remove_dir_all(&dir) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
-        _ => {}
+    std::fs::create_dir_all(&dir)?;
+    let kept: HashSet<String> = kept_jobs.iter().map(|job_id| file_key(job_id)).collect();
+    for entry in std::fs::read_dir(&dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let key = name.to_string_lossy();
+        if kept.contains(key.split('.').next().unwrap_or_default()) {
+            continue;
+        }
+        match entry.file_type()?.is_dir() {
+            true => std::fs::remove_dir_all(entry.path())?,
+            false => std::fs::remove_file(entry.path())?,
+        }
     }
-    std::fs::create_dir_all(dir)
+    Ok(())
 }
 
 impl WorkerJobs {
@@ -265,6 +276,39 @@ impl WorkerJobs {
         self.registry
             .lock()
             .register(job_id, kind, assignment_id, cluster, log)
+    }
+
+    pub(super) fn resume_job(
+        &self,
+        job_id: String,
+        assignment_id: String,
+        run: impl FnOnce(JobUpdater, AbortSignal) -> BoxFuture<'static, Result<()>>,
+    ) {
+        let log = JobLog::reopen(&self.log_dir, &job_id, JOB_LOG_BUFFER_CAP).unwrap_or_else(|e| {
+            warn!(%job_id, error = %e, "unreadable log of a resumed exec job, its output starts over");
+            JobLog::open_resumable(&self.log_dir, &job_id, JOB_LOG_BUFFER_CAP)
+        });
+        let registered =
+            self.registry
+                .lock()
+                .register(job_id.clone(), JobKind::Exec, assignment_id, None, log);
+        let updater = self.updater(
+            job_id.clone(),
+            registered.assignment_id,
+            registered.timeline,
+            registered.log.clone(),
+            None,
+        );
+        let job = run(updater, registered.abort);
+        let (log, done_tx) = (registered.log, registered.done_tx);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "reports back on done_tx and aborts through the registry"
+        )]
+        tokio::spawn(async move {
+            let result = job.await;
+            report_when_drained(log, done_tx, (job_id, result)).await;
+        });
     }
 
     pub(super) fn abort_job(&self, job_id: &str) -> bool {
@@ -755,6 +799,34 @@ mod tests {
                 kind: JobKind::Build,
             }]
         );
+    }
+
+    #[test]
+    fn logs_of_resumed_jobs_survive_the_start_cleanup() {
+        let base = tempfile::tempdir().unwrap();
+        let config = WorkerConfig {
+            base_dir: base.path().to_owned(),
+            ..WorkerConfig::default()
+        };
+        let dir = config.job_log_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        for file in [
+            "exec_1.log",
+            "exec_1.accepted",
+            "build_2.log",
+            "build_2.offset",
+        ] {
+            std::fs::write(dir.join(file), "x").unwrap();
+        }
+
+        clear_job_logs(&config, &["exec:1".to_owned()]).unwrap();
+
+        let mut left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["exec_1.accepted", "exec_1.log"]);
     }
 
     #[tokio::test]

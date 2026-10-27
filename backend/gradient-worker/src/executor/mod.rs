@@ -39,6 +39,7 @@ use gradient_wire::messages::JobPhase;
 
 use crate::count::clamp_to_u32;
 use crate::exec::host::ExecHost;
+use crate::exec::reattach::ResumedJob;
 use crate::executor::timeline::PhaseGuard;
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
@@ -716,6 +717,20 @@ impl JobExecutor {
             .as_deref()
             .context("this worker runs no exec jobs")?;
         crate::exec::job::execute(host, &self.store, job, updater, credentials, abort).await
+    }
+
+    #[instrument(skip_all, fields(job_id = %updater.job_id))]
+    pub async fn resume_exec_job(
+        &self,
+        resumed: ResumedJob,
+        updater: &mut JobUpdater,
+        abort: AbortSignal,
+    ) -> Result<()> {
+        let host = self
+            .exec
+            .as_deref()
+            .context("this worker runs no exec jobs")?;
+        crate::exec::reattach::resume(host, resumed, updater, abort).await
     }
 }
 

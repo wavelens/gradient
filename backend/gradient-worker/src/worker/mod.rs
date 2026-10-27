@@ -20,6 +20,7 @@ use tracing::{info, warn};
 use crate::config::WorkerConfig;
 use crate::connection_state::{Connected, Disconnected};
 use crate::exec::host::ExecHost;
+use crate::exec::reattach::ResumedJob;
 use crate::executor::{JobExecutor, WorkerEvaluator};
 use crate::nix::store::LocalNixStore;
 use crate::proto::credentials::CredentialStore;
@@ -55,24 +56,6 @@ impl<S> Worker<S> {
 }
 
 impl Worker<Connected> {
-    pub async fn connect(
-        config: WorkerConfig,
-        server_url: &str,
-        exec: Option<Arc<ExecHost>>,
-    ) -> Result<Self> {
-        let mut conn = ProtoConnection::open(server_url).await?;
-        perform_setup(
-            &mut conn,
-            &config,
-            Side::Outbound,
-            Vec::new(),
-            exec.as_deref(),
-        )
-        .await?;
-        let (executor, scorer) = Self::build_executor(&config, exec).await?;
-        Ok(Self::new_connected(config, conn, executor, scorer))
-    }
-
     pub async fn from_accepted(
         ws: tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -89,7 +72,7 @@ impl Worker<Connected> {
             exec.as_deref(),
         )
         .await?;
-        let (executor, scorer) = Self::build_executor(&config, exec).await?;
+        let (executor, scorer) = build_executor(&config, exec).await?;
         Ok(Self::new_connected(config, conn, executor, scorer))
     }
 
@@ -112,14 +95,33 @@ impl Worker<Connected> {
 }
 
 impl Worker<Disconnected> {
-    /// The server is holding no state for this worker after a restart.
-    /// A reconnect must re-run the full handshake, capability advertisement and initial request.
-    pub async fn reconnect(&self, server_url: &str) -> Result<ProtoConnection> {
+    pub async fn start(
+        config: WorkerConfig,
+        exec: Option<Arc<ExecHost>>,
+        resumed: Vec<ResumedJob>,
+    ) -> Result<Self> {
+        let (executor, scorer) = build_executor(&config, exec).await?;
+        let jobs = Arc::new(WorkerJobs::new(&config));
+        for job in resumed {
+            resume_exec_job(&jobs, &executor, job);
+        }
+        Ok(Self {
+            config,
+            executor,
+            scorer,
+            credentials: CredentialStore::new(),
+            jobs,
+            conn_state: Disconnected,
+            _marker: PhantomData,
+        })
+    }
+
+    pub async fn connect(&self, server_url: &str) -> Result<ProtoConnection> {
         let mut conn = ProtoConnection::open(server_url).await?;
         perform_setup(
             &mut conn,
             &self.config,
-            Side::Reconnect,
+            Side::Outbound,
             self.jobs.running_assignments(),
             self.executor.exec.as_deref(),
         )
@@ -211,51 +213,57 @@ impl Worker<Connected> {
     }
 }
 
-impl Worker<Connected> {
-    async fn build_executor(
-        config: &WorkerConfig,
-        exec: Option<Arc<ExecHost>>,
-    ) -> Result<(JobExecutor, JobScorer)> {
-        let store = LocalNixStore::connect(config.nix_daemon.max_connections.get())?;
-        let evaluator = WorkerEvaluator::new(
-            config.fork_workers(),
-            config.eval.max_rss.get(),
-            config.memory_guard()?,
-            config.eval_cache_dir(),
-            config.eval.cache_share,
-            config.eval.metrics,
-        );
-        let gcroots = crate::nix::gcroots::GcRootKeeper::new(
-            &config.gcroots_dir,
-            std::sync::Arc::new(store.clone()),
-        );
-        if let Err(e) = gcroots.purge_all().await {
-            tracing::warn!(error = %e, "gcroot purge failed at startup; continuing");
-        }
-        let executor = JobExecutor::new(
-            store,
-            evaluator,
-            gcroots,
-            config.ssh_bin.clone(),
-            crate::executor::log_limit::LogRateLimits {
-                burst_bytes_per_min: config.log.burst_bytes_per_min,
-                sustained_bytes_per_hour: config.log.sustained_bytes_per_hour,
-            },
-            config.log.fetch_from_store,
-            crate::executor::BuildHost {
-                build_cores: config.build_cores(),
-                cpu_core_score: config.cpu_core_score(),
-            },
-        )
-        .with_exec(exec);
-        Ok((executor, JobScorer::new()))
+async fn build_executor(
+    config: &WorkerConfig,
+    exec: Option<Arc<ExecHost>>,
+) -> Result<(JobExecutor, JobScorer)> {
+    let store = LocalNixStore::connect(config.nix_daemon.max_connections.get())?;
+    let evaluator = WorkerEvaluator::new(
+        config.fork_workers(),
+        config.eval.max_rss.get(),
+        config.memory_guard()?,
+        config.eval_cache_dir(),
+        config.eval.cache_share,
+        config.eval.metrics,
+    );
+    let gcroots = crate::nix::gcroots::GcRootKeeper::new(
+        &config.gcroots_dir,
+        std::sync::Arc::new(store.clone()),
+    );
+    if let Err(e) = gcroots.purge_all().await {
+        tracing::warn!(error = %e, "gcroot purge failed at startup; continuing");
     }
+    let executor = JobExecutor::new(
+        store,
+        evaluator,
+        gcroots,
+        config.ssh_bin.clone(),
+        crate::executor::log_limit::LogRateLimits {
+            burst_bytes_per_min: config.log.burst_bytes_per_min,
+            sustained_bytes_per_hour: config.log.sustained_bytes_per_hour,
+        },
+        config.log.fetch_from_store,
+        crate::executor::BuildHost {
+            build_cores: config.build_cores(),
+            cpu_core_score: config.cpu_core_score(),
+        },
+    )
+    .with_exec(exec);
+    Ok((executor, JobScorer::new()))
+}
+
+fn resume_exec_job(jobs: &WorkerJobs, executor: &JobExecutor, resumed: ResumedJob) {
+    let job_id = resumed.stored.job_id.clone();
+    let assignment_id = resumed.stored.assignment_id.clone();
+    let executor = executor.clone();
+    jobs.resume_job(job_id, assignment_id, move |mut updater, abort| {
+        Box::pin(async move { executor.resume_exec_job(resumed, &mut updater, abort).await })
+    });
 }
 
 #[derive(Clone, Copy, Debug)]
 enum Side {
     Outbound,
-    Reconnect,
     Inbound,
 }
 
@@ -281,7 +289,7 @@ async fn perform_setup(
             )
             .await?
         }
-        Side::Outbound | Side::Reconnect => {
+        Side::Outbound => {
             perform_handshake(conn, peer_id, config.peer_tokens(), config.capabilities()).await?
         }
     };
@@ -419,7 +427,7 @@ mod tests {
                 sc.handshake(GradientCapabilities::default()).await.unwrap();
                 sc
             },
-            worker.reconnect(server.url())
+            worker.connect(server.url())
         );
         (sc, worker.into_connected(conn.unwrap()))
     }

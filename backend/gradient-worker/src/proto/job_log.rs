@@ -57,7 +57,7 @@ struct State {
     dropped: u64,
 }
 
-fn file_key(job_id: &str) -> String {
+pub(crate) fn file_key(job_id: &str) -> String {
     job_id
         .bytes()
         .map(|b| {
@@ -104,13 +104,24 @@ impl JobLog {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "a reattached exec job resumes its output from here"
-        )
-    )]
+    pub fn reopen(dir: &Path, job_id: &str, cap: u64) -> Result<Self> {
+        let key = file_key(job_id);
+        let file_len = match std::fs::metadata(dir.join(format!("{key}.log"))) {
+            Ok(metadata) => metadata.len(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(e) => return Err(e).context("read the job log size"),
+        };
+        let offset = read_number(&dir.join(format!("{key}.offset")))?;
+        let accepted = read_number(&dir.join(format!("{key}.accepted")))?;
+        let state = State {
+            buffering: file_len > offset,
+            file_len,
+            offset,
+            ..State::default()
+        };
+        Ok(Self::with_state(dir, job_id, cap, true, state, accepted))
+    }
+
     pub fn accepted(&self) -> u64 {
         self.inner.accepted.load(Ordering::SeqCst)
     }
@@ -268,6 +279,17 @@ impl JobLog {
     }
 }
 
+fn read_number(path: &Path) -> Result<u64> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => text
+            .trim()
+            .parse()
+            .with_context(|| format!("parse {}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(e) => Err(e).with_context(|| format!("read {}", path.display())),
+    }
+}
+
 async fn store_number(path: &Path, value: u64) -> Result<()> {
     let mut written = path.as_os_str().to_owned();
     written.push(".tmp");
@@ -388,6 +410,22 @@ mod tests {
         assert_eq!(log.accepted(), 8);
         let stored = std::fs::read_to_string(dir.path().join("exec_x.accepted")).unwrap();
         assert_eq!(stored, "8");
+    }
+
+    #[tokio::test]
+    async fn accepted_bytes_survive_a_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = JobLog::open_resumable(dir.path(), "exec:x", JOB_LOG_BUFFER_CAP);
+        log.send(&Recorder::detached(), b"hello".to_vec())
+            .await
+            .unwrap();
+        drop(log);
+
+        let log = JobLog::reopen(dir.path(), "exec:x", JOB_LOG_BUFFER_CAP).unwrap();
+        assert_eq!(log.accepted(), 5);
+        let attached = Recorder::attached();
+        log.replay(&attached).await.unwrap();
+        assert_eq!(attached.received(), b"hello");
     }
 
     #[tokio::test]

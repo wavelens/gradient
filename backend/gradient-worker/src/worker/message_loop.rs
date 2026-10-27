@@ -221,9 +221,6 @@ impl MessageLoopState {
         self.begin_drain().await?;
         self.fetches.abort_all();
         let keep_exec_jobs = self.keeps_exec_jobs();
-        if keep_exec_jobs && let Some(exec) = &self.executor.exec {
-            exec.keep_guests_through_the_stop();
-        }
         let aborted = self.jobs.registry.lock().abort_for_stop(keep_exec_jobs);
         info!(
             aborted,
