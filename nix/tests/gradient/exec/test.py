@@ -35,6 +35,8 @@ def fleet_tail():
             "journalctl -u gradient-worker --no-pager -n 60")[1])
         parts.append(f"--- {node.name} guest consoles ---\n" + node.execute(
             f"tail -n 15 {GUESTS}/*/console.log 2>/dev/null")[1])
+        parts.append(f"--- {node.name} guest units ---\n" + node.execute(
+            f"ls -ln {GUESTS}/*/; journalctl -u 'gradient-guest-*' --no-pager -n 60")[1])
     return "\n".join(parts)
 
 

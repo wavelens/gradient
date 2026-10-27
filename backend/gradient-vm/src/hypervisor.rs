@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::pin::pin;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use http_body_util::{BodyExt, Full};
@@ -16,6 +17,8 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use tokio::net::UnixStream;
+
+const API_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct PciDeviceInfo {
@@ -97,6 +100,22 @@ impl HypervisorApi {
     }
 
     async fn call(
+        &self,
+        method: Method,
+        endpoint: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<Bytes> {
+        tokio::time::timeout(API_TIMEOUT, self.exchange(method, endpoint, body))
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "cloud-hypervisor did not answer {endpoint} within {}s",
+                    API_TIMEOUT.as_secs()
+                )
+            })?
+    }
+
+    async fn exchange(
         &self,
         method: Method,
         endpoint: &str,
