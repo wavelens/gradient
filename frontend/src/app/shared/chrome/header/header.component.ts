@@ -6,7 +6,7 @@
 
 import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { IconComponent } from '@gradient/ui/ui';
+import { IconComponent, MenuComponent, MenuItem } from '@gradient/ui/ui';
 import { Brand, HeaderComponent, NavLink } from '@gradient/ui/chrome';
 import { AuthService } from '@core/services/auth.service';
 import { CommandPaletteService } from '../command-palette/command-palette.service';
@@ -24,7 +24,7 @@ const NAV: (NavLink & { signedIn?: true })[] = [
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [HeaderComponent, IconComponent, RouterLink],
+  imports: [HeaderComponent, IconComponent, MenuComponent, RouterLink],
   templateUrl: './header.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './header.component.scss',
@@ -40,6 +40,12 @@ export class AppHeaderComponent {
     const signedIn = this.authService.isAuthenticated();
     return NAV.filter((link) => signedIn || !link.signedIn);
   });
+
+  protected readonly userMenuItems: MenuItem[] = [
+    { label: 'Settings', icon: 'settings', routerLink: '/settings/profile' },
+    { separator: true },
+    { label: 'Log out', icon: 'logout', command: () => this.logout() },
+  ];
 
   get registrationDisabled() { return this.config.registrationDisabled; }
 

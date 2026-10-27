@@ -15,11 +15,12 @@
 
   <div slot="actions" class="header-user">
     @if (authService.user(); as user) {
-      <span class="user-name">{{ user.name }}</span>
-      <a routerLink="/settings/profile" class="user-link">Settings</a>
-      <button class="logout-btn" aria-label="Log out" (click)="logout()">
-        <gr-icon name="logout" />
+      <button type="button" class="user-menu-trigger" aria-haspopup="menu" (click)="userMenu.toggle($event)">
+        <gr-icon name="account_circle" />
+        <span class="user-name">{{ user.name }}</span>
+        <gr-icon name="expand_more" size="sm" />
       </button>
+      <gr-menu #userMenu [model]="userMenuItems" />
     } @else {
       <a routerLink="/account/login" [queryParams]="router.url.startsWith('/account/') ? null : { next: router.url }" class="user-link">Login</a>
       @if (!registrationDisabled) {
