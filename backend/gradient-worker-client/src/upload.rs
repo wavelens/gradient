@@ -308,9 +308,9 @@ impl Upload<'_> {
             session,
             outcome,
         } = self.open.take().context("no granted upload to settle")?;
-        let committed = match transferred {
-            Ok(metadata) => self.finish(request_id, session, metadata, outcome).await,
-            Err(e) if e.is::<SessionLost>() => Ok(None),
+        let finished = match transferred {
+            Ok(metadata) => Ok(self.finish(request_id, session, metadata).await),
+            Err(e) if e.is::<SessionLost>() => Ok(false),
             Err(e) => {
                 let _ = self
                     .client
@@ -321,6 +321,11 @@ impl Upload<'_> {
             }
         };
         self.slots = None;
+        let committed = match finished {
+            Ok(true) => self.commit(session, outcome).await,
+            Ok(false) => Ok(None),
+            Err(e) => Err(e),
+        };
         self.client.forget(request_id);
         match committed? {
             Some(outcome) => self.stored(outcome),
@@ -328,21 +333,21 @@ impl Upload<'_> {
         }
     }
 
-    async fn finish(
-        &self,
-        request_id: u64,
-        session: u64,
-        metadata: UploadMetadata,
-        outcome: oneshot::Receiver<UploadOutcome>,
-    ) -> Result<Option<UploadOutcome>> {
+    async fn finish(&self, request_id: u64, session: u64, metadata: UploadMetadata) -> bool {
         let writer = &self.client.writer;
         let finished = ClientMessage::UploadFinished {
             request_id,
             metadata,
         };
-        if !writer.is_current(session) || writer.send_now(finished).await.is_err() {
-            return Ok(None);
-        }
+        writer.is_current(session) && writer.send_now(finished).await.is_ok()
+    }
+
+    async fn commit(
+        &self,
+        session: u64,
+        outcome: oneshot::Receiver<UploadOutcome>,
+    ) -> Result<Option<UploadOutcome>> {
+        let writer = &self.client.writer;
         tokio::select! {
             biased;
             committed = outcome => committed.map(Some).context("upload cancelled before its commit"),
