@@ -28,7 +28,7 @@ use sea_orm::{
 };
 use tracing::info;
 
-use super::planner::choose_members;
+use super::planner::{choose_members, forecast_wall_ms};
 use super::split_params;
 use crate::Scheduler;
 use crate::cluster::{Slot, SlotKind};
@@ -90,6 +90,7 @@ impl Scheduler {
         }
 
         let costs = gradient_db::eval_costs::load_eval_costs(&self.db.worker_db, task).await?;
+        let forecast = forecast_wall_ms(&costs, &split_params(seats));
         let members = split_members(&costs, seats);
         if members < 2 {
             info!(
@@ -97,6 +98,7 @@ impl Scheduler {
                 seats,
                 cost_sets = costs.sets.len(),
                 cost_subtrees = costs.subtrees.len(),
+                forecast_ms = %format!("{forecast:.0?}"),
                 "evaluation kept on one worker: a split is not predicted to be faster"
             );
             return Ok(None);
@@ -110,7 +112,13 @@ impl Scheduler {
         )
         .await?;
         if let Some(cluster) = created {
-            info!(evaluation_id = %evaluation.id, %cluster, members, "evaluation split into a cluster job");
+            info!(
+                evaluation_id = %evaluation.id,
+                %cluster,
+                members,
+                forecast_ms = %format!("{forecast:.0?}"),
+                "evaluation split into a cluster job"
+            );
         }
 
         Ok(created)
