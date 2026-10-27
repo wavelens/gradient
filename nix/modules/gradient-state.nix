@@ -173,7 +173,7 @@
       exec_enabled = mkOption {
         type = types.bool;
         default = false;
-        description = "Toggle exec jobs of this project with this option. Exec entry points of a project without this option fail with a message.";
+        description = "Whether to run exec jobs of this project. Exec entry points of a project with this option off fail with a message.";
       };
 
       created_by = mkOption {
