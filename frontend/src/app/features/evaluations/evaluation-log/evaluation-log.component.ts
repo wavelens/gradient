@@ -65,6 +65,7 @@ import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListCompone
 import { buildDuration, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
+import { unmetParts } from '@features/exec-jobs/exec-job-status';
 
 
 @Component({
@@ -1674,6 +1675,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         return `${reason.pending_shared_builds} ${buildWord} for an answer from the upstream caches.${failing}`;
       }
       case 'exec_workers': {
+        const missing = unmetParts(reason.unmet);
+        if (missing.length > 0) return `No connected worker offers ${missing.join(', ')}.`;
         const workerWord = reason.matching_workers === 1 ? 'worker' : 'workers';
         return reason.matching_workers > 0
           ? `Waiting for free devices on ${reason.matching_workers} ${workerWord}.`

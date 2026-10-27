@@ -368,6 +368,28 @@ describe('EvaluationLogComponent', () => {
         '14 builds wait for an answer from the upstream caches. Not answering: https://attic.example/lantian.',
       );
     });
+
+    it('names what no exec worker offers', () => {
+      const { cmp } = setup();
+      const reason = {
+        kind: 'exec_workers' as const,
+        unmet: { labels: ['3d-printer'], devices: [{ name: 'gpu:h100', count: 16 }], mounts: [], nodes: 0, custom_image: false },
+        connected_workers: 1,
+        matching_workers: 0,
+      };
+      expect(cmp.formatWaitingReason(reason)).toBe('No connected worker offers label 3d-printer, gpu:h100:16.');
+    });
+
+    it('counts the exec workers whose devices are busy', () => {
+      const { cmp } = setup();
+      const reason = {
+        kind: 'exec_workers' as const,
+        unmet: { labels: [], devices: [], mounts: [], nodes: 0, custom_image: false },
+        connected_workers: 3,
+        matching_workers: 1,
+      };
+      expect(cmp.formatWaitingReason(reason)).toBe('Waiting for free devices on 1 worker.');
+    });
   });
 
   // Every per-build action lives in the sidebar's right-click menu, so the model
