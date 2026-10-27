@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
 
 use anyhow::{Context, Result, anyhow};
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, Stream, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
@@ -161,10 +161,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> GuestConnection<S> {
     }
 
     pub async fn recv<T: Proto>(&mut self) -> Result<Option<T>> {
-        match self.frames.next().await {
-            None => Ok(None),
-            Some(frame) => Ok(Some(from_bytes(frame?.freeze(), self.version)?)),
-        }
+        self.incoming().next().await.transpose()
+    }
+
+    pub fn incoming<T: Proto>(&mut self) -> impl Stream<Item = Result<T>> + Unpin + '_ {
+        let version = self.version;
+        (&mut self.frames).map(move |frame| Ok(from_bytes(frame?.freeze(), version)?))
     }
 }
 
