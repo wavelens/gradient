@@ -29,7 +29,6 @@ import { RowComponent, RowListComponent } from '@gradient/ui/ui';
 export class DashboardStartComponent {
   readonly steps = [
     { icon: 'folder', title: 'Create a project', detail: 'A project groups tasks and members', link: '/projects' },
-    { icon: 'add_task', title: 'Add a task from a repository', detail: 'Point Gradient at a flake and pick the outputs to build', link: '/projects' },
     { icon: 'dns', title: 'Connect a worker', detail: 'Builds run on your own machines', link: '/projects' },
     { icon: 'storage', title: 'Create or subscribe to a cache', detail: 'Serve build results to your machines', link: '/caches' },
   ];
