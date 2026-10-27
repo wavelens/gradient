@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 use tokio_vsock::{VMADDR_CID_ANY, VsockAddr, VsockListener, VsockStream};
 
-use crate::output::{OutputLog, OutputReader, OutputReaders};
+use crate::output::{OutputChunk, OutputLog, OutputReader, OutputReaders};
 use crate::run::run;
 use crate::setup::{PreparedJob, prepare};
 
@@ -212,8 +212,8 @@ async fn stream_to_worker(
 
         tokio::select! {
             chunk = next_chunk(reader.as_mut()), if !output_done => match chunk {
-                Some(data) => {
-                    if outgoing.send(AgentToWorker::Output { data }).await.is_err() {
+                Some(chunk) => {
+                    if outgoing.send(chunk_message(chunk)).await.is_err() {
                         return;
                     }
                 }
@@ -228,7 +228,14 @@ async fn stream_to_worker(
     }
 }
 
-async fn next_chunk(reader: Option<&mut OutputReader>) -> Option<Vec<u8>> {
+fn chunk_message(chunk: OutputChunk) -> AgentToWorker {
+    match chunk {
+        OutputChunk::Data(data) => AgentToWorker::Output { data },
+        OutputChunk::Dropped(bytes) => AgentToWorker::OutputDropped { bytes },
+    }
+}
+
+async fn next_chunk(reader: Option<&mut OutputReader>) -> Option<OutputChunk> {
     match reader {
         Some(reader) => reader.next().await,
         None => std::future::pending().await,

@@ -21,6 +21,7 @@ use gradient_util::shutdown::Shutdown;
 use output::OutputLog;
 
 const OUTPUT_FILE: &str = "/run/gradient/output.log";
+const OUTPUT_KEPT: u64 = 64 * 1024 * 1024;
 
 #[derive(Parser)]
 #[command(name = "gradient-guest-agent", version)]
@@ -54,7 +55,7 @@ async fn serve() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
     let restarted = tokio::fs::try_exists(OUTPUT_FILE).await?;
-    let output = OutputLog::create(Path::new(OUTPUT_FILE)).await?;
+    let output = OutputLog::create(Path::new(OUTPUT_FILE), OUTPUT_KEPT).await?;
     let tasks = Shutdown::new();
     tokio::try_join!(listener::listen(output, tasks, restarted), http::serve())?;
     Ok(())

@@ -323,7 +323,7 @@ mod tests {
     }
 
     async fn output_log(dir: &tempfile::TempDir) -> OutputLog {
-        OutputLog::create(&dir.path().join("output.log"))
+        OutputLog::create(&dir.path().join("output.log"), 1024 * 1024)
             .await
             .expect("create")
     }

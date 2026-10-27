@@ -88,6 +88,7 @@ pub enum AgentToWorker {
     Ready { agent_version: String },
     ProgramStarted,
     Output { data: Vec<u8> },
+    OutputDropped { bytes: u64 },
     Phase { name: String, payload: Vec<u8> },
     SetupFailed { message: String },
     Exited { code: i32 },
