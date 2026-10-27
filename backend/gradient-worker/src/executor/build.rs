@@ -418,6 +418,7 @@ where
     let mut limit_hit = false;
     let mut watchdog = Watchdog::new(tokio::time::Instant::now(), None, silent);
     loop {
+        watchdog.saw_output();
         let msg = match watchdog.next(&mut logs, abort).await {
             Watched::Item(msg) => msg,
             Watched::End => break,
@@ -430,7 +431,6 @@ where
                 anyhow::bail!("build exceeded wall-clock timeout of {}s", total.as_secs())
             }
         };
-        watchdog.saw_output();
         stats.total_msgs += 1;
         if let Some(line) = log_message_to_text(&msg) {
             if limit_hit {
