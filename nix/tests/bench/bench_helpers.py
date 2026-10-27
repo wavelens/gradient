@@ -39,13 +39,13 @@ def login():
     return api("POST", "auth/basic/login", body={"loginname": "admin", "password": "admin_password"})
 
 
-def wait_for_status(token, eval_id, wanted, timeout):
+def wait_for_status(token, eval_id, wanted, timeout, poll=0.2):
     # Polled inside the VM: a driver round trip per poll caps the timing at a second.
     stop = "|".join(sorted(wanted | FAILED))
     rc, status = server.execute(
         f"timeout {timeout} sh -c 'while :; do"
         f" s=$(curl -sf {API}/evals/{eval_id} -H \"Authorization: Bearer {token}\" | jq -r .message.status);"
-        f" echo \"$s\" | grep -qxE \"{stop}\" && {{ echo \"$s\"; exit 0; }}; sleep 0.2; done'"
+        f" echo \"$s\" | grep -qxE \"{stop}\" && {{ echo \"$s\"; exit 0; }}; sleep {poll}; done'"
     )
     status = status.strip()
     if rc != 0:

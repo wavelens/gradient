@@ -216,7 +216,7 @@ def measure(token, task):
     server.succeed(f": > {POSTGRES_LOG}")
     eval_id = api("POST", f"tasks/project/{task}/evaluate", token, body={})
     try:
-        status = wait_for_status(token, eval_id, EVALUATED, timeout=EVAL_TIMEOUT)
+        status = wait_for_status(token, eval_id, EVALUATED, timeout=EVAL_TIMEOUT, poll=2)
     finally:
         save_slow_statements(f"{task}-{workers}")
         save_slow_spans(f"{task}-{workers}")
