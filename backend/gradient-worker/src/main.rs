@@ -8,7 +8,6 @@ mod config;
 mod connection_state;
 mod count;
 mod error;
-#[allow(dead_code, reason = "execute_exec_job wires the exec modules in")]
 mod exec;
 mod executor;
 mod exit_clock;
@@ -20,6 +19,7 @@ mod traits;
 mod worker;
 mod worker_pool;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -29,6 +29,7 @@ use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
 use config::WorkerConfig;
+use exec::host::ExecHost;
 use gradient_util::logging::{LogSetup, LogWriter, TraceSetup};
 use gradient_worker_client::reconnect::{
     RunOutcome, SessionEnd, backoff_after_session, retry_reconnect,
@@ -100,6 +101,7 @@ fn main() -> Result<()> {
             warn!(error = %e, "could not empty the job log directory");
         }
 
+        let exec = start_exec_host(&config).await?;
         let stop = CancellationToken::new();
         install_signal_handler(stop.clone());
 
@@ -144,12 +146,14 @@ fn main() -> Result<()> {
             let listener_config = config.clone();
             let listener_stop = stop.clone();
             let listener_sessions = sessions.clone();
+            let listener_exec = exec.clone();
             #[expect(clippy::disallowed_methods, reason = "returns once the worker stops")]
             tokio::spawn(async move {
                 if let Err(e) = listener::start_listener(
                     listener_config,
                     listener_stop,
                     listener_sessions,
+                    listener_exec,
                 )
                 .await
                 {
@@ -159,14 +163,28 @@ fn main() -> Result<()> {
         }
 
         sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
-        match server_url {
-            Some(server_url) => run_outbound(config, &server_url, stop, &sessions).await,
+        let served = match server_url {
+            Some(server_url) => {
+                run_outbound(config, &server_url, stop, &sessions, exec.clone()).await
+            }
             None => {
                 serve_incoming_only(&stop, &sessions, config.exit_limits()).await;
                 Ok(())
             }
+        };
+        if let Some(exec) = &exec {
+            exec.stop_with_worker().await;
         }
+        served
     })
+}
+
+async fn start_exec_host(config: &WorkerConfig) -> Result<Option<Arc<ExecHost>>> {
+    if !config.capabilities.exec {
+        return Ok(None);
+    }
+    let worker_id = worker::load_or_generate_id(&config.base_dir, config.id.as_deref())?;
+    Ok(Some(ExecHost::new(config, worker_id).await?))
 }
 
 async fn serve_incoming_only(
@@ -188,6 +206,7 @@ async fn run_outbound(
     server_url: &str,
     stop: CancellationToken,
     sessions: &TaskTracker,
+    exec: Option<Arc<ExecHost>>,
 ) -> Result<()> {
     let mut backoff = INITIAL_BACKOFF;
     let limits = config.exit_limits();
@@ -197,7 +216,7 @@ async fn run_outbound(
         () = exit_deadline(limits) => None,
         w = async {
             loop {
-                match Worker::connect(config.clone(), server_url).await {
+                match Worker::connect(config.clone(), server_url, exec.clone()).await {
                     Ok(w) => break w,
                     Err(e) => {
                         error!(

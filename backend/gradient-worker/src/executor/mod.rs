@@ -32,7 +32,7 @@ use gradient_wire::messages::{
     BuildJob, BuildOutput, BuildProgressPhase, BuildSpec, BuildSpecKind, BuildStage, FlakeJob,
     FlakeStep,
 };
-use gradient_wire::types::ExecJob;
+use gradient_wire::types::{ExecInventory, ExecJob};
 use tracing::instrument;
 
 use gradient_wire::messages::JobPhase;
@@ -307,9 +307,22 @@ impl JobExecutor {
         }
     }
 
-    #[expect(dead_code, reason = "the worker builds its exec host in the next step")]
     pub fn with_exec(self, exec: Option<Arc<ExecHost>>) -> Self {
         Self { exec, ..self }
+    }
+
+    pub fn exec_inventory(&self) -> Option<ExecInventory> {
+        self.exec.as_deref().map(ExecHost::inventory)
+    }
+
+    pub fn set_upcoming_exec_jobs(&self, count: u32) {
+        match &self.exec {
+            Some(exec) => exec.pool.set_upcoming_exec_jobs(count),
+            None => tracing::debug!(
+                count,
+                "pre-warm request ignored, this worker runs no guests"
+            ),
+        }
     }
 
     pub async fn shutdown(&self) {

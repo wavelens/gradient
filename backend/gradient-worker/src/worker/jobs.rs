@@ -73,10 +73,6 @@ impl JobRegistry {
         self.running.len()
     }
 
-    pub(super) fn is_idle(&self) -> bool {
-        self.running.is_empty()
-    }
-
     fn register(
         &mut self,
         job_id: String,
@@ -128,6 +124,16 @@ impl JobRegistry {
 
     pub(super) fn abort_all(&self) -> usize {
         self.aborting(|_| true)
+    }
+
+    pub(super) fn abort_for_stop(&self, keep_exec_jobs: bool) -> usize {
+        self.aborting(|j| !(keep_exec_jobs && j.kind == JobKind::Exec))
+    }
+
+    pub(super) fn is_idle_for_stop(&self, keep_exec_jobs: bool) -> bool {
+        self.running
+            .values()
+            .all(|j| keep_exec_jobs && j.kind == JobKind::Exec)
     }
 
     pub(super) fn abort_attempt(&self, attempt: &str) -> usize {
@@ -468,6 +474,58 @@ mod tests {
     }
 
     #[test]
+    fn a_kept_exec_job_survives_a_worker_stop() {
+        let (mut jobs, _done_rx) = registry();
+        let build = jobs.register(
+            "build:x".to_owned(),
+            JobKind::Build,
+            "dispatch-1".to_owned(),
+            None,
+            log(),
+        );
+        let exec = jobs.register(
+            "exec:y".to_owned(),
+            JobKind::Exec,
+            "dispatch-2".to_owned(),
+            None,
+            log(),
+        );
+
+        assert_eq!(jobs.abort_for_stop(true), 1);
+
+        assert!(build.abort.is_aborted());
+        assert!(!exec.abort.is_aborted());
+        assert!(!jobs.is_idle_for_stop(true));
+        jobs.finish("build:x");
+        assert!(jobs.is_idle_for_stop(true));
+        assert!(!jobs.is_idle_for_stop(false));
+    }
+
+    #[test]
+    fn a_stopped_worker_aborts_its_exec_jobs_too() {
+        let (mut jobs, _done_rx) = registry();
+        let build = jobs.register(
+            "build:x".to_owned(),
+            JobKind::Build,
+            "dispatch-1".to_owned(),
+            None,
+            log(),
+        );
+        let exec = jobs.register(
+            "exec:y".to_owned(),
+            JobKind::Exec,
+            "dispatch-2".to_owned(),
+            None,
+            log(),
+        );
+
+        assert_eq!(jobs.abort_for_stop(false), 2);
+
+        assert!(build.abort.is_aborted());
+        assert!(exec.abort.is_aborted());
+    }
+
+    #[test]
     fn aborting_an_attempt_stops_only_its_members() {
         let (mut jobs, _done_rx) = registry();
         let member = jobs.register(
@@ -506,7 +564,7 @@ mod tests {
         let job = jobs.finish("job-1").expect("the job was running");
 
         assert_eq!(job.assignment_id.get(), "dispatch-2");
-        assert!(jobs.is_idle());
+        assert_eq!(jobs.len(), 0);
         assert!(jobs.finish("job-1").is_none());
     }
 

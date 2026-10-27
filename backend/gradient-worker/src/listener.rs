@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use gradient_wire::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
 use tokio::net::TcpListener;
@@ -14,12 +16,14 @@ use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
 use crate::config::WorkerConfig;
+use crate::exec::host::ExecHost;
 use crate::worker::Worker;
 
 pub async fn start_listener(
     config: WorkerConfig,
     stop: CancellationToken,
     sessions: TaskTracker,
+    exec: Option<Arc<ExecHost>>,
 ) -> Result<()> {
     let addr = format!("{}:{}", config.listen_addr, config.port);
     let listener = TcpListener::bind(&addr)
@@ -38,8 +42,9 @@ pub async fn start_listener(
                     info!(%addr, "incoming connection accepted");
                     let config = config.clone();
                     let conn_stop = stop.clone();
+                    let exec = exec.clone();
                     sessions.spawn(async move {
-                        if let Err(e) = handle_incoming(stream, config, conn_stop).await {
+                        if let Err(e) = handle_incoming(stream, config, conn_stop, exec).await {
                             error!(%addr, error = %e, "incoming connection failed");
                         }
                     });
@@ -67,6 +72,7 @@ async fn handle_incoming(
     stream: tokio::net::TcpStream,
     config: WorkerConfig,
     stop: CancellationToken,
+    exec: Option<Arc<ExecHost>>,
 ) -> Result<()> {
     let ws_config = WebSocketConfig::default()
         .max_message_size(Some(MAX_PROTO_MESSAGE_SIZE))
@@ -79,7 +85,7 @@ async fn handle_incoming(
     .await
     .context("upgrade the WebSocket")?;
 
-    let worker = Worker::from_accepted(ws, config).await?;
+    let worker = Worker::from_accepted(ws, config, exec).await?;
     let executor_handle = worker.executor_handle();
     let (_disconnected, outcome) = worker.run(stop).await;
     executor_handle.shutdown().await;

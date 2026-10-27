@@ -154,13 +154,11 @@ impl WorkerConfig {
         }
     }
 
-    #[expect(dead_code, reason = "the exec host is not wired up yet")]
     pub fn guests_dir(&self) -> PathBuf {
         self.base_dir.join("guests")
     }
 }
 
-#[expect(dead_code, reason = "the exec host is not wired up yet")]
 impl ExecArgs {
     pub fn allow(&self) -> ExecAllow {
         let PortRange(lowest, highest) = self.allow_ports.unwrap_or(PortRange(1024, 65535));

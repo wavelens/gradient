@@ -9,7 +9,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use tracing::info;
 
-pub(super) fn load_or_generate_id(data_dir: &Path, id_override: Option<&str>) -> Result<String> {
+pub(crate) fn load_or_generate_id(data_dir: &Path, id_override: Option<&str>) -> Result<String> {
     use std::fs;
 
     if let Some(raw) = id_override {

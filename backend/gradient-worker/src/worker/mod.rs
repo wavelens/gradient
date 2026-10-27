@@ -19,6 +19,7 @@ use tracing::{info, warn};
 
 use crate::config::WorkerConfig;
 use crate::connection_state::{Connected, Disconnected};
+use crate::exec::host::ExecHost;
 use crate::executor::{JobExecutor, WorkerEvaluator};
 use crate::nix::store::LocalNixStore;
 use crate::proto::credentials::CredentialStore;
@@ -28,7 +29,7 @@ use gradient_worker_client::connection::handshake::{perform_dialed_handshake, pe
 use gradient_worker_client::reconnect::RunOutcome;
 use tokio_util::sync::CancellationToken;
 
-use id::load_or_generate_id;
+pub(crate) use id::load_or_generate_id;
 use jobs::WorkerJobs;
 
 pub(crate) use jobs::clear_job_logs;
@@ -54,10 +55,21 @@ impl<S> Worker<S> {
 }
 
 impl Worker<Connected> {
-    pub async fn connect(config: WorkerConfig, server_url: &str) -> Result<Self> {
+    pub async fn connect(
+        config: WorkerConfig,
+        server_url: &str,
+        exec: Option<Arc<ExecHost>>,
+    ) -> Result<Self> {
         let mut conn = ProtoConnection::open(server_url).await?;
-        Self::setup_connection(&mut conn, &config).await?;
-        let (executor, scorer) = Self::build_executor(&config).await?;
+        perform_setup(
+            &mut conn,
+            &config,
+            Side::Outbound,
+            Vec::new(),
+            exec.as_deref(),
+        )
+        .await?;
+        let (executor, scorer) = Self::build_executor(&config, exec).await?;
         Ok(Self::new_connected(config, conn, executor, scorer))
     }
 
@@ -66,10 +78,18 @@ impl Worker<Connected> {
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
         config: WorkerConfig,
+        exec: Option<Arc<ExecHost>>,
     ) -> Result<Self> {
         let mut conn = ProtoConnection::from_accepted(ws);
-        Self::setup_connection_incoming(&mut conn, &config).await?;
-        let (executor, scorer) = Self::build_executor(&config).await?;
+        perform_setup(
+            &mut conn,
+            &config,
+            Side::Inbound,
+            Vec::new(),
+            exec.as_deref(),
+        )
+        .await?;
+        let (executor, scorer) = Self::build_executor(&config, exec).await?;
         Ok(Self::new_connected(config, conn, executor, scorer))
     }
 
@@ -101,6 +121,7 @@ impl Worker<Disconnected> {
             &self.config,
             Side::Reconnect,
             self.jobs.running_assignments(),
+            self.executor.exec.as_deref(),
         )
         .await?;
         Ok(conn)
@@ -191,18 +212,10 @@ impl Worker<Connected> {
 }
 
 impl Worker<Connected> {
-    async fn setup_connection(conn: &mut ProtoConnection, config: &WorkerConfig) -> Result<()> {
-        perform_setup(conn, config, Side::Outbound, Vec::new()).await
-    }
-
-    async fn setup_connection_incoming(
-        conn: &mut ProtoConnection,
+    async fn build_executor(
         config: &WorkerConfig,
-    ) -> Result<()> {
-        perform_setup(conn, config, Side::Inbound, Vec::new()).await
-    }
-
-    async fn build_executor(config: &WorkerConfig) -> Result<(JobExecutor, JobScorer)> {
+        exec: Option<Arc<ExecHost>>,
+    ) -> Result<(JobExecutor, JobScorer)> {
         let store = LocalNixStore::connect(config.nix_daemon.max_connections.get())?;
         let evaluator = WorkerEvaluator::new(
             config.fork_workers(),
@@ -233,7 +246,8 @@ impl Worker<Connected> {
                 build_cores: config.build_cores(),
                 cpu_core_score: config.cpu_core_score(),
             },
-        );
+        )
+        .with_exec(exec);
         Ok((executor, JobScorer::new()))
     }
 }
@@ -250,9 +264,13 @@ async fn perform_setup(
     config: &WorkerConfig,
     side: Side,
     running: Vec<RunningAssignment>,
+    exec: Option<&ExecHost>,
 ) -> Result<()> {
     let peer_id = load_or_generate_id(&config.base_dir, config.id.as_deref())
         .context("load or generate persistent worker ID")?;
+    if let Some(exec) = exec {
+        exec.start_session();
+    }
     let handshake = match side {
         Side::Inbound => {
             perform_dialed_handshake(
@@ -279,7 +297,8 @@ async fn perform_setup(
         })
         .await?;
     }
-    if handshake.negotiated.build {
+    let exec = exec.filter(|_| handshake.negotiated.exec);
+    if handshake.negotiated.build || exec.is_some() {
         let architectures = if config.system.architectures.is_empty() {
             vec![crate::config::host_system()]
         } else {
@@ -311,7 +330,7 @@ async fn perform_setup(
             zone: config.zone.clone().filter(|z| !z.is_empty()),
             endpoint: config.endpoint.clone().filter(|e| !e.is_empty()),
             build_cores: config.build_cores().map(std::num::NonZeroU32::get),
-            exec: None,
+            exec: exec.map(|exec| Box::new(exec.inventory())),
         })
         .await?;
     }
@@ -324,6 +343,12 @@ async fn perform_setup(
         kind: JobKind::Build,
     })
     .await?;
+    if exec.is_some() {
+        conn.send(ClientMessage::RequestJob {
+            kind: JobKind::Exec,
+        })
+        .await?;
+    }
     Ok(())
 }
 

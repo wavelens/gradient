@@ -66,7 +66,7 @@ pub(super) async fn run_message_loop(
 
             _ = stop.cancelled(), if !state.stopping => {
                 state.begin_stop().await?;
-                if state.jobs.registry.lock().is_idle() {
+                if state.idle_for_stop() {
                     break;
                 }
                 stop_deadline = Some(tokio::time::Instant::now() + STOP_BUDGET);
@@ -84,7 +84,7 @@ pub(super) async fn run_message_loop(
 
             Some((job_id, result)) = done_rx.recv() => {
                 state.on_job_done(job_id, result).await?;
-                if state.stopping && state.jobs.registry.lock().is_idle() {
+                if state.stopping && state.idle_for_stop() {
                     info!("stopped: every aborted job has reported");
                     break;
                 }
@@ -161,6 +161,8 @@ pub(super) struct MessageLoopState {
     running_fetches: Arc<std::sync::atomic::AtomicU32>,
     config: WorkerConfig,
     draining: bool,
+    server_draining: bool,
+    warm_guests_stopped: bool,
     stopping: bool,
     refused: bool,
     exiting: bool,
@@ -193,6 +195,8 @@ impl MessageLoopState {
             executor,
             config,
             draining: false,
+            server_draining: false,
+            warm_guests_stopped: false,
             stopping: false,
             refused: false,
             exiting: false,
@@ -216,12 +220,46 @@ impl MessageLoopState {
         self.stopping = true;
         self.begin_drain().await?;
         self.fetches.abort_all();
-        let aborted = self.jobs.registry.lock().abort_all();
+        let keep_exec_jobs = self.keeps_exec_jobs();
+        if keep_exec_jobs && let Some(exec) = &self.executor.exec {
+            exec.keep_guests_through_the_stop();
+        }
+        let aborted = self.jobs.registry.lock().abort_for_stop(keep_exec_jobs);
         info!(
             aborted,
-            "stopping: aborted every running job, collecting their reports"
+            keep_exec_jobs, "stopping: aborted the running jobs, collecting their reports"
         );
         Ok(())
+    }
+
+    fn keeps_exec_jobs(&self) -> bool {
+        !self.config.exec.stop_guests_with_worker
+    }
+
+    fn idle_for_stop(&self) -> bool {
+        self.jobs
+            .registry
+            .lock()
+            .is_idle_for_stop(self.keeps_exec_jobs())
+    }
+
+    fn stop_warm_guests_once_idle(&mut self) {
+        let Some(exec) = &self.executor.exec else {
+            return;
+        };
+        if !self.server_draining
+            || self.warm_guests_stopped
+            || self.jobs.registry.lock().active(JobKind::Exec) > 0
+        {
+            return;
+        }
+        self.warm_guests_stopped = true;
+        let pool = Arc::clone(&exec.pool);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "tears down warm guests while the session drains"
+        )]
+        tokio::spawn(async move { pool.stop_warm().await });
     }
 
     fn occupied(&self, kind: JobKind) -> u32 {
@@ -238,6 +276,7 @@ impl MessageLoopState {
         match kind {
             JobKind::Flake => self.max_eval,
             JobKind::Build => self.max_build,
+            JobKind::Exec if self.executor.exec.is_some() => u32::MAX,
             JobKind::Exec => 0,
         }
     }
@@ -286,12 +325,14 @@ impl MessageLoopState {
             ServerMessage::Draining => {
                 info!("server is draining; finishing in-flight work then disconnecting");
                 self.draining = true;
+                self.server_draining = true;
+                if let Some(exec) = &self.executor.exec {
+                    exec.pool.set_draining();
+                }
+                self.stop_warm_guests_once_idle();
             }
             ServerMessage::PreWarmVms { count } => {
-                debug!(
-                    count,
-                    "pre-warm request ignored, this worker runs no guests"
-                );
+                self.executor.set_upcoming_exec_jobs(count);
             }
             ServerMessage::Error { code, message } => {
                 error!(code, %message, "protocol error from server");
@@ -444,6 +485,7 @@ impl MessageLoopState {
             }
         }
 
+        self.stop_warm_guests_once_idle();
         if !self.draining {
             let kind = completed_kind;
             if self.occupied(kind.clone()) < self.max_for(kind.clone()) {
@@ -501,6 +543,7 @@ impl MessageLoopState {
             &self.writer,
             self.config.build.cgroup.clone(),
             self.config.exit_limits(),
+            self.executor.exec_inventory(),
         );
         let expired = self.holds.expired(std::time::Instant::now());
         self.report_released(expired, "cluster start timed out")
@@ -536,6 +579,14 @@ impl MessageLoopState {
                 })
                 .await
                 .context("heartbeat RequestJob Build")?;
+        }
+        if self.occupied(JobKind::Exec) < self.max_for(JobKind::Exec) {
+            self.writer
+                .send(ClientMessage::RequestJob {
+                    kind: JobKind::Exec,
+                })
+                .await
+                .context("heartbeat RequestJob Exec")?;
         }
 
         Ok(())
@@ -951,6 +1002,7 @@ fn send_live_metrics(
     writer: &ProtoWriter,
     daemon_cgroup: Option<std::path::PathBuf>,
     limits: exit_clock::ExitLimits,
+    exec: Option<gradient_wire::types::ExecInventory>,
 ) {
     let writer = writer.clone();
     #[expect(
@@ -982,7 +1034,7 @@ fn send_live_metrics(
                 lifetime_left_secs: exit_clock::clock()
                     .lifetime_left(&limits, Instant::now())
                     .map(|left| left.as_secs()),
-                exec: None,
+                exec: exec.map(Box::new),
             })
             .await
         {
