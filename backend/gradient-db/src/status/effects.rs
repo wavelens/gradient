@@ -84,7 +84,7 @@ fn is_builder(status: BuildStatus) -> bool {
 fn need_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
     changes
         .iter()
-        .filter(|c| is_builder(c.from) != is_builder(c.to))
+        .filter(|c| is_builder(c.from) != is_builder(c.to) || c.to == BuildStatus::Aborted)
         .map(|c| c.derivation)
         .collect()
 }
@@ -269,8 +269,8 @@ mod tests {
                 change(thawed, BuildStatus::Skipped, BuildStatus::Created),
                 change(promoted, BuildStatus::Created, BuildStatus::Queued),
             ]),
-            vec![requeued, finished],
-            "an abort and a thaw stay inside what builds once wanted; the walk already stepped through them"
+            vec![requeued, finished, aborted],
+            "a thaw stays inside what builds once wanted, the walk stepped through it; an abort marks the job and moves the need anyway"
         );
     }
 
