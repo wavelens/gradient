@@ -46,4 +46,5 @@ pub fn admin_router() -> OpenApiRouter<Arc<ServerState>> {
         .nest("/webhooks", webhooks::router(WebhookMount::Instance))
         .route_layer(from_fn(superuser_only))
         .routes(routes!(crate::endpoints::workers::get_workers))
+        .routes(routes!(crate::endpoints::workers::get_worker))
 }

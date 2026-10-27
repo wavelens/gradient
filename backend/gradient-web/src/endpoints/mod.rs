@@ -28,6 +28,7 @@ pub mod metrics;
 pub mod metrics_query;
 pub mod projects;
 mod refusal;
+pub mod runner_jobs;
 pub mod search;
 pub mod stars;
 pub mod stats;

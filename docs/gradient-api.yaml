@@ -729,6 +729,41 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/admin/workers/{worker}:
+    get:
+      tags:
+      - admin
+      summary: Get connected worker
+      description: |-
+        Returns one connected worker with its capabilities, assigned job counts and runner inventory. Device `free` counts leave out devices held by assigned runner jobs.
+
+        Same access as `listWorkers`. Answers 404 when no worker with this id is connected.
+      operationId: getWorker
+      parameters:
+      - name: worker
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Worker
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/WorkerInfo'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/auth/basic/login:
     post:
       tags:
@@ -5625,6 +5660,44 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/evals/{evaluation}/runner-jobs:
+    get:
+      tags:
+      - runner-jobs
+      summary: List runner jobs of an evaluation
+      description: |-
+        Returns every runner job of the evaluation, ordered by entry point, with its status, wait reason and last phase.
+
+        **Access:** Public projects, or members of the project.
+      operationId: listEvaluationRunnerJobs
+      parameters:
+      - name: evaluation
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/EvaluationId'
+      responses:
+        '200':
+          description: Runner jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RunnerJobSummary'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
   /api/v1/evals/{evaluation}/runtime-closure:
     get:
       tags:
@@ -8049,6 +8122,116 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security:
+      - bearerAuth: []
+  /api/v1/runner-jobs/{job}:
+    get:
+      tags:
+      - runner-jobs
+      summary: Get runner job
+      description: |-
+        Returns a runner job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt.
+
+        **Access:** Public projects, or members of the project.
+      operationId: getRunnerJob
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/RunnerJobId'
+      responses:
+        '200':
+          description: Runner job
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/RunnerJobResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
+  /api/v1/runner-jobs/{job}/abort:
+    post:
+      tags:
+      - runner-jobs
+      summary: Abort runner job
+      description: Stops a runner job that has not finished. The job becomes `Aborted`, its worker gets an abort for the running attempt and the job never restarts. Requires project membership or a superuser. Answers 409 when the job has already finished.
+      operationId: abortRunnerJob
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/RunnerJobId'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/runner-jobs/{job}/log:
+    get:
+      tags:
+      - runner-jobs
+      summary: Get runner job log
+      description: |-
+        Returns the program output of one attempt as a single string, the latest attempt unless `attempt` names its number. Empty string before the first attempt. Answers 404 for an attempt number the job does not have.
+
+        **Access:** Public projects, or members of the project.
+      operationId: getRunnerJobLog
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/RunnerJobId'
+      - name: attempt
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+      responses:
+        '200':
+          description: Runner job log
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
       - bearerAuth: []
   /api/v1/search:
     get:
@@ -13193,6 +13376,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DecisionCandidateView'
+    AttemptEndReason:
+      type: string
+      enum:
+      - completed
+      - failed
+      - timeout
+      - lost
+      - aborted
     AttemptSummary:
       type: object
       required:
@@ -13559,6 +13750,10 @@ components:
           - integer
           - 'null'
           format: int64
+        runner:
+          oneOf:
+          - $ref: '#/components/schemas/RunnerInventory'
+          - type: 'null'
     BuildGraph:
       type: object
       required:
@@ -14707,6 +14902,23 @@ components:
     DerivationId:
       type: string
       format: uuid
+    DeviceClass:
+      type: object
+      required:
+      - name
+      - total
+      - free
+      properties:
+        name:
+          type: string
+        total:
+          type: integer
+          format: int32
+          minimum: 0
+        free:
+          type: integer
+          format: int32
+          minimum: 0
     DeviceRequest:
       type: object
       required:
@@ -18268,6 +18480,296 @@ components:
           type: string
         description:
           type: string
+    RunnerAllow:
+      type: object
+      required:
+      - network
+      - ssh
+      - ports
+      - nodes
+      - devices
+      - mounts
+      - custom_images
+      - retries
+      properties:
+        network:
+          type: boolean
+        ssh:
+          type: boolean
+        ports:
+          type: array
+          items: false
+          prefixItems:
+          - type: integer
+            format: int32
+            minimum: 0
+          - type: integer
+            format: int32
+            minimum: 0
+        nodes:
+          type: integer
+          format: int32
+          minimum: 0
+        devices:
+          type: array
+          items:
+            type: string
+        mounts:
+          type: array
+          items:
+            type: string
+        custom_images:
+          type: boolean
+        timeout_secs:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        max_silent_secs:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        retries:
+          type: integer
+          format: int32
+          minimum: 0
+    RunnerDefaults:
+      type: object
+      required:
+      - network
+      - ssh
+      - mounts
+      properties:
+        network:
+          type: boolean
+        ssh:
+          type: boolean
+        mounts:
+          type: array
+          items:
+            type: string
+        max_silent_secs:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+    RunnerInventory:
+      type: object
+      required:
+      - labels
+      - devices
+      - mounts
+      - secrets
+      - allow
+      - defaults
+      - warm_guests
+      properties:
+        labels:
+          type: array
+          items:
+            type: string
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceClass'
+        mounts:
+          type: array
+          items:
+            type: string
+        secrets:
+          type: array
+          items:
+            type: string
+        allow:
+          $ref: '#/components/schemas/RunnerAllow'
+        defaults:
+          $ref: '#/components/schemas/RunnerDefaults'
+        warm_guests:
+          type: integer
+          format: int32
+          minimum: 0
+    RunnerJobAttemptView:
+      type: object
+      required:
+      - number
+      - worker
+      - started_at
+      properties:
+        number:
+          type: integer
+          format: int32
+        worker:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        end_reason:
+          oneOf:
+          - $ref: '#/components/schemas/AttemptEndReason'
+          - type: 'null'
+        message:
+          type:
+          - string
+          - 'null'
+    RunnerJobId:
+      type: string
+      format: uuid
+    RunnerJobPhaseView:
+      type: object
+      required:
+      - name
+      - attempt
+      - created_at
+      properties:
+        name:
+          type: string
+        attempt:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+    RunnerJobResponse:
+      type: object
+      required:
+      - id
+      - status
+      - entry_point
+      - evaluation
+      - task
+      - project
+      - nodes
+      - labels
+      - devices
+      - retries_left
+      - created_at
+      - attempts
+      - phases
+      properties:
+        id:
+          $ref: '#/components/schemas/RunnerJobId'
+        status:
+          $ref: '#/components/schemas/RunnerJobStatus'
+        entry_point:
+          type: string
+        evaluation:
+          $ref: '#/components/schemas/EvaluationId'
+        task:
+          type: string
+        project:
+          type: string
+        nodes:
+          type: integer
+          format: int32
+          minimum: 0
+        labels:
+          type: array
+          items:
+            type: string
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceRequest'
+        waiting_reason:
+          oneOf:
+          - $ref: '#/components/schemas/WaitingReason'
+          - type: 'null'
+        message:
+          type:
+          - string
+          - 'null'
+        retries_left:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        worker:
+          type:
+          - string
+          - 'null'
+        attempts:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunnerJobAttemptView'
+        phases:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunnerJobPhaseView'
+    RunnerJobStatus:
+      type: string
+      enum:
+      - queued
+      - starting
+      - running
+      - completed
+      - failed
+      - aborted
+      - created
+    RunnerJobSummary:
+      type: object
+      required:
+      - id
+      - entry_point
+      - status
+      - nodes
+      - labels
+      - devices
+      properties:
+        id:
+          $ref: '#/components/schemas/RunnerJobId'
+        entry_point:
+          type: string
+        status:
+          $ref: '#/components/schemas/RunnerJobStatus'
+        waiting_reason:
+          oneOf:
+          - $ref: '#/components/schemas/WaitingReason'
+          - type: 'null'
+        message:
+          type:
+          - string
+          - 'null'
+        nodes:
+          type: integer
+          format: int32
+          minimum: 0
+        labels:
+          type: array
+          items:
+            type: string
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceRequest'
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        last_phase:
+          type:
+          - string
+          - 'null'
     RunnerUnmet:
       type: object
       required:
@@ -19921,6 +20423,10 @@ components:
           items:
             $ref: '#/components/schemas/ProjectId'
           uniqueItems: true
+        runner:
+          oneOf:
+          - $ref: '#/components/schemas/RunnerInventory'
+          - type: 'null'
     WorkerLiveInfo:
       type: object
       required:
@@ -20151,6 +20657,8 @@ tags:
   description: Evaluation details, status, and log streaming
 - name: builds
   description: Build details, logs, artefact downloads, and dependency graph
+- name: runner-jobs
+  description: Runner jobs - status, wait reason, attempts, phases, logs and abort
 - name: build-requests
   description: Ad-hoc build requests from `gradient build` - CLI-uploaded source evaluated under a per-project build-request task. Flake inputs served over `git+ssh://` are fetched using the project's SSH key, and `input_overrides` can override remote flake inputs for the run.
 - name: workers

@@ -133,6 +133,8 @@ export interface AssignDecisionView {
   candidates: DecisionCandidateView[];
 }
 
+export type AttemptEndReason = "completed" | "failed" | "timeout" | "lost" | "aborted";
+
 export interface AttemptSummary {
   dispatched_job_id?: string | null;
   substitute: boolean;
@@ -247,6 +249,7 @@ export interface BoardWorker {
   cpu_usage_pct?: number | null;
   ram_free_mb?: number | null;
   ram_total_mb?: number | null;
+  runner?: RunnerInventory | null;
 }
 
 export interface BuildGraph {
@@ -664,6 +667,12 @@ export interface DependencyGraphNode {
 }
 
 export type DerivationId = string;
+
+export interface DeviceClass {
+  name: string;
+  total: number;
+  free: number;
+}
 
 export interface DeviceRequest {
   name: string;
@@ -1914,6 +1923,89 @@ export interface RuleDescription {
   description: string;
 }
 
+export interface RunnerAllow {
+  network: boolean;
+  ssh: boolean;
+  ports: never[];
+  nodes: number;
+  devices: string[];
+  mounts: string[];
+  custom_images: boolean;
+  timeout_secs?: number | null;
+  max_silent_secs?: number | null;
+  retries: number;
+}
+
+export interface RunnerDefaults {
+  network: boolean;
+  ssh: boolean;
+  mounts: string[];
+  max_silent_secs?: number | null;
+}
+
+export interface RunnerInventory {
+  labels: string[];
+  devices: DeviceClass[];
+  mounts: string[];
+  secrets: string[];
+  allow: RunnerAllow;
+  defaults: RunnerDefaults;
+  warm_guests: number;
+}
+
+export interface RunnerJobAttemptView {
+  number: number;
+  worker: string;
+  started_at: string;
+  ended_at?: string | null;
+  end_reason?: AttemptEndReason | null;
+  message?: string | null;
+}
+
+export type RunnerJobId = string;
+
+export interface RunnerJobPhaseView {
+  name: string;
+  attempt: number;
+  created_at: string;
+}
+
+export interface RunnerJobResponse {
+  id: RunnerJobId;
+  status: RunnerJobStatus;
+  entry_point: string;
+  evaluation: EvaluationId;
+  task: string;
+  project: string;
+  nodes: number;
+  labels: string[];
+  devices: DeviceRequest[];
+  waiting_reason?: WaitingReason | null;
+  message?: string | null;
+  retries_left: number;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  worker?: string | null;
+  attempts: RunnerJobAttemptView[];
+  phases: RunnerJobPhaseView[];
+}
+
+export type RunnerJobStatus = "queued" | "starting" | "running" | "completed" | "failed" | "aborted" | "created";
+
+export interface RunnerJobSummary {
+  id: RunnerJobId;
+  entry_point: string;
+  status: RunnerJobStatus;
+  waiting_reason?: WaitingReason | null;
+  message?: string | null;
+  nodes: number;
+  labels: string[];
+  devices: DeviceRequest[];
+  started_at?: string | null;
+  last_phase?: string | null;
+}
+
 export interface RunnerUnmet {
   labels: string[];
   devices: DeviceRequest[];
@@ -2499,6 +2591,7 @@ export interface WorkerInfo {
   assigned_job_count: number;
   draining: boolean;
   authorized_peers?: ProjectId[] | null;
+  runner?: RunnerInventory | null;
 }
 
 export interface WorkerLiveInfo {
