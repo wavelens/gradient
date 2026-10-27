@@ -81,6 +81,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                 format!("{}/{}", project, task),
                 true,
             );
+            out.ok(&serde_json::json!({"selected": true, "project": project, "task": task}));
             out.human("Task selected in current Project.");
         }
 
