@@ -22,11 +22,6 @@
   align-items: center;
   gap: $spacing-md;
 
-  .user-name {
-    color: var(--gr-text-primary);
-    font-weight: 600;
-  }
-
   .user-link {
     color: var(--gr-text-secondary);
     padding: $spacing-sm $spacing-md;
@@ -36,21 +31,27 @@
     }
   }
 
-  .logout-btn {
-    background: none;
-    border: none;
-    color: var(--gr-text-secondary);
-    cursor: pointer;
-    padding: $spacing-sm;
+  .user-menu-trigger {
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: $spacing-xs;
+    padding: $spacing-xs $spacing-sm;
+    background: none;
+    border: none;
     border-radius: $border-radius-sm;
+    color: var(--gr-text-secondary);
+    font: inherit;
+    cursor: pointer;
     transition: $transition-fast;
 
     &:hover {
       color: var(--gr-text-primary);
       background-color: var(--gr-surface-hover);
     }
+  }
+
+  .user-name {
+    color: var(--gr-text-primary);
+    font-weight: 600;
   }
 }
