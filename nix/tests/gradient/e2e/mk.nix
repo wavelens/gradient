@@ -2619,6 +2619,17 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     for node, unit in fleet_units():
         node.succeed(f"systemctl stop {unit}.service")
     server.succeed("systemctl stop gradient-server.service")
+    sql(
+        "INSERT INTO exec_job (id, evaluation, entry_point, program_derivation, requirement, "
+        "spec, retries_left, status, created_at) "
+        "SELECT gen_random_uuid(), e.evaluation, e.id, e.derivation, '{}'::jsonb, "
+        "'{\"program\": \"/bin/true\"}'::jsonb, 0, 3, now() AT TIME ZONE 'UTC' "
+        "FROM entry_point e LIMIT 1;"
+    )
+    sql(
+        "INSERT INTO exec_job_attempt (id, exec_job, assignment_id, worker, number, started_at, ended_at) "
+        "SELECT gen_random_uuid(), id, gen_random_uuid(), 'gate', 1, created_at, created_at FROM exec_job;"
+    )
 
     print(server.succeed(
         "${pkgs.gradient.gate}/bin/gradient-sql-gate "
