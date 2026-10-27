@@ -640,6 +640,16 @@
   },
   {
     "group": "exec",
+    "field": "nameservers",
+    "flag": "exec-nameservers",
+    "env": "GRADIENT_WORKER_EXEC_NAMESERVERS",
+    "type": "Vec<String>",
+    "description": "IPv4 addresses of the nameservers for guests with network access. An empty list uses the\naddress of {option}`services.gradient.worker.exec.bridge`, where the NixOS module runs\na DNS forwarder.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "exec",
     "field": "cloud_hypervisor_bin",
     "flag": "exec-cloud-hypervisor-bin",
     "env": "GRADIENT_WORKER_EXEC_CLOUD_HYPERVISOR_BIN",

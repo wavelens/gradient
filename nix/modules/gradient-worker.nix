@@ -22,6 +22,7 @@
   bridgeAddress = lib.concatStringsSep "." (lib.take 3 subnetOctets ++ [ (toString (lib.toInt (lib.last subnetOctets) + 1)) ]);
   execOptionsSet = lib.any (option: option.highestPrio < (lib.mkOptionDefault null).priority)
     (lib.collect lib.isOption options.services.gradient.worker.exec);
+  guestDnsForwarder = exec.allow.network && exec.nameservers == [ ];
   hasDevice = source: lib.any (device: device.${source} != null && device.${source} != [ ]) exec.devices;
 
   execConfig = lib.mkIf cfg.capabilities.exec {
@@ -60,6 +61,25 @@
       };
     };
 
+    systemd.services.gradient-guest-dns = lib.mkIf guestDnsForwarder {
+      description = "Forwarder for DNS queries from Gradient guests.";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network.target" ];
+      serviceConfig = {
+        ExecStart = lib.concatStringsSep " " [
+          (lib.getExe' pkgs.dnsmasq "dnsmasq")
+          "--keep-in-foreground"
+          "--conf-file=/dev/null"
+          "--pid-file"
+          "--no-hosts"
+          "--bind-dynamic"
+          "--interface=${exec.bridge}"
+          "--except-interface=lo"
+        ];
+        Restart = "on-failure";
+      };
+    };
+
     networking = {
       bridges.${exec.bridge}.interfaces = [ ];
       interfaces.${exec.bridge}.ipv4.addresses = [{
@@ -69,6 +89,10 @@
       nat = lib.mkIf exec.allow.network {
         enable = true;
         internalInterfaces = [ exec.bridge ];
+      };
+      firewall.interfaces.${exec.bridge} = lib.mkIf guestDnsForwarder {
+        allowedUDPPorts = [ 53 ];
+        allowedTCPPorts = [ 53 ];
       };
     };
   };

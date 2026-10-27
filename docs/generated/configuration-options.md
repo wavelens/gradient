@@ -392,6 +392,7 @@
 | `worker.exec.mounts.*.path` | path | - | - | Host directory for the guest, shared over virtiofs. |
 | `worker.exec.mounts.*.perJob` | bool | `false` | - | Whether to give each job a fresh directory below `path`, deleted after the job. |
 | `worker.exec.mounts.*.readOnly` | bool | `false` | - | Whether to share the directory read-only. |
+| `worker.exec.nameservers` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_NAMESERVERS` | IPv4 addresses of the nameservers for guests with network access. An empty list uses the address of `worker.exec.bridge`, where the NixOS module runs a DNS forwarder. |
 | `worker.exec.preWarm` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_PRE_WARM` | Guests booted from `worker.exec.image` and paused, waiting for a job. |
 | `worker.exec.stopGuestsWithWorker` | bool | `true` | `GRADIENT_WORKER_EXEC_STOP_GUESTS_WITH_WORKER` | Whether stopping or restarting the worker stops every guest. The server queues the exec jobs of stopped guests again without using a retry. `false` keeps guests running across a worker restart and the restarted worker reattaches to them. |
 | `worker.exec.subnet` | string | `"10.233.0.0/16"` | `GRADIENT_WORKER_EXEC_SUBNET` | IPv4 subnet of `worker.exec.bridge`. The bridge takes the first host address, each guest the address of its vsock CID. |

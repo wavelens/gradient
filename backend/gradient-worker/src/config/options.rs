@@ -394,6 +394,12 @@ pub struct ExecArgs {
     #[arg(default_value = "10.233.0.0/16")]
     pub subnet: String,
 
+    /// IPv4 addresses of the nameservers for guests with network access. An empty list uses the
+    /// address of {option}`services.gradient.worker.exec.bridge`, where the NixOS module runs
+    /// a DNS forwarder.
+    #[arg(value_delimiter = ',')]
+    pub nameservers: Vec<String>,
+
     /// Path to the `cloud-hypervisor` binary, resolved via `PATH` by default.
     #[arg(default_value = "cloud-hypervisor")]
     pub cloud_hypervisor_bin: String,
