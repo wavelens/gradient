@@ -162,15 +162,27 @@ def save_slow_spans(label):
     print(f"spans by total time since the previous run, {label}:\n{heaviest}\n\nspans over a second:\n{timeline}")
 
 
+def active_statements():
+    return psql(
+        "SELECT to_char(now(), 'HH24:MI:SS') || ' ' || coalesce(wait_event_type || '/' || wait_event, 'running')"
+        " || ' ' || to_char(now() - xact_start, 'MI:SS') || ' into its transaction: '"
+        " || left(regexp_replace(query, '\\s+', ' ', 'g'), 200)"
+        " FROM pg_stat_activity WHERE state = 'active' AND pid <> pg_backend_pid()"
+    )
+
+
 def wait_until_settled(eval_id):
     deadline = time.monotonic() + EVAL_TIMEOUT
+    samples = []
     while int(psql(
         "SELECT count(*) FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build"
         f" WHERE bj.evaluation = '{eval_id}' AND db.status IN (1, 2)"
     )):
+        samples.append(active_statements())
         assert time.monotonic() < deadline, (
-            f"evaluation {eval_id} still has queued or building shared builds after its abort:\n"
-            + server.succeed("journalctl -u gradient-server --no-pager -n 50")
+            f"evaluation {eval_id} still has queued or building shared builds after its abort\n"
+            "active statements while waiting:\n" + "\n".join(samples) + "\n"
+            + server.succeed("journalctl -u gradient-server --no-pager -n 50 | grep -v 'job failed' || true")
         )
         time.sleep(2)
 
@@ -204,8 +216,13 @@ def measure(token, task):
         "jobs": jobs,
     }
     if status != "Completed":
+        psql("SELECT pg_stat_statements_reset();")
         api("POST", f"evals/{eval_id}", token, body={"method": "abort"})
-        wait_until_settled(eval_id)
+        try:
+            wait_until_settled(eval_id)
+        finally:
+            save_slow_statements(f"{task}-{workers}-abort")
+            save_slow_spans(f"{task}-{workers}-abort")
     return result
 
 
