@@ -73,8 +73,8 @@
       </gr-settings-section>
     }
 
-    <gr-settings-section title="Projects and Caches" [card]="false" maxWidth="none">
-      @if (grants().projects.length + grants().caches.length > 0) {
+    @if (grants().projects.length + grants().caches.length > 0) {
+      <gr-settings-section title="Projects and Caches" [card]="false" maxWidth="none">
         <gr-row-list>
           @for (grant of grants().projects; track grant.project) {
             <gr-row icon="corporate_fare" [link]="['/project', grant.project]" linkLabel="Open project">
@@ -89,11 +89,8 @@
             </gr-row>
           }
         </gr-row-list>
-      } @else {
-        <gr-empty-state icon="corporate_fare" title="No projects or caches"
-          message="A project or cache grants the team on its Members & Roles page." />
-      }
-    </gr-settings-section>
+      </gr-settings-section>
+    }
 
     <gr-settings-section title="Recent Evaluations" [card]="false" maxWidth="none">
       @if (evaluations().length > 0) {

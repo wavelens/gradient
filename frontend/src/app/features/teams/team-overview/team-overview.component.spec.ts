@@ -69,6 +69,10 @@ describe('TeamOverviewComponent', () => {
     expect(headings(render())).not.toContain('Workers');
   });
 
+  it('hides the projects and caches section when the team has no grants', () => {
+    expect(headings(render())).not.toContain('Projects and Caches');
+  });
+
   it('lists the team workers', () => {
     const worker = { worker_id: 'w1', display_name: 'Builder', active: true, connected: true } as TeamWorkerEntry;
     const element = render([worker]);
