@@ -206,6 +206,37 @@ pub fn open_closure_cte_body_until(
     within: Option<&str>,
     stop_at: &str,
 ) -> String {
+    closure_cte_body(
+        name,
+        seed_select,
+        within,
+        stop_at,
+        &builder_predicate("dep", "w"),
+    )
+}
+
+pub fn need_closure_cte_body_until(
+    name: &str,
+    seed_select: &str,
+    within: Option<&str>,
+    stop_at: &str,
+) -> String {
+    closure_cte_body(
+        name,
+        seed_select,
+        within,
+        stop_at,
+        &crate::graph::predicates::builds_once_wanted_predicate("dep", "w"),
+    )
+}
+
+fn closure_cte_body(
+    name: &str,
+    seed_select: &str,
+    within: Option<&str>,
+    stop_at: &str,
+    builder: &str,
+) -> String {
     let stop = if stop_at.is_empty() {
         String::new()
     } else {
@@ -221,7 +252,6 @@ pub fn open_closure_cte_body_until(
              JOIN derivation w ON w.id = dep.derivation \
              WHERE e.derivation = c.derivation AND (c.builder OR e.kind IN (1, 2)) \
                AND {open}{stop}",
-            builder = builder_predicate("dep", "w"),
             open = open_predicate("dep"),
         ),
     );

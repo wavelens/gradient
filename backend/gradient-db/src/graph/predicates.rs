@@ -70,10 +70,18 @@ pub fn aborted_in_evaluation(evaluation: &str) -> String {
 }
 
 pub fn builder_predicate(shared_build: &str, walked: &str) -> String {
+    builds_here(shared_build, walked, &BUILDER_STATUSES)
+}
+
+pub fn builds_once_wanted_predicate(shared_build: &str, walked: &str) -> String {
+    builds_here(shared_build, walked, &BUILDS_ONCE_WANTED)
+}
+
+fn builds_here(shared_build: &str, walked: &str, statuses: &[BuildStatus]) -> String {
     format!(
         "{walked}.walked AND {shared_build}.probed AND NOT {shared_build}.cache_available \
          AND {shared_build}.status IN ({pending})",
-        pending = crate::sql::status::build_in(&BUILDS_ONCE_WANTED),
+        pending = crate::sql::status::build_in(statuses),
     )
 }
 

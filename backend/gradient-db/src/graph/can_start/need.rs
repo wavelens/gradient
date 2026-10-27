@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::graph::predicates::{builder_predicate, open_predicate};
+use crate::graph::predicates::{builds_once_wanted_predicate, open_predicate};
 use crate::graph::promotion::returned_transitions;
 use crate::sql::StatusWrite;
 use crate::status::TransitionChange;
@@ -108,7 +108,12 @@ pub(crate) static RECOUNT_WANTED_SQL: LazyLock<String> = LazyLock::new(|| {
                WHERE ({open} OR s.fetchable)) x \
          WHERE db.derivation = x.derivation AND db.wanted <> x.wanted \
          RETURNING db.derivation, db.wanted",
-        cte = crate::graph::walks::open_closure_cte_body("wanted", &open_entry_points(), None),
+        cte = crate::graph::walks::need_closure_cte_body_until(
+            "wanted",
+            &open_entry_points(),
+            None,
+            ""
+        ),
         open = open_predicate("s"),
     )
 });
@@ -131,7 +136,7 @@ fn open_entry_points() -> String {
          JOIN derivation_build db ON db.derivation = ep.derivation \
          JOIN derivation w ON w.id = db.derivation WHERE {open}",
         live = wanted_by_its_evaluation("ep"),
-        builder = builder_predicate("db", "w"),
+        builder = builds_once_wanted_predicate("db", "w"),
         open = open_predicate("db"),
     )
 }
@@ -165,7 +170,7 @@ static UPDATE_NEED_SQL: LazyLock<String> = LazyLock::new(|| need_sql(""));
 static GAIN_NEED_SQL: LazyLock<String> = LazyLock::new(|| need_sql("dep.wanted"));
 
 fn need_sql(stop_region_at: &str) -> String {
-    let region = crate::graph::walks::open_closure_cte_body_until(
+    let region = crate::graph::walks::need_closure_cte_body_until(
         "region",
         "SELECT NULL::uuid AS evaluation, unnest($1::uuid[]) AS derivation, true AS builder",
         None,
@@ -182,7 +187,7 @@ fn need_sql(stop_region_at: &str) -> String {
                        WHERE p.derivation = pe.parent AND p.wanted AND {open} \
                          AND (({builder}) OR pe.kind IN (1, 2))))",
         open = open_predicate("p"),
-        builder = builder_predicate("p", "pw"),
+        builder = builds_once_wanted_predicate("p", "pw"),
     );
     let seeds = format!(
         "seeds(derivation) AS MATERIALIZED (SELECT r.derivation \
@@ -196,10 +201,11 @@ fn need_sql(stop_region_at: &str) -> String {
          LATERAL (SELECT ({builder}) AS builder FROM derivation_build rb \
                   JOIN derivation w ON w.id = rb.derivation \
                   WHERE rb.derivation = s.derivation AND {open} OFFSET 0) b",
-        builder = builder_predicate("rb", "w"),
+        builder = builds_once_wanted_predicate("rb", "w"),
         open = open_predicate("rb"),
     );
-    let wanted = crate::graph::walks::open_closure_cte_body("wanted", &seed, Some("region"));
+    let wanted =
+        crate::graph::walks::need_closure_cte_body_until("wanted", &seed, Some("region"), "");
 
     format!(
         "WITH RECURSIVE {region}, {entered}, {seeds}, {wanted} \
