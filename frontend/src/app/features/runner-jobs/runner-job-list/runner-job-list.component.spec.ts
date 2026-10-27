@@ -7,6 +7,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
+import { vi } from 'vitest';
 import type { RunnerJobSummary } from '@core/models';
 import { RunnerJobsService } from '@core/services/runner-jobs.service';
 import { RunnerJobListComponent } from './runner-job-list.component';
@@ -48,6 +49,32 @@ describe('RunnerJobListComponent', () => {
     expect(host.textContent).toContain('waiting for free devices on 1 worker');
     expect(host.textContent).toContain('lab-a');
     expect(host.textContent).toContain('gpu:h100:8');
+  });
+
+  it('keeps polling a running evaluation until its runner jobs appear', () => {
+    vi.useFakeTimers();
+    try {
+      const forEvaluation = vi.fn()
+        .mockReturnValueOnce(of([]))
+        .mockReturnValue(of([queuedJob()]));
+      TestBed.configureTestingModule({
+        imports: [RunnerJobListComponent],
+        providers: [provideRouter([]), { provide: RunnerJobsService, useValue: { forEvaluation } }],
+      });
+      const fixture = TestBed.createComponent(RunnerJobListComponent);
+      fixture.componentRef.setInput('evaluation', 'e1');
+      fixture.componentRef.setInput('evaluationRunning', true);
+      fixture.componentRef.setInput('project', 'acme');
+      fixture.componentRef.setInput('task', 'demo');
+      fixture.detectChanges();
+
+      vi.advanceTimersByTime(4000);
+      fixture.detectChanges();
+
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('apps.x86_64-linux.train');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('renders nothing for an evaluation without runner jobs', () => {

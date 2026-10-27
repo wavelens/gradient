@@ -7,7 +7,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Subscription, forkJoin, interval, startWith, switchMap, takeWhile } from 'rxjs';
+import { EMPTY, Subscription, catchError, forkJoin, interval, startWith, switchMap, takeWhile } from 'rxjs';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -82,15 +82,18 @@ export class RunnerJobPageComponent implements OnInit {
     this.poll?.unsubscribe();
     this.poll = interval(POLL_MS).pipe(
       startWith(0),
-      switchMap(() => forkJoin({ job: this.runnerJobs.get(this.jobId), log: this.runnerJobs.log(this.jobId) })),
+      switchMap(() => forkJoin({ job: this.runnerJobs.get(this.jobId), log: this.runnerJobs.log(this.jobId) }).pipe(
+        catchError((error: Error) => {
+          this.errorMessage.set(error.message);
+          return EMPTY;
+        }),
+      )),
       takeWhile(({ job }) => isOpenRunnerJob(job.status), true),
       takeUntilDestroyed(this.destroyRef),
-    ).subscribe({
-      next: ({ job, log }) => {
-        this.job.set(job);
-        this.log.set(log);
-      },
-      error: (error: Error) => this.errorMessage.set(error.message),
+    ).subscribe(({ job, log }) => {
+      this.errorMessage.set(null);
+      this.job.set(job);
+      this.log.set(log);
     });
   }
 

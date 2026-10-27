@@ -6,7 +6,7 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import type { RunnerJobResponse, RunnerJobStatus } from '@core/models';
 import { RunnerJobsService } from '@core/services/runner-jobs.service';
@@ -73,6 +73,38 @@ describe('RunnerJobPageComponent', () => {
       .find((b) => (b.textContent ?? '').includes('Abort')) as HTMLButtonElement | undefined;
     confirm?.click();
     expect(abort).toHaveBeenCalledWith('j1');
+  });
+
+  it('keeps updating after one failed poll', () => {
+    vi.useFakeTimers();
+    try {
+      const get = vi.fn()
+        .mockReturnValueOnce(throwError(() => new Error('Bad Gateway')))
+        .mockReturnValue(of(job('running')));
+      const route = {
+        snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo', job: 'j1' }) },
+        parent: { data: of({ taskAccess: { access: { managed: false, canEdit: true, canTrigger: true } } }) },
+      } as unknown as ActivatedRoute;
+      TestBed.configureTestingModule({
+        imports: [RunnerJobPageComponent],
+        providers: [
+          provideRouter([]),
+          { provide: ActivatedRoute, useValue: route },
+          { provide: RunnerJobsService, useValue: { get, log: () => of('hello'), abort: vi.fn() } },
+        ],
+      });
+      const fixture = TestBed.createComponent(RunnerJobPageComponent);
+      fixture.detectChanges();
+
+      vi.advanceTimersByTime(2000);
+      fixture.detectChanges();
+
+      const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+      expect(text).toContain('epoch-3');
+      expect(text).not.toContain('Bad Gateway');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows the phases and the log', () => {

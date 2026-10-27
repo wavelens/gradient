@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, DestroyRef, OnChanges, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnChanges, SimpleChanges, inject, input, signal } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { Subscription, catchError, interval, of, startWith, switchMap, takeWhile } from 'rxjs';
 import { BadgeComponent } from '@gradient/ui/ui';
@@ -27,6 +27,7 @@ export class RunnerJobListComponent implements OnChanges {
   private runnerJobs = inject(RunnerJobsService);
 
   evaluation = input.required<string>();
+  evaluationRunning = input(false);
   project = input.required<string>();
   task = input.required<string>();
 
@@ -40,14 +41,22 @@ export class RunnerJobListComponent implements OnChanges {
     inject(DestroyRef).onDestroy(() => this.poll?.unsubscribe());
   }
 
-  ngOnChanges(): void {
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['evaluation']) {
+      this.jobs.set([]);
+      this.watch();
+    } else if (this.poll?.closed) {
+      this.watch();
+    }
+  }
+
+  private watch(): void {
     this.poll?.unsubscribe();
-    this.jobs.set([]);
     const evaluation = this.evaluation();
     this.poll = interval(POLL_MS).pipe(
       startWith(0),
       switchMap(() => this.runnerJobs.forEvaluation(evaluation).pipe(catchError(() => of(null)))),
-      takeWhile((jobs) => jobs === null || jobs.some((job) => isOpenRunnerJob(job.status)), true),
+      takeWhile((jobs) => this.evaluationRunning() || jobs === null || jobs.some((job) => isOpenRunnerJob(job.status)), true),
     ).subscribe((jobs) => {
       if (jobs) this.jobs.set(jobs);
     });
