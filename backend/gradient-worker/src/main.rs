@@ -8,6 +8,8 @@ mod config;
 mod connection_state;
 mod count;
 mod error;
+#[allow(dead_code, reason = "execute_exec_job wires the exec modules in")]
+mod exec;
 mod executor;
 mod exit_clock;
 mod listener;
