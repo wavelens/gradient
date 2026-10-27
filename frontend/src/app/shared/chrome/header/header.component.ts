@@ -13,14 +13,12 @@ import { CommandPaletteService } from '../command-palette/command-palette.servic
 import { ConfigService } from '@core/services/config.service';
 
 const BRAND: Brand = { label: 'Gradient', href: '/' };
-const SIGNED_IN_NAV: NavLink[] = [
-  { label: 'Dashboard', href: '/', exact: true },
-  { label: 'Job Board', href: '/board' },
-  { label: 'Teams', href: '/teams' },
-];
-const PUBLIC_NAV: NavLink[] = [
+const NAV: (NavLink & { signedIn?: true })[] = [
+  { label: 'Dashboard', href: '/', exact: true, signedIn: true },
   { label: 'Projects', href: '/projects' },
   { label: 'Caches', href: '/caches' },
+  { label: 'Teams', href: '/teams', signedIn: true },
+  { label: 'Job Board', href: '/board', signedIn: true },
 ];
 
 @Component({
@@ -38,9 +36,10 @@ export class AppHeaderComponent {
   private config = inject(ConfigService);
 
   protected readonly brand = BRAND;
-  protected nav = computed(() =>
-    this.authService.isAuthenticated() ? [...SIGNED_IN_NAV, ...PUBLIC_NAV] : PUBLIC_NAV,
-  );
+  protected nav = computed(() => {
+    const signedIn = this.authService.isAuthenticated();
+    return NAV.filter((link) => signedIn || !link.signedIn);
+  });
 
   get registrationDisabled() { return this.config.registrationDisabled; }
 
