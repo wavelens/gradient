@@ -45,7 +45,7 @@ pub async fn get_workers(
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<WorkerInfo>>>> {
-    require_worker_access(&state, &user)?;
+    require_worker_access(state.config.server.public_stats, &user)?;
     let workers = scheduler.workers_info().await;
     Ok(ok_json(workers))
 }
@@ -66,7 +66,7 @@ pub async fn get_worker(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(worker): Path<String>,
 ) -> WebResult<Json<BaseResponse<WorkerInfo>>> {
-    require_worker_access(&state, &user)?;
+    require_worker_access(state.config.server.public_stats, &user)?;
     let info = scheduler
         .workers_info()
         .await
@@ -76,8 +76,8 @@ pub async fn get_worker(
     Ok(ok_json(info))
 }
 
-fn require_worker_access(state: &ServerState, user: &MUser) -> WebResult<()> {
-    if !state.config.server.public_stats && !user.superuser {
+fn require_worker_access(public_stats: bool, user: &MUser) -> WebResult<()> {
+    if !public_stats && !user.superuser {
         return Err(WorkerRefusal::SuperuserRequired.into());
     }
     Ok(())
