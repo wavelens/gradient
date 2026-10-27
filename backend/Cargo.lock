@@ -2856,6 +2856,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-guest-agent"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "gradient-migration"
 version = "2.0.1"
 dependencies = [

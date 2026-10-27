@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+[package]
+name        = "gradient-guest-agent"
+description = "Gradient guest agent - runs exec jobs inside a worker guest"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
+
+[[bin]]
+name = "gradient-guest-agent"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+tokio  = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "fs", "io-util"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
