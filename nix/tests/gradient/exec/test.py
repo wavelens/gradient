@@ -11,10 +11,12 @@
 # nested KVM (kvm_intel or kvm_amd with nested=1), since the workers boot guests in a VM.
 
 import json
+import re
 import time
 
 API = "http://gradient.local/api/v1"
 GUESTS = "/var/lib/gradient-worker/guests"
+GUEST_UNIT = re.compile(r"gradient-guest-[0-9a-f]{32}\.service")
 WORKERS = [stopper, keeper]
 NAMES = ["fetch", "silent", "abort", "long-stop", "fail", "long-keep", "lost"]
 TERMINAL = {"completed", "failed", "aborted"}
@@ -105,7 +107,8 @@ def wait_running(name, tick):
 def active_guests(node):
     listing = node.succeed(
         "systemctl list-units --plain --no-legend --state=active 'gradient-guest-*.service'")
-    return [line.split()[0] for line in listing.splitlines() if line.strip()]
+    units = [line.split()[0] for line in listing.splitlines() if line.strip()]
+    return [unit for unit in units if GUEST_UNIT.fullmatch(unit)]
 
 
 def guest_id(unit):
