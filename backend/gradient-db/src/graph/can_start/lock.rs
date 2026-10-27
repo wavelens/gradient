@@ -5,7 +5,7 @@
  */
 
 use gradient_types::DerivationId;
-use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, Value};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, RuntimeErr, Value};
 
 fn lock_shared_builds_sql(with_dependencies: bool) -> String {
     let (with, filter) = crate::graph::shared_build_guard::advisory_filter("$1", with_dependencies);
@@ -24,11 +24,23 @@ fn lock_seed_shared_builds_sql() -> String {
     lock_shared_builds_sql(true)
 }
 
+fn try_lock_shared_builds_sql() -> String {
+    let (with, filter) = crate::graph::shared_build_guard::try_advisory_filter("$1");
+    format!(
+        "WITH {with} SELECT 1 FROM derivation_build \
+         WHERE derivation = ANY($1::uuid[]) AND {filter} \
+         ORDER BY derivation FOR NO KEY UPDATE NOWAIT"
+    )
+}
+
 crate::sql_fn! {
     LOCK_SHARED_BUILDS = lock_flip_shared_builds_sql,
         params = [DerivationIds(64)];
 
     LOCK_SEED_SHARED_BUILDS = lock_seed_shared_builds_sql,
+        params = [DerivationIds(64)];
+
+    TRY_LOCK_SHARED_BUILDS = try_lock_shared_builds_sql,
         params = [DerivationIds(64)];
 }
 
@@ -54,6 +66,42 @@ pub async fn lock_shared_builds<'txn>(
         txn,
         derivations: derivations.to_vec(),
     })
+}
+
+pub async fn try_lock_shared_builds<'txn>(
+    txn: &'txn DatabaseTransaction,
+    derivations: &[DerivationId],
+) -> Result<Option<SharedBuildLock<'txn>>, DbErr> {
+    if derivations.is_empty() {
+        return Ok(Some(SharedBuildLock {
+            txn,
+            derivations: Vec::new(),
+        }));
+    }
+
+    match txn
+        .query_all_raw(TRY_LOCK_SHARED_BUILDS.bind([ids(derivations)]))
+        .await
+    {
+        Ok(rows) if rows.is_empty() => Ok(None),
+        Ok(_) => Ok(Some(SharedBuildLock {
+            txn,
+            derivations: derivations.to_vec(),
+        })),
+        Err(e) if lock_unavailable(&e) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+fn lock_unavailable(err: &DbErr) -> bool {
+    let (DbErr::Query(RuntimeErr::SqlxError(e)) | DbErr::Exec(RuntimeErr::SqlxError(e))) = err
+    else {
+        return false;
+    };
+
+    e.as_database_error()
+        .and_then(|d| d.code())
+        .is_some_and(|code| code == "55P03")
 }
 
 /// Dependencies' keys are held shared until commit.
@@ -120,6 +168,13 @@ mod tests {
         assert!(
             seed.contains("ORDER BY derivation FOR NO KEY UPDATE"),
             "{seed}"
+        );
+
+        let try_lock = TRY_LOCK_SHARED_BUILDS.text();
+        assert!(
+            try_lock.contains("pg_try_advisory_xact_lock(643, k)")
+                && try_lock.ends_with("ORDER BY derivation FOR NO KEY UPDATE NOWAIT"),
+            "{try_lock}"
         );
     }
 }

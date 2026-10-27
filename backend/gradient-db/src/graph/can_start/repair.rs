@@ -8,12 +8,15 @@ use crate::graph::promotion::{returned_derivations, returned_transitions, transi
 use crate::status::TransitionChange;
 
 use super::fetchable::{blocking_dependency_count, mark_fetchable, mark_unfetchable};
-use super::lock::{SharedBuildLock, ids, lock_shared_builds};
+use super::lock::{SharedBuildLock, ids, try_lock_shared_builds};
 use super::queue::{PROMOTE_ANY_QUERY, UNPROMOTE_UNGATED_QUERY};
 use gradient_entity::build::BuildStatus;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait};
 use std::sync::LazyLock;
+use tracing::debug;
+
+pub const SWEEP_LOCK_CHUNK: usize = 1000;
 
 fn repair_scope() -> String {
     let pending = crate::sql::status::build_in(&BuildStatus::PENDING);
@@ -91,6 +94,15 @@ async fn recount_blocking_deps(lock: &SharedBuildLock<'_>) -> Result<u64, DbErr>
         .rows_affected())
 }
 
+async fn skip_held_chunk(txn: DatabaseTransaction, shared_builds: usize) -> Result<(), DbErr> {
+    txn.rollback().await?;
+    debug!(
+        shared_builds,
+        "consistency check skipped a chunk the graph writer holds"
+    );
+    Ok(())
+}
+
 /// A column corrected without adjusting its parents' `blocking_deps` leaves them off by one for good.
 /// Queueing what reached zero is left to [`repair_can_start`], after every counter is recounted.
 pub async fn repair_fetchable<C>(db: &C, scope: &[DerivationId]) -> Result<RepairedFetchable, DbErr>
@@ -98,9 +110,12 @@ where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
     let mut repaired = RepairedFetchable::default();
-    for chunk in scope.chunks(crate::IN_CHUNK_SIZE) {
+    for chunk in scope.chunks(SWEEP_LOCK_CHUNK) {
         let txn = db.begin().await?;
-        let lock = lock_shared_builds(&txn, chunk).await?;
+        let Some(lock) = try_lock_shared_builds(&txn, chunk).await? else {
+            skip_held_chunk(txn, chunk.len()).await?;
+            continue;
+        };
         let fetchable = mark_fetchable(&lock).await?;
         let unfetchable = mark_unfetchable(&lock).await?;
         txn.commit().await?;
@@ -120,9 +135,12 @@ where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
     let mut blocking_deps = 0u64;
-    for chunk in scope.chunks(crate::IN_CHUNK_SIZE) {
+    for chunk in scope.chunks(SWEEP_LOCK_CHUNK) {
         let txn = db.begin().await?;
-        let lock = lock_shared_builds(&txn, chunk).await?;
+        let Some(lock) = try_lock_shared_builds(&txn, chunk).await? else {
+            skip_held_chunk(txn, chunk.len()).await?;
+            continue;
+        };
         blocking_deps += recount_blocking_deps(&lock).await?;
         txn.commit().await?;
     }
@@ -154,6 +172,13 @@ mod tests {
             ("derivation".to_owned(), Value::from(id.into_inner())),
             ("startable".to_owned(), Value::from(true)),
         ])
+    }
+
+    fn locked() -> Vec<BTreeMap<String, Value>> {
+        vec![BTreeMap::from([(
+            "?column?".to_owned(),
+            Value::Int(Some(1)),
+        )])]
     }
 
     #[test]
@@ -206,7 +231,7 @@ mod tests {
         let no_longer_fetchable = DerivationId::now_v7();
         let unqueued_parent = DerivationId::now_v7();
         let db = mock_db()
-            .append_exec_results([exec(0)])
+            .append_query_results([locked()])
             .append_query_results([vec![drv(now_fetchable)]])
             .append_query_results([vec![startable_row(unblocked_parent)]])
             .append_query_results([vec![drv(no_longer_fetchable)]])
@@ -233,7 +258,7 @@ mod tests {
             7,
             "BEGIN, lock, two marks with their parents, COMMIT: {inside:?}"
         );
-        assert!(inside[1].contains("FOR NO KEY UPDATE"), "{inside:?}");
+        assert!(inside[1].contains("FOR NO KEY UPDATE NOWAIT"), "{inside:?}");
         assert!(
             inside[2].contains("SET fetchable = true") && inside[3].contains("blocking_deps - c.n"),
             "{inside:?}"
@@ -257,8 +282,8 @@ mod tests {
         let empty = Vec::<BTreeMap<String, Value>>::new;
         let db = mock_db()
             .append_query_results([vec![drv(a)]])
-            .append_exec_results([exec(0), exec(0), exec(3)])
-            .append_query_results([empty(), empty()])
+            .append_query_results([locked(), empty(), empty(), locked()])
+            .append_exec_results([exec(3)])
             .append_query_results([vec![transition_row(demoted, 1, 0)]])
             .append_query_results([vec![drv(promoted)]])
             .into_connection();
@@ -287,7 +312,7 @@ mod tests {
                 .map(|s| s.sql.as_str())
                 .collect();
             assert!(
-                inside[1].contains("ORDER BY derivation FOR NO KEY UPDATE"),
+                inside[1].contains("ORDER BY derivation FOR NO KEY UPDATE NOWAIT"),
                 "{inside:?}"
             );
             assert!(inside[2].contains(first_write), "{inside:?}");
@@ -299,15 +324,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_chunk_the_graph_writer_holds_is_skipped_until_the_next_pass() {
+        let a = DerivationId::now_v7();
+        let empty = Vec::<BTreeMap<String, Value>>::new;
+        let db = mock_db()
+            .append_query_results([vec![drv(a)]])
+            .append_query_results([empty(), locked()])
+            .append_exec_results([exec(1)])
+            .append_query_results([empty(), empty()])
+            .into_connection();
+
+        let scope = can_start_scope(&db).await.unwrap();
+        let fetchable = repair_fetchable(&db, &scope).await.unwrap();
+        let repaired = repair_can_start(&db, &scope).await.unwrap();
+
+        assert_eq!((fetchable.marked, repaired.blocking_deps), (0, 1));
+        let raw = db.into_transaction_log();
+        let skipped: Vec<&str> = raw[1].statements().iter().map(|s| s.sql.as_str()).collect();
+        assert_eq!(
+            skipped.len(),
+            3,
+            "BEGIN, the refused lock, ROLLBACK: {skipped:?}"
+        );
+        assert!(
+            skipped[1].contains("NOWAIT") && skipped[2].contains("ROLLBACK"),
+            "{skipped:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn the_repair_finishes_fetchable_everywhere_before_it_recounts_a_counter() {
-        let scope: Vec<BTreeMap<String, Value>> = (0..crate::IN_CHUNK_SIZE + 1)
+        let scope: Vec<BTreeMap<String, Value>> = (0..SWEEP_LOCK_CHUNK + 1)
             .map(|_| drv(DerivationId::now_v7()))
             .collect();
         let empty = Vec::<BTreeMap<String, Value>>::new;
         let db = mock_db()
             .append_query_results([scope])
-            .append_exec_results(vec![exec(1); 6])
-            .append_query_results([empty(), empty(), empty(), empty(), empty(), empty()])
+            .append_query_results([locked(), empty(), empty(), locked(), empty(), empty()])
+            .append_query_results([locked(), locked()])
+            .append_exec_results(vec![exec(1); 2])
+            .append_query_results([empty(), empty()])
             .into_connection();
 
         let scope = can_start_scope(&db).await.unwrap();
