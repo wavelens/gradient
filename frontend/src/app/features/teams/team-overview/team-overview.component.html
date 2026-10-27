@@ -54,8 +54,8 @@
       }
     </gr-settings-section>
 
-    <gr-settings-section title="Workers" [card]="false" maxWidth="none">
-      @if (workers().length > 0) {
+    @if (workers().length > 0) {
+      <gr-settings-section title="Workers" [card]="false" maxWidth="none">
         <gr-row-list>
           @for (worker of workers(); track worker.worker_id) {
             <gr-row [icon]="worker.gradient_ci ? 'cloud' : 'construction'">
@@ -70,10 +70,8 @@
             </gr-row>
           }
         </gr-row-list>
-      } @else {
-        <gr-empty-state icon="construction" title="No workers" />
-      }
-    </gr-settings-section>
+      </gr-settings-section>
+    }
 
     <gr-settings-section title="Projects and Caches" [card]="false" maxWidth="none">
       @if (grants().projects.length + grants().caches.length > 0) {
