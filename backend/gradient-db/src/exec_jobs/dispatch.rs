@@ -74,16 +74,20 @@ static STARTED_SQL: LazyLock<String> = LazyLock::new(|| {
     ))
 });
 
+static SET_WAITING_REASON_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE exec_job SET waiting_reason = $2::jsonb \
+         WHERE id = $1 AND status = {queued} AND waiting_reason IS DISTINCT FROM $2::jsonb",
+        queued = exec(ExecJobStatus::Queued),
+    )
+});
+
 crate::sql_lazy! {
     QUEUED_UNTRACKED_EXEC_JOBS = || QUEUED_UNTRACKED_SQL.as_str(),
         params = [];
     STARTED_EXEC_JOBS = || STARTED_SQL.as_str(),
         params = [NewUuids(16)];
-}
-
-crate::sql! {
-    SET_EXEC_JOB_WAITING_REASON = "UPDATE exec_job SET waiting_reason = $2::jsonb \
-         WHERE id = $1 AND waiting_reason IS DISTINCT FROM $2::jsonb",
+    SET_EXEC_JOB_WAITING_REASON = || SET_WAITING_REASON_SQL.as_str(),
         params = [NewUuid, Text("{\"kind\":\"draining\"}")];
 }
 
