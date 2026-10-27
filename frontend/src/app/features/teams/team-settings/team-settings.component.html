@@ -20,39 +20,33 @@
       <gr-form-field label="Display Name" for="team-display-name">
         <input grInput id="team-display-name" [(ngModel)]="form.display_name" [appManagedDisable]="access()" />
       </gr-form-field>
-    </gr-settings-section>
-
-    <gr-settings-section title="New Projects" description="What every project created from now on grants this team.">
-      <gr-form-field>
-        <gr-checkbox inputId="new-project-users" [(ngModel)]="form.new_project_users" [binary]="true" label="Grant the team's users"
-          [appManagedDisable]="superuserAccess()" />
+      <gr-form-field hint="Applies to projects created from now on.">
+        <gr-checkbox inputId="new-project-users" [(ngModel)]="form.new_project_users" [binary]="true"
+          label="New projects grant the team's users" [appManagedDisable]="superuserAccess()" />
       </gr-form-field>
-      <gr-form-field label="Role of the team's users">
+      <gr-form-field label="Role of the team's users in new projects">
         <gr-select [(ngModel)]="form.new_project_role" [options]="roleOptions" optionLabel="label" optionValue="value"
           [appManagedDisable]="superuserAccess()" />
       </gr-form-field>
-      <gr-form-field>
-        <gr-checkbox inputId="new-project-workers" [(ngModel)]="form.new_project_workers" [binary]="true" label="Grant the team's workers"
-          [appManagedDisable]="superuserAccess()" />
+      <gr-form-field hint="Applies to projects created from now on.">
+        <gr-checkbox inputId="new-project-workers" [(ngModel)]="form.new_project_workers" [binary]="true"
+          label="New projects grant the team's workers" [appManagedDisable]="superuserAccess()" />
       </gr-form-field>
-    </gr-settings-section>
-
-    <gr-settings-section title="Single Sign-On" description="Members of these groups join the team.">
-      <gr-form-field label="OIDC group" for="team-oidc-group" hint="Taken from the groups claim at each sign-in.">
+      <gr-form-field label="OIDC group" for="team-oidc-group" hint="Members of this group join the team, taken from the groups claim at each sign-in.">
         <input grInput id="team-oidc-group" [(ngModel)]="form.oidc_group" [appManagedDisable]="superuserAccess()" />
       </gr-form-field>
-      <gr-form-field label="SCIM group" for="team-scim-group">
+      <gr-form-field label="SCIM group" for="team-scim-group" hint="Members of this group join the team.">
         <input grInput id="team-scim-group" [(ngModel)]="form.scim_group" [appManagedDisable]="superuserAccess()" />
       </gr-form-field>
-    </gr-settings-section>
 
-    @if (saved()) {
-      <gr-message-banner type="success">Changes saved.</gr-message-banner>
-    }
-    <div class="form-actions">
-      <button *appWritable="access()" grButton label="Save Changes" icon="check" [loading]="saving()" (click)="save()"
-        [appManagedDisable]="access()"></button>
-    </div>
+      @if (saved()) {
+        <gr-message-banner type="success">Changes saved.</gr-message-banner>
+      }
+      <div class="form-actions">
+        <button *appWritable="access()" grButton label="Save Changes" icon="check" [loading]="saving()" (click)="save()"
+          [appManagedDisable]="access()"></button>
+      </div>
+    </gr-settings-section>
 
     @if (team.role === 'admin' || isSuperuser()) {
       <gr-settings-section title="More Settings" [card]="false">
