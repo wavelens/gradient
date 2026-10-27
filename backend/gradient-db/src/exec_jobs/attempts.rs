@@ -15,6 +15,7 @@ use sea_orm::{
 };
 use std::sync::LazyLock;
 
+use crate::sql::StatusWrite;
 use crate::sql::status::{exec, exec_in};
 
 static OPEN_SQL: LazyLock<String> = LazyLock::new(|| {
@@ -59,24 +60,39 @@ static REQUEUE_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-static FINISH_SQL: LazyLock<String> = LazyLock::new(|| {
+fn finish_sql(status: ExecJobStatus) -> String {
     format!(
-        "UPDATE exec_job SET status = $2, message = $3, waiting_reason = NULL, \
+        "UPDATE exec_job SET status = {to}, message = $2, waiting_reason = NULL, \
          finished_at = (now() AT TIME ZONE 'UTC') \
          WHERE id = $1 AND status IN ({open}) RETURNING *",
+        to = exec(status),
         open = exec_in(&ExecJobStatus::OPEN),
     )
-});
+}
+
+static COMPLETE_SQL: LazyLock<String> = LazyLock::new(|| finish_sql(ExecJobStatus::Completed));
+static FAIL_SQL: LazyLock<String> = LazyLock::new(|| finish_sql(ExecJobStatus::Failed));
+static ABORT_SQL: LazyLock<String> = LazyLock::new(|| finish_sql(ExecJobStatus::Aborted));
 
 crate::sql_lazy! {
     OPEN_EXEC_JOB_ATTEMPT = || OPEN_SQL.as_str(),
-        params = [NewUuid, Int(3)];
+        params = [NewUuid, Int(3)],
+        status_write = StatusWrite::exec_job(ExecJobStatus::Starting);
     REQUEUE_EXEC_JOB = || REQUEUE_SQL.as_str(),
-        params = [NewUuid, Int(1)];
-    FINISH_EXEC_JOB = || FINISH_SQL.as_str(),
-        params = [NewUuid, Int(4), Text("the program exited with 1")];
+        params = [NewUuid, Int(1)],
+        status_write = StatusWrite::exec_job(ExecJobStatus::Queued);
+    COMPLETE_EXEC_JOB = || COMPLETE_SQL.as_str(),
+        params = [NewUuid, Text("")],
+        status_write = StatusWrite::exec_job(ExecJobStatus::Completed);
+    FAIL_EXEC_JOB = || FAIL_SQL.as_str(),
+        params = [NewUuid, Text("the program exited with 1")],
+        status_write = StatusWrite::exec_job(ExecJobStatus::Failed);
+    ABORT_EXEC_JOB = || ABORT_SQL.as_str(),
+        params = [NewUuid, Text("")],
+        status_write = StatusWrite::exec_job(ExecJobStatus::Aborted);
     EXEC_PROGRAM_STARTED = || PROGRAM_STARTED_SQL.as_str(),
-        params = [NewUuid];
+        params = [NewUuid],
+        status_write = StatusWrite::exec_job(ExecJobStatus::Running);
     EXEC_LOSSES_IN_A_ROW = || LOSSES_IN_A_ROW_SQL.as_str(),
         params = [NewUuid];
 }
@@ -176,20 +192,27 @@ pub async fn finish<C: ConnectionTrait>(
     status: ExecJobStatus,
     message: Option<String>,
 ) -> Result<Option<MExecJob>, DbErr> {
-    MExecJob::find_by_statement(FINISH_EXEC_JOB.bind([
-        Value::Uuid(Some(job.into_inner())),
-        Value::SmallInt(Some(i16::from(status))),
-        Value::String(message),
-    ]))
+    let statement = match status {
+        ExecJobStatus::Completed => &COMPLETE_EXEC_JOB,
+        ExecJobStatus::Failed => &FAIL_EXEC_JOB,
+        ExecJobStatus::Aborted => &ABORT_EXEC_JOB,
+        open => {
+            return Err(DbErr::Custom(format!(
+                "{open:?} does not finish an exec job"
+            )));
+        }
+    };
+    MExecJob::find_by_statement(
+        statement.bind([Value::Uuid(Some(job.into_inner())), Value::String(message)]),
+    )
     .one(db)
     .await
 }
 
 pub async fn losses_in_a_row<C: ConnectionTrait>(db: &C, job: ExecJobId) -> Result<i64, DbErr> {
-    db.query_one_raw(EXEC_LOSSES_IN_A_ROW.bind([Value::Uuid(Some(job.into_inner()))]))
-        .await?
-        .ok_or_else(|| DbErr::Custom("EXEC_LOSSES_IN_A_ROW returned no row".to_owned()))?
-        .try_get::<i64>("", "losses")
+    EXEC_LOSSES_IN_A_ROW
+        .scalar(db, [job.into()], "losses")
+        .await
 }
 
 pub async fn open_of_job<C: ConnectionTrait>(

@@ -11,6 +11,7 @@
 
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::transition::Transition;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement, TryGetable, Value};
 use std::borrow::Cow;
@@ -67,6 +68,13 @@ impl StatusWrite {
         Self {
             table: "evaluation",
             to: transition.to as i32,
+        }
+    }
+
+    pub const fn exec_job(to: ExecJobStatus) -> Self {
+        Self {
+            table: "exec_job",
+            to: to as i32,
         }
     }
 }

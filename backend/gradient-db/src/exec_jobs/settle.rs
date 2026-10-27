@@ -10,6 +10,7 @@ use gradient_types::MExecJob;
 use sea_orm::{ConnectionTrait, DbErr, FromQueryResult};
 use std::sync::LazyLock;
 
+use crate::sql::StatusWrite;
 use crate::sql::status::{build_in, exec, exec_in};
 use gradient_types::exec::{DISABLED_FOR_PROJECT, DISABLED_ON_INSTANCE};
 
@@ -77,13 +78,17 @@ static REFUSE_DISABLED_PROJECTS_SQL: LazyLock<String> = LazyLock::new(|| {
 
 crate::sql_lazy! {
     QUEUE_CACHED_EXEC_JOBS = || QUEUE_SQL.as_str(),
-        params = [];
+        params = [],
+        status_write = StatusWrite::exec_job(ExecJobStatus::Queued);
     FAIL_UNBUILT_EXEC_JOBS = || FAIL_SQL.as_str(),
-        params = [];
+        params = [],
+        status_write = StatusWrite::exec_job(ExecJobStatus::Failed);
     REFUSE_WAITING_EXEC_JOBS = || REFUSE_ALL_SQL.as_str(),
-        params = [];
+        params = [],
+        status_write = StatusWrite::exec_job(ExecJobStatus::Failed);
     REFUSE_EXEC_JOBS_OF_DISABLED_PROJECTS = || REFUSE_DISABLED_PROJECTS_SQL.as_str(),
-        params = [];
+        params = [],
+        status_write = StatusWrite::exec_job(ExecJobStatus::Failed);
 }
 
 pub async fn refused<C: ConnectionTrait>(

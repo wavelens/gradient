@@ -6,7 +6,7 @@
 
 use super::{StatusWrite, registry};
 
-const TABLES: [&str; 2] = ["derivation_build", "evaluation"];
+const TABLES: [&str; 3] = ["derivation_build", "evaluation", "exec_job"];
 const CLAUSE_ENDS: [&str; 3] = ["WHERE", "FROM", "RETURNING"];
 
 pub fn violations() -> Vec<String> {
@@ -143,6 +143,8 @@ mod tests {
     fn undeclared_wrong_or_bound_status_writes_are_flagged() {
         let undeclared = "UPDATE evaluation e SET status = 3 WHERE e.id = $1";
         assert!(violation("REOPEN", undeclared, None).is_some());
+        let undeclared_exec = "UPDATE exec_job r SET status = 4 WHERE r.id = $1";
+        assert!(violation("FAIL", undeclared_exec, None).is_some());
 
         let wrong = "UPDATE derivation_build SET status = 0 WHERE status = 1";
         assert!(violation("UNQUEUE", wrong, Some(QUEUE)).is_some());
