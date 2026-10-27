@@ -284,6 +284,7 @@ impl WorkerJobs {
         assignment_id: String,
         run: impl FnOnce(JobUpdater, AbortSignal) -> BoxFuture<'static, Result<()>>,
     ) {
+        self.writer.forget_reports(&job_id);
         let log = JobLog::reopen(&self.log_dir, &job_id, JOB_LOG_BUFFER_CAP).unwrap_or_else(|e| {
             warn!(%job_id, error = %e, "unreadable log of a resumed exec job, its output starts over");
             JobLog::open_resumable(&self.log_dir, &job_id, JOB_LOG_BUFFER_CAP)

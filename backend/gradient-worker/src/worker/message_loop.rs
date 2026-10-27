@@ -220,6 +220,9 @@ impl MessageLoopState {
         self.stopping = true;
         self.begin_drain().await?;
         self.fetches.abort_all();
+        if let Some(exec) = &self.executor.exec {
+            exec.pool.set_draining();
+        }
         let keep_exec_jobs = self.keeps_exec_jobs();
         let aborted = self.jobs.registry.lock().abort_for_stop(keep_exec_jobs);
         info!(
@@ -244,19 +247,11 @@ impl MessageLoopState {
         let Some(exec) = &self.executor.exec else {
             return;
         };
-        if !self.server_draining
-            || self.warm_guests_stopped
-            || self.jobs.registry.lock().active(JobKind::Exec) > 0
-        {
-            return;
+        let exec_jobs = self.jobs.registry.lock().active(JobKind::Exec);
+        if warm_guests_due_to_stop(self.server_draining, self.warm_guests_stopped, exec_jobs) {
+            self.warm_guests_stopped = true;
+            exec.pool.stop_warm_in_background();
         }
-        self.warm_guests_stopped = true;
-        let pool = Arc::clone(&exec.pool);
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "tears down warm guests while the session drains"
-        )]
-        tokio::spawn(async move { pool.stop_warm().await });
     }
 
     fn occupied(&self, kind: JobKind) -> u32 {
@@ -1066,6 +1061,10 @@ async fn run_job(
     }
 }
 
+fn warm_guests_due_to_stop(server_draining: bool, already_stopped: bool, exec_jobs: u32) -> bool {
+    server_draining && !already_stopped && exec_jobs == 0
+}
+
 pub(super) async fn until_aborted(
     job: impl std::future::Future<Output = Result<()>>,
     mut abort: AbortSignal,
@@ -1097,6 +1096,14 @@ mod tests {
             err.downcast_ref::<JobAborted>().is_some(),
             "reported as an abort, not a failure: {err:#}"
         );
+    }
+
+    #[test]
+    fn warm_guests_stop_once_a_draining_server_has_no_exec_job_left() {
+        assert!(warm_guests_due_to_stop(true, false, 0));
+        assert!(!warm_guests_due_to_stop(true, false, 1));
+        assert!(!warm_guests_due_to_stop(true, true, 0));
+        assert!(!warm_guests_due_to_stop(false, false, 0));
     }
 
     #[tokio::test]

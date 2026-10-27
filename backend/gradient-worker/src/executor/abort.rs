@@ -31,10 +31,6 @@ impl AbortSignal {
         *self.0.borrow() || self.0.has_changed().is_err()
     }
 
-    pub fn was_requested(&self) -> bool {
-        *self.0.borrow()
-    }
-
     pub fn check(&self) -> Result<()> {
         if self.is_aborted() {
             return Err(JobAborted("job aborted by server".to_owned()).into());

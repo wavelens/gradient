@@ -14,7 +14,6 @@ use tokio_util::sync::CancellationToken;
 use super::inventory::advertised;
 use super::reattach::{ResumedJob, resumable};
 use crate::config::{ExecArgs, WorkerConfig};
-use crate::executor::AbortSignal;
 
 pub struct ExecHost {
     pub pool: Arc<GuestPool>,
@@ -104,9 +103,10 @@ impl ExecHost {
         }
     }
 
-    pub fn leaves_guest_running(&self, abort: &AbortSignal) -> bool {
-        !abort.was_requested()
-            && !self.config.stop_guests_with_worker
-            && self.worker_stop.is_cancelled()
+    pub fn worker_stop_keeping_guests(&self) -> CancellationToken {
+        match self.config.stop_guests_with_worker {
+            true => CancellationToken::new(),
+            false => self.worker_stop.clone(),
+        }
     }
 }

@@ -56,9 +56,7 @@ pub async fn resume(
         stored,
     } = resumed;
     let outcome = follow_again(host, &guest, &stored, updater, abort).await;
-    guest.teardown(host.pool.units()).await;
-    host.pool.refill();
-    drop(devices);
+    host.pool.retire(guest, devices);
     outcome
 }
 
@@ -91,7 +89,15 @@ async fn follow_again(
         .await
         .map_err(BuildError::transient)?;
     let mut watchdog = resumed_watchdog(stored);
-    finish(host, &mut agent, updater, &mut watchdog, &mut abort).await
+    let leave_running = host.worker_stop_keeping_guests();
+    finish(
+        &mut agent,
+        updater,
+        &mut watchdog,
+        &mut abort,
+        &leave_running,
+    )
+    .await
 }
 
 fn resumed_watchdog(stored: &StoredJob) -> Watchdog {
@@ -111,6 +117,8 @@ mod tests {
     use std::path::PathBuf;
 
     use gradient_vm::GuestId;
+
+    use crate::exec::watchdog::Watched;
 
     use super::*;
 
@@ -153,5 +161,27 @@ mod tests {
         assert_eq!(resumable_job(&sent).unwrap(), stored(true));
         assert!(resumable_job(&unsent).is_err());
         assert!(resumable_job(&garbled).is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_resumed_job_keeps_its_wall_clock_deadline() {
+        let job = StoredJob {
+            started_at_unix: unix_now() - 100,
+            timeout_secs: Some(130),
+            max_silent_secs: None,
+            ..stored(true)
+        };
+        let started = Instant::now();
+        let mut watchdog = resumed_watchdog(&job);
+
+        let event = watchdog
+            .next(
+                &mut futures::stream::pending::<()>(),
+                &mut AbortSignal::never(),
+            )
+            .await;
+
+        assert_eq!(event, Watched::TotalExceeded(Duration::from_secs(130)));
+        assert!((29..=31).contains(&started.elapsed().as_secs()));
     }
 }

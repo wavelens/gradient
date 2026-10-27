@@ -18,6 +18,7 @@ use gradient_vm::{
 use gradient_wire::guest::{AgentToWorker, GuestMount, GuestNetwork, RunJob};
 use gradient_wire::types::{ExecJob, MAX_PHASE_PAYLOAD};
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::agent_client::AgentClient;
@@ -75,6 +76,7 @@ pub enum Followed {
     Exited(i32),
     Ended(BuildError),
     Stopped(Stop),
+    LeftRunning,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,28 +129,26 @@ pub async fn execute(
     let devices = run.reserve_devices()?;
     let mut guest = run.take_guest().await?;
     let outcome = run.run_in_guest(&mut guest, &devices, credentials).await;
-    guest.teardown(host.pool.units()).await;
-    host.pool.refill();
-    drop(devices);
+    host.pool.retire(guest, devices);
     outcome
 }
 
 pub async fn finish<R: ExecReport>(
-    host: &ExecHost,
     agent: &mut AgentClient,
     reporter: &mut R,
     watchdog: &mut Watchdog,
     abort: &mut AbortSignal,
+    leave_running: &CancellationToken,
 ) -> Result<()> {
-    let stop = match follow(agent, reporter, watchdog, abort).await {
+    let stop = match follow(agent, reporter, watchdog, abort, leave_running).await {
         Followed::Exited(code) => return exit_result(code).map_err(anyhow::Error::from),
         Followed::Ended(e) => return Err(e.into()),
+        Followed::LeftRunning => {
+            info!("the worker stops and leaves the exec job running in its guest");
+            return std::future::pending().await;
+        }
         Followed::Stopped(stop) => stop,
     };
-    if stop == Stop::Aborted && host.leaves_guest_running(abort) {
-        info!("the worker stops and leaves the exec job running in its guest");
-        std::future::pending::<()>().await;
-    }
     if let Some(line) = stop.log_line()
         && let Err(e) = reporter.note(&line).await
     {
@@ -157,7 +157,9 @@ pub async fn finish<R: ExecReport>(
     if let Err(e) = agent.kill().await {
         warn!(error = %e, "could not ask the guest agent to stop the program");
     }
-    drain_until_exit(agent, reporter).await;
+    if stop != Stop::Aborted {
+        drain_until_exit(agent, reporter).await;
+    }
     Err(stop.into_error())
 }
 
@@ -166,10 +168,16 @@ pub async fn follow<R: ExecReport>(
     reporter: &mut R,
     watchdog: &mut Watchdog,
     abort: &mut AbortSignal,
+    leave_running: &CancellationToken,
 ) -> Followed {
     let mut messages = agent.messages();
     loop {
-        let message = match watchdog.next(&mut messages, abort).await {
+        let watched = tokio::select! {
+            biased;
+            () = leave_running.cancelled() => return Followed::LeftRunning,
+            watched = watchdog.next(&mut messages, abort) => watched,
+        };
+        let message = match watched {
             Watched::Item(Ok(message)) => message,
             Watched::End => {
                 return Followed::Ended(BuildError::transient(anyhow!(
@@ -305,11 +313,11 @@ impl ExecRun<'_> {
             self.job.max_silent_secs.map(Duration::from_secs),
         );
         finish(
-            self.host,
             &mut agent,
             &mut *self.updater,
             &mut watchdog,
             &mut self.abort,
+            &self.host.worker_stop_keeping_guests(),
         )
         .await
     }
@@ -494,7 +502,7 @@ pub fn unix_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use gradient_vm::ReadyAgent;
-    use gradient_wire::guest::{AgentToWorker, GuestConnection};
+    use gradient_wire::guest::{AgentToWorker, GuestConnection, WorkerToAgent};
     use gradient_wire::messages::BuildFailureKind;
     use tokio::net::UnixStream;
 
@@ -540,29 +548,105 @@ mod tests {
         }
     }
 
-    async fn followed(script: Vec<AgentToWorker>) -> (Followed, Vec<Reported>) {
+    async fn connected() -> (AgentClient, GuestConnection<UnixStream>) {
         let (worker_end, agent_end) = UnixStream::pair().unwrap();
-        let agent = async move {
-            let mut conn = GuestConnection::agree(agent_end).await.unwrap();
-            for message in script {
-                conn.send(&message).await.unwrap();
-            }
-        };
-        let (conn, ()) = tokio::join!(GuestConnection::agree(worker_end), agent);
-        let mut agent = AgentClient::from(ReadyAgent {
-            conn: conn.unwrap(),
+        let (worker, agent) = tokio::join!(
+            GuestConnection::agree(worker_end),
+            GuestConnection::agree(agent_end)
+        );
+        let client = AgentClient::from(ReadyAgent {
+            conn: worker.unwrap(),
             agent_version: "test".into(),
         });
+        (client, agent.unwrap())
+    }
+
+    async fn followed(script: Vec<AgentToWorker>) -> (Followed, Vec<Reported>) {
+        let (mut agent, mut guest) = connected().await;
+        let fake_agent = async move {
+            for message in script {
+                guest.send(&message).await.unwrap();
+            }
+        };
         let mut recorder = Recorder::default();
         let mut watchdog = Watchdog::new(Instant::now(), None, None);
-        let followed = follow(
+        let (mut abort, running) = (AbortSignal::never(), CancellationToken::new());
+        let (followed, ()) = tokio::join!(
+            follow(
+                &mut agent,
+                &mut recorder,
+                &mut watchdog,
+                &mut abort,
+                &running
+            ),
+            fake_agent
+        );
+        (followed, recorder.0)
+    }
+
+    #[tokio::test]
+    async fn a_silent_program_is_killed_and_its_last_output_kept() {
+        let (mut agent, mut guest) = connected().await;
+        let fake_agent = async move {
+            guest.send(&AgentToWorker::ProgramStarted).await.unwrap();
+            let kill = guest.recv::<WorkerToAgent>().await.unwrap();
+            assert_eq!(kill, Some(WorkerToAgent::Kill));
+            guest
+                .send(&AgentToWorker::Output {
+                    data: b"bye".to_vec(),
+                })
+                .await
+                .unwrap();
+            guest
+                .send(&AgentToWorker::Exited { code: 143 })
+                .await
+                .unwrap();
+            guest
+        };
+        let mut recorder = Recorder::default();
+        let mut watchdog = Watchdog::new(Instant::now(), None, Some(Duration::from_secs(1)));
+        let (mut abort, running) = (AbortSignal::never(), CancellationToken::new());
+        let finished = finish(
             &mut agent,
             &mut recorder,
             &mut watchdog,
+            &mut abort,
+            &running,
+        );
+
+        let (finished, _guest) = tokio::join!(finished, fake_agent);
+
+        let error = finished.unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<BuildError>().unwrap().kind,
+            BuildFailureKind::Timeout
+        );
+        assert_eq!(
+            recorder.0,
+            [
+                Reported::Started,
+                Reported::Note("program produced no output for 1s (maxSilent exceeded)".into()),
+                Reported::Output(b"bye".to_vec()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_worker_stop_keeping_guests_leaves_the_program_running() {
+        let (mut agent, _guest) = connected().await;
+        let stopping = CancellationToken::new();
+        stopping.cancel();
+
+        let followed = follow(
+            &mut agent,
+            &mut Recorder::default(),
+            &mut Watchdog::new(Instant::now(), None, None),
             &mut AbortSignal::never(),
+            &stopping,
         )
         .await;
-        (followed, recorder.0)
+
+        assert!(matches!(followed, Followed::LeftRunning), "{followed:?}");
     }
 
     #[test]
