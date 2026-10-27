@@ -17,6 +17,7 @@ use gradient_wire::guest::{
 };
 use serde::Serialize;
 use tokio::net::UnixStream;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use crate::agent::{GUEST_BOOT_TIMEOUT, GuestBootError, wait_ready};
@@ -70,6 +71,7 @@ impl Guest {
         config: &VmConfig,
         image: &GuestImage,
         cid: u32,
+        stop: &CancellationToken,
     ) -> Result<Guest, GuestBootError> {
         let guest_id = GuestId::new();
         let dir = config.guests_dir.join(guest_id.to_string());
@@ -88,7 +90,14 @@ impl Guest {
             per_job_dirs: Vec::new(),
         };
         let mut guest = Guest::from_state(config, state);
-        match guest.start(units, config, image).await {
+        let started = match guest.start_unit(units, config).await {
+            Ok(()) => tokio::select! {
+                started = guest.start_vm(image) => started,
+                () = stop.cancelled() => Err(anyhow!("the guest pool stopped during the boot")),
+            },
+            Err(e) => Err(e),
+        };
+        match started {
             Ok(()) => Ok(guest),
             Err(e) => {
                 let error = GuestBootError(format!("{e:#}"));
@@ -179,12 +188,7 @@ impl Guest {
         }
     }
 
-    async fn start(
-        &mut self,
-        units: &GuestUnits,
-        config: &VmConfig,
-        image: &GuestImage,
-    ) -> Result<()> {
+    async fn start_unit(&self, units: &GuestUnits, config: &VmConfig) -> Result<()> {
         std::fs::create_dir_all(&self.dir)
             .with_context(|| format!("create {}", self.dir.display()))?;
         std::fs::set_permissions(&self.dir, std::fs::Permissions::from_mode(0o2770))?;
@@ -192,7 +196,10 @@ impl Guest {
 
         let mut argv = config.supervisor_command.clone();
         argv.push(self.dir.display().to_string());
-        units.start(&self.state.guest_id, argv).await?;
+        units.start(&self.state.guest_id, argv).await
+    }
+
+    async fn start_vm(&mut self, image: &GuestImage) -> Result<()> {
         wait_for_file(&self.dir.join("api.sock")).await?;
         wait_for_file(&self.dir.join("store.sock")).await?;
 

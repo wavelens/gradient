@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{info, warn};
 
@@ -29,6 +31,7 @@ pub struct GuestPool {
     upcoming_exec_jobs: AtomicU32,
     draining: AtomicBool,
     reserved_cids: Mutex<BTreeSet<u32>>,
+    stopping: CancellationToken,
     tasks: TaskTracker,
 }
 
@@ -41,6 +44,7 @@ impl GuestPool {
             upcoming_exec_jobs: AtomicU32::new(0),
             draining: AtomicBool::new(false),
             reserved_cids: Mutex::default(),
+            stopping: CancellationToken::new(),
             tasks: TaskTracker::new(),
         })
     }
@@ -57,10 +61,23 @@ impl GuestPool {
         let warm = lock(&self.slots).take();
         let guest = match warm {
             Some(guest) => Ok(guest),
-            None => self.boot_one().await,
+            None => self.cold_boot().await,
         };
         self.refill();
         guest
+    }
+
+    async fn cold_boot(self: &Arc<Self>) -> Result<Guest, GuestBootError> {
+        let (sender, receiver) = oneshot::channel();
+        let pool = Arc::clone(self);
+        self.tasks.spawn(async move {
+            if let Err(Ok(guest)) = sender.send(pool.boot_one().await) {
+                pool.keep_or_stop(guest).await;
+            }
+        });
+        receiver
+            .await
+            .unwrap_or_else(|_| Err(GuestBootError("the guest pool stopped".to_owned())))
     }
 
     pub fn refill(self: &Arc<Self>) {
@@ -108,6 +125,7 @@ impl GuestPool {
     }
 
     pub async fn stop_warm(&self) {
+        self.stop_boots().await;
         let warm = std::mem::take(&mut lock(&self.slots).warm);
         for guest in warm {
             guest.teardown(&self.units).await;
@@ -115,7 +133,7 @@ impl GuestPool {
     }
 
     pub async fn stop_all_units(&self) {
-        self.set_draining();
+        self.stop_boots().await;
         lock(&self.slots).warm.clear();
         match self.units.list().await {
             Ok(units) => {
@@ -155,7 +173,7 @@ impl GuestPool {
         let image =
             GuestImage::load(&self.config.image).map_err(|e| GuestBootError(format!("{e:#}")))?;
         let cid = self.next_cid();
-        let guest = Guest::boot(&self.units, &self.config, &image, cid).await;
+        let guest = Guest::boot(&self.units, &self.config, &image, cid, &self.stopping).await;
         lock(&self.reserved_cids).remove(&cid);
         guest
     }
@@ -163,10 +181,17 @@ impl GuestPool {
     async fn boot_into_pool(self: Arc<Self>) {
         loop {
             match self.boot_one().await {
-                Ok(guest) => return self.keep_or_stop(guest).await,
+                Ok(guest) => {
+                    let surplus_guest =
+                        lock(&self.slots).finish_boot(guest, self.target(), self.draining());
+                    return self.stop_surplus(surplus_guest).await;
+                }
                 Err(e) => warn!(error = %e, "warm guest boot failed, retrying in 30s"),
             }
-            tokio::time::sleep(BOOT_RETRY).await;
+            tokio::select! {
+                () = tokio::time::sleep(BOOT_RETRY) => {}
+                () = self.stopping.cancelled() => {}
+            }
             if !lock(&self.slots).retry_boot(self.target(), self.draining()) {
                 return;
             }
@@ -174,10 +199,21 @@ impl GuestPool {
     }
 
     async fn keep_or_stop(&self, guest: Guest) {
-        let surplus_guest = lock(&self.slots).finish_boot(guest, self.target(), self.draining());
-        if let Some(guest) = surplus_guest {
+        let surplus_guest = lock(&self.slots).offer(guest, self.target(), self.draining());
+        self.stop_surplus(surplus_guest).await;
+    }
+
+    async fn stop_surplus(&self, guest: Option<Guest>) {
+        if let Some(guest) = guest {
             guest.teardown(&self.units).await;
         }
+    }
+
+    async fn stop_boots(&self) {
+        self.set_draining();
+        self.stopping.cancel();
+        self.tasks.close();
+        self.tasks.wait().await;
     }
 
     fn draining(&self) -> bool {
@@ -210,6 +246,10 @@ impl<T> Slots<T> {
 
     fn finish_boot(&mut self, guest: T, target: u32, draining: bool) -> Option<T> {
         self.booting = self.booting.saturating_sub(1);
+        self.offer(guest, target, draining)
+    }
+
+    fn offer(&mut self, guest: T, target: u32, draining: bool) -> Option<T> {
         if draining || count(self.warm.len()) >= target {
             return Some(guest);
         }
