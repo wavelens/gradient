@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod agent;
 pub mod config;
 pub mod devices;
 pub mod hypervisor;
@@ -12,6 +13,7 @@ pub mod supervisor;
 pub mod unit;
 pub mod vsock;
 
+pub use agent::{GUEST_BOOT_TIMEOUT, GuestBootError, ReadyAgent, wait_ready};
 pub use config::{DeviceConfig, MountConfig, VmConfig, check_device};
 pub use devices::{DeviceCount, DeviceHold, DeviceInventory, DeviceUnit, HostProbe, SysfsProbe};
 pub use hypervisor::{GuestImage, HypervisorApi, PciDeviceInfo, VmInfo, vm_config};
