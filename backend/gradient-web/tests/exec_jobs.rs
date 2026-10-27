@@ -114,7 +114,21 @@ async fn an_exec_job_shows_its_wait_reason_and_attempts() {
     assert_eq!(job["attempts"][0]["number"], 1);
     assert_eq!(job["attempts"][0]["end_reason"], "lost");
     assert_eq!(job["phases"][0]["attempt"], 1);
-    assert_eq!(job["worker"], "w1");
+    assert_eq!(job["worker"], Value::Null, "a queued job runs nowhere");
+}
+
+#[tokio::test]
+async fn a_started_exec_job_names_the_worker_of_its_attempt() {
+    let db =
+        with_job(mock_db(), ExecJobStatus::Running).append_query_results([vec![public_project()]]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec-jobs/{}", job_id()))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"]["worker"], "w1");
 }
 
 #[tokio::test]

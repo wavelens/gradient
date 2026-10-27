@@ -124,7 +124,10 @@ fn response(ctx: ExecJobAccessContext) -> ExecJobResponse {
         created_at: job.created_at,
         started_at: job.started_at,
         finished_at: job.finished_at,
-        worker: attempts.last().map(|a| a.worker.clone()),
+        worker: attempts
+            .last()
+            .filter(|_| !matches!(job.status, ExecJobStatus::Created | ExecJobStatus::Queued))
+            .map(|a| a.worker.clone()),
         attempts: attempts
             .into_iter()
             .map(|a| ExecJobAttemptView {
@@ -162,7 +165,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
     operation_id = "getExecJob",
     tag = "exec-jobs",
     summary = "Get exec job",
-    description = "Returns an exec job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns an exec job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt and empty while the job waits to start.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Exec job", body = ExecJobResponse), WebError)
 )]

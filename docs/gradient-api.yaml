@@ -5812,7 +5812,7 @@ paths:
       - exec-jobs
       summary: Get exec job
       description: |-
-        Returns an exec job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt.
+        Returns an exec job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt and empty while the job waits to start.
 
         **Access:** Public projects, or members of the project.
       operationId: getExecJob
