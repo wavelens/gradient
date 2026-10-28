@@ -1,0 +1,75 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: 0.45rem $spacing-md 0.45rem calc($spacing-md - 3px);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background $transition-fast, border-color $transition-fast;
+
+  .sidebar-item-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: $font-size-sm;
+    color: var(--gr-text-primary);
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:hover {
+    background: var(--gr-surface-hover);
+    border-left-color: var(--gr-border);
+  }
+
+  &.selected {
+    background: var(--gr-surface-active);
+    border-left-color: var(--gr-status-info);
+  }
+}
+
+.sidebar-group-header {
+  width: 100%;
+  border: none;
+  text-align: left;
+  font-family: inherit;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-md;
+  background: var(--gr-surface-base);
+  border-bottom: 1px solid var(--gr-border-subtle);
+  font-size: $font-size-xs;
+  font-weight: 600;
+  color: var(--gr-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  user-select: none;
+
+  .sidebar-group-count {
+    margin-left: auto;
+    color: var(--gr-text-muted);
+    font-weight: 500;
+  }
+
+  .sidebar-group-chevron { transition: transform $transition-fast; }
+  &.collapsed .sidebar-group-chevron { transform: rotate(-90deg); }
+}
+
+button.sidebar-group-header {
+  cursor: pointer;
+
+  &:hover { color: var(--gr-text-primary); }
+}

@@ -8,32 +8,9 @@
 
 // ── Sidebar evaluation section ──────────────────────────────────────────────
 
-.evaluation-messages-item {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  padding: 0.45rem $spacing-md 0.45rem calc($spacing-md - 3px);
-  cursor: pointer;
-  border-left: 3px solid transparent;
-  transition: background $transition-fast, border-color $transition-fast;
+.evaluation-messages-item.selected { border-left-color: var(--gr-status-danger); }
 
-  .evaluation-label {
-    flex: 1;
-    font-size: $font-size-sm;
-    color: var(--gr-text-primary);
-    font-weight: 500;
-  }
-
-  &:hover {
-    background: var(--gr-surface-hover);
-    border-left-color: var(--gr-border);
-  }
-
-  &.selected {
-    background: var(--gr-surface-active);
-    border-left-color: var(--gr-status-danger);
-  }
-}// ── Messages panel ──────────────────────────────────────────────────────────
+// ── Messages panel ──────────────────────────────────────────────────────────
 
 .messages-panel {
   flex: 1;

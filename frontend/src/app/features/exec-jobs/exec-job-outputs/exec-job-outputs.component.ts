@@ -7,7 +7,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { EMPTY, Observable, catchError, interval, of, startWith, switchMap } from 'rxjs';
-import { TableComponent } from '@gradient/ui/ui';
 import { clockTime, formatBytes } from '@shared/text';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import type { ExecJobOutputView, ExecJobResponse } from '@core/models';
@@ -26,10 +25,9 @@ const sameTarget = (a: PollTarget, b: PollTarget): boolean => a.id === b.id && a
 @Component({
   selector: 'app-exec-job-outputs',
   standalone: true,
-  imports: [TableComponent],
   templateUrl: './exec-job-outputs.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './exec-job-outputs.component.scss',
+  styleUrls: ['../../../shared/log/log-sidebar.scss', './exec-job-outputs.component.scss'],
 })
 export class ExecJobOutputsComponent {
   private execJobs = inject(ExecJobsService);

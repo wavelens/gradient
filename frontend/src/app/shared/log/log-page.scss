@@ -1,0 +1,219 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+:host {
+  display: block;
+  height: $below-header-height;
+  overflow: hidden;
+}
+
+.full-loading,
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: $below-header-height;
+  text-align: center;
+}
+
+.log-page {
+  position: relative;
+  display: flex;
+  height: $below-header-height;
+  overflow: hidden;
+}
+
+.log-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+  background: var(--gr-surface-sunken);
+}
+
+.log-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.info-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 $spacing-lg;
+  height: 48px;
+  background: var(--gr-surface-raised);
+  border-bottom: 1px solid var(--gr-border-subtle);
+  flex-shrink: 0;
+  gap: $spacing-md;
+}
+
+.info-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.info-bar-right {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  flex-shrink: 0;
+}
+
+.info-metric {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: 0 $spacing-md;
+  height: 48px;
+  border-right: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
+  flex-shrink: 0;
+
+  &:first-child { padding-left: 0; }
+
+  &:last-child { border-right: none; }
+}
+
+.metric-label {
+  font-size: $font-size-xs;
+  color: var(--gr-text-muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.metric-value {
+  font-size: $font-size-sm;
+  color: var(--gr-text-primary);
+  white-space: nowrap;
+}
+
+.sidebar-toggle {
+  display: none;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-xs $spacing-md;
+  background: color-mix(in srgb, var(--gr-white) 3%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
+  flex-shrink: 0;
+  gap: $spacing-sm;
+  min-width: 0;
+}
+
+.log-header-title {
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  color: var(--gr-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.log-line-count {
+  font-size: $font-size-xs;
+  color: var(--gr-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.log-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--gr-border-subtle);
+  background: var(--gr-surface-base);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-sm $spacing-md;
+  font-size: $font-size-xs;
+  color: var(--gr-text-muted);
+
+  .breadcrumb-sep { color: var(--gr-text-muted); }
+}
+
+.overview-block {
+  padding: $spacing-sm $spacing-md $spacing-md;
+  border-bottom: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-sm;
+}
+
+.log-sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: $breakpoint-md) {
+  .info-bar {
+    padding-inline: $spacing-md;
+    gap: $spacing-sm;
+  }
+
+  .sidebar-toggle {
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+
+  .info-bar-left {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .log-sidebar {
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    z-index: $z-dropdown;
+    width: min(85vw, 320px);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform $transition-base, visibility $transition-base;
+
+    &.open {
+      transform: none;
+      visibility: visible;
+    }
+  }
+
+  .log-sidebar-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: $z-dropdown - 1;
+  }
+}
+
+@media (max-width: $breakpoint-md) and (prefers-reduced-motion: reduce) {
+  .log-sidebar { transition: none; }
+}

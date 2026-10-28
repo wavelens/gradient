@@ -6,6 +6,12 @@
 
 import type { LogSearchHit } from '@core/models';
 
+export function splitLogLines(text: string): string[] {
+  const lines = text.split('\n');
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
 export function parseLineFragment(fragment: string | null | undefined): number | null {
   if (!fragment) return null;
   const m = /^L?(\d+)$/i.exec(fragment.trim());

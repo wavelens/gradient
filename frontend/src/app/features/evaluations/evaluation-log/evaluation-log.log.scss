@@ -8,13 +8,6 @@
 
 // ── Log area ────────────────────────────────────────────────────────────────
 
-.log-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
 .metric-sep {
   font-size: $font-size-xs;
   color: var(--gr-text-muted);
@@ -113,38 +106,6 @@
     font-size: $font-size-sm;
     color: var(--gr-text-muted);
   }
-}
-
-// Header shown above log output when a build is selected
-.log-build-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: $spacing-xs $spacing-md;
-  background: color-mix(in srgb, var(--gr-white) 3%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
-  flex-shrink: 0;
-  gap: $spacing-sm;
-  min-width: 0;
-}
-
-.log-build-path {
-  font-family: $font-family-mono;
-  font-size: $font-size-xs;
-  color: var(--gr-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  flex: 1;
-}
-
-.log-line-count {
-  font-size: $font-size-xs;
-  color: var(--gr-text-muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .download-panel { height: 100%; }
