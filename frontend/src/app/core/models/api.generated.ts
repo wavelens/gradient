@@ -922,9 +922,25 @@ export interface ExecJobAttemptView {
 
 export type ExecJobId = string;
 
+export interface ExecJobOutputView {
+  path: string;
+  size: number;
+  content_type: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ExecJobPhaseView {
   name: string;
   attempt: number;
+  created_at: string;
+}
+
+export interface ExecJobPullRequestView {
+  url: string;
+  branch: string;
+  number: number;
+  integration: string;
   created_at: string;
 }
 
@@ -947,6 +963,9 @@ export interface ExecJobResponse {
   worker?: string | null;
   attempts: ExecJobAttemptView[];
   phases: ExecJobPhaseView[];
+  tokens: ExecJobTokenView[];
+  started_evaluations: StartedEvaluationView[];
+  outputs_size: number;
   ssh_command?: string | null;
   forward_commands: string[];
 }
@@ -964,6 +983,13 @@ export interface ExecJobSummary {
   devices: DeviceRequest[];
   started_at?: string | null;
   last_phase?: string | null;
+}
+
+export interface ExecJobTokenView {
+  attempt: number;
+  created_at: string;
+  expires_at: string;
+  revoked: boolean;
 }
 
 export interface ExecOffer {
@@ -2122,6 +2148,13 @@ export interface StarredTask {
 export interface StartDeepGcResponse {
   task_id: AdminTaskId;
   status: string;
+}
+
+export interface StartedEvaluationView {
+  evaluation: EvaluationId;
+  task: string;
+  status: EvaluationStatus;
+  created_at: string;
 }
 
 export interface StorageMetricPoint {

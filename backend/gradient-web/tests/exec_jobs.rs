@@ -10,7 +10,9 @@ use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_entity::ids::{
     DerivationId, DispatchedJobId, EntryPointId, EvaluationId, ExecJobAttemptId, ExecJobId,
 };
-use gradient_entity::{entry_point, exec_job, exec_job_attempt, exec_job_phase, project_access};
+use gradient_entity::{
+    entry_point, exec_job, exec_job_attempt, exec_job_output, exec_job_phase, project_access,
+};
 use gradient_fixtures::mock::mock_db;
 use gradient_fixtures::rows::{eval_at, project, public_project, superuser, task, user, view_role};
 use gradient_fixtures::test_date;
@@ -19,6 +21,7 @@ use gradient_types::exec::{DeviceRequest, ExecSpec};
 use gradient_types::waiting_reason::{ExecUnmet, WaitingReason};
 use sea_orm::MockDatabase;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 fn job_id() -> ExecJobId {
@@ -90,13 +93,16 @@ fn with_job(db: MockDatabase, status: ExecJobStatus) -> MockDatabase {
             created_at: test_date(),
             ..Default::default()
         }]])
+        .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()])
+        .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()])
         .append_query_results([vec![task()]])
 }
 
 #[tokio::test]
 async fn an_exec_job_shows_its_wait_reason_and_attempts() {
-    let db =
-        with_job(mock_db(), ExecJobStatus::Queued).append_query_results([vec![public_project()]]);
+    let db = with_job(mock_db(), ExecJobStatus::Queued)
+        .append_query_results([vec![public_project()]])
+        .append_query_results([Vec::<exec_job_output::Model>::new()]);
 
     let res = make_test_server(db.into_connection())
         .get(&format!("/api/v1/exec-jobs/{}", job_id()))
@@ -119,8 +125,9 @@ async fn an_exec_job_shows_its_wait_reason_and_attempts() {
 
 #[tokio::test]
 async fn a_started_exec_job_names_the_worker_of_its_attempt() {
-    let db =
-        with_job(mock_db(), ExecJobStatus::Running).append_query_results([vec![public_project()]]);
+    let db = with_job(mock_db(), ExecJobStatus::Running)
+        .append_query_results([vec![public_project()]])
+        .append_query_results([Vec::<exec_job_output::Model>::new()]);
 
     let res = make_test_server(db.into_connection())
         .get(&format!("/api/v1/exec-jobs/{}", job_id()))

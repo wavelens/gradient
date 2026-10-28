@@ -317,7 +317,7 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
 
 pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
     optionally_secured(
-        enveloped(
+        enveloped(wildcard(
             OpenApiRouter::new()
                 .routes(routes!(projects::management::get_project))
                 .routes(routes!(membership::endpoints::project::list_members))
@@ -353,6 +353,10 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(builds::downloads::get_build_download))
                 .routes(routes!(exec_jobs::query::get_exec_job))
                 .routes(routes!(exec_jobs::log::get_exec_job_log))
+                .routes(routes!(exec_jobs::outputs::list_exec_job_outputs))
+                .routes(routes!(
+                    exec_jobs::pull_requests::list_exec_job_pull_requests
+                ))
                 .routes(routes!(exec_jobs::query::list_evaluation_exec_jobs))
                 .routes(routes!(commits::get_commit))
                 .routes(routes!(caches::management::get_cache))
@@ -387,7 +391,8 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(live::task_live_ws))
                 .routes(routes!(live::evaluation_live_ws))
                 .routes(routes!(live::build_live_ws)),
-        ),
+            routes!(exec_jobs::outputs::get_exec_job_output),
+        )),
         BEARER,
     )
 }
