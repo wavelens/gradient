@@ -25,6 +25,13 @@
       lost = app "lost" { labels = [ "keep" ]; };
       interactive = app "interactive" { labels = [ "keep" ]; ssh = true; ports = [ 8080 ]; };
       terminal = app "terminal" { labels = [ "keep" ]; ssh = true; };
+      secrets = app "secrets" {
+        labels = [ "stop" ];
+        secrets = [ "api-token" "wandb-token" "lab-key" ];
+        sops = [ ./secrets/train.yaml ];
+        args = [ "@gradient.secret.wandb-token@" ];
+      };
+      clash = app "clash" { labels = [ "stop" ]; secrets = [ "clash-key" ]; };
     };
   };
 }

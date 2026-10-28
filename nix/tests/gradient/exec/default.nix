@@ -33,6 +33,14 @@
     ];
   };
 
+  sopsFixtures = ../../../../backend/gradient-sops/tests/fixtures;
+  ageRecipient = lib.fileContents "${sopsFixtures}/ed25519.age-recipient";
+  clashSops = pkgs.runCommand "clash.yaml" { nativeBuildInputs = [ pkgs.sops ]; } ''
+    export HOME=$TMPDIR
+    printf 'clash-key: clash-value-1\n' > plain.yaml
+    sops encrypt --age ${ageRecipient} --input-type yaml --output-type yaml plain.yaml > $out
+  '';
+
   secretFile = text: {
     mode = "0600";
     user = "gradient";
@@ -40,12 +48,12 @@
     inherit text;
   };
 
-  execWorker = { id, label, maxPreWarm, stopGuestsWithWorker }: { nodes, pkgs, lib, ... }: {
+  execWorker = { id, label, maxPreWarm, stopGuestsWithWorker, memorySize ? 4096, sops ? { } }: { nodes, pkgs, lib, ... }: {
     imports = [ ../../../modules/gradient-worker.nix ];
 
     virtualisation = {
       cores = 2;
-      memorySize = 4096;
+      inherit memorySize;
       diskSize = 8192;
       writableStore = true;
     };
@@ -75,7 +83,7 @@
         image = guestImage;
         preWarm = 1;
         labels = [ label ];
-        inherit maxPreWarm stopGuestsWithWorker;
+        inherit maxPreWarm stopGuestsWithWorker sops;
         allow = {
           network = true;
           ssh = true;
@@ -115,15 +123,8 @@ in {
           "gradient/secrets/admin_password" = secretFile "$argon2id$v=19$m=4096,t=3,p=1$c29tZXNhbHQxMjM0NQ$hIKBEy9SOWlnAlcwUv2PLPBdsMkKhVlCyjTxaWIK+v4";
           "gradient/secrets/worker_token" = secretFile workerToken;
           "gradient/secrets/main_cache_key" = secretFile "22yRW7p/hxuPRWJh9pcfGH0oXPk2MFUuG0wIA1rfq1BvDbvMqzMZS+er/BE8ucbxNSG5KZ8B0ELO4TJal8mZlw==";
-          "gradient/secrets/project_ssh_key" = secretFile ''
-            -----BEGIN OPENSSH PRIVATE KEY-----
-            b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-            QyNTUxOQAAACDle/PUDDuuI9h8+ViFyHMQjqARSRhLJcYKnay7MrflOgAAAJALQNCyC0DQ
-            sgAAAAtzc2gtZWQyNTUxOQAAACDle/PUDDuuI9h8+ViFyHMQjqARSRhLJcYKnay7MrflOg
-            AAAEAROowXB/e8+691yZgfHOASTPVyIM2Hx7U9RpmAtUda++V789QMO64j2Hz5WIXIcxCO
-            oBFJGEslxgqdrLsyt+U6AAAABm5vbmFtZQECAwQFBgc=
-            -----END OPENSSH PRIVATE KEY-----
-          '';
+          "gradient/secrets/project_ssh_key" = secretFile (builtins.readFile "${sopsFixtures}/ed25519");
+          "gradient/secrets/api_token" = secretFile "api-token-value-1";
           "gradient/secrets/upstream_key" = {
             mode = "0600";
             text = "file-upstream-1:eZPukjHYgRpJ+hLlnUgG+qpi/k4QMTr3bd4ftngZJwkIXutyHrlDclZGwczy+IKCAt82HkKrDtM16u9HR9uzkQ==";
@@ -156,6 +157,7 @@ in {
                 private_key_file = "/etc/gradient/secrets/project_ssh_key";
                 created_by = "admin";
                 exec_enabled = true;
+                secret_files.api-token = "/etc/gradient/secrets/api_token";
               };
 
               tasks.task = {
@@ -234,10 +236,21 @@ in {
           "L+ /var/lib/git/flake.nix - - - - ${./flake_repository.nix}"
           "L+ /var/lib/git/flake.lock - - - - ${../e2e/flake_repository.lock}"
           "L+ /var/lib/git/apps.nix - - - - ${./apps.nix}"
+          "L+ /var/lib/git/train.yaml - - - - ${sopsFixtures}/secrets.yaml"
         ];
       };
 
-      stopper = execWorker { id = workerIds.stopper; label = "stop"; maxPreWarm = 2; stopGuestsWithWorker = true; };
+      stopper = execWorker {
+        id = workerIds.stopper;
+        label = "stop";
+        maxPreWarm = 2;
+        stopGuestsWithWorker = true;
+        memorySize = 5120;
+        sops = {
+          files = [ "${sopsFixtures}/worker.yaml" "${clashSops}" ];
+          keyFile = "${sopsFixtures}/ed25519";
+        };
+      };
       keeper = execWorker { id = workerIds.keeper; label = "keep"; maxPreWarm = 0; stopGuestsWithWorker = false; };
     };
 
@@ -247,6 +260,8 @@ in {
       GIT = "${lib.getExe pkgs.git}"
       NIXPKGS_HASH = "${self.inputs.nixpkgs.narHash}"
       PROGRAMS = "${lib.concatStringsSep " " (lib.attrValues programs)}"
+      AGE_RECIPIENT = "${ageRecipient}"
+      STOPPER_ID = "${workerIds.stopper}"
     '' + builtins.readFile ./test.py;
   });
 }
