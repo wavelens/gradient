@@ -26,7 +26,7 @@ impl JobSecrets {
         SecretRedactor::new(
             self.secrets
                 .iter()
-                .map(|secret| (secret.name.as_str(), secret.value.as_slice()))
+                .map(|secret| (secret.name.as_str(), secret.value.expose()))
                 .chain(token),
         )
     }
@@ -49,7 +49,7 @@ mod tests {
         let job = RunJob {
             secrets: vec![GuestSecret {
                 name: "wandb-token".into(),
-                value: b"s3cr3t-value".to_vec(),
+                value: b"s3cr3t-value".to_vec().into(),
             }],
             context: ContextLayers {
                 job: BTreeMap::from([("token".into(), "gr_job_abcdefgh123".into())]),

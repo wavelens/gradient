@@ -11,9 +11,8 @@ use gradient_ci::actions::decrypt_secret_with_file;
 use gradient_pool::{DeviceCount, WorkerInfo};
 use gradient_sops::{SopsError, SopsKey, decrypt_file};
 use gradient_types::exec::{ExecRequirement, ExecSpec};
-use gradient_types::{EProject, ProjectId, RuntimeConfig};
+use gradient_types::{EProject, ProjectId, RuntimeConfig, SecretBytes, SecretString};
 use sea_orm::{ConnectionTrait, EntityTrait};
-use zeroize::Zeroizing;
 
 use crate::loops::caps_of;
 
@@ -139,7 +138,7 @@ pub async fn server_secret_values(
     project: ProjectId,
     spec: &ExecSpec,
     names: &[String],
-) -> Result<Vec<(String, Zeroizing<Vec<u8>>)>, SecretResolutionError> {
+) -> Result<Vec<(String, SecretBytes)>, SecretResolutionError> {
     let mut values = Vec::with_capacity(names.len());
     let mut missing = Vec::new();
     for name in names {
@@ -150,10 +149,7 @@ pub async fn server_secret_values(
                         name: name.clone(),
                         reason: e.to_string(),
                     })?;
-                values.push((
-                    name.clone(),
-                    Zeroizing::new(plain.expose().as_bytes().to_vec()),
-                ));
+                values.push((name.clone(), SecretBytes::from(plain.expose().as_bytes())));
             }
             None => missing.push(name.clone()),
         }
@@ -167,7 +163,7 @@ pub async fn server_secret_values(
         let secrets = decrypt_file(&file.path, &file.ciphertext, &key)?;
         missing.retain(|name| match secrets.get(name) {
             Some(value) => {
-                values.push((name.clone(), Zeroizing::new(value.to_vec())));
+                values.push((name.clone(), SecretBytes::from(value)));
                 false
             }
             None => true,
@@ -197,8 +193,8 @@ async fn project_sops_key(
         &config.server.serve_url,
     )
     .map_err(|e| SecretResolutionError::ProjectKey(e.to_string()))?;
-    let private_key = Zeroizing::new(private_key);
-    SopsKey::from_ssh_private_key(&private_key)
+    let private_key = SecretString::new(private_key);
+    SopsKey::from_ssh_private_key(private_key.expose())
         .map_err(|e| SecretResolutionError::ProjectKey(e.to_string()))
 }
 

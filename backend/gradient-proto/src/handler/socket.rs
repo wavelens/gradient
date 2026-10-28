@@ -15,7 +15,6 @@ use gradient_scheduler::exec_secrets::server_secret_values;
 use gradient_scheduler::jobs::{Assignment, PendingJob};
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::types::{CredentialKind, Job};
-use zeroize::Zeroizing;
 
 use super::store_paths::{outbound_message, outbound_offer, project_mapper};
 
@@ -87,10 +86,7 @@ pub(super) async fn send_credentials_for_job(
     Ok(())
 }
 
-fn job_secret_credentials(
-    job_id: &str,
-    values: Vec<(String, Zeroizing<Vec<u8>>)>,
-) -> Vec<ServerMessage> {
+fn job_secret_credentials(job_id: &str, values: Vec<(String, SecretBytes)>) -> Vec<ServerMessage> {
     values
         .into_iter()
         .map(|(name, value)| ServerMessage::Credential {
@@ -98,7 +94,7 @@ fn job_secret_credentials(
                 job_id: job_id.to_owned(),
                 name,
             },
-            data: value.to_vec().into(),
+            data: value,
         })
         .collect()
 }
@@ -162,7 +158,7 @@ async fn send_ssh_key_credential(writer: &ProtoWriter, db: &DbContext, project_i
             writer,
             &ServerMessage::Credential {
                 kind: CredentialKind::SshKey,
-                data: private_key.into_bytes().into(),
+                data: SecretBytes::new(private_key.into_bytes()),
             },
         )
         .await;
@@ -275,9 +271,12 @@ mod tests {
             vec![
                 (
                     "wandb-token".into(),
-                    Zeroizing::new(b"s3cr3t-value".to_vec()),
+                    SecretBytes::from(b"s3cr3t-value".as_slice()),
                 ),
-                ("hf-token".into(), Zeroizing::new(b"hf-value-123".to_vec())),
+                (
+                    "hf-token".into(),
+                    SecretBytes::from(b"hf-value-123".as_slice()),
+                ),
             ],
         );
         let kinds: Vec<_> = msgs

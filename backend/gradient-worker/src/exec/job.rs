@@ -202,7 +202,7 @@ pub(crate) fn job_secrets(
             };
             Ok(GuestSecret {
                 name: name.clone(),
-                value: value.expose().to_vec(),
+                value,
             })
         })
         .collect()
@@ -213,7 +213,7 @@ pub(crate) fn job_redactor(secrets: &[GuestSecret], token: &str) -> SecretRedact
     SecretRedactor::new(
         secrets
             .iter()
-            .map(|secret| (secret.name.as_str(), secret.value.as_slice()))
+            .map(|secret| (secret.name.as_str(), secret.value.expose()))
             .chain(token),
     )
 }
@@ -877,7 +877,7 @@ mod tests {
                 job_id: "exec:1".into(),
                 name: name.into(),
             },
-            value.to_vec(),
+            value.into(),
         );
         store
     }
@@ -913,11 +913,11 @@ mod tests {
             [
                 GuestSecret {
                     name: "lab-key".into(),
-                    value: b"lab-value-123".to_vec()
+                    value: b"lab-value-123".to_vec().into()
                 },
                 GuestSecret {
                     name: "wandb-token".into(),
-                    value: b"s3cr3t-value".to_vec()
+                    value: b"s3cr3t-value".to_vec().into()
                 },
             ]
         );

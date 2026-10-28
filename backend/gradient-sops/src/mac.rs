@@ -12,14 +12,14 @@ use aes_gcm::aes::Aes256;
 use aes_gcm::{AesGcm, Nonce};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use gradient_secret::SecretBytes;
 use sha2::{Digest as _, Sha512};
 use yaml_serde::{Mapping, Value};
-use zeroize::Zeroizing;
 
 use crate::SopsError;
 
 type SopsCipher = AesGcm<Aes256, U32>;
-type Secrets = BTreeMap<String, Zeroizing<Vec<u8>>>;
+type Secrets = BTreeMap<String, SecretBytes>;
 
 struct EncryptedValue {
     data: Vec<u8>,
@@ -54,12 +54,7 @@ impl EncryptedValue {
         })
     }
 
-    fn open(
-        &self,
-        file: &str,
-        cipher: &SopsCipher,
-        aad: &[u8],
-    ) -> Result<Zeroizing<Vec<u8>>, SopsError> {
+    fn open(&self, file: &str, cipher: &SopsCipher, aad: &[u8]) -> Result<SecretBytes, SopsError> {
         let nonce = <&Nonce<U32>>::try_from(self.iv.as_slice())
             .map_err(|_| SopsError::parse(file, "encrypted value with a wrong iv size"))?;
         let mut ciphertext = self.data.clone();
@@ -72,7 +67,7 @@ impl EncryptedValue {
                     aad,
                 },
             )
-            .map(Zeroizing::new)
+            .map(SecretBytes::new)
             .map_err(|_| SopsError::MacMismatch { file: file.into() })
     }
 }
@@ -119,7 +114,7 @@ impl<'a> DocumentWalk<'a> {
         &mut self,
         value: &Value,
         path: &mut Vec<String>,
-    ) -> Result<Option<Zeroizing<Vec<u8>>>, SopsError> {
+    ) -> Result<Option<SecretBytes>, SopsError> {
         match value {
             Value::Mapping(mapping) => {
                 for (key, child) in mapping {
@@ -145,21 +140,21 @@ impl<'a> DocumentWalk<'a> {
         &mut self,
         text: &str,
         path: &[String],
-    ) -> Result<Option<Zeroizing<Vec<u8>>>, SopsError> {
+    ) -> Result<Option<SecretBytes>, SopsError> {
         let encrypted = EncryptedValue::parse(self.file, text)?;
         let aad = format!("{}:", path.join(":"));
         let plain = encrypted.open(self.file, &self.cipher, aad.as_bytes())?;
-        self.hasher.update(plain.as_slice());
+        self.hasher.update(plain.expose());
         Ok((encrypted.kind == "str").then_some(plain))
     }
 
-    fn plain_leaf(&mut self, scalar: &Value) -> Option<Zeroizing<Vec<u8>>> {
+    fn plain_leaf(&mut self, scalar: &Value) -> Option<SecretBytes> {
         if !self.mac_only_encrypted {
             self.hasher.update(scalar_bytes(scalar));
         }
         scalar
             .as_str()
-            .map(|text| Zeroizing::new(text.as_bytes().to_vec()))
+            .map(|text| SecretBytes::from(text.as_bytes()))
     }
 }
 
@@ -182,7 +177,7 @@ pub(crate) fn verify_mac(
         text_field("lastmodified")?.as_bytes(),
     )?;
 
-    if expected.eq_ignore_ascii_case(digest.as_bytes()) {
+    if expected.expose().eq_ignore_ascii_case(digest.as_bytes()) {
         Ok(())
     } else {
         Err(SopsError::MacMismatch { file: file.into() })

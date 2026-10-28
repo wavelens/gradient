@@ -11,6 +11,7 @@ use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, Stream, StreamExt};
+use gradient_secret::SecretBytes;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
@@ -82,7 +83,7 @@ pub struct ContextLayers {
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub struct GuestSecret {
     pub name: String,
-    pub value: Vec<u8>,
+    pub value: SecretBytes,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -295,7 +296,7 @@ mod tests {
             last_phase_payload: b"step=2".to_vec(),
             secrets: vec![GuestSecret {
                 name: "wandb-token".into(),
-                value: b"s3cr3t".to_vec(),
+                value: SecretBytes::from(b"s3cr3t".as_slice()),
             }],
             mounts: vec![GuestMount {
                 tag: "datasets".into(),
@@ -390,6 +391,20 @@ mod tests {
             worker.recv::<AgentToWorker>().await.expect("recv"),
             Some(closed)
         );
+    }
+
+    #[test]
+    fn a_guest_secret_encodes_like_a_name_and_a_byte_vector() {
+        let secret = GuestSecret {
+            name: "wandb-token".into(),
+            value: SecretBytes::from(b"s3cr3t-value".as_slice()),
+        };
+        let plain = (String::from("wandb-token"), b"s3cr3t-value".to_vec());
+        let version = *GUEST_PROTO_VERSIONS.end();
+
+        let encoded = to_bytes(&secret, version).expect("encodes");
+        assert_eq!(encoded, to_bytes(&plain, version).expect("encodes"));
+        assert_eq!(from_bytes::<GuestSecret>(encoded, version), Ok(secret));
     }
 
     #[tokio::test]

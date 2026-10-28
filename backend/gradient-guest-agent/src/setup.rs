@@ -92,7 +92,7 @@ async fn write_secrets(job: &RunJob) -> Result<()> {
     tokio::fs::create_dir_all(dir).await?;
     give_to_program_user(dir, 0o500).await?;
     for secret in &job.secrets {
-        write_file(&dir.join(&secret.name), &secret.value, 0o400).await?;
+        write_file(&dir.join(&secret.name), secret.value.expose(), 0o400).await?;
     }
     Ok(())
 }

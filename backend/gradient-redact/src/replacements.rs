@@ -6,20 +6,24 @@
 
 use aho_corasick::{AhoCorasick, MatchKind};
 
-pub struct Replacements {
+pub struct Replacements<P = Vec<u8>> {
     automaton: Option<AhoCorasick>,
-    patterns: Vec<Vec<u8>>,
+    patterns: Vec<P>,
     replacements: Vec<Vec<u8>>,
     longest: usize,
 }
 
-impl Replacements {
-    pub fn new(pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Self {
-        let (patterns, replacements): (Vec<Vec<u8>>, Vec<Vec<u8>>) = pairs
+impl<P: AsRef<[u8]>> Replacements<P> {
+    pub fn new(pairs: Vec<(P, Vec<u8>)>) -> Self {
+        let (patterns, replacements): (Vec<P>, Vec<Vec<u8>>) = pairs
             .into_iter()
-            .filter(|(pattern, _)| !pattern.is_empty())
+            .filter(|(pattern, _)| !pattern.as_ref().is_empty())
             .unzip();
-        let longest = patterns.iter().map(Vec::len).max().unwrap_or(0);
+        let longest = patterns
+            .iter()
+            .map(|pattern| pattern.as_ref().len())
+            .max()
+            .unwrap_or(0);
 
         Self {
             automaton: build_automaton(&patterns),
@@ -76,6 +80,7 @@ impl Replacements {
             && self
                 .patterns
                 .iter()
+                .map(|pattern| pattern.as_ref())
                 .any(|pattern| pattern.len() > tail.len() && pattern.starts_with(tail))
     }
 
@@ -102,13 +107,14 @@ impl Replacements {
         self.patterns
             .iter()
             .enumerate()
+            .map(|(index, pattern)| (index, pattern.as_ref()))
             .filter(|(_, pattern)| rest.starts_with(pattern))
             .map(|(index, pattern)| (index, pattern.len()))
             .max_by_key(|&(index, len)| (len, std::cmp::Reverse(index)))
     }
 }
 
-fn build_automaton(patterns: &[Vec<u8>]) -> Option<AhoCorasick> {
+fn build_automaton<P: AsRef<[u8]>>(patterns: &[P]) -> Option<AhoCorasick> {
     AhoCorasick::builder()
         .match_kind(MatchKind::LeftmostLongest)
         .build(patterns)

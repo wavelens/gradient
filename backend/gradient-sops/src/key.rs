@@ -8,6 +8,7 @@ use std::str::FromStr as _;
 
 use bech32::{ToBase32 as _, Variant};
 use curve25519_dalek::edwards::CompressedEdwardsY;
+use gradient_secret::SecretString;
 use sha2::{Digest as _, Sha512};
 use ssh_key::{Algorithm, PrivateKey, PublicKey};
 use zeroize::Zeroizing;
@@ -21,8 +22,8 @@ pub struct SopsKey {
 
 impl SopsKey {
     pub fn from_ssh_private_key(openssh: &str) -> Result<SopsKey, SopsError> {
-        let openssh = &Zeroizing::new(format!("{}\n", openssh.trim()));
-        let private = PrivateKey::from_openssh(openssh).map_err(key_error)?;
+        let openssh = SecretString::new(format!("{}\n", openssh.trim()));
+        let private = PrivateKey::from_openssh(openssh.expose()).map_err(key_error)?;
         if private.is_encrypted() {
             return Err(SopsError::Key {
                 reason: "passphrase-protected keys are not supported".into(),
@@ -37,7 +38,7 @@ impl SopsKey {
 
         Ok(SopsKey {
             x25519,
-            ssh: ssh_identity(openssh, &private)?,
+            ssh: ssh_identity(openssh.expose(), &private)?,
         })
     }
 

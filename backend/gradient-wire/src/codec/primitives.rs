@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use gradient_secret::SecretBytes;
 
 use super::{DecodeError, EncodeError, Proto, get_u8, get_varint, max, put_varint, take};
 
@@ -139,6 +140,23 @@ impl Proto for Bytes {
     fn decode(input: &mut Bytes, _: u16) -> Result<Self, DecodeError> {
         let len = get_varint(input)?;
         take(input, len)
+    }
+
+    fn describe(_: u16, out: &mut String) {
+        out.push_str("bytes");
+    }
+}
+
+impl Proto for SecretBytes {
+    fn encode(&self, _: u16, out: &mut BytesMut) -> Result<(), EncodeError> {
+        put_varint(out, self.expose().len() as u64);
+        out.put_slice(self.expose());
+        Ok(())
+    }
+
+    fn decode(input: &mut Bytes, _: u16) -> Result<Self, DecodeError> {
+        let len = get_varint(input)?;
+        Ok(SecretBytes::from(take(input, len)?.as_ref()))
     }
 
     fn describe(_: u16, out: &mut String) {

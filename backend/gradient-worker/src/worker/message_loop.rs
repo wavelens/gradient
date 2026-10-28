@@ -314,7 +314,7 @@ impl MessageLoopState {
                 self.on_abort_job(job_id, reason).await?;
             }
             ServerMessage::Credential { kind, data } => {
-                self.on_credential(kind, data.into());
+                self.on_credential(kind, data);
             }
             ServerMessage::Draining => {
                 info!("server is draining; finishing in-flight work then disconnecting");
@@ -952,7 +952,11 @@ impl MessageLoopState {
         Ok(())
     }
 
-    fn on_credential(&mut self, kind: gradient_wire::messages::CredentialKind, data: Vec<u8>) {
+    fn on_credential(
+        &mut self,
+        kind: gradient_wire::messages::CredentialKind,
+        data: gradient_types::SecretBytes,
+    ) {
         debug!(?kind, "received credential");
         self.credentials.store(kind, data);
     }

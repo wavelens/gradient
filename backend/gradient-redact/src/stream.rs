@@ -6,15 +6,17 @@
 
 use std::sync::Arc;
 
+use gradient_secret::SecretBytes;
+
 use crate::replacements::Replacements;
 
 pub struct StreamRedactor {
-    replacements: Arc<Replacements>,
+    replacements: Arc<Replacements<SecretBytes>>,
     held_back: Vec<u8>,
 }
 
 impl StreamRedactor {
-    pub(crate) fn new(replacements: Arc<Replacements>) -> Self {
+    pub(crate) fn new(replacements: Arc<Replacements<SecretBytes>>) -> Self {
         Self {
             replacements,
             held_back: Vec::new(),
