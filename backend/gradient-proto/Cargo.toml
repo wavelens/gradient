@@ -33,11 +33,14 @@ async-trait       = { workspace = true }
 bytes             = { workspace = true }
 chrono            = { workspace = true }
 futures           = { workspace = true }
+hex               = { workspace = true }
+mime_guess        = { workspace = true }
 ractor            = { workspace = true }
 reqwest           = { workspace = true }
 sea-orm           = { workspace = true }
 serde             = { workspace = true }
 serde_json        = { workspace = true }
+sha2              = { workspace = true }
 thiserror         = { workspace = true }
 tokio             = { workspace = true, features = ["fs", "macros", "sync"] }
 tokio-tungstenite = { workspace = true }
