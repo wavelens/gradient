@@ -58,12 +58,16 @@
   <div class="pad task-info">
     <p class="desc">{{ proj.description || 'No description' }}</p>
     <div class="meta-chips">
-      @if (repositoryWebUrl(proj.repository); as repoUrl) {
+      @let repo = splitRepository(proj.repository);
+      @if (repositoryWebUrl(repo.cloneUrl); as repoUrl) {
         <a class="chip chip--link" [href]="repoUrl" target="_blank" rel="noopener noreferrer">
-          <gr-icon name="link" size="sm" />{{ proj.repository }}
+          <gr-icon name="link" size="sm" />{{ repo.cloneUrl }}
         </a>
       } @else {
-        <span class="chip"><gr-icon name="link" size="sm" />{{ proj.repository }}</span>
+        <span class="chip"><gr-icon name="link" size="sm" />{{ repo.cloneUrl }}</span>
+      }
+      @if (repo.flakeDir; as flakeDir) {
+        <span class="chip mono" title="Flake directory"><gr-icon name="folder" size="sm" />dir {{ flakeDir }}</span>
       }
       <span class="chip mono" [title]="proj.wildcard">{{ truncate(proj.wildcard) }}</span>
       @if (proj.last_check_at) {

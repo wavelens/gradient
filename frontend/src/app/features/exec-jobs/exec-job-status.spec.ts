@@ -63,6 +63,16 @@ describe('waitingReasonText', () => {
     expect(waitingReasonText(reason)).toBe('needs worker secret lab-key');
   });
 
+  it('names a worker that allows custom images', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: { labels: [], devices: [], mounts: [], nodes: 0, custom_image: true },
+      connected_workers: 2,
+      matching_workers: 0,
+    };
+    expect(waitingReasonText(reason)).toBe('needs a worker that allows custom images');
+  });
+
   it('counts the matching workers whose devices are busy', () => {
     const reason: WaitingReason = {
       kind: 'exec_workers',

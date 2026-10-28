@@ -49,7 +49,7 @@ import {
   WalkMode,
   EvaluationStatus,
 } from '@core/models';
-import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, repositoryWebUrl, thunkProgress } from '@shared/evaluation';
+import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, repositoryWebUrl, splitRepository, thunkProgress } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -517,6 +517,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   readonly commitLabel = commitLabel;
   readonly commitWebUrl = commitWebUrl;
   readonly repositoryWebUrl = repositoryWebUrl;
+  readonly splitRepository = splitRepository;
 
   evalTitle(e: EvaluationSummary): string {
     return evaluationTitle(e);

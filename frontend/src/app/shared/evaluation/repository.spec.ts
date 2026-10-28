@@ -4,9 +4,28 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { commitWebUrl, repositoryWebUrl } from './repository';
+import { commitWebUrl, repositoryWebUrl, splitRepository } from './repository';
+
+describe('splitRepository', () => {
+  it('splits the dir query off as the flake directory', () => {
+    expect(splitRepository('git@github.com:acme/infra.git?dir=nix'))
+      .toEqual({ cloneUrl: 'git@github.com:acme/infra.git', flakeDir: 'nix' });
+    expect(splitRepository('https://github.com/acme/infra?dir=nix/hosts'))
+      .toEqual({ cloneUrl: 'https://github.com/acme/infra', flakeDir: 'nix/hosts' });
+  });
+
+  it('has no flake directory without a dir query', () => {
+    expect(splitRepository('https://github.com/acme/infra')).toEqual({ cloneUrl: 'https://github.com/acme/infra', flakeDir: null });
+    expect(splitRepository('https://github.com/acme/infra?dir=')).toEqual({ cloneUrl: 'https://github.com/acme/infra', flakeDir: null });
+  });
+});
 
 describe('repositoryWebUrl', () => {
+  it('links the repository without its flake directory', () => {
+    expect(repositoryWebUrl('git@github.com:acme/infra.git?dir=nix')).toBe('https://github.com/acme/infra');
+    expect(commitWebUrl('https://github.com/acme/infra?dir=nix', 'abc')).toBe('https://github.com/acme/infra/commit/abc');
+  });
+
   it('keeps an https URL and drops the .git suffix', () => {
     expect(repositoryWebUrl('https://github.com/wavelens/gradient.git')).toBe('https://github.com/wavelens/gradient');
     expect(repositoryWebUrl('https://github.com/wavelens/gradient')).toBe('https://github.com/wavelens/gradient');
