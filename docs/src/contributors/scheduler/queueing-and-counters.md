@@ -20,10 +20,10 @@ All on `derivation_build`, moved by transitions and never derived by a per-row w
 |---|---|---|
 | `missing_runtime_deps` | Runtime dependencies (`kind IN (1, 2)`) leading to a shared build without a complete closure | `runtime_can_start`: seeded on a NAR landing, spread up and down through the SQL function `ripple_missing_runtime_deps` |
 | `fetchable` | Terminal success (`Completed`, `Substituted`) with a complete closure | `can_start::became_fetchable`, `can_start::lost_fetchability` |
-| `blocking_deps` | Direct dependencies (every edge in `derivation_dependency`) that are not `fetchable` | One-hop spread from the shared builds a `fetchable` change returned |
+| `blocking_deps` | Direct dependencies (every edge in `derivation_dependency`) that are not `fetchable`, or whose `unneeded_outputs` include an output the edge names | One-hop spread from the shared builds a `fetchable` change returned |
 | `wanted` | Shared build still wanted by some open entry point, unless its evaluation or the build was aborted there | `can_start::update_need` |
 
-- **Complete closure** (`graph_sql::shared_build_complete_predicate`): a shared build counts as complete when every output with a NAR is present in the cache and `missing_runtime_deps = 0`. The `EXISTS` over `derivation_output` must stay readable for shared builds without output rows.
+- **Complete closure** (`graph_sql::shared_build_complete_predicate`): a shared build counts as complete when every output outside `unneeded_outputs` is present in the cache and `missing_runtime_deps = 0`. The `EXISTS` over `derivation_output` must stay readable for shared builds without output rows.
 - An upstream copy never counts as `fetchable`. A build that needs a shared build held in an upstream cache must wait for the passthrough, because every build must draw its inputs from the Gradient cache.
 - A flag change must write the flag with a `RETURNING` clause that reports exactly the changed rows, and only those rows may spread further. A spread driven by a state instead of a transition pushed a counter below zero, and `= 0` never held for that counter again.
 - The flag change and the spread ran in one transaction under `can_start::lock_shared_builds`, which took `derivation`-ordered `FOR NO KEY UPDATE` locks. The lock must return the `SharedBuildLock` proof required by both functions.
@@ -72,6 +72,22 @@ A shared build is **open** (`graph_sql::open_predicate`) when `fetchable` is fal
 - The needs-build mark lives in a column. The mark flows down from the entry points, while the can-start counters flow up from the leaves. A one-hop predicate cannot carry the downward direction.
 - `update_need` walks the region below the given roots (roots included) in one statement. `WRITE_NEED` then writes the answer as a bound `unnest` array. Recursive CTEs carry no usable row estimate, and a membership subquery degrades into a sequential scan.
 - The write returns each changed row with its new value, split into gained and lost sets for the caller.
+
+### Partial Substitution
+
+An upstream cache filled with `nix copy` can hold just the outputs referenced by a closure. A shared build can still become a passthrough when its wanted parents need no missing output.
+
+| Parent | Needed outputs of the dependency |
+|---|---|
+| Builder | The names in `derivation_dependency.dependency_outputs` (the `inputDrvs` outputs), every output when unknown |
+| Passthrough | The outputs referenced by its own outputs over a runtime dependency |
+| Entry point of a live evaluation | Every output |
+
+- `apply_upstream_hits` can set `cache_available` when caches contain every needed output. Outputs absent from every cache land in `derivation_build.unneeded_outputs`.
+- The substitute job can fetch just the outputs outside `unneeded_outputs`. A build job can require only the outputs on its edge.
+- Edges that reference an unneeded output count toward `blocking_deps`. The spread on a `fetchable` change can skip those edges.
+- The `needed-output-requeue` pass can find unneeded outputs that parents want (`UNNEEDED_OUTPUTS_NOW_NEEDED`). `needed_outputs::forget_unneeded_outputs` can then clear `cache_available` and `unneeded_outputs` and turn the shared build into a real build. That function can also recount `blocking_deps` of the builds above.
+- An exhausted substitution and a demote clear `unneeded_outputs` through the same function.
 
 ### Callers of `update_need`
 
