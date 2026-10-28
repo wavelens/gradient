@@ -1029,6 +1029,7 @@ export interface ExecUnmet {
   nodes: number;
   custom_image: boolean;
   secrets?: string[];
+  guest?: GuestSize;
 }
 
 export interface ExpensiveBuild {

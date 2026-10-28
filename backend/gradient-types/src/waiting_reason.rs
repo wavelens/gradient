@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_wire::types::DeviceRequest;
+use gradient_wire::types::{DeviceRequest, GuestSize};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -62,6 +62,8 @@ pub struct ExecUnmet {
     pub custom_image: bool,
     #[serde(default)]
     pub secrets: Vec<String>,
+    #[serde(default)]
+    pub guest: GuestSize,
 }
 
 impl ExecUnmet {
@@ -92,11 +94,19 @@ impl std::fmt::Display for ExecUnmet {
         if self.custom_image {
             parts.push("custom-image".to_owned());
         }
+        parts.extend(guest_parts(&self.guest));
         let mut secrets: Vec<String> = self.secrets.iter().map(|s| format!("secret:{s}")).collect();
         secrets.sort();
         parts.extend(secrets);
         f.write_str(&parts.join(","))
     }
+}
+
+fn guest_parts(guest: &GuestSize) -> Vec<String> {
+    let cpus = (guest.cpus > 0).then(|| format!("{} CPUs", guest.cpus));
+    let memory = (guest.memory_mb > 0).then(|| format!("{} MB memory", guest.memory_mb));
+    let disk = (guest.disk_mb > 0).then(|| format!("{} MB disk", guest.disk_mb));
+    [cpus, memory, disk].into_iter().flatten().collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]

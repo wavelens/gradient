@@ -332,7 +332,8 @@ impl PendingJob {
                 j.substitute || outputs_present,
                 j.is_fixed_output || j.job.requirement.architecture == gradient_types::BUILTIN_ARCH,
             ),
-            PendingJob::Eval(_) | PendingJob::Exec(_) => RamNeed::Negligible,
+            PendingJob::Exec(j) => RamNeed::Predicted(j.spec.guest.memory_mb),
+            PendingJob::Eval(_) => RamNeed::Negligible,
         }
     }
 

@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use gradient_wire::types::{
     BuildJob, BuildSpecKind, DeviceClass, ExecInventory, ExecRequirement, FlakeJob, FlakeSource,
-    FlakeStep, JobKind,
+    FlakeStep, GuestCapacity, GuestSize, JobKind, ResourceAmount,
 };
 
 pub fn build_needs_network(kind: BuildSpecKind, is_fixed_output: bool) -> bool {
@@ -33,6 +33,20 @@ impl DeviceCount {
             Self::Total => class.total,
         }
     }
+
+    fn amount(self, amount: &ResourceAmount) -> u64 {
+        match self {
+            Self::Free => amount.free,
+            Self::Total => amount.total,
+        }
+    }
+}
+
+pub fn guest_fits(size: &GuestSize, capacity: &GuestCapacity, count: DeviceCount) -> bool {
+    capacity.is_unset()
+        || (u64::from(size.cpus) <= count.amount(&capacity.cpus)
+            && size.memory_mb <= count.amount(&capacity.memory_mb)
+            && size.disk_mb <= count.amount(&capacity.disk_mb))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -81,6 +95,7 @@ impl WorkerCaps {
             && self.runs_architecture(&req.architecture)
             && req.labels.iter().all(|l| inventory.labels.contains(l))
             && devices_fit(req, inventory, devices)
+            && guest_fits(&req.guest, &inventory.guest_capacity, devices)
             && req
                 .mounts
                 .iter()
@@ -370,6 +385,38 @@ mod tests {
         }
         assert!(!w.fits_exec(&req(|r| r.devices = gpus(8)), DeviceCount::Free));
         assert!(w.fits_exec(&req(|r| r.devices = gpus(8)), DeviceCount::Total));
+    }
+
+    fn budget(total: u64, free: u64) -> ResourceAmount {
+        ResourceAmount { total, free }
+    }
+
+    #[test]
+    fn a_guest_larger_than_the_free_budget_fits_only_the_total() {
+        let mut w = exec_worker();
+        if let Some(inventory) = w.exec.as_mut() {
+            inventory.guest_capacity = GuestCapacity {
+                cpus: budget(4, 1),
+                memory_mb: budget(8000, 8000),
+                disk_mb: budget(100_000, 100_000),
+            };
+        }
+        let two_cpus = req(|r| r.guest = GuestSize::default_request());
+        assert!(!w.fits_exec(&two_cpus, DeviceCount::Free));
+        assert!(w.fits_exec(&two_cpus, DeviceCount::Total));
+    }
+
+    #[test]
+    fn a_worker_without_a_budget_takes_any_size() {
+        let w = exec_worker();
+        let huge = req(|r| {
+            r.guest = GuestSize {
+                cpus: 255,
+                memory_mb: 1 << 30,
+                disk_mb: 1 << 40,
+            }
+        });
+        assert!(w.fits_exec(&huge, DeviceCount::Free));
     }
 
     #[test]
