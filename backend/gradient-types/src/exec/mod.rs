@@ -12,8 +12,8 @@ pub use job_token::{JOB_TOKEN_PREFIX, hash_job_token, job_token_expiry, mint_job
 
 pub use gradient_wire::types::{
     DeviceClass, DeviceRequest, DeviceRequestError, ExecAllow, ExecDefaults, ExecInventory,
-    ExecLimits, ExecRequirement, ExecSpec, Phase, SecretNameError, SopsFile, exec_image_attr,
-    validate_secret_name,
+    ExecLimits, ExecRequirement, ExecSpec, GuestCapacity, GuestSize, Phase, ResourceAmount,
+    SecretNameError, SopsFile, exec_image_attr, validate_secret_name,
 };
 
 pub const DISABLED_ON_INSTANCE: &str = "exec jobs are disabled on this instance";

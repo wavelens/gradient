@@ -67,6 +67,79 @@ impl fmt::Display for DeviceRequest {
 }
 
 #[derive(
+    Proto,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    utoipa::ToSchema,
+)]
+pub struct GuestSize {
+    pub cpus: u32,
+    pub memory_mb: u64,
+    pub disk_mb: u64,
+}
+
+impl GuestSize {
+    pub fn default_request() -> GuestSize {
+        GuestSize {
+            cpus: 2,
+            memory_mb: 500,
+            disk_mb: 10240,
+        }
+    }
+
+    pub fn is_unset(&self) -> bool {
+        *self == GuestSize::default()
+    }
+}
+
+#[derive(
+    Proto,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    utoipa::ToSchema,
+)]
+pub struct ResourceAmount {
+    pub total: u64,
+    pub free: u64,
+}
+
+#[derive(
+    Proto,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    utoipa::ToSchema,
+)]
+pub struct GuestCapacity {
+    pub cpus: ResourceAmount,
+    pub memory_mb: ResourceAmount,
+    pub disk_mb: ResourceAmount,
+}
+
+impl GuestCapacity {
+    pub fn is_unset(&self) -> bool {
+        *self == GuestCapacity::default()
+    }
+}
+
+#[derive(
     Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Eq, Default, utoipa::ToSchema,
 )]
 pub struct ExecRequirement {
@@ -87,6 +160,9 @@ pub struct ExecRequirement {
     #[proto(49, default)]
     #[serde(default)]
     pub nodes: u32,
+    #[proto(51, default)]
+    #[serde(default)]
+    pub guest: GuestSize,
 }
 
 #[derive(
@@ -135,6 +211,9 @@ pub struct ExecInventory {
     pub allow: ExecAllow,
     pub defaults: ExecDefaults,
     pub warm_guests: u32,
+    #[proto(51, default)]
+    #[serde(default)]
+    pub guest_capacity: GuestCapacity,
 }
 
 #[derive(
@@ -247,6 +326,9 @@ pub struct ExecSpec {
     pub timeout_secs: Option<u64>,
     pub max_silent_secs: Option<u64>,
     pub retries: u32,
+    #[proto(51, default)]
+    #[serde(default = "GuestSize::default_request")]
+    pub guest: GuestSize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -273,6 +355,7 @@ impl ExecSpec {
             secrets: Vec::new(),
             server_secrets: Vec::new(),
             nodes: self.nodes,
+            guest: self.guest,
         }
     }
 

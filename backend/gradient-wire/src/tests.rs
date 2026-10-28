@@ -399,3 +399,20 @@ fn a_discovered_derivation_names_the_outputs_of_each_input_since_version_50() {
     assert_eq!(older.dependencies, discovered.dependencies);
     assert!(older.dependency_outputs.is_empty());
 }
+
+#[test]
+fn a_requirement_from_the_previous_version_has_no_guest_size() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::types::{ExecRequirement, GuestSize};
+
+    let requirement = ExecRequirement {
+        guest: GuestSize::default_request(),
+        ..ExecRequirement::default()
+    };
+    assert_eq!(
+        from_bytes::<ExecRequirement>(to_bytes(&requirement, 51).unwrap(), 51).unwrap(),
+        requirement
+    );
+    let older: ExecRequirement = from_bytes(to_bytes(&requirement, 50).unwrap(), 50).unwrap();
+    assert_eq!(older.guest, GuestSize::default());
+}

@@ -1276,6 +1276,7 @@ mod tests {
                     ..ExecDefaults::default()
                 },
                 warm_guests: 2,
+                ..ExecInventory::default()
             }),
         );
 

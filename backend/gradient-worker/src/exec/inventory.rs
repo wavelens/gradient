@@ -5,7 +5,7 @@
  */
 
 use gradient_vm::DeviceInventory;
-use gradient_wire::types::{DeviceClass, DeviceRequest, ExecInventory};
+use gradient_wire::types::{DeviceClass, DeviceRequest, ExecInventory, GuestCapacity};
 
 use crate::config::ExecArgs;
 
@@ -40,6 +40,7 @@ pub fn advertised(
         allow: config.allow(),
         defaults: config.defaults(),
         warm_guests,
+        guest_capacity: GuestCapacity::default(),
     }
 }
 

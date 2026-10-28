@@ -976,6 +976,7 @@ export interface ExecJobResponse {
   nodes: number;
   labels: string[];
   devices: DeviceRequest[];
+  guest: GuestSize;
   waiting_reason?: WaitingReason | null;
   message?: string | null;
   retries_left: number;
@@ -1192,6 +1193,12 @@ export interface GroupResource {
   displayName: string;
   members: GroupMember[];
   meta: Meta;
+}
+
+export interface GuestSize {
+  cpus: number;
+  memory_mb: number;
+  disk_mb: number;
 }
 
 export interface HeatmapBand {
