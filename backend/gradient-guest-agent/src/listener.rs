@@ -188,6 +188,7 @@ async fn serve_connection(agent: Arc<Agent>, stream: VsockStream) -> Result<()> 
                 rows,
             } => channels.resize(channel_id, cols, rows),
             WorkerToAgent::CloseChannel { channel_id } => channels.close(channel_id),
+            WorkerToAgent::UploadSettled { .. } => {}
         }
     }
     Ok(())
