@@ -692,6 +692,13 @@ pub enum JobKind {
     Exec,
 }
 
+#[derive(Proto, Debug, Clone, PartialEq, Eq)]
+pub enum GuestChannelKind {
+    Shell { pty: bool, attach: bool },
+    Forward { port: u16 },
+    Console,
+}
+
 pub type AssignmentId = String;
 
 #[derive(Proto, Debug, Clone, PartialEq)]
