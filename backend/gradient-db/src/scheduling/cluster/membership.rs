@@ -91,6 +91,7 @@ impl From<MemberRow> for MemberOf {
                 created_at: r.created_at,
                 updated_at: r.updated_at,
                 dissolve_after: r.dissolve_after,
+                attempts_outside_budget: 0,
             },
             member: MClusterMember {
                 id: r.member_id,
@@ -102,6 +103,7 @@ impl From<MemberRow> for MemberOf {
                 pin: r.pin,
                 eval_index: r.eval_index,
                 min_free_ram_mb: r.min_free_ram_mb,
+                exec_job: None,
             },
             member_count: u32::try_from(r.member_count).unwrap_or(u32::MAX),
         }

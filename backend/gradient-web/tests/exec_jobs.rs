@@ -75,6 +75,7 @@ fn lost_attempt() -> exec_job_attempt::Model {
         ended_at: Some(test_date()),
         end_reason: Some(AttemptEndReason::Lost),
         message: None,
+        ..Default::default()
     }
 }
 

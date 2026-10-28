@@ -15,7 +15,7 @@ use crate::jobs::{build_job_key, eval_job_key};
 
 pub(crate) enum Route {
     Single,
-    Member(MemberOf),
+    Member(Box<MemberOf>),
     Held,
     Dead,
 }
@@ -70,7 +70,7 @@ impl Membership {
     pub(crate) fn route(&self, key: &str) -> Route {
         match self.by_key.get(key).map(|of| (of, of.cluster.status)) {
             None | Some((_, ClusterJobStatus::Completed)) => Route::Single,
-            Some((of, ClusterJobStatus::Queued)) => Route::Member(of.clone()),
+            Some((of, ClusterJobStatus::Queued)) => Route::Member(Box::new(of.clone())),
             Some((_, ClusterJobStatus::Running)) => Route::Held,
             Some((_, ClusterJobStatus::Failed | ClusterJobStatus::Aborted)) => Route::Dead,
         }
