@@ -5,12 +5,12 @@
  */
 
 use crate::permissions::PermissionMask;
+use gradient_db::exec_jobs::tokens::ResolvedJobToken;
 use gradient_types::ids::CacheId;
-use gradient_types::{ApiId, ProjectId, UserId};
+use gradient_types::{ExecJobAttemptId, ExecJobId, ProjectId, TaskId, UserId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiKeyContext {
-    pub api_id: ApiId,
     pub mask: PermissionMask,
     pub project: Option<ProjectId>,
     pub cache_pin: Option<CacheId>,
@@ -45,6 +45,29 @@ impl MaybeApiKey {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JobPrincipal {
+    pub job: ExecJobId,
+    pub attempt: ExecJobAttemptId,
+    pub project: ProjectId,
+    pub task: TaskId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Principal {
+    User(UserId),
+    Job(JobPrincipal),
+}
+
+impl Principal {
+    pub fn job(&self) -> Option<&JobPrincipal> {
+        match self {
+            Principal::Job(job) => Some(job),
+            Principal::User(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum DecodedRequest {
     Session {
@@ -54,20 +77,47 @@ pub enum DecodedRequest {
         user_id: UserId,
         context: ApiKeyContext,
     },
+    Job {
+        user_id: UserId,
+        context: ApiKeyContext,
+        job: ResolvedJobToken,
+    },
 }
 
 impl DecodedRequest {
     pub fn user_id(&self) -> UserId {
         match self {
-            DecodedRequest::Session { user_id } => *user_id,
-            DecodedRequest::ApiKey { user_id, .. } => *user_id,
+            DecodedRequest::Session { user_id }
+            | DecodedRequest::ApiKey { user_id, .. }
+            | DecodedRequest::Job { user_id, .. } => *user_id,
         }
     }
 
     pub fn api_key_context(&self) -> Option<&ApiKeyContext> {
         match self {
             DecodedRequest::Session { .. } => None,
-            DecodedRequest::ApiKey { context, .. } => Some(context),
+            DecodedRequest::ApiKey { context, .. } | DecodedRequest::Job { context, .. } => {
+                Some(context)
+            }
+        }
+    }
+
+    pub fn job(&self) -> Option<&ResolvedJobToken> {
+        match self {
+            DecodedRequest::Job { job, .. } => Some(job),
+            DecodedRequest::Session { .. } | DecodedRequest::ApiKey { .. } => None,
+        }
+    }
+
+    pub fn principal(&self) -> Principal {
+        match self.job() {
+            Some(job) => Principal::Job(JobPrincipal {
+                job: job.job,
+                attempt: job.attempt,
+                project: job.project,
+                task: job.task,
+            }),
+            None => Principal::User(self.user_id()),
         }
     }
 }

@@ -1053,7 +1053,6 @@ mod tests {
 
     fn api_key_ctx(mask: PermissionMask, project: Option<ProjectId>) -> ApiKeyContext {
         ApiKeyContext {
-            api_id: gradient_entity::ids::ApiId::new(uuid!("a0000000-0000-0000-0000-000000000099")),
             mask,
             project,
             cache_pin: None,
@@ -1337,7 +1336,6 @@ mod tests {
     fn cache_view_api_key(user_id: UserId) -> ApiKeyContext {
         let _ = user_id;
         ApiKeyContext {
-            api_id: gradient_entity::ids::ApiId::new(uuid!("a0000000-0000-0000-0000-000000000099")),
             mask: i64::MAX,
             project: None,
             cache_pin: None,
