@@ -11,10 +11,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
+use gradient_vm::VmStateChange;
 use gradient_wire::messages::{
     BuildFailureKind, CachedPath, ClientMessage, ClusterAddress, ClusterMembership, ClusterPeer,
-    GuestChannelKind, Job, JobCandidate, JobKind, JobPhaseSpan, ServerMessage,
+    GuestChannelKind, Job, JobCandidate, JobKind, JobPhaseSpan, ServerMessage, VM_STATE_SINCE,
 };
+use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -59,6 +61,9 @@ pub(super) async fn run_message_loop(
 
     let limits = state.config.exit_limits();
     let mut exit_check = tokio::time::interval(Duration::from_secs(1));
+
+    let mut vm_changes = state.vm_changes();
+    state.report_live_vms().await;
 
     info!("entering dispatch loop");
 
@@ -111,6 +116,10 @@ pub(super) async fn run_message_loop(
 
             _ = heartbeat.tick() => {
                 state.on_heartbeat().await?;
+            }
+
+            change = super::vm_report::next_change(&mut vm_changes) => {
+                state.report_vm_state(change).await;
             }
 
             inbound = reader.recv() => {
@@ -202,6 +211,35 @@ impl MessageLoopState {
             stopping: false,
             refused: false,
             exiting: false,
+        }
+    }
+
+    fn vm_changes(&self) -> Option<broadcast::Receiver<VmStateChange>> {
+        let exec = self.executor.exec.as_ref()?;
+        (self.writer.version() >= VM_STATE_SINCE).then(|| exec.pool.states().subscribe())
+    }
+
+    async fn report_live_vms(&self) {
+        let Some(exec) = &self.executor.exec else {
+            return;
+        };
+        if self.writer.version() < VM_STATE_SINCE {
+            return;
+        }
+        for change in exec.pool.states().live() {
+            self.report_vm_state(change).await;
+        }
+    }
+
+    async fn report_vm_state(&self, change: VmStateChange) {
+        let report = {
+            let registry = self.jobs.registry.lock();
+            super::vm_report::report_for_session(change, |job| registry.runs(job))
+        };
+        if let Some(report) = report
+            && let Err(e) = self.writer.send(report).await
+        {
+            debug!(error = %e, "VmState send failed");
         }
     }
 

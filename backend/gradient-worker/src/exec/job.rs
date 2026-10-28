@@ -419,7 +419,11 @@ impl ExecRun<'_> {
     }
 
     async fn take_guest(&self) -> Result<Guest> {
-        let guest = unless_aborted(&self.abort, self.host.pool.take()).await?;
+        let guest = unless_aborted(
+            &self.abort,
+            self.host.pool.take(self.updater.job_id.clone()),
+        )
+        .await?;
         Ok(guest.map_err(BuildError::guest_boot)?)
     }
 
