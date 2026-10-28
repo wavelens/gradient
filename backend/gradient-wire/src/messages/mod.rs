@@ -39,7 +39,7 @@ pub const RUNNING_JOBS_SINCE: u16 = 42;
 
 pub const GUEST_CHANNELS_SINCE: u16 = 44;
 
-pub const VM_STATE_SINCE: u16 = 45;
+pub const VM_STATE_SINCE: u16 = 46;
 
 pub const GUEST_CHANNEL_CHUNK: usize = 32 * 1024;
 
