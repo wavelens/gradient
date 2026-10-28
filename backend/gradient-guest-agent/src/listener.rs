@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -20,7 +21,8 @@ use tokio_util::task::AbortOnDropHandle;
 use tokio_vsock::{VMADDR_CID_ANY, VsockAddr, VsockListener, VsockStream};
 
 use crate::channels::AgentChannels;
-use crate::output::{OutputChunk, OutputLog, OutputReader, OutputReaders};
+use crate::http::HttpState;
+use crate::output::{OutputChunk, OutputReader, OutputReaders};
 use crate::redaction::JobSecrets;
 use crate::run::run;
 use crate::setup::{PreparedJob, prepare};
@@ -44,8 +46,9 @@ enum Outcome {
 }
 
 struct Agent {
+    http: Arc<HttpState>,
     readers: OutputReaders,
-    unclaimed_output: Mutex<Option<OutputLog>>,
+    job_claimed: AtomicBool,
     progress: watch::Sender<Progress>,
     kill: CancellationToken,
     shell: Mutex<Option<ShellContext>>,
@@ -92,10 +95,16 @@ impl Agent {
     }
 }
 
-pub async fn listen(output: OutputLog, tasks: Shutdown, restarted: bool) -> Result<()> {
+pub async fn listen(
+    http: Arc<HttpState>,
+    readers: OutputReaders,
+    tasks: Shutdown,
+    restarted: bool,
+) -> Result<()> {
     let agent = Arc::new(Agent {
-        readers: output.readers(),
-        unclaimed_output: Mutex::new((!restarted).then_some(output)),
+        http,
+        readers,
+        job_claimed: AtomicBool::new(restarted),
         progress: watch::Sender::new(initial_progress(restarted)),
         kill: CancellationToken::new(),
         shell: Mutex::new(None),
@@ -155,9 +164,14 @@ async fn serve_connection(agent: Arc<Agent>, stream: VsockStream) -> Result<()> 
     })
     .await?;
 
+    let version = conn.version();
     let (sender, mut receiver) = conn.split();
     let (outgoing, to_send) = mpsc::channel(16);
     let _writer = AbortOnDropHandle::new(agent.tasks.spawn(write_to_worker(sender, to_send)));
+    let _linked = LinkedConnection {
+        generation: agent.http.link.connect(outgoing.clone(), version),
+        http: Arc::clone(&agent.http),
+    };
     let mut channels = AgentChannels::new(outgoing.clone(), agent.tasks.clone());
     let mut _streamer = spawn_streamer(&agent, None, outgoing.clone());
     while let Some(message) = receiver.recv::<WorkerToAgent>().await? {
@@ -188,10 +202,24 @@ async fn serve_connection(agent: Arc<Agent>, stream: VsockStream) -> Result<()> 
                 rows,
             } => channels.resize(channel_id, cols, rows),
             WorkerToAgent::CloseChannel { channel_id } => channels.close(channel_id),
-            WorkerToAgent::UploadSettled { .. } => {}
+            WorkerToAgent::UploadSettled { upload_id, error } => {
+                agent.http.uploads.settled(upload_id, error);
+            }
         }
     }
     Ok(())
+}
+
+struct LinkedConnection {
+    generation: u64,
+    http: Arc<HttpState>,
+}
+
+impl Drop for LinkedConnection {
+    fn drop(&mut self) {
+        self.http.link.disconnect(self.generation);
+        self.http.uploads.connection_lost(self.generation);
+    }
 }
 
 async fn write_to_worker(
@@ -207,20 +235,17 @@ async fn write_to_worker(
 }
 
 fn start_job(agent: &Arc<Agent>, job: Box<RunJob>) -> Option<AgentToWorker> {
-    let claimed = agent
-        .unclaimed_output
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .take();
-    let Some(mut output) = claimed else {
+    if agent.job_claimed.swap(true, Ordering::SeqCst) {
         return Some(AgentToWorker::SetupFailed {
             message: "this guest already ran a job".to_owned(),
         });
-    };
+    }
+    let secrets = JobSecrets::of(&job);
+    agent.http.hold_redactor(secrets.redactor());
     *agent
         .job_secrets
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(JobSecrets::of(&job));
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(secrets);
 
     let job_agent = Arc::clone(agent);
     agent.tasks.spawn(async move {
@@ -242,7 +267,7 @@ fn start_job(agent: &Arc<Agent>, job: Box<RunJob>) -> Option<AgentToWorker> {
                     }
                 };
                 let (code, ()) = tokio::join!(
-                    run(prepared, &mut output, started, agent.kill.clone()),
+                    run(prepared, &agent.http.output, started, agent.kill.clone()),
                     mark_started
                 );
                 Outcome::Exited(code)
@@ -251,7 +276,7 @@ fn start_job(agent: &Arc<Agent>, job: Box<RunJob>) -> Option<AgentToWorker> {
         };
         tracing::info!(?outcome, "job ended");
         agent.progress.send_modify(|p| p.outcome = Some(outcome));
-        output.close();
+        agent.http.output.lock().await.close();
     });
     None
 }

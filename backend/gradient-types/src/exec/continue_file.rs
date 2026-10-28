@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use crate::wildcard::Wildcard;
 
-pub const MAX_CONTINUE_FILE_BYTES: usize = 65536;
+pub use gradient_wire::types::MAX_CONTINUE_FILE_BYTES;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContinueFile {
