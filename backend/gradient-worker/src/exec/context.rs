@@ -96,6 +96,12 @@ fn job_layer(job: &ExecJob, token: &SecretString) -> BTreeMap<String, String> {
         ("phase".to_owned(), phase),
         ("api".to_owned(), context.api_url.clone()),
         ("token".to_owned(), token.expose().to_owned()),
+        (
+            "parent_job".to_owned(),
+            context.parent_job.clone().unwrap_or_default(),
+        ),
+        ("project_name".to_owned(), context.project_name.clone()),
+        ("task_name".to_owned(), context.task_name.clone()),
     ])
 }
 
@@ -181,6 +187,24 @@ mod tests {
 
         assert_eq!(job_layer["token"], "t0k");
         assert_eq!(job_layer["api"], "https://gradient.example.com/api");
+    }
+
+    #[test]
+    fn the_parent_job_and_names_reach_the_job_layer() {
+        let context = JobContext {
+            parent_job: Some("j0".into()),
+            project_name: "infra".into(),
+            task_name: "master".into(),
+            ..Default::default()
+        };
+        let without_parent = layers(&job(JobContext::default()), &PluggedDevices::default()).job;
+
+        let job_layer = layers(&job(context), &PluggedDevices::default()).job;
+
+        assert_eq!(job_layer["parent_job"], "j0");
+        assert_eq!(job_layer["project_name"], "infra");
+        assert_eq!(job_layer["task_name"], "master");
+        assert_eq!(without_parent["parent_job"], "");
     }
 
     #[test]
