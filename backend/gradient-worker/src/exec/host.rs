@@ -4,24 +4,30 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use gradient_vm::{
-    DeviceInventory, GuestAddresses, GuestPool, GuestUnits, SysfsProbe, plan_reattach, read_states,
+    DeviceInventory, GuestAddresses, GuestBudget, GuestPool, GuestUnits, SysfsProbe, plan_reattach,
+    read_states,
 };
 use gradient_wire::types::ExecInventory;
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 
 use super::inventory::advertised;
 use super::reattach::{ResumedJob, resumable};
 use super::sops::WorkerSecrets;
-use crate::config::{ExecArgs, WorkerConfig};
+use crate::config::{ExecArgs, HostResources, WorkerConfig};
+
+const BYTES_PER_MB: u64 = 1024 * 1024;
 
 pub struct ExecHost {
     pub pool: Arc<GuestPool>,
     pub devices: DeviceInventory,
     pub addresses: GuestAddresses,
+    pub budget: GuestBudget,
     pub config: ExecArgs,
     pub worker_id: String,
     pub zone: Option<String>,
@@ -65,10 +71,20 @@ impl ExecHost {
         let devices = DeviceInventory::from_config(&vm.devices, &SysfsProbe);
         let addresses = GuestAddresses::new(&config.exec.subnet, &config.exec.nameservers)
             .context("exec.subnet")?;
+        let total = config
+            .exec
+            .guest_budget(&host_resources(&config.guests_dir())?);
+        info!(
+            cpus = total.cpus,
+            memory_mb = total.memory_mb,
+            disk_mb = total.disk_mb,
+            "guest budget"
+        );
         Ok(Arc::new(ExecHost {
             pool: GuestPool::new(vm, units),
             devices,
             addresses,
+            budget: GuestBudget::new(total),
             config: config.exec.clone(),
             worker_id,
             zone: config.zone.clone().filter(|zone| !zone.is_empty()),
@@ -93,6 +109,7 @@ impl ExecHost {
             &self.worker_id,
             self.pool.warm_count(),
             self.secrets.names(),
+            self.budget.capacity(),
         )
     }
 
@@ -121,4 +138,18 @@ impl ExecHost {
             false => self.worker_stop.clone(),
         }
     }
+}
+
+fn host_resources(guests_dir: &Path) -> Result<HostResources> {
+    std::fs::create_dir_all(guests_dir)
+        .with_context(|| format!("create {}", guests_dir.display()))?;
+    let disk = nix::sys::statvfs::statvfs(guests_dir)
+        .with_context(|| format!("read the free space of {}", guests_dir.display()))?;
+    let free_bytes = disk.blocks_available().saturating_mul(disk.fragment_size());
+    let host = crate::metrics::host_static();
+    Ok(HostResources {
+        cpus: host.cpu_count,
+        memory_mb: host.ram_total_mb,
+        guests_dir_free_mb: free_bytes / BYTES_PER_MB,
+    })
 }

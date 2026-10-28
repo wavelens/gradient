@@ -357,6 +357,19 @@ pub struct ExecArgs {
     #[arg(default_value_t = 0)]
     pub max_pre_warm: u32,
 
+    /// CPUs the running and warm guests of this worker share. An exec job waits until its
+    /// `cpus` fit. `null` uses the CPU count of the host.
+    pub guest_cpus: Option<u32>,
+
+    /// Memory in MB the running and warm guests of this worker share. An exec job waits
+    /// until its `memoryMb` fits. `null` uses 80 % of the host memory.
+    pub guest_memory_mb: Option<u64>,
+
+    /// Disk space in MB the {file}`/work` disks of the running guests share. An exec job
+    /// waits until its `diskMb` fits. `null` uses 80 % of the free space in
+    /// {file}`<services.gradient.worker.baseDir>/guests` when the worker starts.
+    pub guest_disk_mb: Option<u64>,
+
     /// Whether exec jobs may boot their own guest image instead of
     /// {option}`services.gradient.worker.exec.image`.
     #[arg(default_value = "false")]

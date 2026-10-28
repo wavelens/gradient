@@ -584,7 +584,7 @@ in {
           path = [
             cfg.packages.git
             cfg.packages.ssh
-          ] ++ lib.optional cfg.capabilities.exec pkgs.iproute2
+          ] ++ lib.optionals cfg.capabilities.exec [ pkgs.iproute2 pkgs.e2fsprogs ]
             ++ lib.optional (cfg.capabilities.exec && hasDevice "usb") cfg.packages.usbip;
 
           serviceConfig = {
