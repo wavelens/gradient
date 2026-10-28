@@ -5,6 +5,7 @@
  */
 
 pub mod attempts;
+pub mod closure;
 pub mod continuations;
 pub mod create;
 pub mod dispatch;
@@ -16,6 +17,8 @@ pub mod reads;
 pub mod settle;
 pub mod tokens;
 pub mod upcoming;
+
+pub use closure::program_closure;
 
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_types::{BuildAttemptId, EvaluationId, ExecJobAttemptId};

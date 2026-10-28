@@ -148,6 +148,50 @@ async fn a_queued_exec_job_reaches_a_matching_exec_worker() {
 }
 
 #[tokio::test]
+async fn an_exec_offer_carries_the_program_closure_with_its_sizes() {
+    let e1 = EvaluationId::now_v7();
+    let shape = exec_shape(e1)
+        .derivation(B)
+        .walked()
+        .job()
+        .probed()
+        .drv_cached()
+        .output(B_OUT)
+        .build_status(BuildStatus::Completed)
+        .cached_output(B)
+        .derivation(A)
+        .runtime_depends_on(B);
+    let case = SchedulerCase::start_then(shape, async |case| {
+        seed_queued_job(case, &spec()).await;
+    })
+    .await;
+    case.connect(W1, w_exec(inventory()), &[]).await;
+
+    case.assign_exec_jobs().await;
+    let offer = case.offers_full(W1).await;
+
+    let mut paths: Vec<(String, Option<u64>)> = offer
+        .candidates
+        .iter()
+        .flat_map(|candidate| &candidate.required_paths)
+        .map(|path| {
+            let size = path.cache_info.as_ref().map(|info| info.nar_size);
+            (path.path.clone(), size)
+        })
+        .collect();
+    paths.sort();
+    assert_eq!(
+        paths,
+        vec![
+            (format!("/nix/store/{A_OUT}-a"), Some(5)),
+            (format!("/nix/store/{B_OUT}-b"), Some(5)),
+        ],
+        "after 1: the program and its runtime dependency with their sizes"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn an_unplaceable_job_stores_its_wait_reason() {
     let e1 = EvaluationId::now_v7();
     let printer = ExecSpec {

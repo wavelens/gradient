@@ -190,11 +190,12 @@ impl Scheduler {
                 .map(|(key, job)| (key, PendingJob::Eval(job))),
         );
         let api_url = &self.db.config.server.serve_url;
+        let closures = crate::loops::ProgramClosures::default();
         for row in started_exec_jobs(&self.db.worker_db, &exec_ids).await? {
             let key = crate::jobs::exec_job_key(row.job.id);
             row_jobs.live.insert(key.clone());
-            if let Some(job) =
-                crate::loops::pending_exec_job(&row, api_url).filter(|job| job.assignment.is_some())
+            if let Some(job) = crate::loops::pending_exec_job(&row, api_url, &closures)
+                .filter(|job| job.assignment.is_some())
             {
                 row_jobs.jobs.insert(key, PendingJob::Exec(Box::new(job)));
             }

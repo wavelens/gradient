@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use gradient_db::WorkerDb;
 use gradient_db::exec_jobs::dispatch::{self, ExecDispatchRow};
+use gradient_db::exec_jobs::program_closure;
 use gradient_graph::Transition;
 use gradient_pool::{WorkerCaps, WorkerInfo};
 use gradient_types::ProjectId;
@@ -55,11 +57,16 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
     let untracked: HashSet<String> = scheduler.untracked(keys).await.into_iter().collect();
     let workers = scheduler.board_workers().await;
     let api_url = scheduler.db.config.server.serve_url.clone();
+    let new_rows = rows
+        .iter()
+        .filter(|row| untracked.contains(&exec_job_key(row.job.id)));
+    let closures = ProgramClosures::load(&scheduler.db.worker_db, new_rows).await?;
 
     for row in rows {
         let key = exec_job_key(row.job.id);
         let tracked = !untracked.contains(&key);
-        let Some(pending) = queued_job(scheduler, &row, &key, tracked, &api_url).await? else {
+        let Some(pending) = queued_job(scheduler, &row, &key, tracked, &api_url, &closures).await?
+        else {
             continue;
         };
         let project_workers: Vec<WorkerInfo> = workers
@@ -118,12 +125,47 @@ pub(crate) fn serves_project(worker: &WorkerInfo, project: ProjectId) -> bool {
             .is_none_or(|peers| peers.contains(&project))
 }
 
+#[derive(Default)]
+pub(crate) struct ProgramClosures(HashMap<String, Vec<RequiredPath>>);
+
+impl ProgramClosures {
+    async fn load<'a>(
+        db: &WorkerDb,
+        rows: impl Iterator<Item = &'a ExecDispatchRow>,
+    ) -> anyhow::Result<Self> {
+        let mut closures = HashMap::new();
+        let roots: HashSet<String> = rows.flat_map(row_roots).collect();
+        for root in roots {
+            let paths = program_closure(db, std::slice::from_ref(&root)).await?;
+            closures.insert(root, paths);
+        }
+
+        Ok(Self(closures))
+    }
+
+    fn required_paths(&self, roots: Vec<String>) -> Vec<RequiredPath> {
+        let mut seen = HashSet::new();
+        roots
+            .into_iter()
+            .flat_map(|root| match self.0.get(&root) {
+                Some(closure) => closure.clone(),
+                None => vec![RequiredPath {
+                    path: root,
+                    cache_info: None,
+                }],
+            })
+            .filter(|path| seen.insert(path.path.clone()))
+            .collect()
+    }
+}
+
 async fn queued_job(
     scheduler: &Scheduler,
     row: &ExecDispatchRow,
     key: &str,
     tracked: bool,
     api_url: &str,
+    closures: &ProgramClosures,
 ) -> anyhow::Result<Option<PendingExecJob>> {
     if tracked {
         return Ok(match scheduler.pending_job(key).await {
@@ -132,7 +174,7 @@ async fn queued_job(
         });
     }
 
-    let Some(mut pending) = pending_exec_job(row, api_url) else {
+    let Some(mut pending) = pending_exec_job(row, api_url, closures) else {
         return Ok(None);
     };
     let db = &scheduler.db;
@@ -172,7 +214,24 @@ async fn fail_queued_job(
     Ok(())
 }
 
-pub(crate) fn pending_exec_job(row: &ExecDispatchRow, api_url: &str) -> Option<PendingExecJob> {
+fn row_roots(row: &ExecDispatchRow) -> Vec<String> {
+    serde_json::from_value::<ExecSpec>(row.job.spec.clone())
+        .map(|spec| exec_roots(&spec, row))
+        .unwrap_or_default()
+}
+
+fn exec_roots(spec: &ExecSpec, row: &ExecDispatchRow) -> Vec<String> {
+    store_root(&spec.program)
+        .into_iter()
+        .chain(row.image_path.clone())
+        .collect()
+}
+
+pub(crate) fn pending_exec_job(
+    row: &ExecDispatchRow,
+    api_url: &str,
+    closures: &ProgramClosures,
+) -> Option<PendingExecJob> {
     let spec: ExecSpec = match serde_json::from_value(row.job.spec.clone()) {
         Ok(spec) => spec,
         Err(e) => {
@@ -180,14 +239,7 @@ pub(crate) fn pending_exec_job(row: &ExecDispatchRow, api_url: &str) -> Option<P
             return None;
         }
     };
-    let required_paths = std::iter::once(store_root(&spec.program))
-        .chain(row.image_path.clone().map(Some))
-        .flatten()
-        .map(|path| RequiredPath {
-            path,
-            cache_info: None,
-        })
-        .collect();
+    let required_paths = closures.required_paths(exec_roots(&spec, row));
     let now = gradient_types::now();
     Some(PendingExecJob {
         exec_job: row.job.id,
