@@ -53,8 +53,9 @@ Gradient will decide per derivation whether a build is needed at all, before bui
 
 1. Outputs present in a cache on the instance require no work.
 2. For outputs absent on the instance, check the upstream caches of the subscribed caches.
-3. A build with all outputs found counts as **substituted**. A worker downloads the outputs. Nothing below the derivation is built or downloaded.
-4. Derivations with a missing output land on a worker for building. Their inputs pass through the same check.
+3. Builds with every needed output found count as **substituted**. Workers download those outputs. Builds and downloads below the derivation never happen.
+4. Needed outputs cover every output of an entry point. They also cover each output a wanted build above the derivation can read. No cache copy and no reader leave an output out of the list. One case: the `dev` output of a `nix copy` upload.
+5. Derivations with a missing needed output land on a worker for building. Their inputs pass through the same check. A left-out output read by a later build can turn the derivation into a real build.
 
 Lookups only cover derivations an evaluation actually needs. Unresponsive upstream caches pause for a minute instead of slowing every lookup.
 
