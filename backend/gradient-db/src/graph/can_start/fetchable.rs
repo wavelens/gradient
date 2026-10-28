@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::graph::predicates::fetchable_predicate;
+use crate::graph::predicates::{builds_with_unneeded_output_predicate, fetchable_predicate};
 use crate::graph::promotion::{returned_derivations, returned_transitions};
 use crate::sql::StatusWrite;
 use crate::status::TransitionChange;
@@ -25,7 +25,18 @@ pub(super) fn blocking_dependency_count(alias: &str) -> String {
         "(SELECT count(*) FROM derivation_dependency e \
          LEFT JOIN derivation_build dep ON dep.derivation = e.dependency \
          WHERE e.derivation = {alias}.derivation AND e.kind IN (0, 2) \
-           AND (dep.derivation IS NULL OR NOT dep.fetchable))"
+           AND (dep.derivation IS NULL OR NOT dep.fetchable OR {unneeded}))",
+        unneeded = builds_with_unneeded_output_predicate("e", "dep"),
+    )
+}
+
+fn parents_counted(alias: &str) -> String {
+    format!(
+        "(SELECT e.derivation, count(*) AS n FROM derivation_dependency e \
+         JOIN derivation_build dep ON dep.derivation = e.dependency \
+         WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (0, 2) AND NOT {unneeded} \
+         GROUP BY e.derivation) {alias}",
+        unneeded = builds_with_unneeded_output_predicate("e", "dep"),
     )
 }
 
@@ -71,15 +82,17 @@ crate::sql_lazy! {
         params = [DerivationIds(64)];
 }
 
-crate::sql! {
-    UNBLOCK_PARENTS = r#"
-    UPDATE derivation_build d
-    SET blocking_deps = d.blocking_deps - c.n
-    FROM (SELECT e.derivation, count(*) AS n FROM derivation_dependency e
-          WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (0, 2) GROUP BY e.derivation) c
-    WHERE d.derivation = c.derivation
-    RETURNING d.derivation, d.blocking_deps = 0 AS startable
-"#,
+fn unblock_parents_sql() -> String {
+    format!(
+        "UPDATE derivation_build d SET blocking_deps = d.blocking_deps - c.n \
+         FROM {counted} WHERE d.derivation = c.derivation \
+         RETURNING d.derivation, d.blocking_deps = 0 AS startable",
+        counted = parents_counted("c"),
+    )
+}
+
+crate::sql_fn! {
+    UNBLOCK_PARENTS = unblock_parents_sql,
         params = [DerivationIds(64)],
         tier = Bulk;
 }
@@ -91,11 +104,10 @@ static BLOCK_PARENTS: LazyLock<String> = LazyLock::new(|| {
              status = CASE WHEN {unqueue} THEN {created} ELSE d.status END, \
              updated_at = CASE WHEN {unqueue} \
                                THEN (now() AT TIME ZONE 'UTC') ELSE d.updated_at END \
-         FROM (SELECT e.derivation, count(*) AS n FROM derivation_dependency e \
-               WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (0, 2) \
-               GROUP BY e.derivation) c \
+         FROM {counted} \
          WHERE d.derivation = c.derivation \
          RETURNING d.derivation, old.status AS from_status, d.status AS to_status",
+        counted = parents_counted("c"),
         unqueue = format!(
             "d.status = {queued} AND {not_in_flight}",
             queued = crate::sql::status::from(BuildStatus::UNQUEUE),
@@ -285,8 +297,24 @@ mod tests {
              LEFT JOIN derivation_build dep ON dep.derivation = e.dependency \
              WHERE e.derivation = db.derivation \
              AND e.kind IN (0, 2) \
-             AND (dep.derivation IS NULL OR NOT dep.fetchable))"
+             AND (dep.derivation IS NULL OR NOT dep.fetchable \
+             OR (dep.unneeded_outputs <> '{}' AND (e.dependency_outputs IS NULL \
+             OR e.dependency_outputs && dep.unneeded_outputs))))"
         );
+    }
+
+    #[test]
+    fn a_ripple_moves_only_the_edges_the_count_reads_through_the_flag() {
+        let unneeded = norm(&builds_with_unneeded_output_predicate("e", "dep"));
+        for sql in [
+            UNBLOCK_PARENTS.text().into_owned(),
+            BLOCK_PARENTS.to_string(),
+        ] {
+            assert!(
+                norm(&sql).contains(&format!("AND NOT {unneeded} GROUP BY e.derivation")),
+                "an edge blocked by an unneeded output never moved with the flag: {sql}"
+            );
+        }
     }
 
     #[test]

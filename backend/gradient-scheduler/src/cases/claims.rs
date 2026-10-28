@@ -18,9 +18,9 @@ use gradient_wire::types::{
 };
 
 use super::{
-    A, A_OUT, ARM, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, REPOSITORY, SchedulerCase, SlotKind,
-    X86, ago, build_output, drv_nar, drv_path, eval_key, failure, from_now, is_recent, job_ids,
-    narinfo, output_nar, span, store_path, w_all,
+    A, A_DEV, A_OUT, ARM, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, REPOSITORY, SchedulerCase,
+    SlotKind, X, X_OUT, X86, ago, attr_of, build_output, drv_nar, drv_path, eval_key, failure,
+    from_now, is_recent, job_ids, narinfo, output_nar, span, store_path, w_all,
 };
 use crate::actor::Offer;
 use crate::jobs::Assignment;
@@ -1967,6 +1967,95 @@ async fn c28_a_registration_on_a_second_instance_leaves_rows_of_the_first_claim_
     second.check("step 3").await;
 
     second.finish().await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn c29_a_passthrough_fetches_only_the_outputs_it_did_not_leave_out() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(X)
+            .walked()
+            .probed()
+            .drv_cached()
+            .entry_point(&attr_of(X))
+            .job()
+            .output(X_OUT)
+            .depends_on_outputs(A, &["out"])
+            .derivation(A)
+            .walked()
+            .probed()
+            .cache_available()
+            .job()
+            .output(A_OUT)
+            .unneeded_output(A_DEV, "dev")
+            .build_status(BuildStatus::Queued),
+    )
+    .await;
+    case.connect(W1, w_all(), &[]).await;
+
+    case.admit_startable_moves().await;
+    case.offers_full(W1).await;
+    case.score_all(W1).await;
+    let substitute = case
+        .request_job(W1, JobKind::Build)
+        .await
+        .expect("after 1: W1 gets build:A");
+    let outputs: Vec<&str> = build_spec(&substitute)
+        .outputs
+        .iter()
+        .map(|o| o.name.as_str())
+        .collect();
+    assert_eq!(outputs, vec!["out"], "after 1: result.job.outputs");
+    case.check("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn c30_a_build_requires_only_the_outputs_its_derivation_names_of_an_input() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .startable(X, X_OUT)
+            .depends_on_outputs(A, &["out"])
+            .derivation(A)
+            .walked()
+            .probed()
+            .drv_cached()
+            .job()
+            .output(A_OUT)
+            .named_output(A_DEV, "dev")
+            .build_status(BuildStatus::Completed)
+            .cached_path(A_OUT, "a")
+            .cached_path(A_DEV, "a-dev"),
+    )
+    .await;
+    case.connect(W1, w_all(), &[]).await;
+
+    case.admit_startable_moves().await;
+    case.offers_full(W1).await;
+    case.score_all(W1).await;
+    let build = case
+        .request_job(W1, JobKind::Build)
+        .await
+        .expect("after 1: W1 gets build:X");
+    let required: Vec<&str> = build
+        .pending
+        .required_paths()
+        .iter()
+        .map(|p| p.path.as_str())
+        .collect();
+    assert_eq!(
+        required,
+        vec![store_path(A_OUT, "a").as_str()],
+        "after 1: result.job.required_paths"
+    );
+    case.check("step 1").await;
     case.finish().await;
 }
 

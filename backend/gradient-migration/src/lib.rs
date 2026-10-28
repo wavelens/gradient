@@ -38,6 +38,7 @@ mod m20261101_000000_pending_delivery_due_order;
 mod m20261102_000000_project_secrets;
 mod m20261103_000000_exec_job_outputs_tokens;
 mod m20261104_000000_exec_clusters;
+mod m20261105_000000_partial_substitution;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -51,13 +52,21 @@ pub const UPGRADE_FLOOR: UpgradeFloor = UpgradeFloor {
     storage_migrations: &["m20261001_000000_shard_build_logs"],
 };
 
-/// The SQL of a function created by the baseline. Tests compare it with the Rust side.
+/// The SQL of the newest migration defining a function. Tests compare it with the Rust side.
 pub fn function_sql(name: &str) -> &'static str {
-    let sql = include_str!("m20261013_000000_baseline.sql");
-    let marker = format!("CREATE FUNCTION public.{name}(");
-    let start = sql.find(&marker).expect("the function in the baseline");
-    let end = start + sql[start..].find("$$;").expect("the function end") + 3;
-    &sql[start..end]
+    let replaced = format!("CREATE OR REPLACE FUNCTION public.{name}(");
+    let created = format!("CREATE FUNCTION public.{name}(");
+    [
+        m20261105_000000_partial_substitution::UP,
+        include_str!("m20261013_000000_baseline.sql"),
+    ]
+    .into_iter()
+    .find_map(|sql| {
+        let start = sql.find(&replaced).or_else(|| sql.find(&created))?;
+        let end = start + sql[start..].find("$$;")? + 3;
+        Some(&sql[start..end])
+    })
+    .expect("a migration defining the function")
 }
 
 pub struct Migrator;
@@ -93,6 +102,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261102_000000_project_secrets::Migration),
             Box::new(m20261103_000000_exec_job_outputs_tokens::Migration),
             Box::new(m20261104_000000_exec_clusters::Migration),
+            Box::new(m20261105_000000_partial_substitution::Migration),
         ]
     }
 }

@@ -376,11 +376,15 @@ impl BuildAssignMaps {
         .await?;
 
         let mut deps_by_drv: HashMap<DerivationId, Vec<DerivationId>> = HashMap::new();
+        let mut named_inputs: HashMap<(DerivationId, DerivationId), &[String]> = HashMap::new();
         for e in &dep_edges {
             deps_by_drv
                 .entry(e.derivation)
                 .or_default()
                 .push(e.dependency);
+            if let Some(names) = &e.dependency_outputs {
+                named_inputs.insert((e.derivation, e.dependency), names);
+            }
         }
         let dep_counts: HashMap<DerivationId, u32> = deps_by_drv
             .iter()
@@ -448,7 +452,11 @@ impl BuildAssignMaps {
                 let Some(outputs) = outputs_by_drv.get(dep_id) else {
                     continue;
                 };
+                let named = named_inputs.get(&(*drv_id, *dep_id));
                 for o in outputs {
+                    if named.is_some_and(|names| !names.contains(&o.name)) {
+                        continue;
+                    }
                     let Some(path) = o.store_path() else {
                         continue;
                     };
@@ -533,6 +541,26 @@ impl BuildAssignMaps {
         estimate
     }
 
+    fn outputs_to_produce(
+        &self,
+        shared_build: &MDerivationBuild,
+        substitute: bool,
+    ) -> Vec<DerivationOutput> {
+        let outputs = self
+            .self_outputs
+            .get(&shared_build.derivation)
+            .cloned()
+            .unwrap_or_default();
+        if !substitute {
+            return outputs;
+        }
+
+        outputs
+            .into_iter()
+            .filter(|o| !shared_build.unneeded_outputs.contains(&o.name))
+            .collect()
+    }
+
     fn required_features(&self, derivation_id: DerivationId) -> Vec<String> {
         self.features_by_drv
             .get(&derivation_id)
@@ -596,11 +624,7 @@ impl BuildAssignMaps {
                 drv_path: derivation.store_path(),
                 kind,
                 is_fixed_output: derivation.is_fixed_output,
-                outputs: self
-                    .self_outputs
-                    .get(&shared_build.derivation)
-                    .cloned()
-                    .unwrap_or_default(),
+                outputs: self.outputs_to_produce(shared_build, substitute),
                 timeout_secs: resolve_limit(
                     shared_build.timeout_secs,
                     self.config.default_timeout_secs,

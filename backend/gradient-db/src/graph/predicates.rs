@@ -107,7 +107,6 @@ pub fn failure_spreads_predicate(edge: &str) -> String {
 }
 
 fn references_unavailable_output(edge: &str, parent: &str) -> String {
-    let refs = "coalesce(pcp.\"references\", po.references_list)";
     format!(
         "EXISTS (SELECT 1 FROM derivation_output o \
          WHERE o.derivation = {edge}.dependency AND o.external_url IS NULL \
@@ -118,8 +117,53 @@ fn references_unavailable_output(edge: &str, parent: &str) -> String {
                        WHERE po.derivation = {parent} \
                          AND CASE WHEN {refs} IS NULL THEN {edge}.kind IN (1, 2) \
                                   ELSE string_to_array({refs}, ' ') \
-                                       && ARRAY[o.hash || '-' || o.package, \
-                                                '/nix/store/' || o.hash || '-' || o.package] END))"
+                                       && {tokens} END))",
+        refs = PARENT_REFERENCES,
+        tokens = store_path_tokens("o"),
+    )
+}
+
+const PARENT_REFERENCES: &str = "coalesce(pcp.\"references\", po.references_list)";
+
+fn store_path_tokens(output: &str) -> String {
+    format!(
+        "ARRAY[{output}.hash || '-' || {output}.package, \
+               '/nix/store/' || {output}.hash || '-' || {output}.package]"
+    )
+}
+
+pub fn output_needed_predicate(output: &str) -> String {
+    format!(
+        "(EXISTS (SELECT 1 FROM entry_point ep {live} WHERE ep.derivation = {output}.derivation) \
+         OR EXISTS (SELECT 1 FROM derivation_dependency e \
+                    JOIN derivation_build p ON p.derivation = e.derivation \
+                    JOIN derivation pw ON pw.id = p.derivation \
+                    WHERE e.dependency = {output}.derivation AND e.kind IN (0, 2) \
+                      AND p.wanted AND {open} AND ({builder}) \
+                      AND (e.dependency_outputs IS NULL \
+                           OR {output}.name = ANY(e.dependency_outputs))) \
+         OR EXISTS (SELECT 1 FROM derivation_dependency e \
+                    JOIN derivation_build p ON p.derivation = e.derivation, \
+                    LATERAL (SELECT {refs} AS refs FROM derivation_output po \
+                             LEFT JOIN cached_path pcp ON pcp.hash = po.hash \
+                             WHERE po.derivation = e.derivation \
+                               AND (pcp.file_hash IS NOT NULL OR po.references_list IS NOT NULL) \
+                             OFFSET 0) r \
+                    WHERE e.dependency = {output}.derivation AND e.kind IN (1, 2) \
+                      AND p.wanted AND {open} \
+                      AND (r.refs IS NULL OR string_to_array(r.refs, ' ') && {tokens})))",
+        live = crate::graph::can_start::wanted_by_its_evaluation("ep"),
+        open = open_predicate("p"),
+        builder = builds_once_wanted_predicate("p", "pw"),
+        refs = PARENT_REFERENCES,
+        tokens = store_path_tokens(output),
+    )
+}
+
+pub fn builds_with_unneeded_output_predicate(edge: &str, dependency: &str) -> String {
+    format!(
+        "({dependency}.unneeded_outputs <> '{{}}' AND ({edge}.dependency_outputs IS NULL \
+         OR {edge}.dependency_outputs && {dependency}.unneeded_outputs))"
     )
 }
 
@@ -145,14 +189,15 @@ pub fn present_predicate(alias: &str) -> String {
     format!(
         "(EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = {alias}.derivation) \
          AND NOT EXISTS (SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash \
-                         WHERE o.derivation = {alias}.derivation AND cp.file_hash IS NULL))"
+                         WHERE o.derivation = {alias}.derivation AND cp.file_hash IS NULL \
+                           AND o.name <> ALL({alias}.unneeded_outputs)))"
     )
 }
 
 pub fn present_value(alias: &str) -> String {
     format!(
-        "coalesce((SELECT bool_and(cp.file_hash IS NOT NULL) FROM derivation_output o \
-                   LEFT JOIN cached_path cp ON cp.hash = o.hash \
+        "coalesce((SELECT bool_and(cp.file_hash IS NOT NULL OR o.name = ANY({alias}.unneeded_outputs)) \
+                   FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash \
                    WHERE o.derivation = {alias}.derivation), false)"
     )
 }
@@ -273,7 +318,7 @@ mod tests {
             "(db.missing_runtime_deps = 0 AND (EXISTS (SELECT 1 FROM derivation_output o2 \
              WHERE o2.derivation = db.derivation) AND NOT EXISTS (SELECT 1 FROM derivation_output o \
              LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = db.derivation \
-             AND cp.file_hash IS NULL)))"
+             AND cp.file_hash IS NULL AND o.name <> ALL(db.unneeded_outputs))))"
         );
         let f = norm(&fetchable_predicate("db"));
         assert!(f.contains("db.missing_runtime_deps = 0"), "{f}");

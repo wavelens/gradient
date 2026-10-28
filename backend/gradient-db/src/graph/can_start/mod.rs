@@ -26,7 +26,7 @@ pub use need::{
     NeedMoved, SettledNeed, gain_and_settle_need, recount_wanted, settle_created, settle_skipped,
     update_and_settle_need,
 };
-pub(crate) use need::{settle_need, update_need};
+pub(crate) use need::{settle_need, update_need, wanted_by_its_evaluation};
 pub use queue::{
     promote, promote_closure, unpromote_drv_owners, unpromote_ungated, unwalk_derivations,
 };

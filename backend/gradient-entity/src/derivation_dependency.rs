@@ -41,6 +41,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub dependency: DerivationId,
     pub kind: EdgeKind,
+    pub dependency_outputs: Option<Vec<String>>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

@@ -282,6 +282,7 @@ pub struct SubstituteLog {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequeueScope {
     TransientRetries,
+    NeededOutputs,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

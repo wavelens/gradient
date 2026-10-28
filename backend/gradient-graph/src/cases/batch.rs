@@ -879,3 +879,25 @@ async fn b20_a_batch_with_errors_stores_the_message_and_the_verdict_is_failed() 
     case.zero_drift("step 2").await;
     case.finish().await;
 }
+
+#[tokio::test]
+async fn b21_each_edge_records_the_outputs_its_derivation_builds_with() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(shape().evaluation(e1)).await;
+    let mut a = with_attr(walked(A, A_OUT, &[B, C]), "pkg.a");
+    a.dependency_outputs = vec![vec!["out".to_owned(), "dev".to_owned()]];
+
+    walk(&case, e1, vec![a]).await;
+
+    let to_b = case.edge(A, B).await.map(|edge| edge.dependency_outputs);
+    let named = Some(Some(vec!["out".to_owned(), "dev".to_owned()]));
+    assert_eq!(to_b, named, "after 1: edge(A,B).dependency_outputs");
+    let to_c = case.edge(A, C).await.map(|edge| edge.dependency_outputs);
+    assert_eq!(
+        to_c,
+        Some(None),
+        "after 1: edge(A,C).dependency_outputs, a dependency named without outputs"
+    );
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}

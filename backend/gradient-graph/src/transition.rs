@@ -1138,6 +1138,10 @@ async fn exhaust_substitution(
         to: BuildStatus::Created,
     }];
     changes.extend(
+        gradient_db::graph::needed_outputs::forget_unneeded_outputs(db, &[shared_build.derivation])
+            .await?,
+    );
+    changes.extend(
         gradient_db::graph::can_start::update_and_settle_need(db, &[shared_build.derivation])
             .await?
             .changes,

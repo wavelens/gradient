@@ -26,8 +26,8 @@ mod exec;
 
 use background::{
     AbandonedDispatchSweep, BuildHistoryRefit, EvalCompletionWatchdog, GraphConsistency,
-    GraphStuckReheal, InstanceMetrics, RamShortageSweep, StrandedBuildSweep, TransientRetryRequeue,
-    UnreclaimedJobSweep, WorkerLiveness, WorkerSample,
+    GraphStuckReheal, InstanceMetrics, NeededOutputRequeue, RamShortageSweep, StrandedBuildSweep,
+    TransientRetryRequeue, UnreclaimedJobSweep, WorkerLiveness, WorkerSample,
 };
 use eval::EvalDispatch;
 use exec::ExecDispatch;
@@ -94,6 +94,9 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
                 }),
                 build::child_spec(scheduler),
                 ChildSpec::pass(TransientRetryRequeue {
+                    graph: Arc::clone(&scheduler.graph),
+                }),
+                ChildSpec::pass(NeededOutputRequeue {
                     graph: Arc::clone(&scheduler.graph),
                 }),
                 ChildSpec::pass(ClusterDispatch {

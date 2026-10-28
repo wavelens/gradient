@@ -21,6 +21,7 @@ pub struct Model {
     pub derivation: DerivationId,
     pub status: BuildStatus,
     pub cache_available: bool,
+    pub unneeded_outputs: Vec<String>,
     /// `probed` is set once the upstream probe answered, hit or miss. The need is not descending
     /// before that. Descending earlier would dispatch build inputs that a passthrough would make
     /// pointless. A job already handed to a worker cannot be recalled.

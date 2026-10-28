@@ -9,6 +9,7 @@ pub mod closure;
 pub mod consistency;
 pub mod features;
 pub mod layers;
+pub mod needed_outputs;
 pub mod predicates;
 pub mod promotion;
 pub mod reachability;

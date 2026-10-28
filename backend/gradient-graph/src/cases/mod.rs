@@ -19,6 +19,7 @@ mod retire;
 mod scenarios;
 mod sharing;
 mod signing;
+mod substitution;
 mod transitions;
 mod verdicts;
 mod walk;
@@ -596,6 +597,13 @@ impl Case {
             .expect("the requeue runs")
     }
 
+    pub async fn requeue_needed_outputs(&self) -> u64 {
+        self.graph
+            .requeue(RequeueScope::NeededOutputs)
+            .await
+            .expect("the requeue runs")
+    }
+
     pub async fn advance_clock(&self, path: &str) {
         self.override_sb(path, |build| build.updated_at -= chrono::Duration::days(30))
             .await;
@@ -906,6 +914,7 @@ mod shared {
     pub(crate) const O2_OUT: &str = "90909090909090909090909090909090";
     pub(crate) const A_OUT2: &str = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
     pub(crate) const B_OUT2: &str = "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1";
+    pub(crate) const C_OUT2: &str = "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1";
     pub(crate) const SOURCE: &str = "k0k0k0k0k0k0k0k0k0k0k0k0k0k0k0k0";
     pub(crate) const UNKNOWN_OUT: &str = "l0l0l0l0l0l0l0l0l0l0l0l0l0l0l0l0";
 
