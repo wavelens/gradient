@@ -4,19 +4,25 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod exec_tree_pr;
 pub(crate) mod git_host_status;
 mod mail;
 pub(crate) mod matrix;
 pub(crate) mod open_pr;
 pub(crate) mod slack;
+mod start_evaluation;
 mod web_request;
 
+pub(crate) use exec_tree_pr::execute_exec_tree_pr;
 pub(crate) use git_host_status::execute_git_host_status_report;
 pub use git_host_status::{reporter_for_task, verify_git_host_action};
 pub(crate) use mail::execute_send_mail;
 pub(crate) use matrix::execute_send_matrix_message;
 pub(crate) use open_pr::execute_open_pr;
 pub(crate) use slack::execute_send_slack_message;
+pub(crate) use start_evaluation::execute_start_evaluation;
+#[cfg(test)]
+pub(crate) use start_evaluation::queue_evaluation;
 pub(crate) use web_request::execute_send_web_request;
 
 use crate::actions::{ExecutorOk, MAX_BODY_BYTES, read_capped, truncate};

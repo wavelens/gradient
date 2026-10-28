@@ -96,20 +96,8 @@ pub(crate) async fn execute_open_pr(
     let title = render_template(title_template, &bumps).unwrap_or_else(|| default_title(&bumps));
     let body = render_template(body_template, &bumps).unwrap_or_else(|| default_body(&bumps));
 
-    if !update_existing {
-        let existing = EOpenPrState::find()
-            .filter(COpenPrState::Action.eq(action_id))
-            .filter(COpenPrState::Branch.eq(branch.clone()))
-            .one(&ctx.db.worker_db)
-            .await
-            .context("check existing open_pr_state")?;
-        if existing
-            .as_ref()
-            .and_then(|s| s.git_host_pr_number)
-            .is_some()
-        {
-            return Ok(no_op());
-        }
+    if !update_existing && has_open_pr(ctx, action_id, &branch).await? {
+        return Ok(no_op());
     }
 
     let commit = BranchCommit {
@@ -134,7 +122,15 @@ pub(crate) async fn execute_open_pr(
         .await
         .context("open pull request")?;
 
-    upsert_open_pr_state(ctx, task_id, action_id, &branch, pr.number, &head_commit).await?;
+    upsert_open_pr_state(
+        ctx,
+        task_id,
+        action_id,
+        &branch,
+        pr.number,
+        Some(&head_commit),
+    )
+    .await?;
     point_eval_at_pushed_commit(ctx, evaluation_id, &head_commit, &title).await?;
 
     Ok(ExecutorOk {
@@ -146,7 +142,7 @@ pub(crate) async fn execute_open_pr(
     })
 }
 
-fn no_op() -> ExecutorOk {
+pub(crate) fn no_op() -> ExecutorOk {
     ExecutorOk {
         status_code: Some(204),
         response_body: None,
@@ -166,13 +162,13 @@ pub(crate) fn configured_commit_ident(
     }
 }
 
-async fn upsert_open_pr_state(
+pub(crate) async fn upsert_open_pr_state(
     ctx: &CiContext,
     task_id: TaskId,
     action_id: TaskActionId,
     branch: &str,
     pr_number: i64,
-    head_commit: &str,
+    head_commit: Option<&str>,
 ) -> Result<()> {
     let now = gradient_types::now();
     let existing = EOpenPrState::find()
@@ -185,7 +181,7 @@ async fn upsert_open_pr_state(
     if let Some(row) = existing {
         let mut am = row.into_active_model();
         am.git_host_pr_number = Set(Some(pr_number));
-        am.head_commit = Set(Some(head_commit.to_owned()));
+        am.head_commit = Set(head_commit.map(str::to_owned));
         am.status = Set("open".to_owned());
         am.updated_at = Set(now);
         am.update(&ctx.db.worker_db)
@@ -198,7 +194,7 @@ async fn upsert_open_pr_state(
             action: Set(action_id),
             branch: Set(branch.to_owned()),
             git_host_pr_number: Set(Some(pr_number)),
-            head_commit: Set(Some(head_commit.to_owned())),
+            head_commit: Set(head_commit.map(str::to_owned)),
             status: Set("open".to_owned()),
             created_at: Set(now),
             updated_at: Set(now),
@@ -209,6 +205,20 @@ async fn upsert_open_pr_state(
     }
 
     Ok(())
+}
+
+pub(crate) async fn has_open_pr(
+    ctx: &CiContext,
+    action_id: TaskActionId,
+    branch: &str,
+) -> Result<bool> {
+    let existing = EOpenPrState::find()
+        .filter(COpenPrState::Action.eq(action_id))
+        .filter(COpenPrState::Branch.eq(branch))
+        .one(&ctx.db.worker_db)
+        .await
+        .context("check existing open_pr_state")?;
+    Ok(existing.and_then(|s| s.git_host_pr_number).is_some())
 }
 
 async fn point_eval_at_pushed_commit(

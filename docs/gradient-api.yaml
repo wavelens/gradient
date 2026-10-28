@@ -13496,6 +13496,17 @@ components:
             type: string
             enum:
             - send_slack_message
+      - type: object
+        required:
+        - task
+        - type
+        properties:
+          task:
+            $ref: '#/components/schemas/TaskId'
+          type:
+            type: string
+            enum:
+            - start_evaluation
     ActionResponse:
       type: object
       required:
@@ -18305,6 +18316,7 @@ components:
       type: string
       enum:
       - flake_lock
+      - exec_tree
     PatchIntegrationRequest:
       type: object
       properties:

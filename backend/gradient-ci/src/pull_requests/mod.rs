@@ -15,10 +15,10 @@ use gradient_db::WorkerDb;
 use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::{CiReporter, parse_owner_repo};
 use gradient_git_host::{BranchCommit, CommitFile, CommitIdent};
-use gradient_types::input::check_repository_url_is_ssh;
+use gradient_types::input::{check_repository_url_is_ssh, vec_to_hex};
 use gradient_types::{
-    ActionConfig, ActionType, CTaskAction, EProject, ETaskAction, ExecJobId, IntegrationId, MTask,
-    TaskId,
+    ActionConfig, ActionType, CTaskAction, ECommit, EEvaluation, EExecJob, EProject, ETaskAction,
+    ExecJobId, IntegrationId, MCommit, MTask, TaskId,
 };
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter, QueryOrder};
 
@@ -26,6 +26,8 @@ pub use apply::{patch_paths, patched_files};
 pub use branch::default_branch_name;
 
 pub const MAX_PULL_REQUEST_PATCH_BYTES: usize = 8 * 1024 * 1024;
+
+const COMMIT_HASH_BYTES: usize = 20;
 
 #[derive(Debug, Clone)]
 pub struct PatchPullRequest {
@@ -146,6 +148,29 @@ pub async fn pull_request_integration(
             _ => None,
         }
     }))
+}
+
+pub async fn evaluation_commit_of_job(
+    db: &WorkerDb,
+    job: ExecJobId,
+) -> Result<String, PullRequestError> {
+    let commit = evaluation_commit_row(db, job)
+        .await
+        .context("load the job's evaluation commit")
+        .map_err(PullRequestError::Forge)?
+        .filter(|commit| commit.hash.len() == COMMIT_HASH_BYTES)
+        .ok_or(PullRequestError::NoCommit)?;
+    Ok(vec_to_hex(&commit.hash))
+}
+
+async fn evaluation_commit_row(db: &WorkerDb, job: ExecJobId) -> Result<Option<MCommit>, DbErr> {
+    let Some(job) = by_id::<EExecJob, _>(db, job).await? else {
+        return Ok(None);
+    };
+    let Some(evaluation) = by_id::<EEvaluation, _>(db, job.evaluation).await? else {
+        return Ok(None);
+    };
+    by_id::<ECommit, _>(db, evaluation.commit).await
 }
 
 async fn files_of_patch(

@@ -26,6 +26,7 @@ gradient-notify   = { workspace = true }
 gradient-db       = { workspace = true }
 gradient-git-host = { workspace = true }
 gradient-sources  = { workspace = true }
+gradient-wire     = { workspace = true }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }

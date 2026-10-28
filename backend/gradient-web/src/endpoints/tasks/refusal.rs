@@ -78,6 +78,8 @@ pub(crate) enum TaskRefusal {
     AttrNotConcrete,
     #[error("Unknown evaluation status `{name}`; expected `active`, `terminal`, or a status name")]
     UnknownEvaluationStatus { name: String },
+    #[error("the task to start belongs to another project")]
+    StartTaskInOtherProject,
 }
 
 impl Refusal for TaskRefusal {
@@ -95,6 +97,7 @@ impl Refusal for TaskRefusal {
             | Self::RepositoryCheckFailed { .. }
             | Self::AlreadyInProject
             | Self::InvalidCommitHash
+            | Self::StartTaskInOtherProject
             | Self::InvalidAttr { .. }
             | Self::CommitLookupFailed { .. }
             | Self::EvaluationInProgress

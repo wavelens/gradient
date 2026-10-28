@@ -6,7 +6,7 @@
 
 use gradient_git_host::reporter::{APPROVAL_ACTION_ID, CiStatus, RequestedAction};
 use gradient_types::events::names;
-use gradient_types::{ActionConfig, ActionType, MTaskAction, VerifyGate};
+use gradient_types::{ActionConfig, ActionType, MTaskAction, PatchGeneratorKind, VerifyGate};
 
 pub const GIT_HOST_STATUS_EVENTS: &[&str] = &[
     names::BUILD_CREATED,
@@ -23,6 +23,10 @@ pub const GIT_HOST_STATUS_EVENTS: &[&str] = &[
     names::EVALUATION_ABORTED,
     names::EVALUATION_ACTION_REQUIRED,
     names::EVALUATION_APPROVAL_GRANTED,
+    names::EXEC_JOB_STARTED,
+    names::EXEC_JOB_COMPLETED,
+    names::EXEC_JOB_FAILED,
+    names::EXEC_JOB_ABORTED,
 ];
 
 pub fn matches_event(action: &MTaskAction, event: &str) -> bool {
@@ -45,15 +49,22 @@ pub fn matches_event(action: &MTaskAction, event: &str) -> bool {
 pub fn open_pr_gate_events(action: &MTaskAction) -> Option<&'static [&'static str]> {
     const BUILD_GATE: &[&str] = &[names::EVALUATION_COMPLETED];
     const EVAL_GATE: &[&str] = &[names::EVALUATION_BUILDING];
+    const EXEC_TREE_GATE: &[&str] = &[names::EXEC_JOB_COMPLETED];
 
     let cfg: ActionConfig = serde_json::from_value(action.config.clone()).ok()?;
-    let ActionConfig::OpenPr { verify_gate, .. } = cfg else {
+    let ActionConfig::OpenPr {
+        verify_gate,
+        generator,
+        ..
+    } = cfg
+    else {
         return None;
     };
 
-    Some(match verify_gate {
-        VerifyGate::Build => BUILD_GATE,
-        VerifyGate::Eval | VerifyGate::None => EVAL_GATE,
+    Some(match (generator, verify_gate) {
+        (PatchGeneratorKind::ExecTree, _) => EXEC_TREE_GATE,
+        (PatchGeneratorKind::FlakeLock, VerifyGate::Build) => BUILD_GATE,
+        (PatchGeneratorKind::FlakeLock, VerifyGate::Eval | VerifyGate::None) => EVAL_GATE,
     })
 }
 
@@ -73,6 +84,10 @@ pub fn git_host_status_for_event(event: &str) -> Option<CiStatus> {
         names::EVALUATION_ABORTED => Some(CiStatus::Error),
         names::EVALUATION_ACTION_REQUIRED => Some(CiStatus::ActionRequired),
         names::EVALUATION_APPROVAL_GRANTED => Some(CiStatus::Success),
+        names::EXEC_JOB_STARTED => Some(CiStatus::Running),
+        names::EXEC_JOB_COMPLETED => Some(CiStatus::Success),
+        names::EXEC_JOB_FAILED => Some(CiStatus::Failure),
+        names::EXEC_JOB_ABORTED => Some(CiStatus::Error),
         _ => None,
     }
 }

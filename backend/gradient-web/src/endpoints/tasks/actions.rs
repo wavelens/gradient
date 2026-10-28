@@ -135,6 +135,21 @@ async fn validate_mail_teams(db: &WebDb, project: ProjectId, cfg: &ActionConfig)
     Ok(())
 }
 
+async fn validate_start_target(
+    db: &WebDb,
+    project: ProjectId,
+    cfg: &ActionConfig,
+) -> WebResult<()> {
+    let ActionConfig::StartEvaluation { task } = cfg else {
+        return Ok(());
+    };
+    let target = gradient_db::lookup::by_id::<ETask, _>(db, *task).await?;
+    if target.is_none_or(|target| target.project != project) {
+        return Err(TaskRefusal::StartTaskInOtherProject.into());
+    }
+    Ok(())
+}
+
 fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
     let url_error = |e: WebhookUrlError| TaskRefusal::InvalidWebhookUrl(e.to_string());
     match cfg {
@@ -216,6 +231,7 @@ pub async fn create_action(
 
     validate_destination(&body.config)?;
     validate_mail_teams(&state.web_db, project.id, &body.config).await?;
+    validate_start_target(&state.web_db, project.id, &body.config).await?;
     if matches!(
         body.config,
         ActionConfig::SendMatrixMessage {
@@ -370,6 +386,7 @@ pub async fn update_action(
 
         validate_destination(new_cfg)?;
         validate_mail_teams(&state.web_db, project.id, new_cfg).await?;
+        validate_start_target(&state.web_db, project.id, new_cfg).await?;
         match new_cfg {
             ActionConfig::SendMail { recipients, .. } if recipients.is_empty() => {
                 return Err(TaskRefusal::NoMailRecipients.into());

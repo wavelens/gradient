@@ -15,13 +15,12 @@ use crate::scope::{Requires, TaskScope, can};
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_ci::pull_requests::{
-    PatchPullRequest, PullRequestError, default_branch_name, open_from_patch, patch_paths,
-    pull_request_integration,
+    PatchPullRequest, PullRequestError, default_branch_name, evaluation_commit_of_job,
+    open_from_patch, patch_paths, pull_request_integration,
 };
 use gradient_core::ServerState;
 use gradient_db::WorkerDb;
-use gradient_db::lookup::by_id;
-use gradient_types::input::{hex_to_vec, vec_to_hex};
+use gradient_types::input::hex_to_vec;
 use gradient_types::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -120,7 +119,7 @@ async fn start_commit(
     commit: Option<&str>,
 ) -> WebResult<String> {
     match job {
-        Some(job) => evaluation_commit_of_job(db, job).await,
+        Some(job) => Ok(evaluation_commit_of_job(db, job).await?),
         None => {
             let commit = commit.ok_or(PullRequestRefusal::CommitRequired)?;
             hex_to_vec(commit)
@@ -130,18 +129,4 @@ async fn start_commit(
             Ok(commit.to_ascii_lowercase())
         }
     }
-}
-
-async fn evaluation_commit_of_job(db: &WorkerDb, job: ExecJobId) -> WebResult<String> {
-    let job = by_id::<EExecJob, _>(db, job)
-        .await?
-        .ok_or(PullRequestError::NoCommit)?;
-    let evaluation = by_id::<EEvaluation, _>(db, job.evaluation)
-        .await?
-        .ok_or(PullRequestError::NoCommit)?;
-    let commit = by_id::<ECommit, _>(db, evaluation.commit)
-        .await?
-        .filter(|commit| commit.hash.len() == COMMIT_HASH_BYTES)
-        .ok_or(PullRequestError::NoCommit)?;
-    Ok(vec_to_hex(&commit.hash))
 }

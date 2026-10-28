@@ -45,6 +45,7 @@ pub enum CheckContextKind {
     Approval,
     Evaluation,
     Build,
+    ExecJob,
 }
 
 pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
@@ -63,6 +64,10 @@ pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
         | names::BUILD_COMPLETED
         | names::BUILD_FAILED
         | names::BUILD_SUBSTITUTED => Some(CheckContextKind::Build),
+        names::EXEC_JOB_STARTED
+        | names::EXEC_JOB_COMPLETED
+        | names::EXEC_JOB_FAILED
+        | names::EXEC_JOB_ABORTED => Some(CheckContextKind::ExecJob),
         _ => None,
     }
 }

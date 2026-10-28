@@ -29,6 +29,9 @@ export type ActionConfig = {
 } | {
   webhook_url?: string | null;
   type: "send_slack_message";
+} | {
+  task: TaskId;
+  type: "start_evaluation";
 };
 
 export interface ActionResponse {
@@ -1685,7 +1688,7 @@ export interface PatchCacheRequest {
   pull_through?: boolean | null;
 }
 
-export type PatchGeneratorKind = "flake_lock";
+export type PatchGeneratorKind = "flake_lock" | "exec_tree";
 
 export interface PatchIntegrationRequest {
   name?: IndexName | null;
