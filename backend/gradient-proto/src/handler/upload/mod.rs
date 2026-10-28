@@ -9,13 +9,18 @@ mod table;
 
 use std::time::{Duration, Instant};
 
+use gradient_db::scheduling::assignment_record::exec_job_of_key;
 use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey};
 use gradient_storage::eval_cache_segment::{SEGMENT_MAX_BYTES, eval_cache_segment_key};
-use gradient_storage::{NarStore, PartialStore, StorageTarget, upload_lease};
+use gradient_storage::{NarStore, PartialStore, StorageTarget, exec_output_key, upload_lease};
 use gradient_types::StorePath;
+use gradient_types::exec::{ContinueFileError, MAX_CONTINUE_FILE_BYTES};
 use gradient_types::ids::{CacheId, ProjectId};
 use gradient_wire::messages::{ServerMessage, is_small_upload};
-use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
+use gradient_wire::types::{
+    CONTINUE_OUTPUT, GrantTarget, UploadMetadata, UploadObject, UploadOutcome, check_output_path,
+};
+use sha2::{Digest, Sha256};
 use tracing::warn;
 use uuid::Uuid;
 
@@ -37,9 +42,10 @@ pub(super) fn nar_key(store_path: &str) -> Option<String> {
         .map(|path| path.hash().to_owned())
 }
 
-fn key_name(key: &ObjectKey) -> &str {
+fn partial_token(key: &ObjectKey) -> String {
     match key {
-        ObjectKey::Nar(s) | ObjectKey::EvalCache(s) | ObjectKey::Rest(s) => s,
+        ObjectKey::Nar(s) | ObjectKey::EvalCache(s) => s.clone(),
+        ObjectKey::Rest(s) => hex::encode(Sha256::digest(s.as_bytes())),
     }
 }
 
@@ -87,15 +93,15 @@ impl InboundContext<'_> {
                     )
                     .await;
             }
-            UploadObject::ExecOutput { .. } => {
-                return self
-                    .settle(
-                        request_id,
-                        UploadOutcome::Rejected {
-                            reason: "exec outputs are not accepted yet".into(),
-                        },
-                    )
-                    .await;
+            UploadObject::ExecOutput { job, path } => {
+                match self.exec_output_object(&job_id, job, path, size) {
+                    Ok(key) => (ObjectKey::Rest(key), None),
+                    Err(reason) => {
+                        return self
+                            .settle(request_id, UploadOutcome::Rejected { reason })
+                            .await;
+                    }
+                }
             }
             UploadObject::EvalCacheSegment { .. } if size > SEGMENT_MAX_BYTES as u64 => {
                 return self
@@ -206,6 +212,32 @@ impl InboundContext<'_> {
         }
     }
 
+    fn exec_output_object(
+        &self,
+        job_id: &str,
+        job: &str,
+        path: &str,
+        size: u64,
+    ) -> Result<String, String> {
+        if self.active.exec_attempt(job_id).is_none() {
+            return Err(format!("job {job_id} has no running exec attempt"));
+        }
+        let Some(exec_job) = exec_job_of_key(job_id).filter(|id| id.to_string() == job) else {
+            return Err(format!(
+                "an output of job {job} does not belong to {job_id}"
+            ));
+        };
+        check_output_path(path).map_err(|e| e.to_string())?;
+        if path == CONTINUE_OUTPUT && size > MAX_CONTINUE_FILE_BYTES as u64 {
+            return Err(
+                ContinueFileError::TooLarge(usize::try_from(size).unwrap_or(usize::MAX))
+                    .to_string(),
+            );
+        }
+
+        Ok(exec_output_key(exec_job.into_inner(), path))
+    }
+
     async fn eval_cache_target(
         &self,
         project: ProjectId,
@@ -264,12 +296,12 @@ impl InboundContext<'_> {
         };
         Ok(match target {
             StorageTarget::Passthrough => {
-                let token = key_name(key);
+                let token = partial_token(key);
                 let partial = format!("{}/{token}", self.peer_id);
-                let received = uploads.partials.received_len(&partial, token).await?;
+                let received = uploads.partials.received_len(&partial, &token).await?;
                 let writer = uploads
                     .partials
-                    .open_writer(&partial, token, received, uploads.retain_up_to)
+                    .open_writer(&partial, &token, received, uploads.retain_up_to)
                     .await?;
                 (
                     GrantTarget::Passthrough {
@@ -454,11 +486,16 @@ impl InboundContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handler::inbound::fixture::{JOB, TestSession, decode};
+    use crate::handler::inbound::ActiveJob;
+    use crate::handler::inbound::fixture::{JOB, TestSession, decode, pending_exec};
     use gradient_fixtures::mock::{empty_db, mock_db};
+    use gradient_scheduler::jobs::PendingJob;
     use gradient_test_support::state::test_state;
     use gradient_types::MCachedPath;
+    use gradient_types::exec::MAX_CONTINUE_FILE_BYTES;
+    use gradient_types::ids::ExecJobAttemptId;
     use gradient_wire::messages::{ClientMessage, SMALL_UPLOAD_BYTES};
+    use gradient_wire::types::CONTINUE_OUTPUT;
 
     fn nar(c: char) -> UploadObject {
         UploadObject::Nar {
@@ -704,5 +741,84 @@ mod tests {
 
         assert_eq!(state.memory.upload_admission.in_flight(), 0);
         assert!(uploads.table.is_empty());
+    }
+
+    fn running_exec_job(session: &TestSession) -> (String, String) {
+        let pending = pending_exec(ExecJobAttemptId::now_v7());
+        let key = pending.job_key();
+        let PendingJob::Exec(exec) = &pending else {
+            unreachable!("pending_exec is an exec job")
+        };
+        let job = exec.exec_job.to_string();
+        session.active.insert(
+            key.clone(),
+            ActiveJob {
+                assignment_id: gradient_types::ids::DispatchedJobId::now_v7(),
+                pending,
+                cluster: None,
+            },
+        );
+        (key, job)
+    }
+
+    fn exec_output(job: &str, path: &str) -> UploadObject {
+        UploadObject::ExecOutput {
+            job: job.into(),
+            path: path.into(),
+        }
+    }
+
+    fn rejection(bytes: bytes::Bytes) -> String {
+        match decode(bytes) {
+            ServerMessage::UploadCommitted {
+                outcome: UploadOutcome::Rejected { reason },
+                ..
+            } => reason,
+            other => panic!("expected a rejection, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_exec_output_for_another_job_is_rejected() {
+        let state = test_state(empty_db());
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (key, _) = running_exec_job(&session);
+        let (mut ctx, uploads) = session.split();
+        let other = gradient_types::ids::ExecJobId::now_v7().to_string();
+
+        ctx.on_upload_request(key, 1, exec_output(&other, "model/w.bin"), 3, uploads)
+            .await;
+
+        rejection(sent.try_recv().unwrap());
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_output_path_outside_the_job_is_rejected() {
+        let state = test_state(empty_db());
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (key, job) = running_exec_job(&session);
+        let (mut ctx, uploads) = session.split();
+
+        ctx.on_upload_request(key, 1, exec_output(&job, "../x"), 3, uploads)
+            .await;
+
+        let reason = rejection(sent.try_recv().unwrap());
+        assert!(reason.contains("../x"), "{reason}");
+    }
+
+    #[tokio::test]
+    async fn an_oversized_continue_file_is_rejected_before_the_grant() {
+        let state = test_state(empty_db());
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (key, job) = running_exec_job(&session);
+        let (mut ctx, uploads) = session.split();
+        let size = MAX_CONTINUE_FILE_BYTES as u64 + 1;
+
+        ctx.on_upload_request(key, 1, exec_output(&job, CONTINUE_OUTPUT), size, uploads)
+            .await;
+
+        rejection(sent.try_recv().unwrap());
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
     }
 }

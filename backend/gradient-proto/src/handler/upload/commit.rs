@@ -6,13 +6,18 @@
 
 use gradient_db::cache_paths::project_write_caches;
 use gradient_db::eval_cache::record_segment;
+use gradient_db::exec_jobs::{continuations, outputs};
 use gradient_db::{DbContext, WorkerDb};
-use gradient_storage::NarStore;
 use gradient_storage::admission::{ObjectKey, UploadPermit};
-use gradient_types::RuntimeConfig;
-use gradient_types::ids::{CacheId, ProjectId};
+use gradient_storage::{NarStore, StagedFile};
+use gradient_types::exec::ContinueFile;
+use gradient_types::ids::{CacheId, ExecJobId, ProjectId};
+use gradient_types::{EExecJob, RuntimeConfig};
 use gradient_wire::messages::ServerMessage;
-use gradient_wire::types::{NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome};
+use gradient_wire::types::{
+    CONTINUE_OUTPUT, NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome,
+};
+use sea_orm::EntityTrait;
 use tracing::warn;
 
 use super::super::SessionHandles;
@@ -47,15 +52,22 @@ pub(super) async fn run(c: Commit) {
     let placed = match metadata {
         Ok(metadata) => place(&c.handles.db, &c.key, &c.object, c.transfer, &metadata)
             .await
-            .map(|()| metadata),
+            .map(|continue_file| (metadata, continue_file)),
         Err(reason) => Err(rejected(reason)),
     };
     let outcome = match placed {
-        Ok(metadata) => {
+        Ok((metadata, continue_file)) => {
             let mut permit = c.permit;
             permit.release_budget();
-            let outcome =
-                record(&c.handles, c.project, c.segment_cache, &c.object, &metadata).await;
+            let outcome = record(
+                &c.handles,
+                c.project,
+                c.segment_cache,
+                &c.object,
+                &metadata,
+                continue_file,
+            )
+            .await;
             if matches!(outcome, UploadOutcome::Ok) {
                 permit.committed();
             }
@@ -97,7 +109,7 @@ async fn place(
     object: &UploadObject,
     transfer: Transfer,
     metadata: &UploadMetadata,
-) -> Result<(), UploadOutcome> {
+) -> Result<Option<ContinueFile>, UploadOutcome> {
     match (object, metadata) {
         (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta)) => {
             let Some(hash) = super::nar_key(store_path) else {
@@ -118,12 +130,19 @@ async fn place(
                     place_presigned(&db.storage.nar_storage, &db.config, &hash, meta).await
                 }
             }
+            .map(|()| None)
         }
         (UploadObject::EvalCacheSegment { .. }, UploadMetadata::EvalCache { size_bytes }) => {
             let ObjectKey::EvalCache(key) = key else {
                 return Err(rejected("the upload holds no eval cache key".into()));
             };
-            place_eval_cache(&db.storage.nar_storage, key, transfer, *size_bytes).await
+            place_eval_cache(&db.storage.nar_storage, key, transfer, *size_bytes)
+                .await
+                .map(|()| None)
+        }
+        (UploadObject::ExecOutput { job, path }, UploadMetadata::ExecOutput { size_bytes }) => {
+            let job = exec_job_id(job)?;
+            place_exec_output(&db.storage.nar_storage, job, path, transfer, *size_bytes).await
         }
         _ => Err(rejected("metadata does not match the upload object".into())),
     }
@@ -136,10 +155,17 @@ async fn record(
     segment_cache: Option<CacheId>,
     object: &UploadObject,
     metadata: &UploadMetadata,
+    continue_file: Option<ContinueFile>,
 ) -> UploadOutcome {
     match (object, metadata, segment_cache) {
         (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta), _) => {
             record_nar(handles, project_id, store_path, meta).await
+        }
+        (UploadObject::ExecOutput { job, path }, UploadMetadata::ExecOutput { size_bytes }, _) => {
+            match exec_job_id(job) {
+                Ok(job) => record_exec_output(handles, job, path, *size_bytes, continue_file).await,
+                Err(outcome) => outcome,
+            }
         }
         (
             UploadObject::EvalCacheSegment { fingerprint },
@@ -301,6 +327,100 @@ async fn place_eval_cache(
             .await
             .map_err(retry),
     }
+}
+
+fn exec_job_id(job: &str) -> Result<ExecJobId, UploadOutcome> {
+    job.parse()
+        .map_err(|_| rejected(format!("malformed exec job id {job}")))
+}
+
+async fn place_exec_output(
+    nar_storage: &NarStore,
+    job: ExecJobId,
+    path: &str,
+    transfer: Transfer,
+    size_bytes: u64,
+) -> Result<Option<ContinueFile>, UploadOutcome> {
+    let Transfer::Passthrough(writer) = transfer else {
+        return Err(rejected("exec outputs pass through the server".into()));
+    };
+    let staged = (*writer).finish().await.map_err(retry)?;
+    let continue_file = match check_staged_output(&staged, path, size_bytes).await {
+        Ok(continue_file) => continue_file,
+        Err(outcome) => {
+            let _ = tokio::fs::remove_file(&staged.path).await;
+            return Err(outcome);
+        }
+    };
+
+    nar_storage
+        .adopt_exec_output(job.into_inner(), path, &staged.path)
+        .await
+        .map_err(retry)?;
+    Ok(continue_file)
+}
+
+async fn check_staged_output(
+    staged: &StagedFile,
+    path: &str,
+    size_bytes: u64,
+) -> Result<Option<ContinueFile>, UploadOutcome> {
+    if staged.len != size_bytes {
+        return Err(rejected(format!(
+            "received {} bytes, reported {size_bytes}",
+            staged.len
+        )));
+    }
+    if path != CONTINUE_OUTPUT {
+        return Ok(None);
+    }
+
+    let bytes = tokio::fs::read(&staged.path).await.map_err(retry)?;
+    ContinueFile::parse(&bytes)
+        .map(Some)
+        .map_err(|e| rejected(e.to_string()))
+}
+
+async fn record_exec_output(
+    handles: &SessionHandles,
+    job: ExecJobId,
+    path: &str,
+    size: u64,
+    continue_file: Option<ContinueFile>,
+) -> UploadOutcome {
+    let db = &handles.db.worker_db;
+    let size = i64::try_from(size).unwrap_or(i64::MAX);
+    if let Err(e) = outputs::upsert(db, job, path, size, &output_content_type(path)).await {
+        return retry(format!("recording output {path}: {e}"));
+    }
+
+    match continue_file {
+        Some(file) => record_continuation(db, job, &file).await,
+        None => UploadOutcome::Ok,
+    }
+}
+
+async fn record_continuation(db: &WorkerDb, job: ExecJobId, file: &ContinueFile) -> UploadOutcome {
+    let evaluation = match EExecJob::find_by_id(job).one(db).await {
+        Ok(Some(row)) => row.evaluation,
+        Ok(None) => return rejected(format!("exec job {job} does not exist")),
+        Err(e) => return retry(format!("loading exec job {job}: {e}")),
+    };
+
+    match continuations::record(db, job, evaluation, &file.attributes).await {
+        Ok(true) => UploadOutcome::Ok,
+        Ok(false) => rejected(format!(
+            "{CONTINUE_OUTPUT}: exec job {job} is no longer running"
+        )),
+        Err(e) => retry(format!("recording {CONTINUE_OUTPUT}: {e}")),
+    }
+}
+
+fn output_content_type(path: &str) -> String {
+    mime_guess::from_path(path).first().map_or_else(
+        || "application/octet-stream".to_owned(),
+        |mime| mime.to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -587,6 +707,77 @@ mod tests {
         assert!(
             !partials.path("peer/c").exists(),
             "the foreign prefix is gone"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_invalid_continue_file_is_rejected_with_its_reason() {
+        let state = test_state(empty_db());
+        let job = ExecJobId::now_v7();
+        let body = br#"{"attributes":["packages.*"]}"#;
+        let dir = tempfile::TempDir::new().unwrap();
+        let partials = gradient_storage::PartialStore::new(dir.path()).unwrap();
+        let mut writer = partials.open_writer("peer/o", "o", 0, 0).await.unwrap();
+        writer.append(0, body).await.unwrap();
+
+        let placed = place(
+            &state.db(),
+            &ObjectKey::Rest(gradient_storage::exec_output_key(
+                job.into_inner(),
+                CONTINUE_OUTPUT,
+            )),
+            &UploadObject::ExecOutput {
+                job: job.to_string(),
+                path: CONTINUE_OUTPUT.into(),
+            },
+            Transfer::Passthrough(Box::new(writer)),
+            &UploadMetadata::ExecOutput {
+                size_bytes: body.len() as u64,
+            },
+        )
+        .await;
+
+        let Err(UploadOutcome::Rejected { reason }) = placed else {
+            panic!("expected a rejection, got {placed:?}")
+        };
+        assert!(reason.contains("packages.*"), "{reason}");
+        assert!(
+            state
+                .nar_storage
+                .get_exec_output(job.into_inner(), CONTINUE_OUTPUT, body.len())
+                .await
+                .unwrap()
+                .is_none(),
+            "nothing is adopted"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_committed_output_is_recorded_with_its_size_and_type() {
+        let db = mock_db()
+            .append_exec_results([gradient_fixtures::mock::exec_ok()])
+            .into_connection();
+        let log_db = db.clone();
+        let state = test_state(db);
+
+        let outcome = record_exec_output(
+            &SessionHandles::from_state(&state),
+            ExecJobId::now_v7(),
+            "model/w.bin",
+            3,
+            None,
+        )
+        .await;
+
+        assert!(matches!(outcome, UploadOutcome::Ok), "{outcome:?}");
+        let insert = gradient_fixtures::mock::all_statements(log_db.into_transaction_log())
+            .into_iter()
+            .find(|s| s.sql.starts_with("INSERT INTO \"exec_job_output\""))
+            .expect("the output row is written");
+        let values = format!("{:?}", insert.values);
+        assert!(
+            values.contains("BigInt(Some(3))") && values.contains("application/octet-stream"),
+            "{values}"
         );
     }
 }
