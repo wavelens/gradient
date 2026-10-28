@@ -289,6 +289,11 @@ pub enum UploadObject {
     EvalCacheSegment {
         fingerprint: String,
     },
+    #[proto(47)]
+    ExecOutput {
+        job: String,
+        path: String,
+    },
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -314,7 +319,13 @@ pub struct NarUploadMetadata {
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum UploadMetadata {
     Nar(Box<NarUploadMetadata>),
-    EvalCache { size_bytes: u64 },
+    EvalCache {
+        size_bytes: u64,
+    },
+    #[proto(47)]
+    ExecOutput {
+        size_bytes: u64,
+    },
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
