@@ -33,6 +33,12 @@
       };
       clash = app "clash" { labels = [ "stop" ]; secrets = [ "clash-key" ]; };
       outputs = app "outputs" { labels = [ "stop" ]; network = true; };
+      pair = app "pair" {
+        nodes = 2;
+        labels = [ "pair" ];
+        network = true;
+        args = [ "@gradient.cluster.master_addr@:@gradient.cluster.master_port@" ];
+      };
     };
     packages.x86_64-linux.hello = programs.hello;
   };

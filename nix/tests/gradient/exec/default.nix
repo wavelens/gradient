@@ -14,6 +14,10 @@
     stopper = "a0000000-0000-0000-0000-000000000011";
     keeper = "a0000000-0000-0000-0000-000000000012";
   };
+  guestSubnets = {
+    stopper = "10.233.0.0";
+    keeper = "10.234.0.0";
+  };
 
   guestImage = self.lib.mkWorkerImage {
     modules = [
@@ -48,7 +52,7 @@
     inherit text;
   };
 
-  execWorker = { id, label, maxPreWarm, stopGuestsWithWorker, memorySize ? 4096, sops ? { } }: { nodes, pkgs, lib, ... }: {
+  execWorker = { name, peer, label, maxPreWarm, stopGuestsWithWorker, memorySize ? 4096, sops ? { } }: { nodes, pkgs, lib, ... }: {
     imports = [ ../../../modules/gradient-worker.nix ];
 
     virtualisation = {
@@ -58,7 +62,14 @@
       writableStore = true;
     };
 
-    networking.nameservers = [ nodes.server.networking.primaryIPAddress ];
+    networking = {
+      nameservers = [ nodes.server.networking.primaryIPAddress ];
+      interfaces.eth1.ipv4.routes = [{
+        address = guestSubnets.${peer};
+        prefixLength = 16;
+        via = nodes.${peer}.networking.primaryIPAddress;
+      }];
+    };
     nix.settings.substituters = lib.mkForce [ ];
     environment.systemPackages = [ pkgs.curl pkgs.jq ];
 
@@ -72,7 +83,8 @@
     services.gradient.worker = {
       enable = true;
       serverUrl = "ws://server/proto";
-      inherit id;
+      id = workerIds.${name};
+      zone = "lab";
       peersFile = "/etc/gradient/secrets/worker_peers";
       capabilities = {
         eval = true;
@@ -82,12 +94,14 @@
       exec = {
         image = guestImage;
         preWarm = 1;
-        labels = [ label ];
+        labels = [ label "pair" ];
+        subnet = "${guestSubnets.${name}}/16";
         inherit maxPreWarm stopGuestsWithWorker sops;
         allow = {
           network = true;
           ssh = true;
           retries = 1;
+          nodes = 2;
         };
       };
     };
@@ -243,7 +257,8 @@ in {
       };
 
       stopper = execWorker {
-        id = workerIds.stopper;
+        name = "stopper";
+        peer = "keeper";
         label = "stop";
         maxPreWarm = 2;
         stopGuestsWithWorker = true;
@@ -253,7 +268,13 @@ in {
           keyFile = "${sopsFixtures}/ed25519";
         };
       };
-      keeper = execWorker { id = workerIds.keeper; label = "keep"; maxPreWarm = 0; stopGuestsWithWorker = false; };
+      keeper = execWorker {
+        name = "keeper";
+        peer = "stopper";
+        label = "keep";
+        maxPreWarm = 0;
+        stopGuestsWithWorker = false;
+      };
     };
 
     interactive.nodes = lib.genAttrs [ "server" "stopper" "keeper" ] (_: import ../../modules/debug-host.nix);
