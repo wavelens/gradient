@@ -137,10 +137,25 @@ def evaluation_rows(query, eval_id):
 def eval_phases(eval_id):
     return evaluation_rows(
         "SELECT CASE p.phase WHEN 2 THEN 'eval_flake' WHEN 3 THEN 'eval_derivations' ELSE 'other' END AS phase,"
-        " p.start_ms, p.end_ms,"
+        " left(dj.id::text, 8) AS job, p.start_ms, p.end_ms,"
         " (extract(epoch FROM dj.dispatched_at - min(dj.dispatched_at) OVER ()) * 1000)::bigint AS offset_ms"
         " FROM dispatched_job_phase p JOIN dispatched_job dj ON dj.id = p.dispatched_job"
         " WHERE dj.evaluation_id = '{eval_id}' AND dj.kind = 0",
+        eval_id,
+    )
+
+
+def shard_timings(eval_id):
+    return evaluation_rows(
+        "SELECT s.seq, s.pattern, coalesce(cardinality(s.children), 0) AS children,"
+        " round(s.predicted_ms) AS predicted_ms, s.state,"
+        " CASE WHEN s.taken_job IS NULL THEN NULL WHEN split_part(s.taken_job, ':', 3) = '' THEN 'primary'"
+        " ELSE split_part(s.taken_job, ':', 3) END AS member,"
+        " round(extract(epoch FROM s.taken_at - first.at) * 1000) AS taken_ms,"
+        " round(extract(epoch FROM s.finished_at - s.taken_at) * 1000) AS took_ms"
+        " FROM eval_shard s, (SELECT min(dispatched_at) AS at FROM dispatched_job"
+        " WHERE evaluation_id = '{eval_id}' AND kind = 0) first"
+        " WHERE s.evaluation = '{eval_id}' ORDER BY s.taken_at, s.seq",
         eval_id,
     )
 
@@ -297,12 +312,15 @@ def measure(token, task):
         f" WHERE dj.evaluation_id = '{eval_id}' AND dj.kind = 0"
         " AND EXISTS (SELECT 1 FROM dispatched_job_phase p WHERE p.dispatched_job = dj.id AND p.phase IN (2, 3))"
     ))
+    phases = eval_phases(eval_id)
     result = {
         "eval_id": eval_id,
-        "wall_ms": report.wall_ms(eval_phases(eval_id)),
+        "wall_ms": report.wall_ms(phases),
         "statements": statements,
         "shards": shards,
         "jobs": jobs,
+        "phases": phases,
+        "shard_timings": shard_timings(eval_id),
     }
     if status != "Completed":
         psql("SELECT pg_stat_statements_reset();")
@@ -320,6 +338,9 @@ def write_summary(runs, small):
     (out / "summary.json").write_text(json.dumps({"runs": runs, "small": small}, indent=2))
     text = report.render(runs, small) if 1 in runs else ""
     (out / "summary.txt").write_text(text)
+    failed = report.verdicts(runs, small) if 1 in runs else []
+    (out / "report").mkdir(exist_ok=True)
+    (out / "report" / "index.html").write_text(page.render(runs, small, failed))
     print(text)
 
 
@@ -374,6 +395,6 @@ measure(token, "large")
 runs = measure_large(token)
 small = measure_small(token, runs)
 out = pathlib.Path(server.out_dir)
-publish(out, name="evalbench-multinode")
+publish(out, out / "report" / "index.html", name="evalbench-multinode")
 failed = report.verdicts(runs, small)
 assert not failed, "missed #568 targets:\n" + "\n".join(failed)
