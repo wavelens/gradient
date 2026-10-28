@@ -33,3 +33,11 @@ pub(crate) fn test_server_state_with_log(
         .config(configure)
         .build()
 }
+
+pub(crate) async fn store_exec_output(nar: &NarStore, job: uuid::Uuid, staging: &std::path::Path) {
+    let staged = staging.join(format!("{job}.staged"));
+    std::fs::write(&staged, b"weights").expect("the staged output is written");
+    nar.adopt_exec_output(job, "model/w.bin", &staged)
+        .await
+        .expect("the output is stored");
+}
