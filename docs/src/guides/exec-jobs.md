@@ -130,7 +130,7 @@ passthru.gradient = {
 | `network` | worker default | Internet access inside the job |
 | `ssh` | worker default | SSH access into the job |
 | `ports` | `[ ]` | Guest ports for forwarding. Port 0 is refused |
-| `image` | none | A `nixosConfiguration` as the guest system, built like the program |
+| `image` | none | A `nixosConfiguration` as the guest system, see [Boot a Custom Image](#custom-images) |
 | `env`, `args` | empty | Environment and arguments of the program |
 | `secrets`, `sops` | `[ ]` | Secret names and repository sops files, see [Pass Secrets](#secrets) |
 | `timeout` | none | Total seconds, capped by the worker |
@@ -139,11 +139,11 @@ passthru.gradient = {
 
 - Workers report the labels, devices and limits they allow. Requests outside those limits rule out that worker. Downgrades of a request never happen.
 - Lost workers lead to a restart without using a retry. Ten losses in a row fail the job.
-- `nodes` above 1 and `image` don't exist yet.
+- Values above 1 for `nodes` have no support yet.
 
 ## 5. Read the Job Context
 
-Programs start as the user `gradient` in `/work`, a checkout of the evaluated commit. Context values arrive as environment variables and in `/run/gradient/context.json`.
+There is a checkout of the evaluated commit in `/work`. Programs start as the user `gradient` in that directory. Task URLs with `?dir=<rel-dir>` start the program in `/work/<rel-dir>`, see [Repository URL](../concepts/projects-and-tasks.md#repository-url). Context values arrive as environment variables and in `/run/gradient/context.json`.
 
 | Variable | Value |
 |---|---|
@@ -298,6 +298,62 @@ ssh -p 2222 -N -L 8888:127.0.0.1:8888 myproject/<job-id>@ci.example.com # (3)!
 - Logins accept no command except `shell`.
 - Sessions close on a worker disconnect. Programs keep going.
 
+## 8. Boot a Custom Image { #custom-images }
+
+One app can use a custom image in place of the worker image. Kernel modules, drivers and system services of the job go into the custom image.
+
+```nix
+# configuration.nix of the worker
+services.gradient.worker.exec.allow.customImages = true;
+```
+
+```nix
+# flake.nix
+{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.gradient.url = "github:wavelens/gradient";
+
+  outputs = { self, nixpkgs, gradient }: let
+    pkgs = nixpkgs.legacyPackages.x86_64-linux;
+  in {
+    nixosConfigurations.trainer = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        gradient.nixosModules.guest # (1)!
+        ({ config, ... }: {
+          gradient.guest.enable = true;
+          nixpkgs.config.allowUnfree = true;
+          hardware.graphics.enable = true;
+          hardware.nvidia.open = true;
+          services.xserver.videoDrivers = [ "nvidia" ];
+          system.stateVersion = "26.05";
+        })
+      ];
+    };
+
+    apps.x86_64-linux.train = {
+      type = "app";
+      program = "${pkgs.writeShellScript "train" "nvidia-smi && python train.py"}";
+      passthru.gradient = {
+        image = self.nixosConfigurations.trainer;
+        devices = [ "gpu:h100:8" ];
+      };
+    };
+  };
+}
+```
+
+1.  Guest agents come from the `gradient.guest` module. Images that lack that module fail with `guest image has no gradient agent, import the gradient.guest module`.
+
+- Jobs with `image` wait for a worker with [`exec.allow.customImages`](../reference/configuration.md#workerexec). That setting defaults to `false`.
+- Workers build the image the same way they build the program.
+- Jobs with an image run on a fresh guest, booted cold from the image.
+- Warm guests stay untouched.
+- `cpus` and `memoryMb` come from the worker image. The custom image settings don't count.
+- Custom image boot failures fail the attempt and consume a retry.
+- Guest agents in the image come from the `gradient` input. Keep that input at the server version.
+- Agents from older releases start the program in `/work`. Those agents can refuse shells.
+
 ## Verify Deployment
 
 - Start an evaluation of the task. Exec jobs appear with a status in the **Exec Jobs** section of the evaluation.
@@ -310,5 +366,5 @@ ssh -p 2222 -N -L 8888:127.0.0.1:8888 myproject/<job-id>@ci.example.com # (3)!
 - [Workers](../concepts/workers.md): registrations and capabilities
 - [Evaluation Wildcards](../reference/wildcards.md): select the apps of a flake
 - [Declarative State](../reference/state.md): the `exec_enabled` flag, `enable_exec` and `secret_files`
-- [Configuration](../reference/configuration.md): the `exec.enable` and `exec.allow.ssh` settings
+- [Configuration](../reference/configuration.md): where the `exec.enable`, `exec.allow.ssh` and `exec.allow.customImages` settings live
 - [Build over SSH](build-over-ssh.md): SSH server and key setup
