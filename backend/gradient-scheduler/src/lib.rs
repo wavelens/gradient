@@ -47,6 +47,7 @@ use gradient_core::ServerState;
 use gradient_db::DbContext;
 use gradient_db::maintenance::recovery::KeptAssignment;
 use gradient_graph::Graph;
+use gradient_pool::guest_channels::GuestChannels;
 use gradient_types::*;
 use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
 use tokio::sync::Semaphore;
@@ -85,6 +86,7 @@ pub struct Scheduler {
     pub(crate) split_decisions: eval_split::create::SplitDecisions,
     pub(crate) pre_warm: pre_warm::PreWarmCounts,
     expected_reclaims: Arc<gradient_util::sync::Mutex<Vec<KeptAssignment>>>,
+    pub guest_channels: Arc<GuestChannels>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -112,6 +114,7 @@ impl Scheduler {
             workers: worker_memory::WorkerMemory::default(),
             split_decisions: Default::default(),
             pre_warm: pre_warm::PreWarmCounts::default(),
+            guest_channels: GuestChannels::new(),
             expected_reclaims: Arc::default(),
         }
     }

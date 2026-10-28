@@ -2911,6 +2911,7 @@ version = "2.0.1"
 dependencies = [
  "chrono",
  "gradient-types",
+ "gradient-util",
  "gradient-wire",
  "serde",
  "serde_json",

@@ -124,6 +124,12 @@ impl WorkerPool {
         }
     }
 
+    pub fn session_port(&self, worker_id: &str) -> Option<Arc<dyn SessionPort>> {
+        self.workers
+            .get(worker_id)
+            .map(|slot| Arc::clone(&slot.shared().session))
+    }
+
     pub fn send_abort(&self, worker_id: &str, job_id: String, reason: String) -> bool {
         self.signal(worker_id, SessionSignal::Abort { job_id, reason })
     }

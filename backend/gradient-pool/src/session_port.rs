@@ -7,6 +7,8 @@
 use gradient_types::ids::ProjectId;
 use gradient_wire::types::{ClusterAddress, ClusterPeer, ImportOutcome, InputOutcome};
 
+use crate::guest_channels::GuestChannelSignal;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionSignal {
     Offers(u64),
@@ -60,6 +62,7 @@ pub enum SessionSignal {
     PreWarmVms {
         count: u32,
     },
+    GuestChannel(GuestChannelSignal),
 }
 
 pub trait SessionPort: Send + Sync + 'static {
