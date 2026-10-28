@@ -1311,6 +1311,7 @@ mod tests {
             timeout_secs: None,
             input_overrides: vec![],
             input_update: None,
+            flake_dir: None,
         }
     }
 

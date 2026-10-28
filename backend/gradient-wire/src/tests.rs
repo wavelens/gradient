@@ -326,7 +326,31 @@ fn an_exec_output_upload_and_the_job_names_cross_the_wire() {
         from_bytes::<JobContext>(to_bytes(&context, newest).unwrap(), newest).unwrap(),
         context
     );
-    let older: JobContext =
-        from_bytes(to_bytes(&context, newest - 1).unwrap(), newest - 1).unwrap();
+    let older: JobContext = from_bytes(to_bytes(&context, 46).unwrap(), 46).unwrap();
     assert_eq!((older.parent_job, older.project_name.as_str()), (None, ""));
+}
+
+#[test]
+fn a_flake_job_carries_its_flake_directory() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::types::{FlakeJob, FlakeSource, FlakeStep};
+
+    let job = FlakeJob {
+        steps: vec![FlakeStep::FetchFlake],
+        source: FlakeSource::Repository {
+            url: "https://h/o/r".into(),
+            commit: "0".repeat(40),
+        },
+        wildcards: vec!["*".into()],
+        timeout_secs: None,
+        input_overrides: vec![],
+        input_update: None,
+        flake_dir: Some("nix".into()),
+    };
+    assert_eq!(
+        from_bytes::<FlakeJob>(to_bytes(&job, 48).unwrap(), 48).unwrap(),
+        job
+    );
+    let older: FlakeJob = from_bytes(to_bytes(&job, 47).unwrap(), 47).unwrap();
+    assert_eq!(older.flake_dir, None);
 }

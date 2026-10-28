@@ -78,6 +78,8 @@ pub struct FlakeJob {
     pub timeout_secs: Option<u64>,
     pub input_overrides: Vec<FlakeInputOverride>,
     pub input_update: Option<InputUpdateSpec>,
+    #[proto(48, default)]
+    pub flake_dir: Option<String>,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]

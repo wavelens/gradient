@@ -456,6 +456,7 @@ pub(crate) fn flake_job_for_eval_source(
             timeout_secs: None,
             input_overrides,
             input_update,
+            flake_dir: None,
         };
         let required = vec![RequiredPath {
             path: repository.to_owned(),
@@ -474,16 +475,18 @@ pub(crate) fn flake_job_for_eval_source(
             FlakeStep::EvaluateDerivations,
         ]
     };
+    let location = gradient_types::RepositoryLocation::of(repository);
     let job = FlakeJob {
         steps,
         source: FlakeSource::Repository {
-            url: repository.to_owned(),
+            url: location.clone_url.to_owned(),
             commit: commit_sha,
         },
         wildcards,
         timeout_secs: None,
         input_overrides,
         input_update,
+        flake_dir: location.flake_dir.map(str::to_owned),
     };
 
     (job, Vec::new())
@@ -563,6 +566,27 @@ mod eval_source_tests {
         assert!(matches!(job.source, FlakeSource::Repository { .. }));
         assert!(job.steps.contains(&FlakeStep::FetchFlake));
         assert!(required.is_empty());
+    }
+
+    #[test]
+    fn a_repository_with_a_dir_query_splits_into_url_and_flake_directory() {
+        let sha = "0".repeat(40);
+        let (job, _) = flake_job_for_eval_source(
+            "https://h/o/r?dir=nix",
+            sha.clone(),
+            vec!["*".into()],
+            false,
+            vec![],
+            None,
+        );
+        assert_eq!(
+            job.source,
+            FlakeSource::Repository {
+                url: "https://h/o/r".into(),
+                commit: sha,
+            }
+        );
+        assert_eq!(job.flake_dir.as_deref(), Some("nix"));
     }
 
     #[test]

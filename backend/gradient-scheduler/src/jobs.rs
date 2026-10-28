@@ -2109,6 +2109,7 @@ mod tests {
                 timeout_secs: None,
                 input_overrides: vec![],
                 input_update: None,
+                flake_dir: None,
             },
             required_paths: vec![],
             queued_at: gradient_types::now(),
@@ -2144,6 +2145,7 @@ mod tests {
                 timeout_secs: None,
                 input_overrides: vec![],
                 input_update: None,
+                flake_dir: None,
             },
             required_paths: vec![],
             queued_at: gradient_types::now(),
@@ -2500,6 +2502,7 @@ mod tests {
             timeout_secs: None,
             input_overrides: vec![],
             input_update: None,
+            flake_dir: None,
         }
     }
 
@@ -3330,6 +3333,18 @@ mod tests {
     }
 
     #[test]
+    fn a_cached_followup_keeps_the_flake_directory() {
+        let PendingJob::Eval(mut original) = fetch_eval_job(ProjectId::now_v7()) else {
+            unreachable!()
+        };
+        original.job.flake_dir = Some("nix/hosts".into());
+
+        let follow = original.cached_followup("/nix/store/abc-source".into());
+
+        assert_eq!(follow.job.flake_dir.as_deref(), Some("nix/hosts"));
+    }
+
+    #[test]
     fn cached_followup_rewrites_source_and_steps() {
         let peer = ProjectId::now_v7();
         let PendingJob::Eval(original) = fetch_eval_job(peer) else {
@@ -3390,6 +3405,7 @@ mod tests {
             timeout_secs: None,
             input_overrides: vec![],
             input_update: None,
+            flake_dir: None,
         };
         assert!(is_fetch_only(&fetch_only));
 

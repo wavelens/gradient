@@ -608,6 +608,7 @@ mod tests {
             timeout_secs: None,
             input_overrides: vec![],
             input_update: None,
+            flake_dir: None,
         }
     }
 
@@ -646,6 +647,7 @@ mod tests {
             timeout_secs: None,
             input_overrides: vec![],
             input_update: None,
+            flake_dir: None,
         };
         let credentials = crate::proto::credentials::CredentialStore::new();
         let mut reporter = RecordingJobReporter::new();
@@ -725,6 +727,7 @@ mod tests {
             timeout_secs: None,
             input_overrides: vec![],
             input_update: None,
+            flake_dir: None,
         };
 
         let credentials = crate::proto::credentials::CredentialStore::new();
