@@ -9,7 +9,9 @@
 # modes with log replay and JobLost from a restarted agent and the SSH gateway after a
 # resume: attach to the program terminal, a new shell, the task login, a forward to a
 # declared port and a refused forward, secrets from the project store, a repository sops file
-# and the worker sops files with masked output and a secret name in two sources. Not covered:
+# and the worker sops files with masked output and a secret name in two sources, a phase, an
+# uploaded output with a range download, the tree patch, the job token behind `gradient build`
+# and its revocation. Not covered:
 # the browser terminal and the serial console (no browser in the test), VFIO, USB/IP,
 # /dev relays, the nested kvm device, multi-node jobs, custom images. The CI host must offer
 # nested KVM (kvm_intel or kvm_amd with nested=1), since the workers boot guests in a VM.
@@ -24,8 +26,9 @@ GUEST_UNIT = re.compile(r"gradient-guest-[0-9a-f]{32}\.service")
 WORKERS = [stopper, keeper]
 NAMES = [
     "fetch", "silent", "abort", "long-stop", "fail", "long-keep", "lost", "interactive", "terminal",
-    "secrets", "clash",
+    "secrets", "clash", "outputs",
 ]
+OUTPUT_BYTES = 3000000
 SSH = "ssh -p 2222 -i /root/.ssh/gradient -o StrictHostKeyChecking=no -o BatchMode=yes"
 TERMINAL = {"completed", "failed", "aborted"}
 
@@ -80,6 +83,14 @@ def job(name):
 def job_log(name, attempt=None):
     query = f"?attempt={attempt}" if attempt else ""
     return api("GET", f"exec-jobs/{JOBS[name]}/log{query}")
+
+
+def download(path, target, extra=""):
+    status = server.succeed(
+        f"curl -sS -o {target} -D {target}.headers -w '%{{http_code}}' {extra} "
+        f"-H 'Authorization: Bearer {token}' {API}/{path}"
+    )
+    return status.strip(), server.succeed(f"cat {target}.headers")
 
 
 def end_reasons(state):
@@ -196,7 +207,8 @@ server.succeed("cp /var/lib/git/flake.nix /var/lib/git/flake.lock /var/lib/git/a
 server.succeed("install -D -m 0644 /var/lib/git/train.yaml /var/lib/git/test/secrets/train.yaml")
 server.succeed("chmod u+w /var/lib/git/test/*")
 server.succeed(f"sed -i 's#\\[hash\\]#{NIXPKGS_HASH}#g' /var/lib/git/test/flake.lock")
-server.succeed(f"{GIT} -C /var/lib/git/test add flake.nix flake.lock apps.nix secrets/train.yaml")
+server.succeed("echo 'exec test repository' > /var/lib/git/test/README")
+server.succeed(f"{GIT} -C /var/lib/git/test add flake.nix flake.lock apps.nix secrets/train.yaml README")
 server.succeed(f"{GIT} -C /var/lib/git/test commit -m 'exec apps'")
 server.succeed("chown -R git:git /var/lib/git/test")
 
@@ -229,6 +241,30 @@ assert end_reasons(fetched) == ["completed"], json.dumps(fetched)
 output = job_log("fetch")
 assert "served to the guest" in output, f"fetch did not reach the server:\n{output}"
 assert f"job={JOBS['fetch']} attempt=1" in output, f"fetch saw no job context:\n{output}"
+
+banner("Phase 7b: a job reports a phase, uploads outputs and builds with its job token")
+produced = wait_status("outputs", "completed")
+assert end_reasons(produced) == ["completed"], json.dumps(produced)
+assert [phase["name"] for phase in produced["phases"]] == ["epoch-1"], json.dumps(produced)
+assert len(produced["tokens"]) == 1 and produced["tokens"][0]["revoked"], json.dumps(produced)
+assert "GRJ_" not in json.dumps(produced), "the job page shows a token value"
+assert len(produced["started_evaluations"]) == 1, json.dumps(produced)
+assert "::gradient-phase:: epoch-1" in job_log("outputs"), job_log("outputs")
+
+outputs = {entry["path"]: entry for entry in api("GET", f"exec-jobs/{JOBS['outputs']}/outputs")}
+assert outputs.keys() == {"model/w.bin", "gradient/tree.patch"}, json.dumps(outputs)
+assert outputs["model/w.bin"]["size"] == OUTPUT_BYTES, json.dumps(outputs)
+
+status, headers = download(f"exec-jobs/{JOBS['outputs']}/outputs/model/w.bin", "/tmp/w.part", "-H 'Range: bytes=0-9'")
+assert status == "206", f"range download answered {status}:\n{headers}"
+assert f"bytes 0-9/{OUTPUT_BYTES}" in headers, headers
+assert server.succeed("stat -c %s /tmp/w.part").strip() == "10"
+
+status, headers = download(f"exec-jobs/{JOBS['outputs']}/outputs/gradient/tree.patch", "/tmp/tree.patch")
+assert status == "200", f"tree patch download answered {status}:\n{headers}"
+patch = server.succeed("cat /tmp/tree.patch")
+assert "+++ b/README" in patch and "+++ b/new.txt" in patch, patch
+assert "w.bin" not in patch, patch
 
 banner("Phase 8: a silent program times out")
 silent = wait_status("silent", "failed")
