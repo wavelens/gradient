@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use gradient_redact::SecretRedactor;
+use gradient_types::RepositoryLocation;
 use gradient_types::secret::SecretString;
 use gradient_vm::{
     DeviceHold, GUEST_BOOT_TIMEOUT, Guest, MountConfig, PlugPlan, PluggedDevices, WORK_MOUNT_TAG,
@@ -593,6 +594,7 @@ impl ExecRun<'_> {
         guest
             .record_job(&self.stored_job(false))
             .map_err(BuildError::transient)?;
+        let flake_dir = flake_dir_of(&self.job.context.repository)?;
         let work = guest.dir().join("work");
         std::fs::create_dir_all(&work)
             .with_context(|| format!("create {}", work.display()))
@@ -616,7 +618,7 @@ impl ExecRun<'_> {
             network: network.clone(),
         };
         let plugged = guest.plug(&plan).await.map_err(BuildError::transient)?;
-        let run_job = self.run_job(&plugged, &mounts, network);
+        let run_job = self.run_job(&plugged, &mounts, network, flake_dir);
 
         let ready = wait_ready(&guest.vsock_socket(), GUEST_BOOT_TIMEOUT)
             .await
@@ -678,6 +680,7 @@ impl ExecRun<'_> {
         plugged: &PluggedDevices,
         mounts: &[(MountConfig, PathBuf)],
         network: Option<GuestNetwork>,
+        flake_dir: String,
     ) -> RunJob {
         let names: Vec<String> = mounts.iter().map(|(mount, _)| mount.name.clone()).collect();
         let context = context_layers(
@@ -708,6 +711,7 @@ impl ExecRun<'_> {
             relays: plugged.relays.clone(),
             usb_bus_ids: plugged.usb_bus_ids.clone(),
             program_pty: self.job.requirement.ssh,
+            flake_dir,
         }
     }
 
@@ -738,6 +742,11 @@ fn guest_mounts(mounts: &[(MountConfig, PathBuf)]) -> Vec<GuestMount> {
         read_only: mount.read_only,
     });
     std::iter::once(work).chain(configured).collect()
+}
+
+fn flake_dir_of(repository: &str) -> Result<String, BuildError> {
+    let location = RepositoryLocation::check(repository).map_err(BuildError::permanent)?;
+    Ok(location.flake_dir.unwrap_or_default().to_owned())
 }
 
 fn program_store_path(program: &str) -> Result<&str, BuildError> {
@@ -1237,6 +1246,17 @@ mod tests {
         .await;
 
         assert_eq!(reported, [Reported::Phase("small".into())]);
+    }
+
+    #[test]
+    fn the_flake_directory_comes_from_the_repository_url() {
+        assert_eq!(flake_dir_of("https://h/o/r?dir=nix").unwrap(), "nix");
+        assert_eq!(flake_dir_of("https://h/o/r").unwrap(), "");
+        let escaping = flake_dir_of("https://h/o/r?dir=../x").unwrap_err();
+        assert_eq!(
+            escaping.kind,
+            gradient_wire::types::BuildFailureKind::Permanent
+        );
     }
 
     #[test]
