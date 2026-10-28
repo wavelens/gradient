@@ -23,6 +23,22 @@ pub struct ShellContext {
     pub groups: Vec<String>,
 }
 
+impl ShellContext {
+    pub fn of(program: &Command, groups: &[String]) -> Self {
+        let env = program
+            .as_std()
+            .get_envs()
+            .filter_map(|(name, value)| {
+                Some((name.to_str()?.to_owned(), value?.to_str()?.to_owned()))
+            })
+            .collect();
+        Self {
+            env,
+            groups: groups.to_vec(),
+        }
+    }
+}
+
 pub struct Shell {
     pub child: Child,
     pub input: Box<dyn AsyncWrite + Send + Unpin>,

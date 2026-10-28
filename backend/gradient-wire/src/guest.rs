@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
 
 use anyhow::{Context, Result, anyhow};
+use bytes::Bytes;
+use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, Stream, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
@@ -225,6 +227,49 @@ impl<S: AsyncRead + AsyncWrite + Unpin> GuestConnection<S> {
     pub fn incoming<T: Proto>(&mut self) -> impl Stream<Item = Result<T>> + Unpin + '_ {
         let version = self.version;
         (&mut self.frames).map(move |frame| Ok(from_bytes(frame?.freeze(), version)?))
+    }
+
+    pub fn split(self) -> (GuestSender<S>, GuestReceiver<S>) {
+        let (sink, stream) = self.frames.split();
+        let version = self.version;
+        (
+            GuestSender {
+                frames: sink,
+                version,
+            },
+            GuestReceiver {
+                frames: stream,
+                version,
+            },
+        )
+    }
+}
+
+pub struct GuestSender<S> {
+    frames: SplitSink<Framed<S, LengthDelimitedCodec>, Bytes>,
+    version: u16,
+}
+
+impl<S: AsyncRead + AsyncWrite + Unpin> GuestSender<S> {
+    pub async fn send<T: Proto>(&mut self, msg: &T) -> Result<()> {
+        let bytes = to_bytes(msg, self.version)?;
+        self.frames.send(bytes).await?;
+        Ok(())
+    }
+}
+
+pub struct GuestReceiver<S> {
+    frames: SplitStream<Framed<S, LengthDelimitedCodec>>,
+    version: u16,
+}
+
+impl<S: AsyncRead + AsyncWrite + Unpin> GuestReceiver<S> {
+    pub async fn recv<T: Proto>(&mut self) -> Result<Option<T>> {
+        let version = self.version;
+        match self.frames.next().await {
+            Some(frame) => Ok(Some(from_bytes(frame?.freeze(), version)?)),
+            None => Ok(None),
+        }
     }
 }
 
