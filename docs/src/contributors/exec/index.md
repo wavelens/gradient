@@ -208,6 +208,29 @@ Reattach can sort guest units and state files into four groups.
 - Agents replay output from the byte count in `job-logs/<key>.accepted`.
 - Busy guests without a sent job never resume. The server can count a lost attempt.
 
+### Custom Images
+
+Jobs with `passthru.gradient.image` boot a NixOS toplevel of their own. Placement can pick only workers with `ExecAllow.custom_images` (`exec.allow.customImages`).
+
+1. `guest_source` in `gradient-worker/src/exec/job.rs` can return `Warm` or `Custom(<toplevel>)`. Workers without custom images fail the job with `custom images are not allowed on this worker`.
+2. `ensure_path` can realise the toplevel. A GC root can keep the toplevel alive until teardown.
+3. `image_from_toplevel` in `gradient-vm/src/custom_image.rs` can build the boot description. Toplevels without `kernel` or `initrd` fail with `image <path> is not a NixOS system: no <file>`.
+4. `GuestPool::boot_custom` can take a CID from `next_cid` for `Guest::boot`. Warm guests, the warm target and `PreWarmVms` stay untouched.
+5. Checkout, plug, `RunJob`, follow and teardown match a warm guest job. Custom guests never go back to the pool.
+
+| `vm.create` field | Value |
+|---|---|
+| `payload.kernel` | Canonical `<toplevel>/kernel`, a bzImage on x86_64 or an `Image` on aarch64 |
+| `payload.initramfs` | Canonical `<toplevel>/initrd` |
+| `payload.cmdline` | `init=<toplevel>/init` and the trimmed `<toplevel>/kernel-params` |
+| `cpus`, `memory.size` | From `guest.json` of the worker image |
+| `memory.shared`, `fs`, `vsock`, `serial`, `console` | Same as a warm guest |
+
+- A boot wait can take up to `GUEST_BOOT_TIMEOUT` (120 s). Toplevels with no `etc/systemd/system/gradient-guest-agent.service` then fail with `guest image has no gradient agent, import the gradient.guest module`.
+- `attempt_end_reason` can move `GuestBoot` to `Failed` when a job has an image.
+- These attempts consume one retry. Warm guest boot failures stay `Lost`.
+- `nixosModules.guest` can build the `guest.json` cmdline by the same rule as `payload.cmdline`.
+
 ## Guest Agent
 
 The agent `gradient-guest-agent` can accept the worker on vsock port 7000. Frames use the codec of `gradient-wire`, versions agree on `GUEST_PROTO_VERSIONS`.
@@ -237,7 +260,7 @@ The agent `gradient-guest-agent` can accept the worker on vsock port 7000. Frame
 4. Mount the virtiofs shares.
 5. Configure the network and `/etc/resolv.conf`.
 6. Start the device bridges over vsock and attach USB devices.
-7. Execute `/etc/gradient/pre-script` as root. Start the program as `gradient` in `/work`. Then run `/etc/gradient/post-script` as root.
+7. Execute `/etc/gradient/pre-script` as root. Start the program as `gradient` in `/work/<RunJob.flake_dir>`. Then run `/etc/gradient/post-script` as root.
 8. Upload the diff of `/work` against the start commit as `gradient/tree.patch`. Untracked files count too. An empty diff triggers no upload.
 
 - `GRADIENT_*` variables win over app `env` of the same name.

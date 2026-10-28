@@ -40,10 +40,14 @@ flowchart LR
 | SSH URL with port | `ssh://git@git.example.com:2222/org/repo.git` |
 | SCP-like SSH | `git@git.example.com:org/repo.git` |
 | HTTPS | `https://git.example.com/org/repo.git` |
+| Flake directory | `https://git.example.com/org/repo.git?dir=nix/hosts` |
 
 - **SSH Key**: Both SSH forms use the project SSH key for authentication. Add that key as a deploy key on the Git host.
 - **Port**: A port number alone can follow the host in an `ssh://` URL. A path directly after `host:` can appear in the SCP-like form alone, without `ssh://`.
-- **Local Files**: `file://` URLs have no support.
+- **Local Files**: `file://` URLs don't work.
+- **Flake Directory**: Use `?dir=<rel-dir>` on any URL form to target the flake in that directory. The path can't leave the repository. Other query keys don't work.
+- **Checkout**: Workers check out the full repository. Polling, webhooks and pull requests skip the query in the URL. Flake lock pull requests commit `<rel-dir>/flake.lock`.
+- **Worker Version**: Older worker releases evaluate the repository root. Upgrade the workers first. A task can use `?dir=` after the upgrade.
 
 ## Default Trigger
 
