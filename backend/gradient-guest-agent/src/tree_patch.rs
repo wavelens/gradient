@@ -118,6 +118,7 @@ mod tests {
             for (name, _) in files {
                 index.add_path(Path::new(name)).unwrap();
             }
+            index.write().unwrap();
             let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
             let signature = Signature::now("gradient", "gradient@example.com").unwrap();
             repo.commit(Some("HEAD"), &signature, &signature, "start", &tree, &[])
