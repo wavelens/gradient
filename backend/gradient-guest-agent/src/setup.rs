@@ -35,6 +35,7 @@ const INTERFACE_WAIT: Duration = Duration::from_secs(10);
 pub struct PreparedJob {
     pub program: Command,
     pub env: BTreeMap<String, String>,
+    pub terminal: bool,
 }
 
 pub async fn prepare(job: &RunJob, tasks: &Shutdown) -> Result<PreparedJob, String> {
@@ -55,7 +56,11 @@ async fn prepare_steps(job: &RunJob, tasks: &Shutdown) -> Result<PreparedJob> {
     }
     start_relays(&job.relays, tasks).await?;
     attach_usb(&job.usb_bus_ids).await?;
-    Ok(PreparedJob { program, env })
+    Ok(PreparedJob {
+        program,
+        env,
+        terminal: job.program_pty,
+    })
 }
 
 fn job_env(job: &RunJob) -> BTreeMap<String, String> {

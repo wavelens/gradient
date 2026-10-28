@@ -23,6 +23,7 @@ use crate::output::{OutputChunk, OutputLog, OutputReader, OutputReaders};
 use crate::run::run;
 use crate::setup::{PreparedJob, prepare};
 use crate::shell::ShellContext;
+use crate::terminal::ProgramTerminal;
 
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 const SETUP_TIMEOUT: Duration = Duration::from_secs(300);
@@ -62,6 +63,17 @@ impl Agent {
             .shell
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(context);
+    }
+
+    fn keep_program_terminal(&self, terminal: ProgramTerminal) {
+        if let Some(context) = self
+            .shell
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_mut()
+        {
+            context.program = Some(terminal);
+        }
     }
 }
 
@@ -193,7 +205,10 @@ fn start_job(agent: &Arc<Agent>, job: Box<RunJob>) -> Option<AgentToWorker> {
                 agent.keep_shell_context(ShellContext::of(&prepared.program, &job.groups));
                 let (started, started_rx) = oneshot::channel();
                 let mark_started = async {
-                    if started_rx.await.is_ok() {
+                    if let Ok(terminal) = started_rx.await {
+                        if let Some(terminal) = terminal {
+                            agent.keep_program_terminal(terminal);
+                        }
                         agent.progress.send_modify(|p| p.started = true);
                     }
                 };

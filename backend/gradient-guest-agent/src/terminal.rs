@@ -12,6 +12,9 @@ use std::sync::Arc;
 use rustix::termios::{Winsize, tcsetwinsize};
 use tokio::fs::File;
 use tokio::process::{Child, Command};
+use tokio::sync::watch;
+
+use crate::output::{OutputReader, OutputReaders};
 
 pub const TERMINAL_TYPE: &str = "xterm-256color";
 pub const DEFAULT_COLS: u16 = 80;
@@ -22,6 +25,11 @@ pub struct PtyMaster {
 }
 
 impl PtyMaster {
+    pub fn open() -> io::Result<(Arc<Self>, OwnedFd)> {
+        let pty = nix::pty::openpty(None, None)?;
+        Ok((Arc::new(Self { fd: pty.master }), pty.slave))
+    }
+
     pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
         let size = Winsize {
             ws_row: rows,
@@ -43,13 +51,45 @@ pub fn spawn_on_pty(
     cols: u16,
     rows: u16,
 ) -> io::Result<(Child, Arc<PtyMaster>)> {
-    let pty = nix::pty::openpty(None, None)?;
-    let master = Arc::new(PtyMaster { fd: pty.master });
+    let (master, slave) = PtyMaster::open()?;
     master.resize(cols, rows)?;
     command
-        .stdin(Stdio::from(pty.slave.try_clone()?))
-        .stdout(Stdio::from(pty.slave.try_clone()?))
-        .stderr(Stdio::from(pty.slave));
+        .stdin(Stdio::from(slave.try_clone()?))
+        .stdout(Stdio::from(slave.try_clone()?))
+        .stderr(Stdio::from(slave));
     let child = command.spawn()?;
     Ok((child, master))
+}
+
+#[derive(Clone)]
+pub struct ProgramTerminal {
+    master: Arc<PtyMaster>,
+    output: OutputReaders,
+    exit: watch::Receiver<Option<i32>>,
+}
+
+impl ProgramTerminal {
+    pub fn new(
+        master: Arc<PtyMaster>,
+        output: OutputReaders,
+        exit: watch::Receiver<Option<i32>>,
+    ) -> Self {
+        Self {
+            master,
+            output,
+            exit,
+        }
+    }
+
+    pub fn master(&self) -> Arc<PtyMaster> {
+        Arc::clone(&self.master)
+    }
+
+    pub fn follow(&self) -> OutputReader {
+        self.output.reader_from(self.output.written())
+    }
+
+    pub fn exit_code(&self) -> Option<i32> {
+        *self.exit.borrow()
+    }
 }

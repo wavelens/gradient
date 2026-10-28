@@ -126,6 +126,10 @@ impl OutputLog {
 }
 
 impl OutputReaders {
+    pub fn written(&self) -> u64 {
+        self.appended.borrow().bytes
+    }
+
     pub fn reader_from(&self, offset: u64) -> OutputReader {
         OutputReader {
             path: self.path.clone(),
