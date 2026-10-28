@@ -9,19 +9,23 @@ mod context;
 mod http;
 mod listener;
 mod output;
+mod phase;
 mod redaction;
 mod run;
 mod setup;
 mod shell;
 mod terminal;
+mod upload;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use gradient_util::shutdown::Shutdown;
 
+use http::HttpState;
 use output::OutputLog;
 
 const OUTPUT_FILE: &str = "/run/gradient/output.log";
@@ -45,11 +49,11 @@ async fn main() -> Result<ExitCode> {
     match Cli::parse().command {
         None => serve().await.map(|()| ExitCode::SUCCESS),
         Some(Command::Phase { name, file }) => {
-            post("/phase", &[("name", &name)], file.as_deref()).await
+            post(&http::phase_route(&name), file.as_deref()).await
         }
         Some(Command::Upload { file, path }) => {
             let path = path.unwrap_or_else(|| file_name(&file));
-            post("/upload", &[("path", &path)], Some(&file)).await
+            post(&http::output_route(&path), Some(&file)).await
         }
     }
 }
@@ -60,13 +64,18 @@ async fn serve() -> Result<()> {
         .init();
     let restarted = tokio::fs::try_exists(OUTPUT_FILE).await?;
     let output = OutputLog::create(Path::new(OUTPUT_FILE), OUTPUT_KEPT).await?;
+    let readers = output.readers();
+    let state = Arc::new(HttpState::new(output));
     let tasks = Shutdown::new();
-    tokio::try_join!(listener::listen(output, tasks, restarted), http::serve())?;
+    tokio::try_join!(
+        listener::listen(Arc::clone(&state), readers, tasks, restarted),
+        http::serve(state)
+    )?;
     Ok(())
 }
 
-async fn post(route: &str, query: &[(&str, &str)], file: Option<&Path>) -> Result<ExitCode> {
-    let answer = http::post_file(route, query, file).await?;
+async fn post(route: &str, file: Option<&Path>) -> Result<ExitCode> {
+    let answer = http::post_file(route, file).await?;
     if answer.ok {
         return Ok(ExitCode::SUCCESS);
     }
