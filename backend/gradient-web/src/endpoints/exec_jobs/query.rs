@@ -12,7 +12,9 @@ use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::exec_jobs::outputs;
-use gradient_db::exec_jobs::reads::{self, ExecJobDetail, ExecJobRow, StartedEvaluation};
+use gradient_db::exec_jobs::reads::{
+    self, ExecJobDetail, ExecJobRow, ExecNodeDetail, StartedEvaluation,
+};
 use gradient_db::exec_jobs::tokens::JobTokenRow;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
@@ -34,6 +36,17 @@ pub struct ExecJobAttemptView {
     pub ended_at: Option<NaiveDateTime>,
     pub end_reason: Option<AttemptEndReason>,
     pub message: Option<String>,
+}
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct ExecJobNode {
+    pub node: u32,
+    pub id: ExecJobId,
+    pub status: ExecJobStatus,
+    pub worker: Option<String>,
+    pub guest_address: Option<String>,
+    pub master_port: Option<u16>,
+    pub attempts: Vec<ExecJobAttemptView>,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -78,6 +91,7 @@ pub struct ExecJobResponse {
     pub finished_at: Option<NaiveDateTime>,
     pub worker: Option<String>,
     pub attempts: Vec<ExecJobAttemptView>,
+    pub node_jobs: Vec<ExecJobNode>,
     pub phases: Vec<ExecJobPhaseView>,
     pub tokens: Vec<ExecJobTokenView>,
     pub started_evaluations: Vec<StartedEvaluationView>,
@@ -127,6 +141,40 @@ fn ssh_access(
     }
 }
 
+fn attempt_view(attempt: &MExecJobAttempt) -> ExecJobAttemptView {
+    ExecJobAttemptView {
+        number: attempt.number,
+        worker: attempt.worker.clone(),
+        started_at: attempt.started_at,
+        ended_at: attempt.ended_at,
+        end_reason: attempt.end_reason,
+        message: attempt.message.clone(),
+    }
+}
+
+fn placed_attempt(job: &MExecJob, attempts: &[MExecJobAttempt]) -> Option<MExecJobAttempt> {
+    attempts
+        .last()
+        .filter(|_| !matches!(job.status, ExecJobStatus::Created | ExecJobStatus::Queued))
+        .cloned()
+}
+
+fn node_view(node: &ExecNodeDetail) -> ExecJobNode {
+    let placed = placed_attempt(&node.job, &node.attempts);
+    ExecJobNode {
+        node: u32::try_from(node.job.node_index).unwrap_or_default(),
+        id: node.job.id,
+        status: node.job.status,
+        worker: placed.as_ref().map(|a| a.worker.clone()),
+        guest_address: placed.as_ref().and_then(|a| a.guest_address.clone()),
+        master_port: placed
+            .as_ref()
+            .and_then(|a| a.master_port)
+            .and_then(|port| u16::try_from(port).ok()),
+        attempts: node.attempts.iter().map(attempt_view).collect(),
+    }
+}
+
 fn token_view(row: JobTokenRow) -> ExecJobTokenView {
     ExecJobTokenView {
         attempt: row.attempt_number,
@@ -152,15 +200,18 @@ fn response(
 ) -> ExecJobResponse {
     let ExecJobDetail {
         job,
+        status,
         entry_point,
         attempts,
         phases,
         tokens,
         started_evaluations,
+        nodes,
         ..
     } = ctx.detail;
     let spec = spec_of(&job);
     let (ssh_command, forward_commands) = ssh_access(config, &ctx.project.name, job.id, &spec);
+    let worker = placed_attempt(&job, &attempts).map(|a| a.worker);
     let number_of = |attempt: ExecJobAttemptId| {
         attempts
             .iter()
@@ -177,7 +228,7 @@ fn response(
         .collect();
     ExecJobResponse {
         id: job.id,
-        status: job.status,
+        status,
         entry_point,
         evaluation: job.evaluation,
         task: ctx.task.name,
@@ -191,21 +242,9 @@ fn response(
         created_at: job.created_at,
         started_at: job.started_at,
         finished_at: job.finished_at,
-        worker: attempts
-            .last()
-            .filter(|_| !matches!(job.status, ExecJobStatus::Created | ExecJobStatus::Queued))
-            .map(|a| a.worker.clone()),
-        attempts: attempts
-            .into_iter()
-            .map(|a| ExecJobAttemptView {
-                number: a.number,
-                worker: a.worker,
-                started_at: a.started_at,
-                ended_at: a.ended_at,
-                end_reason: a.end_reason,
-                message: a.message,
-            })
-            .collect(),
+        worker,
+        attempts: attempts.iter().map(attempt_view).collect(),
+        node_jobs: nodes.iter().map(node_view).collect(),
         phases,
         tokens: tokens.into_iter().map(token_view).collect(),
         started_evaluations: started_evaluations
@@ -223,7 +262,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
     ExecJobSummary {
         id: row.job.id,
         entry_point: row.entry_point,
-        status: row.job.status,
+        status: row.status,
         waiting_reason: waiting_reason_of(&row.job),
         message: row.job.message,
         nodes: spec.nodes,
@@ -240,7 +279,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
     operation_id = "getExecJob",
     tag = "exec-jobs",
     summary = "Get exec job",
-    description = "Returns an exec job with its status, wait reason, requested labels and devices, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns an exec job with its status, wait reason, requested labels and devices, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Exec job", body = ExecJobResponse), WebError)
 )]
@@ -251,7 +290,7 @@ pub async fn get_exec_job(
     Path(job): Path<ExecJobId>,
 ) -> WebResult<Json<BaseResponse<ExecJobResponse>>> {
     let ctx = ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
-    let outputs_size = outputs::of_job(&state.web_db, job)
+    let outputs_size = outputs::of_job(&state.web_db, ctx.detail.job.id)
         .await?
         .iter()
         .map(|output| output.size)
@@ -265,7 +304,7 @@ pub async fn get_exec_job(
     operation_id = "listEvaluationExecJobs",
     tag = "exec-jobs",
     summary = "List exec jobs of an evaluation",
-    description = "Returns every exec job of the evaluation, ordered by entry point, with its status, wait reason and last phase.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns every exec job of the evaluation, ordered by entry point, with its status, wait reason and last phase. A multi-node job is listed once, under node 0's id, with the status of all its nodes.\n\n**Access:** Public projects, or members of the project.",
     params(("evaluation" = EvaluationId, Path)),
     responses((status = OK, description = "Exec jobs", body = Vec<ExecJobSummary>), WebError)
 )]

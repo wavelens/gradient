@@ -22,6 +22,7 @@ use super::ExecJobAccessContext;
 #[into_params(parameter_in = Query)]
 pub struct ExecJobLogQuery {
     pub attempt: Option<i32>,
+    pub node: Option<u32>,
 }
 
 #[utoipa::path(
@@ -30,7 +31,7 @@ pub struct ExecJobLogQuery {
     operation_id = "getExecJobLog",
     tag = "exec-jobs",
     summary = "Get exec job log",
-    description = "Returns the program output of one attempt as a single string, the latest attempt unless `attempt` names its number. Empty string before the first attempt. Answers 404 for an attempt number the job does not have.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns the program output of one attempt as a single string, the latest attempt unless `attempt` names its number. `node` picks the node of a multi-node job by its index, node 0 by default. Empty string before the first attempt. Answers 404 for an attempt number the node does not have and for a node index the job does not have.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path), ExecJobLogQuery),
     responses((status = OK, description = "Exec job log", body = String, content_type = "application/json"), WebError)
 )]
@@ -42,7 +43,7 @@ pub async fn get_exec_job_log(
     Query(query): Query<ExecJobLogQuery>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let ctx = ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
-    let attempts = &ctx.detail.attempts;
+    let attempts = &ctx.node(query.node)?.attempts;
     let attempt = match query.attempt {
         Some(number) => Some(
             attempts

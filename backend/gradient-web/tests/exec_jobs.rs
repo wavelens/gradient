@@ -202,6 +202,99 @@ async fn an_outsider_cannot_open_a_console() {
     assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
 }
 
+fn node_id(node: i16) -> ExecJobId {
+    ExecJobId::new(Uuid::from_u128(0x7a + node as u128))
+}
+
+fn node_row(node: i16) -> exec_job::Model {
+    exec_job::Model {
+        id: node_id(node),
+        node_index: node,
+        waiting_reason: None,
+        ..job(ExecJobStatus::Running)
+    }
+}
+
+fn node_attempt(node: i16, worker: &str, address: &str) -> exec_job_attempt::Model {
+    exec_job_attempt::Model {
+        id: ExecJobAttemptId::new(Uuid::from_u128(0xa1 + node as u128)),
+        exec_job: node_id(node),
+        worker: worker.into(),
+        ended_at: None,
+        end_reason: None,
+        master_port: Some(29500),
+        guest_address: Some(address.into()),
+        ..lost_attempt()
+    }
+}
+
+fn with_two_nodes(db: MockDatabase) -> MockDatabase {
+    db.append_query_results([vec![node_row(0), node_row(1)]])
+        .append_query_results([vec![entry_point::Model {
+            eval: "apps.x86_64-linux.pair".into(),
+            ..Default::default()
+        }]])
+        .append_query_results([vec![eval_at(evaluation_id(), 0)]])
+        .append_query_results([vec![task()]])
+        .append_query_results([vec![
+            node_attempt(0, "w1", "10.233.0.2"),
+            node_attempt(1, "w2", "10.234.0.2"),
+        ]])
+        .append_query_results([Vec::<exec_job_phase::Model>::new()])
+        .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()])
+        .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()])
+        .append_query_results([vec![task()]])
+        .append_query_results([vec![public_project()]])
+}
+
+#[tokio::test]
+async fn a_two_node_job_lists_both_nodes() {
+    let db = with_two_nodes(mock_db()).append_query_results([Vec::<exec_job_output::Model>::new()]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec-jobs/{}", node_id(0)))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    let nodes = body["message"]["node_jobs"]
+        .as_array()
+        .expect("node_jobs")
+        .clone();
+    let view = |key: &str| nodes.iter().map(|n| n[key].clone()).collect::<Vec<_>>();
+    assert_eq!(view("node"), vec![0, 1]);
+    assert_eq!(view("worker"), vec!["w1", "w2"]);
+    assert_eq!(view("guest_address"), vec!["10.233.0.2", "10.234.0.2"]);
+    assert_eq!(view("master_port"), vec![29500, 29500]);
+    assert_eq!(nodes[1]["attempts"][0]["number"], 1);
+}
+
+#[tokio::test]
+async fn a_node_row_id_answers_the_same_job() {
+    let db = with_two_nodes(mock_db()).append_query_results([Vec::<exec_job_output::Model>::new()]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec-jobs/{}", node_id(1)))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"]["id"], node_id(0).to_string());
+}
+
+#[tokio::test]
+async fn the_log_of_an_unknown_node_is_404() {
+    let db = with_two_nodes(mock_db());
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec-jobs/{}/log?node=2", node_id(0)))
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+    let body: Value = res.json();
+    assert_eq!(body["message"], "no node 2 in this job");
+}
+
 #[tokio::test]
 async fn get_worker_answers_404_for_an_unknown_worker() {
     let (db, auth) = signed_in_as(superuser());

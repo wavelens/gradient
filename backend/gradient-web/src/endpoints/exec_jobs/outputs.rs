@@ -12,7 +12,7 @@ use crate::helpers::ok_json;
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::body::{Body, Bytes};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Response;
 use axum::{Extension, Json};
@@ -22,7 +22,7 @@ use gradient_core::ServerState;
 use gradient_db::exec_jobs::outputs;
 use gradient_storage::NarStore;
 use gradient_types::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use super::ExecJobAccessContext;
@@ -46,6 +46,12 @@ impl From<MExecJobOutput> for ExecJobOutputView {
             updated_at: row.updated_at,
         }
     }
+}
+
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ExecJobNodeQuery {
+    pub node: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,8 +171,8 @@ async fn output_body(
     operation_id = "listExecJobOutputs",
     tag = "exec-jobs",
     summary = "List exec job outputs",
-    description = "Returns every output the job uploaded, ordered by path, with its current size. An output written again by a later upload shows its new size and `updated_at`.\n\n**Access:** Public projects, or members of the project.",
-    params(("job" = ExecJobId, Path)),
+    description = "Returns every output the job uploaded, ordered by path, with its current size. An output written again by a later upload shows its new size and `updated_at`. `node` picks the node of a multi-node job by its index, node 0 by default; an unknown index answers 404.\n\n**Access:** Public projects, or members of the project.",
+    params(("job" = ExecJobId, Path), ExecJobNodeQuery),
     responses((status = OK, description = "Exec job outputs", body = Vec<ExecJobOutputView>), WebError)
 )]
 pub async fn list_exec_job_outputs(
@@ -174,9 +180,11 @@ pub async fn list_exec_job_outputs(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(job): Path<ExecJobId>,
+    Query(query): Query<ExecJobNodeQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<ExecJobOutputView>>>> {
-    ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
-    let rows = outputs::of_job(&state.web_db, job).await?;
+    let ctx = ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
+    let node = ctx.node(query.node)?.job.id;
+    let rows = outputs::of_job(&state.web_db, node).await?;
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
@@ -186,8 +194,8 @@ pub async fn list_exec_job_outputs(
     operation_id = "getExecJobOutput",
     tag = "exec-jobs",
     summary = "Download an exec job output",
-    description = "Streams one output as an attachment. A single `Range: bytes=<start>-[<end>]` answers 206 with that part, a start at or past the size answers 416 and several ranges answer the whole output.\n\n**Access:** Public projects, or members of the project.",
-    params(("job" = ExecJobId, Path), ("path" = String, Path)),
+    description = "Streams one output as an attachment. A single `Range: bytes=<start>-[<end>]` answers 206 with that part, a start at or past the size answers 416 and several ranges answer the whole output. `node` picks the node of a multi-node job by its index, node 0 by default.\n\n**Access:** Public projects, or members of the project.",
+    params(("job" = ExecJobId, Path), ("path" = String, Path), ExecJobNodeQuery),
     responses(
         (status = OK, description = "Output contents", body = Binary, content_type = "application/octet-stream"),
         (status = PARTIAL_CONTENT, description = "Requested part of the output", body = Binary, content_type = "application/octet-stream"),
@@ -200,9 +208,11 @@ pub async fn get_exec_job_output(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path((job, path)): Path<(ExecJobId, String)>,
+    Query(query): Query<ExecJobNodeQuery>,
     headers: HeaderMap,
 ) -> WebResult<Response> {
-    ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
+    let ctx = ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
+    let job = ctx.node(query.node)?.job.id;
     let row = outputs::one(&state.web_db, job, &path)
         .await?
         .ok_or_else(|| WebError::not_found(Resource::ExecOutput))?;
