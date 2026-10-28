@@ -271,7 +271,7 @@ pub enum ClientMessage {
         message: Option<String>,
     },
 
-    #[proto(45)]
+    #[proto(46)]
     VmState {
         vm: String,
         state: VmStateKind,
