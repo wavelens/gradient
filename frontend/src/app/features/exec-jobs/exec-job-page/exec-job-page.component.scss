@@ -18,7 +18,9 @@ h3 { margin: $space-section 0 $spacing-sm; font-size: $font-size-md; }
   .needs { display: inline-flex; flex-wrap: wrap; gap: $spacing-xs; }
 }
 
-gr-table.attempts, gr-table.tokens { display: block; overflow-x: auto; }
+gr-table.attempts, gr-table.tokens, gr-table.nodes { display: block; overflow-x: auto; }
+
+.node-picker { display: block; max-width: 16rem; margin-top: $spacing-sm; }
 
 .links {
   display: flex;

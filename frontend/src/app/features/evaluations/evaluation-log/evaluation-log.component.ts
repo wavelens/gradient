@@ -1676,7 +1676,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       }
       case 'exec_workers': {
         const missing = unmetParts(reason.unmet);
-        if (missing.length > 0) return `No connected worker offers ${missing.join(', ')}.`;
+        if (missing.length > 0) return `The exec job needs ${missing.join(', ')}.`;
         const workerWord = reason.matching_workers === 1 ? 'worker' : 'workers';
         return reason.matching_workers > 0
           ? `Waiting for free devices on ${reason.matching_workers} ${workerWord}.`

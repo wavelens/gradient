@@ -73,6 +73,16 @@ describe('waitingReasonText', () => {
     expect(waitingReasonText(reason)).toBe('needs a worker that allows custom images');
   });
 
+  it('a nodes wait reason names the worker count', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: { labels: [], devices: [], mounts: [], nodes: 2, custom_image: false },
+      connected_workers: 1,
+      matching_workers: 1,
+    };
+    expect(waitingReasonText(reason)).toBe('needs 2 workers in one zone');
+  });
+
   it('counts the matching workers whose devices are busy', () => {
     const reason: WaitingReason = {
       kind: 'exec_workers',

@@ -17,10 +17,11 @@ const POLL_MS = 2000;
 
 interface PollTarget {
   id: string;
+  node?: number;
   open: boolean;
 }
 
-const sameTarget = (a: PollTarget, b: PollTarget): boolean => a.id === b.id && a.open === b.open;
+const sameTarget = (a: PollTarget, b: PollTarget): boolean => a.id === b.id && a.node === b.node && a.open === b.open;
 
 @Component({
   selector: 'app-exec-job-outputs',
@@ -34,9 +35,10 @@ export class ExecJobOutputsComponent {
   private execJobs = inject(ExecJobsService);
 
   job = input.required<ExecJobResponse>();
+  node = input<number>();
 
   private target = computed<PollTarget>(
-    () => ({ id: this.job().id, open: isOpenExecJob(this.job().status) }),
+    () => ({ id: this.job().id, node: this.node(), open: isOpenExecJob(this.job().status) }),
     { equal: sameTarget },
   );
 
@@ -48,11 +50,11 @@ export class ExecJobOutputsComponent {
   protected readonly time = clockTime;
 
   url(path: string): string {
-    return this.execJobs.outputUrl(this.job().id, path);
+    return this.execJobs.outputUrl(this.job().id, path, this.node());
   }
 
-  private watch({ id, open }: PollTarget): Observable<ExecJobOutputView[]> {
+  private watch({ id, node, open }: PollTarget): Observable<ExecJobOutputView[]> {
     const ticks = open ? interval(POLL_MS).pipe(startWith(0)) : of(0);
-    return ticks.pipe(switchMap(() => this.execJobs.outputs(id).pipe(catchError(() => EMPTY))));
+    return ticks.pipe(switchMap(() => this.execJobs.outputs(id, node).pipe(catchError(() => EMPTY))));
   }
 }

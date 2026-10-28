@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Subscription, catchError, forkJoin, interval, startWith, switchMap, takeWhile } from 'rxjs';
@@ -18,6 +18,7 @@ import {
   LoadingSpinnerComponent,
   PageLayoutComponent,
   SelectButtonComponent,
+  SelectComponent,
   TabSwitchComponent,
   TableComponent,
 } from '@gradient/ui/ui';
@@ -39,11 +40,18 @@ const POLL_MS = 2000;
 type JobView = 'log' | 'terminal';
 type TerminalMode = 'console' | 'attach' | 'shell';
 
-const TERMINAL_PATHS: Record<TerminalMode, string> = {
-  console: 'console',
-  attach: 'shell?attach=true',
-  shell: 'shell',
+const TERMINAL_PATHS: Record<TerminalMode, (node: number) => string> = {
+  console: (node) => `console?node=${node}`,
+  attach: (node) => `shell?node=${node}&attach=true`,
+  shell: (node) => `shell?node=${node}`,
 };
+
+const nodeLabel = (node: number): string => (node === 0 ? 'Node 0 (master)' : `Node ${node}`);
+
+function nodeFromQuery(value: string | null): number {
+  const node = Number(value);
+  return Number.isInteger(node) && node > 0 ? node : 0;
+}
 
 const hasTerminal = (status: ExecJobStatus): boolean => status === 'starting' || status === 'running';
 
@@ -52,7 +60,7 @@ const hasTerminal = (status: ExecJobStatus): boolean => status === 'starting' ||
   standalone: true,
   imports: [
     RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent, DialogComponent,
-    FormFieldComponent, LoadingSpinnerComponent, PageLayoutComponent, SelectButtonComponent,
+    FormFieldComponent, LoadingSpinnerComponent, PageLayoutComponent, SelectButtonComponent, SelectComponent,
     TabSwitchComponent, TableComponent, StatusIconComponent, TerminalComponent, WritableDirective,
     ExecJobOutputsComponent,
   ],
@@ -62,6 +70,7 @@ const hasTerminal = (status: ExecJobStatus): boolean => status === 'starting' ||
 })
 export class ExecJobPageComponent implements OnInit {
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   private destroyRef = inject(DestroyRef);
   private execJobs = inject(ExecJobsService);
   private crumbs = inject(BreadcrumbsService);
@@ -76,6 +85,10 @@ export class ExecJobPageComponent implements OnInit {
   private poll?: Subscription;
 
   job = signal<ExecJobResponse | null>(null);
+  node = signal(0);
+  nodeOptions = computed(() =>
+    Array.from({ length: this.job()?.nodes ?? 1 }, (_, node) => ({ label: nodeLabel(node), value: node })),
+  );
   log = signal('');
   logSegments = computed(() => splitPhaseMarkers(this.log()));
   pullRequests = signal<ExecJobPullRequestView[]>([]);
@@ -122,7 +135,20 @@ export class ExecJobPageComponent implements OnInit {
     this.projectName = params.get('project') ?? '';
     this.taskName = params.get('task') ?? '';
     this.jobId = params.get('job') ?? '';
+    this.node.set(nodeFromQuery(this.route.snapshot.queryParamMap.get('node')));
     this.watch();
+  }
+
+  pickNode(node: number): void {
+    this.node.set(node);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { node: node === 0 ? null : node },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+    this.watch();
+    if (this.view() === 'terminal') this.openTerminal(this.terminalMode());
   }
 
   private watch(): void {
@@ -131,7 +157,7 @@ export class ExecJobPageComponent implements OnInit {
       startWith(0),
       switchMap(() => forkJoin({
         job: this.execJobs.get(this.jobId),
-        log: this.execJobs.log(this.jobId),
+        log: this.execJobs.log(this.jobId, undefined, this.node()),
         pullRequests: this.execJobs.pullRequests(this.jobId),
       }).pipe(
         catchError((error: Error) => {
@@ -158,7 +184,7 @@ export class ExecJobPageComponent implements OnInit {
 
   openTerminal(mode: TerminalMode): void {
     this.terminalMode.set(mode);
-    this.terminal.set(terminalSocket(`/exec-jobs/${this.jobId}/${TERMINAL_PATHS[mode]}`));
+    this.terminal.set(terminalSocket(`/exec-jobs/${this.jobId}/${TERMINAL_PATHS[mode](this.node())}`));
   }
 
   confirmAbort(): void {
