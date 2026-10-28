@@ -111,6 +111,7 @@ pub async fn latest_running_of_task<C: ConnectionTrait>(
         )
         .filter(CEvaluation::Task.eq(task))
         .filter(CExecJob::Status.eq(ExecJobStatus::Running))
+        .filter(CExecJob::NodeIndex.eq(0))
         .order_by_desc(CExecJob::StartedAt)
         .limit(1)
         .into_tuple()

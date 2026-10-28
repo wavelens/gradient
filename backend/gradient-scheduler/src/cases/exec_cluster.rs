@@ -4,17 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::exec_jobs::reads::latest_running_of_task;
 use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::exec_job::{self, ExecJobStatus};
 use gradient_entity::ids::{ClusterJobId, DispatchedJobId, EvaluationId};
 use gradient_entity::{dispatched_job, exec_job_attempt, exec_job_token};
+use gradient_pool::guest_channels::GuestChannelSignal;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::WaitingReason;
 use gradient_types::exec::{ExecInventory, ExecSpec, Phase, hash_job_token};
+use gradient_wire::types::GuestChannelKind;
 use gradient_wire::types::{BuildFailureKind, ClusterPeer, ExecJob, Job, JobKind};
 
 use super::exec::{W1, W2, exec_shape, inventory, spec};
 use super::{SchedulerCase, failure, w_exec, without_offers};
+use crate::GuestChannelRefusal;
 use crate::jobs::exec_job_key;
 use crate::test_jobs::allow_all;
 
@@ -391,6 +395,99 @@ async fn aborting_a_running_cluster_aborts_both_nodes() {
             .all(|(status, _)| *status == ExecJobStatus::Aborted),
         "after 2: no restart"
     );
+    case.finish().await;
+}
+
+async fn running_pair(case: &SchedulerCase) -> Vec<StartedNode> {
+    let started = start_pair(case).await;
+    for node in &started {
+        case.scheduler
+            .handle_exec_started(node.worker, &node.key)
+            .await;
+        case.signals(node.worker);
+    }
+    started
+}
+
+fn opened_on(signals: Vec<SessionSignal>) -> Vec<String> {
+    signals
+        .into_iter()
+        .filter_map(|signal| match signal {
+            SessionSignal::GuestChannel(GuestChannelSignal::Open { job_id, .. }) => Some(job_id),
+            _ => None,
+        })
+        .collect()
+}
+
+fn attached_shell() -> GuestChannelKind {
+    GuestChannelKind::Shell {
+        pty: true,
+        attach: true,
+    }
+}
+
+#[tokio::test]
+async fn a_node_index_selects_that_nodes_attempt() {
+    let (case, _) = with_queued_cluster(pair_spec(1, false)).await;
+    connect_pair(&case).await;
+    let started = running_pair(&case).await;
+    let rows = node_rows(&case).await;
+    let (master, second) = (&started[0], &started[1]);
+
+    for (job, node, expected) in [
+        (rows[0].id, 1, second),
+        (rows[0].id, 0, master),
+        (rows[1].id, 0, master),
+    ] {
+        let opened = case
+            .scheduler
+            .open_guest_channel(job, node, attached_shell())
+            .await
+            .expect("the channel request runs");
+        assert!(opened.is_ok(), "node {node} of {job} opens: {opened:?}");
+        assert_eq!(
+            opened_on(case.signals(expected.worker)),
+            vec![expected.key.clone()],
+            "node {node} of {job} reaches {}",
+            expected.worker
+        );
+    }
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn an_unknown_node_is_refused_with_its_index() {
+    let (case, _) = with_queued_cluster(pair_spec(1, false)).await;
+    connect_pair(&case).await;
+    running_pair(&case).await;
+    let master = node_rows(&case).await[0].id;
+
+    let opened = case
+        .scheduler
+        .open_guest_channel(master, 2, attached_shell())
+        .await
+        .expect("the channel request runs");
+
+    assert!(
+        matches!(opened, Err(GuestChannelRefusal::NoSuchNode(2))),
+        "after 1: {opened:?}"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_task_login_reaches_node_0() {
+    let (case, _) = with_queued_cluster(pair_spec(1, false)).await;
+    connect_pair(&case).await;
+    running_pair(&case).await;
+    let rows = node_rows(&case).await;
+    let task = case.db.task_of(rows[0].evaluation).await;
+
+    let login = latest_running_of_task(&case.db.connection(), task)
+        .await
+        .expect("the task login reads");
+
+    assert_eq!(login, Some(rows[0].id), "after 1: node 0 answers the task");
     case.finish().await;
 }
 
