@@ -57,7 +57,7 @@ pub fn program_command(
     command
         .arg(&job.program)
         .args(args)
-        .current_dir(WORK_DIR)
+        .current_dir(Path::new(WORK_DIR).join(&job.flake_dir))
         .env_clear()
         .env("PATH", SYSTEM_PATH)
         .env("HOME", format!("/home/{PROGRAM_USER}"))
@@ -416,6 +416,27 @@ mod tests {
             ]
             .map(OsStr::new)
         );
+    }
+
+    #[test]
+    fn the_program_starts_in_the_flake_directory() {
+        let cwd = |flake_dir: &str| {
+            let job = RunJob {
+                flake_dir: flake_dir.to_owned(),
+                ..job()
+            };
+            program_command(&job, &BTreeMap::new())
+                .expect("command")
+                .as_std()
+                .get_current_dir()
+                .map(std::path::Path::to_owned)
+        };
+
+        assert_eq!(
+            cwd("nix").as_deref(),
+            Some(std::path::Path::new("/work/nix"))
+        );
+        assert_eq!(cwd("").as_deref(), Some(std::path::Path::new("/work")));
     }
 
     #[test]

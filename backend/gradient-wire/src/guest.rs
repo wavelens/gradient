@@ -77,6 +77,8 @@ pub struct RunJob {
     pub usb_bus_ids: Vec<String>,
     #[proto(2, default)]
     pub program_pty: bool,
+    #[proto(4, default)]
+    pub flake_dir: String,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Default)]
@@ -341,7 +343,20 @@ mod tests {
             }],
             usb_bus_ids: vec!["1-2".into()],
             program_pty: false,
+            flake_dir: "nix/hosts".into(),
         }
+    }
+
+    #[test]
+    fn an_older_worker_sends_no_flake_directory() {
+        let older = *GUEST_PROTO_VERSIONS.end() - 1;
+        let job = WorkerToAgent::RunJob(Box::new(run_job()));
+        let Ok(WorkerToAgent::RunJob(received)) =
+            from_bytes::<WorkerToAgent>(to_bytes(&job, older).expect("encodes"), older)
+        else {
+            panic!("expected the run job");
+        };
+        assert_eq!(received.flake_dir, "");
     }
 
     #[tokio::test]
