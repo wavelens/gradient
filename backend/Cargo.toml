@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-guest-agent", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-redact", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-guest-agent", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-redact", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
+members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-guest-agent", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-redact", "gradient-report", "gradient-scheduler", "gradient-sops", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
+default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-guest-agent", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-redact", "gradient-report", "gradient-scheduler", "gradient-sops", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
 resolver     = "2"
 
 [workspace.package]
@@ -43,6 +43,7 @@ gradient-redact       = { path = "gradient-redact" }
 gradient-report       = { path = "gradient-report" }
 gradient-scheduler    = { path = "gradient-scheduler" }
 gradient-pool         = { path = "gradient-pool" }
+gradient-sops         = { path = "gradient-sops" }
 gradient-sources      = { path = "gradient-sources" }
 gradient-ssh          = { path = "gradient-ssh" }
 gradient-state        = { path = "gradient-state" }
@@ -105,6 +106,12 @@ percent-encoding = { version = "2.3", default-features = false, features = ["std
 rand_core       = { version = "0.10", default-features = false }
 sha2            = { version = "0.11", default-features = false }
 ssh-key         = { version = "0.6", default-features = false, features = ["ed25519", "rand_core", "std"] }
+aes-gcm         = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
+age             = { version = "0.11", default-features = false, features = ["armor", "ssh"] }
+bech32          = { version = "0.9", default-features = false, features = ["std"] }
+curve25519-dalek = { version = "4", default-features = false }
+yaml_serde      = { version = "0.10", default-features = false }
+zeroize         = { version = "1", default-features = false, features = ["alloc"] }
 
 # Compression / archive
 async-compression = { version = "0.4", default-features = false, features = ["tokio", "zstd"] }
