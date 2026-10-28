@@ -169,6 +169,7 @@ impl Worker {
                         job_id: claimed.job_id.clone(),
                         accepted: true,
                         reason: None,
+                        endpoint: None,
                     })
                     .await;
                     return claimed;

@@ -73,6 +73,8 @@ pub enum ClientMessage {
         job_id: String,
         accepted: bool,
         reason: Option<String>,
+        #[proto(49, default)]
+        endpoint: Option<String>,
     },
 
     JobUpdate {

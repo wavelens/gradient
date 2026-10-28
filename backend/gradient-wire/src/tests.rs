@@ -354,3 +354,26 @@ fn a_flake_job_carries_its_flake_directory() {
     let older: FlakeJob = from_bytes(to_bytes(&job, 47).unwrap(), 47).unwrap();
     assert_eq!(older.flake_dir, None);
 }
+
+#[test]
+fn an_accept_from_the_previous_version_carries_no_endpoint() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{ClientMessage, PROTO_VERSIONS};
+
+    let accept = ClientMessage::AssignJobResponse {
+        job_id: "exec:a".into(),
+        accepted: true,
+        reason: None,
+        endpoint: Some("10.233.0.2".into()),
+    };
+    let newest = *PROTO_VERSIONS.end();
+    assert_eq!(
+        from_bytes::<ClientMessage>(to_bytes(&accept, newest).unwrap(), newest).unwrap(),
+        accept
+    );
+    let older = from_bytes::<ClientMessage>(to_bytes(&accept, 48).unwrap(), 48).unwrap();
+    assert!(matches!(
+        older,
+        ClientMessage::AssignJobResponse { endpoint: None, .. }
+    ));
+}

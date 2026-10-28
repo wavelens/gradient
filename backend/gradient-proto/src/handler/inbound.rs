@@ -298,8 +298,10 @@ impl<'a> InboundContext<'a> {
                 job_id,
                 accepted,
                 reason,
+                endpoint,
             } => {
-                self.on_assign_job_response(job_id, accepted, reason).await;
+                self.on_assign_job_response(job_id, accepted, reason, endpoint)
+                    .await;
                 true
             }
             ClientMessage::JobUpdate {
@@ -1006,9 +1008,10 @@ impl<'a> InboundContext<'a> {
         job_id: String,
         accepted: bool,
         reason: Option<String>,
+        endpoint: Option<String>,
     ) {
         if accepted {
-            info!(peer_id = %self.peer_id, %job_id, "job accepted");
+            info!(peer_id = %self.peer_id, %job_id, ?endpoint, "job accepted");
             self.scheduler.cluster_member_accepted(&job_id).await;
         } else {
             info!(peer_id = %self.peer_id, %job_id, ?reason, "job rejected by worker");
@@ -1709,7 +1712,7 @@ mod assignment_response_tests {
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
             dialed: None,
         };
-        ctx.on_assign_job_response("j1".into(), false, Some("at capacity".into()))
+        ctx.on_assign_job_response("j1".into(), false, Some("at capacity".into()), None)
             .await;
 
         assert!(active.pending().is_empty());
@@ -1769,7 +1772,8 @@ mod assignment_response_tests {
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
             dialed: None,
         };
-        ctx.on_assign_job_response("j1".into(), true, None).await;
+        ctx.on_assign_job_response("j1".into(), true, None, None)
+            .await;
 
         assert!(active.contains("j1"));
         assert!(log_db.into_transaction_log().is_empty());

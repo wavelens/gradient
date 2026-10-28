@@ -84,6 +84,9 @@ pub struct ExecRequirement {
     #[proto(45, default)]
     #[serde(default)]
     pub server_secrets: Vec<String>,
+    #[proto(49, default)]
+    #[serde(default)]
+    pub nodes: u32,
 }
 
 #[derive(
@@ -161,6 +164,8 @@ pub struct JobContext {
     pub project_name: String,
     #[proto(47, default)]
     pub task_name: String,
+    #[proto(49, default)]
+    pub master_port: Option<u16>,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -261,12 +266,13 @@ impl ExecSpec {
                 .mounts
                 .clone()
                 .unwrap_or_else(|| defaults.mounts.clone()),
-            network: self.network.unwrap_or(defaults.network),
+            network: self.network.unwrap_or(defaults.network) || self.nodes > 1,
             ssh: self.ssh.unwrap_or(defaults.ssh),
             ports: self.ports.clone(),
             custom_image: self.image.is_some(),
             secrets: Vec::new(),
             server_secrets: Vec::new(),
+            nodes: self.nodes,
         }
     }
 
@@ -402,6 +408,26 @@ mod tests {
         };
         let req = explicit.requirement_on("x86_64-linux", &defaults);
         assert!(req.mounts.is_empty() && !req.ssh);
+    }
+
+    #[test]
+    fn a_multi_node_requirement_asks_for_every_node_and_the_network() {
+        let spec = ExecSpec {
+            nodes: 2,
+            ..ExecSpec::default()
+        };
+        let req = spec.requirement_on("x86_64-linux", &ExecDefaults::default());
+        assert_eq!(req.nodes, 2);
+        assert!(req.network);
+        let single = ExecSpec {
+            nodes: 1,
+            ..ExecSpec::default()
+        };
+        assert!(
+            !single
+                .requirement_on("x86_64-linux", &ExecDefaults::default())
+                .network
+        );
     }
 
     #[test]
