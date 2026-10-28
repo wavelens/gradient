@@ -27,7 +27,8 @@ use tracing::{debug, error, warn};
 use crate::Scheduler;
 use crate::cluster::{Membership, Route};
 use crate::instance::EvalHistory;
-use crate::jobs::{PendingEvalJob, PendingJob};
+use crate::jobs::{PendingEvalJob, PendingJob, continuation_job_key};
+use gradient_db::exec_jobs::continuations::{self, ContinuationRow};
 use gradient_wire::types::{FlakeJob, FlakeStep, RequiredPath};
 
 pub(crate) struct EvalDispatch {
@@ -60,6 +61,11 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
         return Ok(());
     }
 
+    assign_queued_evaluations(scheduler).await?;
+    assign_continuations(scheduler).await
+}
+
+async fn assign_queued_evaluations(scheduler: &Scheduler) -> anyhow::Result<()> {
     // The open `dispatched_job` row is the durable proof a job is out. The tracker is only the
     // in-memory fast path and is empty after a respawn.
     let evals = EEvaluation::find()
@@ -130,6 +136,65 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
     }
 
     Ok(())
+}
+
+pub(crate) async fn assign_continuations(scheduler: &Scheduler) -> anyhow::Result<()> {
+    let queued = continuations::queued_untracked(&scheduler.db.worker_db).await?;
+    if queued.is_empty() {
+        return Ok(());
+    }
+
+    let keys = queued.iter().map(|c| continuation_job_key(c.job)).collect();
+    let untracked: HashSet<String> = scheduler.untracked(keys).await.into_iter().collect();
+    let queued: Vec<ContinuationRow> = queued
+        .into_iter()
+        .filter(|c| untracked.contains(&continuation_job_key(c.job)))
+        .collect();
+    let evals: Vec<MEvaluation> = queued.iter().map(|c| c.evaluation.clone()).collect();
+    let maps = EvalAssignMaps::load(&scheduler.db.worker_db, &evals).await?;
+    let eval_history = scheduler.scoring.eval_history.load();
+
+    for continuation in queued {
+        let Some(pending) = continuation_eval_job(&continuation, &maps, &eval_history) else {
+            continue;
+        };
+        let job_id = continuation_job_key(continuation.job);
+        if let Err(e) = scheduler
+            .enqueue_routed(Route::Single, job_id.clone(), PendingJob::Eval(pending))
+            .await
+        {
+            error!(error = %e, %job_id, "enqueue of a continuation eval job failed");
+            continue;
+        }
+
+        debug!(evaluation_id = %continuation.evaluation.id, %job_id, "continuation eval job enqueued");
+    }
+
+    Ok(())
+}
+
+fn continuation_eval_job(
+    continuation: &ContinuationRow,
+    maps: &EvalAssignMaps,
+    eval_history: &EvalHistory,
+) -> Option<PendingEvalJob> {
+    let eval = &continuation.evaluation;
+    let pending = assemble_eval_job(eval, maps, false, eval_history)?;
+    let source = eval.flake_source.as_deref().unwrap_or(&eval.repository);
+    let (job, required_paths) = flake_job_for_eval_source(
+        source,
+        continuation.commit_sha.clone(),
+        continuation.attributes.clone(),
+        false,
+        pending.job.input_overrides.clone(),
+        None,
+    );
+    Some(PendingEvalJob {
+        job,
+        required_paths,
+        continuation: Some(continuation.job),
+        ..pending
+    })
 }
 
 fn member_job(job: &FlakeJob, eval_index: u16) -> FlakeJob {
@@ -254,6 +319,7 @@ fn assemble_eval_job(
         estimate,
         walk_mode: eval.walk_mode,
         eval_index: 0,
+        continuation: None,
     })
 }
 

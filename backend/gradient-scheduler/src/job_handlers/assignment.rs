@@ -202,7 +202,7 @@ pub(crate) async fn assigned_transition(
     worker_id: &str,
     rec: &AssignmentRecord,
 ) -> anyhow::Result<bool> {
-    let transition = match (rec.derivation_build, rec.exec) {
+    let transition = match (rec.derivation_build, &rec.exec) {
         (Some(shared_build), _) => Transition::Assigned { shared_build },
         (None, Some(exec)) => Transition::ExecJobAssigned {
             exec_job: exec.exec_job,
@@ -211,10 +211,8 @@ pub(crate) async fn assigned_transition(
             assignment: rec.assignment_id,
             worker: worker_id.to_owned(),
             retries_cap: exec.retries_cap,
-            token_hash: gradient_types::exec::hash_job_token(
-                &gradient_types::exec::mint_job_token(),
-            ),
-            token_expires_at: gradient_types::exec::job_token_expiry(now(), None),
+            token_hash: exec.token_hash.clone(),
+            token_expires_at: exec.token_expires_at,
         },
         (None, None) => return Ok(true),
     };

@@ -49,6 +49,7 @@ pub(crate) fn eval_job(peer: ProjectId) -> PendingEvalJob {
         estimate: Default::default(),
         walk_mode: Default::default(),
         eval_index: 0,
+        continuation: None,
     }
 }
 
@@ -110,6 +111,9 @@ pub(crate) fn exec_job(spec: ExecSpec) -> PendingExecJob {
         evaluation_id: EvaluationId::now_v7(),
         project_id: ProjectId::now_v7(),
         task_id: TaskId::now_v7(),
+        project_name: "infra".into(),
+        task_name: "master".into(),
+        parent_job: None,
         entry_point: "apps.x86_64-linux.train".into(),
         repository: "git+ssh://git@example.com/repo".into(),
         commit: "abc123".into(),

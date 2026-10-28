@@ -6,7 +6,10 @@
 
 use gradient_db::scheduling::assignment_record::EXEC_KEY_PREFIX;
 use gradient_pool::WorkerCaps;
-use gradient_types::exec::{ExecDefaults, ExecRequirement, ExecSpec, Phase};
+use gradient_types::exec::{
+    ExecDefaults, ExecRequirement, ExecSpec, Phase, hash_job_token, job_token_expiry,
+    mint_job_token,
+};
 use gradient_types::ids::{EvaluationId, ExecJobAttemptId, ExecJobId, ProjectId, TaskId};
 use gradient_wire::types::{ExecJob, RequiredPath};
 
@@ -18,6 +21,9 @@ pub struct PendingExecJob {
     pub evaluation_id: EvaluationId,
     pub project_id: ProjectId,
     pub task_id: TaskId,
+    pub project_name: String,
+    pub task_name: String,
+    pub parent_job: Option<ExecJobId>,
     pub entry_point: String,
     pub repository: String,
     pub commit: String,
@@ -36,12 +42,14 @@ pub struct PendingExecJob {
     pub secrets: ResolvedSecretNames,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecAssignment {
     pub exec_job: ExecJobId,
     pub attempt: ExecJobAttemptId,
     pub number: u32,
     pub retries_cap: u32,
+    pub token_hash: String,
+    pub token_expires_at: chrono::NaiveDateTime,
 }
 
 pub fn exec_job_key(job: ExecJobId) -> String {
@@ -67,7 +75,14 @@ impl PendingExecJob {
             .is_some_and(|requirement| caps.can_run_exec(&requirement))
     }
 
-    pub fn assignment_on(&self, caps: &WorkerCaps) -> Option<ExecAssignment> {
+    pub fn dispatch_on(&self, caps: &WorkerCaps) -> Option<(ExecAssignment, ExecJob)> {
+        let token = mint_job_token();
+        let assignment = self.assignment_on(caps, &token)?;
+        let job = self.exec_job_for(caps, &assignment, token);
+        Some((assignment, job))
+    }
+
+    fn assignment_on(&self, caps: &WorkerCaps, token: &str) -> Option<ExecAssignment> {
         let inventory = caps.exec.as_ref()?;
         let limits = self.spec.limits_on(&inventory.allow, &inventory.defaults);
         Some(ExecAssignment {
@@ -75,10 +90,17 @@ impl PendingExecJob {
             attempt: ExecJobAttemptId::now_v7(),
             number: self.attempts_done.saturating_add(1),
             retries_cap: limits.retries,
+            token_hash: hash_job_token(token),
+            token_expires_at: job_token_expiry(gradient_types::now(), limits.timeout_secs),
         })
     }
 
-    pub fn exec_job_for(&self, caps: &WorkerCaps, assignment: &ExecAssignment) -> ExecJob {
+    fn exec_job_for(
+        &self,
+        caps: &WorkerCaps,
+        assignment: &ExecAssignment,
+        token: String,
+    ) -> ExecJob {
         let inventory = caps.exec.clone().unwrap_or_default();
         let limits = self.spec.limits_on(&inventory.allow, &inventory.defaults);
         ExecJob {
@@ -98,10 +120,10 @@ impl PendingExecJob {
                 entry_point: self.entry_point.clone(),
                 last_phase: self.last_phase.clone(),
                 api_url: self.api_url.clone(),
-                token: String::new(),
-                parent_job: None,
-                project_name: String::new(),
-                task_name: String::new(),
+                token,
+                parent_job: self.parent_job.map(|job| job.to_string()),
+                project_name: self.project_name.clone(),
+                task_name: self.task_name.clone(),
             },
             secrets: self.spec.secrets.clone(),
             keep_running: self.spec.keep_running,

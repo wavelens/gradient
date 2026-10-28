@@ -196,7 +196,7 @@ impl Scheduler {
             if let Some(job) =
                 crate::loops::pending_exec_job(&row, api_url).filter(|job| job.assignment.is_some())
             {
-                row_jobs.jobs.insert(key, PendingJob::Exec(job));
+                row_jobs.jobs.insert(key, PendingJob::Exec(Box::new(job)));
             }
         }
         Ok(row_jobs)
