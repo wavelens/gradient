@@ -5812,7 +5812,7 @@ paths:
       - exec-jobs
       summary: Get exec job
       description: |-
-        Returns an exec job with its status, wait reason, requested labels and devices, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.
+        Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.
 
         **Access:** Public projects, or members of the project.
       operationId: getExecJob
@@ -16248,6 +16248,7 @@ components:
       - nodes
       - labels
       - devices
+      - guest
       - retries_left
       - created_at
       - attempts
@@ -16282,6 +16283,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DeviceRequest'
+        guest:
+          $ref: '#/components/schemas/GuestSize'
         waiting_reason:
           oneOf:
           - $ref: '#/components/schemas/WaitingReason'
@@ -16912,6 +16915,25 @@ components:
             $ref: '#/components/schemas/GroupMember'
         meta:
           $ref: '#/components/schemas/Meta'
+    GuestSize:
+      type: object
+      required:
+      - cpus
+      - memory_mb
+      - disk_mb
+      properties:
+        cpus:
+          type: integer
+          format: int32
+          minimum: 0
+        memory_mb:
+          type: integer
+          format: int64
+          minimum: 0
+        disk_mb:
+          type: integer
+          format: int64
+          minimum: 0
     HeatmapBand:
       type: object
       required:

@@ -19,7 +19,7 @@ use gradient_db::exec_jobs::tokens::JobTokenRow;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
-use gradient_types::exec::{DeviceRequest, ExecSpec};
+use gradient_types::exec::{DeviceRequest, ExecSpec, GuestSize};
 use gradient_types::*;
 use serde::Serialize;
 use std::sync::Arc;
@@ -83,6 +83,7 @@ pub struct ExecJobResponse {
     pub nodes: u32,
     pub labels: Vec<String>,
     pub devices: Vec<DeviceRequest>,
+    pub guest: GuestSize,
     pub waiting_reason: Option<WaitingReason>,
     pub message: Option<String>,
     pub retries_left: i32,
@@ -236,6 +237,7 @@ fn response(
         nodes: spec.nodes,
         labels: spec.labels,
         devices: spec.devices,
+        guest: spec.guest,
         waiting_reason: waiting_reason_of(&job),
         message: job.message,
         retries_left: job.retries_left,
@@ -279,7 +281,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
     operation_id = "getExecJob",
     tag = "exec-jobs",
     summary = "Get exec job",
-    description = "Returns an exec job with its status, wait reason, requested labels and devices, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Exec job", body = ExecJobResponse), WebError)
 )]

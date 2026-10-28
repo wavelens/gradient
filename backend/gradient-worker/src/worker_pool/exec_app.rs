@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use gradient_eval::ipc::ExecApp;
-use gradient_wire::types::{DeviceRequest, ExecSpec, SopsFile, validate_secret_name};
+use gradient_wire::types::{DeviceRequest, ExecSpec, GuestSize, SopsFile, validate_secret_name};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -36,10 +36,34 @@ struct NixBlock {
     max_silent: Option<u64>,
     #[serde(default)]
     retries: u32,
+    cpus: Option<u32>,
+    memory_mb: Option<u64>,
+    disk_mb: Option<u64>,
 }
 
 fn one_node() -> u32 {
     1
+}
+
+impl NixBlock {
+    fn guest(&self) -> Result<GuestSize, String> {
+        let default = GuestSize::default_request();
+        let size = GuestSize {
+            cpus: self.cpus.unwrap_or(default.cpus),
+            memory_mb: self.memory_mb.unwrap_or(default.memory_mb),
+            disk_mb: self.disk_mb.unwrap_or(default.disk_mb),
+        };
+        if !(1..=255).contains(&size.cpus) {
+            return Err("cpus must be between 1 and 255".into());
+        }
+        if size.memory_mb < 128 {
+            return Err("memoryMb must be at least 128".into());
+        }
+        if size.disk_mb < 64 {
+            return Err("diskMb must be at least 64".into());
+        }
+        Ok(size)
+    }
 }
 
 pub(crate) fn exec_spec(app: ExecApp) -> Result<ExecSpec, String> {
@@ -58,6 +82,7 @@ fn spec_of(app: ExecApp) -> Result<ExecSpec, String> {
         return Err("ports: port 0 cannot be forwarded".into());
     }
     check_secret_names(&block.secrets)?;
+    let guest = block.guest()?;
 
     Ok(ExecSpec {
         program: app.program,
@@ -84,6 +109,7 @@ fn spec_of(app: ExecApp) -> Result<ExecSpec, String> {
         timeout_secs: block.timeout,
         max_silent_secs: block.max_silent,
         retries: block.retries,
+        guest,
     })
 }
 
@@ -185,6 +211,31 @@ mod tests {
         );
         assert_eq!(spec.program, "/nix/store/aaaa-train/bin/train");
         assert_eq!(spec.network, None);
+    }
+
+    #[test]
+    fn the_guest_size_defaults_to_two_cpus_and_500_mb() {
+        assert_eq!(
+            exec_spec(app("{}")).unwrap().guest,
+            GuestSize {
+                cpus: 2,
+                memory_mb: 500,
+                disk_mb: 10240
+            }
+        );
+    }
+
+    #[test]
+    fn a_guest_size_out_of_range_names_its_key() {
+        for (block, message) in [
+            (r#"{"cpus":0}"#, "cpus must be between 1 and 255"),
+            (r#"{"cpus":256}"#, "cpus must be between 1 and 255"),
+            (r#"{"memoryMb":64}"#, "memoryMb must be at least 128"),
+            (r#"{"diskMb":1}"#, "diskMb must be at least 64"),
+        ] {
+            let error = exec_spec(app(block)).unwrap_err();
+            assert!(error.contains(message), "{block}: {error}");
+        }
     }
 
     #[test]
