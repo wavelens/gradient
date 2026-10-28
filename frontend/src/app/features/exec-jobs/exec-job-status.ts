@@ -35,6 +35,7 @@ export function unmetParts(unmet: ExecUnmet): string[] {
     ...unmet.mounts.map((mount) => `mount ${mount}`),
     ...(unmet.nodes > 1 ? [`${unmet.nodes} nodes`] : []),
     ...(unmet.custom_image ? ['custom images'] : []),
+    ...(unmet.secrets ?? []).map((name) => `worker secret ${name}`),
   ];
 }
 

@@ -14,7 +14,8 @@ import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
-import { ProjectResponse } from '@core/models';
+import { ProjectResponse, SopsRecipientResponse } from '@core/models';
+import { ProjectSecretsService } from '@core/services/project-secrets.service';
 
 function projectFor(access: AccessState): ProjectResponse {
   return {
@@ -40,7 +41,16 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-function setup(access: AccessState, execEnabled = false): ComponentFixture<ProjectSettingsComponent> {
+const ed25519Recipient: SopsRecipientResponse = {
+  age: 'age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs3290gq',
+  ssh: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEd25519 acme',
+};
+
+function setup(
+  access: AccessState,
+  execEnabled = false,
+  recipient: SopsRecipientResponse = ed25519Recipient,
+): ComponentFixture<ProjectSettingsComponent> {
   TestBed.configureTestingModule({
     imports: [ProjectSettingsComponent],
     providers: [
@@ -55,10 +65,11 @@ function setup(access: AccessState, execEnabled = false): ComponentFixture<Proje
         provide: ProjectsService,
         useValue: {
           getProject: () => of(projectFor(access)),
-          getSSHKey: () => of(''),
+          getSSHKey: () => of(recipient.ssh),
         },
       },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
+      { provide: ProjectSecretsService, useValue: { sopsRecipient: () => of(recipient) } },
     ],
   });
   TestBed.inject(ConfigService).execEnabled = execEnabled;
@@ -105,5 +116,29 @@ describe('ProjectSettingsComponent - exec switch', () => {
     const fixture = setup(admin, true);
     await settled(fixture);
     expect((fixture.nativeElement as HTMLElement).querySelector('#exec-enabled')).not.toBeNull();
+  });
+});
+
+describe('ProjectSettingsComponent - sops recipient', () => {
+  const member: AccessState = { managed: false, canEdit: false, canTrigger: true };
+
+  function recipientField(fixture: ComponentFixture<ProjectSettingsComponent>): HTMLInputElement | null {
+    return (fixture.nativeElement as HTMLElement).querySelector('gr-copy-field #sops-recipient');
+  }
+
+  it('shows the age recipient of an ed25519 key in a copy field', async () => {
+    const fixture = setup(member, true);
+    await settled(fixture);
+    expect(recipientField(fixture)?.value).toBe(ed25519Recipient.age);
+    expect(fixture.nativeElement.textContent).not.toContain('sops 3.10 or newer');
+  });
+
+  it('falls back to the SSH key with a hint when there is no age recipient', async () => {
+    const fixture = setup(member, true, { age: null, ssh: 'ssh-rsa AAAAB3NzaC1yc2E acme' });
+    await settled(fixture);
+    expect(recipientField(fixture)?.value).toBe('ssh-rsa AAAAB3NzaC1yc2E acme');
+    expect(fixture.nativeElement.textContent).toContain(
+      'Use this SSH key as the age recipient (sops 3.10 or newer)',
+    );
   });
 });

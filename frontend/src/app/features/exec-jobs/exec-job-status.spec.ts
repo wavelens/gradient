@@ -53,6 +53,16 @@ describe('waitingReasonText', () => {
     expect(waitingReasonText(reason)).toBe('needs architecture aarch64-linux');
   });
 
+  it('names a secret no worker offers', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: { labels: [], devices: [], mounts: [], nodes: 0, custom_image: false, secrets: ['lab-key'] },
+      connected_workers: 1,
+      matching_workers: 0,
+    };
+    expect(waitingReasonText(reason)).toBe('needs worker secret lab-key');
+  });
+
   it('counts the matching workers whose devices are busy', () => {
     const reason: WaitingReason = {
       kind: 'exec_workers',
