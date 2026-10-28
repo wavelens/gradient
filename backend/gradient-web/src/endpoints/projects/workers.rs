@@ -748,7 +748,9 @@ mod tests {
             .unwrap()
             .expect("encrypted");
         assert_eq!(
-            gradient_sources::decrypt_secret(&path, &encrypted).unwrap(),
+            gradient_sources::decrypt_secret(&path, &encrypted)
+                .unwrap()
+                .expose(),
             "t1"
         );
     }

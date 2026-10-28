@@ -8,6 +8,7 @@ use super::context::TaskGitContext;
 use super::ssh::with_private_key;
 use super::url::{git_transport_url, set_shallow_unless_local};
 use crate::SourceError;
+use gradient_types::SecretString;
 use gradient_types::input::vec_to_hex;
 use tracing::{debug, instrument};
 
@@ -81,10 +82,16 @@ impl TaskGitContext<'_> {
         let url = git_transport_url(&self.task.repository).to_string();
         let private_key = self.private_key.clone();
 
-        tokio::task::spawn_blocking(move || fetch_commit(&url, private_key.as_deref(), &refspec))
-            .await
-            .map_err(|e| SourceError::GitExecution {
-                error: e.to_string(),
-            })?
+        tokio::task::spawn_blocking(move || {
+            fetch_commit(
+                &url,
+                private_key.as_ref().map(SecretString::expose),
+                &refspec,
+            )
+        })
+        .await
+        .map_err(|e| SourceError::GitExecution {
+            error: e.to_string(),
+        })?
     }
 }

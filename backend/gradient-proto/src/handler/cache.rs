@@ -462,7 +462,7 @@ async fn extend_with_gradient_proto_results(
         let found = super::cache_consumer::pull_paths(
             &up.url,
             &up.remote_cache,
-            api_key.as_deref(),
+            api_key.as_ref().map(SecretString::expose),
             mapper,
             &want,
         )

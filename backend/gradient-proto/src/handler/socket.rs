@@ -158,7 +158,7 @@ async fn send_ssh_key_credential(writer: &ProtoWriter, db: &DbContext, project_i
             writer,
             &ServerMessage::Credential {
                 kind: CredentialKind::SshKey,
-                data: SecretBytes::new(private_key.into_bytes()),
+                data: private_key.into_bytes(),
             },
         )
         .await;
@@ -166,7 +166,7 @@ async fn send_ssh_key_credential(writer: &ProtoWriter, db: &DbContext, project_i
     }
 }
 
-async fn project_ssh_key(db: &DbContext, project_id: ProjectId) -> Option<String> {
+async fn project_ssh_key(db: &DbContext, project_id: ProjectId) -> Option<SecretString> {
     match by_id::<EProject, _>(&db.worker_db, project_id).await {
         Ok(Some(project)) => match gradient_sources::ssh_key::decrypt_ssh_private_key(
             &db.config.secrets.crypt_file,

@@ -11,6 +11,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use gradient_eval::pool::{DownloadSink, EvalPoolConfig, EvalWorker};
+use gradient_types::SecretString;
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::{ClientMessage, PROGRESS_INTERVAL};
 use gradient_wire::traits::JobReporter;
@@ -27,7 +28,7 @@ pub struct InputFetchJob {
     pub fetch_id: String,
     pub project: String,
     pub request: String,
-    pub ssh_key: Option<String>,
+    pub ssh_key: Option<SecretString>,
 }
 
 #[async_trait]
@@ -111,7 +112,7 @@ async fn fetch_and_push(
     report: &dyn FetchReport,
     binpath_ssh: &str,
 ) -> Result<String> {
-    let key_env = ssh_key_env(job.ssh_key.as_deref(), binpath_ssh).await?;
+    let key_env = ssh_key_env(job.ssh_key.as_ref().map(SecretString::expose), binpath_ssh).await?;
     let git_ssh_command = key_env.as_ref().map(|(_, command)| command.clone());
     let (transfers, totals) = Transfers::new();
     let download = downloader.download(job.request.clone(), git_ssh_command, transfers);
@@ -282,7 +283,7 @@ mod tests {
             fetch_id: "f1".into(),
             project: "p1".into(),
             request: REQUEST.into(),
-            ssh_key: ssh_key.map(str::to_owned),
+            ssh_key: ssh_key.map(|key| SecretString::new(key.to_owned())),
         }
     }
 

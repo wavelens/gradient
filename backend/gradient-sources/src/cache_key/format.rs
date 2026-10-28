@@ -16,13 +16,8 @@ pub fn format_cache_public_key(
     // Caches created before the split migration have no stored public key. Their key is derived
     // from the encrypted private key.
     let pubkey_b64 = if cache.public_key.is_empty() {
-        let key_b64 = decrypt_signing_key(secret_file, cache.clone())?;
-        let key_bytes = general_purpose::STANDARD
-            .decode(key_b64.trim())
-            .map_err(|e| SourceError::CacheKeyDecoding {
-                cache: cache.name.clone(),
-                reason: format!("Failed to base64-decode signing key: {}", e),
-            })?;
+        let key_bytes = decrypt_signing_key_bytes(secret_file, &cache)?;
+        let key_bytes = key_bytes.expose();
         if key_bytes.len() < 32 {
             return Err(SourceError::KeyPairConversion);
         }
@@ -36,7 +31,7 @@ pub fn format_cache_public_key(
     Ok(format!("{}-{}:{}", base_url, cache.name, pubkey_b64))
 }
 
-pub fn decrypt_signing_key(secret_file: &str, cache: MCache) -> Result<String, SourceError> {
+pub fn decrypt_signing_key(secret_file: &str, cache: MCache) -> Result<SecretString, SourceError> {
     let encrypted_private_key = general_purpose::STANDARD
         .decode(cache.clone().private_key)
         .map_err(|e| SourceError::CacheKeyDecoding {
@@ -44,13 +39,22 @@ pub fn decrypt_signing_key(secret_file: &str, cache: MCache) -> Result<String, S
             reason: format!("{}. The private key in the cache appears to be corrupted or not properly base64-encoded.", e)
         })?;
 
-    let decrypted_private_key = crate::secret::decrypt_bytes(secret_file, encrypted_private_key)?
-        .ok_or(SourceError::PrivateKeyDecryption)?;
+    crate::secret::decrypt_text(secret_file, encrypted_private_key)?
+        .ok_or(SourceError::PrivateKeyDecryption)
+}
 
-    let decrypted_key_str =
-        String::from_utf8(decrypted_private_key).map_err(|_| SourceError::KeyUtf8Conversion)?;
-
-    Ok(decrypted_key_str)
+pub(crate) fn decrypt_signing_key_bytes(
+    secret_file: &str,
+    cache: &MCache,
+) -> Result<SecretBytes, SourceError> {
+    let key_b64 = decrypt_signing_key(secret_file, cache.clone())?;
+    general_purpose::STANDARD
+        .decode(key_b64.expose().trim())
+        .map(SecretBytes::new)
+        .map_err(|e| SourceError::CacheKeyDecoding {
+            cache: cache.name.clone(),
+            reason: format!("Failed to base64-decode signing key: {}", e),
+        })
 }
 
 pub fn format_cache_key(
@@ -66,6 +70,6 @@ pub fn format_cache_key(
         "{}-{}:{}",
         base_url,
         cache.name,
-        decrypted_key.trim()
+        decrypted_key.expose().trim()
     ))
 }

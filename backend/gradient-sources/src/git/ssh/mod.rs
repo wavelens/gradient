@@ -11,6 +11,7 @@ mod tests;
 
 use connection::SshCommandStream;
 use git2::transport::{Service, SmartSubtransport, SmartSubtransportStream, Transport};
+use gradient_types::SecretString;
 use std::cell::RefCell;
 use std::sync::Once;
 use target::SshTarget;
@@ -18,17 +19,17 @@ use target::SshTarget;
 const SCHEMES: [&str; 3] = ["ssh", "ssh+git", "git+ssh"];
 
 thread_local! {
-    static PRIVATE_KEY: RefCell<Option<String>> = const { RefCell::new(None) };
+    static PRIVATE_KEY: RefCell<Option<SecretString>> = const { RefCell::new(None) };
 }
 
 pub(crate) fn with_private_key<T>(private_key: Option<&str>, operation: impl FnOnce() -> T) -> T {
     register();
-    let previous = PRIVATE_KEY.replace(private_key.map(str::to_owned));
+    let previous = PRIVATE_KEY.replace(private_key.map(|key| SecretString::new(key.to_owned())));
     let _restore = Restore(previous);
     operation()
 }
 
-struct Restore(Option<String>);
+struct Restore(Option<SecretString>);
 
 impl Drop for Restore {
     fn drop(&mut self) {
@@ -54,7 +55,7 @@ fn transport(remote: &git2::Remote<'_>) -> Result<Transport, git2::Error> {
 }
 
 struct SshSubtransport {
-    private_key: Option<String>,
+    private_key: Option<SecretString>,
 }
 
 impl SmartSubtransport for SshSubtransport {
@@ -73,7 +74,8 @@ impl SmartSubtransport for SshSubtransport {
 
         let private_key = self
             .private_key
-            .as_deref()
+            .as_ref()
+            .map(SecretString::expose)
             .ok_or_else(|| git2::Error::from_str("SSH remote needs a private key"))?;
         let key = russh::keys::decode_secret_key(private_key, None)
             .map_err(|e| git2::Error::from_str(&format!("invalid SSH private key: {e}")))?;

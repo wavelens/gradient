@@ -14,6 +14,7 @@ use anyhow::{Context, anyhow};
 use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::{CiReporter, parse_owner_repo};
 use gradient_git_host::{BranchCommit, CommitFile, CommitIdent};
+use gradient_types::SecretString;
 use gradient_types::input::{check_repository_url_is_ssh, vec_to_hex};
 use gradient_types::{
     ActionConfig, ActionType, CTaskAction, ECommit, EEvaluation, EExecJob, EProject, ETaskAction,
@@ -184,9 +185,12 @@ async fn files_of_patch(
     let start_commit = request.start_commit.clone();
     let patch = request.patch.clone();
     let files = tokio::task::spawn_blocking(move || {
-        let checkout =
-            gradient_sources::checkout_commit(&repository, &start_commit, ssh_key.as_deref())
-                .map_err(|e| PullRequestError::DoesNotApply(format!("{e:#}")))?;
+        let checkout = gradient_sources::checkout_commit(
+            &repository,
+            &start_commit,
+            ssh_key.as_ref().map(SecretString::expose),
+        )
+        .map_err(|e| PullRequestError::DoesNotApply(format!("{e:#}")))?;
         patched_files(checkout.path(), &patch)
     })
     .await
@@ -200,7 +204,7 @@ async fn files_of_patch(
 async fn repository_ssh_key(
     ctx: &CiContext,
     task: &MTask,
-) -> Result<Option<String>, PullRequestError> {
+) -> Result<Option<SecretString>, PullRequestError> {
     if !check_repository_url_is_ssh(&task.repository) {
         return Ok(None);
     }
