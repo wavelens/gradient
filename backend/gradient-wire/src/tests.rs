@@ -160,8 +160,7 @@ fn worker_capabilities_from_the_previous_version_carry_no_exec_inventory() {
         from_bytes::<ClientMessage>(to_bytes(&caps, newest).unwrap(), newest).unwrap(),
         caps
     );
-    let older =
-        from_bytes::<ClientMessage>(to_bytes(&caps, newest - 1).unwrap(), newest - 1).unwrap();
+    let older = from_bytes::<ClientMessage>(to_bytes(&caps, 42).unwrap(), 42).unwrap();
     assert!(matches!(
         older,
         ClientMessage::WorkerCapabilities { exec: None, .. }
@@ -221,4 +220,59 @@ fn pre_warm_vms_round_trips_and_names_no_job() {
         msg
     );
     assert_eq!((msg.job_id(), msg.variant_name()), (None, "PreWarmVms"));
+}
+
+#[test]
+fn guest_channel_messages_round_trip_and_stay_off_older_sessions() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{ClientMessage, GUEST_CHANNELS_SINCE, GuestChannelKind, ServerMessage};
+
+    let open = ServerMessage::OpenGuestChannel {
+        job_id: "exec:x".into(),
+        channel_id: 7,
+        kind: GuestChannelKind::Forward { port: 6006 },
+    };
+    assert_eq!(
+        from_bytes::<ServerMessage>(
+            to_bytes(&open, GUEST_CHANNELS_SINCE).unwrap(),
+            GUEST_CHANNELS_SINCE
+        )
+        .unwrap(),
+        open
+    );
+    assert!(to_bytes(&open, GUEST_CHANNELS_SINCE - 1).is_err());
+    assert_eq!(open.job_id(), Some("exec:x"));
+    let closed = ClientMessage::CloseGuestChannel {
+        channel_id: 7,
+        exit_code: Some(0),
+        message: None,
+    };
+    assert_eq!(
+        from_bytes::<ClientMessage>(
+            to_bytes(&closed, GUEST_CHANNELS_SINCE).unwrap(),
+            GUEST_CHANNELS_SINCE
+        )
+        .unwrap(),
+        closed
+    );
+}
+
+#[test]
+fn terminal_bytes_are_never_logged() {
+    use crate::messages::{ClientMessage, ServerMessage};
+
+    assert!(
+        ServerMessage::GuestChannelData {
+            channel_id: 1,
+            data: b"hunter2".to_vec()
+        }
+        .carries_secret()
+    );
+    assert!(
+        ClientMessage::GuestChannelData {
+            channel_id: 1,
+            data: b"hunter2".to_vec()
+        }
+        .carries_secret()
+    );
 }

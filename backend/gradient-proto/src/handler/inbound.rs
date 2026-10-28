@@ -599,6 +599,9 @@ impl<'a> InboundContext<'a> {
                 self.on_job_phase(job_id, name, payload).await;
                 true
             }
+            ClientMessage::GuestChannelData { .. } | ClientMessage::CloseGuestChannel { .. } => {
+                true
+            }
         }
     }
 

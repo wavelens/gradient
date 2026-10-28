@@ -257,6 +257,19 @@ pub enum ClientMessage {
         name: String,
         payload: Vec<u8>,
     },
+
+    #[proto(44)]
+    GuestChannelData {
+        channel_id: u64,
+        data: Vec<u8>,
+    },
+
+    #[proto(44)]
+    CloseGuestChannel {
+        channel_id: u64,
+        exit_code: Option<i32>,
+        message: Option<String>,
+    },
 }
 
 impl ClientMessage {
@@ -325,11 +338,16 @@ impl ClientMessage {
             ClientMessage::EvalShardRequest { .. } => "EvalShardRequest",
             ClientMessage::RunningJobs { .. } => "RunningJobs",
             ClientMessage::JobPhase { .. } => "JobPhase",
+            ClientMessage::GuestChannelData { .. } => "GuestChannelData",
+            ClientMessage::CloseGuestChannel { .. } => "CloseGuestChannel",
         }
     }
 
     pub fn carries_secret(&self) -> bool {
-        matches!(self, ClientMessage::AuthResponse { .. })
+        matches!(
+            self,
+            ClientMessage::AuthResponse { .. } | ClientMessage::GuestChannelData { .. }
+        )
     }
 }
 

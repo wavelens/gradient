@@ -9,8 +9,8 @@ use bytes::Bytes;
 use crate::codec::Proto;
 use crate::types::{
     CachedPath, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
-    EvalCachePullOutcome, EvalShardOutcome, GradientCapabilities, GrantTarget, ImportOutcome,
-    InputOutcome, Job, JobCandidate, UploadOutcome,
+    EvalCachePullOutcome, EvalShardOutcome, GradientCapabilities, GrantTarget, GuestChannelKind,
+    ImportOutcome, InputOutcome, Job, JobCandidate, UploadOutcome,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -202,6 +202,31 @@ pub enum ServerMessage {
     PreWarmVms {
         count: u32,
     },
+
+    #[proto(44)]
+    OpenGuestChannel {
+        job_id: String,
+        channel_id: u64,
+        kind: GuestChannelKind,
+    },
+
+    #[proto(44)]
+    GuestChannelData {
+        channel_id: u64,
+        data: Vec<u8>,
+    },
+
+    #[proto(44)]
+    CloseGuestChannel {
+        channel_id: u64,
+    },
+
+    #[proto(44)]
+    GuestChannelResize {
+        channel_id: u64,
+        cols: u16,
+        rows: u16,
+    },
 }
 
 impl ServerMessage {
@@ -218,7 +243,8 @@ impl ServerMessage {
             | ServerMessage::ImportResult { job_id, .. }
             | ServerMessage::InputResult { job_id, .. }
             | ServerMessage::InputProgress { job_id, .. }
-            | ServerMessage::EvalShardReply { job_id, .. } => Some(job_id),
+            | ServerMessage::EvalShardReply { job_id, .. }
+            | ServerMessage::OpenGuestChannel { job_id, .. } => Some(job_id),
             _ => None,
         }
     }
@@ -257,6 +283,10 @@ impl ServerMessage {
             ServerMessage::InputProgress { .. } => "InputProgress",
             ServerMessage::EvalShardReply { .. } => "EvalShardReply",
             ServerMessage::PreWarmVms { .. } => "PreWarmVms",
+            ServerMessage::OpenGuestChannel { .. } => "OpenGuestChannel",
+            ServerMessage::GuestChannelData { .. } => "GuestChannelData",
+            ServerMessage::CloseGuestChannel { .. } => "CloseGuestChannel",
+            ServerMessage::GuestChannelResize { .. } => "GuestChannelResize",
         }
     }
 
@@ -265,6 +295,7 @@ impl ServerMessage {
             self,
             ServerMessage::Authenticate { .. }
                 | ServerMessage::Credential { .. }
+                | ServerMessage::GuestChannelData { .. }
                 | ServerMessage::FetchInput {
                     ssh_key: Some(_),
                     ..

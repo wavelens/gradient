@@ -429,6 +429,12 @@ impl MessageLoopState {
                     ssh_key,
                 });
             }
+            msg @ (ServerMessage::OpenGuestChannel { .. }
+            | ServerMessage::GuestChannelData { .. }
+            | ServerMessage::CloseGuestChannel { .. }
+            | ServerMessage::GuestChannelResize { .. }) => {
+                debug!(kind = msg.variant_name(), "guest channel frame dropped");
+            }
         }
         Ok(())
     }
