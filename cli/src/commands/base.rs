@@ -80,6 +80,11 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: task::Commands,
     },
+    /// Open pull requests from the working tree
+    Pr {
+        #[command(subcommand)]
+        cmd: pr::Commands,
+    },
     /// Manage build workers
     Worker {
         #[command(subcommand)]
@@ -374,6 +379,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         } => download::handle_download(flake_ref, evaluation, task, products, out_dir, out).await,
         MainCommands::Project { cmd } => project::handle(cmd, out).await,
         MainCommands::Task { cmd } => task::handle(cmd, out).await,
+        MainCommands::Pr { cmd } => pr::handle(cmd, out).await,
         MainCommands::Worker { cmd } => worker::handle(cmd, out).await,
         MainCommands::Cache { cmd } => cache::handle(cmd, out).await,
         MainCommands::Builds { cmd } => builds::handle(cmd, out).await,
