@@ -43,6 +43,17 @@ in {
     exec ${pkgs.bashInteractive}/bin/bash -i
   '';
 
+  secrets = pkgs.writeShellScript "exec-secrets" ''
+    echo "env $GRADIENT_SECRET_API_TOKEN"
+    printf %s "$GRADIENT_SECRET_WANDB_TOKEN" | ${pkgs.coreutils}/bin/base64
+    echo "file $(${pkgs.coreutils}/bin/cat /run/gradient/secrets/lab-key)"
+    echo "arg $1"
+  '';
+
+  clash = pkgs.writeShellScript "exec-clash" ''
+    echo "clash started"
+  '';
+
   abort = ticks "exec-abort" 600;
   long-stop = ticks "exec-long-stop" 300;
   long-keep = ticks "exec-long-keep" 150;

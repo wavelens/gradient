@@ -8,10 +8,11 @@
 # guest DNS forwarder, the agent protocol, exit codes, retries, maxSilent, abort, both restart
 # modes with log replay and JobLost from a restarted agent and the SSH gateway after a
 # resume: attach to the program terminal, a new shell, the task login, a forward to a
-# declared port and a refused forward. Not covered: the browser terminal and the serial
-# console (no browser in the test), VFIO, USB/IP, /dev relays, the nested kvm device,
-# multi-node jobs, custom images. The CI host must offer nested KVM (kvm_intel or kvm_amd
-# with nested=1), since the workers boot guests in a VM.
+# declared port and a refused forward, secrets from the project store, a repository sops file
+# and the worker sops files with masked output and a secret name in two sources. Not covered:
+# the browser terminal and the serial console (no browser in the test), VFIO, USB/IP,
+# /dev relays, the nested kvm device, multi-node jobs, custom images. The CI host must offer
+# nested KVM (kvm_intel or kvm_amd with nested=1), since the workers boot guests in a VM.
 
 import json
 import re
@@ -21,7 +22,10 @@ API = "http://gradient.local/api/v1"
 GUESTS = "/var/lib/gradient-worker/guests"
 GUEST_UNIT = re.compile(r"gradient-guest-[0-9a-f]{32}\.service")
 WORKERS = [stopper, keeper]
-NAMES = ["fetch", "silent", "abort", "long-stop", "fail", "long-keep", "lost", "interactive", "terminal"]
+NAMES = [
+    "fetch", "silent", "abort", "long-stop", "fail", "long-keep", "lost", "interactive", "terminal",
+    "secrets", "clash",
+]
 SSH = "ssh -p 2222 -i /root/.ssh/gradient -o StrictHostKeyChecking=no -o BatchMode=yes"
 TERMINAL = {"completed", "failed", "aborted"}
 
@@ -181,20 +185,22 @@ server.succeed(
 server.succeed("chown -R nginx:nginx /srv/upstream")
 
 banner("Phase 4: push the repository with the exec apps")
+server.wait_for_open_port(80)
+token = api("POST", "auth/basic/login", {"loginname": "admin", "password": "admin_password"})
+api("PUT", "projects/project/secrets/clash-key", {"value": "clash-value-1"})
 server.succeed(f"{GIT} config --global init.defaultBranch main")
 server.succeed(f"{GIT} config --global user.email 'nixos@localhost'")
 server.succeed(f"{GIT} config --global user.name 'NixOS test'")
 server.succeed(f"{GIT} init /var/lib/git/test")
 server.succeed("cp /var/lib/git/flake.nix /var/lib/git/flake.lock /var/lib/git/apps.nix /var/lib/git/test/")
+server.succeed("install -D -m 0644 /var/lib/git/train.yaml /var/lib/git/test/secrets/train.yaml")
 server.succeed("chmod u+w /var/lib/git/test/*")
 server.succeed(f"sed -i 's#\\[hash\\]#{NIXPKGS_HASH}#g' /var/lib/git/test/flake.lock")
-server.succeed(f"{GIT} -C /var/lib/git/test add flake.nix flake.lock apps.nix")
+server.succeed(f"{GIT} -C /var/lib/git/test add flake.nix flake.lock apps.nix secrets/train.yaml")
 server.succeed(f"{GIT} -C /var/lib/git/test commit -m 'exec apps'")
 server.succeed("chown -R git:git /var/lib/git/test")
 
 banner("Phase 5: the evaluation records every exec job")
-server.wait_for_open_port(80)
-token = api("POST", "auth/basic/login", {"loginname": "admin", "password": "admin_password"})
 eval_id = wait_for(
     "the task starts an evaluation",
     lambda: api("GET", "tasks/project/task").get("last_evaluation"),
@@ -317,7 +323,24 @@ terminal = wait_status("terminal", "completed", timeout=120)
 assert end_reasons(terminal) == ["completed"], json.dumps(terminal)
 assert "attached-42" in job_log("terminal"), job_log("terminal")
 
-banner("Phase 15: the workers settle on one paused warm guest")
+banner("Phase 15: secrets reach the job masked, a name in two sources fails before dispatch")
+recipient = api("GET", "projects/project/sops-recipient")
+assert recipient["age"] == AGE_RECIPIENT, json.dumps(recipient)
+
+wait_status("secrets", "completed")
+output = job_log("secrets")
+expected = {"[secret:api-token]": 1, "[secret:wandb-token]": 2, "[secret:lab-key]": 1}
+counts = {mask: output.count(mask) for mask in expected}
+assert counts == expected, f"masks {counts} in the secrets log:\n{output}"
+for value in ["api-token-value-1", "s3cr3t-value", "lab-value-123"]:
+    assert value not in output, f"{value} left the guest unmasked:\n{output}"
+
+clash = wait_status("clash", "failed")
+assert clash["attempts"] == [], json.dumps(clash)
+expected_message = f'secret "clash-key" found in two sources: project secrets, worker sops of {STOPPER_ID}'
+assert clash["message"] == expected_message, json.dumps(clash)
+
+banner("Phase 16: the workers settle on one paused warm guest")
 for node in WORKERS:
     wait_for(f"{node.name} settles on one paused warm guest", lambda: one_paused_guest(node))
 status, _ = keeper.execute("journalctl -u gradient-worker --no-pager | grep -q 'warm guest target changed'")
