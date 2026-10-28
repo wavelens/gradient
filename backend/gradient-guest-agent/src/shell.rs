@@ -15,12 +15,15 @@ use tokio::net::unix::pipe;
 use tokio::process::{Child, Command};
 
 use crate::run::{SYSTEM_PATH, WORK_DIR, as_program_user};
-use crate::terminal::{DEFAULT_COLS, DEFAULT_ROWS, PtyMaster, TERMINAL_TYPE, spawn_on_pty};
+use crate::terminal::{
+    DEFAULT_COLS, DEFAULT_ROWS, ProgramTerminal, PtyMaster, TERMINAL_TYPE, spawn_on_pty,
+};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct ShellContext {
     pub env: BTreeMap<String, String>,
     pub groups: Vec<String>,
+    pub program: Option<ProgramTerminal>,
 }
 
 impl ShellContext {
@@ -35,6 +38,7 @@ impl ShellContext {
         Self {
             env,
             groups: groups.to_vec(),
+            program: None,
         }
     }
 }
@@ -109,6 +113,7 @@ mod tests {
         ShellContext {
             env: BTreeMap::from([("GRADIENT_JOB".to_owned(), "j1".to_owned())]),
             groups: vec!["kvm".to_owned()],
+            program: None,
         }
     }
 

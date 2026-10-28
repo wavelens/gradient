@@ -13,14 +13,16 @@ use std::time::Duration;
 use gradient_wire::guest::RunJob;
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
+use tokio::fs::File;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::context::{UnknownPlaceholder, resolve_placeholders};
 use crate::output::OutputLog;
 use crate::setup::{PROGRAM_USER, PreparedJob};
+use crate::terminal::{DEFAULT_COLS, DEFAULT_ROWS, ProgramTerminal, TERMINAL_TYPE, spawn_on_pty};
 
 pub const WORK_DIR: &str = "/work";
 pub const SYSTEM_PATH: &str = "/run/current-system/sw/bin";
@@ -48,7 +50,7 @@ pub fn program_command(
         .map(|(name, value)| Ok((name.clone(), resolve(value)?)))
         .collect::<Result<BTreeMap<_, _>, UnknownPlaceholder>>()?;
 
-    let mut command = as_program_user(&job.groups, false);
+    let mut command = as_program_user(&job.groups, job.program_pty);
     command
         .arg(&job.program)
         .args(args)
@@ -58,6 +60,9 @@ pub fn program_command(
         .env("HOME", format!("/home/{PROGRAM_USER}"))
         .envs(app_env)
         .envs(env);
+    if job.program_pty {
+        command.env("TERM", TERMINAL_TYPE);
+    }
     Ok(command)
 }
 
@@ -85,15 +90,20 @@ pub fn as_program_user(groups: &[String], terminal: bool) -> Command {
 pub async fn run(
     prepared: PreparedJob,
     output: &mut OutputLog,
-    started: oneshot::Sender<()>,
+    started: oneshot::Sender<Option<ProgramTerminal>>,
     kill: CancellationToken,
 ) -> i32 {
-    let PreparedJob { program, env } = prepared;
+    let PreparedJob {
+        program,
+        env,
+        terminal,
+    } = prepared;
     let code = match run_script(PRE_SCRIPT, &env, output, kill.cancelled()).await {
         0 if kill.is_cancelled() => {
             note(output, "killed before the program started").await;
             KILLED
         }
+        0 if terminal => run_program_on_terminal(program, output, started, &kill).await,
         0 => run_program(program, output, started, &kill).await,
         code => {
             note(output, &format!("pre-script exited with code {code}")).await;
@@ -112,12 +122,12 @@ pub async fn run(
 async fn run_program(
     mut program: Command,
     output: &mut OutputLog,
-    started: oneshot::Sender<()>,
+    started: oneshot::Sender<Option<ProgramTerminal>>,
     kill: &CancellationToken,
 ) -> i32 {
     match spawn_piped(&mut program) {
         Ok(child) => {
-            let _ = started.send(());
+            let _ = started.send(None);
             exit_code(stream_until_exit(child, output, kill.cancelled()).await)
         }
         Err(e) => {
@@ -125,6 +135,40 @@ async fn run_program(
             SPAWN_FAILED
         }
     }
+}
+
+async fn run_program_on_terminal(
+    program: Command,
+    output: &mut OutputLog,
+    started: oneshot::Sender<Option<ProgramTerminal>>,
+    kill: &CancellationToken,
+) -> i32 {
+    let spawned = spawn_on_pty(program, DEFAULT_COLS, DEFAULT_ROWS)
+        .and_then(|(child, master)| Ok((child, master.stream()?, master)));
+    let (child, terminal_output, master) = match spawned {
+        Ok(spawned) => spawned,
+        Err(e) => {
+            note(output, &format!("cannot start the program: {e}")).await;
+            return SPAWN_FAILED;
+        }
+    };
+    let (exit, exit_watch) = watch::channel(None);
+    let _ = started.send(Some(ProgramTerminal::new(
+        master,
+        output.readers(),
+        exit_watch,
+    )));
+    let status = stream_streams_until_exit(
+        child,
+        Some(terminal_output),
+        None::<File>,
+        output,
+        kill.cancelled(),
+    )
+    .await;
+    let code = exit_code(status);
+    exit.send_replace(Some(code));
+    code
 }
 
 async fn run_script(
@@ -167,11 +211,22 @@ async fn stream_until_exit(
     output: &mut OutputLog,
     stop: impl Future<Output = ()>,
 ) -> std::io::Result<ExitStatus> {
+    let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
+    stream_streams_until_exit(child, stdout, stderr, output, stop).await
+}
+
+async fn stream_streams_until_exit(
+    mut child: Child,
+    stdout: Option<impl AsyncRead + Unpin>,
+    stderr: Option<impl AsyncRead + Unpin>,
+    output: &mut OutputLog,
+    stop: impl Future<Output = ()>,
+) -> std::io::Result<ExitStatus> {
     let group = child
         .id()
         .and_then(|id| i32::try_from(id).ok())
         .map(Pid::from_raw);
-    let pump = pump(child.stdout.take(), child.stderr.take(), output);
+    let pump = pump(stdout, stderr, output);
     let exit = wait_or_stop(&mut child, group, stop);
     tokio::pin!(pump, exit);
 
@@ -322,6 +377,25 @@ mod tests {
     }
 
     #[test]
+    fn a_terminal_program_gets_a_term() {
+        let term = |program_pty| {
+            let job = RunJob {
+                program_pty,
+                ..job()
+            };
+            program_command(&job, &BTreeMap::new())
+                .expect("command")
+                .as_std()
+                .get_envs()
+                .find(|(name, _)| *name == "TERM")
+                .and_then(|(_, value)| value.map(OsStr::to_owned))
+        };
+
+        assert_eq!(term(true).as_deref(), Some(OsStr::new("xterm-256color")));
+        assert_eq!(term(false), None);
+    }
+
+    #[test]
     fn gradient_variables_win_over_app_env() {
         let env = BTreeMap::from([("GRADIENT_JOB".to_owned(), "j1".to_owned())]);
         let command = program_command(&job(), &env).expect("command");
@@ -390,6 +464,7 @@ mod tests {
         let prepared = PreparedJob {
             program: Command::new("true"),
             env: BTreeMap::new(),
+            terminal: false,
         };
 
         assert_eq!(run(prepared, &mut output, started, kill).await, KILLED);
