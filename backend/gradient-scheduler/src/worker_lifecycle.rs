@@ -68,6 +68,14 @@ impl Scheduler {
             .unwrap_or(false)
     }
 
+    pub async fn worker_port(&self, worker: &str) -> Option<Arc<dyn SessionPort>> {
+        let worker = worker.to_owned();
+        self.call(|reply| SchedulerMsg::WorkerPort { worker, reply })
+            .await
+            .ok()
+            .flatten()
+    }
+
     pub async fn stale_workers(&self, now_ms: i64, timeout_ms: i64) -> Vec<String> {
         self.call(|reply| SchedulerMsg::StaleWorkers {
             now_ms,

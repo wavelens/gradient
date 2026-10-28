@@ -131,6 +131,10 @@ pub enum SchedulerMsg {
         worker: String,
         reply: RpcReplyPort<bool>,
     },
+    WorkerPort {
+        worker: String,
+        reply: RpcReplyPort<Option<Arc<dyn SessionPort>>>,
+    },
     AuthorizedFor {
         worker: String,
         project: ProjectId,
@@ -906,6 +910,9 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::IsConnected { worker, reply } => {
                 let _ = reply.send(core.pool.is_connected(&worker));
+            }
+            SchedulerMsg::WorkerPort { worker, reply } => {
+                let _ = reply.send(core.pool.session_port(&worker));
             }
             SchedulerMsg::AuthorizedFor {
                 worker,

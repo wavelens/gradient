@@ -6,6 +6,7 @@
 
 pub mod aggregate;
 pub mod estimate;
+pub mod guest_channels;
 pub mod input_request;
 pub mod peer_auth;
 pub mod score;
