@@ -14,7 +14,7 @@ Workers declare their capabilities at the handshake. Capabilities cover the jobs
 | Capability | Default | Meaning |
 |---|---|---|
 | `network` | on | Internet access. Needed to clone the repository, download missing inputs, substitute from upstream caches and run fixed-output builds |
-| `secrets` | on | The server may send the project SSH key. Needed to clone a repository behind an SSH URL |
+| `secrets` | on | The server can send the project SSH key and exec job secrets. Needed for an SSH repository URL and for exec secrets from the server |
 | `exec` | off | Start [exec jobs](../guides/exec-jobs.md) on the worker |
 | `eval` | on | Walk the flake and report derivations |
 | `build` | on | Build derivations and upload the outputs |
@@ -63,6 +63,24 @@ Manage team workers on the team's **Workers** page.
 | `enabled` | Global switch for the worker in every granted project |
 
 A worker ID can point to a team worker or to a set of project registrations. Never to both at once.
+
+## Exec Secrets
+
+Exec workers decrypt their own sops files. [Exec jobs](../guides/exec-jobs.md#secrets) fetch the values by name. The server can't see them.
+
+```nix
+# configuration.nix
+services.gradient.worker.exec.sops = {
+  files = [ "/etc/gradient/worker-secrets.yaml" ];
+  keyFile = "/etc/ssh/ssh_host_ed25519_key"; # (1)!
+};
+```
+
+1.  An SSH private key, Ed25519 or RSA. Ed25519 keys yield an age recipient through `ssh-to-age < /etc/ssh/ssh_host_ed25519_key.pub`.
+
+- Workers advertise names, never values. Jobs listing such a name reach only workers with that name.
+- Run `systemctl reload gradient-worker` to decrypt the files again. Failed reloads keep the previous values.
+- The files need group read for `gradient-worker`. They hold ciphertext only.
 
 ## Worker Stop
 

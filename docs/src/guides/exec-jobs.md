@@ -132,13 +132,14 @@ passthru.gradient = {
 | `ports` | `[ ]` | Guest ports for forwarding. Port 0 is refused |
 | `image` | none | A `nixosConfiguration` as the guest system, built like the program |
 | `env`, `args` | empty | Environment and arguments of the program |
+| `secrets`, `sops` | `[ ]` | Secret names and repository sops files, see [Pass Secrets](#secrets) |
 | `timeout` | none | Total seconds, capped by the worker |
 | `maxSilent` | worker default | Seconds without output, capped by the worker |
 | `retries` | `0` | Restarts after a non-zero exit or a timeout, capped by the worker |
 
 - Workers report the labels, devices and limits they allow. Requests outside those limits rule out that worker. Downgrades of a request never happen.
 - Lost workers lead to a restart without using a retry. Ten losses in a row fail the job.
-- Not available yet: `nodes` above 1, `image`, `secrets`, outputs and phase markers in the UI.
+- None of these exist yet: `nodes` above 1, `image`, outputs and phase markers in the UI.
 
 ## 5. Read the Job Context
 
@@ -159,7 +160,86 @@ Programs start as the user `gradient` in `/work`, a checkout of the evaluated co
 - `args` and `env` accept placeholders like `@gradient.job.commit@` or `@gradient.worker.zone@`. Unknown placeholders fail the job.
 - Timeout events end the attempt. The log shows `program produced no output for <n>s (maxSilent exceeded)` or `program exceeded wall-clock timeout of <n>s`.
 
-## 6. Open a Terminal { #ssh-and-terminal }
+## 6. Pass Secrets { #secrets }
+
+Jobs list secret names in `secrets`. Each name needs exactly one source.
+
+```nix
+# flake.nix
+passthru.gradient = {
+  secrets = [ "wandb-token" "hf-token" "lab-key" ];
+  sops = [ ./secrets/train.yaml ]; # (1)!
+  args = [ "--token" "@gradient.secret.hf-token@" ];
+};
+```
+
+1.  Repository files encrypted with sops. Evaluations hand on the ciphertext only.
+
+| Source | Setup | Use |
+|---|---|---|
+| Project secrets | Project **Settings -> Secrets**, the API or `secret_files` in the state | Values from project admins, the simplest choice |
+| Repository sops files | Files listed in `sops`, encrypted for the project recipient | Values versioned with the code, never typed into Gradient |
+| Worker sops files | `exec.sops.files` on the worker, see [Workers](../concepts/workers.md#exec-secrets) | Operator values out of reach of the server |
+
+### Project Secrets
+
+=== "UI"
+
+    Open the project **Settings -> Secrets** and click **Set secret**. Values stay write-only. Only project admins can change secrets.
+
+=== "Declarative"
+
+    ```nix
+    services.gradient.state.projects.acme.secret_files = {
+      wandb-token = "/run/secrets/wandb-token";
+    };
+    ```
+
+- A script can set a value with `PUT /projects/{project}/secrets/{name}`. See [API](../reference/api.md) for details.
+- Names hold 1 to 64 lowercase letters, digits or dashes. Values hold at most 64 KiB.
+- Secrets from the state show as managed. UI and API changes to them fail.
+
+### Repository Sops Files
+
+The project **Settings** show the **Sops recipient**, derived from the project SSH key.
+
+```yaml
+# .sops.yaml
+creation_rules:
+  - path_regex: secrets/.*\.(yaml|json)$
+    age: age1... # (1)!
+```
+
+1.  The recipient from the settings page.
+
+```sh
+sops encrypt --in-place secrets/train.yaml
+```
+
+- Top-level string values turn into secrets. Files need YAML or JSON, picked by extension.
+- RSA project keys have no `age1` recipient. The SSH public key works as the age recipient with sops 3.10 or newer.
+- Files with encrypted comments fail. Remove the comments before encrypting.
+
+### Secrets in the Job
+
+| Form | Example |
+|---|---|
+| File | `/run/gradient/secrets/wandb-token` |
+| Variable | `GRADIENT_SECRET_WANDB_TOKEN` |
+| Placeholder | `@gradient.secret.wandb-token@` in `args` and `env` |
+
+Jobs with a secret problem fail before the start, without using a retry.
+
+| Message | Cause |
+|---|---|
+| `secret "<name>" found in two sources: <first>, <second>` | Two sources hold the name |
+| `secret "<name>" not found in project secrets, repository sops files or worker sops files` | No source holds the name |
+| `sops file <file>: not encrypted for the project key` | A recipient other than the project key |
+
+- Logs, terminals and the console show `[secret:<name>]` in place of a value. Base64 and URL-encoded values also receive masks.
+- Values shorter than 8 bytes stay unmasked. Binary outputs and port forwards stay unmasked too.
+
+## 7. Open a Terminal { #ssh-and-terminal }
 
 Jobs with `ssh = true` accept terminal sessions from the browser and over SSH. Exec workers need `exec.allow.ssh = true` for such jobs.
 
@@ -226,6 +306,6 @@ ssh -p 2222 -N -L 8888:127.0.0.1:8888 myproject/<job-id>@ci.example.com # (3)!
 
 - [Workers](../concepts/workers.md): capabilities and registrations
 - [Evaluation Wildcards](../reference/wildcards.md): select the apps of a flake
-- [Declarative State](../reference/state.md): `exec_enabled` and `enable_exec`
+- [Declarative State](../reference/state.md): the `exec_enabled` flag, `enable_exec` and `secret_files`
 - [Configuration](../reference/configuration.md): the `exec.enable` and `exec.allow.ssh` settings
 - [Build over SSH](build-over-ssh.md): SSH server and key setup

@@ -123,7 +123,9 @@ nav:
           - Messages: contributors/proto/messages.md
           - Transfer: contributors/proto/transfer.md
           - Federation: contributors/proto/federation.md
-      - Exec Jobs: contributors/exec/index.md
+      - Exec Jobs:
+          - contributors/exec/index.md
+          - Secrets: contributors/exec/secrets.md
       - Evaluation Metrics: contributors/eval-metrics.md
       - Eval Benchmark: contributors/eval-benchmark.md
       - Diagnostic Reports: contributors/diagnostic-reports.md
