@@ -3181,6 +3181,7 @@ dependencies = [
  "utoipa",
  "utoipa-axum",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
