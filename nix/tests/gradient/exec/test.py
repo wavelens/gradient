@@ -11,10 +11,11 @@
 # declared port and a refused forward, secrets from the project store, a repository sops file
 # and the worker sops files with masked output and a secret name in two sources, a phase, an
 # uploaded output with a range download, the tree patch, the job token behind `gradient build`
-# and its revocation. Not covered:
-# the browser terminal and the serial console (no browser in the test), VFIO, USB/IP,
-# /dev relays, the nested kvm device, multi-node jobs, custom images. The CI host must offer
-# nested KVM (kvm_intel or kvm_amd with nested=1), since the workers boot guests in a VM.
+# and its revocation, a custom image booted cold on the worker that allows custom images with
+# the program started in the flake directory and a custom image without the guest agent.
+# Not covered: the browser terminal and the serial console (no browser in the test), VFIO,
+# USB/IP, /dev relays, the nested kvm device, multi-node jobs. The CI host must offer nested
+# KVM (kvm_intel or kvm_amd with nested=1), since the workers boot guests in a VM.
 
 import json
 import re
@@ -28,6 +29,8 @@ NAMES = [
     "fetch", "silent", "abort", "long-stop", "fail", "long-keep", "lost", "interactive", "terminal",
     "secrets", "clash", "outputs",
 ]
+IMAGE_NAMES = ["trainer", "noagent"]
+NO_GUEST_AGENT = "guest image has no gradient agent, import the gradient.guest module"
 OUTPUT_BYTES = 3000000
 SSH = "ssh -p 2222 -i /root/.ssh/gradient -o StrictHostKeyChecking=no -o BatchMode=yes"
 TERMINAL = {"completed", "failed", "aborted"}
@@ -219,15 +222,15 @@ eval_id = wait_for(
 )
 
 
-def recorded_jobs():
-    status = api("GET", f"evals/{eval_id}")["status"]
-    assert status not in ("Failed", "Aborted"), f"evaluation {eval_id} ended {status}"
-    jobs = api("GET", f"evals/{eval_id}/exec-jobs")
+def recorded_jobs(evaluation, names):
+    status = api("GET", f"evals/{evaluation}")["status"]
+    assert status not in ("Failed", "Aborted"), f"evaluation {evaluation} ended {status}"
+    jobs = api("GET", f"evals/{evaluation}/exec-jobs")
     by_name = {entry["entry_point"].rsplit(".", 1)[-1]: entry["id"] for entry in jobs}
-    return by_name if set(NAMES) <= by_name.keys() else None
+    return by_name if set(names) <= by_name.keys() else None
 
 
-JOBS = wait_for("the evaluation records every exec job", recorded_jobs, timeout=900)
+JOBS = wait_for("the evaluation records every exec job", lambda: recorded_jobs(eval_id, NAMES), timeout=900)
 
 banner("Phase 6: upcoming exec jobs raise the warm target up to maxPreWarm")
 stopper.wait_until_succeeds(
@@ -381,3 +384,46 @@ for node in WORKERS:
     wait_for(f"{node.name} settles on one paused warm guest", lambda: one_paused_guest(node))
 status, _ = keeper.execute("journalctl -u gradient-worker --no-pager | grep -q 'warm guest target changed'")
 assert status != 0, "keeper with maxPreWarm = 0 changed its warm target"
+
+banner("Phase 17: push the custom images into a flake directory of a second repository")
+warm_guests = active_guests(stopper)
+server.succeed(
+    "nix --extra-experimental-features nix-command copy "
+    "--to 'file:///srv/upstream?secret-key=/etc/gradient/secrets/upstream_key' "
+    f"--no-check-sigs {TRAINER_INPUTS}"
+)
+server.succeed("chown -R nginx:nginx /srv/upstream")
+server.succeed(f"{GIT} init /var/lib/git/images")
+server.succeed("install -D -m 0644 /var/lib/git/images.nix /var/lib/git/images/nix/flake.nix")
+server.succeed("install -m 0644 -t /var/lib/git/images/nix /var/lib/git/apps.nix /var/lib/git/guest.nix /var/lib/git/trainer.nix")
+server.succeed("nix --extra-experimental-features 'nix-command flakes' flake lock path:/var/lib/git/images/nix")
+server.succeed(f"{GIT} -C /var/lib/git/images add nix")
+server.succeed(f"{GIT} -C /var/lib/git/images commit -m 'custom images'")
+server.succeed("chown -R git:git /var/lib/git/images")
+
+images_eval = wait_for(
+    "the images task starts an evaluation",
+    lambda: api("GET", "tasks/project/images").get("last_evaluation"),
+)
+JOBS.update(wait_for(
+    "the evaluation records the custom image jobs", lambda: recorded_jobs(images_eval, IMAGE_NAMES), timeout=900))
+
+banner("Phase 18: a custom image boots cold on the worker that allows custom images")
+trained = wait_status("trainer", "completed", timeout=1200)
+assert end_reasons(trained) == ["completed"], json.dumps(trained)
+assert trained["attempts"][0]["worker"] == STOPPER_ID, json.dumps(trained)
+output = job_log("trainer")
+assert "trainer" in output.splitlines(), f"the job did not run in the custom image:\n{output}"
+assert "cwd /work/nix" in output, f"the program did not start in the flake directory:\n{output}"
+assert set(warm_guests) <= set(active_guests(stopper)), "the custom image job took the warm guest"
+
+banner("Phase 19: a custom image without the guest agent fails with a hint")
+missing = wait_status("noagent", "failed", timeout=900)
+assert end_reasons(missing) == ["failed"], json.dumps(missing)
+messages = [missing["message"]] + [attempt["message"] for attempt in missing["attempts"]]
+assert any(NO_GUEST_AGENT in (message or "") for message in messages), json.dumps(missing)
+
+wait_for(
+    "stopper tears the custom guests down and keeps its warm guest",
+    lambda: active_guests(stopper) == warm_guests and one_paused_guest(stopper),
+)

@@ -66,6 +66,13 @@ in {
 
   hello = pkgs.writeText "exec-hello" "hello\n";
 
+  trainer = pkgs.writeShellScript "exec-trainer" ''
+    ${pkgs.coreutils}/bin/cat /etc/gradient-image
+    echo "cwd $PWD"
+  '';
+
+  noagent = pkgs.writeShellScript "exec-noagent" "true";
+
   abort = ticks "exec-abort" 600;
   long-stop = ticks "exec-long-stop" 300;
   long-keep = ticks "exec-long-keep" 150;
