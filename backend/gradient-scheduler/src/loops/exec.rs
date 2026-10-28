@@ -86,7 +86,7 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
             .enqueue_routed(
                 crate::cluster::Route::Single,
                 key.clone(),
-                PendingJob::Exec(pending),
+                PendingJob::Exec(Box::new(pending)),
             )
             .await
         {
@@ -127,7 +127,7 @@ async fn queued_job(
 ) -> anyhow::Result<Option<PendingExecJob>> {
     if tracked {
         return Ok(match scheduler.pending_job(key).await {
-            Some(PendingJob::Exec(pending)) => Some(pending),
+            Some(PendingJob::Exec(pending)) => Some(*pending),
             _ => None,
         });
     }
@@ -194,6 +194,9 @@ pub(crate) fn pending_exec_job(row: &ExecDispatchRow, api_url: &str) -> Option<P
         evaluation_id: row.job.evaluation,
         project_id: row.project,
         task_id: row.task,
+        project_name: row.project_name.clone(),
+        task_name: row.task_name.clone(),
+        parent_job: row.parent_job,
         entry_point: row.entry_point.clone(),
         repository: row.repository.clone(),
         commit: row.commit.clone(),
@@ -212,6 +215,8 @@ pub(crate) fn pending_exec_job(row: &ExecDispatchRow, api_url: &str) -> Option<P
             attempt: open.id,
             number: u32::try_from(open.number).unwrap_or(0),
             retries_cap: u32::try_from(row.job.retries_left).unwrap_or(0),
+            token_hash: String::new(),
+            token_expires_at: chrono::NaiveDateTime::default(),
         }),
         secrets: Default::default(),
         spec,

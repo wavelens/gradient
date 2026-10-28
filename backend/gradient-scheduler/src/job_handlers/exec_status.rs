@@ -43,7 +43,7 @@ pub(crate) async fn end_attempt(
     reason: AttemptEndReason,
     message: Option<String>,
 ) -> Result<()> {
-    let Some(assignment) = job.assignment else {
+    let Some(assignment) = &job.assignment else {
         warn!(exec_job = %job.exec_job, "an exec report without an attempt; ignored");
         return Ok(());
     };

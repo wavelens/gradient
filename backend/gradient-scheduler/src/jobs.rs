@@ -12,7 +12,7 @@ use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::evaluation::WalkMode;
 use gradient_types::ids::{
     ClusterAttemptId, ClusterJobId, ClusterMemberId, CommitId, DerivationBuildId, DerivationId,
-    DispatchedJobId, EvaluationId, ProjectId, TaskId,
+    DispatchedJobId, EvaluationId, ExecJobId, ProjectId, TaskId,
 };
 use gradient_wire::types::{
     BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeStep, Job, JobCandidate, JobKind,
@@ -46,6 +46,7 @@ pub struct PendingEvalJob {
     pub eval_index: u16,
     pub prioritized: bool,
     pub build_request: bool,
+    pub continuation: Option<ExecJobId>,
 }
 
 impl PendingEvalJob {
@@ -91,7 +92,7 @@ pub struct PendingBuildJob {
 pub enum PendingJob {
     Eval(PendingEvalJob),
     Build(PendingBuildJob),
-    Exec(PendingExecJob),
+    Exec(Box<PendingExecJob>),
 }
 
 pub fn eval_job_key(evaluation: EvaluationId, index: u16) -> String {
@@ -108,6 +109,13 @@ pub fn parse_eval_job_key(key: &str) -> Option<(EvaluationId, u16)> {
         Some((evaluation, index)) => Some((evaluation.parse().ok()?, index.parse().ok()?)),
         None => Some((rest.parse().ok()?, 0)),
     }
+}
+
+pub fn continuation_job_key(job: ExecJobId) -> String {
+    format!(
+        "{}{job}",
+        gradient_db::scheduling::assignment_record::CONTINUE_KEY_PREFIX
+    )
 }
 
 pub fn build_job_key(shared_build: DerivationBuildId) -> String {
@@ -184,17 +192,14 @@ impl PendingJob {
         }
     }
 
-    pub(crate) fn into_job_on(self, caps: Option<&WorkerCaps>, cores: Option<u32>) -> Option<Job> {
+    pub(crate) fn into_job(self, cores: Option<u32>) -> Option<Job> {
         match self {
             PendingJob::Eval(j) => Some(Job::Flake(j.job)),
             PendingJob::Build(mut j) => {
                 j.job.build.build_cores = cores;
                 Some(Job::Build(j.job))
             }
-            PendingJob::Exec(j) => {
-                let job = j.exec_job_for(caps?, j.assignment.as_ref()?);
-                Some(Job::Exec(Box::new(job)))
-            }
+            PendingJob::Exec(_) => None,
         }
     }
 
@@ -366,7 +371,7 @@ pub struct AssignmentRecord {
 /// then rebuild bytes already available upstream (#593).
 impl From<&AssignmentRecord> for ClaimGate {
     fn from(rec: &AssignmentRecord) -> Self {
-        match (rec.derivation_build, rec.exec) {
+        match (rec.derivation_build, &rec.exec) {
             (Some(shared_build), _) => ClaimGate::Build {
                 shared_build,
                 substitute: rec.substitute,
@@ -1228,14 +1233,16 @@ impl JobTracker {
         caps: Option<&WorkerCaps>,
     ) -> Option<Assignment> {
         let mut job = self.pending.remove(job_id)?;
-        if let PendingJob::Exec(exec) = &mut job {
-            exec.assignment = caps.and_then(|c| exec.assignment_on(c));
-            record.exec = exec.assignment;
-        }
-        let Some(wire_job) = job
-            .clone()
-            .into_job_on(caps, record.choice.map(|c| c.cores))
-        else {
+        let wire_job = match &mut job {
+            PendingJob::Exec(exec) => {
+                let dispatch = caps.and_then(|c| exec.dispatch_on(c));
+                exec.assignment = dispatch.as_ref().map(|(assignment, _)| assignment.clone());
+                record.exec = exec.assignment.clone();
+                dispatch.map(|(_, wire)| Job::Exec(Box::new(wire)))
+            }
+            other => other.clone().into_job(record.choice.map(|c| c.cores)),
+        };
+        let Some(wire_job) = wire_job else {
             self.pending.insert(job_id.to_owned(), job);
             return None;
         };
@@ -1315,7 +1322,7 @@ impl JobTracker {
     ) -> Option<gradient_types::ids::ExecJobAttemptId> {
         let active = self.active.get(job_id).filter(|a| a.worker == worker_id)?;
         match &active.job {
-            PendingJob::Exec(exec) => exec.assignment.map(|a| a.attempt),
+            PendingJob::Exec(exec) => exec.assignment.as_ref().map(|a| a.attempt),
             PendingJob::Eval(_) | PendingJob::Build(_) => None,
         }
     }
@@ -1920,7 +1927,7 @@ mod tests {
             ..ExecSpec::default()
         });
         let key = exec_job_key(job.exec_job);
-        tracker.add_pending(key, PendingJob::Exec(job));
+        tracker.add_pending(key, PendingJob::Exec(Box::new(job)));
         let caps = exec_caps(
             ExecAllow {
                 timeout_secs: Some(30 * 24 * 3600),
@@ -1948,6 +1955,7 @@ mod tests {
             assignment
                 .assignment_record
                 .exec
+                .as_ref()
                 .expect("an exec assignment")
                 .retries_cap,
             5
@@ -1960,14 +1968,46 @@ mod tests {
     }
 
     #[test]
+    fn an_assigned_exec_job_carries_a_token_whose_hash_is_stored() {
+        use crate::test_jobs::{allow_all, exec_caps, exec_job};
+        use gradient_types::exec::{ExecDefaults, ExecSpec, JOB_TOKEN_PREFIX, hash_job_token};
+
+        let mut tracker = JobTracker::new();
+        let job = exec_job(ExecSpec {
+            timeout_secs: Some(600),
+            ..ExecSpec::default()
+        });
+        tracker.add_pending(exec_job_key(job.exec_job), PendingJob::Exec(Box::new(job)));
+        let assignment = take_exec(
+            &mut tracker,
+            "w1",
+            &exec_caps(allow_all(), ExecDefaults::default()),
+        )
+        .expect("placed");
+        let Job::Exec(r) = assignment.job else {
+            panic!("exec job")
+        };
+        let record = assignment.assignment_record.exec.unwrap();
+        assert!(r.context.token.starts_with(JOB_TOKEN_PREFIX));
+        assert_eq!(record.token_hash, hash_job_token(&r.context.token));
+        assert_eq!(
+            (
+                r.context.project_name.as_str(),
+                r.context.task_name.as_str()
+            ),
+            ("infra", "master")
+        );
+    }
+
+    #[test]
     fn an_exec_job_is_not_offered_to_a_worker_it_does_not_fit() {
         use crate::test_jobs::{allow_all, exec_caps, exec_job};
         use gradient_types::exec::{ExecDefaults, ExecSpec};
 
-        let job = PendingJob::Exec(exec_job(ExecSpec {
+        let job = PendingJob::Exec(Box::new(exec_job(ExecSpec {
             labels: vec!["3d-printer".into()],
             ..ExecSpec::default()
-        }));
+        })));
         assert!(!visible_to(
             &job,
             None,
@@ -2079,6 +2119,7 @@ mod tests {
             estimate: Default::default(),
             walk_mode: Default::default(),
             eval_index: 0,
+            continuation: None,
         })
     }
 
@@ -2113,6 +2154,7 @@ mod tests {
             estimate: Default::default(),
             walk_mode: Default::default(),
             eval_index: 0,
+            continuation: None,
         })
     }
 

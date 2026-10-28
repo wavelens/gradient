@@ -1597,7 +1597,7 @@ mod tests {
             vec![Reattached::single(
                 job_id,
                 DispatchedJobId::now_v7(),
-                PendingJob::Exec(job),
+                PendingJob::Exec(Box::new(job)),
             )],
         );
         core.pool.update_exec_inventory(

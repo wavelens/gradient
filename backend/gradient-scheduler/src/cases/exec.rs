@@ -10,18 +10,20 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::{self, ExecJobStatus};
 use gradient_entity::exec_job_attempt;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
+use gradient_entity::exec_job_continuation::{self, ContinuationStatus};
 use gradient_entity::ids::{DispatchedJobId, EvaluationId, ProjectId};
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::WaitingReason;
-use gradient_types::exec::{ExecInventory, ExecSpec, SopsFile};
+use gradient_types::exec::{ExecInventory, ExecSpec, Phase, SopsFile};
 use gradient_wire::types::BuildFailureKind;
-use gradient_wire::types::{DiscoveredDerivation, Job, JobKind};
+use gradient_wire::types::{DiscoveredDerivation, FlakeSource, Job, JobKind};
 
 use super::{
-    A, A_OUT, CaseShapes, SchedulerCase, drv, eval_key, failure, w_all, w_exec, with_attr,
-    with_output,
+    A, A_OUT, B, B_OUT, CaseShapes, SchedulerCase, drv, eval_key, failure, w_all, w_exec,
+    with_attr, with_output,
 };
+use crate::jobs::Assignment;
 use crate::test_jobs::allow_all;
 
 const W1: &str = "w1";
@@ -474,6 +476,137 @@ async fn a_wrong_sops_recipient_fails_the_job_before_dispatch() {
     assert!(
         case.db.rows::<dispatched_job::Entity>().await.is_empty(),
         "after 1: no dispatch"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_requeued_job_carries_its_last_phase_to_the_next_attempt() {
+    let e1 = EvaluationId::now_v7();
+    let case = with_queued_job(e1, spec()).await;
+    let (key, _) = dispatched(&case).await;
+    case.scheduler
+        .handle_exec_phase(W1, &key, "epoch-3".into(), b"ckpt".to_vec())
+        .await;
+
+    case.disconnect(W1).await;
+    case.connect(W2, w_exec(inventory()), &[]).await;
+    case.assign_exec_jobs().await;
+    let assignment = case
+        .request_job(W2, JobKind::Exec)
+        .await
+        .expect("after 1: the job reaches W2");
+
+    let Job::Exec(job) = assignment.job else {
+        panic!("after 1: an exec job")
+    };
+    assert_eq!(
+        (job.context.last_phase, job.attempt),
+        (
+            Some(Phase {
+                name: "epoch-3".into(),
+                payload: b"ckpt".to_vec()
+            }),
+            2
+        ),
+        "after 1: the second attempt starts from the phase"
+    );
+    case.finish().await;
+}
+
+const CONTINUED_ATTR: &str = "packages.x86_64-linux.b";
+
+async fn with_queued_continuation(evaluation: EvaluationId) -> SchedulerCase {
+    let case = with_queued_job(evaluation, spec()).await;
+    case.db
+        .execute(&format!(
+            "INSERT INTO exec_job_continuation \
+             (exec_job, evaluation, attributes, status, created_at, updated_at) \
+             SELECT id, evaluation, '[\"{CONTINUED_ATTR}\"]'::jsonb, {queued}, \
+             now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC' FROM exec_job",
+            queued = i16::from(ContinuationStatus::Queued),
+        ))
+        .await;
+    case
+}
+
+async fn dispatched_continuation(case: &SchedulerCase) -> Assignment {
+    case.connect(W1, w_all(), &[]).await;
+    case.assign_queued_evals().await;
+    case.offers_full(W1).await;
+    case.score_all(W1).await;
+    case.request_job(W1, JobKind::Flake)
+        .await
+        .expect("the continuation eval job")
+}
+
+#[tokio::test]
+async fn a_queued_continuation_is_dispatched_as_an_eval_job_of_its_evaluation() {
+    let e1 = EvaluationId::now_v7();
+    let case = with_queued_continuation(e1).await;
+
+    let assignment = dispatched_continuation(&case).await;
+
+    let exec_job = the_job(&case).await.id;
+    let Job::Flake(flake) = &assignment.job else {
+        panic!("after 1: a flake job")
+    };
+    assert_eq!(
+        flake.wildcards,
+        vec![CONTINUED_ATTR.to_owned()],
+        "after 1: the wildcards"
+    );
+    let commit = case
+        .db
+        .texts("SELECT encode(c.hash, 'hex') FROM commit c JOIN evaluation e ON e.commit = c.id")
+        .await;
+    assert!(
+        matches!(&flake.source, FlakeSource::Repository { commit: sha, .. } if [sha.clone()] == commit.as_slice()),
+        "after 1: the source {:?} is the evaluation's commit {commit:?}",
+        flake.source
+    );
+    let rows = case.db.rows::<dispatched_job::Entity>().await;
+    assert_eq!(
+        rows.iter()
+            .map(|r| (r.job_id.clone(), r.evaluation_id))
+            .collect::<Vec<_>>(),
+        vec![(Some(format!("continue:{exec_job}")), e1)],
+        "after 1: the dispatched row"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_finished_continuation_job_ends_the_continuation_not_the_stream() {
+    let e1 = EvaluationId::now_v7();
+    let case = with_queued_continuation(e1).await;
+    let assignment = dispatched_continuation(&case).await;
+    let key = assignment.job_id().to_owned();
+    case.report_eval_result(
+        W1,
+        &key,
+        vec![with_attr(with_output(drv(B, &[]), B_OUT), CONTINUED_ATTR)],
+    )
+    .await;
+
+    case.complete(W1, &key, assignment.assignment_id(), Vec::new(), 0)
+        .await;
+
+    let continuations = case.db.rows::<exec_job_continuation::Entity>().await;
+    assert_eq!(
+        continuations.iter().map(|c| c.status).collect::<Vec<_>>(),
+        vec![ContinuationStatus::Done],
+        "after 1: the continuation"
+    );
+    assert_eq!(
+        case.db
+            .rows::<gradient_entity::evaluation::Entity>()
+            .await
+            .iter()
+            .map(|e| e.status)
+            .collect::<Vec<_>>(),
+        vec![EvaluationStatus::Building],
+        "after 1: build b keeps the evaluation building"
     );
     case.finish().await;
 }

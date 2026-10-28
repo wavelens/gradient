@@ -310,7 +310,7 @@ impl Scheduler {
             .map(|seat| {
                 seat.job
                     .clone()
-                    .into_job_on(None, seat.record.choice.map(|c| c.cores))
+                    .into_job(seat.record.choice.map(|c| c.cores))
             })
             .collect::<Option<Vec<_>>>()
         else {

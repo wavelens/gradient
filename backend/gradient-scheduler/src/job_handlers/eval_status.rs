@@ -14,7 +14,7 @@ use gradient_types::*;
 use gradient_wire::types::DiscoveredDerivation;
 
 use crate::Scheduler;
-use crate::jobs::PendingJob;
+use crate::jobs::{PendingEvalJob, PendingJob};
 
 impl Scheduler {
     pub async fn handle_eval_status_update(
@@ -22,10 +22,14 @@ impl Scheduler {
         job_id: &str,
         new_status: gradient_entity::evaluation::EvaluationStatus,
     ) {
-        let Some(PendingJob::Eval(j)) = self.active_job(job_id).await else {
+        let Some(PendingJob::Eval(PendingEvalJob {
+            evaluation_id,
+            continuation: None,
+            ..
+        })) = self.active_job(job_id).await
+        else {
             return;
         };
-        let evaluation_id = j.evaluation_id;
         match by_id::<EEvaluation, _>(&self.db.worker_db, evaluation_id).await {
             Ok(Some(eval)) => {
                 if let Err(e) =
@@ -46,10 +50,14 @@ impl Scheduler {
         use sea_orm::Set;
 
         let Some(path) = flake_source else { return };
-        let Some(PendingJob::Eval(j)) = self.active_job(job_id).await else {
+        let Some(PendingJob::Eval(PendingEvalJob {
+            evaluation_id,
+            continuation: None,
+            ..
+        })) = self.active_job(job_id).await
+        else {
             return;
         };
-        let evaluation_id = j.evaluation_id;
         let am = gradient_entity::evaluation::ActiveModel {
             id: Set(evaluation_id),
             flake_source: Set(Some(path)),
@@ -200,7 +208,7 @@ impl Scheduler {
                 derivations,
                 warnings,
                 errors,
-                continuation: None,
+                continuation: job.continuation,
             })
             .await?;
         if report.exec_entry_points > 0 {

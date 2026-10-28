@@ -9,14 +9,14 @@ use gradient_db::lookup::by_id;
 use tracing::{info, warn};
 
 use gradient_entity::exec_job_attempt::AttemptEndReason;
-use gradient_graph::Transition;
+use gradient_graph::{ContinuationOutcome, Transition};
 use gradient_types::*;
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput};
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::cluster::{Failure, MemberReport};
-use crate::jobs::{PendingBuildJob, PendingJob};
+use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingJob};
 
 impl Scheduler {
     pub async fn handle_build_status_update(&self, build_id_str: &str, worker_id: &str) {
@@ -134,6 +134,13 @@ impl Scheduler {
 
     pub(crate) async fn settle_completed(&self, job: PendingJob, worker_idle: bool) -> Result<()> {
         match job {
+            PendingJob::Eval(PendingEvalJob {
+                continuation: Some(exec_job),
+                ..
+            }) => {
+                self.end_continuation(exec_job, ContinuationOutcome::Done)
+                    .await
+            }
             PendingJob::Eval(j) => {
                 // A fetch-only job in split mode just archived the source. The cached eval
                 // follow-up is enqueued under the same `eval:{id}` key that the release above
@@ -260,6 +267,13 @@ impl Scheduler {
         metrics: Option<BuildMetrics>,
     ) -> Result<()> {
         match job {
+            PendingJob::Eval(PendingEvalJob {
+                continuation: Some(exec_job),
+                ..
+            }) => {
+                self.end_continuation(exec_job, continuation_outcome(failure))
+                    .await
+            }
             PendingJob::Eval(j) => {
                 self.fold_eval_stats(j.evaluation_id, j.task_id).await;
                 let r = self
@@ -305,5 +319,28 @@ impl Scheduler {
                 .await
             }
         }
+    }
+
+    async fn end_continuation(
+        &self,
+        exec_job: ExecJobId,
+        outcome: ContinuationOutcome,
+    ) -> Result<()> {
+        info!(%exec_job, ?outcome, "continuation eval job ended");
+        self.graph
+            .transition(Transition::ContinuationEnded { exec_job, outcome })
+            .await
+            .map(|_| ())
+    }
+}
+
+fn continuation_outcome(failure: &Failure) -> ContinuationOutcome {
+    match failure.kind {
+        BuildFailureKind::Transient
+        | BuildFailureKind::Canceled
+        | BuildFailureKind::InputsUnavailable => ContinuationOutcome::Retry,
+        _ => ContinuationOutcome::Failed {
+            error: failure.error.clone(),
+        },
     }
 }

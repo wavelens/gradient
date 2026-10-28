@@ -150,13 +150,20 @@ impl Scheduler {
             .await
         {
             Ok(report) => {
-                if !report.aborted_exec_jobs.is_empty() {
-                    let keys = report
-                        .aborted_exec_jobs
-                        .iter()
-                        .copied()
-                        .map(crate::jobs::exec_job_key)
-                        .collect();
+                let keys: Vec<String> = report
+                    .aborted_exec_jobs
+                    .iter()
+                    .copied()
+                    .map(crate::jobs::exec_job_key)
+                    .chain(
+                        report
+                            .aborted_continuations
+                            .iter()
+                            .copied()
+                            .map(crate::jobs::continuation_job_key),
+                    )
+                    .collect();
+                if !keys.is_empty() {
                     self.cancel_jobs(evaluation, keys).await;
                 }
                 report.aborted_shared_builds
