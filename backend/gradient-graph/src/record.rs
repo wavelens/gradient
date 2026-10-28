@@ -950,8 +950,10 @@ impl BatchWriter<'_> {
         let mut refused = HashSet::new();
         let mut accepted = HashSet::new();
         for d in derivations {
-            let Some(spec) = &d.exec else { continue };
-            match exec_refusal(instance_enabled, project_enabled, spec.nodes) {
+            if d.exec.is_none() {
+                continue;
+            }
+            match exec_refusal(instance_enabled, project_enabled) {
                 Some(message) => {
                     self.refuse_exec(&d.attr, message).await;
                     refused.insert(d.attr.clone());

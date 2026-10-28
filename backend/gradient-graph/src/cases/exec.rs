@@ -164,27 +164,6 @@ async fn a_refused_exec_skips_its_image_in_a_later_batch() {
 }
 
 #[tokio::test]
-async fn a_multi_node_exec_skips_its_image_in_a_later_batch() {
-    let e1 = EvaluationId::now_v7();
-    let case = Case::start(shape().evaluation(e1)).await;
-    switch_exec_jobs_on(&case).await;
-
-    case.walk(
-        case.tasked(e1, vec![exec_root_with(ExecSpec { nodes: 2, ..spec() })])
-            .await,
-    )
-    .await;
-    case.walk(case.tasked(e1, vec![image_root()]).await).await;
-
-    assert!(
-        case.entry_points(e1).await.is_empty(),
-        "after 2: no entry point"
-    );
-    assert!(!case.sb(B).await.wanted, "after 2: the image is not wanted");
-    case.finish().await;
-}
-
-#[tokio::test]
 async fn an_accepted_exec_keeps_its_image_from_a_later_batch() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(shape().evaluation(e1)).await;
