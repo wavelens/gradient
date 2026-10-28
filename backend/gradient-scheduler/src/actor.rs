@@ -499,14 +499,14 @@ impl SchedulerCore {
             let job_id = reattached.job_id.clone();
             let kind = reattached.job.job_kind();
             let ram_need = reattached.job.ram_need_with(None, false);
-            let devices = match &reattached.job {
-                PendingJob::Exec(exec) => Some(exec.spec.devices.clone()),
+            let held = match &reattached.job {
+                PendingJob::Exec(exec) => Some((exec.spec.devices.clone(), exec.spec.guest)),
                 PendingJob::Eval(_) | PendingJob::Build(_) => None,
             };
             if self.tracker.restore_active(worker, reattached) {
                 self.occupy(worker, &job_id, kind, ram_need);
-                if let Some(devices) = devices {
-                    self.pool.hold_devices(worker, &job_id, devices);
+                if let Some((devices, guest)) = held {
+                    self.pool.hold_exec(worker, &job_id, devices, guest);
                 }
             }
         }
@@ -614,10 +614,11 @@ impl SchedulerCore {
                     assignment.ram_need,
                 );
                 if let gradient_wire::types::Job::Exec(exec) = &assignment.job {
-                    self.pool.hold_devices(
+                    self.pool.hold_exec(
                         worker,
                         assignment.job_id(),
                         exec.requirement.devices.clone(),
+                        exec.requirement.guest,
                     );
                 }
                 AssignOutcome::Assigned(assignment)
@@ -732,8 +733,12 @@ impl SchedulerCore {
             let need = s.job.ram_need_with(s.record.choice, false);
             self.occupy(&s.worker, &s.key, s.job.job_kind(), need);
             if let gradient_wire::types::Job::Exec(exec) = &s.assigned {
-                self.pool
-                    .hold_devices(&s.worker, &s.key, exec.requirement.devices.clone());
+                self.pool.hold_exec(
+                    &s.worker,
+                    &s.key,
+                    exec.requirement.devices.clone(),
+                    exec.requirement.guest,
+                );
             }
         }
 

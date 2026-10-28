@@ -20,6 +20,10 @@ pub fn effective_free(reported: &DeviceClass, held: u32) -> u32 {
     reported.free.min(reported.total.saturating_sub(held))
 }
 
+pub fn effective_free_amount(reported: &ResourceAmount, held: u64) -> u64 {
+    reported.free.min(reported.total.saturating_sub(held))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceCount {
     Free,

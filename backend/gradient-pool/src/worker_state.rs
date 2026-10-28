@@ -12,10 +12,11 @@ use std::sync::atomic::AtomicI64;
 use gradient_types::ids::ProjectId;
 
 use gradient_wire::types::{
-    BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities, JobKind,
+    BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities, GuestCapacity,
+    GuestSize, JobKind,
 };
 
-use crate::worker_caps::effective_free;
+use crate::worker_caps::{effective_free, effective_free_amount};
 
 use crate::peer_auth::PeerAuth;
 use crate::session_port::SessionPort;
@@ -44,6 +45,13 @@ pub struct AssignedJob {
     pub reserved_ram_mb: u64,
     pub observed_ram_mb: u64,
     pub devices: Vec<DeviceRequest>,
+    pub guest: GuestSize,
+}
+
+fn lower_by_held(capacity: &mut GuestCapacity, held: &GuestSize) {
+    capacity.cpus.free = effective_free_amount(&capacity.cpus, u64::from(held.cpus));
+    capacity.memory_mb.free = effective_free_amount(&capacity.memory_mb, held.memory_mb);
+    capacity.disk_mb.free = effective_free_amount(&capacity.disk_mb, held.disk_mb);
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -150,7 +158,18 @@ impl WorkerShared {
         for class in &mut inventory.devices {
             class.free = effective_free(class, self.held_units(class));
         }
+        lower_by_held(&mut inventory.guest_capacity, &self.held_guest());
         Some(inventory)
+    }
+
+    fn held_guest(&self) -> GuestSize {
+        self.assigned_jobs
+            .values()
+            .fold(GuestSize::default(), |held, job| GuestSize {
+                cpus: held.cpus.saturating_add(job.guest.cpus),
+                memory_mb: held.memory_mb.saturating_add(job.guest.memory_mb),
+                disk_mb: held.disk_mb.saturating_add(job.guest.disk_mb),
+            })
     }
 
     fn held_units(&self, class: &DeviceClass) -> u32 {
