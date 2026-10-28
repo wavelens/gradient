@@ -4,6 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod continue_file;
+mod job_token;
+
+pub use continue_file::{ContinueFile, ContinueFileError, MAX_CONTINUE_FILE_BYTES};
+pub use job_token::{JOB_TOKEN_PREFIX, hash_job_token, job_token_expiry, mint_job_token};
+
 pub use gradient_wire::types::{
     DeviceClass, DeviceRequest, DeviceRequestError, ExecAllow, ExecDefaults, ExecInventory,
     ExecLimits, ExecRequirement, ExecSpec, Phase, SecretNameError, SopsFile, exec_image_attr,
