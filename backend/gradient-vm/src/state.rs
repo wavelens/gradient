@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use gradient_wire::guest::{GuestRelay, GuestRelayKind};
+use gradient_wire::types::GuestSize;
 
 const STATE_FILE: &str = "state.json";
 
@@ -123,6 +124,8 @@ pub struct GuestState {
     pub usb_bus_ids: Vec<String>,
     #[serde(default)]
     pub per_job_dirs: Vec<PathBuf>,
+    #[serde(default)]
+    pub size: GuestSize,
 }
 
 impl GuestState {
@@ -194,6 +197,7 @@ mod tests {
             relays: Vec::new(),
             usb_bus_ids: vec!["1-2".into()],
             per_job_dirs: Vec::new(),
+            size: GuestSize::default(),
         }
     }
 

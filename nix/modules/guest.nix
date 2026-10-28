@@ -61,13 +61,15 @@ in {
     cpus = lib.mkOption {
       type = lib.types.ints.between 1 255;
       default = 2;
-      description = "Virtual CPUs per guest booted from this image.";
+      description = ''
+        Warm guests boot from this image with this many virtual CPUs. Exec jobs only take a warm guest when the job's `cpus` and `memoryMb` equal these values.
+      '';
     };
 
     memoryMb = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 2048;
-      description = "MiB of memory per guest booted from this image.";
+      default = 500;
+      description = "Memory in MiB of each guest booted from this image.";
     };
   };
 

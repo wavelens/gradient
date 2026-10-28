@@ -14,6 +14,7 @@ use gradient_wire::guest::{
     AGENT_RELAY_PORT_BASE, GuestConnection, GuestNetwork, GuestRelay, GuestRelayKind,
     SupervisorReply, SupervisorRequest,
 };
+use gradient_wire::types::GuestSize;
 use serde::Serialize;
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
@@ -88,6 +89,7 @@ impl Guest {
             relays: Vec::new(),
             usb_bus_ids: Vec::new(),
             per_job_dirs: Vec::new(),
+            size: image.size(),
         };
         let mut guest = Guest::from_state(config, state);
         let started = match guest.start_unit(units, config).await {
@@ -152,6 +154,11 @@ impl Guest {
             self.plug_network(network).await?;
         }
         Ok(plugged)
+    }
+
+    pub fn record_size(&mut self, size: GuestSize) -> Result<()> {
+        self.state.size = size;
+        self.save()
     }
 
     pub fn record_job<T: Serialize>(&mut self, job: &T) -> Result<()> {

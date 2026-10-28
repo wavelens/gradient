@@ -8,9 +8,11 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use anyhow::Result;
+use gradient_wire::types::GuestSize;
 use tracing::{info, warn};
 
 use crate::addresses::{AddressLease, GuestAddresses};
+use crate::budget::{BudgetHold, GuestBudget};
 use crate::devices::{DeviceHold, DeviceInventory};
 use crate::guest::{Guest, remove_guest_dirs};
 use crate::pool::GuestPool;
@@ -28,6 +30,7 @@ pub struct ReattachedGuest {
     pub guest: Guest,
     pub devices: DeviceHold,
     pub address: Option<AddressLease>,
+    pub budget: BudgetHold,
 }
 
 pub fn plan_reattach(
@@ -105,9 +108,18 @@ pub async fn apply(
         .map(|state| ReattachedGuest {
             devices: devices.adopt(&state.devices_held),
             address: adopt_address(addresses, &state),
+            budget: pool.adopt_size(&state),
             guest: Guest::from_state(config, state),
         })
         .collect()
+}
+
+pub fn adopt_size(budget: &GuestBudget, state: &GuestState, unrecorded: GuestSize) -> BudgetHold {
+    let size = match state.size.is_unset() {
+        true => unrecorded,
+        false => state.size,
+    };
+    budget.adopt(size)
 }
 
 fn adopt_address(addresses: &GuestAddresses, state: &GuestState) -> Option<AddressLease> {
@@ -141,7 +153,39 @@ mod tests {
             relays: Vec::new(),
             usb_bus_ids: Vec::new(),
             per_job_dirs: Vec::new(),
+            size: GuestSize::default(),
         }
+    }
+
+    #[test]
+    fn reattached_guests_hold_their_size() {
+        let budget = GuestBudget::new(GuestSize {
+            cpus: 4,
+            memory_mb: 1000,
+            disk_mb: 20_480,
+        });
+        let mut busy = state(&GuestId::new(), Some(serde_json::json!({ "job_id": "j1" })));
+        busy.size = GuestSize::default_request();
+        let image = GuestSize {
+            cpus: 2,
+            memory_mb: 500,
+            disk_mb: 0,
+        };
+        let _busy = adopt_size(&budget, &busy, image);
+        let _unrecorded = adopt_size(&budget, &state(&GuestId::new(), None), image);
+        let capacity = budget.capacity();
+        assert_eq!(
+            (
+                capacity.cpus.free,
+                capacity.memory_mb.free,
+                capacity.disk_mb.free
+            ),
+            (0, 0, 10_240)
+        );
+        assert!(
+            budget.hold(GuestSize::default_request()).is_none(),
+            "the next job must not overcommit the host"
+        );
     }
 
     #[test]

@@ -10,27 +10,40 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use gradient_wire::types::{GuestCapacity, GuestSize, ResourceAmount};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{info, warn};
 
 use crate::agent::GuestBootError;
+use crate::budget::{BudgetHold, GuestBudget};
 use crate::config::VmConfig;
 use crate::custom_image::{custom_boot_error, image_from_toplevel};
 use crate::guest::{Guest, remove_guest_dirs};
 use crate::hypervisor::GuestImage;
-use crate::state::{GuestId, read_states};
+use crate::reattach::adopt_size;
+use crate::state::{GuestId, GuestState, read_states};
 use crate::unit::GuestUnits;
 use crate::vm_states::VmStates;
+
+pub const NO_GUEST_BUDGET: &str = "the worker has no guest budget left for this job";
 
 const FIRST_CID: u32 = 3;
 const BOOT_RETRY: Duration = Duration::from_secs(30);
 
+type Taken = Result<(Guest, BudgetHold), GuestBootError>;
+
+struct WarmGuest {
+    guest: Guest,
+    hold: BudgetHold,
+}
+
 pub struct GuestPool {
     config: VmConfig,
     units: GuestUnits,
-    slots: Mutex<Slots<Guest>>,
+    budget: GuestBudget,
+    slots: Mutex<Slots<WarmGuest>>,
     upcoming_exec_jobs: AtomicU32,
     draining: AtomicBool,
     reserved_cids: Mutex<BTreeSet<u32>>,
@@ -40,10 +53,11 @@ pub struct GuestPool {
 }
 
 impl GuestPool {
-    pub fn new(config: VmConfig, units: GuestUnits) -> Arc<Self> {
+    pub fn new(config: VmConfig, units: GuestUnits, budget: GuestBudget) -> Arc<Self> {
         Arc::new(Self {
             config,
             units,
+            budget,
             slots: Mutex::new(Slots::new()),
             upcoming_exec_jobs: AtomicU32::new(0),
             draining: AtomicBool::new(false),
@@ -66,25 +80,51 @@ impl GuestPool {
         &self.states
     }
 
-    pub async fn take(self: &Arc<Self>, job_id: String) -> Result<Guest, GuestBootError> {
-        let warm = lock(&self.slots).take();
-        let guest = match warm {
-            Some(guest) => Ok(guest),
-            None => self.cold_boot().await,
-        };
-        self.refill();
-        if let Ok(guest) = &guest {
-            self.states.running(guest.id(), job_id);
-        }
-        guest
+    pub fn capacity(&self) -> GuestCapacity {
+        let warm: Vec<GuestSize> = lock(&self.slots)
+            .warm
+            .iter()
+            .map(|warm| warm.hold.size())
+            .collect();
+        with_warm_guests_free(self.budget.capacity(), &warm)
     }
 
-    async fn cold_boot(self: &Arc<Self>) -> Result<Guest, GuestBootError> {
+    pub fn adopt_size(&self, state: &GuestState) -> BudgetHold {
+        adopt_size(&self.budget, state, self.warm_size().unwrap_or_default())
+    }
+
+    pub async fn take(self: &Arc<Self>, job_id: String, size: GuestSize) -> Taken {
+        let image = self.worker_image()?;
+        let size = job_size(size, &image);
+        let warm = lock(&self.slots).take(|warm| serves(warm.hold.size(), size));
+        let taken = match warm {
+            Some(warm) => self.claim_warm(warm, size).await,
+            None => self.cold_boot(image.sized(&size), size).await,
+        };
+        self.refill();
+        let (guest, hold) = taken?;
+        self.running(guest, hold, size, job_id)
+    }
+
+    async fn claim_warm(&self, warm: WarmGuest, size: GuestSize) -> Taken {
+        let WarmGuest { guest, mut hold } = warm;
+        match self.make_room(|| hold.resize(size).then_some(())).await {
+            Ok(()) => Ok((guest, hold)),
+            Err(e) => {
+                self.keep_or_stop(guest, hold).await;
+                Err(e)
+            }
+        }
+    }
+
+    async fn cold_boot(self: &Arc<Self>, image: GuestImage, size: GuestSize) -> Taken {
+        let hold = self.make_room(|| self.budget.hold(size)).await?;
         let (sender, receiver) = oneshot::channel();
         let pool = Arc::clone(self);
         self.tasks.spawn(async move {
-            if let Err(Ok(guest)) = sender.send(pool.boot_one().await) {
-                pool.keep_or_stop(guest).await;
+            let booted = pool.boot_image(&image).await.map(|guest| (guest, hold));
+            if let Err(Ok((guest, hold))) = sender.send(booted) {
+                pool.keep_or_stop(guest, hold).await;
             }
         });
         receiver
@@ -92,19 +132,66 @@ impl GuestPool {
             .unwrap_or_else(|_| Err(GuestBootError("the guest pool stopped".to_owned())))
     }
 
+    async fn make_room<T>(
+        &self,
+        mut attempt: impl FnMut() -> Option<T>,
+    ) -> Result<T, GuestBootError> {
+        loop {
+            if let Some(done) = attempt() {
+                return Ok(done);
+            }
+            let evicted = lock(&self.slots).take(|_| true);
+            let Some(warm) = evicted else {
+                return Err(GuestBootError(NO_GUEST_BUDGET.to_owned()));
+            };
+            info!(guest = %warm.guest.id(), "stopping a warm guest to make room for a job of another size");
+            self.teardown_warm(warm).await;
+        }
+    }
+
+    fn running(
+        self: &Arc<Self>,
+        mut guest: Guest,
+        hold: BudgetHold,
+        size: GuestSize,
+        job_id: String,
+    ) -> Taken {
+        if let Err(e) = guest.record_size(size) {
+            self.retire(guest, hold);
+            return Err(GuestBootError(format!("{e:#}")));
+        }
+        self.states.running(guest.id(), job_id);
+        Ok((guest, hold))
+    }
+
     pub fn refill(self: &Arc<Self>) {
         let wanted = lock(&self.slots).start_boots(self.target(), self.draining());
-        for _ in 0..wanted {
+        if wanted == 0 {
+            return;
+        }
+        let holds = match self.warm_size() {
+            Ok(size) => warm_boot_holds(&self.budget, size, wanted),
+            Err(e) => {
+                warn!(error = %e, "warm guests not booted");
+                Vec::new()
+            }
+        };
+        lock(&self.slots).cancel_boots(wanted - count(holds.len()));
+        for hold in holds {
             let pool = Arc::clone(self);
-            self.tasks.spawn(async move { pool.boot_into_pool().await });
+            self.tasks
+                .spawn(async move { pool.boot_into_pool(hold).await });
         }
     }
 
     pub fn adopt_warm(self: &Arc<Self>, guest: Guest) {
+        let hold = self.adopt_size(guest.state());
         let (target, draining) = (self.target(), self.draining());
-        let surplus = self.park(guest, |slots, guest| slots.offer(guest, target, draining));
-        if let Some(guest) = surplus {
-            self.retire(guest, ());
+        let surplus = self.park(WarmGuest { guest, hold }, |slots, warm| {
+            slots.offer(warm, target, draining)
+        });
+        if let Some(warm) = surplus {
+            self.retire(warm.guest, warm.hold);
         }
     }
 
@@ -113,6 +200,7 @@ impl GuestPool {
         self.tasks.spawn(async move {
             pool.teardown(guest).await;
             drop(held);
+            pool.refill();
         });
     }
 
@@ -134,9 +222,10 @@ impl GuestPool {
 
     pub fn trim(self: &Arc<Self>) {
         let doomed = lock(&self.slots).surplus(self.target());
-        for guest in doomed {
+        for warm in doomed {
             let pool = Arc::clone(self);
-            self.tasks.spawn(async move { pool.teardown(guest).await });
+            self.tasks
+                .spawn(async move { pool.teardown_warm(warm).await });
         }
     }
 
@@ -164,8 +253,8 @@ impl GuestPool {
     pub async fn stop_warm(&self) {
         self.set_draining();
         let warm = std::mem::take(&mut lock(&self.slots).warm);
-        for guest in warm {
-            self.teardown(guest).await;
+        for warm in warm {
+            self.teardown_warm(warm).await;
         }
     }
 
@@ -215,17 +304,20 @@ impl GuestPool {
     }
 
     pub async fn boot_custom(
-        &self,
+        self: &Arc<Self>,
         toplevel: &Path,
         job_id: String,
-    ) -> Result<Guest, GuestBootError> {
-        let image = image_from_toplevel(toplevel, &self.worker_image()?)?;
+        size: GuestSize,
+    ) -> Taken {
+        let worker_image = self.worker_image()?;
+        let size = job_size(size, &worker_image);
+        let image = image_from_toplevel(toplevel, &worker_image.sized(&size))?;
+        let hold = self.make_room(|| self.budget.hold(size)).await?;
         let guest = self
             .boot_image(&image)
             .await
             .map_err(|e| custom_boot_error(e, toplevel))?;
-        self.states.running(guest.id(), job_id);
-        Ok(guest)
+        self.running(guest, hold, size, job_id)
     }
 
     async fn boot_one(&self) -> Result<Guest, GuestBootError> {
@@ -236,6 +328,10 @@ impl GuestPool {
         GuestImage::load(&self.config.image).map_err(|e| GuestBootError(format!("{e:#}")))
     }
 
+    fn warm_size(&self) -> Result<GuestSize, GuestBootError> {
+        self.worker_image().map(|image| image.size())
+    }
+
     async fn boot_image(&self, image: &GuestImage) -> Result<Guest, GuestBootError> {
         let cid = self.next_cid();
         let guest = Guest::boot(&self.units, &self.config, image, cid, &self.stopping).await;
@@ -243,15 +339,15 @@ impl GuestPool {
         guest
     }
 
-    async fn boot_into_pool(self: Arc<Self>) {
+    async fn boot_into_pool(self: Arc<Self>, hold: BudgetHold) {
         loop {
             match self.boot_one().await {
                 Ok(guest) => {
                     let (target, draining) = (self.target(), self.draining());
-                    let surplus_guest = self.park(guest, |slots, guest| {
-                        slots.finish_boot(guest, target, draining)
+                    let surplus = self.park(WarmGuest { guest, hold }, |slots, warm| {
+                        slots.finish_boot(warm, target, draining)
                     });
-                    return self.stop_surplus(surplus_guest).await;
+                    return self.stop_surplus(surplus).await;
                 }
                 Err(e) => warn!(error = %e, "warm guest boot failed, retrying in 30s"),
             }
@@ -265,30 +361,42 @@ impl GuestPool {
         }
     }
 
-    async fn keep_or_stop(&self, guest: Guest) {
+    async fn keep_or_stop(&self, guest: Guest, mut hold: BudgetHold) {
+        let fits_warm = self
+            .warm_size()
+            .is_ok_and(|size| serves(hold.size(), size) && hold.resize(size));
+        let warm = WarmGuest { guest, hold };
+        if !fits_warm {
+            return self.teardown_warm(warm).await;
+        }
         let (target, draining) = (self.target(), self.draining());
-        let surplus_guest = self.park(guest, |slots, guest| slots.offer(guest, target, draining));
-        self.stop_surplus(surplus_guest).await;
+        let surplus = self.park(warm, |slots, warm| slots.offer(warm, target, draining));
+        self.stop_surplus(surplus).await;
     }
 
-    async fn stop_surplus(&self, guest: Option<Guest>) {
-        if let Some(guest) = guest {
-            self.teardown(guest).await;
+    async fn stop_surplus(&self, warm: Option<WarmGuest>) {
+        if let Some(warm) = warm {
+            self.teardown_warm(warm).await;
         }
     }
 
     fn park(
         &self,
-        guest: Guest,
-        place: impl FnOnce(&mut Slots<Guest>, Guest) -> Option<Guest>,
-    ) -> Option<Guest> {
-        let id = guest.id().clone();
+        warm: WarmGuest,
+        place: impl FnOnce(&mut Slots<WarmGuest>, WarmGuest) -> Option<WarmGuest>,
+    ) -> Option<WarmGuest> {
+        let id = warm.guest.id().clone();
         let mut slots = lock(&self.slots);
-        let surplus = place(&mut slots, guest);
+        let surplus = place(&mut slots, warm);
         if surplus.is_none() {
             self.states.warm(&id);
         }
         surplus
+    }
+
+    async fn teardown_warm(&self, warm: WarmGuest) {
+        self.teardown(warm.guest).await;
+        drop(warm.hold);
     }
 
     async fn teardown(&self, guest: Guest) {
@@ -308,6 +416,34 @@ impl GuestPool {
     }
 }
 
+fn job_size(size: GuestSize, image: &GuestImage) -> GuestSize {
+    match size.is_unset() {
+        true => image.size(),
+        false => size,
+    }
+}
+
+fn serves(warm: GuestSize, job: GuestSize) -> bool {
+    warm.cpus == job.cpus && warm.memory_mb == job.memory_mb
+}
+
+pub fn warm_boot_holds(budget: &GuestBudget, size: GuestSize, wanted: u32) -> Vec<BudgetHold> {
+    (0..wanted).map_while(|_| budget.hold(size)).collect()
+}
+
+fn with_warm_guests_free(capacity: GuestCapacity, warm: &[GuestSize]) -> GuestCapacity {
+    let freed = |amount: ResourceAmount, held: u64| ResourceAmount {
+        total: amount.total,
+        free: amount.free.saturating_add(held).min(amount.total),
+    };
+    let sum = |of: fn(&GuestSize) -> u64| warm.iter().map(of).sum::<u64>();
+    GuestCapacity {
+        cpus: freed(capacity.cpus, sum(|size| u64::from(size.cpus))),
+        memory_mb: freed(capacity.memory_mb, sum(|size| size.memory_mb)),
+        disk_mb: freed(capacity.disk_mb, sum(|size| size.disk_mb)),
+    }
+}
+
 struct Slots<T> {
     warm: Vec<T>,
     booting: u32,
@@ -321,14 +457,19 @@ impl<T> Slots<T> {
         }
     }
 
-    fn take(&mut self) -> Option<T> {
-        (!self.warm.is_empty()).then(|| self.warm.remove(0))
+    fn take(&mut self, wanted: impl Fn(&T) -> bool) -> Option<T> {
+        let index = self.warm.iter().position(wanted)?;
+        Some(self.warm.remove(index))
     }
 
     fn start_boots(&mut self, target: u32, draining: bool) -> u32 {
         let wanted = wanted_boots(count(self.warm.len()), self.booting, target, draining);
         self.booting += wanted;
         wanted
+    }
+
+    fn cancel_boots(&mut self, boots: u32) {
+        self.booting = self.booting.saturating_sub(boots);
     }
 
     fn finish_boot(&mut self, guest: T, target: u32, draining: bool) -> Option<T> {
@@ -386,6 +527,14 @@ fn count(n: usize) -> u32 {
 mod tests {
     use super::*;
 
+    fn size(cpus: u32, memory_mb: u64, disk_mb: u64) -> GuestSize {
+        GuestSize {
+            cpus,
+            memory_mb,
+            disk_mb,
+        }
+    }
+
     #[test]
     fn the_pool_boots_only_the_missing_guests() {
         assert_eq!(wanted_boots(1, 1, 3, false), 1);
@@ -400,8 +549,47 @@ mod tests {
         assert_eq!(slots.start_boots(3, false), 0);
         assert_eq!(slots.finish_boot(7, 3, false), None);
         assert_eq!(slots.start_boots(3, false), 0);
-        assert_eq!(slots.take(), Some(7));
+        assert_eq!(slots.take(|_| true), Some(7));
         assert_eq!(slots.start_boots(3, false), 1);
+    }
+
+    #[test]
+    fn a_warm_guest_serves_only_its_own_size() {
+        let warm = size(2, 500, 0);
+        let mut slots = Slots::<GuestSize>::new();
+        assert_eq!(slots.offer(warm, 1, false), None);
+        assert_eq!(slots.take(|warm| serves(*warm, size(4, 768, 256))), None);
+        assert_eq!(
+            slots.take(|warm| serves(*warm, size(2, 500, 10_240))),
+            Some(warm)
+        );
+    }
+
+    #[test]
+    fn the_pool_boots_no_warm_guest_beyond_the_budget() {
+        let image = size(2, 500, 0);
+        let budget = GuestBudget::new(size(2, 500, 10_240));
+        let mut slots = Slots::<BudgetHold>::new();
+        let wanted = slots.start_boots(2, false);
+        let mut holds = warm_boot_holds(&budget, image, wanted);
+        assert_eq!(holds.len(), 1);
+        slots.cancel_boots(wanted - count(holds.len()));
+        assert_eq!(slots.booting, 1);
+        let mut taken = holds.remove(0);
+        assert!(
+            taken.resize(GuestSize::default_request()),
+            "the job adds its disk to the warm guest it takes"
+        );
+        assert!(warm_boot_holds(&budget, image, 1).is_empty());
+    }
+
+    #[test]
+    fn warm_guests_count_as_free_for_a_job() {
+        let budget = GuestBudget::new(size(4, 1000, 0));
+        let _warm = budget.hold(size(2, 500, 0)).unwrap();
+        let capacity = with_warm_guests_free(budget.capacity(), &[size(2, 500, 0)]);
+        assert_eq!(capacity.cpus, ResourceAmount { total: 4, free: 4 });
+        assert_eq!(capacity.memory_mb.free, 1000);
     }
 
     #[test]
