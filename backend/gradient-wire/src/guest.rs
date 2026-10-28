@@ -19,7 +19,7 @@ use crate::codec::agreement::{agree, version_frame};
 use crate::codec::{Proto, from_bytes, to_bytes};
 use crate::types::GuestChannelKind;
 
-pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=3;
+pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=4;
 pub const GUEST_CHANNELS_AGENT_SINCE: u16 = 2;
 pub const GUEST_JOB_SECRETS_SINCE: u16 = 2;
 pub const GUEST_UPLOADS_SINCE: u16 = 3;
@@ -105,6 +105,8 @@ pub struct GuestNetwork {
     pub prefix: u8,
     pub gateway: String,
     pub nameservers: Vec<String>,
+    #[proto(4, default)]
+    pub mac: String,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -330,6 +332,7 @@ mod tests {
                 prefix: 16,
                 gateway: "10.233.0.1".into(),
                 nameservers: vec!["10.233.0.1".into()],
+                mac: "02:47:52:00:00:03".into(),
             }),
             relays: vec![GuestRelay {
                 name: "tty0".into(),
