@@ -295,3 +295,38 @@ fn terminal_bytes_are_never_logged() {
         .carries_secret()
     );
 }
+
+#[test]
+fn an_exec_output_upload_and_the_job_names_cross_the_wire() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{ClientMessage, JobContext, PROTO_VERSIONS};
+    use crate::types::UploadObject;
+
+    let newest = *PROTO_VERSIONS.end();
+    let request = ClientMessage::UploadRequest {
+        job_id: "exec:x".into(),
+        request_id: 1,
+        object: UploadObject::ExecOutput {
+            job: "x".into(),
+            path: "model/weights.bin".into(),
+        },
+        size: 3,
+    };
+    assert_eq!(
+        from_bytes::<ClientMessage>(to_bytes(&request, newest).unwrap(), newest).unwrap(),
+        request
+    );
+    let context = JobContext {
+        parent_job: Some("p".into()),
+        project_name: "infra".into(),
+        task_name: "master".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        from_bytes::<JobContext>(to_bytes(&context, newest).unwrap(), newest).unwrap(),
+        context
+    );
+    let older: JobContext =
+        from_bytes(to_bytes(&context, newest - 1).unwrap(), newest - 1).unwrap();
+    assert_eq!((older.parent_job, older.project_name.as_str()), (None, ""));
+}

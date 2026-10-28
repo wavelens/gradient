@@ -155,6 +155,12 @@ pub struct JobContext {
     pub last_phase: Option<Phase>,
     pub api_url: String,
     pub token: String,
+    #[proto(46, default)]
+    pub parent_job: Option<String>,
+    #[proto(46, default)]
+    pub project_name: String,
+    #[proto(46, default)]
+    pub task_name: String,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -284,6 +290,39 @@ fn capped(value: Option<u64>, cap: Option<u64>) -> Option<u64> {
 }
 
 pub const MAX_PHASE_PAYLOAD: usize = 65536;
+
+pub const TREE_PATCH_OUTPUT: &str = "gradient/tree.patch";
+pub const CONTINUE_OUTPUT: &str = "gradient/continue.json";
+pub const MAX_OUTPUT_PATH_BYTES: usize = 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum OutputPathError {
+    #[error("output path is empty")]
+    Empty,
+    #[error("output path is longer than {MAX_OUTPUT_PATH_BYTES} bytes")]
+    TooLong,
+    #[error("output path \"{0}\": the path must be relative")]
+    Absolute(String),
+    #[error("output path \"{0}\": empty, \".\" or \"..\" segments and NUL bytes are not allowed")]
+    BadSegment(String),
+}
+
+pub fn check_output_path(path: &str) -> Result<(), OutputPathError> {
+    if path.is_empty() {
+        return Err(OutputPathError::Empty);
+    }
+    if path.len() > MAX_OUTPUT_PATH_BYTES {
+        return Err(OutputPathError::TooLong);
+    }
+    if path.starts_with('/') {
+        return Err(OutputPathError::Absolute(path.to_owned()));
+    }
+    let bad_segment = |segment: &str| matches!(segment, "" | "." | "..") || segment.contains('\0');
+    if path.split('/').any(bad_segment) {
+        return Err(OutputPathError::BadSegment(path.to_owned()));
+    }
+    Ok(())
+}
 
 pub fn exec_image_attr(attr: &str) -> String {
     format!("{attr}.passthru.gradient.image")
@@ -419,6 +458,29 @@ mod tests {
         let json = serde_json::to_value(&file).unwrap();
         assert_eq!(json["ciphertext"], "YWJj");
         assert_eq!(serde_json::from_value::<SopsFile>(json).unwrap(), file);
+    }
+
+    #[test]
+    fn an_output_path_stays_inside_the_job() {
+        for ok in ["model/weights.bin", "gradient/continue.json", "a.txt"] {
+            assert!(check_output_path(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            "/etc/passwd",
+            "../x",
+            "a/../b",
+            "a//b",
+            "a/",
+            "./a",
+            "a\0b",
+        ] {
+            assert!(check_output_path(bad).is_err(), "{bad:?}");
+        }
+        assert!(matches!(
+            check_output_path(&"a".repeat(MAX_OUTPUT_PATH_BYTES + 1)),
+            Err(OutputPathError::TooLong)
+        ));
     }
 
     #[test]
