@@ -18,6 +18,8 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 use tokio::net::UnixStream;
 
+use crate::console::SERIAL_SOCKET;
+
 const API_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -223,7 +225,7 @@ pub fn vm_config(image: &GuestImage, dir: &Path, cid: u32) -> serde_json::Value 
             "queue_size": 1024,
         }],
         "vsock": { "cid": cid, "socket": dir.join("vsock.sock") },
-        "serial": { "mode": "File", "file": dir.join("console.log") },
+        "serial": { "mode": "Socket", "socket": dir.join(SERIAL_SOCKET) },
         "console": { "mode": "Off" },
     })
 }
@@ -262,6 +264,11 @@ mod tests {
             "/var/lib/gradient-worker/guests/g/vsock.sock"
         );
         assert_eq!(config["vsock"]["cid"], 7);
+        assert_eq!(config["serial"]["mode"], "Socket");
+        assert_eq!(
+            config["serial"]["socket"],
+            "/var/lib/gradient-worker/guests/g/serial.sock"
+        );
     }
 
     #[tokio::test]
