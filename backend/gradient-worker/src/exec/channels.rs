@@ -18,6 +18,13 @@ const AGENT_TOO_OLD: &str =
     "the guest agent is too old for shells, the next attempt gets a new guest";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the message loop sends commands from the next commit on"
+    )
+)]
 pub enum GuestChannelCommand {
     Open {
         channel_id: u64,
@@ -57,7 +64,7 @@ pub enum MuxAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Route {
-    Agent,
+    Agent { attached: bool },
     Console,
 }
 
@@ -91,7 +98,7 @@ impl GuestChannelMux {
                 cols,
                 rows,
             } => match self.routes.get(&channel_id) {
-                Some(Route::Agent) => vec![MuxAction::ToAgent(WorkerToAgent::Resize {
+                Some(Route::Agent { .. }) => vec![MuxAction::ToAgent(WorkerToAgent::Resize {
                     channel_id,
                     cols,
                     rows,
@@ -105,7 +112,7 @@ impl GuestChannelMux {
 
     pub fn on_agent_data(&mut self, channel_id: u64, data: Vec<u8>) -> Vec<MuxAction> {
         match self.routes.get(&channel_id) {
-            Some(Route::Agent) => vec![MuxAction::ToServerData { channel_id, data }],
+            Some(Route::Agent { .. }) => vec![MuxAction::ToServerData { channel_id, data }],
             Some(Route::Console) | None => Vec::new(),
         }
     }
@@ -116,7 +123,7 @@ impl GuestChannelMux {
         exit_code: Option<i32>,
         message: Option<String>,
     ) -> Vec<MuxAction> {
-        if self.routes.get(&channel_id) != Some(&Route::Agent) {
+        if !matches!(self.routes.get(&channel_id), Some(Route::Agent { .. })) {
             return Vec::new();
         }
         self.routes.remove(&channel_id);
@@ -154,7 +161,8 @@ impl GuestChannelMux {
         if let Some(refusal) = self.refusal(&kind) {
             return vec![server_close(channel_id, Some(refusal))];
         }
-        self.routes.insert(channel_id, Route::Agent);
+        let attached = matches!(kind, GuestChannelKind::Shell { attach: true, .. });
+        self.routes.insert(channel_id, Route::Agent { attached });
         vec![MuxAction::ToAgent(WorkerToAgent::OpenChannel {
             channel_id,
             kind,
@@ -191,7 +199,7 @@ impl GuestChannelMux {
 
     fn data(&mut self, channel_id: u64, data: Vec<u8>) -> Vec<MuxAction> {
         match self.routes.get(&channel_id) {
-            Some(Route::Agent) => vec![MuxAction::ToAgent(WorkerToAgent::ChannelData {
+            Some(Route::Agent { .. }) => vec![MuxAction::ToAgent(WorkerToAgent::ChannelData {
                 channel_id,
                 data,
             })],
@@ -204,7 +212,7 @@ impl GuestChannelMux {
 
     fn close_from_server(&mut self, channel_id: u64) -> Vec<MuxAction> {
         match self.routes.remove(&channel_id) {
-            Some(Route::Agent) => {
+            Some(Route::Agent { .. }) => {
                 vec![MuxAction::ToAgent(WorkerToAgent::CloseChannel {
                     channel_id,
                 })]
@@ -226,18 +234,36 @@ impl GuestChannelMux {
     fn close_all(&mut self) -> Vec<MuxAction> {
         let mut actions = Vec::new();
         for (channel_id, route) in std::mem::take(&mut self.routes) {
-            if route == Route::Agent {
+            if matches!(route, Route::Agent { .. }) {
                 actions.push(MuxAction::ToAgent(WorkerToAgent::CloseChannel {
                     channel_id,
                 }));
             }
             actions.push(server_close(channel_id, None));
         }
-        if !std::mem::take(&mut self.console_viewers).is_empty() {
-            self.scrollback.clear();
-            actions.push(MuxAction::DisconnectConsole);
-        }
+        actions.extend(self.forget_console());
         actions
+    }
+
+    pub fn on_job_end(&mut self, exit_code: Option<i32>) -> Vec<MuxAction> {
+        let mut actions: Vec<MuxAction> = std::mem::take(&mut self.routes)
+            .into_iter()
+            .map(|(channel_id, route)| MuxAction::ToServerClose {
+                channel_id,
+                exit_code: exit_code.filter(|_| route == Route::Agent { attached: true }),
+                message: None,
+            })
+            .collect();
+        actions.extend(self.forget_console());
+        actions
+    }
+
+    fn forget_console(&mut self) -> Option<MuxAction> {
+        if std::mem::take(&mut self.console_viewers).is_empty() {
+            return None;
+        }
+        self.scrollback.clear();
+        Some(MuxAction::DisconnectConsole)
     }
 }
 
@@ -507,6 +533,30 @@ mod tests {
                 MuxAction::DisconnectConsole,
             ]
         );
+    }
+
+    #[test]
+    fn the_job_end_gives_attached_channels_the_program_exit_code() {
+        let mut mux = mux();
+        let attach = GuestChannelKind::Shell {
+            pty: true,
+            attach: true,
+        };
+        mux.on_command(open(1, attach));
+        mux.on_command(open(2, new_shell()));
+
+        assert_eq!(
+            mux.on_job_end(Some(0)),
+            [
+                MuxAction::ToServerClose {
+                    channel_id: 1,
+                    exit_code: Some(0),
+                    message: None
+                },
+                server_close(2, None),
+            ]
+        );
+        assert!(mux.on_agent_data(1, b"late".to_vec()).is_empty());
     }
 
     #[test]

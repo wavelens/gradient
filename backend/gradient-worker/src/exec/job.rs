@@ -22,10 +22,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::agent_client::AgentClient;
+use super::channels::GuestChannelMux;
 use super::checkout::checkout_work;
 use super::context::context_layers;
 use super::host::ExecHost;
 use super::inventory::device_requests;
+use super::job_channels::{GuestChannelInbox, JobChannels};
 use super::state::StoredJob;
 use super::watchdog::{Watchdog, Watched};
 use crate::executor::AbortSignal;
@@ -44,6 +46,13 @@ pub trait ExecReport: Send {
     async fn output_dropped(&mut self, bytes: u64) -> Result<()>;
     async fn phase(&mut self, name: String, payload: Vec<u8>) -> Result<()>;
     async fn note(&mut self, line: &str) -> Result<()>;
+    async fn channel_data(&mut self, channel_id: u64, data: Vec<u8>);
+    async fn channel_closed(
+        &mut self,
+        channel_id: u64,
+        exit_code: Option<i32>,
+        message: Option<String>,
+    );
 }
 
 #[async_trait]
@@ -68,6 +77,26 @@ impl ExecReport for JobUpdater {
 
     async fn note(&mut self, line: &str) -> Result<()> {
         self.send_log_note(line).await
+    }
+
+    async fn channel_data(&mut self, channel_id: u64, data: Vec<u8>) {
+        if let Err(e) = self.send_guest_channel_data(channel_id, data).await {
+            debug!(channel_id, error = %e, "guest channel output dropped");
+        }
+    }
+
+    async fn channel_closed(
+        &mut self,
+        channel_id: u64,
+        exit_code: Option<i32>,
+        message: Option<String>,
+    ) {
+        if let Err(e) = self
+            .send_guest_channel_closed(channel_id, exit_code, message)
+            .await
+        {
+            debug!(channel_id, error = %e, "guest channel close dropped");
+        }
     }
 }
 
@@ -116,6 +145,7 @@ pub async fn execute(
     updater: &mut JobUpdater,
     credentials: &CredentialStore,
     abort: AbortSignal,
+    channels: GuestChannelInbox,
 ) -> Result<()> {
     let token = SecretString::new(std::mem::take(&mut job.context.token));
     let mut run = ExecRun {
@@ -128,7 +158,9 @@ pub async fn execute(
     run.ensure_program(store).await?;
     let devices = run.reserve_devices()?;
     let mut guest = run.take_guest().await?;
-    let outcome = run.run_in_guest(&mut guest, &devices, credentials).await;
+    let outcome = run
+        .run_in_guest(&mut guest, &devices, credentials, channels)
+        .await;
     host.pool.retire(guest, devices);
     outcome
 }
@@ -139,8 +171,17 @@ pub async fn finish<R: ExecReport>(
     watchdog: &mut Watchdog,
     abort: &mut AbortSignal,
     leave_running: &CancellationToken,
+    channels: &mut JobChannels,
 ) -> Result<()> {
-    let stop = match follow(agent, reporter, watchdog, abort, leave_running).await {
+    let followed = follow(agent, reporter, watchdog, abort, leave_running, channels).await;
+    if !matches!(followed, Followed::LeftRunning) {
+        let exit_code = match followed {
+            Followed::Exited(code) => Some(code),
+            _ => None,
+        };
+        channels.end(exit_code, agent, reporter).await;
+    }
+    let stop = match followed {
         Followed::Exited(code) => return exit_result(code).map_err(anyhow::Error::from),
         Followed::Ended(e) => return Err(e.into()),
         Followed::LeftRunning => {
@@ -169,13 +210,16 @@ pub async fn follow<R: ExecReport>(
     watchdog: &mut Watchdog,
     abort: &mut AbortSignal,
     leave_running: &CancellationToken,
+    channels: &mut JobChannels,
 ) -> Followed {
-    let mut messages = agent.messages();
     loop {
         let watched = tokio::select! {
-            biased;
             () = leave_running.cancelled() => return Followed::LeftRunning,
-            watched = watchdog.next(&mut messages, abort) => watched,
+            event = channels.next_event() => {
+                channels.handle(event, agent, reporter).await;
+                continue;
+            }
+            watched = async { watchdog.next(&mut agent.messages(), abort).await } => watched,
         };
         let message = match watched {
             Watched::Item(Ok(message)) => message,
@@ -190,6 +234,23 @@ pub async fn follow<R: ExecReport>(
             Watched::Silent(after) => return Followed::Stopped(Stop::Silent(after)),
             Watched::TotalExceeded(after) => return Followed::Stopped(Stop::Total(after)),
             Watched::Aborted => return Followed::Stopped(Stop::Aborted),
+        };
+        let message = match message {
+            AgentToWorker::ChannelData { channel_id, data } => {
+                channels.agent_data(channel_id, data, agent, reporter).await;
+                continue;
+            }
+            AgentToWorker::CloseChannel {
+                channel_id,
+                exit_code,
+                message,
+            } => {
+                channels
+                    .agent_closed(channel_id, exit_code, message, agent, reporter)
+                    .await;
+                continue;
+            }
+            message => message,
         };
         if matches!(
             message,
@@ -307,10 +368,14 @@ impl ExecRun<'_> {
         guest: &mut Guest,
         devices: &DeviceHold,
         credentials: &CredentialStore,
+        inbox: GuestChannelInbox,
     ) -> Result<()> {
         let abort = self.abort.clone();
         let mut agent =
             unless_aborted(&abort, self.start_program(guest, devices, credentials)).await??;
+        let requirement = &self.job.requirement;
+        let mux = GuestChannelMux::new(requirement.ssh, requirement.ports.clone(), agent.version());
+        let mut channels = JobChannels::new(inbox, mux, guest.dir().to_owned());
         let mut watchdog = Watchdog::new(
             Instant::now(),
             self.job.timeout_secs.map(Duration::from_secs),
@@ -322,6 +387,7 @@ impl ExecRun<'_> {
             &mut watchdog,
             &mut self.abort,
             &self.host.worker_stop_keeping_guests(),
+            &mut channels,
         )
         .await
     }
@@ -449,7 +515,7 @@ impl ExecRun<'_> {
             network,
             relays: plugged.relays.clone(),
             usb_bus_ids: plugged.usb_bus_ids.clone(),
-            program_pty: false,
+            program_pty: self.job.requirement.ssh,
         }
     }
 
@@ -462,6 +528,8 @@ impl ExecRun<'_> {
             max_silent_secs: self.job.max_silent_secs,
             started_at_unix: unix_now(),
             sent_to_agent,
+            ssh: self.job.requirement.ssh,
+            ports: self.job.requirement.ports.clone(),
         }
     }
 }
@@ -507,9 +575,14 @@ pub fn unix_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use gradient_vm::ReadyAgent;
-    use gradient_wire::guest::{AgentToWorker, GuestConnection, WorkerToAgent};
-    use gradient_wire::messages::BuildFailureKind;
+    use gradient_wire::guest::{
+        AgentToWorker, GUEST_CHANNELS_AGENT_SINCE, GuestConnection, WorkerToAgent,
+    };
+    use gradient_wire::messages::{BuildFailureKind, GuestChannelKind};
     use tokio::net::UnixStream;
+    use tokio::sync::mpsc;
+
+    use crate::exec::channels::GuestChannelCommand;
 
     use super::*;
 
@@ -520,6 +593,8 @@ mod tests {
         Dropped(u64),
         Phase(String),
         Note(String),
+        ChannelData(u64, Vec<u8>),
+        ChannelClosed(u64, Option<i32>),
     }
 
     #[derive(Default)]
@@ -551,6 +626,29 @@ mod tests {
             self.0.push(Reported::Note(line.to_owned()));
             Ok(())
         }
+
+        async fn channel_data(&mut self, channel_id: u64, data: Vec<u8>) {
+            self.0.push(Reported::ChannelData(channel_id, data));
+        }
+
+        async fn channel_closed(
+            &mut self,
+            channel_id: u64,
+            exit_code: Option<i32>,
+            _message: Option<String>,
+        ) {
+            self.0.push(Reported::ChannelClosed(channel_id, exit_code));
+        }
+    }
+
+    fn job_channels(ssh: bool) -> (mpsc::Sender<GuestChannelCommand>, JobChannels) {
+        let (commands, inbox) = mpsc::channel(8);
+        let mux = GuestChannelMux::new(ssh, Vec::new(), GUEST_CHANNELS_AGENT_SINCE);
+        (commands, JobChannels::new(inbox, mux, PathBuf::new()))
+    }
+
+    fn no_channels() -> JobChannels {
+        job_channels(false).1
     }
 
     async fn connected() -> (AgentClient, GuestConnection<UnixStream>) {
@@ -576,13 +674,15 @@ mod tests {
         let mut recorder = Recorder::default();
         let mut watchdog = Watchdog::new(Instant::now(), None, None);
         let (mut abort, running) = (AbortSignal::never(), CancellationToken::new());
+        let mut channels = no_channels();
         let (followed, ()) = tokio::join!(
             follow(
                 &mut agent,
                 &mut recorder,
                 &mut watchdog,
                 &mut abort,
-                &running
+                &running,
+                &mut channels,
             ),
             fake_agent
         );
@@ -611,12 +711,14 @@ mod tests {
         let mut recorder = Recorder::default();
         let mut watchdog = Watchdog::new(Instant::now(), None, Some(Duration::from_secs(1)));
         let (mut abort, running) = (AbortSignal::never(), CancellationToken::new());
+        let mut channels = no_channels();
         let finished = finish(
             &mut agent,
             &mut recorder,
             &mut watchdog,
             &mut abort,
             &running,
+            &mut channels,
         );
 
         let (finished, _guest) = tokio::join!(finished, fake_agent);
@@ -648,10 +750,62 @@ mod tests {
             &mut Watchdog::new(Instant::now(), None, None),
             &mut AbortSignal::never(),
             &stopping,
+            &mut no_channels(),
         )
         .await;
 
         assert!(matches!(followed, Followed::LeftRunning), "{followed:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn channel_traffic_does_not_reset_max_silent() {
+        let (mut agent, mut guest) = connected().await;
+        let (commands, mut channels) = job_channels(true);
+        let shell = GuestChannelKind::Shell {
+            pty: true,
+            attach: false,
+        };
+        commands
+            .send(GuestChannelCommand::Open {
+                channel_id: 4,
+                kind: shell,
+            })
+            .await
+            .unwrap();
+        let fake_agent = async move {
+            tokio::time::sleep(Duration::from_secs(9)).await;
+            guest
+                .send(&AgentToWorker::ChannelData {
+                    channel_id: 4,
+                    data: b"$ ".to_vec(),
+                })
+                .await
+                .unwrap();
+            guest
+        };
+        let mut recorder = Recorder::default();
+        let started = Instant::now();
+        let mut watchdog = Watchdog::new(started, None, Some(Duration::from_secs(10)));
+        let (mut abort, running) = (AbortSignal::never(), CancellationToken::new());
+
+        let (followed, _guest) = tokio::join!(
+            follow(
+                &mut agent,
+                &mut recorder,
+                &mut watchdog,
+                &mut abort,
+                &running,
+                &mut channels,
+            ),
+            fake_agent
+        );
+
+        assert!(
+            matches!(followed, Followed::Stopped(Stop::Silent(_))),
+            "{followed:?}"
+        );
+        assert_eq!(started.elapsed(), Duration::from_secs(10));
+        assert_eq!(recorder.0, [Reported::ChannelData(4, b"$ ".to_vec())]);
     }
 
     #[test]

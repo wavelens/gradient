@@ -39,8 +39,16 @@ impl AgentClient {
         self.conn.send(&WorkerToAgent::RunJob(Box::new(job))).await
     }
 
+    pub fn version(&self) -> u16 {
+        self.conn.version()
+    }
+
     pub async fn kill(&mut self) -> Result<()> {
         self.conn.send(&WorkerToAgent::Kill).await
+    }
+
+    pub async fn send(&mut self, message: &WorkerToAgent) -> Result<()> {
+        self.conn.send(message).await
     }
 
     pub async fn next(&mut self) -> Result<Option<AgentToWorker>> {
