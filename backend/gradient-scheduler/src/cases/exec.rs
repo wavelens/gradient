@@ -556,13 +556,13 @@ async fn a_queued_continuation_is_dispatched_as_an_eval_job_of_its_evaluation() 
         vec![CONTINUED_ATTR.to_owned()],
         "after 1: the wildcards"
     );
-    let archived = case
+    let source = case
         .db
-        .texts("SELECT flake_source FROM evaluation WHERE flake_source IS NOT NULL")
+        .texts("SELECT COALESCE(flake_source, repository) FROM evaluation")
         .await;
     assert!(
-        matches!(&flake.source, FlakeSource::Cached { store_path } if [store_path.clone()] == archived.as_slice()),
-        "after 1: the source {:?} is the evaluation's archived source {archived:?}",
+        matches!(&flake.source, FlakeSource::Cached { store_path } if [store_path.clone()] == source.as_slice()),
+        "after 1: the source {:?} is the evaluation's source {source:?}",
         flake.source
     );
     let rows = case.db.rows::<dispatched_job::Entity>().await;
