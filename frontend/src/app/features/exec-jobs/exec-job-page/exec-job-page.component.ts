@@ -24,12 +24,15 @@ import {
 import { StatusIconComponent } from '@shared/ui';
 import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/terminal';
 import { WritableDirective, AccessService } from '@shared/access';
-import { clockTime } from '@shared/text';
+import { clockTime, monthDay } from '@shared/text';
+import { evaluationPhase } from '@shared/evaluation';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
-import type { ExecJobResponse, ExecJobStatus } from '@core/models';
+import type { ExecJobPullRequestView, ExecJobResponse, ExecJobStatus } from '@core/models';
 import { deviceLabel, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
+import { splitPhaseMarkers } from '../phase-markers';
+import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
 
 const POLL_MS = 2000;
 
@@ -51,6 +54,7 @@ const hasTerminal = (status: ExecJobStatus): boolean => status === 'starting' ||
     RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent, DialogComponent,
     FormFieldComponent, LoadingSpinnerComponent, PageLayoutComponent, SelectButtonComponent,
     TabSwitchComponent, TableComponent, StatusIconComponent, TerminalComponent, WritableDirective,
+    ExecJobOutputsComponent,
   ],
   templateUrl: './exec-job-page.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -73,6 +77,8 @@ export class ExecJobPageComponent implements OnInit {
 
   job = signal<ExecJobResponse | null>(null);
   log = signal('');
+  logSegments = computed(() => splitPhaseMarkers(this.log()));
+  pullRequests = signal<ExecJobPullRequestView[]>([]);
   abortOpen = signal(false);
   aborting = signal(false);
   errorMessage = signal<string | null>(null);
@@ -108,6 +114,8 @@ export class ExecJobPageComponent implements OnInit {
   protected readonly phase = execJobPhase;
   protected readonly device = deviceLabel;
   protected readonly time = clockTime;
+  protected readonly day = monthDay;
+  protected readonly evaluationPhase = evaluationPhase;
 
   ngOnInit(): void {
     const params = this.route.snapshot.paramMap;
@@ -121,7 +129,11 @@ export class ExecJobPageComponent implements OnInit {
     this.poll?.unsubscribe();
     this.poll = interval(POLL_MS).pipe(
       startWith(0),
-      switchMap(() => forkJoin({ job: this.execJobs.get(this.jobId), log: this.execJobs.log(this.jobId) }).pipe(
+      switchMap(() => forkJoin({
+        job: this.execJobs.get(this.jobId),
+        log: this.execJobs.log(this.jobId),
+        pullRequests: this.execJobs.pullRequests(this.jobId),
+      }).pipe(
         catchError((error: Error) => {
           this.errorMessage.set(error.message);
           return EMPTY;
@@ -129,10 +141,11 @@ export class ExecJobPageComponent implements OnInit {
       )),
       takeWhile(({ job }) => isOpenExecJob(job.status), true),
       takeUntilDestroyed(this.destroyRef),
-    ).subscribe(({ job, log }) => {
+    ).subscribe(({ job, log, pullRequests }) => {
       this.errorMessage.set(null);
       this.job.set(job);
       this.log.set(log);
+      this.pullRequests.set(pullRequests);
       if (!hasTerminal(job.status)) this.showView('log');
     });
   }
