@@ -1310,6 +1310,19 @@ describe('TaskDetailComponent repository chip', () => {
     expect(chip.querySelector('a')).toBeNull();
   });
 
+  it('shows the flake directory as its own chip and links the repository without it', () => {
+    const { fixture } = setup(access, { repository: 'https://github.com/acme/infra?dir=nix/hosts' });
+    const chip = repositoryChip(fixture);
+    expect(chip.getAttribute('href')).toBe('https://github.com/acme/infra');
+    expect(chip.textContent).not.toContain('?dir');
+    expect((chip.nextElementSibling as HTMLElement).textContent).toContain('dir nix/hosts');
+  });
+
+  it('shows no flake directory chip for the repository root', () => {
+    const { fixture } = setup(access, { repository: 'https://github.com/acme/infra' });
+    expect((fixture.nativeElement as HTMLElement).querySelector('[title="Flake directory"]')).toBeNull();
+  });
+
   it('links the selected commit hash to the commit page', () => {
     const { fixture } = setup(access, { repository: 'git@github.com:acme/demo.git' });
     const link = (fixture.nativeElement as HTMLElement).querySelector('.panel-title .sub a.commit-link');

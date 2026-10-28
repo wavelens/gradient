@@ -19,10 +19,20 @@ function hostAndPath(repository: string): { host: string; path: string } | null 
   }
 }
 
+export function splitRepository(repository: string): { cloneUrl: string; flakeDir: string | null } {
+  const queryStart = repository.indexOf('?');
+  if (queryStart < 0) return { cloneUrl: repository, flakeDir: null };
+  const dir = repository.slice(queryStart + 1).split('&')
+    .map((pair) => pair.split('='))
+    .find(([key]) => key === 'dir')?.slice(1).join('=');
+  return { cloneUrl: repository.slice(0, queryStart), flakeDir: dir || null };
+}
+
 export function repositoryWebUrl(repository: string): string | null {
-  const parts = hostAndPath(repository);
+  const { cloneUrl } = splitRepository(repository);
+  const parts = hostAndPath(cloneUrl);
   if (!parts) return null;
-  const scheme = repository.startsWith('http://') ? 'http' : 'https';
+  const scheme = cloneUrl.startsWith('http://') ? 'http' : 'https';
   const path = parts.path.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/, '');
   return `${scheme}://${parts.host}/${path}`;
 }
