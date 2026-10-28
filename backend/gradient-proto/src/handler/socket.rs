@@ -11,7 +11,11 @@ use gradient_types::*;
 use tracing::{debug, warn};
 
 use gradient_scheduler::Scheduler;
+use gradient_scheduler::exec_secrets::server_secret_values;
+use gradient_scheduler::jobs::{Assignment, PendingJob};
 use gradient_wire::messages::ServerMessage;
+use gradient_wire::types::{CredentialKind, Job};
+use zeroize::Zeroizing;
 
 use super::store_paths::{outbound_message, outbound_offer, project_mapper};
 
@@ -48,13 +52,55 @@ pub(super) async fn send_credentials_for_job(
     db: &DbContext,
     scheduler: &gradient_scheduler::Scheduler,
     worker_id: &str,
-    job: &gradient_wire::types::Job,
-    project_id: ProjectId,
-) {
+    assignment: &Assignment,
+) -> Result<(), String> {
     let caps = scheduler.worker_gradient_caps(worker_id).await;
-    if sends_ssh_key(caps.as_ref(), job) {
-        send_ssh_key_credential(writer, db, project_id).await;
+    if sends_ssh_key(caps.as_ref(), &assignment.job) {
+        send_ssh_key_credential(writer, db, assignment.project_id).await;
     }
+
+    let (Job::Exec(exec), PendingJob::Exec(pending)) = (&assignment.job, &assignment.pending)
+    else {
+        return Ok(());
+    };
+    let names = &exec.requirement.server_secrets;
+    if names.is_empty() {
+        return Ok(());
+    }
+    if !caps.is_some_and(|c| c.secrets) {
+        return Err(format!("worker {worker_id} lacks the secrets capability"));
+    }
+
+    let values = server_secret_values(
+        &db.worker_db,
+        &db.config,
+        assignment.project_id,
+        &pending.spec,
+        names,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    for credential in job_secret_credentials(assignment.job_id(), values) {
+        let _ = send_server_msg(writer, &credential).await;
+    }
+    debug!(job_id = %assignment.job_id(), count = names.len(), "job secret credentials sent");
+    Ok(())
+}
+
+fn job_secret_credentials(
+    job_id: &str,
+    values: Vec<(String, Zeroizing<Vec<u8>>)>,
+) -> Vec<ServerMessage> {
+    values
+        .into_iter()
+        .map(|(name, value)| ServerMessage::Credential {
+            kind: CredentialKind::JobSecret {
+                job_id: job_id.to_owned(),
+                name,
+            },
+            data: value.to_vec().into(),
+        })
+        .collect()
 }
 
 fn sends_ssh_key(
@@ -111,8 +157,6 @@ fn sends_input_ssh_key(
 }
 
 async fn send_ssh_key_credential(writer: &ProtoWriter, db: &DbContext, project_id: ProjectId) {
-    use gradient_wire::types::CredentialKind;
-
     if let Some(private_key) = project_ssh_key(db, project_id).await {
         let _ = send_server_msg(
             writer,
@@ -222,6 +266,40 @@ mod tests {
         assert!(sends_ssh_key(Some(&with_secrets), &exec_job()));
         assert!(!sends_ssh_key(Some(&without), &exec_job()));
         assert!(!sends_ssh_key(None, &exec_job()));
+    }
+
+    #[test]
+    fn each_server_secret_becomes_a_job_secret_credential() {
+        let msgs = job_secret_credentials(
+            "exec:1",
+            vec![
+                (
+                    "wandb-token".into(),
+                    Zeroizing::new(b"s3cr3t-value".to_vec()),
+                ),
+                ("hf-token".into(), Zeroizing::new(b"hf-value-123".to_vec())),
+            ],
+        );
+        let kinds: Vec<_> = msgs
+            .iter()
+            .map(|m| match m {
+                ServerMessage::Credential { kind, .. } => kind.clone(),
+                _ => panic!("credential"),
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                CredentialKind::JobSecret {
+                    job_id: "exec:1".into(),
+                    name: "wandb-token".into()
+                },
+                CredentialKind::JobSecret {
+                    job_id: "exec:1".into(),
+                    name: "hf-token".into()
+                },
+            ]
+        );
     }
 
     #[test]

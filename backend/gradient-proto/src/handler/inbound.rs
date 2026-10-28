@@ -926,16 +926,19 @@ impl<'a> InboundContext<'a> {
                 cluster: cluster.as_ref().and_then(|m| m.attempt.parse().ok()),
             },
         );
-        send_credentials_for_job(
+        let credentials = send_credentials_for_job(
             self.writer,
             &self.handles.db,
             self.scheduler,
             self.peer_id,
-            &assignment.job,
-            assignment.project_id,
+            &assignment,
         )
         .instrument(debug_span!("send_credentials"))
         .await;
+        if let Err(message) = credentials {
+            self.fail_dispatch(assignment.job_id(), message).await;
+            return true;
+        }
         let job_id = assignment.job_id().to_owned();
         let assigned = debug_span!("assign_job", %job_id);
         let assign = ServerMessage::AssignJob {
@@ -948,6 +951,18 @@ impl<'a> InboundContext<'a> {
             .instrument(assigned)
             .await
             .is_ok()
+    }
+
+    async fn fail_dispatch(&mut self, job_id: &str, message: String) {
+        warn!(peer_id = %self.peer_id, %job_id, %message, "exec job fails at hand-out");
+        self.withdraw_assignment(job_id).await;
+        if let Err(e) = self
+            .scheduler
+            .fail_exec_dispatch(self.peer_id, job_id, message)
+            .await
+        {
+            warn!(peer_id = %self.peer_id, %job_id, error = %e, "failing an exec dispatch failed");
+        }
     }
 
     async fn fail_unmappable(&self, job_id: &str) -> bool {
