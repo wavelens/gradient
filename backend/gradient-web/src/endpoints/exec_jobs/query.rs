@@ -20,6 +20,7 @@ use serde::Serialize;
 use std::sync::Arc;
 
 use super::ExecJobAccessContext;
+use super::terminal::{ssh_commands, ssh_host};
 use crate::endpoints::evals::EvalAccessContext;
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -59,6 +60,8 @@ pub struct ExecJobResponse {
     pub worker: Option<String>,
     pub attempts: Vec<ExecJobAttemptView>,
     pub phases: Vec<ExecJobPhaseView>,
+    pub ssh_command: Option<String>,
+    pub forward_commands: Vec<String>,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -85,7 +88,24 @@ fn waiting_reason_of(job: &MExecJob) -> Option<WaitingReason> {
         .and_then(WaitingReason::from_json)
 }
 
-fn response(ctx: ExecJobAccessContext) -> ExecJobResponse {
+fn ssh_access(
+    config: &RuntimeConfig,
+    project: &str,
+    job: ExecJobId,
+    spec: &ExecSpec,
+) -> (Option<String>, Vec<String>) {
+    let host =
+        ssh_host(&config.server.serve_url).filter(|_| config.ssh.enable && spec.ssh != Some(false));
+    match host {
+        Some(host) => {
+            let (shell, forwards) = ssh_commands(&host, config.ssh.port, project, job, &spec.ports);
+            (Some(shell), forwards)
+        }
+        None => (None, Vec::new()),
+    }
+}
+
+fn response(ctx: ExecJobAccessContext, config: &RuntimeConfig) -> ExecJobResponse {
     let ExecJobDetail {
         job,
         entry_point,
@@ -94,6 +114,7 @@ fn response(ctx: ExecJobAccessContext) -> ExecJobResponse {
         ..
     } = ctx.detail;
     let spec = spec_of(&job);
+    let (ssh_command, forward_commands) = ssh_access(config, &ctx.project.name, job.id, &spec);
     let number_of = |attempt: ExecJobAttemptId| {
         attempts
             .iter()
@@ -140,6 +161,8 @@ fn response(ctx: ExecJobAccessContext) -> ExecJobResponse {
             })
             .collect(),
         phases,
+        ssh_command,
+        forward_commands,
     }
 }
 
@@ -165,7 +188,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
     operation_id = "getExecJob",
     tag = "exec-jobs",
     summary = "Get exec job",
-    description = "Returns an exec job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt and empty while the job waits to start.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns an exec job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Exec job", body = ExecJobResponse), WebError)
 )]
@@ -176,7 +199,7 @@ pub async fn get_exec_job(
     Path(job): Path<ExecJobId>,
 ) -> WebResult<Json<BaseResponse<ExecJobResponse>>> {
     let ctx = ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
-    Ok(ok_json(response(ctx)))
+    Ok(ok_json(response(ctx, &state.config)))
 }
 
 #[utoipa::path(

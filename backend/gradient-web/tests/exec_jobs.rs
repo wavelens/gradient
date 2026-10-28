@@ -12,7 +12,7 @@ use gradient_entity::ids::{
 };
 use gradient_entity::{entry_point, exec_job, exec_job_attempt, exec_job_phase, project_access};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{eval_at, project, public_project, superuser, task, user};
+use gradient_fixtures::rows::{eval_at, project, public_project, superuser, task, user, view_role};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, signed_in_as};
 use gradient_types::exec::{DeviceRequest, ExecSpec};
@@ -157,6 +157,41 @@ async fn a_finished_exec_job_cannot_be_aborted() {
         .await;
 
     assert_eq!(res.status_code(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn a_member_without_task_write_cannot_open_a_shell() {
+    let (db, auth) = signed_in_as(user());
+    let db = with_job(db, ExecJobStatus::Running)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![project_access::Model {
+            project: project().id,
+            user: user().id,
+            role: view_role().id,
+        }]])
+        .append_query_results([vec![view_role()]]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec-jobs/{}/shell", job_id()))
+        .add_header("authorization", auth)
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn an_outsider_cannot_open_a_console() {
+    let (db, auth) = signed_in_as(user());
+    let db = with_job(db, ExecJobStatus::Running)
+        .append_query_results([vec![project()]])
+        .append_query_results([Vec::<project_access::Model>::new()]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec-jobs/{}/console", job_id()))
+        .add_header("authorization", auth)
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
