@@ -20,11 +20,11 @@ pub fn discovered_derivation(
         })
         .collect();
 
-    let dependencies: Vec<String> = drv
+    let (dependencies, dependency_outputs) = drv
         .input_derivations
         .iter()
-        .map(|input| input.path.clone())
-        .collect();
+        .map(|input| (input.path.clone(), input.outputs.clone()))
+        .unzip();
 
     let input_sources = drv.input_sources.clone();
 
@@ -48,6 +48,7 @@ pub fn discovered_derivation(
         ifd: false,
         licenses: Vec::new(),
         exec: None,
+        dependency_outputs,
     }
 }
 
@@ -82,6 +83,25 @@ mod tests {
         );
 
         assert_eq!(discovered.input_sources, drv.input_sources);
+    }
+
+    #[test]
+    fn each_input_derivation_reports_the_outputs_the_build_reads() {
+        let bash = "/nix/store/00000000000000000000000000000000-bash.drv";
+        let drv = crate::Derivation {
+            outputs: vec![],
+            input_derivations: vec![crate::InputDrv::new(bash, vec!["out".into()])],
+            input_sources: vec![],
+            system: "x86_64-linux".into(),
+            builder: "/bin/sh".into(),
+            args: vec![],
+            environment: std::collections::HashMap::new(),
+        };
+
+        let discovered = discovered_derivation(None, "a.drv".into(), &drv);
+
+        assert_eq!(discovered.dependencies, vec![bash.to_owned()]);
+        assert_eq!(discovered.dependency_outputs, vec![vec!["out".to_owned()]]);
     }
 
     #[test]

@@ -377,3 +377,25 @@ fn an_accept_from_the_previous_version_carries_no_endpoint() {
         ClientMessage::AssignJobResponse { endpoint: None, .. }
     ));
 }
+
+#[test]
+fn a_discovered_derivation_names_the_outputs_of_each_input_since_version_50() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::PROTO_VERSIONS;
+    use crate::types::DiscoveredDerivation;
+
+    let newest = *PROTO_VERSIONS.end();
+    let discovered = DiscoveredDerivation {
+        drv_path: "a.drv".into(),
+        dependencies: vec!["b.drv".into()],
+        dependency_outputs: vec![vec!["out".into(), "dev".into()]],
+        ..Default::default()
+    };
+    assert_eq!(
+        from_bytes::<DiscoveredDerivation>(to_bytes(&discovered, newest).unwrap(), newest).unwrap(),
+        discovered
+    );
+    let older: DiscoveredDerivation = from_bytes(to_bytes(&discovered, 49).unwrap(), 49).unwrap();
+    assert_eq!(older.dependencies, discovered.dependencies);
+    assert!(older.dependency_outputs.is_empty());
+}
