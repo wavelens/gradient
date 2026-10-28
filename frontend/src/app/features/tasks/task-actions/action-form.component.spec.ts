@@ -181,6 +181,43 @@ describe('ActionFormComponent', () => {
     expect(emitted.config).toEqual({ type: 'send_slack_message' });
   });
 
+  it('submits start_evaluation with the picked task and its events', () => {
+    const fixture = createFixture(true);
+    fixture.componentRef.setInput('tasks', [{ id: 't-deploy', name: 'deploy' }]);
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    c.name.set('evaluate-deploy');
+    c.onTypeChange('start_evaluation');
+    c.startTask.set('t-deploy');
+    c.events.set(['exec_job.completed']);
+    let emitted: CreateActionRequest | undefined;
+    c.saved.subscribe((r) => (emitted = r as CreateActionRequest));
+    c.onSubmit();
+    expect(emitted!.config).toEqual({ type: 'start_evaluation', task: 't-deploy' });
+    expect(emitted!.events).toEqual(['exec_job.completed']);
+  });
+
+  it('offers the exec tree generator and sends it without the flake lock fields', () => {
+    const fixture = createFixture(true);
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    expect(c.generatorOptions.map((o) => o.value)).toContain('exec_tree');
+    c.onTypeChange('open_pr');
+    c.integrationId.set('int-1');
+    c.onGeneratorChange('exec_tree');
+    let emitted: CreateActionRequest | undefined;
+    c.saved.subscribe((r) => (emitted = r as CreateActionRequest));
+    c.onSubmit();
+    expect(emitted!.config).toEqual({
+      type: 'open_pr',
+      integration_id: 'int-1',
+      generator: 'exec_tree',
+      branch_pattern: 'gradient/{entry_point}',
+      update_existing: true,
+    });
+    expect(emitted!.events).toEqual([]);
+  });
+
   it('offers Matrix and Slack without SMTP', () => {
     const fixture = createFixture(false);
     fixture.detectChanges();

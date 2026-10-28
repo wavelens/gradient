@@ -24,6 +24,12 @@ describe('groupCatalog', () => {
     ]);
   });
 
+  it('labels a family with an underscore in words', () => {
+    expect(groupCatalog([{ name: 'exec_job.completed', durable: true }])).toEqual([
+      { group: 'Exec Job', items: [{ value: 'exec_job.completed', label: 'completed' }] },
+    ]);
+  });
+
   it('keeps only the requested families', () => {
     expect(groupCatalog(catalog, ['build', 'evaluation']).map((g) => g.group)).toEqual([
       'Build',
