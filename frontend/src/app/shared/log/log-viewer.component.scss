@@ -1,0 +1,150 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+:host {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.log-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: $spacing-md $spacing-lg;
+  // Streamed lines repaint only the log and the browser's own scroll anchoring
+  // stays out of the way of the virtual window's spacers.
+  contain: content;
+  overflow-anchor: none;
+}
+
+.no-log-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  height: 100%;
+  color: var(--gr-text-muted);
+}
+
+.scroll-btn {
+  position: absolute;
+  bottom: $spacing-md;
+  right: $spacing-lg;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border-subtle);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background $transition-fast;
+
+  &:hover { background: var(--gr-surface-hover); }
+
+  gr-icon { color: var(--gr-text-primary); }
+}
+
+.log-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--gr-surface-raised);
+  border-bottom: 1px solid var(--gr-border-subtle);
+}
+
+.log-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  background: var(--gr-surface-base);
+  color: var(--gr-text-primary);
+  border: 1px solid var(--gr-border);
+  border-radius: 4px;
+}
+
+.log-search-count {
+  font-size: $font-size-xs;
+  color: var(--gr-text-secondary);
+  white-space: nowrap;
+}
+
+.log-search-btn {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--gr-border-subtle);
+  border-radius: 4px;
+  color: var(--gr-text-secondary);
+  cursor: pointer;
+  padding: 2px 8px;
+
+  &:hover { color: var(--gr-text-primary); }
+}
+
+.log-spacer {
+  width: 100%;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.log-line {
+  position: relative;
+  padding-left: 68px;
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  line-height: 1.6;
+
+  &--hl {
+    background: rgba(234, 179, 8, 0.18);
+  }
+}
+
+.log-gutter {
+  position: absolute;
+  left: 0;
+  width: 56px;
+  padding-right: 12px;
+  text-align: right;
+  color: var(--gr-text-secondary);
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+  opacity: 0.55;
+
+  &:hover { opacity: 1; }
+}
+
+.log-line-content {
+  display: inline;
+  color: var(--gr-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-marker {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  color: var(--gr-text-muted);
+  font-weight: 600;
+
+  &::before, &::after {
+    flex: 1;
+    border-top: 1px solid var(--gr-border-subtle);
+    content: '';
+  }
+}

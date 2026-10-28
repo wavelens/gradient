@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { HttpHeaders, HttpResponse, provideHttpClient } from '@angular/common/http';
@@ -15,6 +16,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { Subject, of } from 'rxjs';
 import { UserInfoResponse, BuildItem, EvaluationResponse, EvaluationStatus } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
+import type { LogViewerComponent } from '@shared/log';
 
 function build(id: string, name: string, status = 'Completed', depth = 0): BuildItem {
   return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, build_started_at: null, dispatched_job: null, depth, prioritized: false, ifd: false };
@@ -32,70 +34,26 @@ function setup(): { fixture: ComponentFixture<EvaluationLogComponent>; cmp: Eval
 type Internals = {
   sortBuilds: (builds: BuildItem[]) => BuildItem[];
   appendStreamedLines: (lines: string[]) => void;
-  loadWindow: (buildId: string, start: number, end: number, mode: 'replace' | 'append' | 'prepend') => Promise<void>;
-  convertAnsiToHtml: (text: string) => string;
-  logLines: string[];
-  MAX_WINDOW: number;
-  LINE_PX: number;
+  fetchInitialLogs: (id: string) => Promise<void>;
 };
+
+function fakeViewer(cmp: EvaluationLogComponent) {
+  const viewer = { searchOpen: signal(false), openSearch: vi.fn(), closeSearch: vi.fn() };
+  cmp.logViewer = viewer as unknown as LogViewerComponent;
+  return viewer;
+}
 
 describe('EvaluationLogComponent', () => {
   // #341: the live line-count must update on the streaming (Building) render
   // path, identical to chunked (Completed) builds.
-  describe('line count', () => {
-    it('appendStreamedLines sets logLineCount from logLines', () => {
-      const { cmp } = setup();
-      (cmp as unknown as Internals).appendStreamedLines(['a', 'b', 'c']);
-      expect(cmp.logLineCount()).toBe(3);
-    });
-  });
-
-  // Streaming logs render through the same virtualized window as chunked logs:
-  // per-tick cost must stay O(new lines), never O(total lines).
-  describe('streaming virtualization', () => {
-    it('converts only the newly streamed lines, not the whole log', () => {
-      const { cmp } = setup();
-      const c = cmp as unknown as Internals;
-      c.appendStreamedLines(Array.from({ length: 100 }, (_, i) => `line ${i}`));
-      const spy = vi.spyOn(c, 'convertAnsiToHtml');
-      c.appendStreamedLines(['a', 'b', 'c']);
-      expect(spy).toHaveBeenCalledTimes(3);
-      expect(cmp.logLineCount()).toBe(103);
-      expect(cmp.windowLines().length).toBe(103);
-      expect(cmp.windowLines()[102].n).toBe(103);
-    });
-
-    it('caps the rendered window at MAX_WINDOW, accounting for trimmed lines in the top spacer', () => {
-      const { cmp } = setup();
-      const c = cmp as unknown as Internals;
-      c.appendStreamedLines(Array.from({ length: c.MAX_WINDOW + 500 }, (_, i) => `l${i}`));
-      expect(cmp.windowLines().length).toBe(c.MAX_WINDOW);
-      expect(cmp.windowLines()[0].n).toBe(501);
-      expect(cmp.topSpacerPx()).toBe(500 * c.LINE_PX);
-      expect(cmp.logLineCount()).toBe(c.MAX_WINDOW + 500);
-    });
-
-    it('keeps the window pinned while scrolled up: new lines only grow the bottom spacer', () => {
+  describe('streamed lines', () => {
+    it('extend the lines handed to the viewer and the line count', () => {
       const { cmp } = setup();
       const c = cmp as unknown as Internals;
       c.appendStreamedLines(['a', 'b']);
-      cmp.autoScroll.set(false);
-      c.appendStreamedLines(['c', 'd', 'e']);
-      expect(cmp.windowLines().length).toBe(2);
-      expect(cmp.bottomSpacerPx()).toBe(3 * c.LINE_PX);
-      expect(cmp.logLineCount()).toBe(5);
-    });
-
-    it('pages older lines from in-memory log when scrolled up during streaming', async () => {
-      const { cmp } = setup();
-      const c = cmp as unknown as Internals;
-      c.logLines = Array.from({ length: 2000 }, (_, i) => `l${i + 1}`);
-      await c.loadWindow('b1', 1001, 2000, 'replace');
-      expect(cmp.windowLines()[0].n).toBe(1001);
-      await c.loadWindow('b1', 201, 1000, 'prepend');
-      expect(cmp.windowLines()[0].n).toBe(201);
-      expect(cmp.windowLines().length).toBe(1800);
-      expect(cmp.topSpacerPx()).toBe(200 * c.LINE_PX);
+      c.appendStreamedLines(['c']);
+      expect(cmp.logLines()).toEqual(['a', 'b', 'c']);
+      expect(cmp.logLineCount()).toBe(3);
     });
   });
 
@@ -253,40 +211,57 @@ describe('EvaluationLogComponent', () => {
 
     it('opens the log search instead while a log is open, streaming or not', () => {
       const { cmp } = setup();
+      const viewer = fakeViewer(cmp);
       cmp.selectedBuildId.set('b1');
       const ev = key({ key: 'f', ctrlKey: true });
       cmp.onKeydown(ev);
-      expect(cmp.searchOpen()).toBe(true);
+      expect(viewer.openSearch).toHaveBeenCalled();
       expect(cmp.sidebarSearchOpen()).toBe(false);
       expect(ev.defaultPrevented).toBe(true);
     });
 
     it('prefers the builds search while the sidebar holds focus, even with a log open', () => {
       const { cmp } = setup();
+      const viewer = fakeViewer(cmp);
       cmp.selectedBuildId.set('b1');
       cmp.setSidebarFocus(true);
       cmp.onKeydown(key({ key: 'f', ctrlKey: true }));
       expect(cmp.sidebarSearchOpen()).toBe(true);
-      expect(cmp.searchOpen()).toBe(false);
+      expect(viewer.openSearch).not.toHaveBeenCalled();
     });
 
     it('opens the builds search while the pointer is over the sidebar, even with a log open', () => {
       const { cmp } = setup();
+      const viewer = fakeViewer(cmp);
       cmp.selectedBuildId.set('b1');
       cmp.setPointerOver('builds');
       cmp.onKeydown(key({ key: 'f', ctrlKey: true }));
       expect(cmp.sidebarSearchOpen()).toBe(true);
-      expect(cmp.searchOpen()).toBe(false);
+      expect(viewer.openSearch).not.toHaveBeenCalled();
     });
 
     it('opens the log search while the pointer is over the log, even with focus left in the sidebar', () => {
       const { cmp } = setup();
+      const viewer = fakeViewer(cmp);
       cmp.selectedBuildId.set('b1');
       cmp.setSidebarFocus(true);
       cmp.setPointerOver('log');
       cmp.onKeydown(key({ key: 'f', ctrlKey: true }));
-      expect(cmp.searchOpen()).toBe(true);
+      expect(viewer.openSearch).toHaveBeenCalled();
       expect(cmp.sidebarSearchOpen()).toBe(false);
+    });
+
+    it('closes the builds search before the log search on Escape', () => {
+      const { cmp } = setup();
+      const viewer = fakeViewer(cmp);
+      viewer.searchOpen.set(true);
+      cmp.selectedBuildId.set('b1');
+      cmp.openSidebarSearch();
+      cmp.onKeydown(key({ key: 'Escape' }));
+      expect(cmp.sidebarSearchOpen()).toBe(false);
+      expect(viewer.closeSearch).not.toHaveBeenCalled();
+      cmp.onKeydown(key({ key: 'Escape' }));
+      expect(viewer.closeSearch).toHaveBeenCalled();
     });
 
     it('leaves "/" to the header search', () => {
@@ -637,19 +612,14 @@ describe('EvaluationLogComponent', () => {
     });
   });
 
-  // #636: a live log arrives in batches and follows the tail with a smooth
-  // scroll, rather than jumping one line every tick.
+  // #636: a live log arrives in batches rather than one line every tick.
   describe('following a live log', () => {
     type Follow = {
       pendingLogLines: string[];
       startLogDrainTimer: () => void;
       stopLogDrainTimer: () => void;
       appendStreamedLines: (lines: string[]) => void;
-      scrollToBottom: (smooth?: boolean) => void;
-      logContainerRef: { nativeElement: Partial<HTMLElement> } | undefined;
     };
-    const scrolled = (scrollTop: number) =>
-      ({ target: { scrollHeight: 1000, scrollTop, clientHeight: 200 } }) as unknown as Event;
 
     it('drains everything that arrived in one batch', () => {
       vi.useFakeTimers();
@@ -664,61 +634,33 @@ describe('EvaluationLogComponent', () => {
       c.stopLogDrainTimer();
       vi.useRealTimers();
     });
-
-    it('keeps following while its own smooth scroll is still on the way down', () => {
-      const { cmp } = setup();
-      const c = cmp as unknown as Follow;
-      const scrollTo = vi.fn();
-      c.logContainerRef = { nativeElement: { scrollHeight: 1000, scrollTo } as Partial<HTMLElement> };
-      c.scrollToBottom(true);
-      expect(scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: 'smooth' });
-      cmp.onLogScroll(scrolled(300));
-      expect(cmp.autoScroll()).toBe(true);
-    });
-
-    it('stops following once the reader scrolls up', () => {
-      const { cmp } = setup();
-      const c = cmp as unknown as Follow;
-      c.logContainerRef = { nativeElement: { scrollHeight: 1000, scrollTo: vi.fn() } as Partial<HTMLElement> };
-      c.scrollToBottom(true);
-      cmp.onLogWheel(new WheelEvent('wheel', { deltaY: -40 }));
-      cmp.onLogScroll(scrolled(300));
-      expect(cmp.autoScroll()).toBe(false);
-      expect(cmp.showScrollBtn()).toBe(true);
-    });
   });
 
-  describe('log search on a streaming log', () => {
-    it('searches the lines in memory, where no chunk index exists yet', async () => {
-      const { cmp } = setup();
-      const c = cmp as unknown as Internals;
-      c.appendStreamedLines(['compiling', 'error: nope', 'linking']);
-      cmp.selectedBuildId.set('b1');
-      cmp.searchQuery.set('error');
-      const fetchSpy = vi.spyOn(globalThis, 'fetch');
-      await cmp.runSearch();
-      expect(fetchSpy).not.toHaveBeenCalled();
-      expect(cmp.searchHits().map(h => h.line_number)).toEqual([2]);
-      expect(cmp.searchTotal()).toBe(1);
-    });
-  });
-
-  // #636: a finished log opens on its last line, however the page was reached.
   describe('opening a finished log', () => {
-    it('scrolls to the tail once the chunked log is on screen', async () => {
+    const chunkIndex = { total_chunks: 2, total_lines: 4200, total_bytes: 1, chunks: [] };
+
+    it('hands the viewer the chunked log on the server instead of loading it', async () => {
       const { cmp } = setup();
-      const c = cmp as unknown as Internals & {
-        fetchChunkedLog: (id: string) => Promise<boolean>;
-        fetchInitialLogs: (id: string) => Promise<void>;
-        scrollToBottomIfAuto: () => void;
-      };
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ message: chunkIndex }) });
+      vi.stubGlobal('fetch', fetchMock);
       cmp.builds.set([build('b1', 'hash-hello.drv', 'Completed')]);
-      vi.spyOn(c, 'fetchChunkedLog').mockResolvedValue(true);
-      let loadingWhenScrolled: boolean | null = null;
-      vi.spyOn(c, 'scrollToBottomIfAuto').mockImplementation(() => { loadingWhenScrolled = cmp.logLoading(); });
       cmp.logLoading.set(true);
-      await c.fetchInitialLogs('b1');
-      expect(loadingWhenScrolled).toBe(false);
+      await (cmp as unknown as Internals).fetchInitialLogs('b1');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(cmp.serverLog()?.total).toBe(4200);
+      expect(cmp.logLineCount()).toBe(4200);
+      expect(cmp.logLoading()).toBe(false);
+    });
+
+    it('keeps a deep-linked line for the first log only', async () => {
+      const { cmp } = setup();
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ message: chunkIndex }) }));
+      cmp.deepLinkLine.set(12);
+      cmp.builds.set([build('b1', 'hash-hello.drv', 'Completed'), build('b2', 'hash-world.drv', 'Completed')]);
+      await (cmp as unknown as Internals).fetchInitialLogs('b1');
+      expect(cmp.deepLinkLine()).toBe(12);
+      await (cmp as unknown as Internals).fetchInitialLogs('b2');
+      expect(cmp.deepLinkLine()).toBeNull();
     });
   });
 
@@ -871,7 +813,7 @@ describe('EvaluationLogComponent', () => {
     it('shows a prefetch as a compact strip above the running log', () => {
       const { fixture, panel } = setupBuild({ phase: 'prefetch', bytes_done: 120 * MiB, bytes_total: 340 * MiB, paths_done: 12, paths_total: 40 });
       expect(panel()?.querySelector('.build-progress--compact')).not.toBeNull();
-      expect(panel()?.closest('.log-container-wrapper')).not.toBeNull();
+      expect(panel()?.closest('gr-log-viewer')).not.toBeNull();
       expect(panel()?.textContent).toContain('Prefetching inputs 35 %');
       expect(panel()?.textContent).toContain('120 / 340 MiB');
       expect(panel()?.textContent).toContain('12 / 40 paths');
@@ -881,7 +823,7 @@ describe('EvaluationLogComponent', () => {
     it('shows a download in place of the log', () => {
       const { fixture, panel } = setupBuild({ phase: 'download', bytes_done: 1536, bytes_total: null, paths_done: 0, paths_total: 1 });
       expect(panel()?.querySelector('.build-progress--compact')).toBeNull();
-      expect(fixture.nativeElement.querySelector('.log-container-wrapper')).toBeNull();
+      expect(fixture.nativeElement.querySelector('gr-log-viewer')).toBeNull();
       expect(panel()?.textContent).toContain('Downloading');
       expect(panel()?.textContent).toContain('1.5 KiB');
       fixture.destroy();
@@ -890,7 +832,7 @@ describe('EvaluationLogComponent', () => {
     it('hands the panel back to the log once the download landed', () => {
       const { fixture, panel } = setupBuild({ phase: 'download', bytes_done: 1536, bytes_total: 1536, paths_done: 1, paths_total: 1 });
       expect(panel()).toBeNull();
-      expect(fixture.nativeElement.querySelector('.log-container-wrapper')).not.toBeNull();
+      expect(fixture.nativeElement.querySelector('gr-log-viewer')).not.toBeNull();
       fixture.destroy();
     });
 
