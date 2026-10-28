@@ -11,13 +11,15 @@
 # declared port and a refused forward, secrets from the project store, a repository sops file
 # and the worker sops files with masked output and a secret name in two sources, a phase, an
 # uploaded output with a range download, the tree patch, the job token behind `gradient build`
-# and its revocation. Not covered:
+# and its revocation, a two-node job across both workers on routed guest subnets. Not covered:
 # the browser terminal and the serial console (no browser in the test), VFIO, USB/IP,
-# /dev relays, the nested kvm device, multi-node jobs, custom images. The CI host must offer
+# /dev relays, the nested kvm device, custom images. The CI host must offer
 # nested KVM (kvm_intel or kvm_amd with nested=1), since the workers boot guests in a VM.
 
+import ipaddress
 import json
 import re
+import shlex
 import time
 
 API = "http://gradient.local/api/v1"
@@ -26,8 +28,9 @@ GUEST_UNIT = re.compile(r"gradient-guest-[0-9a-f]{32}\.service")
 WORKERS = [stopper, keeper]
 NAMES = [
     "fetch", "silent", "abort", "long-stop", "fail", "long-keep", "lost", "interactive", "terminal",
-    "secrets", "clash", "outputs",
+    "secrets", "clash", "outputs", "pair",
 ]
+GUEST_SUBNETS = [ipaddress.ip_network("10.233.0.0/16"), ipaddress.ip_network("10.234.0.0/16")]
 OUTPUT_BYTES = 3000000
 SSH = "ssh -p 2222 -i /root/.ssh/gradient -o StrictHostKeyChecking=no -o BatchMode=yes"
 TERMINAL = {"completed", "failed", "aborted"}
@@ -80,9 +83,18 @@ def job(name):
     return api("GET", f"exec-jobs/{JOBS[name]}")
 
 
-def job_log(name, attempt=None):
-    query = f"?attempt={attempt}" if attempt else ""
+def job_log(name, attempt=None, node=None):
+    params = [f"{key}={value}" for key, value in [("attempt", attempt), ("node", node)] if value is not None]
+    query = f"?{'&'.join(params)}" if params else ""
     return api("GET", f"exec-jobs/{JOBS[name]}/log{query}")
+
+
+def sql(query):
+    return server.succeed(f"runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d gradient -At -c {shlex.quote(query)}").strip()
+
+
+def subnet_of(address):
+    return next(net for net in GUEST_SUBNETS if ipaddress.ip_address(address) in net)
 
 
 def download(path, target, extra=""):
@@ -224,7 +236,11 @@ def recorded_jobs():
     assert status not in ("Failed", "Aborted"), f"evaluation {eval_id} ended {status}"
     jobs = api("GET", f"evals/{eval_id}/exec-jobs")
     by_name = {entry["entry_point"].rsplit(".", 1)[-1]: entry["id"] for entry in jobs}
-    return by_name if set(NAMES) <= by_name.keys() else None
+    if not set(NAMES) <= by_name.keys():
+        return None
+    pairs = [entry for entry in jobs if entry["entry_point"] == "apps.x86_64-linux.pair"]
+    assert [entry["nodes"] for entry in pairs] == [2], f"the two-node job is not listed once: {json.dumps(pairs)}"
+    return by_name
 
 
 JOBS = wait_for("the evaluation records every exec job", recorded_jobs, timeout=900)
@@ -265,6 +281,33 @@ assert status == "200", f"tree patch download answered {status}:\n{headers}"
 patch = server.succeed("cat /tmp/tree.patch")
 assert "+++ b/README" in patch and "+++ b/new.txt" in patch, patch
 assert "w.bin" not in patch, patch
+
+banner("Phase 7c: a two-node job runs on both workers and node 1 reaches the master")
+pair = wait_status("pair", "completed")
+pair_nodes = pair["node_jobs"]
+assert [node["node"] for node in pair_nodes] == [0, 1], json.dumps(pair)
+assert all(node["status"] == "completed" for node in pair_nodes), json.dumps(pair)
+assert pair_nodes[0]["worker"] and pair_nodes[0]["worker"] != pair_nodes[1]["worker"], json.dumps(pair)
+master_port = pair_nodes[0]["master_port"]
+assert master_port and pair_nodes[1]["master_port"] == master_port, json.dumps(pair)
+master, peer = pair_nodes[0]["guest_address"], pair_nodes[1]["guest_address"]
+assert {subnet_of(master), subnet_of(peer)} == set(GUEST_SUBNETS), json.dumps(pair)
+
+master_log = job_log("pair", node=0)
+assert "hello from node 1 of 2" in master_log, f"node 0 heard nothing from node 1:\n{master_log}"
+peer_lines = job_log("pair", node=1).splitlines()
+assert f"master {master}:{master_port}" in peer_lines, f"node 1 got no master placeholders:\n{peer_lines}"
+peers_line = next((line for line in peer_lines if line.startswith("peers ")), None)
+assert peers_line, f"node 1 printed no GRADIENT_PEERS:\n{peer_lines}"
+peers = json.loads(peers_line.removeprefix("peers "))
+assert [(p["index"], p["address"], p["port"]) for p in peers] == [(0, master, master_port), (1, peer, master_port)], peers_line
+
+cluster = sql(
+    "SELECT cj.status, count(ca.id) FILTER (WHERE ca.started_at IS NOT NULL) FROM cluster_job cj "
+    "LEFT JOIN cluster_attempt ca ON ca.cluster_job = cj.id "
+    "WHERE cj.id IN (SELECT cluster_job FROM cluster_member WHERE exec_job IS NOT NULL) GROUP BY cj.id"
+)
+assert cluster == "2|1", f"expected one completed cluster job with one started attempt, got {cluster!r}"
 
 banner("Phase 8: a silent program times out")
 silent = wait_status("silent", "failed")

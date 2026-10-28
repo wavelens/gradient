@@ -64,6 +64,20 @@ in {
     gradient build --no-link --background packages.x86_64-linux.hello
   '';
 
+  pair = pkgs.writeShellScript "exec-pair" ''
+    echo "master $1"
+    echo "peers $GRADIENT_PEERS"
+    if [ "$GRADIENT_NODE_INDEX" = 0 ]; then
+      exec ${pkgs.socat}/bin/socat -u TCP-LISTEN:"$GRADIENT_MASTER_PORT",reuseaddr STDOUT
+    fi
+    for ((i = 0; i < 60; i++)); do
+      echo "hello from node $GRADIENT_NODE_INDEX of $GRADIENT_NODE_COUNT" \
+        | ${pkgs.socat}/bin/socat -u STDIN TCP:"$GRADIENT_MASTER_ADDR:$GRADIENT_MASTER_PORT" && exit 0
+      ${sleep} 1
+    done
+    exit 1
+  '';
+
   hello = pkgs.writeText "exec-hello" "hello\n";
 
   abort = ticks "exec-abort" 600;

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 # SPDX-License-Identifier: AGPL-3.0-only
 # mk.nix prepends FLAKES, RESOLVED, WORKER_IDS, the topology prelude and ../scheduler/helpers.py.
-# Build clusters come from SQL seeds: members are shared builds held behind a hanging `gate`. Split evaluations come from the scheduler.
+# Multi-node exec jobs produce clusters from evaluations and are covered by gradient-exec. Build clusters here come from SQL seeds: members are shared builds held behind a hanging `gate`. Split evaluations come from the scheduler.
 
 import uuid
 
