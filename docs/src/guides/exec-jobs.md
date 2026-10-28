@@ -263,6 +263,9 @@ Jobs with a secret problem fail before the start, without using a retry.
 - Logs, terminals and the console show `[secret:<name>]` in place of a value. Base64 and URL-encoded values also receive masks.
 - Values shorter than 8 bytes stay unmasked. Binary outputs and port forwards stay unmasked too.
 
+!!! warning "Swap on the Worker Host"
+    Guest memory holds the secrets of a job. The host can move guest memory to swap. Set [`worker.exec.noSwap`](../reference/configuration.md#workerexec) to keep guests in RAM, or give the host encrypted swap.
+
 ## 7. Open a Terminal { #ssh-and-terminal }
 
 Jobs with `ssh = true` accept terminal sessions from the browser and over SSH. Exec workers need `exec.allow.ssh = true` for such jobs.
