@@ -2,9 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
-# Evaluates a large nixpkgs-based flake once per worker count with every cache wiped,
-# then a single-attribute flake standalone and with every worker up, and fails when a
-# target of #568 is missed. The summary is published before that verdict.
+# Eval caches are wiped before every run, the worker stores keep nixpkgs.
 
 from datetime import timedelta
 
@@ -86,6 +84,18 @@ def bump(repo):
     server.succeed(f"{GIT} -C {path} commit -am 'Bump' && chown git:git -R {path}")
 
 
+def keep_nixpkgs():
+    prefetch = "nix --extra-experimental-features 'nix-command flakes' flake prefetch --json http://server/nixpkgs.tar.gz"
+    for node in WORKER_NODES:
+        node.succeed("rm -f /tmp/nixpkgs.done")
+        node.execute(f"({prefetch} > /tmp/nixpkgs.json 2> /tmp/nixpkgs.log; touch /tmp/nixpkgs.done) &")
+    for node in WORKER_NODES:
+        node.wait_until_succeeds("test -e /tmp/nixpkgs.done", timeout=timedelta(seconds=600))
+        fetched = json.loads(node.succeed("cat /tmp/nixpkgs.json"))
+        assert fetched["hash"] == NIXPKGS_HASH, f"{node.name} fetched {fetched} instead of {NIXPKGS_HASH}"
+        node.succeed(f"nix-store --add-root /nix/var/nix/gcroots/nixpkgs -r {fetched['storePath']}")
+
+
 def reset_workers():
     epoch = server.succeed("date +%s").strip()
     for node in WORKER_NODES:
@@ -141,6 +151,21 @@ def save_job_phases(label, eval_id):
         " GROUP BY dj.id, p.phase ORDER BY dj.id, p.phase"
     )
     print(f"job phases of {label} (fetch 0, eval_flake 2, eval_derivations 3, known_wait 6, closure_push 7):\n{text}")
+
+
+def save_shards(label, eval_id):
+    text = psql(
+        "SELECT s.seq || ' ' || s.pattern || ': ' || coalesce(cardinality(s.children), 0) || ' children, predicted '"
+        " || round(s.predicted_ms) || ' ms, state ' || s.state || ', member '"
+        " || CASE WHEN s.taken_job IS NULL THEN 'nobody' WHEN split_part(s.taken_job, ':', 3) = '' THEN 'primary'"
+        " ELSE split_part(s.taken_job, ':', 3) END || ', taken +'"
+        " || coalesce(round(extract(epoch FROM s.taken_at - first.at) * 1000)::text, '-') || ' ms, took '"
+        " || coalesce(round(extract(epoch FROM s.finished_at - s.taken_at) * 1000)::text, '-') || ' ms'"
+        " FROM eval_shard s, (SELECT min(dispatched_at) AS at FROM dispatched_job"
+        f" WHERE evaluation_id = '{eval_id}' AND kind = 0) first"
+        f" WHERE s.evaluation = '{eval_id}' ORDER BY s.taken_at, s.seq"
+    )
+    print(f"shards of {label} (queued 0, running 1, done 2, failed 3, split 4):\n{text}")
 
 
 def statements_ranked_by(column):
@@ -258,6 +283,7 @@ def measure(token, task):
         save_slow_spans(f"{task}-{workers}")
         save_eval_costs(f"{task}-{workers}")
         save_job_phases(f"{task}-{workers}", eval_id)
+        save_shards(f"{task}-{workers}", eval_id)
     statements = int(psql(
         "SELECT coalesce(sum(s.calls), 0) FROM pg_stat_statements s"
         " JOIN pg_roles r ON r.oid = s.userid WHERE r.rolname = 'gradient'"
@@ -327,6 +353,7 @@ server.wait_for_unit("nginx.service")
 wait_links_shaped()
 wait_workers_ready()
 assert_shaped_links()
+keep_nixpkgs()
 
 banner("seed the bench repositories")
 server.succeed(f"{GIT} config --global --add safe.directory '*'")
