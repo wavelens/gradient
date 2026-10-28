@@ -78,6 +78,18 @@ in {
     exit 1
   '';
 
+  sized = pkgs.writeShellScript "exec-sized" ''
+    echo "cpus $(${pkgs.coreutils}/bin/nproc)"
+    while read -r key value _; do
+      [ "$key" = MemTotal: ] && echo "memory_kb $value"
+    done < /proc/meminfo
+    echo "work_mb $(${pkgs.coreutils}/bin/df -m --output=size /work | ${pkgs.coreutils}/bin/tail -n 1)"
+  '';
+
+  toolarge = pkgs.writeShellScript "exec-toolarge" ''
+    echo "a guest of 64 CPUs never boots in this test"
+  '';
+
   hello = pkgs.writeText "exec-hello" "hello\n";
 
   trainer = pkgs.writeShellScript "exec-trainer" ''

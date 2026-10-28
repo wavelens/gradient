@@ -33,6 +33,8 @@
       };
       clash = app "clash" { labels = [ "stop" ]; secrets = [ "clash-key" ]; };
       outputs = app "outputs" { labels = [ "stop" ]; network = true; };
+      sized = app "sized" { labels = [ "stop" ]; cpus = 1; memoryMb = 768; diskMb = 256; };
+      toolarge = app "toolarge" { labels = [ "stop" ]; cpus = 64; };
       pair = app "pair" {
         nodes = 2;
         labels = [ "pair" ];
