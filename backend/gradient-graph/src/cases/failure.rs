@@ -766,3 +766,56 @@ async fn f10_the_failure_spread_marks_only_created_queued_and_failed_transient_d
     case.zero_drift("step 1").await;
     case.finish().await;
 }
+
+#[tokio::test]
+async fn f11_a_dependency_failure_leaves_a_dispatched_substitution_to_its_report() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .probed()
+            .output(A_OUT)
+            .cache_available()
+            .runtime_depends_on(B)
+            .build_status(BuildStatus::Queued)
+            .derivation(B)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(B_OUT)
+            .build_status(BuildStatus::Building)
+            .attempt(AttemptOutcome::Running, None)
+            .open_assignment(),
+    )
+    .await;
+    case.assigned(e1, A, true)
+        .await
+        .expect("step 1: a worker claims the passthrough A");
+
+    case.build_failed(B, BuildFailureKind::Permanent, &[]).await;
+
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 2: sb(A), its substitution is out"
+    );
+    case.zero_drift("step 2").await;
+
+    case.build_started(A).await;
+    case.build_output(A, true).await;
+    case.build_completed(A).await;
+
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Substituted,
+        "after 3: sb(A)"
+    );
+    case.zero_drift("step 3").await;
+    case.finish().await;
+}
