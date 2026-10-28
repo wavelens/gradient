@@ -121,6 +121,12 @@ async fn serve_connection(agent: Arc<Agent>, stream: VsockStream) -> Result<()> 
                     }
                 }
                 Some(WorkerToAgent::Kill) => agent.kill.cancel(),
+                Some(
+                    WorkerToAgent::OpenChannel { .. }
+                    | WorkerToAgent::ChannelData { .. }
+                    | WorkerToAgent::CloseChannel { .. }
+                    | WorkerToAgent::Resize { .. },
+                ) => {}
                 None => return Ok(()),
             },
             Some(message) = to_send.recv() => conn.send(&message).await?,

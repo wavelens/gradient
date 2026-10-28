@@ -14,8 +14,10 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use crate::codec::agreement::{agree, version_frame};
 use crate::codec::{Proto, from_bytes, to_bytes};
+use crate::types::GuestChannelKind;
 
-pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=1;
+pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=2;
+pub const GUEST_CHANNELS_AGENT_SINCE: u16 = 2;
 pub const AGENT_VSOCK_PORT: u32 = 7000;
 pub const AGENT_RELAY_PORT_BASE: u32 = 7100;
 
@@ -23,9 +25,31 @@ const MAX_GUEST_FRAME: usize = 16 * 1024 * 1024;
 
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum WorkerToAgent {
-    Attach { output_offset: u64 },
+    Attach {
+        output_offset: u64,
+    },
     RunJob(Box<RunJob>),
     Kill,
+    #[proto(2)]
+    OpenChannel {
+        channel_id: u64,
+        kind: GuestChannelKind,
+    },
+    #[proto(2)]
+    ChannelData {
+        channel_id: u64,
+        data: Vec<u8>,
+    },
+    #[proto(2)]
+    CloseChannel {
+        channel_id: u64,
+    },
+    #[proto(2)]
+    Resize {
+        channel_id: u64,
+        cols: u16,
+        rows: u16,
+    },
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Default)]
@@ -41,6 +65,8 @@ pub struct RunJob {
     pub network: Option<GuestNetwork>,
     pub relays: Vec<GuestRelay>,
     pub usb_bus_ids: Vec<String>,
+    #[proto(2, default)]
+    pub program_pty: bool,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Default)]
@@ -86,14 +112,38 @@ pub enum GuestRelayKind {
 
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum AgentToWorker {
-    Ready { agent_version: String },
+    Ready {
+        agent_version: String,
+    },
     ProgramStarted,
-    Output { data: Vec<u8> },
-    OutputDropped { bytes: u64 },
-    Phase { name: String, payload: Vec<u8> },
-    SetupFailed { message: String },
-    Exited { code: i32 },
+    Output {
+        data: Vec<u8>,
+    },
+    OutputDropped {
+        bytes: u64,
+    },
+    Phase {
+        name: String,
+        payload: Vec<u8>,
+    },
+    SetupFailed {
+        message: String,
+    },
+    Exited {
+        code: i32,
+    },
     JobLost,
+    #[proto(2)]
+    ChannelData {
+        channel_id: u64,
+        data: Vec<u8>,
+    },
+    #[proto(2)]
+    CloseChannel {
+        channel_id: u64,
+        exit_code: Option<i32>,
+        message: Option<String>,
+    },
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -137,12 +187,16 @@ pub struct GuestConnection<S> {
 
 impl<S: AsyncRead + AsyncWrite + Unpin> GuestConnection<S> {
     pub async fn agree(stream: S) -> Result<Self> {
+        Self::agree_within(stream, &GUEST_PROTO_VERSIONS).await
+    }
+
+    async fn agree_within(stream: S, ours: &RangeInclusive<u16>) -> Result<Self> {
         let codec = LengthDelimitedCodec::builder()
             .max_frame_length(MAX_GUEST_FRAME)
             .new_codec();
         let mut frames = Framed::new(stream, codec);
         frames
-            .send(version_frame(&GUEST_PROTO_VERSIONS))
+            .send(version_frame(ours))
             .await
             .context("sending the guest protocol range")?;
         let peer = frames
@@ -150,8 +204,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> GuestConnection<S> {
             .await
             .ok_or_else(|| anyhow!("guest peer closed before the version agreement"))?
             .context("reading the guest protocol range")?;
-        let version = agree(&GUEST_PROTO_VERSIONS, &peer).map_err(|e| anyhow!(e))?;
+        let version = agree(ours, &peer).map_err(|e| anyhow!(e))?;
         Ok(Self { frames, version })
+    }
+
+    pub fn version(&self) -> u16 {
+        self.version
     }
 
     pub async fn send<T: Proto>(&mut self, msg: &T) -> Result<()> {
@@ -206,6 +264,7 @@ mod tests {
                 kind: GuestRelayKind::Tcp { listen: 5000 },
             }],
             usb_bus_ids: vec!["1-2".into()],
+            program_pty: false,
         }
     }
 
@@ -226,11 +285,67 @@ mod tests {
         assert_eq!(received, Some(sent));
     }
 
+    async fn connected(
+        worker_range: RangeInclusive<u16>,
+    ) -> (
+        GuestConnection<tokio::io::DuplexStream>,
+        GuestConnection<tokio::io::DuplexStream>,
+    ) {
+        let (worker_end, agent_end) = tokio::io::duplex(64 * 1024);
+        let (worker, agent) = tokio::join!(
+            GuestConnection::agree_within(worker_end, &worker_range),
+            GuestConnection::agree(agent_end)
+        );
+        (worker.expect("worker agrees"), agent.expect("agent agrees"))
+    }
+
+    #[tokio::test]
+    async fn channel_frames_need_the_second_guest_version() {
+        let open = WorkerToAgent::OpenChannel {
+            channel_id: 3,
+            kind: GuestChannelKind::Shell {
+                pty: true,
+                attach: true,
+            },
+        };
+
+        let (mut old_worker, mut old_agent) = connected(1..=1).await;
+        assert!(old_worker.send(&open).await.is_err());
+        old_worker
+            .send(&WorkerToAgent::RunJob(Box::new(RunJob {
+                program_pty: true,
+                ..run_job()
+            })))
+            .await
+            .expect("a run job crosses version 1");
+        let Some(WorkerToAgent::RunJob(job)) = old_agent.recv().await.expect("recv") else {
+            panic!("expected the run job");
+        };
+        assert!(!job.program_pty);
+
+        let (mut worker, mut agent) = connected(1..=2).await;
+        worker.send(&open).await.expect("send");
+        assert_eq!(
+            agent.recv::<WorkerToAgent>().await.expect("recv"),
+            Some(open)
+        );
+        let closed = AgentToWorker::CloseChannel {
+            channel_id: 3,
+            exit_code: Some(130),
+            message: None,
+        };
+        agent.send(&closed).await.expect("send");
+        assert_eq!(
+            worker.recv::<AgentToWorker>().await.expect("recv"),
+            Some(closed)
+        );
+    }
+
     #[tokio::test]
     async fn a_frame_of_a_disjoint_version_range_is_refused() {
         let (ours, theirs) = tokio::io::duplex(64 * 1024);
         let mut peer = Framed::new(theirs, LengthDelimitedCodec::new());
-        peer.send(version_frame(&(2..=3)))
+        peer.send(version_frame(&(3..=4)))
             .await
             .expect("peer frame");
 
