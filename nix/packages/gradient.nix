@@ -50,6 +50,7 @@ let
       ../../backend/gradient-worker/options.json
       ../../backend/gradient-wire/schema
       ../../backend/gradient-ssh/testdata
+      ../../backend/gradient-sops/tests/fixtures
     ];
   };
 
