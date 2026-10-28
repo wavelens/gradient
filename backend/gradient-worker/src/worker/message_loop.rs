@@ -774,7 +774,7 @@ impl MessageLoopState {
             })
             .await?;
 
-        let credentials = self.credentials.clone();
+        let credentials = self.credentials.snapshot();
         self.spawn_job(
             job_id.clone(),
             kind.clone(),
