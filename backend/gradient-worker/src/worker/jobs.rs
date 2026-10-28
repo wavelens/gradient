@@ -12,7 +12,9 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use futures::future::BoxFuture;
 use gradient_util::sync::Mutex;
-use gradient_wire::messages::{ClientMessage, JobKind, RUNNING_JOBS_SINCE, RunningAssignment};
+use gradient_wire::messages::{
+    ClientMessage, GuestChannelKind, JobKind, RUNNING_JOBS_SINCE, RunningAssignment,
+};
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::connection::reconnecting::ReconnectingWriter;
 use gradient_worker_client::correlation::{
@@ -25,6 +27,8 @@ use tracing::{debug, warn};
 
 use crate::config::WorkerConfig;
 use crate::count::clamp_to_u32;
+use crate::exec::channels::GuestChannelCommand;
+use crate::exec::job_channels::GuestChannelInbox;
 use crate::executor::AbortSignal;
 use crate::executor::timeline::JobTimeline;
 use crate::exit_clock;
@@ -36,6 +40,8 @@ use crate::proto::job_log::{JOB_LOG_BUFFER_CAP, JobLog, file_key};
 
 pub(super) type JobDone = (String, Result<()>);
 
+const GUEST_CHANNEL_INBOX: usize = 256;
+
 pub(super) struct ActiveJob {
     pub(super) kind: JobKind,
     pub(super) assignment_id: AssignmentHandle,
@@ -43,10 +49,12 @@ pub(super) struct ActiveJob {
     pub(super) timeline: Arc<JobTimeline>,
     pub(super) cluster: Option<String>,
     pub(super) log: JobLog,
+    guest_channels: Option<mpsc::Sender<GuestChannelCommand>>,
 }
 
 pub(super) struct JobRegistry {
     running: HashMap<String, ActiveJob>,
+    channel_jobs: HashMap<u64, String>,
     done_tx: mpsc::UnboundedSender<JobDone>,
 }
 
@@ -63,6 +71,7 @@ pub(super) struct Registered {
     pub(super) timeline: Arc<JobTimeline>,
     pub(super) log: JobLog,
     pub(super) done_tx: mpsc::UnboundedSender<JobDone>,
+    pub(super) guest_channels: GuestChannelInbox,
 }
 
 impl JobRegistry {
@@ -85,9 +94,11 @@ impl JobRegistry {
         let assignment_id = AssignmentHandle::new(assignment_id);
         let (abort, abort_rx) = AbortSignal::channel();
         let timeline = JobTimeline::new();
+        let (commands, inbox) = mpsc::channel(GUEST_CHANNEL_INBOX);
         self.running.insert(
             job_id,
             ActiveJob {
+                guest_channels: (kind == JobKind::Exec).then_some(commands),
                 kind,
                 assignment_id: assignment_id.clone(),
                 abort,
@@ -102,6 +113,66 @@ impl JobRegistry {
             timeline,
             log,
             done_tx: self.done_tx.clone(),
+            guest_channels: inbox,
+        }
+    }
+
+    pub(super) fn open_guest_channel(
+        &mut self,
+        job_id: &str,
+        channel_id: u64,
+        kind: GuestChannelKind,
+    ) -> bool {
+        let Some(commands) = self
+            .running
+            .get(job_id)
+            .and_then(|job| job.guest_channels.as_ref())
+        else {
+            return false;
+        };
+        if commands
+            .try_send(GuestChannelCommand::Open { channel_id, kind })
+            .is_err()
+        {
+            return false;
+        }
+        self.channel_jobs.insert(channel_id, job_id.to_owned());
+        true
+    }
+
+    pub(super) fn route_guest_channel(&mut self, command: GuestChannelCommand) -> bool {
+        let channel_id = match &command {
+            GuestChannelCommand::Data { channel_id, .. }
+            | GuestChannelCommand::Resize { channel_id, .. } => *channel_id,
+            GuestChannelCommand::Close { channel_id } => {
+                let channel_id = *channel_id;
+                let routed = self.send_to_channel_job(channel_id, command);
+                self.channel_jobs.remove(&channel_id);
+                return routed;
+            }
+            GuestChannelCommand::Open { .. } | GuestChannelCommand::CloseAll => return false,
+        };
+        self.send_to_channel_job(channel_id, command)
+    }
+
+    fn send_to_channel_job(&self, channel_id: u64, command: GuestChannelCommand) -> bool {
+        self.channel_jobs
+            .get(&channel_id)
+            .and_then(|job_id| self.running.get(job_id))
+            .and_then(|job| job.guest_channels.as_ref())
+            .is_some_and(|commands| commands.try_send(command).is_ok())
+    }
+
+    pub(super) fn close_guest_channels(&mut self) {
+        self.channel_jobs.clear();
+        for commands in self
+            .running
+            .values()
+            .filter_map(|job| job.guest_channels.as_ref())
+        {
+            if commands.try_send(GuestChannelCommand::CloseAll).is_err() {
+                debug!("an exec job did not take the guest channel close");
+            }
         }
     }
 
@@ -154,6 +225,7 @@ impl JobRegistry {
     }
 
     pub(super) fn finish(&mut self, job_id: &str) -> Option<ActiveJob> {
+        self.channel_jobs.retain(|_, owner| owner != job_id);
         self.running.remove(job_id)
     }
 
@@ -241,6 +313,7 @@ impl WorkerJobs {
         Self {
             registry: Mutex::new(JobRegistry {
                 running: HashMap::new(),
+                channel_jobs: HashMap::new(),
                 done_tx,
             }),
             done_rx: tokio::sync::Mutex::new(done_rx),
@@ -282,7 +355,7 @@ impl WorkerJobs {
         &self,
         job_id: String,
         assignment_id: String,
-        run: impl FnOnce(JobUpdater, AbortSignal) -> BoxFuture<'static, Result<()>>,
+        run: impl FnOnce(JobUpdater, AbortSignal, GuestChannelInbox) -> BoxFuture<'static, Result<()>>,
     ) {
         self.writer.forget_reports(&job_id);
         let log = JobLog::reopen(&self.log_dir, &job_id, JOB_LOG_BUFFER_CAP).unwrap_or_else(|e| {
@@ -300,7 +373,7 @@ impl WorkerJobs {
             registered.log.clone(),
             None,
         );
-        let job = run(updater, registered.abort);
+        let job = run(updater, registered.abort, registered.guest_channels);
         let (log, done_tx) = (registered.log, registered.done_tx);
         #[expect(
             clippy::disallowed_methods,
@@ -413,7 +486,8 @@ impl WorkerJobs {
 
     pub(crate) fn end_session(&self, agreed_version: u16) {
         self.writer.detach();
-        let registry = self.registry.lock();
+        let mut registry = self.registry.lock();
+        registry.close_guest_channels();
         let members = registry.abort_cluster_members();
         let all = if agreed_version < RUNNING_JOBS_SINCE {
             registry.abort_all()
@@ -443,6 +517,7 @@ mod tests {
         (
             JobRegistry {
                 running: HashMap::new(),
+                channel_jobs: HashMap::new(),
                 done_tx,
             },
             done_rx,
@@ -800,6 +875,64 @@ mod tests {
                 kind: JobKind::Build,
             }]
         );
+    }
+
+    #[test]
+    fn a_channel_reaches_its_job_and_unknown_jobs_are_refused() {
+        let (mut jobs, _done_rx) = registry();
+        let mut a = jobs.register(
+            "exec:a".to_owned(),
+            JobKind::Exec,
+            "d-a".to_owned(),
+            None,
+            log(),
+        );
+        let mut b = jobs.register(
+            "exec:b".to_owned(),
+            JobKind::Exec,
+            "d-b".to_owned(),
+            None,
+            log(),
+        );
+        let data = |channel_id| GuestChannelCommand::Data {
+            channel_id,
+            data: b"ls
+"
+            .to_vec(),
+        };
+
+        assert!(jobs.open_guest_channel("exec:b", 9, GuestChannelKind::Console));
+        assert_eq!(
+            b.guest_channels.try_recv().ok(),
+            Some(GuestChannelCommand::Open {
+                channel_id: 9,
+                kind: GuestChannelKind::Console
+            })
+        );
+        assert!(a.guest_channels.try_recv().is_err());
+        assert!(jobs.route_guest_channel(data(9)));
+        assert_eq!(b.guest_channels.try_recv().ok(), Some(data(9)));
+        assert!(!jobs.open_guest_channel("exec:x", 10, GuestChannelKind::Console));
+        assert!(!jobs.route_guest_channel(data(10)));
+    }
+
+    #[tokio::test]
+    async fn a_session_end_closes_the_channels_of_every_exec_job() {
+        let (jobs, _base) = worker_jobs();
+        let mut a = jobs.register("exec:a".to_owned(), JobKind::Exec, "d-a".to_owned(), None);
+        let mut b = jobs.register("exec:b".to_owned(), JobKind::Exec, "d-b".to_owned(), None);
+
+        jobs.end_session(RUNNING_JOBS_SINCE);
+
+        assert_eq!(
+            a.guest_channels.try_recv().ok(),
+            Some(GuestChannelCommand::CloseAll)
+        );
+        assert_eq!(
+            b.guest_channels.try_recv().ok(),
+            Some(GuestChannelCommand::CloseAll)
+        );
+        assert!(!a.abort.is_aborted() && !b.abort.is_aborted());
     }
 
     #[test]

@@ -13,12 +13,14 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result};
 use gradient_wire::messages::{
     BuildFailureKind, CachedPath, ClientMessage, ClusterAddress, ClusterMembership, ClusterPeer,
-    Job, JobCandidate, JobKind, JobPhaseSpan, ServerMessage,
+    GuestChannelKind, Job, JobCandidate, JobKind, JobPhaseSpan, ServerMessage,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
+use crate::exec::channels::GuestChannelCommand;
+use crate::exec::job_channels::GuestChannelInbox;
 use crate::executor::eval_split::SplitMember;
 use crate::executor::timeline::{JobTimeline, TimelineSnapshot};
 use crate::executor::{AbortSignal, JobExecutor};
@@ -429,14 +431,57 @@ impl MessageLoopState {
                     ssh_key,
                 });
             }
-            msg @ (ServerMessage::OpenGuestChannel { .. }
-            | ServerMessage::GuestChannelData { .. }
-            | ServerMessage::CloseGuestChannel { .. }
-            | ServerMessage::GuestChannelResize { .. }) => {
-                debug!(kind = msg.variant_name(), "guest channel frame dropped");
+            ServerMessage::OpenGuestChannel {
+                job_id,
+                channel_id,
+                kind,
+            } => {
+                self.on_open_guest_channel(&job_id, channel_id, kind).await;
+            }
+            ServerMessage::GuestChannelData { channel_id, data } => {
+                self.route_guest_channel(GuestChannelCommand::Data { channel_id, data });
+            }
+            ServerMessage::GuestChannelResize {
+                channel_id,
+                cols,
+                rows,
+            } => {
+                self.route_guest_channel(GuestChannelCommand::Resize {
+                    channel_id,
+                    cols,
+                    rows,
+                });
+            }
+            ServerMessage::CloseGuestChannel { channel_id } => {
+                self.route_guest_channel(GuestChannelCommand::Close { channel_id });
             }
         }
         Ok(())
+    }
+
+    async fn on_open_guest_channel(&self, job_id: &str, channel_id: u64, kind: GuestChannelKind) {
+        let opened = self
+            .jobs
+            .registry
+            .lock()
+            .open_guest_channel(job_id, channel_id, kind);
+        if opened {
+            return;
+        }
+        let refused = ClientMessage::CloseGuestChannel {
+            channel_id,
+            exit_code: None,
+            message: Some("the exec job is not running".to_owned()),
+        };
+        if let Err(e) = self.jobs.writer.send_now(refused).await {
+            debug!(%job_id, channel_id, error = %e, "guest channel refusal not sent");
+        }
+    }
+
+    fn route_guest_channel(&self, command: GuestChannelCommand) {
+        if !self.jobs.registry.lock().route_guest_channel(command) {
+            debug!("a guest channel frame for no running exec job was dropped");
+        }
     }
 
     async fn on_job_done(&mut self, job_id: String, result: Result<()>) -> Result<()> {
@@ -773,13 +818,23 @@ impl MessageLoopState {
             Some(Arc::clone(&executor.store)),
         );
         let (log, abort, done_tx) = (registered.log, registered.abort, registered.done_tx);
+        let guest_channels = registered.guest_channels;
 
         #[expect(
             clippy::disallowed_methods,
             reason = "reports back on done_tx and aborts through the registry"
         )]
         tokio::spawn(async move {
-            let result = run_job(executor, job, &mut updater, &credentials, abort, split).await;
+            let result = run_job(
+                executor,
+                job,
+                &mut updater,
+                &credentials,
+                abort,
+                split,
+                guest_channels,
+            )
+            .await;
             report_when_drained(log, done_tx, (job_id, result)).await;
         });
     }
@@ -1048,6 +1103,7 @@ async fn run_job(
     credentials: &CredentialStore,
     abort: AbortSignal,
     split: Option<SplitMember>,
+    guest_channels: GuestChannelInbox,
 ) -> Result<()> {
     let job_abort = abort.clone();
     match job {
@@ -1060,9 +1116,8 @@ async fn run_job(
             until_aborted(run, abort).await
         }
         Job::Exec(exec_job) => {
-            let (_, channels) = tokio::sync::mpsc::channel(1);
             executor
-                .execute_exec_job(*exec_job, updater, credentials, abort, channels)
+                .execute_exec_job(*exec_job, updater, credentials, abort, guest_channels)
                 .await
         }
     }

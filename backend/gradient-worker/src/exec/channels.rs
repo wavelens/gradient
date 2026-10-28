@@ -18,13 +18,6 @@ const AGENT_TOO_OLD: &str =
     "the guest agent is too old for shells, the next attempt gets a new guest";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the message loop sends commands from the next commit on"
-    )
-)]
 pub enum GuestChannelCommand {
     Open {
         channel_id: u64,
