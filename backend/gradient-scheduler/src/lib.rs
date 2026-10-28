@@ -57,6 +57,7 @@ use cluster::ClusterAttempts;
 use loops::BuildKick;
 use scoring::Scoring;
 
+pub use job_handlers::guest_channel::{GuestChannelOpened, GuestChannelRefusal};
 pub use job_handlers::timeline::ReportedTimeline;
 pub use jobs::{AssignDecision, BoardActiveJob, DecisionCandidate, PendingJobInfo};
 

@@ -7,13 +7,13 @@
 use chrono::NaiveDateTime;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_types::{
-    CExecJob, CExecJobAttempt, CExecJobPhase, EEntryPoint, EEvaluation, EExecJob, EExecJobAttempt,
-    EExecJobPhase, ETask, EvaluationId, ExecJobAttemptId, ExecJobId, MExecJob, MExecJobAttempt,
-    ProjectId, TaskId,
+    CEvaluation, CExecJob, CExecJobAttempt, CExecJobPhase, EEntryPoint, EEvaluation, EExecJob,
+    EExecJobAttempt, EExecJobPhase, ETask, EvaluationId, ExecJobAttemptId, ExecJobId, MExecJob,
+    MExecJobAttempt, ProjectId, TaskId,
 };
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
-    QueryResult, QuerySelect, Value,
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, JoinType, QueryFilter,
+    QueryOrder, QueryResult, QuerySelect, RelationTrait, Value,
 };
 
 #[derive(Debug, Clone)]
@@ -60,6 +60,26 @@ pub async fn open_of_evaluation<C: ConnectionTrait>(
         .filter(CExecJob::Status.is_in(ExecJobStatus::OPEN))
         .into_tuple()
         .all(db)
+        .await
+}
+
+pub async fn latest_running_of_task<C: ConnectionTrait>(
+    db: &C,
+    task: TaskId,
+) -> Result<Option<ExecJobId>, DbErr> {
+    EExecJob::find()
+        .select_only()
+        .column(CExecJob::Id)
+        .join(
+            JoinType::InnerJoin,
+            gradient_entity::exec_job::Relation::Evaluation.def(),
+        )
+        .filter(CEvaluation::Task.eq(task))
+        .filter(CExecJob::Status.eq(ExecJobStatus::Running))
+        .order_by_desc(CExecJob::StartedAt)
+        .limit(1)
+        .into_tuple()
+        .one(db)
         .await
 }
 
