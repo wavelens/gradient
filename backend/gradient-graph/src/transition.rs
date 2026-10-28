@@ -31,9 +31,9 @@ use sea_orm::{
 };
 use tracing::{error, info, warn};
 
-use crate::exec;
 use crate::messages::{OrphanCause, RamShortage, SubstituteLog, Transition, TransitionReport};
 use crate::policy::{self, FailureOutcome, OrphanedBuild};
+use crate::{continuation, exec};
 
 pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<TransitionReport> {
     match transition {
@@ -142,6 +142,12 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             Ok(TransitionReport {
                 aborted_shared_builds,
                 aborted_exec_jobs: exec::abort_evaluation(ctx, eval.id).await?,
+                aborted_continuations:
+                    gradient_db::exec_jobs::continuations::fail_open_of_evaluation(
+                        &ctx.worker_db,
+                        eval.id,
+                    )
+                    .await?,
                 ..Default::default()
             })
         }
@@ -210,6 +216,8 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             assignment,
             worker,
             retries_cap,
+            token_hash,
+            token_expires_at,
         } => {
             let assignment = exec::Assignment {
                 exec_job,
@@ -218,11 +226,17 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 assignment,
                 worker,
                 retries_cap,
+                token_hash,
+                token_expires_at,
             };
             Ok(TransitionReport {
                 already_aborted: !exec::assigned(ctx, assignment).await?,
                 ..Default::default()
             })
+        }
+        Transition::ContinuationEnded { exec_job, outcome } => {
+            continuation::continuation_ended(ctx, exec_job, outcome).await?;
+            Ok(TransitionReport::default())
         }
         Transition::ExecProgramStarted { attempt } => {
             exec::program_started(ctx, attempt).await?;

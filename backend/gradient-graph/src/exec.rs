@@ -7,8 +7,9 @@
 use std::collections::BTreeSet;
 
 use anyhow::Result;
+use chrono::NaiveDateTime;
 use gradient_db::DbContext;
-use gradient_db::exec_jobs::{attempts, phases, reads, settle};
+use gradient_db::exec_jobs::{attempts, continuations, phases, reads, settle, tokens};
 use gradient_db::status::check_evaluation_done;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
@@ -59,6 +60,8 @@ pub(crate) struct Assignment {
     pub assignment: DispatchedJobId,
     pub worker: String,
     pub retries_cap: u32,
+    pub token_hash: String,
+    pub token_expires_at: NaiveDateTime,
 }
 
 pub(crate) async fn settle(ctx: &DbContext) -> Result<()> {
@@ -87,7 +90,19 @@ pub(crate) async fn assigned(ctx: &DbContext, assignment: Assignment) -> Result<
         i32::try_from(assignment.retries_cap).unwrap_or(i32::MAX),
     )
     .await?;
-    Ok(opened)
+    if !opened {
+        return Ok(false);
+    }
+
+    continuations::forget_recorded(&ctx.worker_db, assignment.exec_job).await?;
+    tokens::insert(
+        &ctx.worker_db,
+        assignment.attempt,
+        &assignment.token_hash,
+        assignment.token_expires_at,
+    )
+    .await?;
+    Ok(true)
 }
 
 pub(crate) async fn program_started(ctx: &DbContext, attempt: ExecJobAttemptId) -> Result<()> {
@@ -136,10 +151,22 @@ pub(crate) async fn attempt_ended(
                 (ExecJobStatus::Completed, _) => None,
                 _ => message,
             };
+            if status == ExecJobStatus::Completed {
+                queue_continuation(ctx, job.id).await?;
+            }
             end(ctx, job.id, status, message, Some(closed.id)).await?;
             Ok(())
         }
     }
+}
+
+async fn queue_continuation(ctx: &DbContext, exec_job: ExecJobId) -> Result<()> {
+    if continuations::activate(&ctx.worker_db, exec_job).await? {
+        info!(%exec_job, "continue file queued as an eval job");
+        ctx.wake.eval_assign.notify_one();
+    }
+
+    Ok(())
 }
 
 pub(crate) async fn abort(ctx: &DbContext, exec_job: ExecJobId) -> Result<bool> {

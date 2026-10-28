@@ -4,17 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::exec_jobs::continuations;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
-use gradient_entity::ids::{DispatchedJobId, EvaluationId, ExecJobAttemptId};
-use gradient_entity::{evaluation_message, exec_job, exec_job_attempt, exec_job_phase};
+use gradient_entity::ids::{DispatchedJobId, EvaluationId, ExecJobAttemptId, ExecJobId};
+use gradient_entity::{
+    evaluation_message, exec_job, exec_job_attempt, exec_job_continuation, exec_job_phase,
+    exec_job_token,
+};
 use gradient_fixtures::shape::shape;
 use gradient_types::exec::{ExecSpec, exec_image_attr};
 use gradient_wire::types::{BuildFailureKind, DiscoveredDerivation};
 
 use super::{A, A_OUT, B, B_OUT, Case, drv, nar, with_attr, with_output, with_references};
-use crate::messages::{Transition, TransitionReport};
+use crate::messages::{ContinuationOutcome, GcRequest, Transition, TransitionReport};
 
 const ATTR: &str = "apps.x86_64-linux.a";
 const MISSING_SECRET: &str =
@@ -278,6 +282,8 @@ async fn assign(
             assignment: DispatchedJobId::now_v7(),
             worker: "w1".into(),
             retries_cap,
+            token_hash: format!("h{number}"),
+            token_expires_at: gradient_types::now() + chrono::Duration::hours(1),
         })
         .await;
     assert!(!report.already_aborted, "attempt {number} opens");
@@ -493,6 +499,8 @@ async fn a_stale_attempt_number_leaves_the_job_queued() {
             assignment: DispatchedJobId::now_v7(),
             worker: "w2".into(),
             retries_cap: 5,
+            token_hash: "stale".into(),
+            token_expires_at: gradient_types::now(),
         })
         .await;
 
@@ -693,5 +701,210 @@ async fn a_finished_job_ignores_a_late_failure() {
         "after 1: the job"
     );
     assert_eq!(exec_events(&case).await, events, "after 1: no new event");
+    case.finish().await;
+}
+
+const B_ATTR: &str = "packages.x86_64-linux.b";
+
+async fn tokens(case: &Case) -> Vec<(String, bool)> {
+    let mut rows: Vec<(String, bool)> = case
+        .db
+        .rows::<exec_job_token::Entity>()
+        .await
+        .into_iter()
+        .map(|token| (token.token_hash, token.revoked))
+        .collect();
+    rows.sort();
+    rows
+}
+
+async fn continuation_rows(case: &Case) -> Vec<exec_job_continuation::Model> {
+    case.db.rows::<exec_job_continuation::Entity>().await
+}
+
+async fn record_continue_file(case: &Case, evaluation: EvaluationId, attributes: &[&str]) {
+    let attributes: Vec<String> = attributes.iter().map(|a| (*a).to_owned()).collect();
+    let recorded = continuations::record(
+        &case.db.connection(),
+        job(case, evaluation).await.id,
+        evaluation,
+        &attributes,
+    )
+    .await
+    .expect("the continue file is recorded");
+    assert!(recorded, "the open job takes the continue file");
+}
+
+async fn continued_case() -> (Case, EvaluationId, ExecJobId) {
+    let (case, e1) = queued_case(spec()).await;
+    let attempt = assign(&case, e1, 1, 5).await;
+    record_continue_file(&case, e1, &[ATTR, B_ATTR]).await;
+    end_attempt(&case, attempt, AttemptEndReason::Completed).await;
+    let exec_job = job(&case, e1).await.id;
+    (case, e1, exec_job)
+}
+
+#[tokio::test]
+async fn a_dispatched_attempt_gets_one_token_and_its_end_revokes_it() {
+    let (case, e1) = queued_case(with_retries(1)).await;
+
+    let first = assign(&case, e1, 1, 5).await;
+    assert_eq!(
+        tokens(&case).await,
+        vec![("h1".to_owned(), false)],
+        "after 1: one live token"
+    );
+
+    end_attempt(&case, first, AttemptEndReason::Lost).await;
+    let second = assign(&case, e1, 2, 5).await;
+    assert_eq!(
+        tokens(&case).await,
+        vec![("h1".to_owned(), true), ("h2".to_owned(), false)],
+        "after 2: the lost attempt's token is revoked, the new one is live"
+    );
+
+    end_attempt(&case, second, AttemptEndReason::Completed).await;
+    assert_eq!(
+        tokens(&case).await,
+        vec![("h1".to_owned(), true), ("h2".to_owned(), true)],
+        "after 3: every token is revoked"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_continue_file_adds_entry_points_once_and_keeps_the_evaluation_building() {
+    let (case, e1, exec_job) = continued_case().await;
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Building,
+        "after 1: the queued continuation keeps the evaluation building"
+    );
+
+    let report = case
+        .walk(crate::messages::RecordBatch {
+            continuation: Some(exec_job),
+            ..case
+                .tasked(e1, vec![exec_root(), entry_point(B, B_OUT, B_ATTR)])
+                .await
+        })
+        .await;
+    assert!(!report.skipped, "after 2: the continuation batch is taken");
+    let names: Vec<String> = case
+        .entry_points(e1)
+        .await
+        .into_iter()
+        .map(|point| point.eval)
+        .collect();
+    assert_eq!(
+        names.iter().filter(|name| *name == ATTR).count(),
+        1,
+        "after 2: {names:?}"
+    );
+    assert!(names.contains(&B_ATTR.to_owned()), "after 2: {names:?}");
+
+    case.transition(Transition::ContinuationEnded {
+        exec_job,
+        outcome: ContinuationOutcome::Done,
+    })
+    .await;
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Building,
+        "after 3: build b is still open"
+    );
+
+    case.build_started(B).await;
+    case.commit_nar(nar(B_OUT, "b")).await;
+    case.build_completed(B).await;
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Completed,
+        "after 4: the evaluation"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_continue_file_from_a_failed_attempt_is_forgotten_on_restart() {
+    let (case, e1) = queued_case(with_retries(1)).await;
+    let first = assign(&case, e1, 1, 5).await;
+    record_continue_file(&case, e1, &[B_ATTR]).await;
+    end_attempt(&case, first, AttemptEndReason::Failed).await;
+
+    let second = assign(&case, e1, 2, 5).await;
+    end_attempt(&case, second, AttemptEndReason::Completed).await;
+
+    assert!(
+        continuation_rows(&case).await.is_empty(),
+        "after 2: no continuation"
+    );
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Completed,
+        "after 2: the evaluation"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_batch_for_a_building_evaluation_without_a_continuation_is_dropped() {
+    let (case, e1) = exec_case(spec()).await;
+
+    let report = case
+        .walk(case.tasked(e1, vec![entry_point(B, B_OUT, B_ATTR)]).await)
+        .await;
+
+    assert!(report.skipped, "after 1: the batch is dropped");
+    assert!(
+        !case
+            .entry_points(e1)
+            .await
+            .iter()
+            .any(|point| point.eval == B_ATTR),
+        "after 1: no new entry point"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_failed_continuation_fails_the_evaluation_with_its_message() {
+    let (case, e1, exec_job) = continued_case().await;
+
+    case.transition(Transition::ContinuationEnded {
+        exec_job,
+        outcome: ContinuationOutcome::Failed {
+            error: "attribute 'b' missing".into(),
+        },
+    })
+    .await;
+
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Failed,
+        "after 1: the evaluation"
+    );
+    assert!(
+        messages(&case, e1).await.contains(&(
+            "continue.json: attribute 'b' missing".to_owned(),
+            Some("nix-eval".to_owned())
+        )),
+        "after 1: the message"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn deleting_an_evaluation_reports_its_exec_jobs() {
+    let (case, e1) = queued_case(spec()).await;
+    let exec_job = job(&case, e1).await.id;
+
+    let report = case.gc(GcRequest::Evaluations { ids: vec![e1] }).await;
+
+    assert_eq!(
+        report.deleted_exec_jobs,
+        vec![exec_job],
+        "after 1: the report"
+    );
     case.finish().await;
 }

@@ -200,6 +200,7 @@ impl Scheduler {
                 derivations,
                 warnings,
                 errors,
+                continuation: None,
             })
             .await?;
         if report.exec_entry_points > 0 {

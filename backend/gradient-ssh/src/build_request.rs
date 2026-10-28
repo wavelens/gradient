@@ -320,6 +320,7 @@ async fn add_batches(
                 derivations: batch.to_vec(),
                 warnings: vec![],
                 errors: vec![],
+                continuation: None,
             })
             .await?;
         if report.skipped {
