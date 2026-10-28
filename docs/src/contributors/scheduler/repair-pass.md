@@ -96,7 +96,7 @@ Changes to `evaluation.graph_version` can invalidate the per-entry-point status 
 | 7 | Adopt pending shared builds reachable by a live evaluation and named by nobody | `adopted` |
 | 8 | Count unbacked outputs of terminal-success producers (read-only) | `unbacked_trusted_outputs` |
 | 9 | Recount evaluation shared-build counters | `eval_counter_drift` |
-| 10 | Count `Building` evaluations with `active_shared_builds = 0` and no open exec job (read-only) | `wedged_building_evals` |
+| 10 | Tally `Building` evaluations where `active_shared_builds = 0`. These evaluations lack an open exec job and a queued continue file. Keep the tally read-only. | `wedged_building_evals` |
 
 - **Repair scope:** pending shared builds, their direct dependencies, `fetchable` rows with `missing_runtime_deps > 0`, and terminal-success rows without a set `fetchable` flag. Every pass must log the scope size under the `scope` field.
 - Steps 1 and 2 first compare each counter with its direct inputs. The full recount can only start on a mismatch.

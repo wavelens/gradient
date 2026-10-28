@@ -18,6 +18,8 @@ pub struct Reported {
     pub evaluation: EvaluationId,
     pub status: i16,
     pub phase: Option<String>,
+    #[serde(default)]
+    pub node: u32,
     pub task: Option<TaskId>,
     pub project: Option<ProjectId>,
     pub entry_point_name: Option<String>,

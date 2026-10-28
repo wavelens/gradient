@@ -13,6 +13,7 @@
 use crate::DbContext;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
+use gradient_entity::exec_job_continuation::ContinuationStatus;
 use sea_orm::{ConnectionTrait, DbErr, Statement};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -63,9 +64,12 @@ fn wedged_building_evals_sql() -> String {
         "SELECT count(*) AS n FROM evaluation ev \
          WHERE ev.status = {building} AND ev.active_shared_builds = 0 \
          AND NOT EXISTS (SELECT 1 FROM exec_job ej \
-                         WHERE ej.evaluation = ev.id AND ej.status IN ({open_exec}))",
+                         WHERE ej.evaluation = ev.id AND ej.status IN ({open_exec})) \
+         AND NOT EXISTS (SELECT 1 FROM exec_job_continuation c \
+                         WHERE c.evaluation = ev.id AND c.status = {queued})",
         building = crate::sql::status::eval(EvaluationStatus::Building),
         open_exec = crate::sql::status::exec_in(&ExecJobStatus::OPEN),
+        queued = i16::from(ContinuationStatus::Queued),
     )
 }
 
