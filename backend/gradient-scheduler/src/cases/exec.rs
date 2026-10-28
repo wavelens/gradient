@@ -556,13 +556,13 @@ async fn a_queued_continuation_is_dispatched_as_an_eval_job_of_its_evaluation() 
         vec![CONTINUED_ATTR.to_owned()],
         "after 1: the wildcards"
     );
-    let commit = case
+    let archived = case
         .db
-        .texts("SELECT encode(c.hash, 'hex') FROM commit c JOIN evaluation e ON e.commit = c.id")
+        .texts("SELECT flake_source FROM evaluation WHERE flake_source IS NOT NULL")
         .await;
     assert!(
-        matches!(&flake.source, FlakeSource::Repository { commit: sha, .. } if [sha.clone()] == commit.as_slice()),
-        "after 1: the source {:?} is the evaluation's commit {commit:?}",
+        matches!(&flake.source, FlakeSource::Cached { store_path } if [store_path.clone()] == archived.as_slice()),
+        "after 1: the source {:?} is the evaluation's archived source {archived:?}",
         flake.source
     );
     let rows = case.db.rows::<dispatched_job::Entity>().await;
