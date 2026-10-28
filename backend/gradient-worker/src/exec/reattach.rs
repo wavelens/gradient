@@ -12,8 +12,10 @@ use tokio::time::Instant;
 use tracing::{info, warn};
 
 use super::agent_client::AgentClient;
+use super::channels::GuestChannelMux;
 use super::host::ExecHost;
 use super::job::{finish, unix_now, unless_aborted};
+use super::job_channels::{GuestChannelInbox, JobChannels};
 use super::state::StoredJob;
 use super::watchdog::Watchdog;
 use crate::executor::AbortSignal;
@@ -50,12 +52,13 @@ pub async fn resume(
     resumed: ResumedJob,
     updater: &mut JobUpdater,
     abort: AbortSignal,
+    inbox: GuestChannelInbox,
 ) -> Result<()> {
     let ResumedJob {
         guest: ReattachedGuest { guest, devices },
         stored,
     } = resumed;
-    let outcome = follow_again(host, &guest, &stored, updater, abort).await;
+    let outcome = follow_again(host, &guest, &stored, updater, abort, inbox).await;
     host.pool.retire(guest, devices);
     outcome
 }
@@ -76,6 +79,7 @@ async fn follow_again(
     stored: &StoredJob,
     updater: &mut JobUpdater,
     mut abort: AbortSignal,
+    inbox: GuestChannelInbox,
 ) -> Result<()> {
     let ready = unless_aborted(
         &abort,
@@ -90,12 +94,15 @@ async fn follow_again(
         .map_err(BuildError::transient)?;
     let mut watchdog = resumed_watchdog(stored);
     let leave_running = host.worker_stop_keeping_guests();
+    let mux = GuestChannelMux::new(stored.ssh, stored.ports.clone(), agent.version());
+    let mut channels = JobChannels::new(inbox, mux, guest.dir().to_owned());
     finish(
         &mut agent,
         updater,
         &mut watchdog,
         &mut abort,
         &leave_running,
+        &mut channels,
     )
     .await
 }
@@ -149,6 +156,8 @@ mod tests {
             max_silent_secs: Some(60),
             started_at_unix: 1_790_000_000,
             sent_to_agent,
+            ssh: false,
+            ports: Vec::new(),
         }
     }
 

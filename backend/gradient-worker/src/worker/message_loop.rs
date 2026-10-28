@@ -1060,8 +1060,9 @@ async fn run_job(
             until_aborted(run, abort).await
         }
         Job::Exec(exec_job) => {
+            let (_, channels) = tokio::sync::mpsc::channel(1);
             executor
-                .execute_exec_job(*exec_job, updater, credentials, abort)
+                .execute_exec_job(*exec_job, updater, credentials, abort, channels)
                 .await
         }
     }

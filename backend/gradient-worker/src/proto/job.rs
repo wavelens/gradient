@@ -613,6 +613,27 @@ impl JobUpdater {
             .await
     }
 
+    pub async fn send_guest_channel_data(&self, channel_id: u64, data: Vec<u8>) -> Result<()> {
+        self.writer
+            .send_now(ClientMessage::GuestChannelData { channel_id, data })
+            .await
+    }
+
+    pub async fn send_guest_channel_closed(
+        &self,
+        channel_id: u64,
+        exit_code: Option<i32>,
+        message: Option<String>,
+    ) -> Result<()> {
+        self.writer
+            .send_now(ClientMessage::CloseGuestChannel {
+                channel_id,
+                exit_code,
+                message,
+            })
+            .await
+    }
+
     async fn send_update(&self, update: JobUpdateKind) -> Result<()> {
         debug!(job_id = %self.job_id, ?update, "sending job update");
         self.writer
