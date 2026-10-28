@@ -85,15 +85,18 @@ def bump(repo):
 
 
 def keep_nixpkgs():
-    prefetch = "nix --extra-experimental-features 'nix-command flakes' flake prefetch --json http://server/nixpkgs.tar.gz"
+    unpack = "nix-prefetch-url --unpack --name source --print-path http://server/nixpkgs.tar.gz"
     for node in WORKER_NODES:
         node.succeed("rm -f /tmp/nixpkgs.done")
-        node.execute(f"({prefetch} > /tmp/nixpkgs.json 2> /tmp/nixpkgs.log; touch /tmp/nixpkgs.done) &")
+        node.execute(f"({unpack} > /tmp/nixpkgs.out 2> /tmp/nixpkgs.log; touch /tmp/nixpkgs.done) &")
     for node in WORKER_NODES:
         node.wait_until_succeeds("test -e /tmp/nixpkgs.done", timeout=timedelta(seconds=600))
-        fetched = json.loads(node.succeed("cat /tmp/nixpkgs.json"))
-        assert fetched["hash"] == NIXPKGS_HASH, f"{node.name} fetched {fetched} instead of {NIXPKGS_HASH}"
-        node.succeed(f"nix-store --add-root /nix/var/nix/gcroots/nixpkgs -r {fetched['storePath']}")
+        path = node.succeed("tail -1 /tmp/nixpkgs.out").strip()
+        assert path.startswith("/nix/store/"), f"{node.name} did not unpack nixpkgs:\n" + node.succeed("cat /tmp/nixpkgs.log")
+        info = json.loads(node.succeed(f"nix --extra-experimental-features nix-command path-info --json {path}"))
+        nar_hash = (info[0] if isinstance(info, list) else next(iter(info.values())))["narHash"]
+        assert nar_hash == NIXPKGS_HASH, f"{node.name} unpacked {path} with {nar_hash} instead of {NIXPKGS_HASH}"
+        node.succeed(f"nix-store --add-root /nix/var/nix/gcroots/nixpkgs -r {path}")
 
 
 def reset_workers():
