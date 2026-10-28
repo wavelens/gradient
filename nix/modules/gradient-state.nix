@@ -155,6 +155,16 @@
         description = "File containing the SSH private key used for Git access.";
       };
 
+      secret_files = mkOption {
+        type = types.attrsOf types.str;
+        default = { };
+        example = { wandb-token = "/run/secrets/wandb-token"; };
+        description = ''
+          Files with the project secrets of exec jobs, keyed by secret name. The server reads each
+          file as a systemd credential and stores its content encrypted.
+        '';
+      };
+
       public = mkOption {
         type = types.bool;
         default = false;

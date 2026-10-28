@@ -6,7 +6,8 @@
 
 pub use gradient_wire::types::{
     DeviceClass, DeviceRequest, DeviceRequestError, ExecAllow, ExecDefaults, ExecInventory,
-    ExecLimits, ExecRequirement, ExecSpec, Phase, SopsFile, exec_image_attr,
+    ExecLimits, ExecRequirement, ExecSpec, Phase, SecretNameError, SopsFile, exec_image_attr,
+    validate_secret_name,
 };
 
 pub const DISABLED_ON_INSTANCE: &str = "exec jobs are disabled on this instance";

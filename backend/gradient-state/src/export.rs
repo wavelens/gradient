@@ -82,6 +82,10 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     let github_installs = gradient_entity::github_installation::Entity::find()
         .all(db)
         .await?;
+    let managed_secrets = gradient_entity::project_secret::Entity::find()
+        .filter(gradient_entity::project_secret::Column::Managed.eq(true))
+        .all(db)
+        .await?;
 
     let username = id_name_map(users.iter().map(|u| (u.id, u.username.clone())));
     let project_name = id_name_map(projects.iter().map(|o| (o.id, o.name.clone())));
@@ -141,9 +145,13 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 })
             })
             .collect();
-        config
-            .projects
-            .insert(o.name.clone(), export_project(o, &username, members, teams));
+        let mut project = export_project(o, &username, members, teams);
+        project.secret_files = managed_secrets
+            .iter()
+            .filter(|s| s.project == o.id)
+            .map(|s| (s.name.clone(), String::new()))
+            .collect();
+        config.projects.insert(o.name.clone(), project);
     }
 
     for p in &tasks {
@@ -391,6 +399,7 @@ fn export_project(
         id: Some(project.id.to_string()),
         description: opt(&project.description),
         private_key_file: String::new(),
+        secret_files: Default::default(),
         public: project.public,
         hide_build_requests: project.hide_build_requests,
         exec_enabled: project.exec_enabled,

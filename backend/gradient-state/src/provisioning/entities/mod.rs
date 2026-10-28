@@ -7,6 +7,7 @@
 mod api_keys;
 mod caches;
 mod integrations;
+mod project_secrets;
 mod projects;
 mod roles;
 mod tasks;

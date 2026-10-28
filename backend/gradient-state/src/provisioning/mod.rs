@@ -57,6 +57,7 @@ pub(super) async fn apply_state_to_database(
     // Teams must exist before projects, for their new-project grants (the local worker's `server`).
     let team_ids = app.apply_teams(&config.teams).await?;
     app.apply_projects_without_members(&config.projects).await?;
+    app.apply_project_secrets(&config.projects).await?;
     app.apply_roles(&config.roles).await?;
     app.apply_project_members(&config.projects, &pending)
         .await?;
