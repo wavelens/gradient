@@ -451,6 +451,7 @@ impl Shape {
             created_at,
             updated_at: created_at,
             dissolve_after: None,
+            attempts_outside_budget: 0,
         });
         self
     }

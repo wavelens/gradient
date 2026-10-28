@@ -55,6 +55,8 @@ pub struct Model {
     pub ended_at: Option<NaiveDateTime>,
     pub end_reason: Option<AttemptEndReason>,
     pub message: Option<String>,
+    pub master_port: Option<i32>,
+    pub guest_address: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

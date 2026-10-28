@@ -54,7 +54,7 @@ impl Scheduler {
                 })
                 .await
             }
-            crate::cluster::Route::Member(of) => self.enqueue_cluster_member(of, key, job).await,
+            crate::cluster::Route::Member(of) => self.enqueue_cluster_member(*of, key, job).await,
             crate::cluster::Route::Held => Ok(()),
             crate::cluster::Route::Dead => {
                 let failure = crate::cluster::Failure {

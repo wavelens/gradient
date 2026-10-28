@@ -77,6 +77,7 @@ pub struct Model {
     pub created_at: NaiveDateTime,
     pub started_at: Option<NaiveDateTime>,
     pub finished_at: Option<NaiveDateTime>,
+    pub node_index: i16,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

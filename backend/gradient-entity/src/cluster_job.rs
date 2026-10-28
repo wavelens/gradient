@@ -54,6 +54,7 @@ pub struct Model {
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     pub dissolve_after: Option<NaiveDateTime>,
+    pub attempts_outside_budget: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

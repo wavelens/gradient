@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Exactly one of `evaluation` or `derivation_build` is set. Both are unique, and a job can belong
-//! to at most one cluster.
+//! Exactly one of `evaluation`, `derivation_build` or `exec_job` is set. Each is unique and a job
+//! can belong to at most one cluster.
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ClusterJobId, ClusterMemberId, DerivationBuildId, EvaluationId};
+use crate::ids::{ClusterJobId, ClusterMemberId, DerivationBuildId, EvaluationId, ExecJobId};
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cluster_member")]
@@ -25,6 +25,7 @@ pub struct Model {
     pub pin: Option<String>,
     pub eval_index: Option<i16>,
     pub min_free_ram_mb: Option<i32>,
+    pub exec_job: Option<ExecJobId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
