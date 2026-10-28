@@ -134,6 +134,7 @@ mod tests {
             resolved_at: None,
             split: true,
             planned: false,
+            exec: None,
         }
     }
 
