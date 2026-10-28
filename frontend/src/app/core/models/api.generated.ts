@@ -549,6 +549,15 @@ export interface CreateIntegrationRequest {
 
 export type CreatePermission = "none" | "superusers" | "everyone";
 
+export interface CreatePullRequestRequest {
+  title: string;
+  body?: string | null;
+  branch?: string | null;
+  base?: string | null;
+  patch: string;
+  commit?: string | null;
+}
+
 export interface CreateRoleRequest {
   name: IndexName;
   permissions: string[];
@@ -1895,6 +1904,12 @@ export interface ProtocolProbe {
   status?: number | null;
   latency_ms: number;
   error?: string | null;
+}
+
+export interface PullRequestResponse {
+  url: string;
+  number: number;
+  branch: string;
 }
 
 export interface PutProjectSecretRequest {
