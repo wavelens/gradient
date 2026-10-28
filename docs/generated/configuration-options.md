@@ -364,21 +364,21 @@
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.exec.allow.customImages` | bool | `false` | - | Whether exec jobs may boot their own guest image instead of `worker.exec.image`. |
-| `worker.exec.allow.devices` | list of string | `[ ]` | - | Device names from `worker.exec.devices` exec jobs may request. An empty list allows none. |
-| `worker.exec.allow.maxSilent` | null or (unsigned int) | `null` | - | Most seconds an exec job may go without output. The server lowers a larger request to this value. `null` sets no cap. |
-| `worker.exec.allow.mounts` | list of string | `[ ]` | - | Mount names from `worker.exec.mounts` exec jobs may request. An empty list allows none. |
-| `worker.exec.allow.network` | bool | `false` | - | Whether exec jobs may reach the network through `worker.exec.bridge`. |
-| `worker.exec.allow.nodes` | unsigned int | `1` | - | Most nodes an exec job may span. |
-| `worker.exec.allow.ports` | null or (list of port) | `null` | - | First and last port of the range that exec jobs can ask for. `null` allows ports 1024 to 65535. |
-| `worker.exec.allow.retries` | unsigned int | `0` | - | Most retries an exec job may request. |
-| `worker.exec.allow.ssh` | bool | `false` | - | Whether exec jobs may accept SSH sessions into their guest. |
-| `worker.exec.allow.timeout` | null or (unsigned int) | `null` | - | Most seconds an exec job may run. The server lowers a larger request to this value. `null` sets no cap. |
+| `worker.exec.allow.customImages` | bool | `false` | `GRADIENT_WORKER_EXEC_ALLOW_CUSTOM_IMAGES` | Whether exec jobs may boot their own guest image instead of `worker.exec.image`. |
+| `worker.exec.allow.devices` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_ALLOW_DEVICES` | Device names from `worker.exec.devices` exec jobs may request. An empty list allows none. |
+| `worker.exec.allow.maxSilent` | null or (unsigned int) | `null` | `GRADIENT_WORKER_EXEC_ALLOW_MAX_SILENT` | Most seconds an exec job may go without output. The server lowers a larger request to this value. `null` sets no cap. |
+| `worker.exec.allow.mounts` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_ALLOW_MOUNTS` | Mount names from `worker.exec.mounts` exec jobs may request. An empty list allows none. |
+| `worker.exec.allow.network` | bool | `false` | `GRADIENT_WORKER_EXEC_ALLOW_NETWORK` | Whether exec jobs may reach the network through `worker.exec.bridge`. |
+| `worker.exec.allow.nodes` | unsigned int | `1` | `GRADIENT_WORKER_EXEC_ALLOW_NODES` | Most nodes an exec job may span. |
+| `worker.exec.allow.ports` | null or (list of port) | `null` | `GRADIENT_WORKER_EXEC_ALLOW_PORTS` | First and last port of the range that exec jobs can ask for. `null` allows ports 1024 to 65535. |
+| `worker.exec.allow.retries` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_ALLOW_RETRIES` | Most retries an exec job may request. |
+| `worker.exec.allow.ssh` | bool | `false` | `GRADIENT_WORKER_EXEC_ALLOW_SSH` | Whether exec jobs may accept SSH sessions into their guest. |
+| `worker.exec.allow.timeout` | null or (unsigned int) | `null` | `GRADIENT_WORKER_EXEC_ALLOW_TIMEOUT` | Most seconds an exec job may run. The server lowers a larger request to this value. `null` sets no cap. |
 | `worker.exec.bridge` | string | `"gradient-guests"` | `GRADIENT_WORKER_EXEC_BRIDGE` | Network bridge the guest tap devices join. |
-| `worker.exec.defaults.maxSilent` | null or (unsigned int) | `null` | - | Seconds without output after which an exec job that leaves `maxSilent` unset times out. `null` sets no limit. |
-| `worker.exec.defaults.mounts` | list of string | `[ ]` | - | Mounts of an exec job that leaves `mounts` unset. |
-| `worker.exec.defaults.network` | bool | `false` | - | Whether an exec job that leaves `network` unset reaches the network. |
-| `worker.exec.defaults.ssh` | bool | `false` | - | Whether an exec job that leaves `ssh` unset accepts SSH sessions. |
+| `worker.exec.defaults.maxSilent` | null or (unsigned int) | `null` | `GRADIENT_WORKER_EXEC_DEFAULTS_MAX_SILENT` | Seconds without output after which an exec job that leaves `maxSilent` unset times out. `null` sets no limit. |
+| `worker.exec.defaults.mounts` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_DEFAULTS_MOUNTS` | Mounts of an exec job that leaves `mounts` unset. |
+| `worker.exec.defaults.network` | bool | `false` | `GRADIENT_WORKER_EXEC_DEFAULTS_NETWORK` | Whether an exec job that leaves `network` unset reaches the network. |
+| `worker.exec.defaults.ssh` | bool | `false` | `GRADIENT_WORKER_EXEC_DEFAULTS_SSH` | Whether an exec job that leaves `ssh` unset accepts SSH sessions. |
 | `worker.exec.devices` | list of (submodule) | `[ ]` | `GRADIENT_WORKER_EXEC_DEVICES` | Devices that exec jobs can ask for. Set exactly `vfio`, `dev` or `usb` per entry. Devices held by a job stay out of reach for other jobs. |
 | `worker.exec.devices.*.dev` | null or path | `null` | - | Host device file for the guest, relayed over vsock. |
 | `worker.exec.devices.*.name` | string | - | - | Device class name that exec jobs ask for. |
@@ -394,6 +394,8 @@
 | `worker.exec.mounts.*.readOnly` | bool | `false` | - | Whether to share the directory read-only. |
 | `worker.exec.nameservers` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_NAMESERVERS` | IPv4 addresses of the nameservers for guests with network access. An empty list uses the address of `worker.exec.bridge`, where the NixOS module runs a DNS forwarder. |
 | `worker.exec.preWarm` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_PRE_WARM` | Guests booted from `worker.exec.image` and paused, waiting for a job. |
+| `worker.exec.sops.files` | list of path | `[ ]` | `GRADIENT_WORKER_EXEC_SOPS_FILES` | Sops files decrypted on the worker with `worker.exec.sops.keyFile`. Exec jobs get their top-level values by name. The server never sees them. |
+| `worker.exec.sops.keyFile` | null or path | `null` | `GRADIENT_WORKER_EXEC_SOPS_KEY_FILE` | SSH private key decrypting `worker.exec.sops.files`, an Ed25519 or RSA key. The age recipient derives from it. The worker reads it through a systemd credential, and `systemctl reload gradient-worker` decrypts the files again. `null` decrypts no file. |
 | `worker.exec.stopGuestsWithWorker` | bool | `true` | `GRADIENT_WORKER_EXEC_STOP_GUESTS_WITH_WORKER` | Whether stopping or restarting the worker stops every guest. The server queues the exec jobs of stopped guests again without using a retry. `false` keeps guests running across a worker restart and the restarted worker reattaches to them. |
 | `worker.exec.subnet` | string | `"10.233.0.0/16"` | `GRADIENT_WORKER_EXEC_SUBNET` | IPv4 subnet of `worker.exec.bridge`. The bridge takes the first host address, each guest the address of its vsock CID. |
 

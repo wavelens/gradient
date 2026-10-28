@@ -4,18 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_vm::{DeviceInventory, MountConfig};
-use gradient_wire::types::{DeviceClass, DeviceRequest, ExecAllow, ExecDefaults, ExecInventory};
+use gradient_vm::DeviceInventory;
+use gradient_wire::types::{DeviceClass, DeviceRequest, ExecInventory};
+
+use crate::config::ExecArgs;
 
 pub fn advertised(
     devices: &DeviceInventory,
-    mut labels: Vec<String>,
+    config: &ExecArgs,
     worker_id: &str,
-    mounts: &[MountConfig],
-    allow: ExecAllow,
-    defaults: ExecDefaults,
     warm_guests: u32,
+    secrets: Vec<String>,
 ) -> ExecInventory {
+    let mut labels = config.labels.clone();
     if !labels.iter().any(|label| label == worker_id) {
         labels.push(worker_id.to_owned());
     }
@@ -30,10 +31,14 @@ pub fn advertised(
                 free: count.free,
             })
             .collect(),
-        mounts: mounts.iter().map(|mount| mount.name.clone()).collect(),
-        secrets: Vec::new(),
-        allow,
-        defaults,
+        mounts: config
+            .mounts
+            .iter()
+            .map(|mount| mount.name.clone())
+            .collect(),
+        secrets,
+        allow: config.allow(),
+        defaults: config.defaults(),
         warm_guests,
     }
 }
@@ -54,15 +59,11 @@ mod tests {
     #[test]
     fn the_worker_id_is_a_label() {
         let devices = DeviceInventory::from_config(&[], &SysfsProbe);
-        let inventory = advertised(
-            &devices,
-            vec!["gpu".into()],
-            "worker-7",
-            &[],
-            ExecAllow::default(),
-            ExecDefaults::default(),
-            1,
-        );
+        let config = ExecArgs {
+            labels: vec!["gpu".into()],
+            ..ExecArgs::default()
+        };
+        let inventory = advertised(&devices, &config, "worker-7", 1, Vec::new());
         assert_eq!(inventory.labels, ["gpu", "worker-7"]);
         assert_eq!(inventory.warm_guests, 1);
     }

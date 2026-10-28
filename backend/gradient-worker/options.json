@@ -809,5 +809,25 @@
     "description": "Seconds without output after which an exec job that leaves `maxSilent` unset times\nout. `null` sets no limit.",
     "default": null,
     "values": []
+  },
+  {
+    "group": "exec",
+    "field": "sops_files",
+    "flag": "exec-sops-files",
+    "env": "GRADIENT_WORKER_EXEC_SOPS_FILES",
+    "type": "Vec<PathBuf>",
+    "description": "Sops files decrypted on the worker with\n{option}`services.gradient.worker.exec.sops.keyFile`. Exec jobs get their top-level\nvalues by name. The server never sees them.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "sops_key_file",
+    "flag": "exec-sops-key-file",
+    "env": "GRADIENT_WORKER_EXEC_SOPS_KEY_FILE",
+    "type": "Option<PathBuf>",
+    "description": "SSH private key decrypting {option}`services.gradient.worker.exec.sops.files`, an\nEd25519 or RSA key. The age recipient derives from it. `null` decrypts no file.",
+    "default": null,
+    "values": []
   }
 ]
