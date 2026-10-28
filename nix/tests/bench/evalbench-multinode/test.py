@@ -328,6 +328,7 @@ def measure(token, task):
     captured = {}
     try:
         status = wait_for_status(token, eval_id, EVALUATED, timeout=EVAL_TIMEOUT, poll=2)
+        wait_until_delivered()
     finally:
         captured["load"] = save_vm_load(label, load_before)
         captured["top_statements"] = save_slow_statements(label)
