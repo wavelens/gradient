@@ -124,6 +124,7 @@ passthru.gradient = {
 
 | Field | Default | Effect |
 |---|---|---|
+| `nodes` | `1` | Guests on separate workers of one zone, see [Spread a Job over Workers](#multi-node-jobs) |
 | `labels` | `[ ]` | The worker must report every label |
 | `devices` | `[ ]` | Device classes and counts, held until the job ends |
 | `mounts` | worker default | Named host directories of the worker |
@@ -139,7 +140,6 @@ passthru.gradient = {
 
 - Workers report the labels, devices and limits they allow. Requests outside those limits rule out that worker. Downgrades of a request never happen.
 - Lost workers lead to a restart without using a retry. Ten losses in a row fail the job.
-- Values above 1 for `nodes` have no support yet.
 
 ## 5. Read the Job Context
 
@@ -157,7 +157,7 @@ There is a checkout of the evaluated commit in `/work`. Programs start as the us
 | `GRADIENT_WORKER`, `GRADIENT_ZONE` | Worker ID and zone |
 | `GRADIENT_DEVICES`, `GRADIENT_GPU_INDICES` | Device handles in the guest as JSON, GPU indices |
 | `GRADIENT_MOUNT_<NAME>` | Path of a mount |
-| `GRADIENT_NODE_INDEX`, `GRADIENT_NODE_COUNT`, `GRADIENT_MASTER_ADDR`, `GRADIENT_MASTER_PORT`, `GRADIENT_PEERS` | Cluster values, a single node for now |
+| `GRADIENT_NODE_INDEX`, `GRADIENT_NODE_COUNT`, `GRADIENT_MASTER_ADDR`, `GRADIENT_MASTER_PORT`, `GRADIENT_PEERS` | Node index, node count, master address and port, every node as JSON, see [Cluster Context](#cluster-context) |
 
 - `args` and `env` accept placeholders like `@gradient.job.commit@` or `@gradient.worker.zone@`. Unknown placeholders fail the job.
 - Timeout events end the attempt. The log shows `program produced no output for <n>s (maxSilent exceeded)` or `program exceeded wall-clock timeout of <n>s`.
@@ -272,6 +272,7 @@ The **Terminal** tab of the job page offers three sessions.
 
 - The oldest viewer can type into the console. Later viewers see a read-only view.
 - Programs stay active past the close of an attached view.
+- Multi-node jobs add a **Node** picker. The log and every session follow the picked node.
 
 ### SSH Logins
 
@@ -280,8 +281,8 @@ SSH logins need the SSH server and a key from [Build over SSH](build-over-ssh.md
 | Login | Target |
 |---|---|
 | `<project>/<job-id>` | The job |
-| `<project>/<job-id>/<node>` | A node of the job, only `0` for now |
-| `<project>/<task>` | The newest running exec job of the task |
+| `<project>/<job-id>/<node>` | One node of a [multi-node job](#multi-node-jobs), `0` for the master |
+| `<project>/<task>` | Node 0 of the newest running exec job of the task |
 
 ```sh
 ssh -p 2222 myproject/<job-id>@ci.example.com # (1)!
@@ -353,6 +354,85 @@ services.gradient.worker.exec.allow.customImages = true;
 - Custom image boot failures fail the attempt and consume a retry.
 - Guest agents in the image come from the `gradient` input. Keep that input at the server version.
 - Agents from older releases start the program in `/work`. Those agents can refuse shells.
+
+## 9. Spread a Job over Workers { #multi-node-jobs }
+
+Apps with `nodes` above 1 start one guest per node, each on its own worker of one zone. All nodes start together or not at all.
+
+```nix
+# flake.nix
+passthru.gradient = {
+  nodes = 4;
+  devices = [ "gpu:h100:8" ];
+  args = [ "--master" "@gradient.cluster.master_addr@:@gradient.cluster.master_port@" ]; # (1)!
+  keepRunning = false; # (2)!
+};
+```
+
+1.  Node 0 is the master. All nodes receive the master address and port.
+2.  A node failure doesn't stop the other nodes when the value is `true`.
+
+- Multi-node jobs need `network`. The default for a missing `network` is `true`. Apps with `network = false` fail with `nodes > 1 needs network`.
+- Every worker needs `exec.allow.nodes` of at least `nodes`, plus `exec.allow.network`.
+- All nodes share one [zone](../concepts/workers.md#zones). Too few matching workers in one zone leave the job waiting with `needs N workers in one zone`.
+- Lists and events show the job once, under node 0. All node statuses combine into the job status.
+
+### Cluster Context
+
+| Key | Variable | Value |
+|---|---|---|
+| `node_index` | `GRADIENT_NODE_INDEX` | Index of this node, from 0 |
+| `node_count` | `GRADIENT_NODE_COUNT` | Number of nodes |
+| `master_addr` | `GRADIENT_MASTER_ADDR` | Guest address of node 0 |
+| `master_port` | `GRADIENT_MASTER_PORT` | Port for the master process |
+| `peers` | `GRADIENT_PEERS` | Every node as JSON, sorted by index, this node included |
+| `attempt` | `GRADIENT_ATTEMPT` | Attempt number, starting at 1 |
+
+```json
+[{"index":0,"address":"10.233.0.2","port":29500},{"index":1,"address":"10.234.0.2","port":29500}]
+```
+
+- `args` and `env` accept the keys as `@gradient.cluster.<key>@`.
+- The master port defaults to 29500. Ports outside `exec.allow.ports` of the master worker or listed in `ports` give way to the lowest free port of that range.
+
+### Restarts
+
+| Event | Result |
+|---|---|
+| A node failed or timed out, without `keepRunning` | The other nodes stop. Every node restarts from its last phase while retries remain, one retry per restart |
+| A node failed, with `keepRunning = true` | The other nodes go on. The job ends `failed` after the last node, without a restart |
+| A lost worker connection | Every node restarts from its last phase without a retry. A fourth loss fails the job |
+| A server restart | Every node restarts from its last phase without a retry. Server restarts stay outside the limit of losses |
+| An abort | Every node ends `aborted`. No restart |
+
+- Workers apply caps to the `retries` of their own nodes. Jobs take the lowest of those capped values as their retry count.
+
+!!! warning
+    Nodes never survive a lost worker connection or a server restart. These cases stay the same with `stopGuestsWithWorker = false`. All nodes restart from their last phase.
+
+### Network Between Workers
+
+Nodes connect to each other on their guest addresses. The operator provides the network between the exec workers of a zone.
+
+| Need | Setup |
+|---|---|
+| Own subnet | A distinct `exec.subnet` on every exec worker |
+| Routes | A route to the subnet of every other exec worker, via that worker. Static routes or the LAN router both work |
+| Forwarding | No drop rule for traffic between the LAN interface and `exec.bridge` |
+| Ports | The `exec.allow.ports` range open between the workers |
+
+```nix
+# configuration.nix of worker a, LAN address 192.168.1.11
+services.gradient.worker.exec.subnet = "10.233.0.0/16";
+networking.interfaces.eth0.ipv4.routes = [
+  { address = "10.234.0.0"; prefixLength = 16; via = "192.168.1.12"; } # (1)!
+];
+```
+
+1.  Worker b with `exec.subnet = "10.234.0.0/16"` and a route back to `10.233.0.0/16`.
+
+- Worker NATs can hide a guest's source address. Peers see the address of the other worker as source.
+- Two workers on one subnet fail every node with `two nodes have the guest address <address>; give every exec worker its own exec.subnet`.
 
 ## Verify Deployment
 
