@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
-use gradient_vm::VmStateChange;
+use gradient_vm::{AddressLease, VmStateChange};
 use gradient_wire::messages::{
     BuildFailureKind, CachedPath, ClientMessage, ClusterAddress, ClusterMembership, ClusterPeer,
     GuestChannelKind, Job, JobCandidate, JobKind, JobPhaseSpan, ServerMessage, VM_STATE_SINCE,
@@ -22,6 +22,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
 use crate::exec::channels::GuestChannelCommand;
+use crate::exec::job::lease_guest_address;
 use crate::exec::job_channels::GuestChannelInbox;
 use crate::executor::eval_split::SplitMember;
 use crate::executor::timeline::{JobTimeline, TimelineSnapshot};
@@ -33,7 +34,7 @@ use crate::proto::scorer::JobScorer;
 use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
 use gradient_worker_client::correlation::AssignmentHandle;
 
-use super::cluster::{ClusterChannels, ClusterHolds, HeldJob};
+use super::cluster::{ClusterChannels, ClusterHolds, ClusterStart, HeldJob};
 use super::jobs::{Readoption, WorkerJobs, report_when_drained};
 use super::scoring::spawn_scoring_task;
 
@@ -784,22 +785,39 @@ impl MessageLoopState {
 
         if let Some(membership) = cluster {
             let attempt = membership.attempt.clone();
+            let address = match self.member_address(&job) {
+                Ok(address) => address,
+                Err(reason) => {
+                    warn!(%job_id, %attempt, %reason, "rejecting cluster member");
+                    self.writer
+                        .send(ClientMessage::AssignJobResponse {
+                            job_id,
+                            accepted: false,
+                            reason: Some(reason),
+                            endpoint: None,
+                        })
+                        .await?;
+                    return Ok(());
+                }
+            };
+            let endpoint = address.as_ref().map(AddressLease::address);
             let held = HeldJob {
                 job_id: job_id.clone(),
                 assignment_id,
                 job,
                 kind: kind.clone(),
                 credentials: self.credentials.snapshot(),
+                address,
             };
             let accepted = self.holds.hold(membership, held, std::time::Instant::now());
-            info!(%job_id, %attempt, accepted, "cluster member assigned - holding its slot");
+            info!(%job_id, %attempt, accepted, ?endpoint, "cluster member assigned - holding its slot");
             self.writer
                 .send(ClientMessage::AssignJobResponse {
                     job_id,
                     accepted,
                     reason: (!accepted)
                         .then(|| "already holds a member of this cluster attempt".to_owned()),
-                    endpoint: None,
+                    endpoint: endpoint.filter(|_| accepted),
                 })
                 .await?;
             if accepted && active_count + 1 < max {
@@ -826,6 +844,7 @@ impl MessageLoopState {
             job,
             None,
             None,
+            None,
             credentials,
         );
 
@@ -834,6 +853,20 @@ impl MessageLoopState {
         }
 
         Ok(())
+    }
+
+    fn member_address(&self, job: &Job) -> Result<Option<AddressLease>, String> {
+        let Job::Exec(_) = job else {
+            return Ok(None);
+        };
+        let host = self
+            .executor
+            .exec
+            .as_deref()
+            .ok_or("this worker runs no exec jobs")?;
+        lease_guest_address(host)
+            .map(Some)
+            .map_err(|e| e.to_string())
     }
 
     #[expect(
@@ -848,6 +881,7 @@ impl MessageLoopState {
         job: Job,
         cluster: Option<String>,
         split: Option<SplitMember>,
+        exec_member: Option<ClusterStart>,
         credentials: CredentialStore,
     ) {
         let registered = self
@@ -877,6 +911,7 @@ impl MessageLoopState {
                 abort,
                 split,
                 guest_channels,
+                exec_member,
             )
             .await;
             report_when_drained(log, done_tx, (job_id, result)).await;
@@ -927,6 +962,10 @@ impl MessageLoopState {
             index: membership.index,
         };
         self.channels.open(&attempt, me, roster);
+        let exec_member = held.address.and_then(|address| {
+            let inbox = self.channels.take(&attempt)?;
+            Some(ClusterStart { inbox, address })
+        });
         self.spawn_job(
             held.job_id,
             held.kind,
@@ -934,6 +973,7 @@ impl MessageLoopState {
             held.job,
             Some(attempt),
             split,
+            exec_member,
             held.credentials,
         );
 
@@ -1144,6 +1184,10 @@ fn send_live_metrics(
     });
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 async fn run_job(
     executor: JobExecutor,
     job: Job,
@@ -1152,6 +1196,7 @@ async fn run_job(
     abort: AbortSignal,
     split: Option<SplitMember>,
     guest_channels: GuestChannelInbox,
+    exec_member: Option<ClusterStart>,
 ) -> Result<()> {
     let job_abort = abort.clone();
     match job {
@@ -1165,7 +1210,14 @@ async fn run_job(
         }
         Job::Exec(exec_job) => {
             executor
-                .execute_exec_job(*exec_job, updater, credentials, abort, guest_channels)
+                .execute_exec_job(
+                    *exec_job,
+                    updater,
+                    credentials,
+                    abort,
+                    guest_channels,
+                    exec_member,
+                )
                 .await
         }
     }

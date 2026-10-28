@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-mod cluster;
+pub(crate) mod cluster;
 mod id;
 mod jobs;
 mod message_loop;
