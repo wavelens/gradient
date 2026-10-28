@@ -20,7 +20,8 @@ gradient-derive = { workspace = true }
 anyhow            = { workspace = true }
 async-trait       = { workspace = true }
 axum              = { workspace = true, features = ["ws", "tokio"] }
-bytes             = { workspace = true }
+base64            = { workspace = true }
+bytes            = { workspace = true }
 futures           = { workspace = true }
 hex               = { workspace = true }
 password-auth     = { workspace = true }
@@ -36,4 +37,5 @@ utoipa            = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "test-util", "io-util"] }
+serde_json = { workspace = true }
 uuid  = { workspace = true }

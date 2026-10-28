@@ -682,6 +682,11 @@ pub struct JobPhaseSpan {
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum CredentialKind {
     SshKey,
+    #[proto(45)]
+    JobSecret {
+        job_id: String,
+        name: String,
+    },
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
