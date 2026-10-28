@@ -297,7 +297,13 @@ impl SchedulerCase {
     }
 
     pub async fn accept(&self, _worker: &str, key: &str) {
-        self.scheduler.cluster_member_accepted(key).await;
+        self.scheduler.cluster_member_accepted(key, None).await;
+    }
+
+    pub async fn accept_at(&self, _worker: &str, key: &str, endpoint: &str) {
+        self.scheduler
+            .cluster_member_accepted(key, Some(endpoint.to_owned()))
+            .await;
     }
 
     pub async fn reject(&self, worker: &str, key: &str) -> bool {

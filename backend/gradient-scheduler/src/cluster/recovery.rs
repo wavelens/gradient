@@ -6,7 +6,6 @@
 
 use anyhow::Result;
 use gradient_db::eval_reports::drop_eval_reports;
-use gradient_db::scheduling::cluster::Requeue;
 use gradient_db::status::BuildRefusal;
 use gradient_graph::Transition;
 use gradient_pool::session_port::SessionSignal;
@@ -39,6 +38,7 @@ impl Scheduler {
                 if let MemberReport::Completed { job }
                 | MemberReport::Failed { job, .. }
                 | MemberReport::Lost { job } = report
+                    && !matches!(job, PendingJob::Exec(_))
                 {
                     self.return_member(&worker, job_id, assignment_id, job, attempt)
                         .await;
@@ -47,6 +47,9 @@ impl Scheduler {
                 Ok(())
             }
             Recorded::Decided(attempt, fate) => self.resolve_attempt(attempt, fate).await,
+            Recorded::Late(_, report) if matches!(report.job(), Some(PendingJob::Exec(_))) => {
+                Ok(())
+            }
             Recorded::Late(resolution, report) => {
                 self.apply(vec![dispose(resolution, report)]).await;
                 Ok(())
@@ -69,11 +72,7 @@ impl Scheduler {
             cluster,
             attempt,
             fate.into(),
-            if fate == Fate::Retry {
-                Requeue::WithinBudget
-            } else {
-                Requeue::No
-            },
+            super::requeue_for(fate),
             fate.into(),
         )
         .await;
@@ -94,7 +93,14 @@ impl Scheduler {
             requeued,
             split: self.cluster.book.split(attempt).await,
         };
+        let exec = self.cluster.book.is_exec(attempt).await;
         let (reports, survivors) = self.cluster.book.drain(attempt, resolution).await;
+        if exec {
+            let survivors = self.abort_survivors(attempt, &survivors).await;
+            self.apply_exec_cluster(resolution, reports, survivors)
+                .await;
+            return Ok(());
+        }
         self.drop_reports_of_a_retry(resolution, &reports).await;
         let completion = split_completion(resolution, &reports);
         let mut dispositions: Vec<Disposition> = reports

@@ -1012,7 +1012,9 @@ impl<'a> InboundContext<'a> {
     ) {
         if accepted {
             info!(peer_id = %self.peer_id, %job_id, ?endpoint, "job accepted");
-            self.scheduler.cluster_member_accepted(&job_id).await;
+            self.scheduler
+                .cluster_member_accepted(&job_id, endpoint)
+                .await;
         } else {
             info!(peer_id = %self.peer_id, %job_id, ?reason, "job rejected by worker");
             self.withdraw_assignment(&job_id).await;

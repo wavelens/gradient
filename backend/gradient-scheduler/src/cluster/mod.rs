@@ -7,6 +7,7 @@
 pub(crate) mod book;
 mod coordinator;
 mod divert;
+mod exec_settlement;
 mod master_port;
 mod matching;
 mod planner;
@@ -19,6 +20,7 @@ mod slots;
 pub use book::{ClusterBook, ClusterMember, PendingCluster};
 pub use coordinator::*;
 pub(crate) use divert::{Membership, Route};
+pub use exec_settlement::{cluster_next, node_ends, requeue_for};
 pub use master_port::master_port;
 pub use matching::kuhn;
 pub use planner::{Placement, ScoreLookup, Seat, fillable_seats, plan};
