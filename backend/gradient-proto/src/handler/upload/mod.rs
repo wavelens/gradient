@@ -87,6 +87,16 @@ impl InboundContext<'_> {
                     )
                     .await;
             }
+            UploadObject::ExecOutput { .. } => {
+                return self
+                    .settle(
+                        request_id,
+                        UploadOutcome::Rejected {
+                            reason: "exec outputs are not accepted yet".into(),
+                        },
+                    )
+                    .await;
+            }
             UploadObject::EvalCacheSegment { .. } if size > SEGMENT_MAX_BYTES as u64 => {
                 return self
                     .settle(
