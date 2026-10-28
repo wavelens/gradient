@@ -111,6 +111,8 @@ in {
       };
     };
 
+    services.getty.autologinUser = lib.mkDefault "gradient";
+
     services.udev.extraRules = ''
       SUBSYSTEM=="usb", MODE="0660", GROUP="dialout"
     '';
