@@ -32,7 +32,7 @@ const PHASE_PAYLOAD_FILE: &str = "/run/gradient/phase-payload";
 const RESOLV_CONF: &str = "/etc/resolv.conf";
 const DEVICE_LINK_DIR: &str = "/dev/gradient";
 const DEVICE_GROUP: &str = "dialout";
-const INTERFACE_WAIT: Duration = Duration::from_secs(10);
+const INTERFACE_WAIT: Duration = Duration::from_secs(60);
 
 pub struct PreparedJob {
     pub program: Command,
