@@ -220,6 +220,7 @@ in {
             resolveLocalQueries = false;
             settings = {
               no-resolv = true;
+              no-hosts = true;
               address = map (name: "/${name}/${config.networking.primaryIPAddress}") [ "web.exec.test" "gradient.local" ];
             };
           };
