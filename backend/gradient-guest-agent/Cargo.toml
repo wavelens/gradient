@@ -29,7 +29,8 @@ clap               = { workspace = true }
 http-body-util     = { workspace = true }
 hyper              = { workspace = true }
 hyper-util         = { workspace = true }
-nix                = { workspace = true, features = ["signal", "term", "user"] }
+nix                = { workspace = true, features = ["process", "signal", "term", "user"] }
+rustix             = { workspace = true }
 serde_json         = { workspace = true }
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "fs", "io-util", "net", "process", "time"] }
 tokio-util         = { workspace = true, features = ["rt"] }

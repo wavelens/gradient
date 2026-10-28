@@ -22,8 +22,8 @@ use crate::context::{UnknownPlaceholder, resolve_placeholders};
 use crate::output::OutputLog;
 use crate::setup::{PROGRAM_USER, PreparedJob};
 
-const WORK_DIR: &str = "/work";
-const SYSTEM_PATH: &str = "/run/current-system/sw/bin";
+pub const WORK_DIR: &str = "/work";
+pub const SYSTEM_PATH: &str = "/run/current-system/sw/bin";
 const PRE_SCRIPT: &str = "/etc/gradient/pre-script";
 const POST_SCRIPT: &str = "/etc/gradient/post-script";
 const KILL_GRACE: Duration = Duration::from_secs(10);
@@ -48,17 +48,8 @@ pub fn program_command(
         .map(|(name, value)| Ok((name.clone(), resolve(value)?)))
         .collect::<Result<BTreeMap<_, _>, UnknownPlaceholder>>()?;
 
-    let groups = if job.groups.is_empty() {
-        "--clear-groups".to_owned()
-    } else {
-        format!("--groups={}", job.groups.join(","))
-    };
-    let mut command = Command::new("setpriv");
+    let mut command = as_program_user(&job.groups, false);
     command
-        .arg(format!("--reuid={PROGRAM_USER}"))
-        .arg(format!("--regid={PROGRAM_USER}"))
-        .arg(groups)
-        .arg("--")
         .arg(&job.program)
         .args(args)
         .current_dir(WORK_DIR)
@@ -68,6 +59,27 @@ pub fn program_command(
         .envs(app_env)
         .envs(env);
     Ok(command)
+}
+
+pub fn as_program_user(groups: &[String], terminal: bool) -> Command {
+    let groups = if groups.is_empty() {
+        "--clear-groups".to_owned()
+    } else {
+        format!("--groups={}", groups.join(","))
+    };
+    let mut command = if terminal {
+        let mut session = Command::new("setsid");
+        session.args(["--ctty", "setpriv"]);
+        session
+    } else {
+        Command::new("setpriv")
+    };
+    command
+        .arg(format!("--reuid={PROGRAM_USER}"))
+        .arg(format!("--regid={PROGRAM_USER}"))
+        .arg(groups)
+        .arg("--");
+    command
 }
 
 pub async fn run(
@@ -229,13 +241,13 @@ async fn read_some(pipe: Option<&mut (impl AsyncRead + Unpin)>, buf: &mut [u8]) 
     }
 }
 
-fn signal_group(group: Option<Pid>, signal: Signal) {
+pub fn signal_group(group: Option<Pid>, signal: Signal) {
     if let Some(group) = group {
         let _ = killpg(group, signal);
     }
 }
 
-fn exit_code(status: std::io::Result<ExitStatus>) -> i32 {
+pub fn exit_code(status: std::io::Result<ExitStatus>) -> i32 {
     match status {
         Ok(status) => status
             .code()
