@@ -5812,7 +5812,7 @@ paths:
       - exec-jobs
       summary: Get exec job
       description: |-
-        Returns an exec job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.
+        Returns an exec job with its status, wait reason, requested labels and devices, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.
 
         **Access:** Public projects, or members of the project.
       operationId: getExecJob
@@ -5947,6 +5947,123 @@ paths:
                     type: boolean
                   message:
                     type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
+  /api/v1/exec-jobs/{job}/outputs:
+    get:
+      tags:
+      - exec-jobs
+      summary: List exec job outputs
+      description: |-
+        Returns every output the job uploaded, ordered by path, with its current size. An output written again by a later upload shows its new size and `updated_at`.
+
+        **Access:** Public projects, or members of the project.
+      operationId: listExecJobOutputs
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      responses:
+        '200':
+          description: Exec job outputs
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExecJobOutputView'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
+  /api/v1/exec-jobs/{job}/outputs/{path}:
+    get:
+      tags:
+      - exec-jobs
+      summary: Download an exec job output
+      description: |-
+        Streams one output as an attachment. A single `Range: bytes=<start>-[<end>]` answers 206 with that part, a start at or past the size answers 416 and several ranges answer the whole output.
+
+        **Access:** Public projects, or members of the project.
+      operationId: getExecJobOutput
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      - name: path
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Output contents
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/Binary'
+        '206':
+          description: Requested part of the output
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/Binary'
+        '416':
+          description: The range starts at or past the size
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
+  /api/v1/exec-jobs/{job}/pull-requests:
+    get:
+      tags:
+      - exec-jobs
+      summary: List pull requests of an exec job
+      description: |-
+        Returns the pull requests the job opened or updated, newest first. `integration` is the id of the Git host integration that opened it.
+
+        **Access:** Public projects, or members of the project.
+      operationId: listExecJobPullRequests
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      responses:
+        '200':
+          description: Pull requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExecJobPullRequestView'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -15923,6 +16040,28 @@ components:
     ExecJobId:
       type: string
       format: uuid
+    ExecJobOutputView:
+      type: object
+      required:
+      - path
+      - size
+      - content_type
+      - created_at
+      - updated_at
+      properties:
+        path:
+          type: string
+        size:
+          type: integer
+          format: int64
+        content_type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     ExecJobPhaseView:
       type: object
       required:
@@ -15935,6 +16074,27 @@ components:
         attempt:
           type: integer
           format: int32
+        created_at:
+          type: string
+          format: date-time
+    ExecJobPullRequestView:
+      type: object
+      required:
+      - url
+      - branch
+      - number
+      - integration
+      - created_at
+      properties:
+        url:
+          type: string
+        branch:
+          type: string
+        number:
+          type: integer
+          format: int64
+        integration:
+          type: string
         created_at:
           type: string
           format: date-time
@@ -15954,6 +16114,9 @@ components:
       - created_at
       - attempts
       - phases
+      - tokens
+      - started_evaluations
+      - outputs_size
       - forward_commands
       properties:
         id:
@@ -16016,6 +16179,17 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ExecJobPhaseView'
+        tokens:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecJobTokenView'
+        started_evaluations:
+          type: array
+          items:
+            $ref: '#/components/schemas/StartedEvaluationView'
+        outputs_size:
+          type: integer
+          format: int64
         ssh_command:
           type:
           - string
@@ -16079,6 +16253,25 @@ components:
           type:
           - string
           - 'null'
+    ExecJobTokenView:
+      type: object
+      required:
+      - attempt
+      - created_at
+      - expires_at
+      - revoked
+      properties:
+        attempt:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        revoked:
+          type: boolean
     ExecOffer:
       type: object
       required:
@@ -19303,6 +19496,23 @@ components:
           $ref: '#/components/schemas/AdminTaskId'
         status:
           type: string
+    StartedEvaluationView:
+      type: object
+      required:
+      - evaluation
+      - task
+      - status
+      - created_at
+      properties:
+        evaluation:
+          $ref: '#/components/schemas/EvaluationId'
+        task:
+          type: string
+        status:
+          $ref: '#/components/schemas/EvaluationStatus'
+        created_at:
+          type: string
+          format: date-time
     StorageMetricPoint:
       type: object
       required:
