@@ -18,6 +18,7 @@ use tokio::task::JoinSet;
 use tracing::{info, warn};
 
 use crate::config::SupervisorConfig;
+use crate::console::{CONSOLE_SOCKET, serve_console};
 use crate::guest::WORK_MOUNT_TAG;
 use crate::vsock::connect_vsock;
 
@@ -59,6 +60,11 @@ async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
     let host = Arc::new(Host::new(dir, config));
     let control = bind(&dir.join("control.sock"))?;
     share(&dir.join("control.sock"), group)?;
+    let console_clients = bind(&dir.join(CONSOLE_SOCKET))?;
+    share(&dir.join(CONSOLE_SOCKET), group)?;
+    let console = serve_console(dir, console_clients);
+    tokio::pin!(console);
+    let mut console_served = true;
     let api = dir.join("api.sock");
     wait_for_socket(&api).await?;
     share(&api, group)?;
@@ -74,6 +80,12 @@ async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
             shared = &mut vsock, if !vsock_shared => {
                 vsock_shared = true;
                 shared?;
+            }
+            served = &mut console, if console_served => {
+                console_served = false;
+                if let Err(e) = served {
+                    warn!(error = %format!("{e:#}"), "the guest console relay stopped");
+                }
             }
             accepted = control.accept() => {
                 let (stream, _) = accepted?;
