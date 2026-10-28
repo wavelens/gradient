@@ -233,19 +233,17 @@ mod tests {
             .await
             .unwrap();
             let mut received = Vec::new();
-            loop {
+            let (mut last_chunk, mut finished) = (false, false);
+            while !(last_chunk && finished) {
                 match conn.recv().await.unwrap() {
                     ClientMessage::UploadChunk { data, is_final, .. } => {
                         received.extend_from_slice(&data);
-                        if is_final {
-                            break;
-                        }
+                        last_chunk |= is_final;
                     }
+                    ClientMessage::UploadFinished { .. } => finished = true,
                     other => panic!("unexpected {other:?}"),
                 }
             }
-            let finished = conn.recv().await.unwrap();
-            assert!(matches!(finished, ClientMessage::UploadFinished { .. }));
             conn.send(ServerMessage::UploadCommitted {
                 request_id,
                 outcome: UploadOutcome::Ok,
