@@ -62,6 +62,7 @@ function job(status: ExecJobStatus, sshCommand: string | null = SSH): ExecJobRes
     created_at: '2026-01-01T00:00:00',
     worker: 'w1',
     attempts: [{ number: 1, worker: 'w1', started_at: '2026-01-01T00:00:01' }],
+    node_jobs: [],
     phases: [{ name: 'epoch-3', attempt: 1, created_at: '2026-01-01T00:00:02' }],
     ssh_command: sshCommand,
     forward_commands: sshCommand ? [FORWARD] : [],

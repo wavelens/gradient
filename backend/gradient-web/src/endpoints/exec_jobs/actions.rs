@@ -40,7 +40,7 @@ pub async fn post_exec_job_abort(
     {
         return Err(WebError::not_found(Resource::ExecJob));
     }
-    if ctx.detail.job.status.is_terminal() || !scheduler.abort_exec_job(job).await? {
+    if ctx.detail.status.is_terminal() || !scheduler.abort_exec_job(ctx.detail.job.id).await? {
         return Err(ExecJobRefusal::Finished.into());
     }
 

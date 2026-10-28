@@ -16,8 +16,8 @@ pub use self::log::get_exec_job_log;
 pub use self::outputs::{ExecJobOutputView, get_exec_job_output, list_exec_job_outputs};
 pub use self::pull_requests::{ExecJobPullRequestView, list_exec_job_pull_requests};
 pub use self::query::{
-    ExecJobAttemptView, ExecJobPhaseView, ExecJobResponse, ExecJobSummary, ExecJobTokenView,
-    StartedEvaluationView, get_exec_job, list_evaluation_exec_jobs,
+    ExecJobAttemptView, ExecJobNode, ExecJobPhaseView, ExecJobResponse, ExecJobSummary,
+    ExecJobTokenView, StartedEvaluationView, get_exec_job, list_evaluation_exec_jobs,
 };
 
 use crate::access::is_project_member;
@@ -26,7 +26,7 @@ use crate::error::{WebError, WebResult};
 use crate::refusal::{Refusal, RefusalStatus};
 use crate::resource::Resource;
 use gradient_db::WebDb;
-use gradient_db::exec_jobs::reads::{self, ExecJobDetail};
+use gradient_db::exec_jobs::reads::{self, ExecJobDetail, ExecNodeDetail};
 use gradient_db::lookup::by_id;
 use gradient_types::*;
 
@@ -34,12 +34,15 @@ use gradient_types::*;
 pub(crate) enum ExecJobRefusal {
     #[error("the exec job has already finished")]
     Finished,
+    #[error("no node {0} in this job")]
+    NoSuchNode(u32),
 }
 
 impl Refusal for ExecJobRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
             Self::Finished => RefusalStatus::Conflict,
+            Self::NoSuchNode(_) => RefusalStatus::NotFound,
         }
     }
 }
@@ -51,6 +54,13 @@ pub(super) struct ExecJobAccessContext {
 }
 
 impl ExecJobAccessContext {
+    pub(super) fn node(&self, index: Option<u32>) -> WebResult<&ExecNodeDetail> {
+        let index = index.unwrap_or(0);
+        self.detail
+            .node(index)
+            .ok_or_else(|| ExecJobRefusal::NoSuchNode(index).into())
+    }
+
     pub(super) async fn load_unguarded(db: &WebDb, job: ExecJobId) -> WebResult<Self> {
         let detail = reads::one(db, job)
             .await?

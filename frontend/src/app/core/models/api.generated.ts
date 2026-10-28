@@ -934,6 +934,16 @@ export interface ExecJobAttemptView {
 
 export type ExecJobId = string;
 
+export interface ExecJobNode {
+  node: number;
+  id: ExecJobId;
+  status: ExecJobStatus;
+  worker?: string | null;
+  guest_address?: string | null;
+  master_port?: number | null;
+  attempts: ExecJobAttemptView[];
+}
+
 export interface ExecJobOutputView {
   path: string;
   size: number;
@@ -974,6 +984,7 @@ export interface ExecJobResponse {
   finished_at?: string | null;
   worker?: string | null;
   attempts: ExecJobAttemptView[];
+  node_jobs: ExecJobNode[];
   phases: ExecJobPhaseView[];
   tokens: ExecJobTokenView[];
   started_evaluations: StartedEvaluationView[];
