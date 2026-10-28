@@ -34,6 +34,7 @@ impl CredentialStore {
             CredentialKind::SshKey => {
                 inner.ssh_key = Some(SecretBytes::new(data));
             }
+            CredentialKind::JobSecret { .. } => {}
         }
     }
 

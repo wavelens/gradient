@@ -258,6 +258,25 @@ fn guest_channel_messages_round_trip_and_stay_off_older_sessions() {
 }
 
 #[test]
+fn a_job_secret_credential_round_trips() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{CredentialKind, PROTO_VERSIONS, ServerMessage};
+
+    let newest = *PROTO_VERSIONS.end();
+    let msg = ServerMessage::Credential {
+        kind: CredentialKind::JobSecret {
+            job_id: "exec:1".into(),
+            name: "wandb-token".into(),
+        },
+        data: b"v".to_vec().into(),
+    };
+    assert_eq!(
+        from_bytes::<ServerMessage>(to_bytes(&msg, newest).unwrap(), newest).unwrap(),
+        msg
+    );
+}
+
+#[test]
 fn terminal_bytes_are_never_logged() {
     use crate::messages::{ClientMessage, ServerMessage};
 

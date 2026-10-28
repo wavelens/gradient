@@ -78,6 +78,12 @@ pub struct ExecRequirement {
     pub ssh: bool,
     pub ports: Vec<u16>,
     pub custom_image: bool,
+    #[proto(45, default)]
+    #[serde(default)]
+    pub secrets: Vec<String>,
+    #[proto(45, default)]
+    #[serde(default)]
+    pub server_secrets: Vec<String>,
 }
 
 #[derive(
@@ -171,7 +177,42 @@ pub struct ExecJob {
 )]
 pub struct SopsFile {
     pub path: String,
+    #[serde(with = "base64_bytes")]
+    #[schema(value_type = String, format = Byte)]
     pub ciphertext: Vec<u8>,
+}
+
+mod base64_bytes {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD;
+    use serde::{Deserialize, Deserializer, Serializer, de::Error as _};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        STANDARD.decode(text).map_err(D::Error::custom)
+    }
+}
+
+const MAX_SECRET_NAME: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("secret name \"{0}\": use 1 to 64 lowercase letters, digits or dashes")]
+pub struct SecretNameError(pub String);
+
+pub fn validate_secret_name(name: &str) -> Result<(), SecretNameError> {
+    let allowed = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-';
+    let valid = (1..=MAX_SECRET_NAME).contains(&name.len())
+        && name.bytes().all(allowed)
+        && !name.starts_with('-');
+    if valid {
+        Ok(())
+    } else {
+        Err(SecretNameError(name.to_owned()))
+    }
 }
 
 #[derive(
@@ -218,6 +259,8 @@ impl ExecSpec {
             ssh: self.ssh.unwrap_or(defaults.ssh),
             ports: self.ports.clone(),
             custom_image: self.image.is_some(),
+            secrets: Vec::new(),
+            server_secrets: Vec::new(),
         }
     }
 
@@ -355,6 +398,27 @@ mod tests {
                 retries: 0
             }
         );
+    }
+
+    #[test]
+    fn secret_names_are_lowercase_letters_digits_and_dashes() {
+        for ok in ["wandb-token", "hf2", "a"] {
+            assert!(validate_secret_name(ok).is_ok(), "{ok}");
+        }
+        for bad in ["", "Wandb", "a_b", "-x", &"a".repeat(65)] {
+            assert!(validate_secret_name(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn sops_ciphertext_is_base64_in_json() {
+        let file = SopsFile {
+            path: "a.yaml".into(),
+            ciphertext: b"abc".to_vec(),
+        };
+        let json = serde_json::to_value(&file).unwrap();
+        assert_eq!(json["ciphertext"], "YWJj");
+        assert_eq!(serde_json::from_value::<SopsFile>(json).unwrap(), file);
     }
 
     #[test]
