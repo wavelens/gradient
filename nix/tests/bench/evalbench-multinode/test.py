@@ -34,6 +34,22 @@ def pin_vms():
     for index, node in enumerate(WORKER_NODES):
         first = SERVER_CORES + WORKER_CORES * index
         pin(node, CPUS[first:first + WORKER_CORES])
+    siblings = {
+        cpu: pathlib.Path(f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list").read_text().strip()
+        for cpu in CPUS
+    }
+    print(f"builder CPUs {CPUS} of {os.cpu_count()}, load {os.getloadavg()}, siblings {siblings}")
+
+
+def cpu_seconds(node):
+    fields = node.succeed("head -1 /proc/stat").split()
+    return {name: int(value) / 100 for name, value in zip(["user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal"], fields[1:9])}
+
+
+def save_vm_load(label, before):
+    for node in [server] + WORKER_NODES:
+        delta = {name: round(value - before[node.name][name]) for name, value in cpu_seconds(node).items()}
+        print(f"cpu seconds of {node.name} during {label}: {delta}, load {node.succeed('cat /proc/loadavg').strip()}")
 
 
 def wait_links_shaped():
@@ -113,6 +129,17 @@ def eval_phases(eval_id):
         " WHERE dj.evaluation_id = '{eval_id}' AND dj.kind = 0",
         eval_id,
     )
+
+
+def save_job_phases(label, eval_id):
+    text = psql(
+        "SELECT left(dj.id::text, 8) || ' ' || p.phase || ': ' || count(*) || ' x, '"
+        " || sum(p.end_ms - p.start_ms) || ' ms, from +' || min(p.start_ms) || ' to +' || max(p.end_ms)"
+        " FROM dispatched_job_phase p JOIN dispatched_job dj ON dj.id = p.dispatched_job"
+        f" WHERE dj.evaluation_id = '{eval_id}' AND dj.kind = 0"
+        " GROUP BY dj.id, p.phase ORDER BY dj.id, p.phase"
+    )
+    print(f"job phases of {label} (fetch 0, eval_flake 2, eval_derivations 3, known_wait 6, closure_push 7):\n{text}")
 
 
 def statements_ranked_by(column):
@@ -217,13 +244,16 @@ def measure(token, task):
     wait_until_delivered()
     psql("SELECT pg_stat_statements_reset();")
     server.succeed(f": > {POSTGRES_LOG}")
+    load_before = {node.name: cpu_seconds(node) for node in [server] + WORKER_NODES}
     eval_id = api("POST", f"tasks/project/{task}/evaluate", token, body={})
     try:
         status = wait_for_status(token, eval_id, EVALUATED, timeout=EVAL_TIMEOUT, poll=2)
     finally:
+        save_vm_load(f"{task}-{workers}", load_before)
         save_slow_statements(f"{task}-{workers}")
         save_slow_spans(f"{task}-{workers}")
         save_eval_costs(f"{task}-{workers}")
+        save_job_phases(f"{task}-{workers}", eval_id)
     statements = int(psql(
         "SELECT coalesce(sum(s.calls), 0) FROM pg_stat_statements s"
         " JOIN pg_roles r ON r.oid = s.userid WHERE r.rolname = 'gradient'"
