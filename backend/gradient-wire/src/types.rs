@@ -704,6 +704,13 @@ pub enum GuestChannelKind {
     Console,
 }
 
+#[derive(Proto, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VmStateKind {
+    Warm,
+    Running,
+    Stopped,
+}
+
 pub type AssignmentId = String;
 
 #[derive(Proto, Debug, Clone, PartialEq)]

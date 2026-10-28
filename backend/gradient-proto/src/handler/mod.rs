@@ -29,6 +29,7 @@ mod store_paths;
 mod stored_paths;
 mod tap;
 mod upload;
+mod vm_state;
 
 use std::sync::Arc;
 

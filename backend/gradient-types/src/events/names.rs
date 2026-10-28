@@ -45,6 +45,8 @@ pub const WORKER_JOB_DISPATCHED: &str = "worker.job_dispatched";
 pub const WORKER_QUEUE_DEPTH: &str = "worker.queue_depth";
 pub const WORKER_DEMAND: &str = "worker.demand";
 
+pub const VM_STATE: &str = "vm.state";
+
 pub const GRAPH_NAR_COMMITTED: &str = "graph.nar_committed";
 pub const GRAPH_TRANSITIONED: &str = "graph.transitioned";
 pub const GRAPH_REQUEUED: &str = "graph.requeued";

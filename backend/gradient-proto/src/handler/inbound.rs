@@ -629,6 +629,18 @@ impl<'a> InboundContext<'a> {
                 );
                 true
             }
+            ClientMessage::VmState { vm, state, job_id } => {
+                self.handles
+                    .db
+                    .events
+                    .publish(super::vm_state::vm_state_changed(
+                        self.peer_id,
+                        vm,
+                        state,
+                        job_id.as_deref(),
+                    ));
+                true
+            }
         }
     }
 
