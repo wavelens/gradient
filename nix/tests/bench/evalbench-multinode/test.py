@@ -46,9 +46,13 @@ def cpu_seconds(node):
 
 
 def save_vm_load(label, before):
+    loads = {}
     for node in [server] + WORKER_NODES:
         delta = {name: round(value - before[node.name][name]) for name, value in cpu_seconds(node).items()}
-        print(f"cpu seconds of {node.name} during {label}: {delta}, load {node.succeed('cat /proc/loadavg').strip()}")
+        loadavg = node.succeed("cat /proc/loadavg").strip()
+        print(f"cpu seconds of {node.name} during {label}: {delta}, load {loadavg}")
+        loads[node.name] = {**delta, "load": float(loadavg.split()[0])}
+    return loads
 
 
 def wait_links_shaped():
@@ -194,6 +198,14 @@ def statements_ranked_by(column):
     )
 
 
+def heaviest_statements():
+    return json.loads(psql(
+        "SELECT coalesce(json_agg(t), '[]') FROM (SELECT left(regexp_replace(query, '\\s+', ' ', 'g'), 400) AS query,"
+        " calls, round(total_exec_time) AS total_ms, round(max_exec_time) AS max_ms"
+        " FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 15) t;"
+    ))
+
+
 def save_slow_statements(label):
     slowest = statements_ranked_by("max_exec_time")
     heaviest = statements_ranked_by("total_exec_time")
@@ -201,6 +213,7 @@ def save_slow_statements(label):
     text = f"by max time:\n{slowest}\n\nby total time:\n{heaviest}\n\n{logged}"
     (pathlib.Path(server.out_dir) / f"slow-statements-{label}.txt").write_text(text)
     print(f"slow statements of {label}:\n{text}")
+    return heaviest_statements()
 
 
 spans_seen = 0
@@ -234,20 +247,27 @@ def save_slow_spans(label):
         if span["dur_us"] >= 1_000_000 and span["target"].startswith(("gradient_graph", "gradient_db"))
     )
     print(f"spans by total time since the previous run, {label}:\n{heaviest}\n\nspans over a second:\n{timeline}")
+    return f"spans-{label}.jsonl"
 
 
 def save_eval_costs(label):
-    text = psql(
-        "SELECT array_to_string(s.path, '.') || ': startup ' || round(coalesce(s.startup_ms, 0)) || ' ms, '"
-        " || s.samples || ' samples, ' || count(t.id) || ' children, '"
-        " || round(coalesce(sum(t.attrs * t.ms_per_attr), 0)) || ' ms work, median child '"
-        " || round(coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY t.attrs * t.ms_per_attr), 0)) || ' ms, max child '"
-        " || round(coalesce(max(t.attrs * t.ms_per_attr), 0)) || ' ms'"
+    costs = json.loads(psql(
+        "SELECT coalesce(json_agg(c), '[]') FROM (SELECT array_to_string(s.path, '.') AS path,"
+        " round(coalesce(s.startup_ms, 0)) AS startup_ms, s.samples, count(t.id) AS children,"
+        " round(coalesce(sum(t.attrs * t.ms_per_attr), 0)) AS work_ms,"
+        " round(coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY t.attrs * t.ms_per_attr), 0)) AS median_ms,"
+        " round(coalesce(max(t.attrs * t.ms_per_attr), 0)) AS max_ms"
         " FROM eval_set_cost s LEFT JOIN eval_subtree_cost t ON t.task = s.task"
         " AND cardinality(t.path) = cardinality(s.path) + 1 AND t.path[1:cardinality(s.path)] = s.path"
-        " GROUP BY s.id, s.path, s.startup_ms, s.samples ORDER BY s.path"
+        " GROUP BY s.id, s.path, s.startup_ms, s.samples ORDER BY s.path) c;"
+    ))
+    text = "\n".join(
+        f"{c['path']}: startup {c['startup_ms']} ms, {c['samples']} samples, {c['children']} children,"
+        f" {c['work_ms']} ms work, median child {c['median_ms']} ms, max child {c['max_ms']} ms"
+        for c in costs
     )
     print(f"learned costs after {label}:\n{text}")
+    return costs
 
 
 def active_statements():
@@ -293,15 +313,17 @@ def measure(token, task):
     server.succeed(f": > {POSTGRES_LOG}")
     load_before = {node.name: cpu_seconds(node) for node in [server] + WORKER_NODES}
     eval_id = api("POST", f"tasks/project/{task}/evaluate", token, body={})
+    label = f"{task}-{workers}"
+    captured = {}
     try:
         status = wait_for_status(token, eval_id, EVALUATED, timeout=EVAL_TIMEOUT, poll=2)
     finally:
-        save_vm_load(f"{task}-{workers}", load_before)
-        save_slow_statements(f"{task}-{workers}")
-        save_slow_spans(f"{task}-{workers}")
-        save_eval_costs(f"{task}-{workers}")
-        save_job_phases(f"{task}-{workers}", eval_id)
-        save_shards(f"{task}-{workers}", eval_id)
+        captured["load"] = save_vm_load(label, load_before)
+        captured["top_statements"] = save_slow_statements(label)
+        captured["spans_file"] = save_slow_spans(label)
+        captured["costs"] = save_eval_costs(label)
+        save_job_phases(label, eval_id)
+        save_shards(label, eval_id)
     statements = int(psql(
         "SELECT coalesce(sum(s.calls), 0) FROM pg_stat_statements s"
         " JOIN pg_roles r ON r.oid = s.userid WHERE r.rolname = 'gradient'"
@@ -321,6 +343,8 @@ def measure(token, task):
         "jobs": jobs,
         "phases": phases,
         "shard_timings": shard_timings(eval_id),
+        "status": status,
+        **captured,
     }
     if status != "Completed":
         psql("SELECT pg_stat_statements_reset();")
@@ -328,8 +352,8 @@ def measure(token, task):
         try:
             wait_until_settled(eval_id)
         finally:
-            save_slow_statements(f"{task}-{workers}-abort")
-            save_slow_spans(f"{task}-{workers}-abort")
+            result["abort_statements"] = save_slow_statements(f"{label}-abort")
+            save_slow_spans(f"{label}-abort")
     return result
 
 
@@ -340,7 +364,7 @@ def write_summary(runs, small):
     (out / "summary.txt").write_text(text)
     failed = report.verdicts(runs, small) if 1 in runs else []
     (out / "report").mkdir(exist_ok=True)
-    (out / "report" / "index.html").write_text(page.render(runs, small, failed))
+    (out / "report" / "index.html").write_text(page.render(runs, small, failed, out))
     print(text)
 
 
