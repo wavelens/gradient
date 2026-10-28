@@ -120,6 +120,8 @@ in {
       etc."gradient/post-script" = script cfg.postScript;
       systemPackages = [
         usbip
+        pkgs.git
+        pkgs.gradient-cli
         (agentCommand "gradient-phase" "phase")
         (agentCommand "gradient-upload" "upload")
       ];

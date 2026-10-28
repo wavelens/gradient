@@ -21,9 +21,11 @@ use tokio::sync::{Mutex, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::context::{UnknownPlaceholder, resolve_placeholders};
+use crate::http::HttpState;
 use crate::output::OutputLog;
 use crate::setup::{PROGRAM_USER, PreparedJob};
 use crate::terminal::{DEFAULT_COLS, DEFAULT_ROWS, ProgramTerminal, TERMINAL_TYPE, spawn_on_pty};
+use crate::tree_patch::upload_tree_patch;
 
 pub const WORK_DIR: &str = "/work";
 pub const SYSTEM_PATH: &str = "/run/current-system/sw/bin";
@@ -90,7 +92,7 @@ pub fn as_program_user(groups: &[String], terminal: bool) -> Command {
 
 pub async fn run(
     prepared: PreparedJob,
-    output: &Mutex<OutputLog>,
+    http: &HttpState,
     started: oneshot::Sender<Option<ProgramTerminal>>,
     kill: CancellationToken,
 ) -> i32 {
@@ -99,7 +101,9 @@ pub async fn run(
         env,
         terminal,
         redactor,
+        start_commit,
     } = prepared;
+    let output = &http.output;
     let code = match run_script(PRE_SCRIPT, &env, output, &redactor, kill.cancelled()).await {
         0 if kill.is_cancelled() => {
             note(output, "killed before the program started").await;
@@ -118,6 +122,7 @@ pub async fn run(
     if post != 0 {
         note(output, &format!("post-script exited with code {post}")).await;
     }
+    upload_tree_patch(Path::new(WORK_DIR), &start_commit, &redactor, http).await;
     code
 }
 
@@ -342,7 +347,7 @@ pub fn exit_code(status: std::io::Result<ExitStatus>) -> i32 {
     }
 }
 
-async fn note(output: &Mutex<OutputLog>, line: &str) {
+pub async fn note(output: &Mutex<OutputLog>, line: &str) {
     if let Err(e) = output
         .lock()
         .await
@@ -369,8 +374,8 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::{
-        KILLED, OutputLog, PreparedJob, exit_code, program_command, pump, run, spawn_piped,
-        stream_until_exit,
+        HttpState, KILLED, OutputLog, PreparedJob, exit_code, program_command, pump, run,
+        spawn_piped, stream_until_exit,
     };
 
     fn job() -> RunJob {
@@ -537,9 +542,11 @@ mod tests {
             env: BTreeMap::new(),
             terminal: false,
             redactor: SecretRedactor::default(),
+            start_commit: String::new(),
         };
+        let http = HttpState::new(output.into_inner());
 
-        assert_eq!(run(prepared, &output, started, kill).await, KILLED);
+        assert_eq!(run(prepared, &http, started, kill).await, KILLED);
         assert!(started_rx.await.is_err());
     }
 }

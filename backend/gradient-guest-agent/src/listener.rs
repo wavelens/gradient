@@ -267,7 +267,7 @@ fn start_job(agent: &Arc<Agent>, job: Box<RunJob>) -> Option<AgentToWorker> {
                     }
                 };
                 let (code, ()) = tokio::join!(
-                    run(prepared, &agent.http.output, started, agent.kill.clone()),
+                    run(prepared, &agent.http, started, agent.kill.clone()),
                     mark_started
                 );
                 Outcome::Exited(code)
