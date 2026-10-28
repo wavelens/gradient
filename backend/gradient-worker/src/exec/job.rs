@@ -28,7 +28,7 @@ use tracing::{debug, info, warn};
 use super::agent_client::AgentClient;
 use super::channels::GuestChannelMux;
 use super::checkout::checkout_work;
-use super::context::context_layers;
+use super::context::{ClusterContext, cluster_context, context_layers};
 use super::host::ExecHost;
 use super::inventory::device_requests;
 use super::job_channels::{GuestChannelInbox, JobChannels};
@@ -42,6 +42,7 @@ use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
 use crate::proto::credentials::CredentialStore;
 use crate::proto::job::{JobUpdater, push_exec_output};
+use crate::worker::cluster::ClusterStart;
 
 const STORE_DIR: &str = "/nix/store/";
 const EXEC_KEY_PREFIX: &str = "exec:";
@@ -165,6 +166,10 @@ pub struct StoreAccess<'a> {
     pub gcroots: &'a GcRootKeeper,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 pub async fn execute(
     host: &ExecHost,
     nix: StoreAccess<'_>,
@@ -173,7 +178,9 @@ pub async fn execute(
     credentials: &CredentialStore,
     abort: AbortSignal,
     channels: GuestChannelInbox,
+    cluster: Option<ClusterStart>,
 ) -> Result<()> {
+    let (cluster, held_address) = cluster_member(cluster, job.context.master_port)?;
     let token = SecretString::new(std::mem::take(&mut job.context.token));
     let secrets = job_secrets(
         &updater.job_id,
@@ -191,11 +198,15 @@ pub async fn execute(
         redactor,
         updater,
         abort,
+        cluster,
     };
     let source = guest_source(&run.job, host.config.allow_custom_images)?;
     run.ensure_program(nix.store).await?;
     let devices = run.reserve_devices()?;
-    let address = run.lease_address()?;
+    let address = match held_address {
+        Some(address) => Some(address),
+        None => run.lease_address()?,
+    };
     let (mut guest, image_root) = run.take_guest(source, &nix).await?;
     let outcome = run
         .run_in_guest(
@@ -258,6 +269,18 @@ pub(crate) fn job_secrets(
             })
         })
         .collect()
+}
+
+fn cluster_member(
+    start: Option<ClusterStart>,
+    master_port: Option<u16>,
+) -> Result<(Option<ClusterContext>, Option<AddressLease>), BuildError> {
+    let Some(ClusterStart { inbox, address }) = start else {
+        return Ok((None, None));
+    };
+    let context = cluster_context(&inbox.me, &inbox.roster, master_port)
+        .map_err(|e| BuildError::permanent(anyhow!(e)))?;
+    Ok((Some(context), Some(address)))
 }
 
 pub(crate) fn lease_guest_address(host: &ExecHost) -> Result<AddressLease, BuildError> {
@@ -514,6 +537,7 @@ struct ExecRun<'a> {
     redactor: SecretRedactor,
     updater: &'a mut JobUpdater,
     abort: AbortSignal,
+    cluster: Option<ClusterContext>,
 }
 
 impl ExecRun<'_> {
@@ -702,7 +726,7 @@ impl ExecRun<'_> {
             plugged,
             &names,
             network.as_ref().map(|network| network.address.as_str()),
-            None,
+            self.cluster.as_ref(),
         );
         RunJob {
             program: self.job.program.clone(),

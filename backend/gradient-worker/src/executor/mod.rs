@@ -46,6 +46,7 @@ use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
 use crate::proto::progress::{Progress, Tally};
 use crate::proto::{credentials::CredentialStore, job::JobUpdater};
+use crate::worker::cluster::ClusterStart;
 use gradient_wire::messages::CachedPath;
 use gradient_wire::traits::WorkerStore;
 use gradient_worker_client::nar;
@@ -713,6 +714,7 @@ impl JobExecutor {
         credentials: &CredentialStore,
         abort: AbortSignal,
         channels: GuestChannelInbox,
+        cluster: Option<ClusterStart>,
     ) -> Result<()> {
         let host = self
             .exec
@@ -729,6 +731,7 @@ impl JobExecutor {
             credentials,
             abort,
             channels,
+            cluster,
         )
         .await
     }

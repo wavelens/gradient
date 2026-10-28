@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "held exec cluster members start with a cluster context in the next commit"
-    )
-)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use gradient_types::secret::SecretString;

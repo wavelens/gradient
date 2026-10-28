@@ -6,10 +6,6 @@
 
 //! A held cluster member is occupying its slot without running until `StartCluster`.
 //! Signals are reaching it through its route.
-#![expect(
-    dead_code,
-    reason = "ClusterInbox and ClusterChannels::{take, send} are the executor handoff; no executor consumes them yet"
-)]
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use gradient_util::sync::Mutex;
+use gradient_vm::AddressLease;
 use gradient_wire::messages::{
     ClientMessage, ClusterAddress, ClusterMembership, ClusterPeer, Job, JobKind,
 };
@@ -32,6 +29,12 @@ pub(super) struct HeldJob {
     pub job: Job,
     pub kind: JobKind,
     pub credentials: CredentialStore,
+    pub address: Option<AddressLease>,
+}
+
+pub(crate) struct ClusterStart {
+    pub inbox: ClusterInbox,
+    pub address: AddressLease,
 }
 
 struct HeldAttempt {
@@ -113,9 +116,12 @@ impl ClusterHolds {
 }
 
 pub(crate) struct ClusterInbox {
-    pub attempt: String,
     pub me: ClusterAddress,
     pub roster: Vec<ClusterPeer>,
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "no cluster member exchanges signals yet")
+    )]
     pub signals: mpsc::UnboundedReceiver<(ClusterAddress, Vec<u8>)>,
 }
 
@@ -133,7 +139,6 @@ impl ClusterRoutes {
     pub(super) fn open(&mut self, attempt: &str, me: ClusterAddress, roster: Vec<ClusterPeer>) {
         let (signals, rx) = mpsc::unbounded_channel();
         let inbox = ClusterInbox {
-            attempt: attempt.to_owned(),
             me,
             roster,
             signals: rx,
@@ -165,6 +170,7 @@ impl ClusterRoutes {
 #[derive(Clone)]
 pub(crate) struct ClusterChannels {
     routes: Arc<Mutex<ClusterRoutes>>,
+    #[expect(dead_code, reason = "no cluster member exchanges signals yet")]
     writer: ProtoWriter,
 }
 
@@ -192,6 +198,7 @@ impl ClusterChannels {
         self.routes.lock().close(attempt);
     }
 
+    #[expect(dead_code, reason = "no cluster member exchanges signals yet")]
     pub(crate) async fn send(
         &self,
         attempt: &str,
@@ -211,6 +218,7 @@ impl ClusterChannels {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_vm::GuestAddresses;
     use gradient_wire::messages::{BuildJob, Job};
 
     fn membership(attempt: &str, hold_secs: u32) -> ClusterMembership {
@@ -232,7 +240,36 @@ mod tests {
             }),
             kind: JobKind::Build,
             credentials: CredentialStore::new(),
+            address: None,
         }
+    }
+
+    fn held_exec(address: Option<AddressLease>) -> HeldJob {
+        HeldJob {
+            kind: JobKind::Exec,
+            address,
+            ..held("exec:x")
+        }
+    }
+
+    #[test]
+    fn a_released_hold_returns_its_address() {
+        let addresses = GuestAddresses::new("10.233.0.0/30", &[]).unwrap();
+        let mut holds = ClusterHolds::default();
+        let now = Instant::now();
+        assert!(holds.hold(membership("t1", 5), held_exec(addresses.lease()), now));
+        assert!(addresses.lease().is_none());
+        assert_eq!(holds.expired(now + Duration::from_secs(6)).len(), 1);
+        assert!(
+            addresses.lease().is_some(),
+            "the expired hold gave its address back"
+        );
+        assert!(holds.hold(membership("t2", 5), held_exec(addresses.lease()), now));
+        holds.drop_attempt("t2");
+        assert!(
+            addresses.lease().is_some(),
+            "an aborted hold gave its address back"
+        );
     }
 
     #[test]
