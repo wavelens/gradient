@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use aho_corasick::{AhoCorasick, MatchKind};
+use gradient_redact::Replacements;
 use sha2::{Digest as _, Sha256};
 
 use crate::schema::ReportOptions;
@@ -31,45 +31,19 @@ pub struct Redactor {
 
 struct Matcher {
     covers: usize,
-    automaton: Option<AhoCorasick>,
-    patterns: Vec<String>,
-    tokens: Vec<String>,
+    replacements: Replacements,
 }
 
 impl Matcher {
     fn build(pairs: Vec<(String, String)>) -> Self {
-        let covers = pairs.len();
-        let (patterns, tokens): (Vec<String>, Vec<String>) = pairs.into_iter().unzip();
-        let automaton = AhoCorasick::builder()
-            .match_kind(MatchKind::LeftmostLongest)
-            .build(&patterns)
-            .inspect_err(|e| {
-                tracing::warn!(
-                    error = %e,
-                    patterns = covers,
-                    "report: pseudonym matcher did not compile, redacting the slow way",
-                );
-            })
-            .ok();
-
         Self {
-            covers,
-            automaton,
-            patterns,
-            tokens,
-        }
-    }
-
-    fn apply(&self, text: &str) -> String {
-        match &self.automaton {
-            Some(automaton) => automaton.replace_all(text, &self.tokens),
-            None => self
-                .patterns
-                .iter()
-                .zip(&self.tokens)
-                .fold(text.to_owned(), |acc, (original, token)| {
-                    acc.replace(original, token)
-                }),
+            covers: pairs.len(),
+            replacements: Replacements::new(
+                pairs
+                    .into_iter()
+                    .map(|(original, token)| (original.into_bytes(), token.into_bytes()))
+                    .collect(),
+            ),
         }
     }
 }
@@ -158,7 +132,9 @@ impl Redactor {
             *matcher = Some(Matcher::build(self.minted()));
         }
 
-        matcher.as_ref().map_or(out.clone(), |m| m.apply(&out))
+        matcher
+            .as_ref()
+            .map_or(out.clone(), |m| m.replacements.apply_str(&out))
     }
 
     pub fn log_redactions(&self) -> String {
