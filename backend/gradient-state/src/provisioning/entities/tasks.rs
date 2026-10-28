@@ -29,6 +29,7 @@ impl<'a> StateApplicator<'a> {
     ) -> Result<(), DynError> {
         let user_map = self.user_lookup().await?;
         let project_map = self.project_lookup().await?;
+        let mut applied = Vec::with_capacity(state_tasks.len());
 
         for state_task in state_tasks.values() {
             let created_by_id = lookup_id(&user_map, &state_task.created_by, "User")?;
@@ -130,8 +131,12 @@ impl<'a> StateApplicator<'a> {
                     )
                 })?;
 
+            applied.push((task_row.id, created_by_id, project_id, state_task));
+        }
+
+        for (task_id, created_by_id, project_id, state_task) in applied {
             self.apply_task_actions(
-                task_row.id,
+                task_id,
                 created_by_id,
                 project_id,
                 &state_task.name,
@@ -158,6 +163,7 @@ impl<'a> StateApplicator<'a> {
         desired: &[StateAction],
     ) -> Result<(), DynError> {
         let outbound = outbound_integrations_by_name(self.db, project_id).await?;
+        let tasks = task_ids_by_name(self.db, project_id).await?;
         let crypt_key = load_secret_bytes(self.crypt_secret_file)
             .map_err(|e| format!("Failed to load crypt secret: {}", e))?;
 
@@ -184,6 +190,7 @@ impl<'a> StateApplicator<'a> {
                 action,
                 task_name,
                 &outbound,
+                &tasks,
                 self.email_enabled,
                 crypt_key.expose(),
                 self.credentials_dir,
@@ -506,6 +513,7 @@ pub(crate) fn build_action_config(
     a: &StateAction,
     task_name: &str,
     outbound: &HashMap<String, IntegrationId>,
+    tasks: &HashMap<String, TaskId>,
     email_enabled: bool,
     crypt_key: &[u8],
     credentials_dir: &Path,
@@ -650,6 +658,16 @@ pub(crate) fn build_action_config(
                 update_existing,
             })
         }
+        "start_evaluation" => {
+            let target = string_field(a, "task")?;
+            let task = *tasks.get(&target).ok_or_else(|| {
+                format!(
+                    "action '{}': task '{}' not found in the task's project",
+                    a.name, target
+                )
+            })?;
+            Ok(ActionConfig::StartEvaluation { task })
+        }
         other => Err(format!(
             "action '{}' has invalid type '{}': expected {}",
             a.name,
@@ -658,6 +676,19 @@ pub(crate) fn build_action_config(
         )
         .into()),
     }
+}
+
+async fn task_ids_by_name<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+) -> Result<HashMap<String, TaskId>, DynError> {
+    Ok(task::Entity::find()
+        .filter(task::Column::Project.eq(project))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|task| (task.name, task.id))
+        .collect())
 }
 
 fn action_type_names() -> String {
@@ -930,6 +961,7 @@ mod action_helper_tests {
             &a,
             "web",
             &HashMap::new(),
+            &HashMap::new(),
             true,
             &key(),
             Path::new("/nonexistent"),
@@ -960,6 +992,7 @@ mod action_helper_tests {
             &a,
             "web",
             &HashMap::new(),
+            &HashMap::new(),
             false,
             &key(),
             Path::new("/nonexistent"),
@@ -981,6 +1014,7 @@ mod action_helper_tests {
             &a,
             "web",
             &HashMap::new(),
+            &HashMap::new(),
             true,
             &key(),
             Path::new("/nonexistent"),
@@ -1001,6 +1035,7 @@ mod action_helper_tests {
         let cfg = build_action_config(
             &a,
             "web",
+            &HashMap::new(),
             &HashMap::new(),
             true,
             &key(),
@@ -1032,6 +1067,7 @@ mod action_helper_tests {
             &a,
             "web",
             &outbound,
+            &HashMap::new(),
             true,
             &key(),
             Path::new("/nonexistent"),
@@ -1058,6 +1094,7 @@ mod action_helper_tests {
             &a,
             "web",
             &HashMap::new(),
+            &HashMap::new(),
             true,
             &key(),
             Path::new("/nonexistent"),
@@ -1082,6 +1119,7 @@ mod action_helper_tests {
             &a,
             "web",
             &outbound,
+            &HashMap::new(),
             true,
             &key(),
             Path::new("/nonexistent"),
@@ -1102,6 +1140,7 @@ mod action_helper_tests {
         let err = build_action_config(
             &a,
             "web",
+            &HashMap::new(),
             &HashMap::new(),
             true,
             &key(),
@@ -1126,6 +1165,7 @@ mod action_helper_tests {
         let err = build_action_config(
             &a,
             "web",
+            &HashMap::new(),
             &HashMap::new(),
             true,
             &key(),
@@ -1152,6 +1192,7 @@ mod action_helper_tests {
             &a,
             "web",
             &HashMap::new(),
+            &HashMap::new(),
             true,
             &key(),
             Path::new("/nonexistent"),
@@ -1173,6 +1214,7 @@ mod action_helper_tests {
             &a,
             "web",
             &HashMap::new(),
+            &HashMap::new(),
             true,
             &key(),
             Path::new("/nonexistent"),
@@ -1185,5 +1227,50 @@ mod action_helper_tests {
     fn slack_webhook_rejects_a_loopback_url() {
         let err = checked_url("slack", "http://127.0.0.1/hook").unwrap_err();
         assert!(err.to_string().contains("disallowed address"), "got: {err}");
+    }
+
+    fn start_evaluation(task: &str) -> StateAction {
+        StateAction {
+            name: "evaluate-deploy".into(),
+            action_type: "start_evaluation".into(),
+            active: true,
+            events: vec!["exec_job.completed".into()],
+            config: serde_json::json!({ "task": task }),
+        }
+    }
+
+    fn build_with_tasks(
+        a: &StateAction,
+        tasks: &HashMap<String, TaskId>,
+    ) -> Result<ActionConfig, DynError> {
+        build_action_config(
+            a,
+            "update",
+            &HashMap::new(),
+            tasks,
+            true,
+            &key(),
+            Path::new("/nonexistent"),
+        )
+    }
+
+    #[test]
+    fn start_evaluation_resolves_its_task_by_name() {
+        let deploy = TaskId::new(Uuid::from_u128(7));
+        let tasks = HashMap::from([("deploy".to_string(), deploy)]);
+
+        let cfg = build_with_tasks(&start_evaluation("deploy"), &tasks).unwrap();
+
+        assert_eq!(cfg, ActionConfig::StartEvaluation { task: deploy });
+    }
+
+    #[test]
+    fn start_evaluation_names_a_missing_task() {
+        let err = build_with_tasks(&start_evaluation("deploy"), &HashMap::new()).unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "action 'evaluate-deploy': task 'deploy' not found in the task's project"
+        );
     }
 }
