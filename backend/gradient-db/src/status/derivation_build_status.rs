@@ -191,25 +191,24 @@ pub async fn announce_entry_point_statuses(
     })
     .await?;
 
-    for job in jobs {
-        let Some(&status) = status_by_drv.get(&job.derivation) else {
-            continue;
-        };
-
-        crate::deliveries::events::record(
-            db,
-            &ctx.events,
-            gradient_types::events::build::Reported {
-                build_id: job.id,
-                derivation_build: job.derivation_build,
-                evaluation_id: job.evaluation,
-                derivation: job.derivation,
-                status: i16::from(status),
-                ..Default::default()
-            },
-        )
-        .await?;
-    }
+    let reports = jobs
+        .into_iter()
+        .filter_map(|job| {
+            let status = *status_by_drv.get(&job.derivation)?;
+            Some(
+                gradient_types::events::build::Reported {
+                    build_id: job.id,
+                    derivation_build: job.derivation_build,
+                    evaluation_id: job.evaluation,
+                    derivation: job.derivation,
+                    status: i16::from(status),
+                    ..Default::default()
+                }
+                .into(),
+            )
+        })
+        .collect();
+    crate::deliveries::events::record_many(db, &ctx.events, reports).await?;
     ctx.wake.delivery.notify_one();
 
     Ok(())
