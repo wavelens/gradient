@@ -60,6 +60,15 @@ describe('ExecJobOutputsComponent', () => {
     expect(root.textContent).toContain('120 B');
   });
 
+  it('lists and links the outputs of the picked node', () => {
+    const { fixture, outputs } = setup('completed');
+    fixture.componentRef.setInput('node', 1);
+    fixture.detectChanges();
+    expect(outputs).toHaveBeenLastCalledWith('exec-jobs/j1/outputs?node=1');
+    const link = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('a');
+    expect(link?.getAttribute('href')).toBe('/api/v1/exec-jobs/j1/outputs/model/w.bin?node=1');
+  });
+
   it('polls again after 2 s while the job runs', () => {
     vi.useFakeTimers();
     const { fixture, outputs } = setup('running');

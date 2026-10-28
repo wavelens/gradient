@@ -10,6 +10,11 @@ import { environment } from '@environments/environment';
 import { ApiService } from './api.service';
 import { ExecJobOutputView, ExecJobPullRequestView, ExecJobResponse, ExecJobSummary } from '@core/models';
 
+function query(params: Record<string, number | undefined>): string {
+  const defined = Object.entries(params).filter((entry): entry is [string, number] => entry[1] !== undefined);
+  return defined.length === 0 ? '' : `?${new URLSearchParams(defined.map(([key, value]) => [key, String(value)]))}`;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ExecJobsService {
   private api = inject(ApiService);
@@ -22,18 +27,17 @@ export class ExecJobsService {
     return this.api.get<ExecJobResponse>(`exec-jobs/${job}`);
   }
 
-  log(job: string, attempt?: number): Observable<string> {
-    const query = attempt === undefined ? '' : `?attempt=${attempt}`;
-    return this.api.get<string>(`exec-jobs/${job}/log${query}`);
+  log(job: string, attempt?: number, node?: number): Observable<string> {
+    return this.api.get<string>(`exec-jobs/${job}/log${query({ attempt, node })}`);
   }
 
-  outputs(job: string): Observable<ExecJobOutputView[]> {
-    return this.api.get<ExecJobOutputView[]>(`exec-jobs/${job}/outputs`);
+  outputs(job: string, node?: number): Observable<ExecJobOutputView[]> {
+    return this.api.get<ExecJobOutputView[]>(`exec-jobs/${job}/outputs${query({ node })}`);
   }
 
-  outputUrl(job: string, path: string): string {
+  outputUrl(job: string, path: string, node?: number): string {
     const encoded = path.split('/').map(encodeURIComponent).join('/');
-    return `${environment.apiUrl}/exec-jobs/${job}/outputs/${encoded}`;
+    return `${environment.apiUrl}/exec-jobs/${job}/outputs/${encoded}${query({ node })}`;
   }
 
   pullRequests(job: string): Observable<ExecJobPullRequestView[]> {

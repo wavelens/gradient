@@ -29,6 +29,29 @@
       </span>
     </div>
 
+    @if (job.nodes > 1) {
+      <h3>Nodes</h3>
+      <gr-table class="nodes">
+        <thead>
+          <tr><th>Node</th><th>Status</th><th>Worker</th><th>Guest address</th></tr>
+        </thead>
+        <tbody>
+          @for (n of job.node_jobs; track n.node) {
+            <tr>
+              <td>{{ n.node }}</td>
+              <td><gr-status-icon size="sm" [phase]="phase(n.status)" [label]="n.status" /> {{ n.status }}</td>
+              <td class="mono">{{ n.worker ?? '-' }}</td>
+              <td class="mono">{{ n.guest_address ?? '-' }}</td>
+            </tr>
+          }
+        </tbody>
+      </gr-table>
+      <gr-form-field class="node-picker" label="Node" for="exec-job-node">
+        <gr-select inputId="exec-job-node" [options]="nodeOptions()" optionLabel="label" optionValue="value"
+                   [ngModel]="node()" (ngModelChange)="pickNode($event)" />
+      </gr-form-field>
+    }
+
     @if (job.attempts.length > 0) {
       <h3>Attempts</h3>
       <gr-table class="attempts">
@@ -58,7 +81,7 @@
       </ol>
     }
 
-    <app-exec-job-outputs [job]="job" />
+    <app-exec-job-outputs [job]="job" [node]="node()" />
 
     @if (pullRequests().length > 0) {
       <h3>Pull requests</h3>

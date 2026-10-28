@@ -377,7 +377,7 @@ describe('EvaluationLogComponent', () => {
         connected_workers: 1,
         matching_workers: 0,
       };
-      expect(cmp.formatWaitingReason(reason)).toBe('No connected worker offers label 3d-printer, gpu:h100:16.');
+      expect(cmp.formatWaitingReason(reason)).toBe('The exec job needs label 3d-printer, gpu:h100:16.');
     });
 
     it('counts the exec workers whose devices are busy', () => {
