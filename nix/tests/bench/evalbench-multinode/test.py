@@ -227,11 +227,15 @@ def unseen_spans():
     return [span for span in map(parsed_span, complete) if span]
 
 
+SPAN_KEYS = {"name", "target", "ts_us", "dur_us", "fields"}
+
+
 def parsed_span(line):
     try:
-        return json.loads(line) if line.startswith("{") else None
+        span = json.loads(line) if line.startswith("{") else None
     except json.JSONDecodeError:
         return None
+    return span if isinstance(span, dict) and SPAN_KEYS <= span.keys() else None
 
 
 def save_slow_spans(label):
