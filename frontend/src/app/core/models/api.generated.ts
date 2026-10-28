@@ -978,6 +978,7 @@ export interface ExecUnmet {
   mounts: string[];
   nodes: number;
   custom_image: boolean;
+  secrets?: string[];
 }
 
 export interface ExpensiveBuild {

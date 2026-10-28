@@ -60,6 +60,8 @@ pub struct ExecUnmet {
     pub mounts: Vec<String>,
     pub nodes: u32,
     pub custom_image: bool,
+    #[serde(default)]
+    pub secrets: Vec<String>,
 }
 
 impl ExecUnmet {
@@ -90,6 +92,9 @@ impl std::fmt::Display for ExecUnmet {
         if self.custom_image {
             parts.push("custom-image".to_owned());
         }
+        let mut secrets: Vec<String> = self.secrets.iter().map(|s| format!("secret:{s}")).collect();
+        secrets.sort();
+        parts.extend(secrets);
         f.write_str(&parts.join(","))
     }
 }
