@@ -15,4 +15,5 @@ pub mod job_channels;
 pub mod reattach;
 pub mod sops;
 pub mod state;
+pub mod uploads;
 pub mod watchdog;
