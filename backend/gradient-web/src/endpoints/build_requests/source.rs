@@ -5,12 +5,12 @@
  */
 
 use super::dispatch::{
-    BuildRequestOptions, DispatchResponse, InputOverrideBody, finalize_build_request,
+    BuildRequestOptions, DispatchResponse, InputOverrideBody, finalize_build_request, parent_job,
 };
 use super::refusal::BuildRequestRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::api_spec::Binary;
-use crate::authorization::MaybeApiKey;
+use crate::authorization::{MaybeApiKey, Principal};
 use crate::endpoints::ChunkReceived;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -56,6 +56,7 @@ pub async fn post_source(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
+    principal: Option<Extension<Principal>>,
     Query(query): Query<SourceQuery>,
     mut multipart: Multipart,
 ) -> WebResult<Json<BaseResponse<DispatchResponse>>> {
@@ -116,6 +117,7 @@ pub async fn post_source(
             target,
             input_overrides: Vec::new(),
             session: None,
+            parent_job: parent_job(principal),
         },
     )
     .await?;
@@ -205,6 +207,7 @@ pub async fn source_finalize(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
+    principal: Option<Extension<Principal>>,
     Path(upload): Path<String>,
     Query(query): Query<SourceQuery>,
     Json(body): Json<SourceFinalize>,
@@ -258,6 +261,7 @@ pub async fn source_finalize(
             target: body.target,
             input_overrides,
             session: None,
+            parent_job: parent_job(principal),
         },
     )
     .await?;

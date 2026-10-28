@@ -7,7 +7,7 @@
 use super::refusal::BuildRequestRefusal;
 use super::types::ManifestEntry;
 use crate::access::has_permission;
-use crate::authorization::MaybeApiKey;
+use crate::authorization::{MaybeApiKey, Principal};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::lookup::require;
@@ -78,6 +78,7 @@ pub async fn post_dispatch(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
+    principal: Option<Extension<Principal>>,
     Path(session_id): Path<UploadSessionId>,
     Json(body): Json<DispatchRequest>,
 ) -> WebResult<Json<BaseResponse<DispatchResponse>>> {
@@ -146,6 +147,7 @@ pub async fn post_dispatch(
             target: body.target,
             input_overrides,
             session: Some(session),
+            parent_job: parent_job(principal),
         },
     )
     .await?;
@@ -157,6 +159,13 @@ pub(super) struct BuildRequestOptions {
     pub target: Option<String>,
     pub input_overrides: Vec<(String, String)>,
     pub session: Option<MUploadSession>,
+    pub parent_job: Option<gradient_types::ExecJobId>,
+}
+
+pub(super) fn parent_job(
+    principal: Option<Extension<Principal>>,
+) -> Option<gradient_types::ExecJobId> {
+    principal.and_then(|Extension(principal)| principal.job().map(|job| job.job))
 }
 
 pub(super) async fn finalize_build_request(
@@ -205,6 +214,7 @@ pub(super) async fn finalize_build_request(
             commit_message: format!("Build request {}", nar.store_hash),
             target: options.target,
             input_overrides: options.input_overrides,
+            parent_exec_job: options.parent_job,
         },
     )
     .await?;
@@ -233,6 +243,7 @@ pub(super) struct BuildRequestSource {
     pub commit_message: String,
     pub target: Option<String>,
     pub input_overrides: Vec<(String, String)>,
+    pub parent_exec_job: Option<gradient_types::ExecJobId>,
 }
 
 pub(super) async fn queue_build_request<C: ConnectionTrait>(
@@ -280,6 +291,7 @@ pub(super) async fn queue_build_request<C: ConnectionTrait>(
             status: gradient_entity::evaluation::EvaluationStatus::Queued,
             concurrent: true,
             branch: gradient_types::branch_key::NO_BRANCH.to_owned(),
+            parent_exec_job: source.parent_exec_job,
             created_at: now_ts,
             updated_at: now_ts,
             ..Default::default()
