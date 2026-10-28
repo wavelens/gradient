@@ -8,7 +8,7 @@ use crate::pr::{BranchCommit, CommitIdent, PrRef};
 use crate::registry::GitHostRegistry;
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_types::GitHostType;
+use gradient_types::{GitHostType, RepositoryLocation};
 use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -255,9 +255,8 @@ pub fn reporter_for_task(
 }
 
 pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
-    let url = repository_url
-        .strip_prefix("git+")
-        .unwrap_or(repository_url);
+    let clone_url = RepositoryLocation::of(repository_url).clone_url;
+    let url = clone_url.strip_prefix("git+").unwrap_or(clone_url);
 
     let path = if let Some(rest) = url
         .strip_prefix("https://")
@@ -369,6 +368,20 @@ mod tests {
             parse_owner_repo("git@gitea.example.com:group/sub/repo.git"),
             Some(("group".into(), "sub/repo".into()))
         );
+    }
+
+    #[test]
+    fn a_flake_directory_does_not_change_the_repository_identity() {
+        for url in [
+            "https://github.com/acme/infra?dir=nix",
+            "git@github.com:acme/infra.git?dir=nix",
+        ] {
+            assert_eq!(
+                parse_owner_repo(url),
+                Some(("acme".into(), "infra".into())),
+                "{url}"
+            );
+        }
     }
 
     #[test]
