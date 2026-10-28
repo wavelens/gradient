@@ -12,13 +12,14 @@ use gradient_db::exec_jobs::dispatch::{self, ExecDispatchRow};
 use gradient_graph::Transition;
 use gradient_pool::{WorkerCaps, WorkerInfo};
 use gradient_types::ProjectId;
-use gradient_types::exec::ExecSpec;
+use gradient_types::exec::{ExecDefaults, ExecSpec};
 use gradient_util::supervision::{Pass, PassError, RunsOn};
 use gradient_wire::types::RequiredPath;
 use tracing::{debug, error, warn};
 
 use crate::Scheduler;
 use crate::buildability::exec_waiting_reason;
+use crate::exec_secrets::{resolve_secret_names, secret_refusal};
 use crate::jobs::{ExecAssignment, PendingExecJob, PendingJob, exec_job_key};
 
 pub(crate) struct ExecDispatch {
@@ -56,15 +57,29 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
     let api_url = scheduler.db.config.server.serve_url.clone();
 
     for row in rows {
-        let Some(pending) = pending_exec_job(&row, &api_url) else {
+        let key = exec_job_key(row.job.id);
+        let tracked = !untracked.contains(&key);
+        let Some(pending) = queued_job(scheduler, &row, &key, tracked, &api_url).await? else {
             continue;
         };
-        let caps = exec_workers(&workers, row.project);
-        let reason = exec_waiting_reason(&pending.spec, &pending.architecture, &caps);
+        let project_workers: Vec<WorkerInfo> = workers
+            .iter()
+            .filter(|w| serves_project(w, row.project))
+            .cloned()
+            .collect();
+        let requirement = pending
+            .spec
+            .requirement_on(&pending.architecture, &ExecDefaults::default());
+        if let Some(refusal) = secret_refusal(&requirement, &pending.secrets, &project_workers) {
+            fail_queued_job(scheduler, &row, &key, tracked, refusal.to_string()).await?;
+            continue;
+        }
+
+        let caps: Vec<WorkerCaps> = project_workers.iter().map(caps_of).collect();
+        let reason = exec_waiting_reason(&pending, &caps);
         dispatch::set_waiting_reason(&scheduler.db.worker_db, row.job.id, reason.as_ref()).await?;
 
-        let key = exec_job_key(row.job.id);
-        if !untracked.contains(&key) {
+        if tracked {
             continue;
         }
         if let Err(e) = scheduler
@@ -103,12 +118,58 @@ pub(crate) fn serves_project(worker: &WorkerInfo, project: ProjectId) -> bool {
             .is_none_or(|peers| peers.contains(&project))
 }
 
-fn exec_workers(workers: &[WorkerInfo], project: ProjectId) -> Vec<WorkerCaps> {
-    workers
-        .iter()
-        .filter(|w| serves_project(w, project))
-        .map(caps_of)
-        .collect()
+async fn queued_job(
+    scheduler: &Scheduler,
+    row: &ExecDispatchRow,
+    key: &str,
+    tracked: bool,
+    api_url: &str,
+) -> anyhow::Result<Option<PendingExecJob>> {
+    if tracked {
+        return Ok(match scheduler.pending_job(key).await {
+            Some(PendingJob::Exec(pending)) => Some(pending),
+            _ => None,
+        });
+    }
+
+    let Some(mut pending) = pending_exec_job(row, api_url) else {
+        return Ok(None);
+    };
+    let db = &scheduler.db;
+    match resolve_secret_names(&db.worker_db, &db.config, row.project, &pending.spec).await {
+        Ok(names) => {
+            pending.secrets = names;
+            Ok(Some(pending))
+        }
+        Err(refusal) => {
+            fail_queued_job(scheduler, row, key, false, refusal.to_string()).await?;
+            Ok(None)
+        }
+    }
+}
+
+async fn fail_queued_job(
+    scheduler: &Scheduler,
+    row: &ExecDispatchRow,
+    key: &str,
+    tracked: bool,
+    message: String,
+) -> anyhow::Result<()> {
+    debug!(%key, %message, "exec job fails before dispatch");
+    scheduler
+        .graph
+        .transition(Transition::FailExecJob {
+            exec_job: row.job.id,
+            message,
+        })
+        .await?;
+    if tracked {
+        scheduler
+            .cancel_jobs(row.job.evaluation, vec![key.to_owned()])
+            .await;
+    }
+
+    Ok(())
 }
 
 pub(crate) fn pending_exec_job(row: &ExecDispatchRow, api_url: &str) -> Option<PendingExecJob> {
@@ -152,6 +213,7 @@ pub(crate) fn pending_exec_job(row: &ExecDispatchRow, api_url: &str) -> Option<P
             number: u32::try_from(open.number).unwrap_or(0),
             retries_cap: u32::try_from(row.job.retries_left).unwrap_or(0),
         }),
+        secrets: Default::default(),
         spec,
     })
 }

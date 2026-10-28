@@ -16,6 +16,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::assign_mode::decide_build_spec_kind;
 use crate::count::clamp_to_u32;
+use crate::jobs::PendingExecJob;
 use gradient_pool::{DeviceCount, WorkerCaps, build_needs_network};
 use gradient_types::exec::{DeviceRequest, ExecInventory, ExecSpec};
 use gradient_types::waiting_reason::{EvalCapability, ExecUnmet};
@@ -227,8 +228,7 @@ impl BuildabilityChecker {
 }
 
 pub(crate) fn exec_waiting_reason(
-    spec: &ExecSpec,
-    architecture: &str,
+    job: &PendingExecJob,
     workers: &[WorkerCaps],
 ) -> Option<WaitingReason> {
     let exec_workers: Vec<&WorkerCaps> = workers.iter().filter(|w| runs_exec_jobs(w)).collect();
@@ -240,19 +240,15 @@ pub(crate) fn exec_waiting_reason(
     }
 
     let fits = |worker: &WorkerCaps, devices: DeviceCount| {
-        let defaults = worker
-            .exec
-            .as_ref()
-            .map(|inventory| inventory.defaults.clone())
-            .unwrap_or_default();
-        worker.fits_exec(&spec.requirement_on(architecture, &defaults), devices)
+        job.requirement_for(worker)
+            .is_some_and(|requirement| worker.fits_exec(&requirement, devices))
     };
     if exec_workers.iter().any(|w| fits(w, DeviceCount::Free)) {
         return None;
     }
 
     Some(WaitingReason::ExecWorkers {
-        unmet: exec_unmet(spec, architecture, &[], workers),
+        unmet: exec_unmet(&job.spec, &job.architecture, &job.secrets.worker, workers),
         connected_workers: clamp_to_u32(workers.len()),
         matching_workers: clamp_to_u32(
             exec_workers
@@ -334,6 +330,13 @@ fn offers_device(inventory: &ExecInventory, device: &DeviceRequest) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn job_on(spec: ExecSpec, architecture: &str) -> PendingExecJob {
+        PendingExecJob {
+            architecture: architecture.to_owned(),
+            ..crate::test_jobs::exec_job(spec)
+        }
+    }
 
     fn workers_view(r: &WaitingReason) -> (&[UnmetRequirement], u32, &[String]) {
         match r {
@@ -657,8 +660,10 @@ mod tests {
     #[test]
     fn a_job_without_any_exec_worker_waits_for_exec() {
         use crate::test_jobs::build_only_caps;
-        let reason =
-            exec_waiting_reason(&ExecSpec::default(), "x86_64-linux", &[build_only_caps()]);
+        let reason = exec_waiting_reason(
+            &job_on(ExecSpec::default(), "x86_64-linux"),
+            &[build_only_caps()],
+        );
         assert_eq!(
             reason,
             Some(WaitingReason::eval_workers(EvalCapability::Exec, 1))
@@ -681,7 +686,7 @@ mod tests {
             unmet,
             connected_workers,
             matching_workers,
-        }) = exec_waiting_reason(&spec, "x86_64-linux", &[eight_gpu_exec_caps()])
+        }) = exec_waiting_reason(&job_on(spec, "x86_64-linux"), &[eight_gpu_exec_caps()])
         else {
             panic!("exec wait")
         };
@@ -720,7 +725,7 @@ mod tests {
             unmet,
             matching_workers,
             ..
-        }) = exec_waiting_reason(&spec, "aarch64-linux", &[eight_gpu_exec_caps()])
+        }) = exec_waiting_reason(&job_on(spec, "aarch64-linux"), &[eight_gpu_exec_caps()])
         else {
             panic!("exec wait")
         };
@@ -748,7 +753,10 @@ mod tests {
             unmet,
             matching_workers,
             ..
-        }) = exec_waiting_reason(&spec, "x86_64-linux", &[eight_gpu_exec_caps_with_free(0)])
+        }) = exec_waiting_reason(
+            &job_on(spec, "x86_64-linux"),
+            &[eight_gpu_exec_caps_with_free(0)],
+        )
         else {
             panic!("exec wait")
         };

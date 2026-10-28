@@ -6,9 +6,11 @@
 
 use gradient_db::scheduling::assignment_record::EXEC_KEY_PREFIX;
 use gradient_pool::WorkerCaps;
-use gradient_types::exec::{ExecRequirement, ExecSpec, Phase};
+use gradient_types::exec::{ExecDefaults, ExecRequirement, ExecSpec, Phase};
 use gradient_types::ids::{EvaluationId, ExecJobAttemptId, ExecJobId, ProjectId, TaskId};
 use gradient_wire::types::{ExecJob, RequiredPath};
+
+use crate::exec_secrets::ResolvedSecretNames;
 
 #[derive(Debug, Clone)]
 pub struct PendingExecJob {
@@ -31,6 +33,7 @@ pub struct PendingExecJob {
     pub rescore_count: u32,
     pub api_url: String,
     pub assignment: Option<ExecAssignment>,
+    pub secrets: ResolvedSecretNames,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,10 +51,15 @@ pub fn exec_job_key(job: ExecJobId) -> String {
 impl PendingExecJob {
     pub fn requirement_for(&self, caps: &WorkerCaps) -> Option<ExecRequirement> {
         let inventory = caps.exec.as_ref()?;
-        Some(
-            self.spec
-                .requirement_on(&self.architecture, &inventory.defaults),
-        )
+        Some(self.requirement_with(&inventory.defaults))
+    }
+
+    fn requirement_with(&self, defaults: &ExecDefaults) -> ExecRequirement {
+        ExecRequirement {
+            secrets: self.secrets.worker.clone(),
+            server_secrets: self.secrets.server_names(),
+            ..self.spec.requirement_on(&self.architecture, defaults)
+        }
     }
 
     pub fn fits(&self, caps: &WorkerCaps) -> bool {
@@ -78,9 +86,7 @@ impl PendingExecJob {
             args: self.spec.args.clone(),
             env: self.spec.env.clone(),
             image: self.image_path.clone(),
-            requirement: self
-                .spec
-                .requirement_on(&self.architecture, &inventory.defaults),
+            requirement: self.requirement_with(&inventory.defaults),
             context: gradient_wire::types::JobContext {
                 job: self.exec_job.to_string(),
                 attempt: assignment.attempt.to_string(),

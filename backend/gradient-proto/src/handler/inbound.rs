@@ -1522,6 +1522,7 @@ pub(in crate::handler) mod fixture {
                 number: 1,
                 retries_cap: 0,
             }),
+            secrets: Default::default(),
         })
     }
 
