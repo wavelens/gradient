@@ -10,6 +10,7 @@ pub mod commits;
 pub mod evals;
 pub mod integrations;
 pub mod projects;
+pub mod pull_requests;
 pub mod server;
 pub mod tasks;
 pub mod user;
@@ -81,6 +82,9 @@ impl Client {
     }
     pub fn projects(&self) -> projects::ProjectsApi<'_> {
         projects::ProjectsApi(self)
+    }
+    pub fn pull_requests(&self) -> pull_requests::PullRequestsApi<'_> {
+        pull_requests::PullRequestsApi(self)
     }
     pub fn tasks(&self) -> tasks::TasksApi<'_> {
         tasks::TasksApi(self)
