@@ -34,6 +34,7 @@ mod m20261029_000000_eval_cost_report;
 mod m20261029_000000_exec_jobs;
 mod m20261030_000000_eval_set_cost_max_peak_rss;
 mod m20261031_000000_counter_trigger_per_statement;
+mod m20261101_000000_pending_delivery_due_order;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -85,6 +86,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261029_000000_eval_cost_report::Migration),
             Box::new(m20261030_000000_eval_set_cost_max_peak_rss::Migration),
             Box::new(m20261031_000000_counter_trigger_per_statement::Migration),
+            Box::new(m20261101_000000_pending_delivery_due_order::Migration),
         ]
     }
 }
