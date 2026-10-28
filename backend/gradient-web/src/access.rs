@@ -374,7 +374,7 @@ pub async fn load_membership_with_permissions(
     }))
 }
 
-async fn require_project_permission(
+pub(crate) async fn require_project_permission(
     db: &WebDb,
     user_id: UserId,
     project_id: ProjectId,

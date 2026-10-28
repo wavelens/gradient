@@ -7,6 +7,7 @@
 pub mod actions;
 pub mod log;
 pub mod query;
+pub mod terminal;
 
 pub use self::actions::post_exec_job_abort;
 pub use self::log::get_exec_job_log;

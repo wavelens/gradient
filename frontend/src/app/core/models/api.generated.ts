@@ -947,6 +947,8 @@ export interface ExecJobResponse {
   worker?: string | null;
   attempts: ExecJobAttemptView[];
   phases: ExecJobPhaseView[];
+  ssh_command?: string | null;
+  forward_commands: string[];
 }
 
 export type ExecJobStatus = "queued" | "starting" | "running" | "completed" | "failed" | "aborted" | "created";

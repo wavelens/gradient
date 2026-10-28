@@ -5812,7 +5812,7 @@ paths:
       - exec-jobs
       summary: Get exec job
       description: |-
-        Returns an exec job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt and empty while the job waits to start.
+        Returns an exec job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.
 
         **Access:** Public projects, or members of the project.
       operationId: getExecJob
@@ -5874,6 +5874,42 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/exec-jobs/{job}/console:
+    get:
+      tags:
+      - exec-jobs
+      summary: Exec job serial console (WebSocket)
+      description: |-
+        Upgrades to a WebSocket joined to the serial console of the job's guest. Opens while the job is `starting` or `running`, also with `ssh = false`.
+
+        **Frames**
+        - Binary frames carry raw terminal bytes both ways; every viewer first receives the last 64 KiB of console output.
+        - The oldest open console holds the input; every further viewer is read-only.
+        - A text frame `{"type":"resize","cols":120,"rows":40}` from the client is accepted and ignored by the console.
+        - The last server frame is the text frame `{"type":"closed","exit_code":null,"message":"..."}`, also when the channel is refused after the upgrade.
+
+        `node` accepts `0` only. Requires the `TriggerEvaluation` permission on the project.
+      operationId: execJobConsole
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      - name: node
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket upgrade successful
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/exec-jobs/{job}/log:
     get:
       tags:
@@ -5915,6 +5951,46 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - {}
+      - bearerAuth: []
+  /api/v1/exec-jobs/{job}/shell:
+    get:
+      tags:
+      - exec-jobs
+      summary: Exec job shell (WebSocket)
+      description: |-
+        Upgrades to a WebSocket joined to a terminal in the job's guest. With `attach=true` it joins the program's terminal (the job needs `ssh = true`); without it a new shell starts as `gradient` in `/work` with the job's environment. Opens while the job is `running` and was not started with `ssh = false`.
+
+        **Frames**
+        - Binary frames carry raw terminal bytes both ways.
+        - A text frame `{"type":"resize","cols":120,"rows":40}` from the client resizes the terminal.
+        - The last server frame is the text frame `{"type":"closed","exit_code":0,"message":null}`, also when the channel is refused after the upgrade.
+
+        Closing an attached terminal leaves the program running. `node` accepts `0` only. Requires the `TriggerEvaluation` permission on the project.
+      operationId: execJobShell
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      - name: node
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: attach
+        in: query
+        required: false
+        schema:
+          type: boolean
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket upgrade successful
+        default:
+          $ref: '#/components/responses/Error'
+      security:
       - bearerAuth: []
   /api/v1/gradient-ci/connections:
     post:
@@ -15705,6 +15781,7 @@ components:
       - created_at
       - attempts
       - phases
+      - forward_commands
       properties:
         id:
           $ref: '#/components/schemas/ExecJobId'
@@ -15766,6 +15843,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ExecJobPhaseView'
+        ssh_command:
+          type:
+          - string
+          - 'null'
+        forward_commands:
+          type: array
+          items:
+            type: string
     ExecJobStatus:
       type: string
       enum:
