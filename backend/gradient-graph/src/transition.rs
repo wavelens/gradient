@@ -252,6 +252,10 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             },
             ..Default::default()
         }),
+        Transition::FailExecJob { exec_job, message } => {
+            exec::fail_before_start(ctx, exec_job, &message).await?;
+            Ok(TransitionReport::default())
+        }
         Transition::PrioritizeBuild { shared_build } => {
             let Some(row) = EDerivationBuild::find_by_id(shared_build)
                 .one(&ctx.worker_db)
