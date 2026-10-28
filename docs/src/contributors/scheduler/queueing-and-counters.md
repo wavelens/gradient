@@ -152,6 +152,7 @@ The `evaluation` table holds five counter columns. They cover the shared builds 
 - `repair_dependency_failed` can repeat that walk inside the closure of an evaluation, at stream completion and during the graph-stuck heal. A shared build thawed after its dependency failed gets caught by this repeat.
 - The repeat can also take each shared build the evaluation aborted (`build_job.aborted`) as a starting point. Derivations wanting such a build end as `DependencyFailed`.
 - Both walks skip any shared build available in a cache (`graph_sql::non_passthrough_predicate`).
+- Both walks skip a shared build with an open dispatch. The worker report of that dispatch must settle the status, as with an unqueue.
 
 ## Build Abort and Retry
 
