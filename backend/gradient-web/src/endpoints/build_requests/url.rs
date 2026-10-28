@@ -5,11 +5,11 @@
  */
 
 use super::dispatch::{
-    BuildRequestSource, DispatchResponse, InputOverrideBody, queue_build_request,
+    BuildRequestSource, DispatchResponse, InputOverrideBody, parent_job, queue_build_request,
 };
 use super::refusal::BuildRequestRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
-use crate::authorization::MaybeApiKey;
+use crate::authorization::{MaybeApiKey, Principal};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
@@ -56,6 +56,7 @@ pub async fn post_url(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
+    principal: Option<Extension<Principal>>,
     Json(body): Json<UrlRequest>,
 ) -> WebResult<Json<BaseResponse<DispatchResponse>>> {
     let project = load_project(
@@ -126,6 +127,7 @@ pub async fn post_url(
             commit_message: format!("Build request {url}@{label}"),
             target: body.target,
             input_overrides,
+            parent_exec_job: parent_job(principal),
         },
     )
     .await?;
