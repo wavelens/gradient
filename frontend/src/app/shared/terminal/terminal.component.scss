@@ -15,11 +15,24 @@
 }
 
 .terminal {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
   padding: $spacing-sm;
   overflow: hidden;
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   background-color: var(--gr-black);
+}
+
+.screen {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:host(.flush) .terminal {
+  border: 0;
+  border-radius: 0;
 }

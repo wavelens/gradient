@@ -21,7 +21,7 @@ vi.mock('@xterm/xterm', () => ({
     cols = 80;
     rows = 24;
     options: { disableStdin?: boolean } = {};
-    write = vi.fn();
+    write = vi.fn((_bytes: unknown, parsed?: () => void) => parsed?.());
     typed: (data: string) => void = () => undefined;
     constructor() {
       terminals.push(this);
@@ -77,7 +77,7 @@ describe('TerminalComponent', () => {
     render(source);
     const bytes = new Uint8Array([104, 105]);
     output.next(bytes);
-    expect(terminals[0].write).toHaveBeenCalledWith(bytes);
+    expect(terminals[0].write.mock.calls[0][0]).toBe(bytes);
   });
 
   it('sends typed text to the source', () => {
@@ -85,6 +85,46 @@ describe('TerminalComponent', () => {
     render(source);
     terminals[0].typed('ls\r');
     expect(source.write).toHaveBeenCalledWith('ls\r');
+  });
+
+  describe('replayed history', () => {
+    const CURSOR_REPORT = '\x1b[42;161R';
+
+    function answerWhileParsing(report: string): void {
+      terminals[0].write.mockImplementation((_bytes: Uint8Array, parsed?: () => void) => {
+        terminals[0].typed(report);
+        parsed?.();
+      });
+    }
+
+    afterEach(() => vi.useRealTimers());
+
+    it('drops the replies xterm gives to queries in the history replayed on connect', () => {
+      const { source, output } = fakeSource();
+      render(source);
+      answerWhileParsing(CURSOR_REPORT);
+      output.next(new Uint8Array([27, 91, 54, 110]));
+      expect(source.write).not.toHaveBeenCalled();
+    });
+
+    it('keeps typed text while the history is written', () => {
+      const { source, output } = fakeSource();
+      render(source);
+      answerWhileParsing('ls\r');
+      output.next(new Uint8Array([104, 105]));
+      expect(source.write).toHaveBeenCalledWith('ls\r');
+    });
+
+    it('answers queries that arrive live, after the replay', () => {
+      vi.useFakeTimers();
+      const { source, output } = fakeSource();
+      render(source);
+      output.next(new Uint8Array([104, 105]));
+      vi.advanceTimersByTime(2000);
+      answerWhileParsing(CURSOR_REPORT);
+      output.next(new Uint8Array([27, 91, 54, 110]));
+      expect(source.write).toHaveBeenCalledWith(CURSOR_REPORT);
+    });
   });
 
   it('prints the close message and stops input', () => {
