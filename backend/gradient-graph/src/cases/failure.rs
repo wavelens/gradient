@@ -9,12 +9,12 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::EvaluationId;
-use gradient_fixtures::shape::shape;
+use gradient_fixtures::shape::{Shape, shape};
 use gradient_wire::types::BuildFailureKind;
 
 use super::{
-    A, A_OUT, A1, A1_OUT, A2, A2_OUT, B, B_OUT, BUILDER_EXIT, C, C_OUT, Case, D, D_OUT, G, G_OUT,
-    H, H_OUT, P, P_OUT, Q, Q_OUT, R, R_OUT, S, S_OUT, X, X_OUT, Y, Y_OUT, chain, diamond,
+    A, A_OUT, A1, A1_OUT, A2, A2_OUT, B, B_OUT, B_OUT2, BUILDER_EXIT, C, C_OUT, Case, D, D_OUT, G,
+    G_OUT, H, H_OUT, P, P_OUT, Q, Q_OUT, R, R_OUT, S, S_OUT, X, X_OUT, Y, Y_OUT, chain, diamond,
 };
 
 #[tokio::test]
@@ -817,5 +817,72 @@ async fn f11_a_dependency_failure_leaves_a_dispatched_substitution_to_its_report
         "after 3: sb(A)"
     );
     case.zero_drift("step 3").await;
+    case.finish().await;
+}
+
+fn passthrough_referencing(e1: EvaluationId, referenced: &str) -> Shape {
+    shape()
+        .evaluation(e1)
+        .evaluation_status(EvaluationStatus::Building)
+        .derivation(A)
+        .walked()
+        .entry_point("pkg.a")
+        .job()
+        .probed()
+        .output(A_OUT)
+        .cache_available()
+        .output_option(A_OUT, |o| o.references = Some(referenced.to_owned()))
+        .runtime_depends_on(B)
+        .build_status(BuildStatus::Queued)
+        .derivation(B)
+        .walked()
+        .job()
+        .probed()
+        .drv_cached()
+        .output(B_OUT)
+        .output_option(B_OUT, |o| {
+            o.external_url = Some(format!("https://upstream.invalid/nar/{B_OUT}.nar"));
+        })
+        .named_output(B_OUT2, "dev")
+        .build_status(BuildStatus::Building)
+        .attempt(AttemptOutcome::Running, None)
+        .open_assignment()
+}
+
+#[tokio::test]
+async fn f12_a_failure_stays_below_a_passthrough_whose_referenced_outputs_are_upstream() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(passthrough_referencing(e1, &format!("{B_OUT}-b"))).await;
+
+    case.build_failed(B, BuildFailureKind::Permanent, &[]).await;
+
+    assert_eq!(
+        case.sb(B).await.status,
+        BuildStatus::FailedPermanent,
+        "after 1: sb(B)"
+    );
+    let a = case.sb(A).await;
+    assert_eq!(
+        (a.status, a.cache_available),
+        (BuildStatus::Queued, true),
+        "after 1: sb(A), the missing dev output is nothing A references"
+    );
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn f13_a_failure_spreads_into_a_passthrough_referencing_an_unavailable_output() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(passthrough_referencing(e1, &format!("{B_OUT2}-b-dev"))).await;
+
+    case.build_failed(B, BuildFailureKind::Permanent, &[]).await;
+
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::DependencyFailed,
+        "after 1: sb(A)"
+    );
+    case.zero_drift("step 1").await;
     case.finish().await;
 }
