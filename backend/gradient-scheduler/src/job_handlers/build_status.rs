@@ -308,6 +308,14 @@ impl Scheduler {
 
                 r
             }
+            PendingJob::Exec(j) if j.assignment.is_none() => self
+                .graph
+                .transition(Transition::FailExecJob {
+                    exec_job: j.exec_job,
+                    message: failure.error.clone(),
+                })
+                .await
+                .map(|_| ()),
             PendingJob::Exec(j) => {
                 let reason =
                     super::exec_status::attempt_end_reason(failure.kind, j.image_path.is_some());

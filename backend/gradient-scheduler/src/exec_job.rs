@@ -18,6 +18,7 @@ use crate::exec_secrets::ResolvedSecretNames;
 #[derive(Debug, Clone)]
 pub struct PendingExecJob {
     pub exec_job: ExecJobId,
+    pub node_index: u32,
     pub evaluation_id: EvaluationId,
     pub project_id: ProjectId,
     pub task_id: TaskId,
@@ -50,6 +51,7 @@ pub struct ExecAssignment {
     pub retries_cap: u32,
     pub token_hash: String,
     pub token_expires_at: chrono::NaiveDateTime,
+    pub master_port: Option<u16>,
 }
 
 pub fn exec_job_key(job: ExecJobId) -> String {
@@ -75,14 +77,23 @@ impl PendingExecJob {
             .is_some_and(|requirement| caps.can_run_exec(&requirement))
     }
 
-    pub fn dispatch_on(&self, caps: &WorkerCaps) -> Option<(ExecAssignment, ExecJob)> {
+    pub fn dispatch_on(
+        &self,
+        caps: &WorkerCaps,
+        master_port: Option<u16>,
+    ) -> Option<(ExecAssignment, ExecJob)> {
         let token = mint_job_token();
-        let assignment = self.assignment_on(caps, &token)?;
+        let assignment = self.assignment_on(caps, &token, master_port)?;
         let job = self.exec_job_for(caps, &assignment, token);
         Some((assignment, job))
     }
 
-    fn assignment_on(&self, caps: &WorkerCaps, token: &str) -> Option<ExecAssignment> {
+    fn assignment_on(
+        &self,
+        caps: &WorkerCaps,
+        token: &str,
+        master_port: Option<u16>,
+    ) -> Option<ExecAssignment> {
         let inventory = caps.exec.as_ref()?;
         let limits = self.spec.limits_on(&inventory.allow, &inventory.defaults);
         Some(ExecAssignment {
@@ -92,6 +103,7 @@ impl PendingExecJob {
             retries_cap: limits.retries,
             token_hash: hash_job_token(token),
             token_expires_at: job_token_expiry(gradient_types::now(), limits.timeout_secs),
+            master_port,
         })
     }
 
@@ -124,7 +136,7 @@ impl PendingExecJob {
                 parent_job: self.parent_job.map(|job| job.to_string()),
                 project_name: self.project_name.clone(),
                 task_name: self.task_name.clone(),
-                master_port: None,
+                master_port: assignment.master_port,
             },
             secrets: self.spec.secrets.clone(),
             keep_running: self.spec.keep_running,

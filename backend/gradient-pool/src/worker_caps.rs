@@ -92,7 +92,7 @@ impl WorkerCaps {
                 .iter()
                 .all(|p| (lowest_port..=highest_port).contains(p))
             && (!req.custom_image || allow.custom_images)
-            && allow.nodes >= 1
+            && allow.nodes >= req.nodes.max(1)
             && self.holds_secrets(req, inventory)
     }
 
@@ -370,6 +370,16 @@ mod tests {
         }
         assert!(!w.fits_exec(&req(|r| r.devices = gpus(8)), DeviceCount::Free));
         assert!(w.fits_exec(&req(|r| r.devices = gpus(8)), DeviceCount::Total));
+    }
+
+    #[test]
+    fn a_worker_allows_at_most_its_node_count() {
+        let mut w = exec_worker();
+        if let Some(inventory) = w.exec.as_mut() {
+            inventory.allow.nodes = 1;
+        }
+        assert!(!w.can_run_exec(&req(|r| r.nodes = 2)));
+        assert!(w.can_run_exec(&req(|r| r.nodes = 1)));
     }
 
     #[test]

@@ -243,12 +243,19 @@ pub(crate) fn exec_waiting_reason(
         job.requirement_for(worker)
             .is_some_and(|requirement| worker.fits_exec(&requirement, devices))
     };
-    if exec_workers.iter().any(|w| fits(w, DeviceCount::Free)) {
+    let nodes = job.spec.nodes.max(1);
+    let one_zone_fits =
+        |devices: DeviceCount| one_zone_holds(&exec_workers, nodes, |worker| fits(worker, devices));
+    if one_zone_fits(DeviceCount::Free) {
         return None;
     }
 
+    let mut unmet = exec_unmet(&job.spec, &job.architecture, &job.secrets.worker, workers);
+    if nodes > 1 && !one_zone_fits(DeviceCount::Total) {
+        unmet.nodes = nodes;
+    }
     Some(WaitingReason::ExecWorkers {
-        unmet: exec_unmet(&job.spec, &job.architecture, &job.secrets.worker, workers),
+        unmet,
         connected_workers: clamp_to_u32(workers.len()),
         matching_workers: clamp_to_u32(
             exec_workers
@@ -313,6 +320,15 @@ pub(crate) fn exec_unmet(
             .cloned()
             .collect(),
     }
+}
+
+fn one_zone_holds(workers: &[&WorkerCaps], nodes: u32, fits: impl Fn(&WorkerCaps) -> bool) -> bool {
+    let mut per_zone: HashMap<Option<&str>, u32> = HashMap::new();
+    for worker in workers.iter().filter(|worker| fits(worker)) {
+        *per_zone.entry(worker.zone.as_deref()).or_default() += 1;
+    }
+
+    per_zone.values().any(|&fitting| fitting >= nodes)
 }
 
 fn runs_exec_jobs(worker: &WorkerCaps) -> bool {
@@ -784,5 +800,39 @@ mod tests {
             panic!("exec wait")
         };
         assert_eq!((unmet, matching_workers), (ExecUnmet::default(), 1));
+    }
+
+    fn exec_caps_in_zone(zone: &str) -> WorkerCaps {
+        use crate::test_jobs::{allow_all, exec_caps};
+        let allow = gradient_types::exec::ExecAllow {
+            nodes: 8,
+            ..allow_all()
+        };
+        WorkerCaps {
+            zone: Some(zone.into()),
+            ..exec_caps(allow, gradient_types::exec::ExecDefaults::default())
+        }
+    }
+
+    #[test]
+    fn too_few_matching_workers_in_one_zone_wait_for_nodes() {
+        let spec = ExecSpec {
+            nodes: 3,
+            ..ExecSpec::default()
+        };
+        let workers = [
+            exec_caps_in_zone("a"),
+            exec_caps_in_zone("a"),
+            exec_caps_in_zone("b"),
+        ];
+        let Some(WaitingReason::ExecWorkers {
+            unmet,
+            matching_workers,
+            ..
+        }) = exec_waiting_reason(&job_on(spec, "x86_64-linux"), &workers)
+        else {
+            panic!("exec wait")
+        };
+        assert_eq!((unmet.nodes, matching_workers), (3, 3));
     }
 }

@@ -17,7 +17,7 @@ use gradient_wire::types::{
     BuildStage, CandidateScore, GradientCapabilities, JobCandidate, JobKind,
 };
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::jobs::{
     AssignDecision, Assignment, AwaitingReclaim, BoardActiveJob, CandidateDetail, HeldReclaim,
@@ -647,20 +647,22 @@ impl SchedulerCore {
         use crate::cluster::{CommittedSeat, SlotKind};
 
         let now = Instant::now();
-        let seats_free = {
+        let (seats_free, master_port) = {
             let cluster = self
                 .tracker
                 .waiting_cluster(placement.cluster)
                 .filter(|c| c.ready())?;
-            placement.seats.iter().all(|s| {
+            let seats_free = placement.seats.iter().all(|s| {
                 let kind = SlotKind::from(&cluster.members[s.member]);
                 self.idle.is_idle(&s.worker, kind, now)
                     && self.pool.has_capacity(&s.worker, &kind.job_kind())
-            })
+            });
+            (seats_free, self.placement_master_port(cluster, placement))
         };
         if !seats_free {
             return None;
         }
+        let master_port = master_port?;
 
         let cluster = self.tracker.take_cluster(placement.cluster)?;
         let mut roles: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
@@ -677,34 +679,42 @@ impl SchedulerCore {
         let policy = Arc::clone(&self.policy);
         let instance = self.with_live_transfers(instance);
         self.unmeasured_build_ram_mb = instance.unmeasured_build_ram_mb();
-        let seats: Vec<CommittedSeat> = placement
+        let seats: Option<Vec<CommittedSeat>> = placement
             .seats
             .iter()
-            .filter_map(|s| {
+            .map(|s| {
                 let m = &cluster.members[s.member];
-                let job = m.job.clone()?;
+                let mut job = m.job.clone()?;
                 let caps = self.pool.worker_caps(&s.worker);
                 self.idle.clear(&s.worker, SlotKind::from(m));
+                let mut record = self.tracker.member_record(
+                    &s.worker,
+                    caps.as_ref(),
+                    &m.key,
+                    &job,
+                    &*policy,
+                    &instance,
+                );
+                let assigned = job.assigned_job(caps.as_ref(), &mut record, master_port)?;
                 Some(CommittedSeat {
                     worker: s.worker.clone(),
                     key: m.key.clone(),
-                    record: self.tracker.member_record(
-                        &s.worker,
-                        caps.as_ref(),
-                        &m.key,
-                        &job,
-                        &*policy,
-                        &instance,
-                    ),
+                    index: job.cluster_index().unwrap_or(index_of[s.member]),
+                    record,
                     job,
+                    assigned,
                     role: m.role.clone(),
-                    index: index_of[s.member],
                     primary: m.primary,
                     zone: caps.as_ref().and_then(|c| c.zone.clone()),
                     endpoint: caps.as_ref().and_then(|c| c.endpoint.clone()),
                 })
             })
             .collect();
+        let Some(seats) = seats else {
+            warn!(cluster = %cluster.id, "a cluster member has no worker job; the cluster waits");
+            self.tracker.restore_cluster(cluster);
+            return None;
+        };
 
         let active = seats
             .iter()
@@ -721,9 +731,40 @@ impl SchedulerCore {
         for s in &seats {
             let need = s.job.ram_need_with(s.record.choice, false);
             self.occupy(&s.worker, &s.key, s.job.job_kind(), need);
+            if let gradient_wire::types::Job::Exec(exec) = &s.assigned {
+                self.pool
+                    .hold_devices(&s.worker, &s.key, exec.requirement.devices.clone());
+            }
         }
 
         Some(crate::cluster::Committing { cluster, seats })
+    }
+
+    fn placement_master_port(
+        &self,
+        cluster: &crate::cluster::PendingCluster,
+        placement: &crate::cluster::Placement,
+    ) -> Option<Option<u16>> {
+        let master =
+            placement
+                .seats
+                .iter()
+                .find_map(|s| match cluster.members[s.member].job.as_ref()? {
+                    crate::jobs::PendingJob::Exec(exec) if exec.node_index == 0 => {
+                        Some((s.worker.as_str(), exec.spec.ports.as_slice()))
+                    }
+                    _ => None,
+                });
+        let Some((worker, forwarded)) = master else {
+            return Some(None);
+        };
+        let allow = self.pool.worker_caps(worker)?.exec?.allow.ports;
+        let port = crate::cluster::master_port(allow, forwarded);
+        if port.is_none() {
+            warn!(cluster = %cluster.id, %worker, "every port of the master's allow.ports is forwarded; the cluster waits");
+        }
+
+        port.map(Some)
     }
 
     fn restore_placement(

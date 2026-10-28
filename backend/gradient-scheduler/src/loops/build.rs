@@ -849,7 +849,7 @@ async fn enqueue_startable_shared_builds(
 
     let enqueued_ids: Vec<_> = new_shared_builds.iter().map(|a| a.id).collect();
     let membership =
-        crate::cluster::Membership::load(&scheduler.db.worker_db, &[], &enqueued_ids).await?;
+        crate::cluster::Membership::load(&scheduler.db.worker_db, &[], &enqueued_ids, &[]).await?;
 
     let maps = assign_maps(scheduler, &new_shared_builds).await?;
 

@@ -7,6 +7,7 @@
 pub(crate) mod book;
 mod coordinator;
 mod divert;
+mod master_port;
 mod matching;
 mod planner;
 mod prepared;
@@ -18,6 +19,7 @@ mod slots;
 pub use book::{ClusterBook, ClusterMember, PendingCluster};
 pub use coordinator::*;
 pub(crate) use divert::{Membership, Route};
+pub use master_port::master_port;
 pub use matching::kuhn;
 pub use planner::{Placement, ScoreLookup, Seat, fillable_seats, plan};
 pub use prepared::{PreparedMember, PreparedMembers};
@@ -41,6 +43,7 @@ pub struct CommittedSeat {
     pub worker: String,
     pub key: String,
     pub job: crate::jobs::PendingJob,
+    pub assigned: gradient_wire::types::Job,
     pub record: crate::jobs::AssignmentRecord,
     pub role: String,
     pub index: u32,

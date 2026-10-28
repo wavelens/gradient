@@ -1531,6 +1531,7 @@ pub(in crate::handler) mod fixture {
         let exec_job = gradient_types::ids::ExecJobId::now_v7();
         PendingJob::Exec(Box::new(gradient_scheduler::jobs::PendingExecJob {
             exec_job,
+            node_index: 0,
             evaluation_id: EvaluationId::now_v7(),
             project_id: ProjectId::now_v7(),
             task_id: TaskId::now_v7(),
@@ -1558,6 +1559,7 @@ pub(in crate::handler) mod fixture {
                 retries_cap: 0,
                 token_hash: String::new(),
                 token_expires_at: gradient_types::now(),
+                master_port: None,
             }),
             secrets: Default::default(),
         }))

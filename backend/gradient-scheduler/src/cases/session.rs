@@ -312,6 +312,14 @@ impl SchedulerCase {
     }
 
     pub async fn take_cluster_assignment(&self, worker: &str, key: &str) -> ClusterAssignment {
+        self.take_cluster_job(worker, key).await.0
+    }
+
+    pub async fn take_cluster_job(
+        &self,
+        worker: &str,
+        key: &str,
+    ) -> (ClusterAssignment, gradient_wire::types::Job) {
         let prepared = self
             .scheduler
             .cluster
@@ -326,13 +334,14 @@ impl SchedulerCase {
             assignment.assignment_id(),
             assignment.pending.clone(),
         );
-        ClusterAssignment {
+        let membership = ClusterAssignment {
             assignment_id: assignment.assignment_id(),
             attempt: prepared.membership.attempt.clone(),
             role: prepared.membership.role.clone(),
             index: prepared.membership.index,
             prepare_secs: aliases::prepare_secs(&prepared.membership),
-        }
+        };
+        (membership, assignment.job.clone())
     }
 
     pub async fn report_building(&self, worker: &str, key: &str) {

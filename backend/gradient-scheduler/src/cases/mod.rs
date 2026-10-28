@@ -13,6 +13,7 @@ mod control;
 mod estimates;
 mod eval_queue;
 mod exec;
+mod exec_cluster;
 mod imports;
 mod inputs;
 mod invariants;

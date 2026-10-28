@@ -97,6 +97,10 @@ impl Profile {
         self
     }
 
+    pub fn zone(self, zone: &str) -> Self {
+        self.hardware(|h| h.zone = Some(zone.into()))
+    }
+
     pub fn exec(mut self, inventory: ExecInventory) -> Self {
         self.caps.exec = true;
         self.hardware(|h| h.exec = Some(inventory))
