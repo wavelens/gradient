@@ -456,7 +456,7 @@ pub struct EvaluationsQuery {
     pub attr: Option<String>,
 }
 
-const COMMIT_HASH_BYTES: usize = 20;
+pub(super) const COMMIT_HASH_BYTES: usize = 20;
 
 const ATTR_SCAN_LIMIT: u64 = 1000;
 

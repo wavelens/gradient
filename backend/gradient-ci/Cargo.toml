@@ -25,6 +25,7 @@ gradient-storage  = { workspace = true }
 gradient-notify   = { workspace = true }
 gradient-db       = { workspace = true }
 gradient-git-host = { workspace = true }
+gradient-sources  = { workspace = true }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
@@ -33,6 +34,7 @@ crypter     = { workspace = true }
 bytes       = { workspace = true }
 chrono      = { workspace = true }
 futures     = { workspace = true }
+git2        = { workspace = true }
 hex         = { workspace = true }
 hmac        = { workspace = true }
 num_enum    = { workspace = true }
@@ -50,4 +52,5 @@ uuid        = { workspace = true }
 
 [dev-dependencies]
 gradient-fixtures = { workspace = true }
+tempfile = { workspace = true }
 wiremock = { workspace = true }

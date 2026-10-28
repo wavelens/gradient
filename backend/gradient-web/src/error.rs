@@ -67,6 +67,8 @@ impl ErrorCode {
     pub const USER_UPDATE_FAILED: Self = Self("user_update_failed");
     pub const SSH_KEY_GENERATION_FAILED: Self = Self("ssh_key_generation_failed");
 
+    pub const BAD_GATEWAY: Self = Self("bad_gateway");
+
     pub const SERVICE_UNAVAILABLE: Self = Self("service_unavailable");
 
     #[inline]
@@ -99,6 +101,8 @@ pub enum WebError {
     PayloadTooLarge(ErrorCode, String),
     #[error("Unprocessable Entity [{0}]: {1}")]
     UnprocessableEntity(ErrorCode, String),
+    #[error("Bad Gateway [{0}]: {1}")]
+    BadGateway(ErrorCode, String),
     #[error("Service Unavailable [{0}]: {1}")]
     ServiceUnavailable(ErrorCode, String),
     #[error("Upload capacity exhausted; retry after {retry_after:?}")]
@@ -132,6 +136,7 @@ impl WebError {
             Self::Gone(..) => StatusCode::GONE,
             Self::PayloadTooLarge(..) => StatusCode::PAYLOAD_TOO_LARGE,
             Self::UnprocessableEntity(..) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::BadGateway(..) => StatusCode::BAD_GATEWAY,
             Self::ServiceUnavailable(..) | Self::UploadBusy { .. } => {
                 StatusCode::SERVICE_UNAVAILABLE
             }
@@ -149,6 +154,7 @@ impl WebError {
             | Self::Gone(c, _)
             | Self::PayloadTooLarge(c, _)
             | Self::UnprocessableEntity(c, _)
+            | Self::BadGateway(c, _)
             | Self::ServiceUnavailable(c, _) => *c,
             Self::UploadBusy { .. } => ErrorCode::SERVICE_UNAVAILABLE,
             Self::DataInconsistency(_) | Self::Internal(_) => ErrorCode::INTERNAL,
@@ -231,6 +237,7 @@ impl IntoResponse for WebError {
             | Self::Gone(_, m)
             | Self::PayloadTooLarge(_, m)
             | Self::UnprocessableEntity(_, m)
+            | Self::BadGateway(_, m)
             | Self::ServiceUnavailable(_, m) => m.clone(),
             Self::UploadBusy { .. } => "upload capacity exhausted".to_string(),
         };

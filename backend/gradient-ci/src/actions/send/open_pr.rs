@@ -153,7 +153,10 @@ fn no_op() -> ExecutorOk {
     }
 }
 
-fn configured_commit_ident(name: &Option<String>, email: &Option<String>) -> Option<CommitIdent> {
+pub(crate) fn configured_commit_ident(
+    name: &Option<String>,
+    email: &Option<String>,
+) -> Option<CommitIdent> {
     match (name.as_deref(), email.as_deref()) {
         (Some(n), Some(e)) if !n.is_empty() && !e.is_empty() => Some(CommitIdent {
             name: n.to_owned(),
