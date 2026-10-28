@@ -24,6 +24,7 @@ pub mod generate;
 pub mod logs;
 pub mod logstream;
 pub mod mcp;
+pub mod pr;
 pub mod project;
 pub mod task;
 pub mod watch;
