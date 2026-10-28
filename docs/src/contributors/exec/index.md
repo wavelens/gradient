@@ -27,7 +27,8 @@ flowchart LR
 | `gradient-pool` | Matching (`WorkerCaps::fits_exec`) and device holds |
 | `gradient-scheduler` | Loading, placement, dispatch, wait reasons and pre-warm counts |
 | `gradient-proto` | Phases, program start, logs and the inventory on the session |
-| `gradient-web` | `/exec-jobs` endpoints and the project switch |
+| `gradient-web` | `/exec-jobs` endpoints, browser terminals and the project switch |
+| `gradient-ssh` | SSH logins into exec jobs |
 
 ## Entry Points
 
@@ -102,7 +103,7 @@ flowchart LR
 | Guest unit | Transient `gradient-guest-<id>.service` in `gradient-guests.slice`, started over D-Bus |
 | Supervisor | Main process of the unit, `gradient-worker --guest-supervisor <dir>` as root with the worker's group |
 | Guest directory | `/var/lib/gradient-worker/guests/<id>/`, mode `0770` |
-| Files | `state.json`, `console.log`, `api.sock`, `vsock.sock`, `control.sock`, `store.sock`, `work/`, `mounts/<name>.sock` |
+| Files | `state.json`, `console.log`, `serial.sock`, `console.sock`, `api.sock`, `vsock.sock`, `control.sock`, `store.sock`, `work/`, `mounts/<name>.sock` |
 
 - Supervisors own cloud-hypervisor, every virtiofsd, the taps and the USB/IP bindings. Guests never belong to the worker process.
 - Workers drive the cloud-hypervisor API, the supervisor control socket and the agent over hybrid vsock.
@@ -196,3 +197,57 @@ The agent `gradient-guest-agent` can accept the worker on vsock port 7000. Frame
 - Output from programs can land in `/run/gradient/output.log`. Only the last 64 MiB stay.
 - `127.0.0.1:7777` can answer `POST /phase` and `POST /upload` with `501` for now.
 - Timeouts belong to the worker watchdog. Workers send `Kill` and log the timeout line.
+
+### Guest Channels
+
+Numbered guest channels connect browser terminals and SSH sessions to a running job. The server can issue a new `channel_id` for every channel.
+
+```mermaid
+flowchart LR
+    client["Browser or ssh"] --> server["Server"]
+    server -- "OpenGuestChannel" --> worker["Worker"]
+    worker -- "OpenChannel" --> agent["Guest agent"]
+    worker -- "console.sock" --> supervisor["Guest supervisor"]
+    supervisor -- "serial.sock" --> ch["cloud-hypervisor"]
+```
+
+| Kind | Worker side | Guest side |
+|---|---|---|
+| `Shell { pty, attach: false }` | Agent | A new `bash` next to the program |
+| `Shell { pty, attach: true }` | Agent | The terminal of the program |
+| `Forward { port }` | Agent | A TCP connection to `127.0.0.1:<port>` |
+| `Console` | Supervisor, over `console.sock` | The serial console |
+
+- The agent frames `OpenChannel`, `ChannelData`, `Resize` and `CloseChannel` require guest protocol version 2. Server messages live in [Messages](../proto/messages.md).
+- Data frames top out at 32 KiB. Agents queue 256 input chunks per channel. Agents close a full channel with `the guest stopped reading the channel input`.
+- Shells and forwards of a job without `ssh` fail the worker checks. Ports outside `ports` and agents below version 2 fail too.
+- Channel traffic can never move the `maxSilent` deadline.
+
+| Program terminal | Behaviour |
+|---|---|
+| Start | `ssh = true` sets `RunJob.program_pty`. The program starts on a PTY with `TERM=xterm-256color` at 80x24 |
+| Output | PTY output goes into the output log like piped output. Typed input echoed by the PTY counts as output |
+| Attach | Attached channels follow the output log from the attach point. Input and resizes go to the program PTY |
+| Close | Closing an attached channel leaves the program active. The program exit closes every attached channel with its exit code |
+
+| New shell | Behaviour |
+|---|---|
+| User | `setpriv --reuid=gradient --regid=gradient` with the job groups, behind `setsid --ctty` on a PTY |
+| Environment | `/work`, the environment of the program, `TERM=xterm-256color` only on a PTY |
+| Without PTY | Pipes, stderr merged into stdout |
+| Close | SIGHUP to the process group, SIGKILL after 2 s |
+
+| Console | Behaviour |
+|---|---|
+| Supervisor | Holds `serial.sock`, appends every byte to `console.log`, accepts one client on `console.sock` (mode `0660`) |
+| Replay | New clients get the last 64 KiB of `console.log` first. Clients lose the connection after 5 s of no reads |
+| Viewers | The worker keeps its own 64 KiB scrollback for each new viewer. The oldest viewer holds the input |
+| Read-only | Later viewers get a read-only notice once. The next viewer takes the input when the holder leaves |
+| Old guests | Guests without `console.sock` close the console channel with `this guest has no console socket` |
+
+| Close | Effect |
+|---|---|
+| Either side | `CloseGuestChannel` ends the route on both sides. Later frames for the id go nowhere |
+| Session end | The worker closes every channel of its exec jobs. The server closes them with `the worker disconnected` |
+| Slow client | A full server buffer of 256 events closes the channel with `the terminal could not keep up` |
+| Forward refused | `nothing listens on port <port> in the guest` |
