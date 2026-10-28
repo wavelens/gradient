@@ -110,7 +110,7 @@ impl Attempts {
         self.by_job.get(job_id).copied()
     }
 
-    pub fn accept(&mut self, job_id: &str) -> Acceptance {
+    pub fn accept(&mut self, job_id: &str, endpoint: Option<String>) -> Acceptance {
         let Some(attempt) = self.attempt_of(job_id) else {
             return Acceptance::NotMember;
         };
@@ -119,6 +119,15 @@ impl Attempts {
         };
         if let Some(m) = state.members.iter_mut().find(|m| m.job_id == job_id) {
             m.accepted = true;
+            let address = m.address();
+            if let Some(peer) = state
+                .roster
+                .iter_mut()
+                .find(|p| p.role == address.role && p.index == address.index)
+                && endpoint.is_some()
+            {
+                peer.endpoint = endpoint;
+            }
         }
         if state.all_accepted || !state.members.iter().all(|m| m.accepted) {
             return Acceptance::Waiting;
@@ -342,8 +351,8 @@ impl AttemptBook {
         self.0.lock().attempt_of(job_id)
     }
 
-    pub async fn accept(&self, job_id: &str) -> Acceptance {
-        self.0.lock().accept(job_id)
+    pub async fn accept(&self, job_id: &str, endpoint: Option<String>) -> Acceptance {
+        self.0.lock().accept(job_id, endpoint)
     }
 
     pub async fn mark_started(&self, attempt: ClusterAttemptId) -> Option<Option<Fate>> {
@@ -385,6 +394,14 @@ impl AttemptBook {
             .attempts
             .get(&attempt)
             .is_some_and(|s| s.split)
+    }
+
+    pub async fn is_exec(&self, attempt: ClusterAttemptId) -> bool {
+        self.0
+            .lock()
+            .attempts
+            .get(&attempt)
+            .is_some_and(|s| s.exec.is_some())
     }
 
     pub async fn drain(
@@ -477,18 +494,18 @@ mod tests {
     fn the_last_acceptance_starts_the_attempt() {
         let (mut book, attempt) = book(Instant::now() + Duration::from_secs(30));
 
-        assert!(matches!(book.accept("build:a"), Acceptance::Waiting));
+        assert!(matches!(book.accept("build:a", None), Acceptance::Waiting));
         let Acceptance::AllAccepted {
             attempt: started,
             workers,
             ..
-        } = book.accept("build:b")
+        } = book.accept("build:b", None)
         else {
             panic!("all accepted");
         };
         assert_eq!(started, attempt);
         assert_eq!(workers, vec!["w1".to_owned(), "w2".to_owned()]);
-        assert!(matches!(book.accept("eval:x"), Acceptance::NotMember));
+        assert!(matches!(book.accept("eval:x", None), Acceptance::NotMember));
     }
 
     #[test]
@@ -505,8 +522,8 @@ mod tests {
     fn an_attempt_every_member_accepted_is_never_overdue() {
         let now = Instant::now();
         let (mut book, _) = book(now);
-        book.accept("build:a");
-        book.accept("build:b");
+        book.accept("build:a", None);
+        book.accept("build:b", None);
 
         assert!(book.overdue(now + Duration::from_secs(1)).is_empty());
     }
@@ -552,8 +569,8 @@ mod tests {
     #[test]
     fn a_report_while_the_start_commits_waits_for_it() {
         let (mut book, attempt) = book(Instant::now());
-        book.accept("build:a");
-        book.accept("build:b");
+        book.accept("build:a", None);
+        book.accept("build:b", None);
         let lost = MemberReport::Aborted { job: None };
 
         assert!(matches!(

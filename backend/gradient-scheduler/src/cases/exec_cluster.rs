@@ -4,16 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::exec_job::{self, ExecJobStatus};
-use gradient_entity::ids::{ClusterJobId, EvaluationId};
+use gradient_entity::ids::{ClusterJobId, DispatchedJobId, EvaluationId};
 use gradient_entity::{dispatched_job, exec_job_attempt, exec_job_token};
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::WaitingReason;
-use gradient_types::exec::{ExecInventory, ExecSpec, hash_job_token};
-use gradient_wire::types::{Job, JobKind};
+use gradient_types::exec::{ExecInventory, ExecSpec, Phase, hash_job_token};
+use gradient_wire::types::{BuildFailureKind, ClusterPeer, ExecJob, Job, JobKind};
 
 use super::exec::{W1, W2, exec_shape, inventory, spec};
-use super::{SchedulerCase, w_exec, without_offers};
+use super::{SchedulerCase, failure, w_exec, without_offers};
 use crate::jobs::exec_job_key;
 use crate::test_jobs::allow_all;
 
@@ -116,6 +117,281 @@ pub(super) fn assigned_key(case: &SchedulerCase, worker: &str) -> String {
         panic!("{worker} got one cluster member, got {assigned:?}");
     };
     key.clone()
+}
+
+const GUEST_ADDRESSES: [&str; 2] = ["10.233.0.2", "10.234.0.2"];
+
+pub(super) struct StartedNode {
+    pub node: usize,
+    pub worker: &'static str,
+    pub key: String,
+    pub assignment: DispatchedJobId,
+    pub job: Box<ExecJob>,
+}
+
+pub(super) async fn start_pair(case: &SchedulerCase) -> Vec<StartedNode> {
+    place_pair(case).await;
+    let rows = node_rows(case).await;
+    let mut started = Vec::new();
+    for worker in [W1, W2] {
+        let key = assigned_key(case, worker);
+        let (membership, job) = case.take_cluster_job(worker, &key).await;
+        let Job::Exec(job) = job else {
+            panic!("{key} is an exec job")
+        };
+        let node = rows
+            .iter()
+            .position(|row| exec_job_key(row.id) == key)
+            .expect("a node key");
+        started.push(StartedNode {
+            node,
+            worker,
+            key,
+            assignment: membership.assignment_id,
+            job,
+        });
+    }
+    started.sort_by_key(|started| started.node);
+    for node in &started {
+        case.accept_at(node.worker, &node.key, GUEST_ADDRESSES[node.node])
+            .await;
+    }
+    started
+}
+
+fn started_roster(signals: Vec<SessionSignal>) -> Option<Vec<ClusterPeer>> {
+    without_offers(signals)
+        .into_iter()
+        .find_map(|signal| match signal {
+            SessionSignal::StartCluster { roster, .. } => Some(roster),
+            _ => None,
+        })
+}
+
+fn aborts_cluster(signals: Vec<SessionSignal>) -> bool {
+    signals
+        .iter()
+        .any(|signal| matches!(signal, SessionSignal::AbortCluster { .. }))
+}
+
+async fn statuses(case: &SchedulerCase) -> Vec<(ExecJobStatus, i32)> {
+    node_rows(case)
+        .await
+        .iter()
+        .map(|row| (row.status, row.retries_left))
+        .collect()
+}
+
+#[tokio::test]
+async fn the_roster_names_each_guest_address() {
+    let (case, _) = with_queued_cluster(pair_spec(1, false)).await;
+    connect_pair(&case).await;
+
+    let started = start_pair(&case).await;
+
+    let roster = started_roster(case.signals(started[0].worker)).expect("after 1: StartCluster");
+    assert_eq!(
+        roster
+            .iter()
+            .map(|peer| (peer.index, peer.endpoint.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![(0, Some(GUEST_ADDRESSES[0])), (1, Some(GUEST_ADDRESSES[1]))],
+        "after 1: the roster"
+    );
+    let mut addresses: Vec<Option<String>> = case
+        .db
+        .rows::<exec_job_attempt::Entity>()
+        .await
+        .into_iter()
+        .map(|attempt| attempt.guest_address)
+        .collect();
+    addresses.sort();
+    assert_eq!(
+        addresses,
+        vec![
+            Some(GUEST_ADDRESSES[0].to_owned()),
+            Some(GUEST_ADDRESSES[1].to_owned())
+        ],
+        "after 1: the attempts"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn one_failed_node_restarts_both_from_their_last_phase() {
+    let (case, cluster) = with_queued_cluster(pair_spec(1, false)).await;
+    connect_pair(&case).await;
+    let started = start_pair(&case).await;
+    for node in &started {
+        let name = format!("epoch-{}", node.node);
+        case.scheduler
+            .handle_exec_phase(node.worker, &node.key, name, vec![1])
+            .await;
+    }
+    case.signals(started[0].worker);
+
+    let failed = &started[1];
+    case.fail(
+        failed.worker,
+        &failed.key,
+        failed.assignment,
+        failure(BuildFailureKind::Permanent),
+    )
+    .await;
+
+    assert!(
+        aborts_cluster(case.signals(started[0].worker)),
+        "after 1: node 0's worker got AbortCluster"
+    );
+    assert_eq!(
+        statuses(&case).await,
+        vec![(ExecJobStatus::Queued, 0), (ExecJobStatus::Queued, 0)],
+        "after 1: both nodes queued with the retry spent"
+    );
+    let row = case.cluster(cluster).await;
+    assert_eq!(
+        (row.status, row.attempts_outside_budget),
+        (ClusterJobStatus::Queued, 1),
+        "after 1: the cluster job"
+    );
+
+    let restarted = start_pair(&case).await;
+    for node in &restarted {
+        assert_eq!(
+            node.job.context.last_phase,
+            Some(Phase {
+                name: format!("epoch-{}", node.node),
+                payload: vec![1]
+            }),
+            "after 2: node {} starts from its phase",
+            node.node
+        );
+    }
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn keep_running_lets_node_0_finish_and_the_job_fails() {
+    let (case, cluster) = with_queued_cluster(pair_spec(1, true)).await;
+    connect_pair(&case).await;
+    let started = start_pair(&case).await;
+    case.signals(started[0].worker);
+
+    let (master, failed) = (&started[0], &started[1]);
+    case.fail(
+        failed.worker,
+        &failed.key,
+        failed.assignment,
+        failure(BuildFailureKind::Permanent),
+    )
+    .await;
+    assert!(
+        !aborts_cluster(case.signals(master.worker)),
+        "after 1: node 0 keeps running"
+    );
+    assert_eq!(
+        node_rows(&case).await[0].status,
+        ExecJobStatus::Starting,
+        "after 1: node 0"
+    );
+
+    case.complete(master.worker, &master.key, master.assignment, Vec::new(), 0)
+        .await;
+
+    assert_eq!(
+        statuses(&case)
+            .await
+            .into_iter()
+            .map(|(status, _)| status)
+            .collect::<Vec<_>>(),
+        vec![ExecJobStatus::Completed, ExecJobStatus::Failed],
+        "after 2: the nodes"
+    );
+    assert_eq!(
+        case.cluster(cluster).await.status,
+        ClusterJobStatus::Failed,
+        "after 2: the cluster job"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_lost_node_restarts_until_the_budget_is_spent() {
+    let (case, _) = with_queued_cluster(pair_spec(1, false)).await;
+    connect_pair(&case).await;
+
+    for loss in 1..=4 {
+        let started = start_pair(&case).await;
+        let lost = started[1].worker;
+        case.disconnect(lost).await;
+        let expected = if loss < 4 {
+            vec![(ExecJobStatus::Queued, 1), (ExecJobStatus::Queued, 1)]
+        } else {
+            vec![(ExecJobStatus::Failed, 1), (ExecJobStatus::Failed, 1)]
+        };
+        assert_eq!(statuses(&case).await, expected, "after loss {loss}");
+        case.connect(lost, w_exec(pair_inventory()).zone(ZONE), &[])
+            .await;
+    }
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn aborting_a_running_cluster_aborts_both_nodes() {
+    let (case, cluster) = with_queued_cluster(pair_spec(1, false)).await;
+    connect_pair(&case).await;
+    let started = start_pair(&case).await;
+    for node in &started {
+        case.signals(node.worker);
+    }
+
+    let aborted = case
+        .scheduler
+        .abort_exec_job(node_rows(&case).await[0].id)
+        .await
+        .expect("the abort runs");
+
+    assert!(aborted, "after 1: the job was open");
+    for node in &started {
+        assert!(
+            case.signals(node.worker).iter().any(
+                |signal| matches!(signal, SessionSignal::Abort { job_id, .. } if *job_id == node.key)
+            ),
+            "after 1: {} was told to abort {}",
+            node.worker,
+            node.key
+        );
+    }
+    assert!(
+        statuses(&case)
+            .await
+            .iter()
+            .all(|(status, _)| *status == ExecJobStatus::Aborted),
+        "after 1: both nodes are aborted"
+    );
+
+    for node in &started {
+        case.fail(
+            node.worker,
+            &node.key,
+            node.assignment,
+            failure(BuildFailureKind::Aborted),
+        )
+        .await;
+    }
+    assert_eq!(
+        case.cluster(cluster).await.status,
+        ClusterJobStatus::Aborted,
+        "after 2: the cluster job"
+    );
+    assert!(
+        statuses(&case)
+            .await
+            .iter()
+            .all(|(status, _)| *status == ExecJobStatus::Aborted),
+        "after 2: no restart"
+    );
+    case.finish().await;
 }
 
 #[tokio::test]

@@ -7,7 +7,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gradient_db::scheduling::assignment_record::ClaimGate;
+use gradient_db::exec_jobs::attempts;
+use gradient_db::scheduling::assignment_record::{ClaimGate, exec_job_of_key};
 use gradient_db::scheduling::cluster::ClusterClaim;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::ids::{ClusterAttemptId, ClusterJobId};
@@ -41,6 +42,7 @@ impl Pass for ClusterDispatch {
 }
 
 use super::assignment::{assigned_transition, assignment_row};
+use super::exec_status::lose_open_attempt;
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::cluster::{
@@ -209,7 +211,8 @@ impl Scheduler {
         seats: &[CommittedSeat],
     ) {
         let timeout = self.db.config.scheduler.cluster_prepare_timeout_secs.get();
-        let roster = seats
+        let exec = ExecCluster::of(seats.iter().map(|s| &s.job));
+        let mut roster: Vec<ClusterPeer> = seats
             .iter()
             .map(|s| ClusterPeer {
                 role: s.role.clone(),
@@ -219,6 +222,9 @@ impl Scheduler {
                 endpoint: s.endpoint.clone(),
             })
             .collect();
+        if exec.is_some() {
+            roster.sort_by_key(|peer| peer.index);
+        }
         let members = seats
             .iter()
             .map(|s| AttemptMember {
@@ -251,7 +257,7 @@ impl Scheduler {
                     resolved_at: None,
                     split: seats.iter().any(|s| is_split_role(&s.role)),
                     planned: false,
-                    exec: ExecCluster::of(seats.iter().map(|s| &s.job)),
+                    exec,
                 },
             )
             .await;
@@ -350,13 +356,16 @@ impl Scheduler {
         self.signal_workers(signals).await;
     }
 
-    pub async fn cluster_member_accepted(&self, job_id: &str) {
+    pub async fn cluster_member_accepted(&self, job_id: &str, endpoint: Option<String>) {
+        if let Some(address) = &endpoint {
+            self.record_guest_address(job_id, address).await;
+        }
         let Acceptance::AllAccepted {
             cluster,
             attempt,
             workers,
             roster,
-        } = self.cluster.book.accept(job_id).await
+        } = self.cluster.book.accept(job_id, endpoint).await
         else {
             return;
         };
@@ -393,6 +402,21 @@ impl Scheduler {
                 warn!(error = %e, %attempt, "cluster start failed");
                 self.fail_prepare(attempt).await;
             }
+        }
+    }
+
+    async fn record_guest_address(&self, job_id: &str, address: &str) {
+        let Some(exec_job) = exec_job_of_key(job_id) else {
+            return;
+        };
+        let db = &self.db.worker_db;
+        let recorded = match attempts::open_of_job(db, exec_job).await {
+            Ok(Some(open)) => attempts::set_guest_address(db, open.id, address).await,
+            Ok(None) => Ok(()),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = recorded {
+            warn!(error = %e, %job_id, "recording the guest address of an exec node failed");
         }
     }
 
@@ -449,7 +473,32 @@ impl Scheduler {
             signals.push((m.worker.clone(), abort));
         }
         self.signal_workers(signals).await;
-        self.restore_parked(attempt, state).await;
+        if state.exec.is_some() {
+            self.drop_exec_attempt(attempt, &state).await;
+        } else {
+            self.restore_parked(attempt, state).await;
+        }
+    }
+
+    async fn drop_exec_attempt(&self, attempt: ClusterAttemptId, state: &AttemptState) {
+        let seats = state
+            .members
+            .iter()
+            .map(|m| (m.worker.clone(), m.job_id.clone()))
+            .collect();
+        if let Err(e) = self
+            .call(|reply| SchedulerMsg::DropCluster { seats, reply })
+            .await
+        {
+            warn!(error = %e, %attempt, "dropping an exec cluster attempt did not reach the scheduler");
+        }
+        for exec_job in state
+            .members
+            .iter()
+            .filter_map(|m| exec_job_of_key(&m.job_id))
+        {
+            lose_open_attempt(&self.db, &self.graph, exec_job).await;
+        }
     }
 
     pub async fn forward_cluster_signal(

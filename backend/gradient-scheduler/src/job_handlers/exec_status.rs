@@ -147,8 +147,13 @@ impl Scheduler {
             return Ok(false);
         }
 
-        self.cancel_jobs(row.evaluation, vec![exec_job_key(job)])
-            .await;
+        let keys = report
+            .aborted_exec_jobs
+            .iter()
+            .copied()
+            .map(exec_job_key)
+            .collect();
+        self.cancel_jobs(row.evaluation, keys).await;
         Ok(true)
     }
 
