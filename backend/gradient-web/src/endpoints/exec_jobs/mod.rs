@@ -6,14 +6,18 @@
 
 pub mod actions;
 pub mod log;
+pub mod outputs;
+pub mod pull_requests;
 pub mod query;
 pub mod terminal;
 
 pub use self::actions::post_exec_job_abort;
 pub use self::log::get_exec_job_log;
+pub use self::outputs::{ExecJobOutputView, get_exec_job_output, list_exec_job_outputs};
+pub use self::pull_requests::{ExecJobPullRequestView, list_exec_job_pull_requests};
 pub use self::query::{
-    ExecJobAttemptView, ExecJobPhaseView, ExecJobResponse, ExecJobSummary, get_exec_job,
-    list_evaluation_exec_jobs,
+    ExecJobAttemptView, ExecJobPhaseView, ExecJobResponse, ExecJobSummary, ExecJobTokenView,
+    StartedEvaluationView, get_exec_job, list_evaluation_exec_jobs,
 };
 
 use crate::access::is_project_member;

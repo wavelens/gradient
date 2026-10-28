@@ -11,7 +11,10 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
-use gradient_db::exec_jobs::reads::{self, ExecJobDetail, ExecJobRow};
+use gradient_db::exec_jobs::outputs;
+use gradient_db::exec_jobs::reads::{self, ExecJobDetail, ExecJobRow, StartedEvaluation};
+use gradient_db::exec_jobs::tokens::JobTokenRow;
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_types::exec::{DeviceRequest, ExecSpec};
@@ -41,6 +44,22 @@ pub struct ExecJobPhaseView {
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct ExecJobTokenView {
+    pub attempt: i32,
+    pub created_at: NaiveDateTime,
+    pub expires_at: NaiveDateTime,
+    pub revoked: bool,
+}
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct StartedEvaluationView {
+    pub evaluation: EvaluationId,
+    pub task: String,
+    pub status: EvaluationStatus,
+    pub created_at: NaiveDateTime,
+}
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct ExecJobResponse {
     pub id: ExecJobId,
     pub status: ExecJobStatus,
@@ -60,6 +79,9 @@ pub struct ExecJobResponse {
     pub worker: Option<String>,
     pub attempts: Vec<ExecJobAttemptView>,
     pub phases: Vec<ExecJobPhaseView>,
+    pub tokens: Vec<ExecJobTokenView>,
+    pub started_evaluations: Vec<StartedEvaluationView>,
+    pub outputs_size: i64,
     pub ssh_command: Option<String>,
     pub forward_commands: Vec<String>,
 }
@@ -105,12 +127,36 @@ fn ssh_access(
     }
 }
 
-fn response(ctx: ExecJobAccessContext, config: &RuntimeConfig) -> ExecJobResponse {
+fn token_view(row: JobTokenRow) -> ExecJobTokenView {
+    ExecJobTokenView {
+        attempt: row.attempt_number,
+        created_at: row.created_at,
+        expires_at: row.expires_at,
+        revoked: row.revoked,
+    }
+}
+
+fn started_evaluation_view(row: StartedEvaluation) -> StartedEvaluationView {
+    StartedEvaluationView {
+        evaluation: row.evaluation,
+        task: row.task,
+        status: row.status,
+        created_at: row.created_at,
+    }
+}
+
+fn response(
+    ctx: ExecJobAccessContext,
+    outputs_size: i64,
+    config: &RuntimeConfig,
+) -> ExecJobResponse {
     let ExecJobDetail {
         job,
         entry_point,
         attempts,
         phases,
+        tokens,
+        started_evaluations,
         ..
     } = ctx.detail;
     let spec = spec_of(&job);
@@ -161,6 +207,12 @@ fn response(ctx: ExecJobAccessContext, config: &RuntimeConfig) -> ExecJobRespons
             })
             .collect(),
         phases,
+        tokens: tokens.into_iter().map(token_view).collect(),
+        started_evaluations: started_evaluations
+            .into_iter()
+            .map(started_evaluation_view)
+            .collect(),
+        outputs_size,
         ssh_command,
         forward_commands,
     }
@@ -188,7 +240,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
     operation_id = "getExecJob",
     tag = "exec-jobs",
     summary = "Get exec job",
-    description = "Returns an exec job with its status, wait reason, requested labels and devices, attempts and phases. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns an exec job with its status, wait reason, requested labels and devices, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Exec job", body = ExecJobResponse), WebError)
 )]
@@ -199,7 +251,12 @@ pub async fn get_exec_job(
     Path(job): Path<ExecJobId>,
 ) -> WebResult<Json<BaseResponse<ExecJobResponse>>> {
     let ctx = ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
-    Ok(ok_json(response(ctx, &state.config)))
+    let outputs_size = outputs::of_job(&state.web_db, job)
+        .await?
+        .iter()
+        .map(|output| output.size)
+        .sum();
+    Ok(ok_json(response(ctx, outputs_size, &state.config)))
 }
 
 #[utoipa::path(
