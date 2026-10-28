@@ -6,8 +6,9 @@
 
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
+import { environment } from '@environments/environment';
 import { ApiService } from './api.service';
-import { ExecJobResponse, ExecJobSummary } from '@core/models';
+import { ExecJobOutputView, ExecJobPullRequestView, ExecJobResponse, ExecJobSummary } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class ExecJobsService {
@@ -24,6 +25,19 @@ export class ExecJobsService {
   log(job: string, attempt?: number): Observable<string> {
     const query = attempt === undefined ? '' : `?attempt=${attempt}`;
     return this.api.get<string>(`exec-jobs/${job}/log${query}`);
+  }
+
+  outputs(job: string): Observable<ExecJobOutputView[]> {
+    return this.api.get<ExecJobOutputView[]>(`exec-jobs/${job}/outputs`);
+  }
+
+  outputUrl(job: string, path: string): string {
+    const encoded = path.split('/').map(encodeURIComponent).join('/');
+    return `${environment.apiUrl}/exec-jobs/${job}/outputs/${encoded}`;
+  }
+
+  pullRequests(job: string): Observable<ExecJobPullRequestView[]> {
+    return this.api.get<ExecJobPullRequestView[]>(`exec-jobs/${job}/pull-requests`);
   }
 
   abort(job: string): Observable<string> {

@@ -18,7 +18,34 @@ h3 { margin: $space-section 0 $spacing-sm; font-size: $font-size-md; }
   .needs { display: inline-flex; flex-wrap: wrap; gap: $spacing-xs; }
 }
 
-gr-table.attempts { display: block; overflow-x: auto; }
+gr-table.attempts, gr-table.tokens { display: block; overflow-x: auto; }
+
+.links {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li { display: flex; flex-wrap: wrap; align-items: center; gap: $spacing-xs $spacing-sm; }
+  .branch { overflow-wrap: anywhere; }
+}
+
+.phase-marker {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin: $spacing-sm 0;
+  color: var(--gr-text-muted);
+  font-weight: 600;
+
+  &::before, &::after {
+    flex: 1;
+    border-top: 1px solid var(--gr-border-subtle);
+    content: '';
+  }
+}
 
 .phases {
   display: flex;

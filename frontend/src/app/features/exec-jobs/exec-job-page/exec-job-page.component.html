@@ -58,6 +58,59 @@
       </ol>
     }
 
+    <app-exec-job-outputs [job]="job" />
+
+    @if (pullRequests().length > 0) {
+      <h3>Pull requests</h3>
+      <ul class="links">
+        @for (pr of pullRequests(); track pr.url) {
+          <li>
+            <a [href]="pr.url" target="_blank" rel="noopener">#{{ pr.number }}</a>
+            <span class="mono branch">{{ pr.branch }}</span>
+            <span class="muted">{{ pr.integration }}, {{ time(pr.created_at) }}</span>
+          </li>
+        }
+      </ul>
+    }
+
+    @if (job.started_evaluations.length > 0) {
+      <h3>Started evaluations</h3>
+      <ul class="links">
+        @for (started of job.started_evaluations; track started.evaluation) {
+          <li>
+            <gr-status-icon size="sm" [phase]="evaluationPhase(started.status)" [label]="started.status" />
+            <a [routerLink]="['/project', job.project, 'log', started.evaluation]">{{ started.task }}</a>
+            <span class="muted">{{ time(started.created_at) }}</span>
+          </li>
+        }
+      </ul>
+    }
+
+    @if (job.tokens.length > 0) {
+      <h3>Job tokens</h3>
+      <gr-table class="tokens">
+        <thead>
+          <tr><th>Attempt</th><th>Created</th><th>Expires</th><th>State</th></tr>
+        </thead>
+        <tbody>
+          @for (token of job.tokens; track token.attempt) {
+            <tr>
+              <td>{{ token.attempt }}</td>
+              <td>{{ time(token.created_at) }}</td>
+              <td>{{ day(token.expires_at) }} {{ time(token.expires_at) }}</td>
+              <td>
+                @if (token.revoked) {
+                  <gr-badge severity="danger">revoked</gr-badge>
+                } @else {
+                  <gr-badge severity="success">active</gr-badge>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </gr-table>
+    }
+
     @if (terminalReachable()) {
       <gr-tab-switch class="views" ariaLabel="Job output" [options]="views" optionLabel="label" optionValue="value"
                      [ngModel]="view()" (ngModelChange)="showView($event)" />
@@ -84,7 +137,7 @@
         </div>
       }
     } @else {
-      <pre class="log">{{ log() || 'No output yet.' }}</pre>
+      <pre class="log">@for (segment of logSegments(); track $index) {@if (segment.kind === 'phase') {<span class="phase-marker" role="separator">{{ segment.name }}</span>} @else {<span>{{ segment.text }}</span>}} @empty {No output yet.}</pre>
     }
   } @else if (!errorMessage()) {
     <gr-loading-spinner message="Loading exec job..." />
