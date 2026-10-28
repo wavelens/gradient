@@ -5,6 +5,11 @@
  */
 
 pub mod agent_client;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "exec jobs carry channels from the next commit on")
+)]
+pub mod channels;
 pub mod checkout;
 pub mod context;
 pub mod host;
