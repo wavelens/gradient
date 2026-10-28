@@ -293,6 +293,7 @@ pub const MAX_PHASE_PAYLOAD: usize = 65536;
 
 pub const TREE_PATCH_OUTPUT: &str = "gradient/tree.patch";
 pub const CONTINUE_OUTPUT: &str = "gradient/continue.json";
+pub const MAX_CONTINUE_FILE_BYTES: usize = 65536;
 pub const MAX_OUTPUT_PATH_BYTES: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

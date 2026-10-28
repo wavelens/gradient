@@ -17,7 +17,7 @@ use nix::unistd::Pid;
 use tokio::fs::File;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{Mutex, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::context::{UnknownPlaceholder, resolve_placeholders};
@@ -90,7 +90,7 @@ pub fn as_program_user(groups: &[String], terminal: bool) -> Command {
 
 pub async fn run(
     prepared: PreparedJob,
-    output: &mut OutputLog,
+    output: &Mutex<OutputLog>,
     started: oneshot::Sender<Option<ProgramTerminal>>,
     kill: CancellationToken,
 ) -> i32 {
@@ -123,7 +123,7 @@ pub async fn run(
 
 async fn run_program(
     mut program: Command,
-    output: &mut OutputLog,
+    output: &Mutex<OutputLog>,
     redactor: &SecretRedactor,
     started: oneshot::Sender<Option<ProgramTerminal>>,
     kill: &CancellationToken,
@@ -142,7 +142,7 @@ async fn run_program(
 
 async fn run_program_on_terminal(
     program: Command,
-    output: &mut OutputLog,
+    output: &Mutex<OutputLog>,
     redactor: &SecretRedactor,
     started: oneshot::Sender<Option<ProgramTerminal>>,
     kill: &CancellationToken,
@@ -159,7 +159,7 @@ async fn run_program_on_terminal(
     let (exit, exit_watch) = watch::channel(None);
     let _ = started.send(Some(ProgramTerminal::new(
         master,
-        output.readers(),
+        output.lock().await.readers(),
         exit_watch,
     )));
     let status = stream_streams_until_exit(
@@ -179,7 +179,7 @@ async fn run_program_on_terminal(
 async fn run_script(
     path: &str,
     env: &BTreeMap<String, String>,
-    output: &mut OutputLog,
+    output: &Mutex<OutputLog>,
     redactor: &SecretRedactor,
     stop: impl Future<Output = ()>,
 ) -> i32 {
@@ -214,7 +214,7 @@ fn spawn_piped(command: &mut Command) -> std::io::Result<Child> {
 
 async fn stream_until_exit(
     mut child: Child,
-    output: &mut OutputLog,
+    output: &Mutex<OutputLog>,
     redactor: &SecretRedactor,
     stop: impl Future<Output = ()>,
 ) -> std::io::Result<ExitStatus> {
@@ -226,7 +226,7 @@ async fn stream_streams_until_exit(
     mut child: Child,
     stdout: Option<impl AsyncRead + Unpin>,
     stderr: Option<impl AsyncRead + Unpin>,
-    output: &mut OutputLog,
+    output: &Mutex<OutputLog>,
     redactor: &SecretRedactor,
     stop: impl Future<Output = ()>,
 ) -> std::io::Result<ExitStatus> {
@@ -276,7 +276,7 @@ type MaskedSource<P> = (P, StreamRedactor);
 async fn pump(
     stdout: Option<MaskedSource<impl AsyncRead + Unpin>>,
     stderr: Option<MaskedSource<impl AsyncRead + Unpin>>,
-    output: &mut OutputLog,
+    output: &Mutex<OutputLog>,
 ) {
     let (mut stdout, mut stderr) = (stdout, stderr);
     let mut out_buf = vec![0u8; 8192];
@@ -293,7 +293,7 @@ async fn keep<P>(
     read: Option<usize>,
     buf: &[u8],
     source: &mut Option<MaskedSource<P>>,
-    output: &mut OutputLog,
+    output: &Mutex<OutputLog>,
 ) {
     let Some((_, redactor)) = source.as_mut() else {
         return;
@@ -307,7 +307,7 @@ async fn keep<P>(
         }
     };
     if !masked.is_empty()
-        && let Err(e) = output.append(&masked).await
+        && let Err(e) = output.lock().await.append(&masked).await
     {
         tracing::warn!(error = %e, "cannot keep program output");
     }
@@ -342,8 +342,13 @@ pub fn exit_code(status: std::io::Result<ExitStatus>) -> i32 {
     }
 }
 
-async fn note(output: &mut OutputLog, line: &str) {
-    if let Err(e) = output.append(format!("{line}\n").as_bytes()).await {
+async fn note(output: &Mutex<OutputLog>, line: &str) {
+    if let Err(e) = output
+        .lock()
+        .await
+        .append(format!("{line}\n").as_bytes())
+        .await
+    {
         tracing::warn!(error = %e, "cannot keep program output");
     }
 }
@@ -359,7 +364,7 @@ mod tests {
     use gradient_wire::guest::{ContextLayers, RunJob};
     use tokio::io::AsyncWriteExt;
     use tokio::process::{Child, Command};
-    use tokio::sync::oneshot;
+    use tokio::sync::{Mutex, oneshot};
     use tokio::time::timeout;
     use tokio_util::sync::CancellationToken;
 
@@ -440,10 +445,11 @@ mod tests {
         assert_eq!(job_var, Some(OsStr::new("j1")));
     }
 
-    async fn output_log(dir: &tempfile::TempDir) -> OutputLog {
-        OutputLog::create(&dir.path().join("output.log"), 1024 * 1024)
+    async fn output_log(dir: &tempfile::TempDir) -> Mutex<OutputLog> {
+        let log = OutputLog::create(&dir.path().join("output.log"), 1024 * 1024)
             .await
-            .expect("create")
+            .expect("create");
+        Mutex::new(log)
     }
 
     fn shell(script: &str) -> Child {
@@ -453,13 +459,13 @@ mod tests {
     #[tokio::test]
     async fn program_output_reaches_the_log_masked() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut output = output_log(&dir).await;
+        let output = output_log(&dir).await;
         let (mut writer, reader) = tokio::io::duplex(64);
         let redactor = SecretRedactor::new([("wandb-token", b"s3cr3t-value".as_slice())]);
         let pumped = pump(
             Some((reader, redactor.stream())),
             None::<(tokio::io::DuplexStream, _)>,
-            &mut output,
+            &output,
         );
         let write = async {
             writer.write_all(b"token=s3cr3t").await.unwrap();
@@ -480,14 +486,14 @@ mod tests {
     #[tokio::test]
     async fn a_background_process_holding_the_pipes_does_not_hold_the_exit() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut output = output_log(&dir).await;
+        let output = output_log(&dir).await;
         let child = shell("sleep 60 & echo done; exit 3");
 
         let status = timeout(
             Duration::from_secs(20),
             stream_until_exit(
                 child,
-                &mut output,
+                &output,
                 &SecretRedactor::default(),
                 std::future::pending(),
             ),
@@ -501,14 +507,14 @@ mod tests {
     #[tokio::test]
     async fn a_kill_stops_the_whole_process_group() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut output = output_log(&dir).await;
+        let output = output_log(&dir).await;
         let child = shell("sleep 60 & sleep 60");
 
         let status = timeout(
             Duration::from_secs(20),
             stream_until_exit(
                 child,
-                &mut output,
+                &output,
                 &SecretRedactor::default(),
                 tokio::time::sleep(Duration::from_millis(200)),
             ),
@@ -522,7 +528,7 @@ mod tests {
     #[tokio::test]
     async fn a_kill_before_the_program_starts_is_a_sigterm_exit() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut output = output_log(&dir).await;
+        let output = output_log(&dir).await;
         let kill = CancellationToken::new();
         kill.cancel();
         let (started, started_rx) = oneshot::channel();
@@ -533,7 +539,7 @@ mod tests {
             redactor: SecretRedactor::default(),
         };
 
-        assert_eq!(run(prepared, &mut output, started, kill).await, KILLED);
+        assert_eq!(run(prepared, &output, started, kill).await, KILLED);
         assert!(started_rx.await.is_err());
     }
 }
