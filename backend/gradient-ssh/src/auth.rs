@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::gateway_user::parse_login;
 use crate::session::{Session, SshHandles};
 use gradient_db::lookup::by_id;
 use gradient_types::*;
@@ -21,11 +22,15 @@ pub fn fingerprint(key: &PublicKey) -> String {
 
 pub async fn authorize(
     handles: &SshHandles,
-    project_name: &str,
+    login: &str,
     fingerprint: &str,
 ) -> Result<Arc<Session>, Rejected> {
-    match load_session(handles, project_name, fingerprint).await {
-        Ok(Some(session)) => Ok(Arc::new(session)),
+    let login = parse_login(login).map_err(|_| Rejected)?;
+    match load_session(handles, &login.project, fingerprint).await {
+        Ok(Some(session)) => Ok(Arc::new(Session {
+            target: login.target,
+            ..session
+        })),
         Ok(None) => Err(Rejected),
         Err(error) => {
             tracing::warn!(%error, "ssh login lookup failed");
@@ -104,8 +109,7 @@ mod tests {
             .into_connection();
         let state = TestState::new().web_db(db).build();
 
-        let rejected =
-            authorize(&SshHandles::from_state(&state), "project", "SHA256:unknown").await;
+        let rejected = authorize(&SshHandles::for_tests(&state), "project", "SHA256:unknown").await;
         assert!(rejected.is_err());
     }
 
@@ -124,7 +128,7 @@ mod tests {
         let state = TestState::new().web_db(db).build();
 
         let rejected = authorize(
-            &SshHandles::from_state(&state),
+            &SshHandles::for_tests(&state),
             "someone-elses",
             "SHA256:known",
         )
@@ -152,7 +156,7 @@ mod tests {
         let state = TestState::new().web_db(db.clone()).build();
 
         assert!(
-            authorize(&SshHandles::from_state(&state), "project", "SHA256:known")
+            authorize(&SshHandles::for_tests(&state), "project", "SHA256:known")
                 .await
                 .is_err()
         );

@@ -25,7 +25,8 @@ gradient-db                    = { workspace = true }
 gradient-derivation            = { workspace = true }
 gradient-entity                = { workspace = true }
 gradient-graph                 = { workspace = true }
-gradient-proto                 = { workspace = true }
+gradient-pool                  = { workspace = true }
+gradient-proto                = { workspace = true }
 gradient-scheduler             = { workspace = true }
 gradient-sources               = { workspace = true }
 gradient-storage               = { workspace = true }

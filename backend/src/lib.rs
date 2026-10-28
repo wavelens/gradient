@@ -94,7 +94,7 @@ pub async fn run(cli: Cli, extensions: ServerExtensions) -> std::io::Result<()> 
 
     if state.config.ssh.enable {
         info!("Starting SSH service");
-        gradient_ssh::start(Arc::clone(&state)).await?;
+        gradient_ssh::start(Arc::clone(&state), Arc::clone(&scheduler)).await?;
     }
 
     info!("Starting web service");

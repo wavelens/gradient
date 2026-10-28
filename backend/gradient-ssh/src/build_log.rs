@@ -327,7 +327,7 @@ mod tests {
             .append_query_results([Vec::<gradient_entity::build_log_chunk::Model>::new()])
             .into_connection();
         let session = Session::open(
-            SshHandles::from_state(&TestState::new().web_db(db).build()),
+            SshHandles::for_tests(&TestState::new().web_db(db).build()),
             gradient_fixtures::rows::user(),
             gradient_fixtures::rows::project(),
             0,

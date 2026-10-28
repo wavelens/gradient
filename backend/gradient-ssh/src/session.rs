@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::gateway_user::GatewayTarget;
 use gradient_core::ServerState;
 use gradient_db::DbContext;
 use gradient_graph::Graph;
+use gradient_scheduler::Scheduler;
 use gradient_storage::admission::UploadAdmission;
 use gradient_types::permissions::{Permission, PermissionMask, mask_grants};
 use gradient_types::*;
@@ -18,15 +20,22 @@ pub struct SshHandles {
     pub db: DbContext,
     pub graph: Arc<Graph>,
     pub upload_admission: Arc<UploadAdmission>,
+    pub scheduler: Arc<Scheduler>,
 }
 
 impl SshHandles {
-    pub fn from_state(state: &ServerState) -> Self {
+    pub fn from_state(state: &ServerState, scheduler: Arc<Scheduler>) -> Self {
         Self {
             db: state.db(),
             graph: Arc::clone(&state.graph),
             upload_admission: Arc::clone(&state.memory.upload_admission),
+            scheduler,
         }
+    }
+
+    #[cfg(test)]
+    pub fn for_tests(state: &Arc<ServerState>) -> Self {
+        Self::from_state(state, Arc::new(Scheduler::new(Arc::clone(state))))
     }
 }
 
@@ -38,6 +47,7 @@ pub struct Session {
     pub caches: Vec<CacheId>,
     pub mapper: StorePathMapper,
     pub closed: CancellationToken,
+    pub target: Option<GatewayTarget>,
 }
 
 impl Session {
@@ -57,6 +67,7 @@ impl Session {
             permissions,
             caches,
             mapper,
+            target: None,
         })
     }
 

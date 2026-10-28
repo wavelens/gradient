@@ -467,7 +467,7 @@ mod tests {
 
     async fn session(db: sea_orm::DatabaseConnection) -> Session {
         Session::open(
-            SshHandles::from_state(&TestState::new().web_db(db).build()),
+            SshHandles::for_tests(&TestState::new().web_db(db).build()),
             gradient_fixtures::rows::user(),
             gradient_fixtures::rows::project(),
             0,
