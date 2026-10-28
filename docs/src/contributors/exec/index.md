@@ -51,10 +51,11 @@ flowchart LR
 - `ExecSpec::requirement_on` can build the `ExecRequirement` from the spec and the worker `defaults`. Defaults only fill fields the app left out.
 - `ExecInventory.allow` can restrict every field. Requirements outside `allow` make the worker unfit, without a downgrade.
 - `ExecSpec::limits_on` can clamp `timeout`, `maxSilent` and `retries` to the caps of `allow` at dispatch.
-- Placed jobs hold their devices until the end of the attempt. Held devices are never free, even before the next `WorkerMetrics`.
+- Placed jobs hold their devices and guest size until the end of the attempt, see [Guest Sizes](#guest-sizes). Held parts are never free, even before the next `WorkerMetrics`.
 - Exec jobs skip the RAM fit rule. Queue age orders the matching workers.
+- Exec jobs count as `RamNeed::Predicted(memory_mb)` for builds placed on the same worker.
 - Only workers without draining and with access to the job's project count, for placement and for wait reasons.
-- `WaitingReason::ExecWorkers` can name the unmet labels, devices, mounts, node count or custom image.
+- `WaitingReason::ExecWorkers` can name the unmet labels, devices, mounts, guest size, node count or custom image.
 - `ExecUnmet` can hold only the architecture when zero exec workers of the job's architecture connect.
 
 ### Multi-Node Jobs
@@ -186,7 +187,7 @@ flowchart LR
 | Guest unit | Transient `gradient-guest-<id>.service` in `gradient-guests.slice`, started over D-Bus |
 | Supervisor | Main process of the unit, `gradient-worker --guest-supervisor <dir>` as root with the worker's group |
 | Guest directory | `/var/lib/gradient-worker/guests/<id>/`, mode `0770` |
-| Files | `state.json`, `console.log`, `serial.sock`, `console.sock`, `api.sock`, `vsock.sock`, `control.sock`, `store.sock`, `work/`, `mounts/<name>.sock` |
+| Files | `state.json`, `console.log`, `serial.sock`, `console.sock`, `api.sock`, `vsock.sock`, `control.sock`, `store.sock`, `work.img`, `mounts/<name>.sock` |
 
 - Supervisors own cloud-hypervisor, every virtiofsd, the taps and the USB/IP bindings. Guests never belong to the worker process.
 - Workers drive the cloud-hypervisor API, the supervisor control socket and the agent over hybrid vsock.
@@ -208,7 +209,8 @@ flowchart LR
 | `vm.create`, `vm.boot` | Boot from `kernel`, `initrd` and `guest.json` of the image |
 | `vm.pause`, `vm.resume` | Warm guests |
 | `vm.add-device` | VFIO devices |
-| `vm.add-fs` | `/work` and mounts, one virtiofsd each |
+| `vm.add-disk` | `work.img` as `/work`, serial `work` |
+| `vm.add-fs` | Mounts, one virtiofsd each. `/work` for agents below guest protocol 5 |
 | `vm.add-net` | Tap on `exec.bridge` for networked jobs |
 | `vm.remove-device`, `vm.shutdown`, `vmm.shutdown` | Teardown |
 | `vm.info` | Paused check of a warm guest after a restart |
@@ -228,6 +230,32 @@ flowchart LR
 - Full subnets end the job with `no free guest address in exec.subnet`.
 - Guests resolve names through the forwarder on the bridge, or through `exec.nameservers`.
 - Teardown is always an explicit step. Dropped tasks leave the guest running.
+
+### Guest Sizes
+
+Guest sizes follow the device path. `GuestSize { cpus, memory_mb, disk_mb }` travels in `ExecSpec.guest` and `ExecRequirement.guest`.
+
+| Step | Part |
+|---|---|
+| Worker | `GuestBudget` in `gradient-vm/src/budget.rs` with the total from `ExecArgs::guest_budget`. `hold` returns a `BudgetHold` or `None` |
+| Report | `ExecInventory.guest_capacity` with `{ total, free }` per resource |
+| Server hold | `AssignedJob.guest` through `WorkerPool::hold_exec`, subtracted by `effective_free_amount` |
+| Fit | `guest_fits` in `fits_exec`, free for placement, total for wait reasons and pre-warm counts |
+
+- Old workers report all-zero capacity. Such workers fit every size.
+- Old servers send all-zero `ExecRequirement.guest`. Workers then boot the image size with the virtiofs `work` share.
+- Warm guests hold a `BudgetHold` of the image size. Refills start only when the budget can hold a boot.
+- `GuestPool::take` can hand out a warm guest only when `cpus` and `memory_mb` match. Other sizes boot cold from `GuestImage::sized`.
+- Missing budgets at boot end the attempt with `the worker has no guest budget left for this job`, a transient error.
+- Job holds drop in `retire` with the devices and the guest address.
+- Reattach operations adopt `GuestState.size` with `GuestBudget::adopt`, even above the total.
+
+`build_work_disk` in `gradient-worker/src/exec/work_disk.rs` can turn the checkout in `work-staging/` into `work.img`.
+
+1. A sparse image results from `mkfs.ext4 -q -F -L work -d <staging> work.img <diskMb>M`. Budget totals cover the full size, not the sparse one.
+2. A full image can fail the job with `the checkout does not fit in diskMb = <n>`. That error is permanent.
+3. Cleanup steps remove the staging directory. `vm.add-disk` can attach the image.
+4. The agent can mount `/dev/disk/by-id/virtio-work` as ext4 on `/work`, but only with `work_disk` in the guest setup.
 
 ### Worker Restart
 
@@ -264,7 +292,7 @@ Jobs with `passthru.gradient.image` boot a NixOS toplevel of their own. Placemen
 | `payload.kernel` | Canonical `<toplevel>/kernel`, a bzImage on x86_64 or an `Image` on aarch64 |
 | `payload.initramfs` | Canonical `<toplevel>/initrd` |
 | `payload.cmdline` | `init=<toplevel>/init` and the trimmed `<toplevel>/kernel-params` |
-| `cpus`, `memory.size` | From `guest.json` of the worker image |
+| `cpus`, `memory.size` | The job size, through `GuestImage::sized` of the worker image |
 | `memory.shared`, `fs`, `vsock`, `serial`, `console` | Same as a warm guest |
 
 - A boot wait can take up to `GUEST_BOOT_TIMEOUT` (120 s). Toplevels with no `etc/systemd/system/gradient-guest-agent.service` then fail with `guest image has no gradient agent, import the gradient.guest module`.
@@ -298,7 +326,7 @@ The agent `gradient-guest-agent` can accept the worker on vsock port 7000. Frame
 1. Resolve placeholders in `args` and `env`. Unknown placeholders fail the setup.
 2. Write `/run/gradient/context.json` and `/run/gradient/secrets/<name>` with mode `0400`. Write the CLI config `/home/gradient/.config/gradient/config.toml` with mode `0600`.
 3. Write `/run/gradient/phase-payload` for a job with an earlier phase.
-4. Mount the virtiofs shares.
+4. Mount the `/work` disk and the virtiofs shares.
 5. Configure the network and `/etc/resolv.conf`.
 6. Start the device bridges over vsock and attach USB devices.
 7. Execute `/etc/gradient/pre-script` as root. Start the program as `gradient` in `/work/<RunJob.flake_dir>`. Then run `/etc/gradient/post-script` as root.

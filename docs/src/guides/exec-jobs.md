@@ -69,7 +69,7 @@ services.gradient.worker = {
 };
 ```
 
-1.  A NixOS system for the guests. `gradient.guest.cpus`, `gradient.guest.memoryMb`, `gradient.guest.preScript` and `gradient.guest.postScript` tune every guest. Workers without `image` boot a plain guest image.
+1.  A NixOS system for the guests. `gradient.guest.preScript` and `gradient.guest.postScript` tune every guest. `gradient.guest.cpus` and `gradient.guest.memoryMb` size the warm guests, see [Guest Size](#guest-size). Workers without `image` boot a plain guest image.
 2.  Guests booted and paused ahead, waiting for a job.
 3.  Upper bound for warm guests for upcoming exec jobs on the server. Leave at `0` for a fixed `preWarm`.
 4.  Set exactly `vfio`, `dev` or `usb` per device. Bind each VFIO device to `vfio-pci` first.
@@ -109,6 +109,8 @@ apps.x86_64-linux.check = {
 ```nix
 passthru.gradient = {
   labels = [ "lab-a" ];
+  cpus = 32;
+  memoryMb = 131072;
   devices = [ "gpu:h100:8" "kvm" ]; # (1)!
   mounts = [ "datasets" ];
   network = true;
@@ -124,6 +126,9 @@ passthru.gradient = {
 
 | Field | Default | Effect |
 |---|---|---|
+| `cpus` | `2` | Virtual CPUs of the guest, 1 to 255, see [Guest Size](#guest-size) |
+| `memoryMb` | `500` | Guest memory in MB, at least 128 |
+| `diskMb` | `10240` | Size of the `/work` disk in MB, at least 64 |
 | `nodes` | `1` | Guests on separate workers of one zone, see [Spread a Job over Workers](#multi-node-jobs) |
 | `labels` | `[ ]` | The worker must report every label |
 | `devices` | `[ ]` | Device classes and counts, held until the job ends |
@@ -140,6 +145,23 @@ passthru.gradient = {
 
 - Workers report the labels, devices and limits they allow. Requests outside those limits rule out that worker. Downgrades of a request never happen.
 - Lost workers lead to a restart without using a retry. Ten losses in a row fail the job.
+
+### Guest Size { #guest-size }
+
+Workers provide a budget for guest CPUs, memory and disk. Both running guests and warm guests draw from that budget.
+
+| Worker option | Default |
+|---|---|
+| `exec.guestCpus` | CPU count of the host |
+| `exec.guestMemoryMb` | 80 % of the host memory |
+| `exec.guestDiskMb` | 80 % of the free space under `<worker.baseDir>/guests` at worker start |
+
+- Only workers with enough free budget start jobs. Jobs with no such worker stay queued, the same way jobs wait on busy devices.
+- Sizes beyond the budget of every worker show in the wait reason, for example `needs 64 CPUs`.
+- Warm guests boot with `gradient.guest.cpus` and `gradient.guest.memoryMb` of the image, `2` and `500` by default.
+- Only jobs with exactly that CPU count and memory take a warm guest. Other sizes boot a new guest.
+- `/work` is a disk of `diskMb` with the checkout. Checkouts larger than the disk fail the job with `the checkout does not fit in diskMb = <n>`.
+- The full option list is in [Configuration](../reference/configuration.md).
 
 ## 5. Read the Job Context
 
