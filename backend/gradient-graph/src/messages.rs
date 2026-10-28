@@ -198,6 +198,11 @@ pub enum Transition {
         retries_cap: u32,
         token_hash: String,
         token_expires_at: NaiveDateTime,
+        master_port: Option<u16>,
+    },
+    ExecClusterSettled {
+        nodes: Vec<ExecNodeEnd>,
+        next: ClusterNext,
     },
     ContinuationEnded {
         exec_job: ExecJobId,
@@ -223,6 +228,19 @@ pub enum Transition {
         exec_job: ExecJobId,
         message: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecNodeEnd {
+    pub attempt: ExecJobAttemptId,
+    pub reason: AttemptEndReason,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClusterNext {
+    Restart { consume_retry: bool },
+    End,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

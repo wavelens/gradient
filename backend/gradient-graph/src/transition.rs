@@ -218,6 +218,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             retries_cap,
             token_hash,
             token_expires_at,
+            master_port,
         } => {
             let assignment = exec::Assignment {
                 exec_job,
@@ -228,11 +229,16 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 retries_cap,
                 token_hash,
                 token_expires_at,
+                master_port,
             };
             Ok(TransitionReport {
                 already_aborted: !exec::assigned(ctx, assignment).await?,
                 ..Default::default()
             })
+        }
+        Transition::ExecClusterSettled { nodes, next } => {
+            exec::cluster_settled(ctx, nodes, next).await?;
+            Ok(TransitionReport::default())
         }
         Transition::ContinuationEnded { exec_job, outcome } => {
             continuation::continuation_ended(ctx, exec_job, outcome).await?;
@@ -259,11 +265,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             Ok(TransitionReport::default())
         }
         Transition::AbortExecJob { exec_job } => Ok(TransitionReport {
-            aborted_exec_jobs: if exec::abort(ctx, exec_job).await? {
-                vec![exec_job]
-            } else {
-                Vec::new()
-            },
+            aborted_exec_jobs: exec::abort(ctx, exec_job).await?,
             ..Default::default()
         }),
         Transition::FailExecJob { exec_job, message } => {

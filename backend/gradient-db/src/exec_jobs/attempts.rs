@@ -62,6 +62,21 @@ static REQUEUE_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+static REQUEUE_NODES_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE exec_job SET status = {queued}, waiting_reason = NULL, \
+         retries_left = GREATEST(retries_left - $2, 0) \
+         WHERE entry_point = (SELECT entry_point FROM exec_job WHERE id = $1) \
+         AND status IN ({placed}) RETURNING *",
+        queued = exec(ExecJobStatus::Queued),
+        placed = exec_in(&[
+            ExecJobStatus::Queued,
+            ExecJobStatus::Starting,
+            ExecJobStatus::Running
+        ]),
+    )
+});
+
 fn finish_sql(status: ExecJobStatus) -> String {
     format!(
         "UPDATE exec_job SET status = {to}, message = $2, waiting_reason = NULL, \
@@ -81,6 +96,9 @@ crate::sql_lazy! {
         params = [NewUuid, Int(3), Int(1)],
         status_write = StatusWrite::exec_job(ExecJobStatus::Starting);
     REQUEUE_EXEC_JOB = || REQUEUE_SQL.as_str(),
+        params = [NewUuid, Int(1)],
+        status_write = StatusWrite::exec_job(ExecJobStatus::Queued);
+    REQUEUE_EXEC_JOB_NODES = || REQUEUE_NODES_SQL.as_str(),
         params = [NewUuid, Int(1)],
         status_write = StatusWrite::exec_job(ExecJobStatus::Queued);
     COMPLETE_EXEC_JOB = || COMPLETE_SQL.as_str(),
@@ -202,6 +220,19 @@ pub async fn requeue<C: ConnectionTrait>(
         Value::Int(Some(i32::from(consume_retry))),
     ]))
     .one(db)
+    .await
+}
+
+pub async fn requeue_nodes<C: ConnectionTrait>(
+    db: &C,
+    job: ExecJobId,
+    consume_retry: bool,
+) -> Result<Vec<MExecJob>, DbErr> {
+    MExecJob::find_by_statement(REQUEUE_EXEC_JOB_NODES.bind([
+        Value::Uuid(Some(job.into_inner())),
+        Value::Int(Some(i32::from(consume_retry))),
+    ]))
+    .all(db)
     .await
 }
 

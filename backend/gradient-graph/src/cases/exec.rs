@@ -8,17 +8,20 @@ use gradient_db::exec_jobs::continuations;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
+use gradient_entity::exec_job_continuation::ContinuationStatus;
 use gradient_entity::ids::{DispatchedJobId, EvaluationId, ExecJobAttemptId, ExecJobId};
 use gradient_entity::{
-    evaluation_message, exec_job, exec_job_attempt, exec_job_continuation, exec_job_phase,
-    exec_job_token,
+    cluster_job, cluster_member, evaluation_message, exec_job, exec_job_attempt,
+    exec_job_continuation, exec_job_phase, exec_job_token,
 };
 use gradient_fixtures::shape::shape;
 use gradient_types::exec::{ExecSpec, exec_image_attr};
 use gradient_wire::types::{BuildFailureKind, DiscoveredDerivation};
 
 use super::{A, A_OUT, B, B_OUT, Case, drv, nar, with_attr, with_output, with_references};
-use crate::messages::{ContinuationOutcome, GcRequest, Transition, TransitionReport};
+use crate::messages::{
+    ClusterNext, ContinuationOutcome, ExecNodeEnd, GcRequest, Transition, TransitionReport,
+};
 
 const ATTR: &str = "apps.x86_64-linux.a";
 const MISSING_SECRET: &str =
@@ -263,6 +266,7 @@ async fn assign(
             retries_cap,
             token_hash: format!("h{number}"),
             token_expires_at: gradient_types::now() + chrono::Duration::hours(1),
+            master_port: None,
         })
         .await;
     assert!(!report.already_aborted, "attempt {number} opens");
@@ -480,6 +484,7 @@ async fn a_stale_attempt_number_leaves_the_job_queued() {
             retries_cap: 5,
             token_hash: "stale".into(),
             token_expires_at: gradient_types::now(),
+            master_port: None,
         })
         .await;
 
@@ -884,6 +889,376 @@ async fn deleting_an_evaluation_reports_its_exec_jobs() {
         report.deleted_exec_jobs,
         vec![exec_job],
         "after 1: the report"
+    );
+    case.finish().await;
+}
+
+const MASTER_PORT: u16 = 29500;
+
+async fn exec_cluster_case(nodes: u32, keep_running: bool, retries: u32) -> (Case, EvaluationId) {
+    queued_case(ExecSpec {
+        nodes,
+        keep_running,
+        retries,
+        ..spec()
+    })
+    .await
+}
+
+async fn node_rows(case: &Case, evaluation: EvaluationId) -> Vec<exec_job::Model> {
+    let mut rows: Vec<exec_job::Model> = case
+        .db
+        .rows::<exec_job::Entity>()
+        .await
+        .into_iter()
+        .filter(|job| job.evaluation == evaluation)
+        .collect();
+    rows.sort_by_key(|job| job.node_index);
+    rows
+}
+
+async fn assign_node(case: &Case, node: &exec_job::Model, number: u32) -> ExecJobAttemptId {
+    let attempt = ExecJobAttemptId::now_v7();
+    let report = case
+        .transition(Transition::ExecJobAssigned {
+            exec_job: node.id,
+            attempt,
+            number,
+            assignment: DispatchedJobId::now_v7(),
+            worker: format!("w{}", node.node_index),
+            retries_cap: 5,
+            token_hash: format!("h{}-{number}", node.node_index),
+            token_expires_at: gradient_types::now() + chrono::Duration::hours(1),
+            master_port: Some(MASTER_PORT),
+        })
+        .await;
+    assert!(
+        !report.already_aborted,
+        "node {} attempt {number} opens",
+        node.node_index
+    );
+    attempt
+}
+
+async fn running_cluster(case: &Case, evaluation: EvaluationId) -> Vec<ExecJobAttemptId> {
+    let mut attempts = Vec::new();
+    for node in node_rows(case, evaluation).await {
+        let attempt = assign_node(case, &node, 1).await;
+        case.transition(Transition::ExecProgramStarted { attempt })
+            .await;
+        attempts.push(attempt);
+    }
+    attempts
+}
+
+fn node_end(attempt: ExecJobAttemptId, reason: AttemptEndReason) -> ExecNodeEnd {
+    ExecNodeEnd {
+        attempt,
+        reason,
+        message: (reason != AttemptEndReason::Completed).then(|| "node ended".to_owned()),
+    }
+}
+
+async fn settle_cluster(
+    case: &Case,
+    attempts: &[ExecJobAttemptId],
+    reasons: [AttemptEndReason; 2],
+    next: ClusterNext,
+) {
+    case.transition(Transition::ExecClusterSettled {
+        nodes: attempts
+            .iter()
+            .zip(reasons)
+            .map(|(attempt, reason)| node_end(*attempt, reason))
+            .collect(),
+        next,
+    })
+    .await;
+}
+
+fn events_of(events: &[String], job: ExecJobId) -> usize {
+    let prefix = format!("exec_job:{job}:");
+    events.iter().filter(|key| key.starts_with(&prefix)).count()
+}
+
+#[tokio::test]
+async fn a_stream_completion_creates_one_row_per_node_and_their_cluster() {
+    let (case, e1) = exec_cluster_case(2, false, 1).await;
+
+    let rows = node_rows(&case, e1).await;
+    assert_eq!(
+        rows.iter().map(|job| job.node_index).collect::<Vec<_>>(),
+        vec![0, 1],
+        "after 1: one row per node"
+    );
+    assert_eq!(
+        case.db.rows::<cluster_job::Entity>().await.len(),
+        1,
+        "after 1: one cluster job"
+    );
+    let members = case.db.rows::<cluster_member::Entity>().await;
+    let mut targets: Vec<_> = members.iter().map(|m| m.exec_job).collect();
+    targets.sort();
+    let mut expected: Vec<_> = rows.iter().map(|job| Some(job.id)).collect();
+    expected.sort();
+    assert_eq!(targets, expected, "after 1: one member per node");
+    let events = exec_events(&case).await;
+    assert_eq!(
+        (
+            count_status(&events, ExecJobStatus::Queued),
+            events_of(&events, rows[0].id)
+        ),
+        (1, 1),
+        "after 1: one queued event under node 0: {events:?}"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn the_master_port_is_written_on_every_node_attempt() {
+    let (case, e1) = exec_cluster_case(2, false, 1).await;
+
+    let attempts = running_cluster(&case, e1).await;
+
+    for attempt in attempts {
+        assert_eq!(
+            attempt_row(&case, attempt).await.master_port,
+            Some(i32::from(MASTER_PORT)),
+            "after 1: the attempt {attempt}"
+        );
+    }
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_cluster_restart_requeues_every_node_and_consumes_one_retry() {
+    let (case, e1) = exec_cluster_case(2, false, 1).await;
+    let attempts = running_cluster(&case, e1).await;
+    let before = exec_events(&case).await;
+
+    settle_cluster(
+        &case,
+        &attempts,
+        [AttemptEndReason::Failed, AttemptEndReason::Aborted],
+        ClusterNext::Restart {
+            consume_retry: true,
+        },
+    )
+    .await;
+
+    let rows = node_rows(&case, e1).await;
+    assert!(
+        rows.iter()
+            .all(|row| (row.status, row.retries_left) == (ExecJobStatus::Queued, 0)),
+        "after 1: every node queued with the retry spent: {rows:?}"
+    );
+    assert_eq!(
+        attempt_row(&case, attempts[0]).await.end_reason,
+        Some(AttemptEndReason::Failed),
+        "after 1: node 0's attempt"
+    );
+    assert_eq!(
+        attempt_row(&case, attempts[1]).await.end_reason,
+        Some(AttemptEndReason::Aborted),
+        "after 1: node 1's attempt"
+    );
+    let events = exec_events(&case).await;
+    assert_eq!(
+        count_status(&events, ExecJobStatus::Queued) - count_status(&before, ExecJobStatus::Queued),
+        1,
+        "after 1: one queued event: {events:?}"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_lost_node_restart_keeps_the_retries() {
+    let (case, e1) = exec_cluster_case(2, false, 1).await;
+    let attempts = running_cluster(&case, e1).await;
+
+    settle_cluster(
+        &case,
+        &attempts,
+        [AttemptEndReason::Aborted, AttemptEndReason::Lost],
+        ClusterNext::Restart {
+            consume_retry: false,
+        },
+    )
+    .await;
+
+    let rows = node_rows(&case, e1).await;
+    assert!(
+        rows.iter()
+            .all(|row| (row.status, row.retries_left) == (ExecJobStatus::Queued, 1)),
+        "after 1: every node queued with its retry: {rows:?}"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_kept_failure_ends_the_job_failed_once() {
+    let (case, e1) = exec_cluster_case(2, true, 1).await;
+    let attempts = running_cluster(&case, e1).await;
+
+    settle_cluster(
+        &case,
+        &attempts,
+        [AttemptEndReason::Completed, AttemptEndReason::Failed],
+        ClusterNext::End,
+    )
+    .await;
+
+    let rows = node_rows(&case, e1).await;
+    assert_eq!(
+        rows.iter().map(|row| row.status).collect::<Vec<_>>(),
+        vec![ExecJobStatus::Completed, ExecJobStatus::Failed],
+        "after 1: the nodes"
+    );
+    let events = exec_events(&case).await;
+    assert_eq!(
+        count_status(&events, ExecJobStatus::Failed),
+        1,
+        "after 1: one failed event: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|key| key.starts_with(&format!("exec_job:{}:", rows[0].id))
+                && key.ends_with(&format!(":{}", i16::from(ExecJobStatus::Failed)))),
+        "after 1: the failed event is node 0's: {events:?}"
+    );
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Failed,
+        "after 1: the evaluation"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_survivor_report_after_the_restart_changes_nothing() {
+    let (case, e1) = exec_cluster_case(2, false, 1).await;
+    let attempts = running_cluster(&case, e1).await;
+    settle_cluster(
+        &case,
+        &attempts,
+        [AttemptEndReason::Failed, AttemptEndReason::Aborted],
+        ClusterNext::Restart {
+            consume_retry: true,
+        },
+    )
+    .await;
+    let events = exec_events(&case).await;
+
+    end_attempt(&case, attempts[1], AttemptEndReason::Aborted).await;
+
+    let rows = node_rows(&case, e1).await;
+    assert!(
+        rows.iter().all(|row| row.status == ExecJobStatus::Queued),
+        "after 2: both nodes stay queued: {rows:?}"
+    );
+    assert_eq!(exec_events(&case).await, events, "after 2: no new event");
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn aborting_the_job_aborts_every_node() {
+    let (case, e1) = exec_cluster_case(2, false, 1).await;
+    running_cluster(&case, e1).await;
+    let rows = node_rows(&case, e1).await;
+
+    let report = case
+        .transition(Transition::AbortExecJob {
+            exec_job: rows[0].id,
+        })
+        .await;
+
+    assert_eq!(
+        report.aborted_exec_jobs,
+        vec![rows[0].id, rows[1].id],
+        "after 1: the report"
+    );
+    assert!(
+        node_rows(&case, e1)
+            .await
+            .iter()
+            .all(|row| row.status == ExecJobStatus::Aborted),
+        "after 1: every node is aborted"
+    );
+    let events = exec_events(&case).await;
+    assert_eq!(
+        count_status(&events, ExecJobStatus::Aborted),
+        1,
+        "after 1: one aborted event: {events:?}"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn phases_of_every_node_are_announced_with_their_node() {
+    let (case, e1) = exec_cluster_case(2, false, 1).await;
+    let attempts = running_cluster(&case, e1).await;
+
+    case.transition(Transition::ExecPhase {
+        attempt: attempts[1],
+        name: "epoch-1".into(),
+        payload: Vec::new(),
+    })
+    .await;
+
+    let nodes = case
+        .db
+        .texts(
+            "SELECT jsonb_path_query_first(payload, 'lax $.**.node')::text \
+             FROM pending_delivery WHERE key LIKE 'exec_job.phase:%'",
+        )
+        .await;
+    assert_eq!(nodes, vec!["1".to_owned()], "after 1: one phase of node 1");
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn the_continue_file_of_node_0_is_activated_when_every_node_completes() {
+    let (case, e1) = exec_cluster_case(2, false, 1).await;
+    let attempts = running_cluster(&case, e1).await;
+    let rows = node_rows(&case, e1).await;
+    for row in &rows {
+        let recorded =
+            continuations::record(&case.db.connection(), row.id, e1, &[B_ATTR.to_owned()])
+                .await
+                .expect("the continue file is recorded");
+        assert!(recorded, "node {} takes the continue file", row.node_index);
+    }
+
+    settle_cluster(
+        &case,
+        &attempts,
+        [AttemptEndReason::Completed, AttemptEndReason::Completed],
+        ClusterNext::End,
+    )
+    .await;
+
+    let status_of = |job: ExecJobId, rows: &[exec_job_continuation::Model]| {
+        rows.iter()
+            .find(|row| row.exec_job == job)
+            .map(|row| row.status)
+    };
+    let continued = continuation_rows(&case).await;
+    assert_eq!(
+        (
+            status_of(rows[0].id, &continued),
+            status_of(rows[1].id, &continued)
+        ),
+        (
+            Some(ContinuationStatus::Queued),
+            Some(ContinuationStatus::Recorded)
+        ),
+        "after 1: only node 0's continue file is queued"
+    );
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Building,
+        "after 1: the evaluation"
     );
     case.finish().await;
 }
