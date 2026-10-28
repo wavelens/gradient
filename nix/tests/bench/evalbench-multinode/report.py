@@ -22,6 +22,10 @@ def speedup(runs, n):
     return runs[1]["wall_ms"] / max(runs[n]["wall_ms"], 1)
 
 
+def target(n):
+    return 1 + GAIN_PER_ADDED_WORKER * (n - 1)
+
+
 def jobs_text(jobs):
     return f"{jobs} job" if jobs == 1 else f"{jobs} jobs"
 
@@ -29,9 +33,8 @@ def jobs_text(jobs):
 def speedup_verdicts(runs):
     failed = []
     for n in sorted(n for n in runs if n > 1):
-        target = 1 + GAIN_PER_ADDED_WORKER * (n - 1)
-        if speedup(runs, n) < target:
-            failed.append(f"N={n}: speedup {speedup(runs, n):.2f} below {target:.2f}")
+        if speedup(runs, n) < target(n):
+            failed.append(f"N={n}: speedup {speedup(runs, n):.2f} below {target(n):.2f}")
         if runs[n]["jobs"] <= 1:
             failed.append(f"N={n}: ran on {jobs_text(runs[n]['jobs'])}")
 

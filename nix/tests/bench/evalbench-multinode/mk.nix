@@ -143,8 +143,9 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
     import sys
     import time
 
-    sys.path[:0] = ["${./.}", "${../evalbench}"]
+    sys.path[:0] = ["${./.}", "${../evalbench}", "${../../../tools/evalbench-inspector}"]
     report = importlib.import_module("report")
+    page = importlib.import_module("page")
     publish = importlib.import_module("summarize").publish
 
     GIT          = "${lib.getExe pkgs.git}"
