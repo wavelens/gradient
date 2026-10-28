@@ -15,7 +15,7 @@ use gradient_git_host::{BranchCommit, CommitFile, CommitIdent};
 use gradient_types::{
     AOpenPrState, CEvaluationInputUpdate, COpenPrState, ECommit, EEvaluation,
     EEvaluationInputUpdate, EOpenPrState, ETask, EvaluationId, IntegrationId, OpenPrStateId,
-    TaskActionId, TaskId,
+    RepositoryLocation, TaskActionId, TaskId,
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
@@ -107,7 +107,7 @@ pub(crate) async fn execute_open_pr(
             &ctx.db.config.pull_requests.commit_email,
         ),
         files: vec![CommitFile {
-            path: "flake.lock".into(),
+            path: lock_file_path(&task.repository),
             contents: candidate_lock.into_bytes(),
         }],
     };
@@ -299,6 +299,13 @@ fn render_template(template: Option<&str>, bumps: &[BumpRow]) -> Option<String> 
     )
 }
 
+fn lock_file_path(task_repository: &str) -> String {
+    match RepositoryLocation::of(task_repository).flake_dir {
+        Some(dir) => format!("{dir}/flake.lock"),
+        None => "flake.lock".to_owned(),
+    }
+}
+
 fn short_rev(rev: &str) -> &str {
     &rev[..rev.len().min(12)]
 }
@@ -327,5 +334,11 @@ mod tests {
                 email: "b@x".into()
             })
         );
+    }
+
+    #[test]
+    fn a_subdirectory_flake_gets_its_lock_committed_there() {
+        assert_eq!(lock_file_path("https://h/o/r?dir=nix"), "nix/flake.lock");
+        assert_eq!(lock_file_path("https://h/o/r"), "flake.lock");
     }
 }
