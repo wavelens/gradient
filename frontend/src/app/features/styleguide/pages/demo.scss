@@ -13,6 +13,7 @@
 
 :host ::ng-deep gr-badge,
 :host ::ng-deep gr-eval-status-badge,
+:host ::ng-deep gr-status-badge,
 :host ::ng-deep gr-icon,
 :host ::ng-deep button[grButton] {
   vertical-align: middle;
@@ -43,6 +44,7 @@ h2 + gr-form-field {
 
 gr-badge,
 gr-eval-status-badge,
+gr-status-badge,
 gr-icon,
 button[grButton] {
   margin-right: $spacing-sm;

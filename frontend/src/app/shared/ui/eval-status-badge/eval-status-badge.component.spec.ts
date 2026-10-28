@@ -22,7 +22,7 @@ describe('EvalStatusBadgeComponent', () => {
 
   it('colors the badge and its icon by phase', () => {
     const fixture = render('Completed');
-    expect(fixture.nativeElement.querySelector('.eval-status-badge[data-phase="success"]')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('.status-badge[data-phase="success"]')).toBeTruthy();
     expect(fixture.nativeElement.querySelector('gr-status-icon[data-phase="success"]')).toBeTruthy();
   });
 

@@ -6,21 +6,15 @@
 
 import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
 import { evaluationPhase } from '@shared/evaluation';
-import { StatusIconComponent } from '../status-icon/status-icon.component';
+import { StatusBadgeComponent } from '../status-badge/status-badge.component';
 import { EvaluationStatus } from '@core/models';
 
 @Component({
   selector: 'gr-eval-status-badge',
   standalone: true,
-  imports: [StatusIconComponent],
-  template: `
-    <span class="eval-status-badge" [attr.data-phase]="phase()">
-      <gr-status-icon [phase]="phase()" [prioritized]="prioritized()" size="sm" />
-      {{ label() }}
-    </span>
-  `,
+  imports: [StatusBadgeComponent],
+  template: `<gr-status-badge [phase]="phase()" [label]="label()" [prioritized]="prioritized()" />`,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './eval-status-badge.component.scss',
 })
 export class EvalStatusBadgeComponent {
   status = input.required<EvaluationStatus>();

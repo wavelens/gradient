@@ -8,6 +8,7 @@
 export * from './allowed-capabilities/allowed-capabilities.component';
 export * from './build-progress/build-progress.component';
 export * from './eval-status-badge/eval-status-badge.component';
+export * from './status-badge/status-badge.component';
 export * from './gradient-ci-connect/gradient-ci-connect.component';
 export * from './input-fetch-list/input-fetch-list.component';
 export * from './label-help/label-help.component';

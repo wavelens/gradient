@@ -52,6 +52,7 @@ describe('ExecJobListComponent', () => {
     expect(host.textContent).toContain('waiting for free devices on 1 worker');
     expect(host.textContent).toContain('lab-a');
     expect(host.textContent).toContain('gpu:h100:8');
+    expect(host.querySelector('a.job')?.getAttribute('href')).toBe('/project/acme/task/demo/exec/j1');
   });
 
   it('shows a job that waits for its manual start by its wait reason', () => {
