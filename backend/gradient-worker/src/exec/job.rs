@@ -14,8 +14,8 @@ use gradient_redact::SecretRedactor;
 use gradient_types::RepositoryLocation;
 use gradient_types::secret::SecretString;
 use gradient_vm::{
-    AddressLease, DeviceHold, GUEST_BOOT_TIMEOUT, Guest, MountConfig, PlugPlan, PluggedDevices,
-    WORK_MOUNT_TAG, wait_ready,
+    AddressLease, BudgetHold, DeviceHold, GUEST_BOOT_TIMEOUT, Guest, GuestBootError, MountConfig,
+    NO_GUEST_BUDGET, PlugPlan, PluggedDevices, WORK_MOUNT_TAG, wait_ready,
 };
 use gradient_wire::guest::{
     AgentToWorker, GuestMount, GuestNetwork, GuestSecret, RunJob, WorkerToAgent,
@@ -207,7 +207,7 @@ pub async fn execute(
         Some(address) => Some(address),
         None => run.lease_address()?,
     };
-    let (mut guest, image_root) = run.take_guest(source, &nix).await?;
+    let (mut guest, budget, image_root) = run.take_guest(source, &nix).await?;
     let outcome = run
         .run_in_guest(
             &mut guest,
@@ -217,7 +217,8 @@ pub async fn execute(
             channels,
         )
         .await;
-    host.pool.retire(guest, (devices, image_root, address));
+    host.pool
+        .retire(guest, (devices, image_root, address, budget));
     outcome
 }
 
@@ -281,6 +282,13 @@ fn cluster_member(
     let context = cluster_context(&inbox.me, &inbox.roster, master_port)
         .map_err(|e| BuildError::permanent(anyhow!(e)))?;
     Ok((Some(context), Some(address)))
+}
+
+fn guest_boot_failure(error: GuestBootError) -> BuildError {
+    match error.0 == NO_GUEST_BUDGET {
+        true => BuildError::transient(error),
+        false => BuildError::guest_boot(error),
+    }
 }
 
 pub(crate) fn lease_guest_address(host: &ExecHost) -> Result<AddressLease, BuildError> {
@@ -570,20 +578,22 @@ impl ExecRun<'_> {
         &mut self,
         source: GuestSource,
         nix: &StoreAccess<'_>,
-    ) -> Result<(Guest, Option<GcRootHandle>)> {
+    ) -> Result<(Guest, BudgetHold, Option<GcRootHandle>)> {
         let job_id = self.updater.job_id.clone();
+        let size = self.job.requirement.guest;
         let (booted, image_root) = match source {
             GuestSource::Warm => {
-                let warm = unless_aborted(&self.abort, self.host.pool.take(job_id)).await?;
-                (warm, None)
+                let warm = self.host.pool.take(job_id, size);
+                (unless_aborted(&self.abort, warm).await?, None)
             }
             GuestSource::Custom(image) => {
                 let root = self.realise_image(&image, nix).await?;
-                let custom = self.host.pool.boot_custom(&image, job_id);
+                let custom = self.host.pool.boot_custom(&image, job_id, size);
                 (unless_aborted(&self.abort, custom).await?, Some(root))
             }
         };
-        Ok((booted.map_err(BuildError::guest_boot)?, image_root))
+        let (guest, budget) = booted.map_err(guest_boot_failure)?;
+        Ok((guest, budget, image_root))
     }
 
     async fn realise_image(&mut self, image: &Path, nix: &StoreAccess<'_>) -> Result<GcRootHandle> {

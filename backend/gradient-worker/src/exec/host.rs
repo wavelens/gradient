@@ -27,7 +27,6 @@ pub struct ExecHost {
     pub pool: Arc<GuestPool>,
     pub devices: DeviceInventory,
     pub addresses: GuestAddresses,
-    pub budget: GuestBudget,
     pub config: ExecArgs,
     pub worker_id: String,
     pub zone: Option<String>,
@@ -81,10 +80,9 @@ impl ExecHost {
             "guest budget"
         );
         Ok(Arc::new(ExecHost {
-            pool: GuestPool::new(vm, units),
+            pool: GuestPool::new(vm, units, GuestBudget::new(total)),
             devices,
             addresses,
-            budget: GuestBudget::new(total),
             config: config.exec.clone(),
             worker_id,
             zone: config.zone.clone().filter(|zone| !zone.is_empty()),
@@ -109,7 +107,7 @@ impl ExecHost {
             &self.worker_id,
             self.pool.warm_count(),
             self.secrets.names(),
-            self.budget.capacity(),
+            self.pool.capacity(),
         )
     }
 

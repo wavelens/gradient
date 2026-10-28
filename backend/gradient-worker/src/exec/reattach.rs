@@ -61,11 +61,12 @@ pub async fn resume(
                 guest,
                 devices,
                 address,
+                budget,
             },
         stored,
     } = resumed;
     let outcome = follow_again(host, &guest, &stored, updater, abort, inbox).await;
-    host.pool.retire(guest, (devices, address));
+    host.pool.retire(guest, (devices, address, budget));
     outcome
 }
 
@@ -152,6 +153,7 @@ mod tests {
             relays: Vec::new(),
             usb_bus_ids: Vec::new(),
             per_job_dirs: Vec::new(),
+            size: Default::default(),
         }
     }
 

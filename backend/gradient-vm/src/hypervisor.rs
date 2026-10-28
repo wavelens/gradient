@@ -18,6 +18,8 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 use tokio::net::UnixStream;
 
+use gradient_wire::types::GuestSize;
+
 use crate::console::SERIAL_SOCKET;
 
 const API_TIMEOUT: Duration = Duration::from_secs(60);
@@ -207,6 +209,30 @@ impl GuestImage {
             memory_mb: guest.memory_mb,
         })
     }
+
+    pub fn sized(&self, size: &GuestSize) -> GuestImage {
+        let cpus = match size.cpus {
+            0 => self.cpus,
+            cpus => u8::try_from(cpus).unwrap_or(u8::MAX),
+        };
+        let memory_mb = match size.memory_mb {
+            0 => self.memory_mb,
+            memory_mb => memory_mb,
+        };
+        GuestImage {
+            cpus,
+            memory_mb,
+            ..self.clone()
+        }
+    }
+
+    pub fn size(&self) -> GuestSize {
+        GuestSize {
+            cpus: u32::from(self.cpus),
+            memory_mb: self.memory_mb,
+            disk_mb: 0,
+        }
+    }
 }
 
 pub fn vm_config(image: &GuestImage, dir: &Path, cid: u32) -> serde_json::Value {
@@ -269,6 +295,22 @@ mod tests {
             config["serial"]["socket"],
             "/var/lib/gradient-worker/guests/g/serial.sock"
         );
+    }
+
+    #[test]
+    fn a_sized_image_boots_with_the_job_size() {
+        let dir = Path::new("/var/lib/gradient-worker/guests/g");
+        let sized = image().sized(&GuestSize {
+            cpus: 4,
+            memory_mb: 768,
+            ..GuestSize::default()
+        });
+        let config = vm_config(&sized, dir, 7);
+
+        assert_eq!(config["cpus"]["boot_vcpus"], 4);
+        assert_eq!(config["memory"]["size"], 768_u64 * 1024 * 1024);
+        assert_eq!(config["payload"]["kernel"], "/nix/store/x-guest/kernel");
+        assert_eq!(image().sized(&GuestSize::default()), image());
     }
 
     #[tokio::test]

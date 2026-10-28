@@ -30,7 +30,7 @@ pub use custom_image::NO_GUEST_AGENT;
 pub use devices::{DeviceCount, DeviceHold, DeviceInventory, DeviceUnit, HostProbe, SysfsProbe};
 pub use guest::{Guest, PlugPlan, PluggedDevices, WORK_MOUNT_TAG, device_groups};
 pub use hypervisor::{GuestImage, HypervisorApi, PciDeviceInfo, VmInfo, vm_config};
-pub use pool::{GuestPool, surplus, wanted_boots, warm_target};
+pub use pool::{GuestPool, NO_GUEST_BUDGET, surplus, wanted_boots, warm_target};
 pub use reattach::{ReattachPlan, ReattachedGuest, plan_reattach};
 pub use state::{GuestId, GuestState, HeldDevice, StoredRelay, read_states, write_state};
 pub use supervisor::{run_supervisor, usb_bus_id};

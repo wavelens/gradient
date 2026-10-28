@@ -57,6 +57,7 @@ mod tests {
             relays: Vec::new(),
             usb_bus_ids: Vec::new(),
             per_job_dirs: Vec::new(),
+            size: Default::default(),
         };
 
         let read = state.job_as::<StoredJob>().unwrap().unwrap();
