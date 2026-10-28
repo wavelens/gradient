@@ -5,8 +5,8 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
-use gradient_types::ActionType;
 use gradient_types::triggers::TriggerType;
+use gradient_types::{ActionType, RepositoryLocation};
 use sea_orm::Iterable;
 use std::collections::HashSet;
 
@@ -32,6 +32,10 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 format!("tasks.{}.repository", task.name),
                 "Repository URL must start with http or git",
             );
+        }
+
+        if let Err(e) = RepositoryLocation::check(&task.repository) {
+            errors.push(format!("tasks.{}.repository", task.name), e.to_string());
         }
 
         if task.keep_evaluations < 1 {
