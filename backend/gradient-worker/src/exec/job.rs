@@ -15,10 +15,11 @@ use gradient_types::RepositoryLocation;
 use gradient_types::secret::SecretString;
 use gradient_vm::{
     AddressLease, BudgetHold, DeviceHold, GUEST_BOOT_TIMEOUT, Guest, GuestBootError, MountConfig,
-    NO_GUEST_BUDGET, PlugPlan, PluggedDevices, WORK_MOUNT_TAG, wait_ready,
+    NO_GUEST_BUDGET, PlugPlan, PluggedDevices, WORK_MOUNT_TAG, WorkVolume, wait_ready,
 };
 use gradient_wire::guest::{
-    AgentToWorker, GuestMount, GuestNetwork, GuestSecret, RunJob, WorkerToAgent,
+    AgentToWorker, GUEST_WORK_DISK_SINCE, GuestMount, GuestNetwork, GuestSecret, RunJob,
+    WorkerToAgent,
 };
 use gradient_wire::types::{ExecJob, MAX_PHASE_PAYLOAD, UploadObject};
 use tokio::time::Instant;
@@ -36,6 +37,7 @@ use super::sops::WorkerSecrets;
 use super::state::StoredJob;
 use super::uploads::{GuestUploads, OutputUpload};
 use super::watchdog::{Watchdog, Watched};
+use super::work_disk::{WorkDiskError, build_work_disk};
 use crate::executor::AbortSignal;
 use crate::executor::failure::{BuildError, JobAborted};
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
@@ -48,6 +50,8 @@ const STORE_DIR: &str = "/nix/store/";
 const EXEC_KEY_PREFIX: &str = "exec:";
 const KILL_GRACE: Duration = Duration::from_secs(15);
 const NO_FREE_ADDRESS: &str = "no free guest address in exec.subnet";
+const WORK_STAGING: &str = "work-staging";
+const WORK_DISK_IMAGE: &str = "work.img";
 
 #[async_trait]
 pub trait ExecReport: Send {
@@ -652,32 +656,8 @@ impl ExecRun<'_> {
             .record_job(&self.stored_job(false))
             .map_err(BuildError::transient)?;
         let flake_dir = flake_dir_of(&self.job.context.repository)?;
-        let work = guest.dir().join("work");
-        std::fs::create_dir_all(&work)
-            .with_context(|| format!("create {}", work.display()))
-            .map_err(BuildError::transient)?;
-        checkout_work(
-            &work,
-            &self.job.context,
-            credentials,
-            &mut self.abort.clone(),
-        )
-        .await
-        .map_err(BuildError::transient)?;
+        let staging = self.check_out(guest, credentials).await?;
         guest.resume().await.map_err(BuildError::transient)?;
-
-        let mounts = self.mounts(guest)?;
-        let cid = guest.state().cid;
-        let network = address.map(|lease| lease.network(cid));
-        let plan = PlugPlan {
-            units: devices.units(),
-            mounts: mounts.clone(),
-            work,
-            network: network.clone(),
-        };
-        let plugged = guest.plug(&plan).await.map_err(BuildError::transient)?;
-        let run_job = self.run_job(&plugged, &mounts, network, flake_dir);
-
         let ready = wait_ready(&guest.vsock_socket(), GUEST_BOOT_TIMEOUT)
             .await
             .map_err(BuildError::guest_boot)?;
@@ -686,12 +666,47 @@ impl ExecRun<'_> {
             agent_version = agent.agent_version(),
             "guest agent ready for the job"
         );
+        let disk_mb = self.job.requirement.guest.disk_mb;
+        let work = work_volume(guest.dir(), disk_mb, agent.version());
+        fill_work(&staging, &work, disk_mb).await?;
+
+        let mounts = self.mounts(guest)?;
+        let cid = guest.state().cid;
+        let network = address.map(|lease| lease.network(cid));
+        let plan = PlugPlan {
+            units: devices.units(),
+            mounts: mounts.clone(),
+            work: work.clone(),
+            network: network.clone(),
+        };
+        let plugged = guest.plug(&plan).await.map_err(BuildError::transient)?;
+        let run_job = self.run_job(&plugged, &mounts, network, flake_dir, &work);
         agent.attach(0).await.map_err(BuildError::transient)?;
         agent.run(run_job).await.map_err(BuildError::transient)?;
         guest
             .record_job(&self.stored_job(true))
             .map_err(BuildError::transient)?;
         Ok(agent)
+    }
+
+    async fn check_out(
+        &self,
+        guest: &Guest,
+        credentials: &CredentialStore,
+    ) -> Result<PathBuf, BuildError> {
+        let staging = guest.dir().join(WORK_STAGING);
+        std::fs::create_dir_all(&staging)
+            .with_context(|| format!("create {}", staging.display()))
+            .map_err(BuildError::transient)?;
+        checkout_work(
+            &staging,
+            &self.job.context,
+            credentials,
+            &mut self.abort.clone(),
+        )
+        .await
+        .map_err(BuildError::transient)?;
+        Ok(staging)
     }
 
     fn mounts(&self, guest: &Guest) -> Result<Vec<(MountConfig, PathBuf)>, BuildError> {
@@ -726,6 +741,7 @@ impl ExecRun<'_> {
         mounts: &[(MountConfig, PathBuf)],
         network: Option<GuestNetwork>,
         flake_dir: String,
+        work: &WorkVolume,
     ) -> RunJob {
         let names: Vec<String> = mounts.iter().map(|(mount, _)| mount.name.clone()).collect();
         let context = context_layers(
@@ -751,13 +767,14 @@ impl ExecRun<'_> {
                 .map(|phase| phase.payload.clone())
                 .unwrap_or_default(),
             secrets: self.secrets.clone(),
-            mounts: guest_mounts(mounts),
+            mounts: guest_mounts(work, mounts),
             groups: plugged.groups.clone(),
             network,
             relays: plugged.relays.clone(),
             usb_bus_ids: plugged.usb_bus_ids.clone(),
             program_pty: self.job.requirement.ssh,
             flake_dir,
+            work_disk: matches!(work, WorkVolume::Disk(_)),
         }
     }
 
@@ -776,18 +793,50 @@ impl ExecRun<'_> {
     }
 }
 
-fn guest_mounts(mounts: &[(MountConfig, PathBuf)]) -> Vec<GuestMount> {
-    let work = GuestMount {
+pub(crate) fn work_volume(guest_dir: &Path, disk_mb: u64, agent_protocol: u16) -> WorkVolume {
+    match disk_mb > 0 && agent_protocol >= GUEST_WORK_DISK_SINCE {
+        true => WorkVolume::Disk(guest_dir.join(WORK_DISK_IMAGE)),
+        false => WorkVolume::Share(guest_dir.join(WORK_MOUNT_TAG)),
+    }
+}
+
+async fn fill_work(staging: &Path, work: &WorkVolume, disk_mb: u64) -> Result<(), BuildError> {
+    match work {
+        WorkVolume::Share(dir) => tokio::fs::rename(staging, dir)
+            .await
+            .with_context(|| format!("move the checkout to {}", dir.display()))
+            .map_err(BuildError::transient),
+        WorkVolume::Disk(image) => {
+            build_work_disk(staging, image, disk_mb)
+                .await
+                .map_err(work_disk_failure)?;
+            tokio::fs::remove_dir_all(staging)
+                .await
+                .with_context(|| format!("remove {}", staging.display()))
+                .map_err(BuildError::transient)
+        }
+    }
+}
+
+fn work_disk_failure(error: WorkDiskError) -> BuildError {
+    match error {
+        WorkDiskError::TooSmall { .. } => BuildError::permanent(error),
+        WorkDiskError::Start(_) | WorkDiskError::Failed(_) => BuildError::transient(error),
+    }
+}
+
+fn guest_mounts(work: &WorkVolume, mounts: &[(MountConfig, PathBuf)]) -> Vec<GuestMount> {
+    let share = matches!(work, WorkVolume::Share(_)).then(|| GuestMount {
         tag: WORK_MOUNT_TAG.to_owned(),
         path: "/work".to_owned(),
         read_only: false,
-    };
+    });
     let configured = mounts.iter().map(|(mount, _)| GuestMount {
         tag: mount.name.clone(),
         path: format!("/mnt/{}", mount.name),
         read_only: mount.read_only,
     });
-    std::iter::once(work).chain(configured).collect()
+    share.into_iter().chain(configured).collect()
 }
 
 fn flake_dir_of(repository: &str) -> Result<String, BuildError> {
@@ -1350,5 +1399,44 @@ mod tests {
             GuestSource::Custom(image.into())
         );
         assert_eq!(guest_source(&plain, false).unwrap(), GuestSource::Warm);
+    }
+
+    #[test]
+    fn an_old_agent_keeps_the_work_share() {
+        let dir = Path::new("/var/lib/gradient-worker/guests/g1");
+        let work_share = |work: &WorkVolume| {
+            guest_mounts(work, &[])
+                .iter()
+                .any(|mount| mount.tag == WORK_MOUNT_TAG && mount.path == "/work")
+        };
+
+        let old = work_volume(dir, 10_240, GUEST_WORK_DISK_SINCE - 1);
+        assert_eq!(old, WorkVolume::Share(dir.join("work")));
+        assert!(work_share(&old));
+
+        let current = work_volume(dir, 10_240, GUEST_WORK_DISK_SINCE);
+        assert_eq!(current, WorkVolume::Disk(dir.join("work.img")));
+        assert!(!work_share(&current));
+
+        let unsized_job = work_volume(dir, 0, GUEST_WORK_DISK_SINCE);
+        assert_eq!(unsized_job, WorkVolume::Share(dir.join("work")));
+    }
+
+    #[test]
+    fn only_a_checkout_too_large_for_its_disk_fails_for_good() {
+        let too_small = work_disk_failure(WorkDiskError::TooSmall { disk_mb: 64 });
+        assert_eq!(
+            too_small.kind,
+            gradient_wire::types::BuildFailureKind::Permanent
+        );
+        assert_eq!(
+            too_small.to_string(),
+            "the checkout does not fit in diskMb = 64"
+        );
+        let broken = work_disk_failure(WorkDiskError::Failed("bad superblock".into()));
+        assert_ne!(
+            broken.kind,
+            gradient_wire::types::BuildFailureKind::Permanent
+        );
     }
 }

@@ -28,7 +28,7 @@ pub use config::{DeviceConfig, MountConfig, SupervisorConfig, VmConfig, check_de
 pub use console::ConsoleLink;
 pub use custom_image::NO_GUEST_AGENT;
 pub use devices::{DeviceCount, DeviceHold, DeviceInventory, DeviceUnit, HostProbe, SysfsProbe};
-pub use guest::{Guest, PlugPlan, PluggedDevices, WORK_MOUNT_TAG, device_groups};
+pub use guest::{Guest, PlugPlan, PluggedDevices, WORK_MOUNT_TAG, WorkVolume, device_groups};
 pub use hypervisor::{GuestImage, HypervisorApi, PciDeviceInfo, VmInfo, vm_config};
 pub use pool::{GuestPool, NO_GUEST_BUDGET, surplus, wanted_boots, warm_target};
 pub use reattach::{ReattachPlan, ReattachedGuest, plan_reattach};
