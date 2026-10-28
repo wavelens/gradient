@@ -115,6 +115,12 @@
   <gr-eval-status-badge [status]="status" />
 }
 
+<h2>Status badge</h2>
+<p><code>gr-status-badge</code> takes a phase and a label, for statuses outside evaluations such as exec jobs.</p>
+@for (phase of statusPhases; track phase) {
+  <gr-status-badge [phase]="phase" [label]="phase" />
+}
+
 <h2>Progress bars</h2>
 <p>Every progress bar is a <code>gr-segmented-bar</code>. Build counts show a tooltip on hover.
    Byte downloads, as in the flake input rows and the build download on the evaluation log, draw plain segments.</p>

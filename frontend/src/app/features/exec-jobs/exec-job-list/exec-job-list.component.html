@@ -10,7 +10,7 @@
     <div class="job-list">
       @for (job of jobs(); track job.id) {
         <a class="job" [attr.data-phase]="phase(job.status)"
-           [routerLink]="['/project', project(), 'task', task(), 'exec-jobs', job.id]">
+           [routerLink]="['/project', project(), 'task', task(), 'exec', job.id]">
           <gr-status-icon class="si" [phase]="phase(job.status)" [label]="job.status" size="sm" />
           <span class="job-name">{{ job.entry_point }}</span>
           <span class="job-detail">{{ detail(job) }}</span>

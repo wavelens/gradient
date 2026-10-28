@@ -126,7 +126,7 @@ export const routes: Routes = [
               ),
           },
           {
-            path: 'exec-jobs/:job',
+            path: 'exec/:job',
             title: 'Exec Job',
             data: { hideFooter: true },
             loadComponent: () =>

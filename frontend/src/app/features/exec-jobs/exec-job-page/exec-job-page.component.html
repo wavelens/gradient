@@ -23,10 +23,7 @@
 
       <div class="overview-block">
         <div class="status-row">
-          <span class="job-status">
-            <gr-status-icon [phase]="phase(job.status)" [label]="job.status" />
-            {{ job.status }}
-          </span>
+          <gr-status-badge [phase]="phase(job.status)" [label]="job.status" />
           <span class="item-meta">{{ job.retries_left }} {{ job.retries_left === 1 ? 'retry' : 'retries' }} left</span>
         </div>
       </div>
@@ -93,8 +90,7 @@
                 (click)="sidebarOpen.set(!sidebarOpen())"></button>
         <div class="info-bar-left">
           <div class="info-metric">
-            <gr-status-icon [phase]="phase(job.status)" [label]="job.status" />
-            <span class="metric-value job-status">{{ job.status }}</span>
+            <gr-status-badge [phase]="phase(job.status)" [label]="job.status" />
           </div>
           <div class="info-metric">
             <span class="metric-label">Duration</span>
@@ -141,11 +137,13 @@
         @if (view() === 'terminal') {
           <div class="log-header">
             <span class="log-header-title">Terminal</span>
-            <gr-select-button ariaLabel="Terminal" [options]="terminalModes()" optionLabel="label" optionValue="value"
-                              [allowEmpty]="false" [ngModel]="terminalMode()" (ngModelChange)="openTerminal($event)" />
+            @if (terminalModes().length > 1) {
+              <gr-select-button ariaLabel="Terminal" [options]="terminalModes()" optionLabel="label" optionValue="value"
+                                [allowEmpty]="false" [ngModel]="terminalMode()" (ngModelChange)="openTerminal($event)" />
+            }
           </div>
           @if (terminal(); as source) {
-            <gr-terminal class="terminal" [source]="source" />
+            <gr-terminal class="terminal flush" [source]="source" />
           }
           @if (job.ssh_command; as sshCommand) {
             <div class="ssh-commands">

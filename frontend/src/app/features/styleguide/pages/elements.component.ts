@@ -37,6 +37,7 @@ import {
   PermissionPickerComponent,
   SegmentedBarComponent,
   StarButtonComponent,
+  StatusBadgeComponent,
   StatusIconComponent,
   ThunkProgressComponent,
   ratioSegments,
@@ -54,7 +55,7 @@ function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
   imports: [
     BadgeComponent, CopyFieldComponent, FieldRowComponent, IconComponent,
     MessageBannerComponent, EmptyStateComponent, LoadingSpinnerComponent,
-    StatCardComponent, TableComponent, DividerComponent, EvalStatusBadgeComponent,
+    StatCardComponent, TableComponent, DividerComponent, EvalStatusBadgeComponent, StatusBadgeComponent,
     MetricChartComponent, ToastComponent, ButtonComponent,
     CardGridComponent, RowComponent, RowListComponent, SkeletonComponent,
     LogoComponent, StarButtonComponent, StatusIconComponent, SegmentedBarComponent, ThunkProgressComponent,

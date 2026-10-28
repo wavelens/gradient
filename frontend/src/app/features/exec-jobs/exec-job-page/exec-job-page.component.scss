@@ -14,15 +14,6 @@
 
 a.sidebar-item { text-decoration: none; }
 
-.job-status {
-  display: inline-flex;
-  align-items: center;
-  gap: $spacing-xs;
-  font-size: $font-size-sm;
-  font-weight: 600;
-  color: var(--gr-text-primary);
-}
-
 .item-meta {
   flex-shrink: 0;
   font-size: $font-size-xs;
@@ -47,7 +38,6 @@ gr-terminal.terminal {
   flex: 1;
   height: auto;
   min-height: 0;
-  padding: $spacing-sm $spacing-md;
 }
 
 .ssh-commands {

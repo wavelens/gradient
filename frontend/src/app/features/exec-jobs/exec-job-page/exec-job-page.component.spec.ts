@@ -317,11 +317,11 @@ describe('ExecJobPageComponent', () => {
       expect(buttonNamed(root, 'Console')).toBeUndefined();
     });
 
-    it('offers only the console without ssh', () => {
+    it('opens the console without a mode switch when there is no ssh', () => {
       const { fixture } = setup('running', null);
       const root = openTerminalTab(fixture);
-      expect(buttonNamed(root, 'Console')).toBeTruthy();
-      expect(buttonNamed(root, 'Attach to program')).toBeUndefined();
+      expect(opened.map(path)).toEqual(['/exec-jobs/j1/console']);
+      expect(root.querySelector('gr-select-button')).toBeNull();
       expect(buttonNamed(root, 'New shell')).toBeUndefined();
       expect(root.querySelector('gr-copy-field')).toBeNull();
     });

@@ -21,7 +21,7 @@ import {
   MessageBannerComponent,
   SelectButtonComponent,
 } from '@gradient/ui/ui';
-import { StatusIconComponent } from '@shared/ui';
+import { StatusBadgeComponent, StatusIconComponent } from '@shared/ui';
 import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/terminal';
 import { LogViewerComponent, parseLineFragment, splitLogLines } from '@shared/log';
 import { WritableDirective, AccessService } from '@shared/access';
@@ -57,7 +57,7 @@ const hasTerminal = (status: ExecJobStatus): boolean => status === 'starting' ||
   imports: [
     RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent, DialogComponent,
     EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MessageBannerComponent,
-    SelectButtonComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
+    SelectButtonComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
     LogViewerComponent,
   ],
   templateUrl: './exec-job-page.component.html',
