@@ -2960,13 +2960,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "gradient-report"
+name = "gradient-redact"
 version = "2.0.1"
 dependencies = [
  "aho-corasick",
+ "tracing",
+]
+
+[[package]]
+name = "gradient-report"
+version = "2.0.1"
+dependencies = [
  "anyhow",
  "gradient-db",
  "gradient-entity",
+ "gradient-redact",
  "gradient-storage",
  "gradient-types",
  "rand 0.10.3",

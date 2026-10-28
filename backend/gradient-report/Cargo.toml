@@ -18,7 +18,7 @@ doctest = false
 workspace = true
 
 [dependencies]
-aho-corasick = { workspace = true }
+gradient-redact = { workspace = true }
 anyhow = { workspace = true }
 gradient-db = { workspace = true }
 gradient-entity = { workspace = true }
