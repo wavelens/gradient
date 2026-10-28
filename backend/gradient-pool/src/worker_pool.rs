@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use gradient_types::ids::ProjectId;
 use gradient_wire::types::{
-    BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities, JobKind,
+    BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities, GuestSize, JobKind,
 };
 
 use crate::peer_auth::PeerAuth;
@@ -339,9 +339,9 @@ impl WorkerPool {
     ) {
         if let Some(slot) = self.workers.get_mut(worker_id) {
             let jobs = &mut slot.shared_mut().assigned_jobs;
-            let devices = jobs
+            let (devices, guest) = jobs
                 .remove(job_id)
-                .map(|held| held.devices)
+                .map(|held| (held.devices, held.guest))
                 .unwrap_or_default();
             jobs.insert(
                 job_id.to_owned(),
@@ -351,14 +351,22 @@ impl WorkerPool {
                     reserved_ram_mb,
                     observed_ram_mb: 0,
                     devices,
+                    guest,
                 },
             );
         }
     }
 
-    pub fn hold_devices(&mut self, worker_id: &str, job_id: &str, devices: Vec<DeviceRequest>) {
+    pub fn hold_exec(
+        &mut self,
+        worker_id: &str,
+        job_id: &str,
+        devices: Vec<DeviceRequest>,
+        guest: GuestSize,
+    ) {
         if let Some(slot) = self.workers.get_mut(worker_id) {
-            slot.shared_mut()
+            let held = slot
+                .shared_mut()
                 .assigned_jobs
                 .entry(job_id.to_owned())
                 .or_insert_with(|| AssignedJob {
@@ -367,8 +375,10 @@ impl WorkerPool {
                     reserved_ram_mb: 0,
                     observed_ram_mb: 0,
                     devices: Vec::new(),
-                })
-                .devices = devices;
+                    guest: GuestSize::default(),
+                });
+            held.devices = devices;
+            held.guest = guest;
         }
     }
 
@@ -1236,19 +1246,68 @@ mod tests {
                 .and_then(|caps| caps.exec)
                 .map(|exec| exec.devices[0].free)
         };
-        pool.hold_devices(
+        pool.hold_exec(
             "w1",
             "exec:1",
             vec![DeviceRequest {
                 name: "gpu:h100".into(),
                 count: 8,
             }],
+            GuestSize::default(),
         );
         assert_eq!(free(&pool), Some(0));
         pool.assign_job("w1", "exec:1", JobKind::Exec, 0);
         assert_eq!(free(&pool), Some(0), "the assignment keeps the hold");
         pool.release_job("w1", "exec:1");
         assert_eq!(free(&pool), Some(8));
+    }
+
+    #[test]
+    fn held_guest_sizes_lower_the_free_budget() {
+        use crate::worker_caps::DeviceCount;
+        use gradient_wire::types::{
+            ExecAllow, ExecInventory, ExecRequirement, GuestCapacity, ResourceAmount,
+        };
+        let plenty = ResourceAmount {
+            total: 1_000_000,
+            free: 1_000_000,
+        };
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.update_exec_inventory(
+            "w1",
+            Some(ExecInventory {
+                allow: ExecAllow {
+                    nodes: 1,
+                    ..ExecAllow::default()
+                },
+                guest_capacity: GuestCapacity {
+                    cpus: plenty,
+                    memory_mb: ResourceAmount {
+                        total: 1000,
+                        free: 1000,
+                    },
+                    disk_mb: plenty,
+                },
+                ..Default::default()
+            }),
+        );
+        for job in ["exec:1", "exec:2"] {
+            pool.hold_exec("w1", job, Vec::new(), GuestSize::default_request());
+            pool.assign_job("w1", job, JobKind::Exec, 500);
+        }
+        let mut worker = pool.worker_caps("w1").unwrap();
+        let inventory = worker.exec.clone().unwrap();
+        assert_eq!(inventory.guest_capacity.memory_mb.free, 0);
+        worker.capabilities.exec = true;
+        worker.architectures = vec!["x86_64-linux".into()];
+        let third = ExecRequirement {
+            architecture: "x86_64-linux".into(),
+            guest: GuestSize::default_request(),
+            ..ExecRequirement::default()
+        };
+        assert!(!worker.fits_exec(&third, DeviceCount::Free));
+        assert!(worker.fits_exec(&third, DeviceCount::Total));
     }
 
     #[test]
