@@ -23,6 +23,8 @@
       fail = app "fail" { labels = [ "keep" ]; retries = 1; };
       long-keep = app "long-keep" { labels = [ "keep" ]; };
       lost = app "lost" { labels = [ "keep" ]; };
+      interactive = app "interactive" { labels = [ "keep" ]; ssh = true; ports = [ 8080 ]; };
+      terminal = app "terminal" { labels = [ "keep" ]; ssh = true; };
     };
   };
 }

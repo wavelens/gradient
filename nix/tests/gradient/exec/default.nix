@@ -78,6 +78,7 @@
         inherit maxPreWarm stopGuestsWithWorker;
         allow = {
           network = true;
+          ssh = true;
           retries = 1;
         };
       };
@@ -108,7 +109,7 @@ in {
         };
 
         nix.settings.substituters = lib.mkForce [ ];
-        environment.systemPackages = [ pkgs.git pkgs.curl pkgs.jq ];
+        environment.systemPackages = [ pkgs.git pkgs.curl pkgs.jq pkgs.openssh ];
 
         environment.etc = {
           "gradient/secrets/admin_password" = secretFile "$argon2id$v=19$m=4096,t=3,p=1$c29tZXNhbHQxMjM0NQ$hIKBEy9SOWlnAlcwUv2PLPBdsMkKhVlCyjTxaWIK+v4";
@@ -140,6 +141,7 @@ in {
             postgres.enable = true;
             domain = "gradient.local";
             proto.public = true;
+            ssh.enable = true;
             secrets.jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4");
             secrets.cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
 

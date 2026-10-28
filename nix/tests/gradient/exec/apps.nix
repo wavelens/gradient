@@ -35,6 +35,14 @@ in {
     ${sleep} 120
   '';
 
+  interactive = pkgs.writeShellScript "exec-interactive" ''
+    exec ${pkgs.python3}/bin/python3 -m http.server 8080 --bind 127.0.0.1 --directory /work
+  '';
+
+  terminal = pkgs.writeShellScript "exec-terminal" ''
+    exec ${pkgs.bashInteractive}/bin/bash -i
+  '';
+
   abort = ticks "exec-abort" 600;
   long-stop = ticks "exec-long-stop" 300;
   long-keep = ticks "exec-long-keep" 150;
