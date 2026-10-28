@@ -238,6 +238,7 @@
 | `reverseProxy.caddy.useACMEHost` | null or string | `null` | - | Host of an existing ACME certificate, passed to `services.caddy.virtualHosts.<name>.useACMEHost`. Caddy reuses it instead of requesting a new certificate. `null` keeps certificate management with Caddy. |
 | `reverseProxy.nginx.enable` | bool | `!reverseProxy.caddy.enable` | - | Whether to enable an nginx virtual host for Gradient. |
 | `reverseProxy.nginx.manageTls` | bool | `true` | - | Whether to let nginx obtain and present the TLS certificate itself through the virtual host's `enableACME` and `forceSSL` settings. Disable it for upstream proxies (Traefik, Cloudflare, load balancers) that terminate TLS and forward plain HTTP to nginx. Keep `useTls` enabled in that case for `https://` URLs and `Secure` session cookies. Has no effect with `useTls` disabled. |
+| `reverseProxy.nginx.useACMEHost` | null or string | `null` | - | Host of an existing ACME certificate, passed to `services.nginx.virtualHosts.<name>.useACMEHost`. Nginx reuses it instead of requesting a new certificate. `null` keeps certificate management with Nginx. Exclusive with `reverseProxy.nginx.manageTls`. Has no effect with `useTls` disabled. |
 
 ## `s3`
 
@@ -396,6 +397,7 @@
 | `worker.exec.mounts.*.perJob` | bool | `false` | - | Whether to give each job a fresh directory below `path`, deleted after the job. |
 | `worker.exec.mounts.*.readOnly` | bool | `false` | - | Whether to share the directory read-only. |
 | `worker.exec.nameservers` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_NAMESERVERS` | IPv4 addresses of the nameservers for guests with network access. An empty list uses the address of `worker.exec.bridge`, where the NixOS module runs a DNS forwarder. |
+| `worker.exec.noSwap` | bool | `false` | - | Whether to keep the worker service and `gradient-guests.slice` out of swap. Guest memory and the secrets in it then stay in RAM. Under memory pressure the kernel kills guests and worker processes instead of swapping them out. |
 | `worker.exec.preWarm` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_PRE_WARM` | Guests booted from `worker.exec.image` and paused, waiting for a job. |
 | `worker.exec.sops.files` | list of path | `[ ]` | `GRADIENT_WORKER_EXEC_SOPS_FILES` | Sops files decrypted on the worker with `worker.exec.sops.keyFile`. Exec jobs get their top-level values by name. The server never sees them. |
 | `worker.exec.sops.keyFile` | null or path | `null` | `GRADIENT_WORKER_EXEC_SOPS_KEY_FILE` | SSH private key decrypting `worker.exec.sops.files`, an Ed25519 or RSA key. The age recipient derives from it. The worker reads it through a systemd credential, and `systemctl reload gradient-worker` decrypts the files again. `null` decrypts no file. |

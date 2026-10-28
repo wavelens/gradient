@@ -206,6 +206,16 @@ in {
         '';
       };
 
+      noSwap = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Whether to keep the worker service and `gradient-guests.slice` out of swap. Guest
+          memory and the secrets in it then stay in RAM. Under memory pressure the kernel kills
+          guests and worker processes instead of swapping them out.
+        '';
+      };
+
       devices = lib.mkOption {
         type = lib.types.listOf (lib.types.submodule {
           options = {
@@ -570,6 +580,10 @@ in {
         };
       };
 
+      slices = lib.mkIf cfg.exec.noSwap {
+        gradient-guests.sliceConfig.MemorySwapMax = 0;
+      };
+
       services = {
         nix-daemon.serviceConfig = {
           Delegate = lib.mkIf cfg.build.metrics true;
@@ -609,6 +623,7 @@ in {
             RestartSec = 10;
             KillMode = "mixed";
             LimitNOFILE = 65535;
+            MemorySwapMax = lib.mkIf cfg.exec.noSwap 0;
             RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
             RestrictNamespaces = true;
             RestrictRealtime = true;
