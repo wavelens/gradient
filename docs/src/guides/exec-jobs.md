@@ -138,7 +138,7 @@ passthru.gradient = {
 
 - Workers report the labels, devices and limits they allow. Requests outside those limits rule out that worker. Downgrades of a request never happen.
 - Lost workers lead to a restart without using a retry. Ten losses in a row fail the job.
-- Not available yet: `nodes` above 1, `image`, `secrets`, SSH sessions, outputs and phase markers in the UI.
+- Not available yet: `nodes` above 1, `image`, `secrets`, outputs and phase markers in the UI.
 
 ## 5. Read the Job Context
 
@@ -157,7 +157,64 @@ Programs start as the user `gradient` in `/work`, a checkout of the evaluated co
 | `GRADIENT_NODE_INDEX`, `GRADIENT_NODE_COUNT`, `GRADIENT_MASTER_ADDR`, `GRADIENT_MASTER_PORT`, `GRADIENT_PEERS` | Cluster values, a single node for now |
 
 - `args` and `env` accept placeholders like `@gradient.job.commit@` or `@gradient.worker.zone@`. Unknown placeholders fail the job.
-- Timeouts terminate the attempt. with a log line, `program produced no output for <n>s (maxSilent exceeded)` or `program exceeded wall-clock timeout of <n>s`.
+- Timeout events end the attempt. The log shows `program produced no output for <n>s (maxSilent exceeded)` or `program exceeded wall-clock timeout of <n>s`.
+
+## 6. Open a Terminal { #ssh-and-terminal }
+
+Jobs with `ssh = true` accept terminal sessions from the browser and over SSH. Exec workers need `exec.allow.ssh = true` for such jobs.
+
+```nix
+# flake.nix
+apps.x86_64-linux.notebook = {
+  type = "app";
+  program = "${pkgs.bashInteractive}/bin/bash";
+  passthru.gradient = { ssh = true; ports = [ 8888 ]; };
+};
+```
+
+- Programs of such jobs start on a terminal. `bash` programs wait for input and hold the job up until the shell exits.
+- A job with `ssh = false` provides the guest serial console as its only access.
+- Sessions need the `TriggerEvaluation` permission on the project, see [Members and Roles](../ui/members-and-roles.md).
+- New shells start as `gradient` in `/work` with the environment of the program.
+- Interactive programs still obey `maxSilent`. Typed input echoed by the terminal counts as output.
+
+### Terminal Tab
+
+The **Terminal** tab of the job page offers three sessions.
+
+| Session | Job status | Content |
+|---|---|---|
+| **Console** | `starting` or `running` | Serial console of the guest, starting with the last 64 KiB of output |
+| **Attach to program** | `running`, `ssh = true` | The terminal of the program |
+| **New shell** | `running`, `ssh = true` | A new shell next to the program |
+
+- The oldest viewer can type into the console. Later viewers see a read-only view.
+- Programs stay active past the close of an attached view.
+
+### SSH Logins
+
+SSH logins need the SSH server and a key from [Build over SSH](build-over-ssh.md).
+
+| Login | Target |
+|---|---|
+| `<project>/<job-id>` | The job |
+| `<project>/<job-id>/<node>` | A node of the job, only `0` for now |
+| `<project>/<task>` | The newest running exec job of the task |
+
+```sh
+ssh -p 2222 myproject/<job-id>@ci.example.com # (1)!
+ssh -t -p 2222 myproject/<job-id>@ci.example.com shell # (2)!
+ssh -p 2222 -N -L 8888:127.0.0.1:8888 myproject/<job-id>@ci.example.com # (3)!
+```
+
+1.  Attach to the terminal of the program.
+2.  Open a new shell next to the program.
+3.  Forward the local port 8888 to port 8888 inside the guest.
+
+- Job pages show the `ssh` command and an `ssh -N -L` command per port, ready to copy.
+- Forwards reach only ports listed in `ports`.
+- Logins accept no command except `shell`.
+- Sessions close on a worker disconnect. Programs keep going.
 
 ## Verify Deployment
 
@@ -170,4 +227,5 @@ Programs start as the user `gradient` in `/work`, a checkout of the evaluated co
 - [Workers](../concepts/workers.md): capabilities and registrations
 - [Evaluation Wildcards](../reference/wildcards.md): select the apps of a flake
 - [Declarative State](../reference/state.md): `exec_enabled` and `enable_exec`
-- [Configuration](../reference/configuration.md): `exec.enable`
+- [Configuration](../reference/configuration.md): the `exec.enable` and `exec.allow.ssh` settings
+- [Build over SSH](build-over-ssh.md): SSH server and key setup

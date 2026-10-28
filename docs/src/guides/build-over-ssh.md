@@ -103,4 +103,5 @@ Expected output: the store URL and `Trusted: 0`. Build requests appear in the UI
 
 - [Share a Cache](share-a-cache.md): substituter URL and public key
 - [Build Before Pushing](build-before-push.md): building uncommitted changes with `gradient build`
-- [Configuration](../reference/configuration.md#ssh): all `ssh` options
+- Every `ssh` option: [Configuration](../reference/configuration.md#ssh)
+- Terminal sessions inside exec jobs: [Run Exec Jobs](exec-jobs.md#ssh-and-terminal)
