@@ -463,6 +463,16 @@ pub struct ExecArgs {
     /// Seconds without output after which an exec job that leaves `maxSilent` unset times
     /// out. `null` sets no limit.
     pub defaults_max_silent: Option<u64>,
+
+    /// Sops files decrypted on the worker with
+    /// {option}`services.gradient.worker.exec.sops.keyFile`. Exec jobs get their top-level
+    /// values by name. The server never sees them.
+    #[arg(value_delimiter = ',')]
+    pub sops_files: Vec<PathBuf>,
+
+    /// SSH private key decrypting {option}`services.gradient.worker.exec.sops.files`, an
+    /// Ed25519 or RSA key. The age recipient derives from it. `null` decrypts no file.
+    pub sops_key_file: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

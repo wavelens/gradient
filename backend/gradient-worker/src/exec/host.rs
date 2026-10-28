@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::inventory::advertised;
 use super::reattach::{ResumedJob, resumable};
+use super::sops::WorkerSecrets;
 use crate::config::{ExecArgs, WorkerConfig};
 
 pub struct ExecHost {
@@ -21,6 +22,7 @@ pub struct ExecHost {
     pub config: ExecArgs,
     pub worker_id: String,
     pub zone: Option<String>,
+    pub secrets: Arc<WorkerSecrets>,
     worker_stop: CancellationToken,
 }
 
@@ -50,6 +52,10 @@ impl ExecHost {
         if config.exec.image.is_none() {
             bail!("capabilities.exec needs exec.image, the guest image exec jobs boot");
         }
+        let secrets = WorkerSecrets::open(
+            &config.exec.sops_files,
+            config.exec.sops_key_file.as_deref(),
+        )?;
         let worker_exe = std::env::current_exe().context("locate the worker binary")?;
         let vm = config.exec.vm_config(config.guests_dir(), &worker_exe);
         let units = GuestUnits::connect().await?;
@@ -60,6 +66,7 @@ impl ExecHost {
             config: config.exec.clone(),
             worker_id,
             zone: config.zone.clone().filter(|zone| !zone.is_empty()),
+            secrets,
             worker_stop,
         }))
     }
@@ -75,12 +82,10 @@ impl ExecHost {
     pub fn inventory(&self) -> ExecInventory {
         advertised(
             &self.devices,
-            self.config.labels.clone(),
+            &self.config,
             &self.worker_id,
-            &self.config.mounts,
-            self.config.allow(),
-            self.config.defaults(),
             self.pool.warm_count(),
+            self.secrets.names(),
         )
     }
 

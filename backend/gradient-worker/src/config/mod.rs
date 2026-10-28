@@ -276,6 +276,15 @@ mod tests {
     }
 
     #[test]
+    fn sops_files_come_from_a_comma_separated_value() {
+        let config = parse(&["--exec-sops-files", "/a.yaml,/b.yaml"]).expect("valid paths");
+        assert_eq!(
+            config.exec.sops_files,
+            [PathBuf::from("/a.yaml"), PathBuf::from("/b.yaml")]
+        );
+    }
+
+    #[test]
     fn a_reversed_port_range_is_refused() {
         assert!(parse(&["--exec-allow-ports", "65535,1024"]).is_err());
     }

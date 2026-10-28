@@ -46,12 +46,13 @@
       else if lib.elem name [ "i32" "i64" ] then lib.types.int
       else if name == "PathBuf" then lib.types.path
       else if name == "Vec<String>" then lib.types.listOf lib.types.str
+      else if name == "Vec<PathBuf>" then lib.types.listOf lib.types.path
       else lib.types.str;
   in if isOptional spec then lib.types.nullOr type else type;
 
   defaultOf = spec:
     if spec.type == "bool" then spec.default == "true"
-    else if spec.type == "Vec<String>" then lib.optionals (spec.default != null) (lib.splitString "," spec.default)
+    else if lib.hasPrefix "Vec<" spec.type then lib.optionals (spec.default != null) (lib.splitString "," spec.default)
     else if spec.default == null then null
     else if isInteger spec then lib.toInt spec.default
     else spec.default;

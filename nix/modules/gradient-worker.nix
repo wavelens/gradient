@@ -104,7 +104,7 @@
   workerOptions = import ./options.nix {
     inherit lib;
     specs = builtins.fromJSON (builtins.readFile ../../backend/gradient-worker/options.json);
-    subGroups = { eval = [ "cache" ]; log = [ "level" ]; exec = [ "allow" "defaults" ]; };
+    subGroups = { eval = [ "cache" ]; log = [ "level" ]; exec = [ "allow" "defaults" "sops" ]; };
     groupSwitches.exec = [ "capabilities" "exec" ];
     emptyListIsUnset = true;
 
@@ -114,6 +114,7 @@
       serverUrl = "wss://gradient.example.com/proto";
       zone = "fra1";
       log.traceDir = "/var/lib/gradient-worker/trace";
+      exec.sops.files = [ "/etc/gradient/worker-secrets.yaml" ];
     };
 
     withoutEnvironment = [ [ "peers" ] [ "sshBin" ] [ "evalSubprocess" ] [ "evalDriver" ] [ "guestSupervisor" ] ] ++ execByHand;
@@ -302,6 +303,19 @@ in {
         description = ''
           First and last port of the range that exec jobs can ask for. `null` allows ports
           1024 to 65535.
+        '';
+      };
+
+      sops.keyFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        example = "/etc/ssh/ssh_host_ed25519_key";
+        description = ''
+          SSH private key decrypting {option}`services.gradient.worker.exec.sops.files`, an
+          Ed25519 or RSA key. The age recipient derives from it.
+          The worker reads it through a systemd credential, and
+          {command}`systemctl reload gradient-worker` decrypts the files again. `null` decrypts
+          no file.
         '';
       };
     };
@@ -535,6 +549,10 @@ in {
         assertion = exec.allow.ports == null || lib.length exec.allow.ports == 2;
         message = "services.gradient.worker.exec.allow.ports: a list of the first and last port, not ${toString (lib.length exec.allow.ports)} ports";
       }
+      {
+        assertion = exec.sops.files != [ ] -> exec.sops.keyFile != null;
+        message = "services.gradient.worker.exec.sops.files: set without exec.sops.keyFile";
+      }
     ];
 
     systemd = {
@@ -572,6 +590,7 @@ in {
           serviceConfig = {
             Type = "notify";
             ExecStart = lib.getExe' cfg.packages.gradient "gradient-worker";
+            ExecReload = lib.mkIf cfg.capabilities.exec "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
             StateDirectory = "gradient-worker";
             User = "gradient-worker";
             Group = "gradient-worker";
@@ -599,6 +618,8 @@ in {
               "gradient_worker_peers:${cfg.peersFile}"
             ] ++ lib.optionals (cfg.acceptedServerTokensFile != null) [
               "gradient_worker_accepted_server_tokens:${cfg.acceptedServerTokensFile}"
+            ] ++ lib.optionals (cfg.capabilities.exec && exec.sops.keyFile != null) [
+              "gradient_worker_exec_sops_key:${exec.sops.keyFile}"
             ];
           };
 
@@ -617,6 +638,8 @@ in {
             GRADIENT_WORKER_EXEC_MOUNTS = builtins.toJSON exec.mounts;
             GRADIENT_WORKER_EXEC_CLOUD_HYPERVISOR_BIN = lib.getExe' cfg.packages.cloudHypervisor "cloud-hypervisor";
             GRADIENT_WORKER_EXEC_VIRTIOFSD_BIN = lib.getExe cfg.packages.virtiofsd;
+          } // lib.optionalAttrs (cfg.capabilities.exec && exec.sops.keyFile != null) {
+            GRADIENT_WORKER_EXEC_SOPS_KEY_FILE = "%d/gradient_worker_exec_sops_key";
           } // lib.optionalAttrs (cfg.capabilities.exec && exec.allow.ports != null) {
             GRADIENT_WORKER_EXEC_ALLOW_PORTS = lib.concatMapStringsSep "," toString exec.allow.ports;
           } // workerOptions.environment cfg // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;

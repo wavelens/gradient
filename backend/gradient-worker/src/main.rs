@@ -32,6 +32,7 @@ use config::WorkerConfig;
 use connection_state::Disconnected;
 use exec::host::ExecHost;
 use exec::reattach::ResumedJob;
+use exec::sops::WorkerSecrets;
 use gradient_util::logging::{LogSetup, LogWriter, TraceSetup};
 use gradient_worker_client::reconnect::{
     RunOutcome, SessionEnd, backoff_after_session, retry_reconnect,
@@ -102,6 +103,9 @@ fn main() -> Result<()> {
         let stop = CancellationToken::new();
         install_signal_handler(stop.clone());
         let (exec, resumed) = start_exec_host(&config, &stop).await?;
+        if let Some(exec) = &exec {
+            install_reload_handler(Arc::clone(&exec.secrets));
+        }
 
         let kept_logs: Vec<String> = resumed.iter().map(|job| job.stored.job_id.clone()).collect();
         if let Err(e) = worker::clear_job_logs(&config, &kept_logs) {
@@ -325,6 +329,31 @@ fn install_signal_handler(stop: CancellationToken) {
         next_stop_signal().await;
         info!("stop requested; aborting running jobs so the server queues them again");
         stop.cancel();
+    });
+}
+
+fn install_reload_handler(secrets: Arc<WorkerSecrets>) {
+    use tokio::signal::unix::{SignalKind, signal};
+    let mut hangup = match signal(SignalKind::hangup()) {
+        Ok(hangup) => hangup,
+        Err(e) => {
+            error!(error = %e, "failed to install SIGHUP handler; worker sops secrets reload only on restart");
+            return;
+        }
+    };
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "outlives every session; ends with the process"
+    )]
+    tokio::spawn(async move {
+        while hangup.recv().await.is_some() {
+            match secrets.reload() {
+                Ok(count) => info!(count, "reloaded worker sops secrets"),
+                Err(e) => {
+                    error!(error = %format!("{e:#}"), "worker sops secrets not reloaded; keeping the previous values")
+                }
+            }
+        }
     });
 }
 

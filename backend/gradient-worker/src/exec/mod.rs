@@ -13,5 +13,6 @@ pub mod inventory;
 pub mod job;
 pub mod job_channels;
 pub mod reattach;
+pub mod sops;
 pub mod state;
 pub mod watchdog;
