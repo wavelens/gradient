@@ -33,6 +33,7 @@
             ],
             "styles": [
               "node_modules/@angular/cdk/overlay-prebuilt.css",
+              "node_modules/@xterm/xterm/css/xterm.css",
               "src/styles.scss"
             ]
           },

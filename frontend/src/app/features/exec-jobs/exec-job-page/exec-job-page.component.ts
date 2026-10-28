@@ -6,33 +6,51 @@
 
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterModule } from '@angular/router';
+import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Subscription, catchError, forkJoin, interval, startWith, switchMap, takeWhile } from 'rxjs';
 import {
   BadgeComponent,
   ButtonComponent,
+  CopyFieldComponent,
   DialogComponent,
+  FormFieldComponent,
   LoadingSpinnerComponent,
   PageLayoutComponent,
+  SelectButtonComponent,
+  TabSwitchComponent,
   TableComponent,
 } from '@gradient/ui/ui';
 import { StatusIconComponent } from '@shared/ui';
+import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/terminal';
 import { WritableDirective, AccessService } from '@shared/access';
 import { clockTime } from '@shared/text';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
-import type { ExecJobResponse } from '@core/models';
+import type { ExecJobResponse, ExecJobStatus } from '@core/models';
 import { deviceLabel, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 
 const POLL_MS = 2000;
+
+type JobView = 'log' | 'terminal';
+type TerminalMode = 'console' | 'attach' | 'shell';
+
+const TERMINAL_PATHS: Record<TerminalMode, string> = {
+  console: 'console',
+  attach: 'shell?attach=true',
+  shell: 'shell',
+};
+
+const hasTerminal = (status: ExecJobStatus): boolean => status === 'starting' || status === 'running';
 
 @Component({
   selector: 'app-exec-job-page',
   standalone: true,
   imports: [
-    RouterModule, BadgeComponent, ButtonComponent, DialogComponent, LoadingSpinnerComponent,
-    PageLayoutComponent, TableComponent, StatusIconComponent, WritableDirective,
+    RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent, DialogComponent,
+    FormFieldComponent, LoadingSpinnerComponent, PageLayoutComponent, SelectButtonComponent,
+    TabSwitchComponent, TableComponent, StatusIconComponent, TerminalComponent, WritableDirective,
   ],
   templateUrl: './exec-job-page.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -58,6 +76,27 @@ export class ExecJobPageComponent implements OnInit {
   abortOpen = signal(false);
   aborting = signal(false);
   errorMessage = signal<string | null>(null);
+
+  protected readonly views = [
+    { label: 'Log', value: 'log' },
+    { label: 'Terminal', value: 'terminal' },
+  ];
+  view = signal<JobView>('log');
+  terminalMode = signal<TerminalMode>('console');
+  terminal = signal<TerminalSource | null>(null);
+
+  terminalReachable = computed(() => {
+    const job = this.job();
+    return job ? hasTerminal(job.status) : false;
+  });
+  terminalModes = computed(() => {
+    const job = this.job();
+    const modes: { label: string; value: TerminalMode }[] = [{ label: 'Console', value: 'console' }];
+    if (job?.status === 'running' && job.ssh_command) {
+      modes.push({ label: 'Attach to program', value: 'attach' }, { label: 'New shell', value: 'shell' });
+    }
+    return modes;
+  });
 
   open = computed(() => {
     const job = this.job();
@@ -94,7 +133,19 @@ export class ExecJobPageComponent implements OnInit {
       this.errorMessage.set(null);
       this.job.set(job);
       this.log.set(log);
+      if (!hasTerminal(job.status)) this.showView('log');
     });
+  }
+
+  showView(view: JobView): void {
+    this.view.set(view);
+    if (view === 'terminal') this.openTerminal(this.terminalMode());
+    else this.terminal.set(null);
+  }
+
+  openTerminal(mode: TerminalMode): void {
+    this.terminalMode.set(mode);
+    this.terminal.set(terminalSocket(`/exec-jobs/${this.jobId}/${TERMINAL_PATHS[mode]}`));
   }
 
   confirmAbort(): void {

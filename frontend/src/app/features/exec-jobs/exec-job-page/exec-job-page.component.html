@@ -58,8 +58,34 @@
       </ol>
     }
 
-    <h3>Log</h3>
-    <pre class="log">{{ log() || 'No output yet.' }}</pre>
+    @if (terminalReachable()) {
+      <gr-tab-switch class="views" ariaLabel="Job output" [options]="views" optionLabel="label" optionValue="value"
+                     [ngModel]="view()" (ngModelChange)="showView($event)" />
+    } @else {
+      <h3>Log</h3>
+    }
+
+    @if (view() === 'terminal') {
+      <gr-select-button ariaLabel="Terminal" [options]="terminalModes()" optionLabel="label" optionValue="value"
+                        [allowEmpty]="false" [ngModel]="terminalMode()" (ngModelChange)="openTerminal($event)" />
+      @if (terminal(); as source) {
+        <gr-terminal class="terminal" [source]="source" />
+      }
+      @if (job.ssh_command; as sshCommand) {
+        <div class="ssh-commands">
+          <gr-form-field label="SSH login">
+            <gr-copy-field [value]="sshCommand" />
+          </gr-form-field>
+          @for (command of job.forward_commands; track command) {
+            <gr-form-field label="Port forward">
+              <gr-copy-field [value]="command" />
+            </gr-form-field>
+          }
+        </div>
+      }
+    } @else {
+      <pre class="log">{{ log() || 'No output yet.' }}</pre>
+    }
   } @else if (!errorMessage()) {
     <gr-loading-spinner message="Loading exec job..." />
   }

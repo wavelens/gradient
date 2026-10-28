@@ -28,6 +28,20 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
+import { TerminalComponent, type TerminalSource } from '@shared/terminal';
+import { NEVER, Subject, startWith } from 'rxjs';
+
+function echoSource(): TerminalSource {
+  const encoder = new TextEncoder();
+  const typed = new Subject<Uint8Array>();
+  return {
+    output: typed.pipe(startWith(encoder.encode('Everything typed here is echoed back.\r\n'))),
+    closed: NEVER,
+    write: (data) => typed.next(encoder.encode(data === '\r' ? '\r\n' : data)),
+    resize: () => undefined,
+    dispose: () => typed.complete(),
+  };
+}
 
 @Component({
   selector: 'app-sg-components',
@@ -36,7 +50,7 @@ import { LabelHelpComponent } from '@shared/ui';
     FormsModule, ButtonComponent, CheckboxComponent, SelectComponent, SelectButtonComponent,
     AutoCompleteComponent, MenuComponent, PopoverComponent, TooltipDirective, InputDirective,
     FormFieldComponent, LabelHelpComponent, DialogComponent, PasswordInputComponent, NameFieldComponent,
-    TabSwitchComponent, TableComponent, SettingsSectionComponent, SubmitDirective,
+    TabSwitchComponent, TableComponent, SettingsSectionComponent, SubmitDirective, TerminalComponent,
   ],
   templateUrl: './components.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -60,6 +74,7 @@ export class ComponentsComponent {
     { label: 'Weeks', value: 'weeks' },
   ];
   dialogOpen = signal(false);
+  echo = echoSource();
   suggestions = ['europe', 'north-america', 'asia'];
   regions = [
     { label: 'Europe', value: 'eu' },
