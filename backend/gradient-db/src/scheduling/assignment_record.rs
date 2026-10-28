@@ -26,6 +26,7 @@ use std::collections::HashMap;
 pub const EVAL_KEY_PREFIX: &str = "eval:";
 pub const BUILD_KEY_PREFIX: &str = "build:";
 pub const EXEC_KEY_PREFIX: &str = "exec:";
+pub const CONTINUE_KEY_PREFIX: &str = "continue:";
 
 pub fn shared_build_of_key(job_id: &str) -> Option<DerivationBuildId> {
     job_id.strip_prefix(BUILD_KEY_PREFIX)?.parse().ok()
@@ -37,6 +38,14 @@ pub fn eval_of_key(job_id: &str) -> Option<EvaluationId> {
 
 pub fn exec_job_of_key(job_id: &str) -> Option<ExecJobId> {
     job_id.strip_prefix(EXEC_KEY_PREFIX)?.parse().ok()
+}
+
+pub fn exec_job_of_continuation_key(job_id: &str) -> Option<ExecJobId> {
+    job_id.strip_prefix(CONTINUE_KEY_PREFIX)?.parse().ok()
+}
+
+pub fn continuation_job_key_sql(id_expr: &str) -> String {
+    format!("'{CONTINUE_KEY_PREFIX}' || {id_expr}::text")
 }
 
 pub fn exec_job_key_sql(id_expr: &str) -> String {
@@ -156,6 +165,7 @@ pub async fn latest_eval_jobs<C: ConnectionTrait>(
             .column(CDispatchedJob::EvaluationId)
             .column(CDispatchedJob::Id)
             .filter(CDispatchedJob::Kind.eq(DispatchedJobKind::Eval))
+            .filter(CDispatchedJob::JobId.starts_with(EVAL_KEY_PREFIX))
             .filter(CDispatchedJob::EvaluationId.is_in(chunk))
             .order_by_asc(CDispatchedJob::DispatchedAt)
             .into_tuple::<(EvaluationId, DispatchedJobId)>()
@@ -173,6 +183,7 @@ pub async fn eval_attempts<C: ConnectionTrait>(
 ) -> Result<u64, DbErr> {
     EDispatchedJob::find()
         .filter(CDispatchedJob::Kind.eq(DispatchedJobKind::Eval))
+        .filter(CDispatchedJob::JobId.starts_with(EVAL_KEY_PREFIX))
         .filter(CDispatchedJob::EvaluationId.eq(evaluation))
         .filter(
             CDispatchedJob::Outcome
@@ -523,6 +534,19 @@ mod tests {
         assert!(
             sql.ends_with("ORDER BY \"dispatched_job\".\"dispatched_at\" ASC"),
             "{sql}"
+        );
+    }
+
+    #[test]
+    fn a_continuation_key_names_its_job() {
+        let job = ExecJobId::now_v7();
+        assert_eq!(
+            exec_job_of_continuation_key(&format!("{CONTINUE_KEY_PREFIX}{job}")),
+            Some(job)
+        );
+        assert_eq!(
+            exec_job_of_continuation_key(&format!("{EVAL_KEY_PREFIX}{}", EvaluationId::now_v7())),
+            None
         );
     }
 

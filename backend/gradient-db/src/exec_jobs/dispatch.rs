@@ -20,6 +20,9 @@ pub struct ExecDispatchRow {
     pub entry_point: String,
     pub task: TaskId,
     pub project: ProjectId,
+    pub project_name: String,
+    pub task_name: String,
+    pub parent_job: Option<ExecJobId>,
     pub repository: String,
     pub commit: String,
     pub architecture: String,
@@ -38,6 +41,7 @@ pub struct OpenAttempt {
 fn dispatch_rows_sql(filter: &str) -> String {
     format!(
         "SELECT r.*, e.eval AS entry_point_name, ev.task AS task_id, t.project AS project_id, \
+         pr.name AS project_name, t.name AS task_name, ev.parent_exec_job AS parent_job, \
          ev.repository, encode(c.hash, 'hex') AS commit_hash, d.architecture, \
          img.hash AS image_hash, img.package AS image_package, \
          (SELECT count(*) FROM exec_job_attempt a WHERE a.exec_job = r.id)::integer \
@@ -48,6 +52,7 @@ fn dispatch_rows_sql(filter: &str) -> String {
          JOIN entry_point e ON e.id = r.entry_point \
          JOIN evaluation ev ON ev.id = r.evaluation \
          JOIN task t ON t.id = ev.task \
+         JOIN project pr ON pr.id = t.project \
          JOIN commit c ON c.id = ev.commit \
          JOIN derivation d ON d.id = r.program_derivation \
          LEFT JOIN derivation_output img ON img.derivation = r.image_derivation AND img.name = 'out' \
@@ -127,6 +132,9 @@ fn dispatch_row(row: &QueryResult) -> Result<ExecDispatchRow, DbErr> {
         entry_point: row.try_get("", "entry_point_name")?,
         task: row.try_get("", "task_id")?,
         project: row.try_get("", "project_id")?,
+        project_name: row.try_get("", "project_name")?,
+        task_name: row.try_get("", "task_name")?,
+        parent_job: row.try_get("", "parent_job")?,
         repository: row.try_get("", "repository")?,
         commit: row.try_get("", "commit_hash")?,
         architecture: row.try_get("", "architecture")?,
