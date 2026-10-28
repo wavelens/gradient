@@ -443,11 +443,17 @@
                 update_existing = true;
               };
             }
+            {
+              name = "evaluate-deploy";
+              type = "start_evaluation";
+              events = [ "exec_job.completed" ];
+              config.task = "deploy";
+            }
           ]
         '';
         description = ''
           Task actions: email notifications, web requests, Matrix and Slack messages, Git host status
-          reports and pull request automation. Actions missing on the next state apply are removed,
+          reports, pull request automation and evaluations of other tasks. Actions missing on the next state apply are removed,
           matched by `name`.
 
           Secret files of actions (`token_file`, `access_token_file`, `webhook_url_file`) must live
@@ -637,6 +643,7 @@
           "open_pr"
           "send_matrix_message"
           "send_slack_message"
+          "start_evaluation"
         ];
         description = "Action kind, determining the expected `config`.";
       };
@@ -681,7 +688,9 @@
             - `integration` (string) names an outbound integration in the same project, as
               for `git_host_status_report`.
             - `generator` (string, default `"flake_lock"`) chooses the change generator.
-              `flake_lock` is currently the only one and updates {file}`flake.lock`.
+              `flake_lock` updates {file}`flake.lock`. `exec_tree` opens the
+              {file}`gradient/tree.patch` output of an exec job once the job completes, with
+              `{entry_point}` and `{job}` as placeholders in the branch and templates.
             - `granularity` (string, default `"per_run"`) is `"per_run"` for one pull request
               with every input update or `"per_input"` for one per updated input.
             - `verify_gate` (string, default `"build"`) is `"none"`, `"eval"` or `"build"`. The
@@ -693,6 +702,10 @@
             - `body_template` (string, optional) is the template of the pull request body.
             - `update_existing` (bool, default `true`) force-pushes new contents to an open
               pull request of the same branch instead of opening a duplicate.
+
+          - `start_evaluation` takes `{ task = "deploy"; }`, naming a task of the same
+            project and starts an evaluation of that task's head commit on each subscribed
+            event. An exec job event links the new evaluation to the job.
 
           A `send_web_request` action without `token_file` sends unauthenticated requests.
           Secret files (`token_file`, `access_token_file`, `webhook_url_file`) are read from the

@@ -791,3 +791,28 @@ fn a_worker_of_an_unknown_team_is_rejected() {
         v.errors
     );
 }
+
+#[test]
+fn a_start_evaluation_action_survives_export() {
+    use gradient_entity::ids::TaskId;
+    use gradient_types::actions::{ActionConfig, ActionType};
+    use std::collections::HashMap;
+
+    let deploy = TaskId::now_v7();
+    let action = gradient_entity::task_action::Model {
+        name: "evaluate-deploy".into(),
+        action_type: ActionType::StartEvaluation,
+        config: serde_json::to_value(ActionConfig::StartEvaluation { task: deploy }).unwrap(),
+        events: serde_json::json!(["exec_job.completed"]),
+        active: true,
+        ..Default::default()
+    };
+    let task_name = HashMap::from([(deploy, "deploy".to_string())]);
+
+    let exported = crate::export::export_action(&action, &HashMap::new(), &task_name)
+        .expect("the action is exported");
+
+    assert_eq!(exported.action_type, "start_evaluation");
+    assert_eq!(exported.config["task"], "deploy");
+    assert_eq!(exported.events, vec!["exec_job.completed".to_string()]);
+}
