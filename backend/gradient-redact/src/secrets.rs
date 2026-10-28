@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
+use gradient_secret::SecretBytes;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_encode};
 
 use crate::replacements::Replacements;
@@ -22,21 +23,30 @@ const URL_UNRESERVED: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'_')
     .remove(b'~');
 
-pub fn secret_forms(value: &[u8]) -> Vec<Vec<u8>> {
+pub fn secret_forms(value: &[u8]) -> Vec<SecretBytes> {
     if value.len() < MIN_SECRET_BYTES {
         return Vec::new();
     }
 
     let trimmed = trim_trailing_newlines(value);
-    let mut forms = vec![value.to_vec(), trimmed.to_vec()];
+    let mut forms = vec![SecretBytes::from(value), SecretBytes::from(trimmed)];
     forms.extend(lines_of(trimmed));
     for whole in [value, trimmed] {
         forms.extend(encoded_forms(whole));
     }
 
+    forms.retain(|form| form.expose().len() >= MIN_SECRET_BYTES);
+    first_of_each(forms, SecretBytes::expose)
+}
+
+fn first_of_each<T>(items: Vec<T>, bytes: impl Fn(&T) -> &[u8]) -> Vec<T> {
     let mut seen = HashSet::new();
-    forms.retain(|form| form.len() >= MIN_SECRET_BYTES && seen.insert(form.clone()));
-    forms
+    let first: Vec<bool> = items.iter().map(|item| seen.insert(bytes(item))).collect();
+    items
+        .into_iter()
+        .zip(first)
+        .filter_map(|(item, first)| first.then_some(item))
+        .collect()
 }
 
 fn trim_trailing_newlines(value: &[u8]) -> &[u8] {
@@ -47,36 +57,45 @@ fn trim_trailing_newlines(value: &[u8]) -> &[u8] {
     &value[..end]
 }
 
-fn lines_of(value: &[u8]) -> Vec<Vec<u8>> {
+fn lines_of(value: &[u8]) -> Vec<SecretBytes> {
     if !value.contains(&b'\n') {
         return Vec::new();
     }
 
     value
         .split(|&b| b == b'\n')
-        .map(|line| line.strip_suffix(b"\r").unwrap_or(line).to_vec())
+        .map(|line| SecretBytes::from(line.strip_suffix(b"\r").unwrap_or(line)))
         .collect()
 }
 
-fn encoded_forms(value: &[u8]) -> [Vec<u8>; 3] {
+fn encoded_forms(value: &[u8]) -> [SecretBytes; 3] {
     [
-        STANDARD.encode(value).into_bytes(),
-        STANDARD_NO_PAD.encode(value).into_bytes(),
-        percent_encode(value, URL_UNRESERVED)
-            .to_string()
-            .into_bytes(),
+        SecretBytes::new(STANDARD.encode(value).into_bytes()),
+        SecretBytes::new(STANDARD_NO_PAD.encode(value).into_bytes()),
+        percent_encoded(value),
     ]
+}
+
+fn percent_encoded(value: &[u8]) -> SecretBytes {
+    let mut out = Vec::with_capacity(value.len() * 3);
+    for part in percent_encode(value, URL_UNRESERVED) {
+        out.extend_from_slice(part.as_bytes());
+    }
+    SecretBytes::new(out)
+}
+
+fn form_of(pair: &(SecretBytes, Vec<u8>)) -> &[u8] {
+    pair.0.expose()
 }
 
 #[derive(Clone)]
 pub struct SecretRedactor {
-    replacements: Arc<Replacements>,
+    replacements: Arc<Replacements<SecretBytes>>,
 }
 
 impl SecretRedactor {
     pub fn new<'a>(secrets: impl IntoIterator<Item = (&'a str, &'a [u8])>) -> Self {
-        let mut seen = HashSet::new();
-        let mut pairs: Vec<(Vec<u8>, Vec<u8>)> = secrets
+        let pairs = secrets
             .into_iter()
             .flat_map(|(name, value)| {
                 let replacement = format!("[secret:{name}]").into_bytes();
@@ -84,9 +103,9 @@ impl SecretRedactor {
                     .into_iter()
                     .map(move |form| (form, replacement.clone()))
             })
-            .filter(|(form, _)| seen.insert(form.clone()))
             .collect();
-        pairs.sort_by_key(|(form, _)| std::cmp::Reverse(form.len()));
+        let mut pairs = first_of_each(pairs, form_of);
+        pairs.sort_by_key(|(form, _)| std::cmp::Reverse(form.expose().len()));
 
         Self {
             replacements: Arc::new(Replacements::new(pairs)),

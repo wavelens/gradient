@@ -5,6 +5,7 @@
  */
 
 use bytes::Bytes;
+use gradient_secret::SecretBytes;
 
 use crate::codec::Proto;
 use crate::types::{
@@ -88,7 +89,7 @@ pub enum ServerMessage {
 
     Credential {
         kind: CredentialKind,
-        data: Bytes,
+        data: SecretBytes,
     },
 
     NarPush {

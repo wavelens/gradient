@@ -42,7 +42,6 @@ tokio      = { workspace = true, features = ["macros", "sync", "time"] }
 tracing    = { workspace = true }
 utoipa     = { workspace = true }
 uuid       = { workspace = true }
-zeroize    = { workspace = true }
 
 [dev-dependencies]
 git2 = { workspace = true }

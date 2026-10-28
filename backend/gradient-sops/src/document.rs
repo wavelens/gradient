@@ -9,12 +9,15 @@ use std::path::Path;
 
 use age::DecryptError;
 use age::armor::ArmoredReader;
+use gradient_secret::SecretBytes;
 use yaml_serde::{Mapping, Value};
 use zeroize::Zeroizing;
 
 use crate::key::SopsKey;
 use crate::mac::{DocumentWalk, verify_mac};
 use crate::{SopsError, SopsSecrets};
+
+const DATA_KEY_CAPACITY: usize = 64;
 
 pub fn decrypt_file(path: &str, content: &[u8], key: &SopsKey) -> Result<SopsSecrets, SopsError> {
     let file = path.to_owned();
@@ -34,9 +37,9 @@ pub fn decrypt_file(path: &str, content: &[u8], key: &SopsKey) -> Result<SopsSec
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    let walk = DocumentWalk::new(&file, &data_key, mac_only_encrypted)?;
+    let walk = DocumentWalk::new(&file, data_key.expose(), mac_only_encrypted)?;
     let (secrets, digest) = walk.run(&document)?;
-    verify_mac(&file, metadata, &data_key, &digest)?;
+    verify_mac(&file, metadata, data_key.expose(), &digest)?;
     Ok(SopsSecrets(secrets))
 }
 
@@ -61,11 +64,7 @@ fn parse_document(file: &str, content: &[u8]) -> Result<Mapping, SopsError> {
     }
 }
 
-fn data_key(
-    file: &str,
-    metadata: &Mapping,
-    key: &SopsKey,
-) -> Result<Zeroizing<Vec<u8>>, SopsError> {
+fn data_key(file: &str, metadata: &Mapping, key: &SopsKey) -> Result<SecretBytes, SopsError> {
     let stanzas = metadata
         .get("age")
         .and_then(Value::as_sequence)
@@ -84,10 +83,10 @@ fn data_key(
     Err(SopsError::NotARecipient { file: file.into() })
 }
 
-fn open_age(armored: &str, key: &SopsKey) -> Result<Zeroizing<Vec<u8>>, DecryptError> {
+fn open_age(armored: &str, key: &SopsKey) -> Result<SecretBytes, DecryptError> {
     let decryptor = age::Decryptor::new_buffered(ArmoredReader::new(armored.as_bytes()))?;
     let mut reader = decryptor.decrypt(key.identities())?;
-    let mut data_key = Zeroizing::new(Vec::new());
+    let mut data_key = Zeroizing::new(Vec::with_capacity(DATA_KEY_CAPACITY));
     reader.read_to_end(&mut data_key)?;
-    Ok(data_key)
+    Ok(SecretBytes::from(data_key.as_slice()))
 }

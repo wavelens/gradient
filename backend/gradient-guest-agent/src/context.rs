@@ -104,7 +104,7 @@ fn env_name(prefix: &str, key: &str) -> String {
 }
 
 fn secret_text(secret: &GuestSecret) -> String {
-    String::from_utf8_lossy(&secret.value).into_owned()
+    String::from_utf8_lossy(secret.value.expose()).into_owned()
 }
 
 #[cfg(test)]
@@ -133,7 +133,7 @@ mod tests {
     fn secret(name: &str, value: &str) -> GuestSecret {
         GuestSecret {
             name: name.to_owned(),
-            value: value.as_bytes().to_vec(),
+            value: value.as_bytes().to_vec().into(),
         }
     }
 

@@ -10,16 +10,16 @@ mod mac;
 
 use std::collections::BTreeMap;
 
-use zeroize::Zeroizing;
+use gradient_secret::SecretBytes;
 
 pub use document::decrypt_file;
 pub use key::{SopsKey, SopsRecipient, sops_recipient};
 
-pub struct SopsSecrets(BTreeMap<String, Zeroizing<Vec<u8>>>);
+pub struct SopsSecrets(BTreeMap<String, SecretBytes>);
 
 impl SopsSecrets {
     pub fn get(&self, name: &str) -> Option<&[u8]> {
-        self.0.get(name).map(|value| value.as_slice())
+        self.0.get(name).map(SecretBytes::expose)
     }
 
     pub fn names(&self) -> impl Iterator<Item = &str> {

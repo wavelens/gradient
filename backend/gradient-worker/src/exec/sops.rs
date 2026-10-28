@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use gradient_sops::{SopsKey, decrypt_file};
-use gradient_types::SecretBytes;
+use gradient_types::{SecretBytes, SecretString};
 use gradient_util::sync::Mutex;
 
 pub struct WorkerSecrets {
@@ -51,17 +51,15 @@ impl WorkerSecrets {
     }
 
     pub fn value(&self, name: &str) -> Option<SecretBytes> {
-        self.values
-            .lock()
-            .get(name)
-            .map(|value| SecretBytes::new(value.expose().to_vec()))
+        self.values.lock().get(name).cloned()
     }
 }
 
 fn read_key(path: &Path) -> Result<SopsKey> {
     let openssh = std::fs::read_to_string(path)
+        .map(SecretString::new)
         .with_context(|| format!("read the sops key file {}", path.display()))?;
-    Ok(SopsKey::from_ssh_private_key(&openssh)?)
+    Ok(SopsKey::from_ssh_private_key(openssh.expose())?)
 }
 
 fn load(files: &[PathBuf], key: &SopsKey) -> Result<BTreeMap<String, SecretBytes>> {
@@ -78,7 +76,7 @@ fn load(files: &[PathBuf], key: &SopsKey) -> Result<BTreeMap<String, SecretBytes
                     file.display()
                 );
             }
-            let value = SecretBytes::new(secrets.get(name).unwrap_or_default().to_vec());
+            let value = SecretBytes::from(secrets.get(name).unwrap_or_default());
             loaded.insert(name.to_owned(), (value, file));
         }
     }

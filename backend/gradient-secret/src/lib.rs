@@ -9,10 +9,14 @@ use std::fmt;
 pub struct SecretString(Box<str>);
 
 impl SecretString {
-    /// Only this buffer is locked. Earlier copies of the string, like the original `String`
-    /// before conversion, are staying unlocked.
     pub fn new(s: String) -> Self {
-        let b = s.into_boxed_str();
+        let b = if s.len() == s.capacity() {
+            s.into_boxed_str()
+        } else {
+            let exact = Box::from(s.as_str());
+            zeroize_slice(&mut s.into_bytes());
+            exact
+        };
         mlock_slice(b.as_bytes());
         Self(b)
     }
@@ -31,6 +35,12 @@ impl Drop for SecretString {
             std::slice::from_raw_parts_mut(self.0.as_ptr() as *mut u8, self.0.len())
         });
         munlock_slice(self.0.as_bytes());
+    }
+}
+
+impl Clone for SecretString {
+    fn clone(&self) -> Self {
+        Self::new(self.expose().to_owned())
     }
 }
 
@@ -55,8 +65,14 @@ impl From<String> for SecretString {
 pub struct SecretBytes(Box<[u8]>);
 
 impl SecretBytes {
-    pub fn new(v: Vec<u8>) -> Self {
-        let b = v.into_boxed_slice();
+    pub fn new(mut v: Vec<u8>) -> Self {
+        let b = if v.len() == v.capacity() {
+            v.into_boxed_slice()
+        } else {
+            let exact = Box::from(v.as_slice());
+            zeroize_slice(&mut v);
+            exact
+        };
         mlock_slice(&b);
         Self(b)
     }
@@ -70,6 +86,26 @@ impl Drop for SecretBytes {
     fn drop(&mut self) {
         zeroize_slice(&mut self.0);
         munlock_slice(&self.0);
+    }
+}
+
+impl Clone for SecretBytes {
+    fn clone(&self) -> Self {
+        Self::from(self.expose())
+    }
+}
+
+impl PartialEq for SecretBytes {
+    fn eq(&self, other: &Self) -> bool {
+        self.expose() == other.expose()
+    }
+}
+
+impl Eq for SecretBytes {}
+
+impl AsRef<[u8]> for SecretBytes {
+    fn as_ref(&self) -> &[u8] {
+        self.expose()
     }
 }
 
@@ -91,12 +127,17 @@ impl From<Vec<u8>> for SecretBytes {
     }
 }
 
-/// Volatile writes are keeping the compiler from optimizing the zeroing away. A plain
-/// `fill(0)` on a value about to be dropped is removable.
+impl From<&[u8]> for SecretBytes {
+    fn from(bytes: &[u8]) -> Self {
+        Self::new(bytes.to_vec())
+    }
+}
+
 fn zeroize_slice(s: &mut [u8]) {
     for byte in s.iter_mut() {
         // SAFETY: `byte` is a valid, aligned, exclusively borrowed `&mut u8`. A one-byte volatile
-        // write through it is sound.
+        // write through it is sound and the compiler cannot remove it like a plain `fill(0)` on
+        // a value about to be dropped.
         unsafe { std::ptr::write_volatile(byte, 0) };
     }
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
@@ -167,5 +208,16 @@ mod tests {
         let mut buf = [1u8, 2, 3, 4];
         zeroize_slice(&mut buf);
         assert_eq!(buf, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_buffer_with_spare_capacity_keeps_its_content() {
+        let mut bytes = Vec::with_capacity(64);
+        bytes.extend_from_slice(b"s3cr3t-value");
+        assert_eq!(SecretBytes::new(bytes).expose(), b"s3cr3t-value");
+
+        let mut text = String::with_capacity(64);
+        text.push_str("s3cr3t-value");
+        assert_eq!(SecretString::new(text).expose(), "s3cr3t-value");
     }
 }
