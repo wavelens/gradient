@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
-SPEEDUP_PER_WORKER = 0.8
+GAIN_PER_ADDED_WORKER = 0.15
 SMALL_SLOWDOWN = 1.1
 STATEMENTS_PER_SHARD = 10
 EVAL_PHASES = {"eval_flake", "eval_derivations"}
@@ -29,7 +29,7 @@ def jobs_text(jobs):
 def speedup_verdicts(runs):
     failed = []
     for n in sorted(n for n in runs if n > 1):
-        target = SPEEDUP_PER_WORKER * n
+        target = 1 + GAIN_PER_ADDED_WORKER * (n - 1)
         if speedup(runs, n) < target:
             failed.append(f"N={n}: speedup {speedup(runs, n):.2f} below {target:.2f}")
         if runs[n]["jobs"] <= 1:

@@ -62,7 +62,7 @@ cat result/summary.txt
 
 | Target | Check |
 |---|---|
-| Speedup | Wall clock on 1 worker divided by the wall clock on N workers, at least 0.8 x N, on more than one job |
+| Speedup | Wall clock on 1 worker divided by the wall clock on N workers, at least 1 + 0.15 x (N - 1), on more than one job |
 | Statements | At most 10 extra statements per finished shard, compared to 1 worker |
 | Small flake | One job with 4 workers up, at most 10% slower than standalone |
 

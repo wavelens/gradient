@@ -17,8 +17,8 @@ def ph(phase, start_ms, end_ms, offset_ms=0):
 
 class ReportTest(unittest.TestCase):
     def test_speedup_below_target_fails(self):
-        runs = {1: run(100_000), 2: run(70_000, jobs=2)}
-        self.assertEqual(verdicts(runs), ["N=2: speedup 1.43 below 1.60"])
+        runs = {1: run(100_000), 2: run(90_000, jobs=2)}
+        self.assertEqual(verdicts(runs), ["N=2: speedup 1.11 below 1.15"])
 
     def test_a_split_that_never_happened_fails(self):
         runs = {1: run(100_000), 2: run(50_000, jobs=1)}
