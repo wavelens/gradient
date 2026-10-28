@@ -12,6 +12,7 @@ mod dialed;
 mod eval_cache;
 mod eval_split;
 mod failures;
+mod guest_channel;
 mod handles;
 mod inbound;
 mod job_events;

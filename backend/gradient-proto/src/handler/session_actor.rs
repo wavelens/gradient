@@ -26,6 +26,7 @@ use tracing::{debug, info, warn};
 
 use super::SessionHandles;
 use super::dialed::{DialedSession, refresh_dialed_peers};
+use super::guest_channel::{WORKER_TOO_OLD, outbound_guest_channel};
 use super::inbound::{ActiveJobs, InboundContext, RpcContext};
 use super::job_events::{JobEvents, SchedulerJobEvents};
 use super::log_lane::LogLane;
@@ -406,8 +407,20 @@ impl Actor for SessionActor {
                     myself.stop(Some("write failed".into()));
                 }
             }
-            SessionMsg::Signal(SessionSignal::GuestChannel(_)) => {
-                debug!(peer_id = %st.peer_id, "guest channels are not routed yet");
+            SessionMsg::Signal(SessionSignal::GuestChannel(signal)) => {
+                match outbound_guest_channel(signal, st.writer.version()) {
+                    Ok(msg) => {
+                        if send_server_msg(&st.writer, &msg).await.is_err() {
+                            myself.stop(Some("write failed".into()));
+                        }
+                    }
+                    Err(channel_id) => st.scheduler.guest_channels.closed_by_worker(
+                        &st.peer_id,
+                        channel_id,
+                        None,
+                        Some(WORKER_TOO_OLD.into()),
+                    ),
+                }
             }
             SessionMsg::Signal(SessionSignal::ClusterAssign { job_id }) => {
                 let Some(prepared) = st.scheduler.cluster.prepared.take(&job_id).await else {
@@ -464,6 +477,7 @@ impl Actor for SessionActor {
                 .spawn(async move { abandon_transfer(&nar_storage, granted).await });
         }
         st.job_events.finish().await;
+        st.scheduler.guest_channels.close_worker(&st.peer_id);
         st.scheduler.unregister_worker(&st.peer_id).await;
         info!(peer_id = %st.peer_id, "WebSocket connection closed");
         Ok(())

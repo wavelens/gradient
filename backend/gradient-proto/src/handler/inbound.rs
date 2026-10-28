@@ -599,7 +599,23 @@ impl<'a> InboundContext<'a> {
                 self.on_job_phase(job_id, name, payload).await;
                 true
             }
-            ClientMessage::GuestChannelData { .. } | ClientMessage::CloseGuestChannel { .. } => {
+            ClientMessage::GuestChannelData { channel_id, data } => {
+                self.scheduler
+                    .guest_channels
+                    .deliver(self.peer_id, channel_id, data);
+                true
+            }
+            ClientMessage::CloseGuestChannel {
+                channel_id,
+                exit_code,
+                message,
+            } => {
+                self.scheduler.guest_channels.closed_by_worker(
+                    self.peer_id,
+                    channel_id,
+                    exit_code,
+                    message,
+                );
                 true
             }
         }
