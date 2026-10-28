@@ -5,7 +5,7 @@
  */
 
 use bytes::Bytes;
-use gradient_secret::SecretBytes;
+use gradient_secret::{SecretBytes, SecretString};
 
 use crate::codec::Proto;
 use crate::types::{
@@ -182,7 +182,7 @@ pub enum ServerMessage {
         fetch_id: String,
         project: String,
         request: String,
-        ssh_key: Option<String>,
+        ssh_key: Option<SecretString>,
     },
 
     #[proto(35)]

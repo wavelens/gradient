@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::format::decrypt_signing_key;
+use super::format::decrypt_signing_key_bytes;
 use super::{narinfo, realisation};
 use crate::{SourceError, cache_key_host};
 use base64::{Engine, engine::general_purpose};
@@ -23,15 +23,9 @@ impl CacheSigner {
         cache: &MCache,
         serve_url: &str,
     ) -> Result<Self, SourceError> {
-        let key_b64 = decrypt_signing_key(secret_file, cache.clone())?;
-        let key_bytes = general_purpose::STANDARD
-            .decode(key_b64.trim())
-            .map_err(|e| SourceError::CacheKeyDecoding {
-                cache: cache.name.clone(),
-                reason: format!("Failed to base64-decode signing key: {}", e),
-            })?;
-        let secret_key =
-            SecretKey::from_slice(&key_bytes).map_err(|_| SourceError::KeyPairConversion)?;
+        let key_bytes = decrypt_signing_key_bytes(secret_file, cache)?;
+        let secret_key = SecretKey::from_slice(key_bytes.expose())
+            .map_err(|_| SourceError::KeyPairConversion)?;
         Ok(Self {
             secret_key,
             cache_name: cache.name.clone(),

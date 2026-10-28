@@ -13,7 +13,7 @@ use sea_orm::EntityTrait;
 pub(super) struct TaskGitContext<'a> {
     pub(super) ctx: &'a DbContext,
     pub(super) task: &'a MTask,
-    pub(super) private_key: Option<String>,
+    pub(super) private_key: Option<SecretString>,
 }
 
 impl<'a> TaskGitContext<'a> {

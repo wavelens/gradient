@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use gradient_types::SecretString;
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::{FlakeJob, FlakeSource};
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter, WorkerStore};
@@ -48,9 +49,7 @@ pub async fn fetch_repository(
 
     updater.report_fetching().await?;
 
-    let ssh_key = credentials
-        .ssh_key()
-        .map(|k| String::from_utf8_lossy(k.expose()).to_string());
+    let ssh_key = credentials.ssh_key().and_then(SecretString::from_utf8);
 
     let (source_path, flake_root, _checkout) = match &job.source {
         FlakeSource::Repository { url, commit } => {
@@ -63,7 +62,7 @@ pub async fn fetch_repository(
                 gradient_sources::checkout_commit(
                     &url,
                     &commit_for_clone,
-                    ssh_key_for_clone.as_deref(),
+                    ssh_key_for_clone.as_ref().map(SecretString::expose),
                 )
             });
 
@@ -80,7 +79,7 @@ pub async fn fetch_repository(
             let flake_root = flake_root(checkout.path(), job.flake_dir.as_deref())?;
 
             if let Some(spec) = &job.input_update {
-                run_input_update(spec, &flake_root, ssh_key.as_deref(), updater).await?;
+                run_input_update(spec, &flake_root, ssh_key.as_ref(), updater).await?;
             }
 
             let source_path = super::source::add_git_tree(store, &checkout_path, &commit).await?;
@@ -403,7 +402,7 @@ async fn fetch_inputs(
 async fn run_input_update(
     spec: &gradient_wire::messages::InputUpdateSpec,
     flake_root: &Path,
-    ssh_key: Option<&str>,
+    ssh_key: Option<&SecretString>,
     updater: &mut dyn JobReporter,
 ) -> Result<()> {
     use gradient_sources::flake_lock::PatchGenerator as _;
@@ -434,7 +433,7 @@ async fn run_input_update(
     let resolver = gradient_sources::flake_lock::HttpRevisionResolver::new(
         gradient_worker_client::http::download_client().clone(),
     )
-    .with_ssh_key(ssh_key.map(str::to_owned));
+    .with_ssh_key(ssh_key.cloned());
     let generator = gradient_sources::flake_lock::FlakeLockGenerator::new(resolver);
     let tracked: Vec<gradient_sources::flake_lock::InputName> =
         spec.inputs.iter().cloned().map(Into::into).collect();

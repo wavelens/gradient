@@ -66,7 +66,11 @@ impl TaskGitContext<'_> {
         let branch_owned = branch.map(|b| b.to_owned());
 
         tokio::task::spawn_blocking(move || {
-            ls_remote_head(&url, private_key.as_deref(), branch_owned.as_deref())
+            ls_remote_head(
+                &url,
+                private_key.as_ref().map(SecretString::expose),
+                branch_owned.as_deref(),
+            )
         })
         .await
         .map_err(|e| SourceError::GitExecution {

@@ -83,7 +83,11 @@ pub async fn resolve_remote_ref(
     let branch = branch.map(|b| b.to_owned());
 
     let head = tokio::task::spawn_blocking(move || {
-        remote::ls_remote_head(&url, private_key.as_deref(), branch.as_deref())
+        remote::ls_remote_head(
+            &url,
+            private_key.as_ref().map(SecretString::expose),
+            branch.as_deref(),
+        )
     })
     .await
     .map_err(|e| SourceError::GitExecution {

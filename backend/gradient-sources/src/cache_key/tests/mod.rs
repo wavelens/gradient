@@ -18,7 +18,7 @@ fn generate_decrypt_roundtrip() {
     let cache = make_cache("testcache", &pub_b64, &encrypted_priv);
     let decrypted = decrypt_signing_key(&path, cache).expect("decrypt failed");
     let bytes = general_purpose::STANDARD
-        .decode(decrypted.trim())
+        .decode(decrypted.expose().trim())
         .expect("base64 decode failed");
     assert_eq!(bytes.len(), 64, "ed25519 keypair is 64 bytes");
 }

@@ -6,20 +6,22 @@
 
 use super::SourceError;
 use base64::{Engine, engine::general_purpose};
+use gradient_types::{SecretBytes, SecretString};
 use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
 /// Argon2 is stretching the password on every decryption for tens of milliseconds. The same few
 /// keys are decrypted on every dispatch, signature and update check.
-static PLAINTEXTS: LazyLock<Mutex<HashMap<Ciphertext, Vec<u8>>>> = LazyLock::new(Default::default);
+static PLAINTEXTS: LazyLock<Mutex<HashMap<Ciphertext, SecretBytes>>> =
+    LazyLock::new(Default::default);
 
 type Ciphertext = (String, Vec<u8>);
 
 pub(crate) fn decrypt_bytes(
     secret_file: &str,
     encrypted: Vec<u8>,
-) -> Result<Option<Vec<u8>>, SourceError> {
+) -> Result<Option<SecretBytes>, SourceError> {
     let key = (secret_file.to_owned(), encrypted);
     if let Some(plain) = PLAINTEXTS.lock().get(&key) {
         return Ok(Some(plain.clone()));
@@ -30,11 +32,21 @@ pub(crate) fn decrypt_bytes(
             reason: e.to_string(),
         }
     })?;
-    let Some(plain) = crypter::decrypt_with_password(secret.expose(), &key.1) else {
+    let Some(plain) = crypter::decrypt_with_password(secret.expose(), &key.1).map(SecretBytes::new)
+    else {
         return Ok(None);
     };
     PLAINTEXTS.lock().insert(key, plain.clone());
     Ok(Some(plain))
+}
+
+pub(crate) fn decrypt_text(
+    secret_file: &str,
+    encrypted: Vec<u8>,
+) -> Result<Option<SecretString>, SourceError> {
+    decrypt_bytes(secret_file, encrypted)?
+        .map(|plain| SecretString::from_utf8(plain).ok_or(SourceError::KeyUtf8Conversion))
+        .transpose()
 }
 
 pub fn encrypt_secret(secret_file: &str, plaintext: &str) -> Result<String, SourceError> {
@@ -48,12 +60,11 @@ pub fn encrypt_secret(secret_file: &str, plaintext: &str) -> Result<String, Sour
     Ok(general_purpose::STANDARD.encode(enc))
 }
 
-pub fn decrypt_secret(secret_file: &str, blob_b64: &str) -> Result<String, SourceError> {
+pub fn decrypt_secret(secret_file: &str, blob_b64: &str) -> Result<SecretString, SourceError> {
     let raw = general_purpose::STANDARD
         .decode(blob_b64.trim())
         .map_err(|_| SourceError::CryptographicOperation)?;
-    let dec = decrypt_bytes(secret_file, raw)?.ok_or(SourceError::CryptographicOperation)?;
-    String::from_utf8(dec).map_err(|_| SourceError::KeyUtf8Conversion)
+    decrypt_text(secret_file, raw)?.ok_or(SourceError::CryptographicOperation)
 }
 
 #[cfg(test)]
@@ -74,17 +85,17 @@ mod tests {
         let (_f, p) = temp_secret_file();
         let enc = encrypt_secret(&p, "GRADtoken123").unwrap();
         assert_ne!(enc, "GRADtoken123");
-        assert_eq!(decrypt_secret(&p, &enc).unwrap(), "GRADtoken123");
+        assert_eq!(decrypt_secret(&p, &enc).unwrap().expose(), "GRADtoken123");
     }
 
     #[test]
     fn a_decrypted_secret_is_not_decrypted_again() {
         let (f, p) = temp_secret_file();
         let enc = encrypt_secret(&p, "GRADonce").unwrap();
-        assert_eq!(decrypt_secret(&p, &enc).unwrap(), "GRADonce");
+        assert_eq!(decrypt_secret(&p, &enc).unwrap().expose(), "GRADonce");
 
         drop(f);
-        assert_eq!(decrypt_secret(&p, &enc).unwrap(), "GRADonce");
+        assert_eq!(decrypt_secret(&p, &enc).unwrap().expose(), "GRADonce");
     }
 
     #[test]

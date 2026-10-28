@@ -44,8 +44,7 @@ pub fn generate_ssh_key(secret_file: &str) -> Result<(String, String), SourceErr
 
     let private_key_openssh = private_key
         .to_openssh(LineEnding::LF)
-        .map_err(|_| SourceError::SshKeyGeneration)?
-        .to_string();
+        .map_err(|_| SourceError::SshKeyGeneration)?;
 
     let public_key_parts = private_key
         .public_key()
@@ -61,7 +60,7 @@ pub fn generate_ssh_key(secret_file: &str) -> Result<(String, String), SourceErr
     let public_key_openssh = format!("{} {}", Algorithm::Ed25519.as_str(), public_key_data);
 
     let encrypted_private_key =
-        crypter::encrypt_with_password(secret.expose(), &private_key_openssh)
+        crypter::encrypt_with_password(secret.expose(), private_key_openssh.as_bytes())
             .ok_or(SourceError::CryptographicOperation)?;
 
     let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
@@ -73,7 +72,7 @@ pub fn decrypt_ssh_private_key(
     secret_file: &str,
     project: MProject,
     serve_url: &str,
-) -> Result<(String, String), SourceError> {
+) -> Result<(SecretString, String), SourceError> {
     let encrypted_private_key = general_purpose::STANDARD
         .decode(project.clone().private_key)
         .map_err(|e| SourceError::ProjectKeyDecoding {
@@ -81,20 +80,23 @@ pub fn decrypt_ssh_private_key(
             reason: format!("{}. The private key in the database appears to be corrupted or not properly base64-encoded.", e)
         })?;
 
-    let decrypted_private_key =
-        match crate::secret::decrypt_bytes(secret_file, encrypted_private_key)? {
-            Some(p) => String::from_utf8(p).map_err(|_| SourceError::KeyUtf8Conversion)?,
-            None => {
-                return Err(SourceError::KeyDecryption {
-                    project: project.name.clone(),
-                });
-            }
-        };
+    let decrypted_private_key = crate::secret::decrypt_text(secret_file, encrypted_private_key)?
+        .ok_or_else(|| SourceError::KeyDecryption {
+            project: project.name.clone(),
+        })?;
 
     let formatted_public_key = format_public_key(project, serve_url);
-    let decrypted_private_key = format!("{}\n", decrypted_private_key);
+    Ok((
+        with_final_newline(&decrypted_private_key),
+        formatted_public_key,
+    ))
+}
 
-    Ok((decrypted_private_key, formatted_public_key))
+fn with_final_newline(key: &SecretString) -> SecretString {
+    let mut text = String::with_capacity(key.expose().len() + 1);
+    text.push_str(key.expose());
+    text.push('\n');
+    SecretString::new(text)
 }
 
 pub fn format_public_key(project: MProject, serve_url: &str) -> String {
@@ -194,7 +196,11 @@ mod tests {
         project.private_key = enc_priv;
         let (priv_pem, pub_formatted) =
             decrypt_ssh_private_key(&path, project, "https://example.com").expect("decrypt failed");
-        assert!(priv_pem.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----"));
+        assert!(
+            priv_pem
+                .expose()
+                .starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
+        );
         assert!(pub_formatted.starts_with(&pub_openssh));
         assert!(pub_formatted.ends_with(" example.com-myproject"));
     }

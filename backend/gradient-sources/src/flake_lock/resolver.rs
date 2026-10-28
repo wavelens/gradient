@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
+use gradient_types::SecretString;
 use serde::Deserialize;
 
 use super::lock::LockedRef;
@@ -32,7 +33,7 @@ pub struct HttpRevisionResolver {
     client: reqwest::Client,
     github_token: Option<String>,
     gitlab_token: Option<String>,
-    ssh_key: Option<String>,
+    ssh_key: Option<SecretString>,
 }
 
 impl std::fmt::Debug for HttpRevisionResolver {
@@ -41,7 +42,7 @@ impl std::fmt::Debug for HttpRevisionResolver {
         f.debug_struct("HttpRevisionResolver")
             .field("github_token", &redact(&self.github_token))
             .field("gitlab_token", &redact(&self.gitlab_token))
-            .field("ssh_key", &redact(&self.ssh_key))
+            .field("ssh_key", &self.ssh_key)
             .finish_non_exhaustive()
     }
 }
@@ -66,7 +67,7 @@ impl HttpRevisionResolver {
         self
     }
 
-    pub fn with_ssh_key(mut self, key: Option<String>) -> Self {
+    pub fn with_ssh_key(mut self, key: Option<SecretString>) -> Self {
         self.ssh_key = key;
         self
     }
@@ -142,7 +143,11 @@ impl HttpRevisionResolver {
         let ref_owned = ref_.clone();
         let ssh_key = self.ssh_key.clone();
         let (rev, last_modified, tmp) = tokio::task::spawn_blocking(move || {
-            git_checkout(&url, ref_owned.as_deref(), ssh_key.as_deref())
+            git_checkout(
+                &url,
+                ref_owned.as_deref(),
+                ssh_key.as_ref().map(SecretString::expose),
+            )
         })
         .await
         .context("git checkout task panicked")??;

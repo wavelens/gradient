@@ -11,7 +11,7 @@ use gradient_ci::actions::decrypt_secret_with_file;
 use gradient_pool::{DeviceCount, WorkerInfo};
 use gradient_sops::{SopsError, SopsKey, decrypt_file};
 use gradient_types::exec::{ExecRequirement, ExecSpec};
-use gradient_types::{EProject, ProjectId, RuntimeConfig, SecretBytes, SecretString};
+use gradient_types::{EProject, ProjectId, RuntimeConfig, SecretBytes};
 use sea_orm::{ConnectionTrait, EntityTrait};
 
 use crate::loops::caps_of;
@@ -149,7 +149,7 @@ pub async fn server_secret_values(
                         name: name.clone(),
                         reason: e.to_string(),
                     })?;
-                values.push((name.clone(), SecretBytes::from(plain.expose().as_bytes())));
+                values.push((name.clone(), plain.into_bytes()));
             }
             None => missing.push(name.clone()),
         }
@@ -193,7 +193,6 @@ async fn project_sops_key(
         &config.server.serve_url,
     )
     .map_err(|e| SecretResolutionError::ProjectKey(e.to_string()))?;
-    let private_key = SecretString::new(private_key);
     SopsKey::from_ssh_private_key(private_key.expose())
         .map_err(|e| SecretResolutionError::ProjectKey(e.to_string()))
 }

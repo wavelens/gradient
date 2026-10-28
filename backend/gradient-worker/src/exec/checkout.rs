@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
+use gradient_types::SecretString;
 use gradient_wire::types::JobContext;
 
 use crate::executor::AbortSignal;
@@ -28,7 +29,12 @@ pub async fn checkout_work(
         context.commit.clone(),
     );
     let clone = tokio::task::spawn_blocking(move || {
-        gradient_sources::checkout_commit_into(&dir, &url, &commit, ssh_key.as_deref())
+        gradient_sources::checkout_commit_into(
+            &dir,
+            &url,
+            &commit,
+            ssh_key.as_ref().map(SecretString::expose),
+        )
     });
     tokio::select! {
         biased;
@@ -37,9 +43,9 @@ pub async fn checkout_work(
     }
 }
 
-fn project_ssh_key(credentials: &CredentialStore) -> Result<Option<String>> {
+fn project_ssh_key(credentials: &CredentialStore) -> Result<Option<SecretString>> {
     credentials
         .ssh_key()
-        .map(|key| String::from_utf8(key.expose().to_vec()).context("project SSH key is not UTF-8"))
+        .map(|key| SecretString::from_utf8(key).context("project SSH key is not UTF-8"))
         .transpose()
 }

@@ -12,7 +12,7 @@ use gradient_core::ServerState;
 use gradient_db::WorkerDb;
 use gradient_entity::{team_worker, worker_registration};
 use gradient_types::ids::ProjectId;
-use gradient_types::{ETeamWorker, EWorkerRegistration};
+use gradient_types::{ETeamWorker, EWorkerRegistration, SecretString};
 use gradient_util::supervision::{ChildSpec, Pass, PassError, RunsOn};
 use gradient_wire::Rejection;
 use gradient_wire::session::handshake::DialerCredentials;
@@ -275,7 +275,10 @@ fn merge_rows(
     team_rows
 }
 
-fn plan_dials(rows: Vec<DialRow>, decrypt: impl Fn(&str) -> Option<String>) -> Vec<PlannedDial> {
+fn plan_dials(
+    rows: Vec<DialRow>,
+    decrypt: impl Fn(&str) -> Option<SecretString>,
+) -> Vec<PlannedDial> {
     group_by_worker(rows)
         .into_iter()
         .map(|group| plan_worker(group, &decrypt))
@@ -299,7 +302,7 @@ fn group_by_worker(rows: Vec<DialRow>) -> Vec<WorkerDial> {
     groups
 }
 
-fn plan_worker(group: WorkerDial, decrypt: &impl Fn(&str) -> Option<String>) -> PlannedDial {
+fn plan_worker(group: WorkerDial, decrypt: &impl Fn(&str) -> Option<SecretString>) -> PlannedDial {
     let (token_projects, team_worker) = match group.token_projects() {
         Dialable::Projects {
             projects,
@@ -324,7 +327,7 @@ fn plan_worker(group: WorkerDial, decrypt: &impl Fn(&str) -> Option<String>) -> 
         tokens.extend(
             row.token_peers
                 .iter()
-                .map(|peer| (peer.clone(), token.clone())),
+                .map(|peer| (peer.clone(), token.expose().to_owned())),
         );
     }
 
@@ -407,8 +410,10 @@ mod tests {
         }
     }
 
-    fn plain(encrypted: &str) -> Option<String> {
-        encrypted.strip_prefix("enc:").map(str::to_owned)
+    fn plain(encrypted: &str) -> Option<SecretString> {
+        encrypted
+            .strip_prefix("enc:")
+            .map(|token| SecretString::new(token.to_owned()))
     }
 
     fn only_dial(planned: Vec<PlannedDial>) -> DialTarget {

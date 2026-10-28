@@ -61,6 +61,14 @@ impl Clone for SecretString {
     }
 }
 
+impl PartialEq for SecretString {
+    fn eq(&self, other: &Self) -> bool {
+        self.expose() == other.expose()
+    }
+}
+
+impl Eq for SecretString {}
+
 impl fmt::Debug for SecretString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("[REDACTED]")
