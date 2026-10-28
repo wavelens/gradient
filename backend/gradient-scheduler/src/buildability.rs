@@ -18,7 +18,9 @@ use crate::assign_mode::decide_build_spec_kind;
 use crate::count::clamp_to_u32;
 use crate::jobs::PendingExecJob;
 use gradient_pool::{DeviceCount, WorkerCaps, build_needs_network};
-use gradient_types::exec::{DeviceRequest, ExecInventory, ExecSpec};
+use gradient_types::exec::{
+    DeviceRequest, ExecInventory, ExecSpec, GuestCapacity, GuestSize, ResourceAmount,
+};
 use gradient_types::waiting_reason::{EvalCapability, ExecUnmet};
 use gradient_wire::types::{BuildSpecKind, JobKind};
 
@@ -319,6 +321,33 @@ pub(crate) fn exec_unmet(
             .filter(|name| !offered(&|i| i.secrets.contains(name)))
             .cloned()
             .collect(),
+        guest: unmet_guest(&spec.guest, &inventories),
+    }
+}
+
+fn unmet_guest(size: &GuestSize, inventories: &[&ExecInventory]) -> GuestSize {
+    let held = |asked: u64, amount: fn(&GuestCapacity) -> ResourceAmount| {
+        inventories.iter().any(|inventory| {
+            let capacity = &inventory.guest_capacity;
+            capacity.is_unset() || asked <= amount(capacity).total
+        })
+    };
+    GuestSize {
+        cpus: if held(u64::from(size.cpus), |c| c.cpus) {
+            0
+        } else {
+            size.cpus
+        },
+        memory_mb: if held(size.memory_mb, |c| c.memory_mb) {
+            0
+        } else {
+            size.memory_mb
+        },
+        disk_mb: if held(size.disk_mb, |c| c.disk_mb) {
+            0
+        } else {
+            size.disk_mb
+        },
     }
 }
 
@@ -800,6 +829,35 @@ mod tests {
             panic!("exec wait")
         };
         assert_eq!((unmet, matching_workers), (ExecUnmet::default(), 1));
+    }
+
+    #[test]
+    fn a_guest_no_worker_can_hold_names_its_size() {
+        use crate::test_jobs::{allow_all, exec_caps};
+        let amount = |total| ResourceAmount { total, free: total };
+        let mut worker = exec_caps(allow_all(), gradient_types::exec::ExecDefaults::default());
+        if let Some(inventory) = worker.exec.as_mut() {
+            inventory.guest_capacity = GuestCapacity {
+                cpus: amount(16),
+                memory_mb: amount(64_000),
+                disk_mb: amount(100_000),
+            };
+        }
+        let spec = ExecSpec {
+            guest: GuestSize {
+                cpus: 64,
+                ..GuestSize::default_request()
+            },
+            ..ExecSpec::default()
+        };
+        let Some(WaitingReason::ExecWorkers { unmet, .. }) =
+            exec_waiting_reason(&job_on(spec, "x86_64-linux"), &[worker])
+        else {
+            panic!("exec wait")
+        };
+        let reason = unmet.to_string();
+        assert!(reason.contains("64 CPUs"), "{reason}");
+        assert!(!reason.contains("MB"), "{reason}");
     }
 
     fn exec_caps_in_zone(zone: &str) -> WorkerCaps {

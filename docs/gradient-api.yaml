@@ -16467,6 +16467,8 @@ components:
           type: array
           items:
             type: string
+        guest:
+          $ref: '#/components/schemas/GuestSize'
     ExpensiveBuild:
       type: object
       required:
