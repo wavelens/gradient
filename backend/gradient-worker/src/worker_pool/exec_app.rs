@@ -51,6 +51,9 @@ fn spec_of(app: ExecApp) -> Result<ExecSpec, String> {
     if block.nodes == 0 {
         return Err("nodes must be at least 1".into());
     }
+    if block.nodes > 1 && block.network == Some(false) {
+        return Err("nodes > 1 needs network".into());
+    }
     if block.ports.contains(&0) {
         return Err("ports: port 0 cannot be forwarded".into());
     }
@@ -182,6 +185,16 @@ mod tests {
         );
         assert_eq!(spec.program, "/nix/store/aaaa-train/bin/train");
         assert_eq!(spec.network, None);
+    }
+
+    #[test]
+    fn a_multi_node_app_cannot_turn_the_network_off() {
+        assert!(
+            exec_spec(app(r#"{"nodes":2,"network":false}"#))
+                .unwrap_err()
+                .contains("nodes > 1 needs network")
+        );
+        assert_eq!(exec_spec(app(r#"{"nodes":2}"#)).unwrap().nodes, 2);
     }
 
     #[test]
