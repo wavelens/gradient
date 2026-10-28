@@ -135,6 +135,13 @@ pub struct ProjectPath {
 
 #[derive(IntoParams)]
 #[into_params(parameter_in = Path)]
+pub struct ProjectSecretPath {
+    pub project: String,
+    pub name: String,
+}
+
+#[derive(IntoParams)]
+#[into_params(parameter_in = Path)]
 pub struct TaskPath {
     pub project: String,
     pub task: String,

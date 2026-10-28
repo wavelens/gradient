@@ -7,6 +7,7 @@
 pub mod integrations;
 pub mod management;
 mod refusal;
+pub mod secrets;
 pub mod settings;
 pub mod ssh;
 pub mod workers;
