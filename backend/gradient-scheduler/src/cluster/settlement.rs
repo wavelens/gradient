@@ -6,10 +6,12 @@
 
 use gradient_entity::cluster_attempt::ClusterAttemptOutcome;
 use gradient_entity::cluster_job::ClusterJobStatus;
+use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_types::ids::{ClusterAttemptId, DispatchedJobId};
 use gradient_wire::types::BuildFailureKind;
 
 use super::coordinator::AttemptMember;
+use crate::job_handlers::exec_status::attempt_end_reason;
 use crate::jobs::PendingJob;
 
 #[derive(Debug, Clone)]
@@ -37,9 +39,19 @@ pub enum MemberOutcome {
 
 impl MemberReport {
     pub fn from_failure(job: PendingJob, failure: Failure) -> Self {
-        match failure.kind {
-            BuildFailureKind::Canceled => Self::Lost { job },
-            _ => Self::Failed { job, failure },
+        let lost = match &job {
+            PendingJob::Exec(exec) => {
+                attempt_end_reason(failure.kind, exec.image_path.is_some())
+                    == AttemptEndReason::Lost
+            }
+            PendingJob::Eval(_) | PendingJob::Build(_) => {
+                failure.kind == BuildFailureKind::Canceled
+            }
+        };
+        if lost {
+            Self::Lost { job }
+        } else {
+            Self::Failed { job, failure }
         }
     }
 
@@ -67,6 +79,8 @@ impl MemberReport {
 pub enum Fate {
     Complete,
     Retry,
+    Restart,
+    Fail,
     Abort,
 }
 
@@ -74,7 +88,7 @@ impl From<Fate> for ClusterJobStatus {
     fn from(fate: Fate) -> Self {
         match fate {
             Fate::Complete => ClusterJobStatus::Completed,
-            Fate::Retry => ClusterJobStatus::Failed,
+            Fate::Retry | Fate::Restart | Fate::Fail => ClusterJobStatus::Failed,
             Fate::Abort => ClusterJobStatus::Aborted,
         }
     }
@@ -84,9 +98,34 @@ impl From<Fate> for ClusterAttemptOutcome {
     fn from(fate: Fate) -> Self {
         match fate {
             Fate::Complete => ClusterAttemptOutcome::Succeeded,
-            Fate::Retry => ClusterAttemptOutcome::Failed,
+            Fate::Retry | Fate::Restart | Fate::Fail => ClusterAttemptOutcome::Failed,
             Fate::Abort => ClusterAttemptOutcome::Aborted,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecCluster {
+    pub keep_running: bool,
+    pub retries_left: u32,
+}
+
+impl ExecCluster {
+    pub fn of<'a>(jobs: impl IntoIterator<Item = &'a PendingJob>) -> Option<Self> {
+        let mut cluster: Option<Self> = None;
+        for job in jobs {
+            let PendingJob::Exec(exec) = job else {
+                return None;
+            };
+            let cap = exec.assignment.as_ref().map_or(0, |a| a.retries_cap);
+            let retries_left = exec.retries_left.min(cap);
+            cluster = Some(Self {
+                keep_running: exec.spec.keep_running,
+                retries_left: cluster.map_or(retries_left, |c| c.retries_left.min(retries_left)),
+            });
+        }
+
+        cluster
     }
 }
 
@@ -151,6 +190,35 @@ pub fn verdict(members: &[AttemptMember], planned_split: bool) -> Option<Fate> {
             )
         })
         .then_some(Fate::Retry)
+}
+
+pub fn exec_verdict(members: &[AttemptMember], cluster: &ExecCluster) -> Option<Fate> {
+    let outcomes: Vec<Option<MemberOutcome>> = members
+        .iter()
+        .map(|m| m.report.as_ref().map(MemberReport::outcome))
+        .collect();
+    let any = |outcome: MemberOutcome| outcomes.contains(&Some(outcome));
+    if outcomes
+        .iter()
+        .all(|o| *o == Some(MemberOutcome::Succeeded))
+    {
+        return Some(Fate::Complete);
+    }
+    if any(MemberOutcome::Aborted) {
+        return Some(Fate::Abort);
+    }
+    if any(MemberOutcome::Lost) {
+        return Some(Fate::Retry);
+    }
+    if !any(MemberOutcome::Failed) {
+        return None;
+    }
+
+    match (cluster.keep_running, cluster.retries_left) {
+        (true, _) if outcomes.contains(&None) => None,
+        (true, _) | (false, 0) => Some(Fate::Fail),
+        (false, _) => Some(Fate::Restart),
+    }
 }
 
 fn split_verdict(members: &[AttemptMember]) -> Option<Fate> {
@@ -270,6 +338,7 @@ mod tests {
                 resolved_at: None,
                 split: false,
                 planned: false,
+                exec: None,
             },
         )
         .await;
@@ -307,6 +376,112 @@ mod tests {
 
     fn completed() -> MemberReport {
         MemberReport::Completed { job: job() }
+    }
+
+    fn exec_member_job() -> PendingJob {
+        PendingJob::Exec(Box::new(crate::test_jobs::exec_job(
+            gradient_types::exec::ExecSpec::default(),
+        )))
+    }
+
+    #[test]
+    fn one_failed_node_restarts_the_cluster_while_retries_are_left() {
+        let members = [
+            member("a", false, None),
+            member("b", false, Some(failed(BuildFailureKind::Permanent))),
+        ];
+        let cluster = |retries_left| ExecCluster {
+            keep_running: false,
+            retries_left,
+        };
+        assert_eq!(exec_verdict(&members, &cluster(1)), Some(Fate::Restart));
+        assert_eq!(exec_verdict(&members, &cluster(0)), Some(Fate::Fail));
+    }
+
+    #[test]
+    fn a_timeout_counts_as_a_failure() {
+        let members = [
+            member("a", false, None),
+            member("b", false, Some(failed(BuildFailureKind::Timeout))),
+        ];
+        let cluster = ExecCluster {
+            keep_running: false,
+            retries_left: 2,
+        };
+        assert_eq!(exec_verdict(&members, &cluster), Some(Fate::Restart));
+    }
+
+    #[test]
+    fn keep_running_lets_the_others_finish_then_fails() {
+        let cluster = ExecCluster {
+            keep_running: true,
+            retries_left: 2,
+        };
+        let running = [
+            member("a", false, None),
+            member("b", false, Some(failed(BuildFailureKind::Permanent))),
+        ];
+        assert_eq!(exec_verdict(&running, &cluster), None);
+        let done = [
+            member("a", false, Some(completed())),
+            member("b", false, Some(failed(BuildFailureKind::Permanent))),
+        ];
+        assert_eq!(exec_verdict(&done, &cluster), Some(Fate::Fail));
+    }
+
+    #[test]
+    fn a_loss_after_a_kept_failure_restarts_the_cluster() {
+        let members = [
+            member(
+                "a",
+                false,
+                Some(MemberReport::Lost {
+                    job: exec_member_job(),
+                }),
+            ),
+            member("b", false, Some(failed(BuildFailureKind::Permanent))),
+        ];
+        let cluster = ExecCluster {
+            keep_running: true,
+            retries_left: 0,
+        };
+        assert_eq!(exec_verdict(&members, &cluster), Some(Fate::Retry));
+    }
+
+    #[test]
+    fn an_abort_wins_and_every_node_must_succeed() {
+        let cluster = ExecCluster {
+            keep_running: false,
+            retries_left: 3,
+        };
+        let aborted = [
+            member("a", false, Some(completed())),
+            member("b", false, Some(MemberReport::Aborted { job: None })),
+        ];
+        assert_eq!(exec_verdict(&aborted, &cluster), Some(Fate::Abort));
+        let running = [
+            member("a", false, Some(completed())),
+            member("b", false, None),
+        ];
+        assert_eq!(exec_verdict(&running, &cluster), None);
+        let done = [
+            member("a", false, Some(completed())),
+            member("b", false, Some(completed())),
+        ];
+        assert_eq!(exec_verdict(&done, &cluster), Some(Fate::Complete));
+    }
+
+    #[test]
+    fn a_guest_boot_failure_of_a_exec_node_is_a_loss() {
+        let report = MemberReport::from_failure(
+            exec_member_job(),
+            Failure {
+                error: "no agent".into(),
+                kind: BuildFailureKind::GuestBoot,
+                missing_paths: vec![],
+            },
+        );
+        assert_eq!(report.outcome(), MemberOutcome::Lost);
     }
 
     #[test]

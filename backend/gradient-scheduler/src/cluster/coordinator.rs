@@ -14,7 +14,8 @@ use gradient_wire::types::{ClusterAddress, ClusterPeer};
 
 use super::PendingCluster;
 use super::settlement::{
-    Fate, MemberOutcome, MemberReport, Recorded, Resolution, Survivor, verdict,
+    ExecCluster, Fate, MemberOutcome, MemberReport, Recorded, Resolution, Survivor, exec_verdict,
+    verdict,
 };
 
 pub const CLUSTER_HOLD_MARGIN_SECS: u32 = 10;
@@ -57,6 +58,16 @@ pub struct AttemptState {
     pub resolved_at: Option<Instant>,
     pub split: bool,
     pub planned: bool,
+    pub exec: Option<ExecCluster>,
+}
+
+impl AttemptState {
+    fn decide(&self) -> Option<Fate> {
+        match &self.exec {
+            Some(cluster) => exec_verdict(&self.members, cluster),
+            None => verdict(&self.members, self.split && self.planned),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -128,7 +139,7 @@ impl Attempts {
         if state.verdict.is_some() {
             return Some(None);
         }
-        state.verdict = verdict(&state.members, state.split && state.planned);
+        state.verdict = state.decide();
 
         Some(state.verdict)
     }
@@ -207,7 +218,7 @@ impl Attempts {
         if state.verdict.is_some() {
             return Recorded::Deferred;
         }
-        match verdict(&state.members, state.split && state.planned) {
+        match state.decide() {
             Some(fate) => {
                 state.verdict = Some(fate);
                 Recorded::Decided(attempt, fate)
@@ -455,6 +466,7 @@ mod tests {
                 resolved_at: None,
                 split: false,
                 planned: false,
+                exec: None,
             },
         );
 

@@ -45,8 +45,8 @@ use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::cluster::{
     Acceptance, AgingPolicy, AgingStep, AttemptMember, AttemptState, CLUSTER_HOLD_MARGIN_SECS,
-    CLUSTER_RETRY_BACKOFF, ClusterSnapshot, CommittedSeat, Committing, PendingCluster, Placement,
-    PreparedMember, Reservation, aging_step, hide_reserved,
+    CLUSTER_RETRY_BACKOFF, ClusterSnapshot, CommittedSeat, Committing, ExecCluster, PendingCluster,
+    Placement, PreparedMember, Reservation, aging_step, hide_reserved,
 };
 use crate::eval_split::is_split_role;
 use crate::jobs::Assignment;
@@ -251,6 +251,7 @@ impl Scheduler {
                     resolved_at: None,
                     split: seats.iter().any(|s| is_split_role(&s.role)),
                     planned: false,
+                    exec: ExecCluster::of(seats.iter().map(|s| &s.job)),
                 },
             )
             .await;
@@ -567,5 +568,46 @@ impl Scheduler {
         self.call(|reply| SchedulerMsg::IsAborting { job_id, reply })
             .await
             .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::jobs::{ExecAssignment, PendingJob};
+    use gradient_types::exec::ExecSpec;
+    use gradient_types::ids::{ExecJobAttemptId, ProjectId};
+
+    fn seat(retries_left: u32, retries_cap: u32) -> PendingJob {
+        let mut job = crate::test_jobs::exec_job(ExecSpec {
+            nodes: 2,
+            ..ExecSpec::default()
+        });
+        job.retries_left = retries_left;
+        job.assignment = Some(ExecAssignment {
+            exec_job: job.exec_job,
+            attempt: ExecJobAttemptId::now_v7(),
+            number: 1,
+            retries_cap,
+            token_hash: String::new(),
+            token_expires_at: gradient_types::now(),
+            master_port: Some(29500),
+        });
+        PendingJob::Exec(Box::new(job))
+    }
+
+    #[test]
+    fn the_lowest_clamped_retry_count_decides_a_restart() {
+        let seats = [seat(3, 5), seat(3, 1)];
+        assert_eq!(
+            ExecCluster::of(&seats),
+            Some(ExecCluster {
+                keep_running: false,
+                retries_left: 1
+            })
+        );
+
+        let eval = PendingJob::Eval(crate::test_jobs::eval_job(ProjectId::now_v7()));
+        assert_eq!(ExecCluster::of(&[seat(3, 5), eval]), None);
     }
 }
