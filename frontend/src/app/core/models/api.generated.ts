@@ -1824,6 +1824,13 @@ export interface ProjectRoleOwner {
   project?: ProjectId | null;
 }
 
+export interface ProjectSecretSummary {
+  name: string;
+  updated_at: string;
+  updated_by?: string | null;
+  managed: boolean;
+}
+
 export interface ProjectSummary {
   id: ProjectId;
   name: string;
@@ -1861,6 +1868,10 @@ export interface ProtocolProbe {
   status?: number | null;
   latency_ms: number;
   error?: string | null;
+}
+
+export interface PutProjectSecretRequest {
+  value: string;
 }
 
 export interface QueueSummary {
@@ -2070,6 +2081,11 @@ export interface SkippedTask {
   task_name: string;
   project: string;
   reason: string;
+}
+
+export interface SopsRecipientResponse {
+  age?: string | null;
+  ssh: string;
 }
 
 export interface SourceFinalize {

@@ -19,6 +19,7 @@ gradient-core = { workspace = true }
 gradient-state = { workspace = true }
 gradient-ci = { workspace = true }
 gradient-sources = { workspace = true }
+gradient-sops = { workspace = true }
 gradient-git-host = { workspace = true }
 gradient-db = { workspace = true }
 gradient-graph = { workspace = true }

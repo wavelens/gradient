@@ -40,6 +40,16 @@ pub(crate) enum ProjectRefusal {
     WorkerIdBelongsToOtherConnection,
     #[error("team workers are managed on the team page")]
     TeamWorkerManagedOnTeamPage,
+    #[error("{reason}")]
+    InvalidSecretName { reason: String },
+    #[error("secret value is empty")]
+    EmptySecretValue,
+    #[error("secret value is larger than 65536 bytes")]
+    SecretValueTooLarge,
+    #[error("secret \"{name}\" is managed by the declarative state")]
+    ManagedSecret { name: String },
+    #[error("project key unusable for sops: {reason}")]
+    UnusableSopsKey { reason: String },
 }
 
 impl Refusal for ProjectRefusal {
@@ -52,12 +62,17 @@ impl Refusal for ProjectRefusal {
             | Self::InvalidInstallationId { .. }
             | Self::GitHubIntegrationNotEditable
             | Self::SwitchToGitHubNotAllowed
-            | Self::NotSubscribedToCache => RefusalStatus::BadRequest,
+            | Self::NotSubscribedToCache
+            | Self::InvalidSecretName { .. }
+            | Self::EmptySecretValue
+            | Self::SecretValueTooLarge => RefusalStatus::BadRequest,
             Self::IntegrationNameTaken { .. }
             | Self::WorkerIdBelongsToTeamWorker
             | Self::WorkerIdRegistered
             | Self::WorkerIdBelongsToOtherConnection
-            | Self::TeamWorkerManagedOnTeamPage => RefusalStatus::Conflict,
+            | Self::TeamWorkerManagedOnTeamPage
+            | Self::ManagedSecret { .. }
+            | Self::UnusableSopsKey { .. } => RefusalStatus::Conflict,
         }
     }
 }

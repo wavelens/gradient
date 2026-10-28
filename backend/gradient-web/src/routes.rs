@@ -133,6 +133,13 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     projects::ssh::get_project_ssh,
                     projects::ssh::post_project_ssh
                 ))
+                .routes(routes!(projects::secrets::list_project_secrets))
+                .routes(routes!(
+                    projects::secrets::get_project_secret,
+                    projects::secrets::put_project_secret,
+                    projects::secrets::delete_project_secret
+                ))
+                .routes(routes!(projects::secrets::get_project_sops_recipient))
                 .routes(routes!(projects::settings::get_project_subscribe))
                 .routes(routes!(
                     projects::settings::post_project_subscribe_cache,

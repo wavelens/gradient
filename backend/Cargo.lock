@@ -3579,6 +3579,7 @@ dependencies = [
  "gradient-proto",
  "gradient-report",
  "gradient-scheduler",
+ "gradient-sops",
  "gradient-sources",
  "gradient-state",
  "gradient-storage",

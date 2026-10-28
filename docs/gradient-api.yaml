@@ -7207,6 +7207,179 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/projects/{project}/secrets:
+    get:
+      tags:
+      - projects
+      summary: List project secrets
+      description: Lists the secrets exec jobs of this project can request. Values are write-only and never returned.
+      operationId: listProjectSecrets
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Secrets by name
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProjectSecretSummary'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/projects/{project}/secrets/{name}:
+    get:
+      tags:
+      - projects
+      summary: Get a project secret
+      description: Returns when and by whom a secret was last set, never its value.
+      operationId: getProjectSecret
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Secret
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/ProjectSecretSummary'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    put:
+      tags:
+      - projects
+      summary: Set a project secret
+      description: Creates or replaces a secret. The value is stored encrypted with the server's crypt key. Secrets set by the declarative state cannot be replaced.
+      operationId: putProjectSecret
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutProjectSecretRequest'
+        required: true
+      responses:
+        '200':
+          description: Secret stored
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/ProjectSecretSummary'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - projects
+      summary: Delete a project secret
+      description: Deletes a secret. Secrets set by the declarative state cannot be deleted here.
+      operationId: deleteProjectSecret
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Secret deleted
+          content:
+            text/plain:
+              schema:
+                type: boolean
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/projects/{project}/sops-recipient:
+    get:
+      tags:
+      - projects
+      summary: Get the sops recipient
+      description: Returns the recipient to encrypt repository sops files for, derived from the project SSH key. `age` is absent for an RSA key, use `ssh` then.
+      operationId: getProjectSopsRecipient
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Sops recipient
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/SopsRecipientResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/projects/{project}/ssh:
     get:
       tags:
@@ -18352,6 +18525,24 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ProjectId'
           - type: 'null'
+    ProjectSecretSummary:
+      type: object
+      required:
+      - name
+      - updated_at
+      - managed
+      properties:
+        name:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          type:
+          - string
+          - 'null'
+        managed:
+          type: boolean
     ProjectSummary:
       type: object
       required:
@@ -18471,6 +18662,13 @@ components:
           type:
           - string
           - 'null'
+    PutProjectSecretRequest:
+      type: object
+      required:
+      - value
+      properties:
+        value:
+          type: string
     QueueSummary:
       type: object
       required:
@@ -19001,6 +19199,17 @@ components:
         project:
           type: string
         reason:
+          type: string
+    SopsRecipientResponse:
+      type: object
+      required:
+      - ssh
+      properties:
+        age:
+          type:
+          - string
+          - 'null'
+        ssh:
           type: string
     SourceFinalize:
       type: object
