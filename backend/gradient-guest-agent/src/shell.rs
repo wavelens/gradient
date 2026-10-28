@@ -10,6 +10,7 @@ use std::os::fd::OwnedFd;
 use std::process::Stdio;
 use std::sync::Arc;
 
+use gradient_redact::SecretRedactor;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::unix::pipe;
 use tokio::process::{Child, Command};
@@ -24,10 +25,11 @@ pub struct ShellContext {
     pub env: BTreeMap<String, String>,
     pub groups: Vec<String>,
     pub program: Option<ProgramTerminal>,
+    pub redactor: SecretRedactor,
 }
 
 impl ShellContext {
-    pub fn of(program: &Command, groups: &[String]) -> Self {
+    pub fn of(program: &Command, groups: &[String], redactor: SecretRedactor) -> Self {
         let env = program
             .as_std()
             .get_envs()
@@ -39,6 +41,7 @@ impl ShellContext {
             env,
             groups: groups.to_vec(),
             program: None,
+            redactor,
         }
     }
 }
@@ -113,7 +116,7 @@ mod tests {
         ShellContext {
             env: BTreeMap::from([("GRADIENT_JOB".to_owned(), "j1".to_owned())]),
             groups: vec!["kvm".to_owned()],
-            program: None,
+            ..ShellContext::default()
         }
     }
 

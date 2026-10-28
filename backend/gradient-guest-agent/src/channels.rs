@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use gradient_redact::StreamRedactor;
 use gradient_util::shutdown::Shutdown;
 use gradient_wire::guest::AgentToWorker;
 use gradient_wire::messages::{GUEST_CHANNEL_CHUNK, GuestChannelKind};
@@ -157,6 +158,7 @@ impl AgentChannels {
             channel_id,
             child,
             output,
+            context.redactor.stream(),
             self.outbound.clone(),
             channel.ended.clone(),
         ));
@@ -255,27 +257,45 @@ async fn write_and_flush(input: &mut Input, data: &[u8]) -> std::io::Result<()> 
 async fn send_output(
     channel_id: u64,
     mut output: impl AsyncRead + Unpin,
+    mut redactor: Option<StreamRedactor>,
     outbound: &mpsc::Sender<AgentToWorker>,
 ) {
     let mut buf = vec![0; GUEST_CHANNEL_CHUNK];
     while let Ok(n) = output.read(&mut buf).await
         && n > 0
     {
-        let data = buf[..n].to_vec();
+        let data = match redactor.as_mut() {
+            Some(redactor) => redactor.push(&buf[..n]),
+            None => buf[..n].to_vec(),
+        };
+        if !send_data(channel_id, &data, outbound).await {
+            return;
+        }
+    }
+    if let Some(mut redactor) = redactor {
+        send_data(channel_id, &redactor.finish(), outbound).await;
+    }
+}
+
+async fn send_data(channel_id: u64, data: &[u8], outbound: &mpsc::Sender<AgentToWorker>) -> bool {
+    for piece in data.chunks(GUEST_CHANNEL_CHUNK) {
+        let data = piece.to_vec();
         if outbound
             .send(AgentToWorker::ChannelData { channel_id, data })
             .await
             .is_err()
         {
-            return;
+            return false;
         }
     }
+    true
 }
 
 async fn shell_output(
     channel_id: u64,
     mut child: Child,
     output: Box<dyn AsyncRead + Send + Unpin>,
+    redactor: StreamRedactor,
     outbound: mpsc::Sender<AgentToWorker>,
     ended: CancellationToken,
 ) {
@@ -285,7 +305,7 @@ async fn shell_output(
         .map(Pid::from_raw);
     let status = {
         let finished = async {
-            let pump = send_output(channel_id, output, &outbound);
+            let pump = send_output(channel_id, output, Some(redactor), &outbound);
             let exit = child.wait();
             tokio::pin!(pump, exit);
             tokio::select! {
@@ -330,7 +350,7 @@ async fn forward_output(
     ended: CancellationToken,
 ) {
     tokio::select! {
-        () = send_output(channel_id, reader, &outbound) => {
+        () = send_output(channel_id, reader, None, &outbound) => {
             let _ = outbound.send(closed(channel_id, None, None)).await;
             ended.cancel();
         }
@@ -362,15 +382,8 @@ async fn send_followed(
         let OutputChunk::Data(data) = chunk else {
             continue;
         };
-        for piece in data.chunks(GUEST_CHANNEL_CHUNK) {
-            let data = piece.to_vec();
-            if outbound
-                .send(AgentToWorker::ChannelData { channel_id, data })
-                .await
-                .is_err()
-            {
-                return;
-            }
+        if !send_data(channel_id, &data, outbound).await {
+            return;
         }
     }
 }

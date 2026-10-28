@@ -9,6 +9,7 @@ mod context;
 mod http;
 mod listener;
 mod output;
+mod redaction;
 mod run;
 mod setup;
 mod shell;

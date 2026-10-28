@@ -20,6 +20,7 @@ use crate::types::GuestChannelKind;
 
 pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=2;
 pub const GUEST_CHANNELS_AGENT_SINCE: u16 = 2;
+pub const GUEST_JOB_SECRETS_SINCE: u16 = 2;
 pub const AGENT_VSOCK_PORT: u32 = 7000;
 pub const AGENT_RELAY_PORT_BASE: u32 = 7100;
 
@@ -145,6 +146,11 @@ pub enum AgentToWorker {
         channel_id: u64,
         exit_code: Option<i32>,
         message: Option<String>,
+    },
+    #[proto(2)]
+    JobSecrets {
+        secrets: Vec<GuestSecret>,
+        token: String,
     },
 }
 

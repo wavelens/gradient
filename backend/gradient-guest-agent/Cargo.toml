@@ -19,6 +19,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+gradient-redact = { workspace = true }
 gradient-util = { workspace = true }
 gradient-wire = { workspace = true }
 

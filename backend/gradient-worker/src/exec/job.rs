@@ -305,6 +305,7 @@ async fn forward<R: ExecReport>(
         | AgentToWorker::CloseChannel { channel_id, .. } => {
             debug!(channel_id, "guest channel frame dropped");
         }
+        AgentToWorker::JobSecrets { .. } => debug!("job secrets from the guest agent dropped"),
     }
     Ok(None)
 }

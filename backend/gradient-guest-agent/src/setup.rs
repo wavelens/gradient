@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
+use gradient_redact::SecretRedactor;
 use gradient_util::shutdown::Shutdown;
 use gradient_wire::guest::{GuestMount, GuestNetwork, GuestRelay, GuestRelayKind, RunJob};
 use nix::sys::termios::{SetArg, cfmakeraw, tcgetattr, tcsetattr};
@@ -21,6 +22,7 @@ use tokio::process::Command;
 use tokio_vsock::{VMADDR_CID_ANY, VsockAddr, VsockListener};
 
 use crate::context::{context_env, context_json};
+use crate::redaction::job_redactor;
 use crate::run::program_command;
 
 pub const PROGRAM_USER: &str = "gradient";
@@ -36,6 +38,7 @@ pub struct PreparedJob {
     pub program: Command,
     pub env: BTreeMap<String, String>,
     pub terminal: bool,
+    pub redactor: SecretRedactor,
 }
 
 pub async fn prepare(job: &RunJob, tasks: &Shutdown) -> Result<PreparedJob, String> {
@@ -60,6 +63,7 @@ async fn prepare_steps(job: &RunJob, tasks: &Shutdown) -> Result<PreparedJob> {
         program,
         env,
         terminal: job.program_pty,
+        redactor: job_redactor(job),
     })
 }
 
