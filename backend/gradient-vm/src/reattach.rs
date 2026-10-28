@@ -10,6 +10,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use tracing::{info, warn};
 
+use crate::addresses::{AddressLease, GuestAddresses};
 use crate::devices::{DeviceHold, DeviceInventory};
 use crate::guest::{Guest, remove_guest_dirs};
 use crate::pool::GuestPool;
@@ -26,6 +27,7 @@ pub struct ReattachPlan {
 pub struct ReattachedGuest {
     pub guest: Guest,
     pub devices: DeviceHold,
+    pub address: Option<AddressLease>,
 }
 
 pub fn plan_reattach(
@@ -70,6 +72,7 @@ pub async fn apply(
     plan: ReattachPlan,
     pool: &Arc<GuestPool>,
     devices: &DeviceInventory,
+    addresses: &GuestAddresses,
 ) -> Vec<ReattachedGuest> {
     let config = pool.config();
     for id in plan.orphans {
@@ -101,9 +104,19 @@ pub async fn apply(
         .into_iter()
         .map(|state| ReattachedGuest {
             devices: devices.adopt(&state.devices_held),
+            address: adopt_address(addresses, &state),
             guest: Guest::from_state(config, state),
         })
         .collect()
+}
+
+fn adopt_address(addresses: &GuestAddresses, state: &GuestState) -> Option<AddressLease> {
+    let address = state.address.as_deref()?;
+    let lease = addresses.adopt(address);
+    if lease.is_none() {
+        warn!(guest = %state.guest_id, %address, "guest address is outside exec.subnet or held twice");
+    }
+    lease
 }
 
 #[cfg(test)]

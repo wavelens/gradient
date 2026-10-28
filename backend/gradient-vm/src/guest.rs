@@ -5,7 +5,6 @@
  */
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::Ipv4Addr;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -373,37 +372,6 @@ impl Guest {
     }
 }
 
-pub fn guest_address(subnet: &str, cid: u32, nameservers: &[String]) -> Result<GuestNetwork> {
-    let (network, prefix) = subnet
-        .split_once('/')
-        .ok_or_else(|| anyhow!("subnet {subnet} has no prefix length"))?;
-    let network: Ipv4Addr = network
-        .parse()
-        .with_context(|| format!("subnet {subnet}"))?;
-    let prefix: u8 = prefix.parse().with_context(|| format!("subnet {subnet}"))?;
-    if !(8..=30).contains(&prefix) {
-        bail!("subnet {subnet} needs a prefix length between 8 and 30");
-    }
-    let mask = u32::MAX << (32 - prefix);
-    let base = u32::from(network) & mask;
-    let hosts = !mask;
-    if cid >= hosts {
-        bail!("subnet {subnet} has no address for guest cid {cid}");
-    }
-    let gateway = Ipv4Addr::from(base + 1).to_string();
-    let nameservers = match nameservers {
-        [] => vec![gateway.clone()],
-        configured => configured.to_vec(),
-    };
-    Ok(GuestNetwork {
-        address: Ipv4Addr::from(base + cid).to_string(),
-        prefix,
-        gateway,
-        nameservers,
-        mac: guest_mac(cid),
-    })
-}
-
 pub fn guest_mac(cid: u32) -> String {
     format!(
         "02:47:52:{:02x}:{:02x}:{:02x}",
@@ -487,20 +455,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_guest_address_follows_its_cid() {
-        assert_eq!(
-            guest_address("10.233.0.0/16", 3, &[]).unwrap(),
-            GuestNetwork {
-                address: "10.233.0.3".into(),
-                prefix: 16,
-                gateway: "10.233.0.1".into(),
-                nameservers: vec!["10.233.0.1".into()],
-                mac: "02:47:52:00:00:03".into(),
-            }
-        );
-    }
-
-    #[test]
     fn the_state_file_stays_while_the_unit_is_still_running() {
         let root = tempfile::tempdir().unwrap();
         let dir = root.path().join("guest");
@@ -516,17 +470,6 @@ mod tests {
         remove_guest_dirs(&dir, std::slice::from_ref(&per_job), true);
         assert!(!dir.exists());
         assert!(!per_job.exists());
-    }
-
-    #[test]
-    fn configured_nameservers_replace_the_gateway_as_resolver() {
-        let nameservers = ["9.9.9.9".to_owned()];
-        assert_eq!(
-            guest_address("10.233.0.0/16", 3, &nameservers)
-                .unwrap()
-                .nameservers,
-            nameservers
-        );
     }
 
     #[test]

@@ -14,8 +14,8 @@ use gradient_redact::SecretRedactor;
 use gradient_types::RepositoryLocation;
 use gradient_types::secret::SecretString;
 use gradient_vm::{
-    DeviceHold, GUEST_BOOT_TIMEOUT, Guest, MountConfig, PlugPlan, PluggedDevices, WORK_MOUNT_TAG,
-    guest_address, wait_ready,
+    AddressLease, DeviceHold, GUEST_BOOT_TIMEOUT, Guest, MountConfig, PlugPlan, PluggedDevices,
+    WORK_MOUNT_TAG, wait_ready,
 };
 use gradient_wire::guest::{
     AgentToWorker, GuestMount, GuestNetwork, GuestSecret, RunJob, WorkerToAgent,
@@ -46,6 +46,7 @@ use crate::proto::job::{JobUpdater, push_exec_output};
 const STORE_DIR: &str = "/nix/store/";
 const EXEC_KEY_PREFIX: &str = "exec:";
 const KILL_GRACE: Duration = Duration::from_secs(15);
+const NO_FREE_ADDRESS: &str = "no free guest address in exec.subnet";
 
 #[async_trait]
 pub trait ExecReport: Send {
@@ -194,11 +195,18 @@ pub async fn execute(
     let source = guest_source(&run.job, host.config.allow_custom_images)?;
     run.ensure_program(nix.store).await?;
     let devices = run.reserve_devices()?;
+    let address = run.lease_address()?;
     let (mut guest, image_root) = run.take_guest(source, &nix).await?;
     let outcome = run
-        .run_in_guest(&mut guest, &devices, credentials, channels)
+        .run_in_guest(
+            &mut guest,
+            &devices,
+            address.as_ref(),
+            credentials,
+            channels,
+        )
         .await;
-    host.pool.retire(guest, (devices, image_root));
+    host.pool.retire(guest, (devices, image_root, address));
     outcome
 }
 
@@ -250,6 +258,12 @@ pub(crate) fn job_secrets(
             })
         })
         .collect()
+}
+
+pub(crate) fn lease_guest_address(host: &ExecHost) -> Result<AddressLease, BuildError> {
+    host.addresses
+        .lease()
+        .ok_or_else(|| BuildError::transient(anyhow!(NO_FREE_ADDRESS)))
 }
 
 fn exec_job_of(job_id: &str) -> &str {
@@ -521,6 +535,13 @@ impl ExecRun<'_> {
             .ok_or_else(|| BuildError::transient(anyhow!("devices no longer free")).into())
     }
 
+    fn lease_address(&self) -> Result<Option<AddressLease>, BuildError> {
+        if !self.job.requirement.network {
+            return Ok(None);
+        }
+        lease_guest_address(self.host).map(Some)
+    }
+
     async fn take_guest(
         &mut self,
         source: GuestSource,
@@ -556,12 +577,13 @@ impl ExecRun<'_> {
         &mut self,
         guest: &mut Guest,
         devices: &DeviceHold,
+        address: Option<&AddressLease>,
         credentials: &CredentialStore,
         inbox: GuestChannelInbox,
     ) -> Result<()> {
         let abort = self.abort.clone();
-        let mut agent =
-            unless_aborted(&abort, self.start_program(guest, devices, credentials)).await??;
+        let started = self.start_program(guest, devices, address, credentials);
+        let mut agent = unless_aborted(&abort, started).await??;
         let requirement = &self.job.requirement;
         let mut mux =
             GuestChannelMux::new(requirement.ssh, requirement.ports.clone(), agent.version());
@@ -589,6 +611,7 @@ impl ExecRun<'_> {
         &mut self,
         guest: &mut Guest,
         devices: &DeviceHold,
+        address: Option<&AddressLease>,
         credentials: &CredentialStore,
     ) -> Result<AgentClient> {
         guest
@@ -610,7 +633,8 @@ impl ExecRun<'_> {
         guest.resume().await.map_err(BuildError::transient)?;
 
         let mounts = self.mounts(guest)?;
-        let network = self.network(guest)?;
+        let cid = guest.state().cid;
+        let network = address.map(|lease| lease.network(cid));
         let plan = PlugPlan {
             units: devices.units(),
             mounts: mounts.clone(),
@@ -660,19 +684,6 @@ impl ExecRun<'_> {
                 Ok((mount.clone(), dir))
             })
             .collect()
-    }
-
-    fn network(&self, guest: &Guest) -> Result<Option<GuestNetwork>, BuildError> {
-        if !self.job.requirement.network {
-            return Ok(None);
-        }
-        guest_address(
-            &self.host.pool.config().subnet,
-            guest.state().cid,
-            &self.host.config.nameservers,
-        )
-        .map(Some)
-        .map_err(BuildError::permanent)
     }
 
     fn run_job(

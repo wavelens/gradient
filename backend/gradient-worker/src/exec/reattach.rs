@@ -56,11 +56,16 @@ pub async fn resume(
     inbox: GuestChannelInbox,
 ) -> Result<()> {
     let ResumedJob {
-        guest: ReattachedGuest { guest, devices },
+        guest:
+            ReattachedGuest {
+                guest,
+                devices,
+                address,
+            },
         stored,
     } = resumed;
     let outcome = follow_again(host, &guest, &stored, updater, abort, inbox).await;
-    host.pool.retire(guest, devices);
+    host.pool.retire(guest, (devices, address));
     outcome
 }
 

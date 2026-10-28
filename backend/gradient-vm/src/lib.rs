@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod addresses;
 pub mod agent;
 pub mod config;
 pub mod console;
@@ -19,12 +20,13 @@ pub mod unit;
 pub mod vm_states;
 pub mod vsock;
 
+pub use addresses::{AddressLease, GuestAddresses};
 pub use agent::{GUEST_BOOT_TIMEOUT, GuestBootError, ReadyAgent, wait_ready};
 pub use config::{DeviceConfig, MountConfig, SupervisorConfig, VmConfig, check_device};
 pub use console::ConsoleLink;
 pub use custom_image::NO_GUEST_AGENT;
 pub use devices::{DeviceCount, DeviceHold, DeviceInventory, DeviceUnit, HostProbe, SysfsProbe};
-pub use guest::{Guest, PlugPlan, PluggedDevices, WORK_MOUNT_TAG, device_groups, guest_address};
+pub use guest::{Guest, PlugPlan, PluggedDevices, WORK_MOUNT_TAG, device_groups};
 pub use hypervisor::{GuestImage, HypervisorApi, PciDeviceInfo, VmInfo, vm_config};
 pub use pool::{GuestPool, surplus, wanted_boots, warm_target};
 pub use reattach::{ReattachPlan, ReattachedGuest, plan_reattach};
