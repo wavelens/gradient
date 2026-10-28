@@ -306,6 +306,13 @@ pub(super) async fn eval_cache_fingerprint(
 }
 
 pub(super) fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
+    with_flake_dir(
+        source_flake_url(job, local_flake_path),
+        job.flake_dir.as_deref(),
+    )
+}
+
+fn source_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
     if let Some(path) = local_flake_path {
         return format!("path:{}", path);
     }
@@ -317,12 +324,23 @@ pub(super) fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) ->
     }
 }
 
+fn with_flake_dir(flake_ref: String, flake_dir: Option<&str>) -> String {
+    match flake_dir {
+        None => flake_ref,
+        Some(dir) if flake_ref.contains('?') => format!("{flake_ref}&dir={dir}"),
+        Some(dir) => format!("{flake_ref}?dir={dir}"),
+    }
+}
+
 pub(super) fn eval_input_overrides(
     job: &FlakeJob,
     local_flake_path: Option<&str>,
 ) -> Vec<(String, String)> {
     let declared: std::collections::BTreeSet<String> = local_flake_path
-        .and_then(|p| std::fs::read(std::path::Path::new(p).join("flake.lock")).ok())
+        .and_then(|p| {
+            super::fetch::flake_root(std::path::Path::new(p), job.flake_dir.as_deref()).ok()
+        })
+        .and_then(|root| std::fs::read(root.join("flake.lock")).ok())
         .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
         .and_then(|lock| {
             let root = lock.get("root").and_then(|v| v.as_str()).unwrap_or("root");
@@ -1317,6 +1335,22 @@ mod tests {
 
     fn never_abort() -> crate::executor::AbortSignal {
         crate::executor::AbortSignal::never()
+    }
+
+    #[test]
+    fn a_flake_reference_names_its_directory() {
+        assert_eq!(
+            with_flake_dir("path:/nix/store/x-source".into(), Some("nix")),
+            "path:/nix/store/x-source?dir=nix"
+        );
+        assert_eq!(
+            with_flake_dir("git+https://h/r?rev=abc".into(), Some("nix")),
+            "git+https://h/r?rev=abc&dir=nix"
+        );
+        assert_eq!(
+            with_flake_dir("path:/nix/store/x-source".into(), None),
+            "path:/nix/store/x-source"
+        );
     }
 
     #[test]
