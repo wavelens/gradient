@@ -5,11 +5,15 @@
  */
 
 pub mod attempts;
+pub mod continuations;
 pub mod create;
 pub mod dispatch;
+pub mod outputs;
 pub mod phases;
+pub mod pull_requests;
 pub mod reads;
 pub mod settle;
+pub mod tokens;
 pub mod upcoming;
 
 use gradient_entity::exec_job::ExecJobStatus;
