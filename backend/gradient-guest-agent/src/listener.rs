@@ -10,7 +10,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use gradient_util::shutdown::Shutdown;
 use gradient_wire::guest::{
-    AGENT_VSOCK_PORT, AgentToWorker, GuestConnection, GuestSender, RunJob, WorkerToAgent,
+    AGENT_VSOCK_PORT, AgentToWorker, GUEST_JOB_SECRETS_SINCE, GuestConnection, GuestSender, RunJob,
+    WorkerToAgent,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -20,6 +21,7 @@ use tokio_vsock::{VMADDR_CID_ANY, VsockAddr, VsockListener, VsockStream};
 
 use crate::channels::AgentChannels;
 use crate::output::{OutputChunk, OutputLog, OutputReader, OutputReaders};
+use crate::redaction::JobSecrets;
 use crate::run::run;
 use crate::setup::{PreparedJob, prepare};
 use crate::shell::ShellContext;
@@ -47,6 +49,7 @@ struct Agent {
     progress: watch::Sender<Progress>,
     kill: CancellationToken,
     shell: Mutex<Option<ShellContext>>,
+    job_secrets: Mutex<Option<JobSecrets>>,
     tasks: Shutdown,
 }
 
@@ -63,6 +66,18 @@ impl Agent {
             .shell
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(context);
+    }
+
+    fn job_secrets_message(&self) -> Option<AgentToWorker> {
+        let secrets = self
+            .job_secrets
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()?;
+        Some(AgentToWorker::JobSecrets {
+            secrets: secrets.secrets,
+            token: secrets.token,
+        })
     }
 
     fn keep_program_terminal(&self, terminal: ProgramTerminal) {
@@ -84,6 +99,7 @@ pub async fn listen(output: OutputLog, tasks: Shutdown, restarted: bool) -> Resu
         progress: watch::Sender::new(initial_progress(restarted)),
         kill: CancellationToken::new(),
         shell: Mutex::new(None),
+        job_secrets: Mutex::new(None),
         tasks,
     });
     let listener = VsockListener::bind(VsockAddr::new(VMADDR_CID_ANY, AGENT_VSOCK_PORT))
@@ -133,6 +149,7 @@ async fn prepare_until_stopped(job: &RunJob, agent: &Agent) -> Result<PreparedJo
 
 async fn serve_connection(agent: Arc<Agent>, stream: VsockStream) -> Result<()> {
     let mut conn = GuestConnection::agree(stream).await?;
+    let sends_job_secrets = conn.version() >= GUEST_JOB_SECRETS_SINCE;
     conn.send(&AgentToWorker::Ready {
         agent_version: env!("CARGO_PKG_VERSION").to_owned(),
     })
@@ -146,6 +163,9 @@ async fn serve_connection(agent: Arc<Agent>, stream: VsockStream) -> Result<()> 
     while let Some(message) = receiver.recv::<WorkerToAgent>().await? {
         match message {
             WorkerToAgent::Attach { output_offset } => {
+                if let Some(secrets) = agent.job_secrets_message().filter(|_| sends_job_secrets) {
+                    outgoing.send(secrets).await?;
+                }
                 let reader = agent.readers.reader_from(output_offset);
                 _streamer = spawn_streamer(&agent, Some(reader), outgoing.clone());
             }
@@ -196,13 +216,21 @@ fn start_job(agent: &Arc<Agent>, job: Box<RunJob>) -> Option<AgentToWorker> {
             message: "this guest already ran a job".to_owned(),
         });
     };
+    *agent
+        .job_secrets
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(JobSecrets::of(&job));
 
     let job_agent = Arc::clone(agent);
     agent.tasks.spawn(async move {
         let agent = job_agent;
         let outcome = match prepare_until_stopped(&job, &agent).await {
             Ok(prepared) => {
-                agent.keep_shell_context(ShellContext::of(&prepared.program, &job.groups));
+                agent.keep_shell_context(ShellContext::of(
+                    &prepared.program,
+                    &job.groups,
+                    prepared.redactor.clone(),
+                ));
                 let (started, started_rx) = oneshot::channel();
                 let mark_started = async {
                     if let Ok(terminal) = started_rx.await {

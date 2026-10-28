@@ -10,6 +10,7 @@ use std::path::Path;
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
+use gradient_redact::{SecretRedactor, StreamRedactor};
 use gradient_wire::guest::RunJob;
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
@@ -97,14 +98,15 @@ pub async fn run(
         program,
         env,
         terminal,
+        redactor,
     } = prepared;
-    let code = match run_script(PRE_SCRIPT, &env, output, kill.cancelled()).await {
+    let code = match run_script(PRE_SCRIPT, &env, output, &redactor, kill.cancelled()).await {
         0 if kill.is_cancelled() => {
             note(output, "killed before the program started").await;
             KILLED
         }
-        0 if terminal => run_program_on_terminal(program, output, started, &kill).await,
-        0 => run_program(program, output, started, &kill).await,
+        0 if terminal => run_program_on_terminal(program, output, &redactor, started, &kill).await,
+        0 => run_program(program, output, &redactor, started, &kill).await,
         code => {
             note(output, &format!("pre-script exited with code {code}")).await;
             code
@@ -112,7 +114,7 @@ pub async fn run(
     };
 
     let deadline = tokio::time::sleep(POST_SCRIPT_TIMEOUT);
-    let post = run_script(POST_SCRIPT, &env, output, deadline).await;
+    let post = run_script(POST_SCRIPT, &env, output, &redactor, deadline).await;
     if post != 0 {
         note(output, &format!("post-script exited with code {post}")).await;
     }
@@ -122,13 +124,14 @@ pub async fn run(
 async fn run_program(
     mut program: Command,
     output: &mut OutputLog,
+    redactor: &SecretRedactor,
     started: oneshot::Sender<Option<ProgramTerminal>>,
     kill: &CancellationToken,
 ) -> i32 {
     match spawn_piped(&mut program) {
         Ok(child) => {
             let _ = started.send(None);
-            exit_code(stream_until_exit(child, output, kill.cancelled()).await)
+            exit_code(stream_until_exit(child, output, redactor, kill.cancelled()).await)
         }
         Err(e) => {
             note(output, &format!("cannot start the program: {e}")).await;
@@ -140,6 +143,7 @@ async fn run_program(
 async fn run_program_on_terminal(
     program: Command,
     output: &mut OutputLog,
+    redactor: &SecretRedactor,
     started: oneshot::Sender<Option<ProgramTerminal>>,
     kill: &CancellationToken,
 ) -> i32 {
@@ -163,6 +167,7 @@ async fn run_program_on_terminal(
         Some(terminal_output),
         None::<File>,
         output,
+        redactor,
         kill.cancelled(),
     )
     .await;
@@ -175,6 +180,7 @@ async fn run_script(
     path: &str,
     env: &BTreeMap<String, String>,
     output: &mut OutputLog,
+    redactor: &SecretRedactor,
     stop: impl Future<Output = ()>,
 ) -> i32 {
     if !Path::new(path).exists() {
@@ -189,7 +195,7 @@ async fn run_script(
         .env("HOME", "/root")
         .envs(env);
     match spawn_piped(&mut command) {
-        Ok(child) => exit_code(stream_until_exit(child, output, stop).await),
+        Ok(child) => exit_code(stream_until_exit(child, output, redactor, stop).await),
         Err(e) => {
             note(output, &format!("cannot start {path}: {e}")).await;
             SPAWN_FAILED
@@ -209,10 +215,11 @@ fn spawn_piped(command: &mut Command) -> std::io::Result<Child> {
 async fn stream_until_exit(
     mut child: Child,
     output: &mut OutputLog,
+    redactor: &SecretRedactor,
     stop: impl Future<Output = ()>,
 ) -> std::io::Result<ExitStatus> {
     let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
-    stream_streams_until_exit(child, stdout, stderr, output, stop).await
+    stream_streams_until_exit(child, stdout, stderr, output, redactor, stop).await
 }
 
 async fn stream_streams_until_exit(
@@ -220,13 +227,18 @@ async fn stream_streams_until_exit(
     stdout: Option<impl AsyncRead + Unpin>,
     stderr: Option<impl AsyncRead + Unpin>,
     output: &mut OutputLog,
+    redactor: &SecretRedactor,
     stop: impl Future<Output = ()>,
 ) -> std::io::Result<ExitStatus> {
     let group = child
         .id()
         .and_then(|id| i32::try_from(id).ok())
         .map(Pid::from_raw);
-    let pump = pump(stdout, stderr, output);
+    let pump = pump(
+        stdout.map(|source| (source, redactor.stream())),
+        stderr.map(|source| (source, redactor.stream())),
+        output,
+    );
     let exit = wait_or_stop(&mut child, group, stop);
     tokio::pin!(pump, exit);
 
@@ -259,9 +271,11 @@ async fn wait_or_stop(
     }
 }
 
+type MaskedSource<P> = (P, StreamRedactor);
+
 async fn pump(
-    stdout: Option<impl AsyncRead + Unpin>,
-    stderr: Option<impl AsyncRead + Unpin>,
+    stdout: Option<MaskedSource<impl AsyncRead + Unpin>>,
+    stderr: Option<MaskedSource<impl AsyncRead + Unpin>>,
     output: &mut OutputLog,
 ) {
     let (mut stdout, mut stderr) = (stdout, stderr);
@@ -275,20 +289,36 @@ async fn pump(
     }
 }
 
-async fn keep<P>(read: Option<usize>, buf: &[u8], pipe: &mut Option<P>, output: &mut OutputLog) {
-    match read {
-        Some(n) => {
-            if let Err(e) = output.append(&buf[..n]).await {
-                tracing::warn!(error = %e, "cannot keep program output");
-            }
+async fn keep<P>(
+    read: Option<usize>,
+    buf: &[u8],
+    source: &mut Option<MaskedSource<P>>,
+    output: &mut OutputLog,
+) {
+    let Some((_, redactor)) = source.as_mut() else {
+        return;
+    };
+    let masked = match read {
+        Some(n) => redactor.push(&buf[..n]),
+        None => {
+            let rest = redactor.finish();
+            *source = None;
+            rest
         }
-        None => *pipe = None,
+    };
+    if !masked.is_empty()
+        && let Err(e) = output.append(&masked).await
+    {
+        tracing::warn!(error = %e, "cannot keep program output");
     }
 }
 
-async fn read_some(pipe: Option<&mut (impl AsyncRead + Unpin)>, buf: &mut [u8]) -> Option<usize> {
-    match pipe {
-        Some(pipe) => match pipe.read(buf).await {
+async fn read_some<P: AsyncRead + Unpin>(
+    source: Option<&mut MaskedSource<P>>,
+    buf: &mut [u8],
+) -> Option<usize> {
+    match source {
+        Some((pipe, _)) => match pipe.read(buf).await {
             Ok(0) | Err(_) => None,
             Ok(n) => Some(n),
         },
@@ -325,14 +355,16 @@ mod tests {
 
     use std::time::Duration;
 
+    use gradient_redact::SecretRedactor;
     use gradient_wire::guest::{ContextLayers, RunJob};
+    use tokio::io::AsyncWriteExt;
     use tokio::process::{Child, Command};
     use tokio::sync::oneshot;
     use tokio::time::timeout;
     use tokio_util::sync::CancellationToken;
 
     use super::{
-        KILLED, OutputLog, PreparedJob, exit_code, program_command, run, spawn_piped,
+        KILLED, OutputLog, PreparedJob, exit_code, program_command, pump, run, spawn_piped,
         stream_until_exit,
     };
 
@@ -419,6 +451,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn program_output_reaches_the_log_masked() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut output = output_log(&dir).await;
+        let (mut writer, reader) = tokio::io::duplex(64);
+        let redactor = SecretRedactor::new([("wandb-token", b"s3cr3t-value".as_slice())]);
+        let pumped = pump(
+            Some((reader, redactor.stream())),
+            None::<(tokio::io::DuplexStream, _)>,
+            &mut output,
+        );
+        let write = async {
+            writer.write_all(b"token=s3cr3t").await.unwrap();
+            writer.write_all(b"-value\n").await.unwrap();
+            drop(writer);
+        };
+
+        tokio::join!(pumped, write);
+
+        assert_eq!(
+            tokio::fs::read(dir.path().join("output.log"))
+                .await
+                .unwrap(),
+            b"token=[secret:wandb-token]\n"
+        );
+    }
+
+    #[tokio::test]
     async fn a_background_process_holding_the_pipes_does_not_hold_the_exit() {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut output = output_log(&dir).await;
@@ -426,7 +485,12 @@ mod tests {
 
         let status = timeout(
             Duration::from_secs(20),
-            stream_until_exit(child, &mut output, std::future::pending()),
+            stream_until_exit(
+                child,
+                &mut output,
+                &SecretRedactor::default(),
+                std::future::pending(),
+            ),
         )
         .await
         .expect("the exit is not held by the background sleep");
@@ -445,6 +509,7 @@ mod tests {
             stream_until_exit(
                 child,
                 &mut output,
+                &SecretRedactor::default(),
                 tokio::time::sleep(Duration::from_millis(200)),
             ),
         )
@@ -465,6 +530,7 @@ mod tests {
             program: Command::new("true"),
             env: BTreeMap::new(),
             terminal: false,
+            redactor: SecretRedactor::default(),
         };
 
         assert_eq!(run(prepared, &mut output, started, kill).await, KILLED);

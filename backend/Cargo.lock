@@ -3087,6 +3087,7 @@ dependencies = [
  "axum",
  "bytes",
  "clap",
+ "gradient-redact",
  "gradient-util",
  "gradient-wire",
  "http-body-util",
