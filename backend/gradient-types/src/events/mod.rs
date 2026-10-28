@@ -19,6 +19,7 @@ pub mod gc;
 pub mod graph;
 pub mod names;
 pub mod proto;
+pub mod vm;
 pub mod webhook;
 pub mod worker;
 pub mod worker_demand;
@@ -197,6 +198,7 @@ events! {
     GcDeepFinished(gc::DeepFinished),
     Audit(audit::Audited),
     WebhookPing(webhook::Ping),
+    VmStateChanged(vm::StateChanged),
 }
 
 #[cfg(test)]

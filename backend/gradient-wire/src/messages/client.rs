@@ -11,7 +11,7 @@ use crate::types::{
     BuildFailureKind, BuildMetrics, BuildProgressPhase, CandidateScore, ClusterAddress,
     EvalMessageLevel, EvalProgress, EvalShardSpec, ExecInventory, FinishedShard,
     GradientCapabilities, InputOutcome, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode,
-    RunningAssignment, UploadMetadata, UploadObject,
+    RunningAssignment, UploadMetadata, UploadObject, VmStateKind,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -270,6 +270,13 @@ pub enum ClientMessage {
         exit_code: Option<i32>,
         message: Option<String>,
     },
+
+    #[proto(45)]
+    VmState {
+        vm: String,
+        state: VmStateKind,
+        job_id: Option<String>,
+    },
 }
 
 impl ClientMessage {
@@ -295,6 +302,7 @@ impl ClientMessage {
             | ClientMessage::EvalShardsPlanned { job_id, .. }
             | ClientMessage::EvalShardRequest { job_id, .. }
             | ClientMessage::JobPhase { job_id, .. } => Some(job_id),
+            ClientMessage::VmState { job_id, .. } => job_id.as_deref(),
             _ => None,
         }
     }
@@ -340,6 +348,7 @@ impl ClientMessage {
             ClientMessage::JobPhase { .. } => "JobPhase",
             ClientMessage::GuestChannelData { .. } => "GuestChannelData",
             ClientMessage::CloseGuestChannel { .. } => "CloseGuestChannel",
+            ClientMessage::VmState { .. } => "VmState",
         }
     }
 

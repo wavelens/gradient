@@ -16,7 +16,7 @@ pub use crate::types::{
     EvalStatsReport, EvalSubtreeCost, FinishedShard, FlakeInputOverride, FlakeJob, FlakeOutputNode,
     FlakeSource, FlakeStep, GradientCapabilities, GuestChannelKind, InputFetch, InputFetchState,
     InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode,
-    Realisation, RequiredPath, RunningAssignment,
+    Realisation, RequiredPath, RunningAssignment, VmStateKind,
 };
 pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, SegmentFetch,
@@ -38,6 +38,8 @@ pub const PROTO_VERSIONS: std::ops::RangeInclusive<u16> =
 pub const RUNNING_JOBS_SINCE: u16 = 42;
 
 pub const GUEST_CHANNELS_SINCE: u16 = 44;
+
+pub const VM_STATE_SINCE: u16 = 45;
 
 pub const GUEST_CHANNEL_CHUNK: usize = 32 * 1024;
 
