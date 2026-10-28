@@ -30,6 +30,8 @@ pub struct DeepGcReport {
     pub blob_check_errors: u64,
     pub logs_scanned: u64,
     pub orphan_logs_removed: u64,
+    pub exec_output_jobs_scanned: u64,
+    pub orphan_exec_outputs_removed: u64,
     pub stale_partials_removed: u64,
 }
 
