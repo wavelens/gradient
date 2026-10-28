@@ -12,15 +12,14 @@ import {
   signal,
   computed,
   ViewChild,
-  ElementRef,
-  ChangeDetectorRef,
   DestroyRef,
   HostListener,
   ChangeDetectionStrategy
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { parseLineFragment, searchLines, windowAround } from './log-window';
+import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, parseLineFragment } from '@shared/log';
 import { matchesBuildSearch } from './build-search';
+import { buildLog } from './build-log';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
@@ -38,7 +37,6 @@ import {
   EvaluationProgress,
   BuildItem,
   EvaluationMessageResponse,
-  LogSearchHit,
   LogChunkIndex,
   EvaluationStatus,
   BuildWithOutputs,
@@ -71,7 +69,7 @@ import { saveResponse } from '@shared/download';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, EmptyStateComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, ToastComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, EmptyStateComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, ToastComponent, WritableDirective],
   providers: [MessageService],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -93,10 +91,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private messageService = inject(MessageService);
   protected authService = inject(AuthService);
   private sanitizer = inject(DomSanitizer);
-  private cdr = inject(ChangeDetectorRef);
   private destroyRef = inject(DestroyRef);
 
-  @ViewChild('logContainer') logContainerRef?: ElementRef<HTMLDivElement>;
+  @ViewChild(LogViewerComponent) logViewer?: LogViewerComponent;
 
   loading = signal(true);
   evaluation = signal<EvaluationResponse | null>(null);
@@ -123,8 +120,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   // owning task is asked directly: a viewer must not be offered an abort.
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
   triggerAccess = computed(() => this.accessService.triggerAccess(this.access()));
-  autoScroll = signal(true);
-  showScrollBtn = signal(false);
   duration = signal('0s');
   totalBuildsCount = signal(0);
   activeBuildsCount = signal(0);
@@ -232,7 +227,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private durationInterval?: ReturnType<typeof setInterval>;
   private activeStreamReader?: ReadableStreamDefaultReader<Uint8Array>;
   private streamingBuildId?: string;
-  private logLines: string[] = [];
   private autoFollowBuilding = false;
   private userPickedBuild = false;
   private isInitialBuildsLoad = true;
@@ -244,36 +238,14 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private totalBuilds = 0;
   private loadingMore = false;
 
-  // ── Virtualized log window (streaming from memory, completed via chunk API) ──
-  chunkedMode = signal(false);
-  windowLines = signal<{ n: number; html: SafeHtml }[]>([]);
-  topSpacerPx = signal(0);
-  bottomSpacerPx = signal(0);
-  highlightLine = signal<number | null>(null);
-  searchOpen = signal(false);
-  searchQuery = signal('');
+  logLines = signal<readonly string[]>([]);
+  serverLog = signal<ServerLog | null>(null);
+  deepLinkLine = signal<number | null>(null);
   sidebarSearchOpen = signal(false);
   sidebarSearchQuery = signal('');
   private sidebarFocused = false;
   private pointerOver: 'builds' | 'log' | null = null;
-  searchHits = signal<LogSearchHit[]>([]);
-  searchTotal = signal(0);
-  currentHit = signal(-1);
-  searchLoading = signal(false);
-  private searchDebounceTimer?: ReturnType<typeof setTimeout>;
-  private searchSeq = 0;
-  private readonly MIN_SEARCH_LEN = 3;
-  private readonly SEARCH_DEBOUNCE_MS = 300;
-  private chunkIndex: LogChunkIndex | null = null;
-  private logSource: 'memory' | 'chunks' = 'memory';
-  private windowStart = 1;
-  private loadingWindow = false;
-  private pendingDeepLink: number | null = null;
-  private readonly LINE_PX = 18;
   private readonly DRAIN_MS = 250;
-  private followScroll = false;
-  private readonly WINDOW_PAGE = 800;
-  private readonly MAX_WINDOW = 4000;
 
   ngOnInit(): void {
     document.documentElement.style.overflow = 'hidden';
@@ -283,7 +255,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.initialBuildId = this.route.snapshot.queryParamMap.get('build');
     this.scopeBuildId.set(this.initialBuildId);
     this.initialShowEval = this.route.snapshot.queryParamMap.get('eval') !== null;
-    this.pendingDeepLink = parseLineFragment(this.route.snapshot.fragment);
+    this.deepLinkLine.set(parseLineFragment(this.route.snapshot.fragment));
     if (!this.evaluationId) {
       this.loading.set(false);
       return;
@@ -298,7 +270,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.stopDurationTimer();
     this.stopActiveStream();
     this.stopBuildRevealTimer();
-    if (this.searchDebounceTimer !== undefined) clearTimeout(this.searchDebounceTimer);
   }
 
   loadEvaluation(): void {
@@ -354,7 +325,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       next: (msgs) => this.messages.set(
         msgs.map(m => ({
           ...m,
-          renderedHtml: this.sanitizer.bypassSecurityTrustHtml(this.convertAnsiToHtml(m.message)),
+          renderedHtml: this.sanitizer.bypassSecurityTrustHtml(ansiToHtml(m.message)),
         }))
       ),
     });
@@ -738,8 +709,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.stopActiveStream();
     this.resetLogState();
     this.selectedBuildId.set(build.id);
-    this.autoScroll.set(true);
-    this.showScrollBtn.set(false);
 
     this.router.navigate([], {
       relativeTo: this.route,
@@ -758,7 +727,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const terminal = selected && !['Queued', 'Building', 'Created'].includes(selected.status);
     if (terminal && (await this.fetchChunkedLog(buildId))) {
       this.logLoading.set(false);
-      this.scrollToBottomIfAuto();
       return;
     }
 
@@ -775,9 +743,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           const lines = (data.message as string).split('\n');
           // Trim a single trailing empty string produced by a final newline
           if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
-          this.logLines = lines;
+          this.logLines.set(lines);
           this.logLineCount.set(lines.length);
-          await this.showTailOrDeepLink(buildId);
         }
       }
     } catch {
@@ -785,7 +752,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }
 
     this.logLoading.set(false);
-    this.scrollToBottomIfAuto();
 
     // If this build is still running, start streaming
     const build = this.builds().find(b => b.id === buildId);
@@ -873,26 +839,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.stopProgressWatch();
   }
 
-  // ── Virtualized log window ──────────────────────────────────────────────────
-
   private resetLogState(): void {
-    this.chunkedMode.set(false);
-    this.chunkIndex = null;
-    this.logSource = 'memory';
-    this.logLines = [];
+    if (this.logLineCount() > 0) this.deepLinkLine.set(null);
+    this.logLines.set([]);
+    this.serverLog.set(null);
     this.logLineCount.set(0);
-    this.windowStart = 1;
-    this.windowLines.set([]);
-    this.topSpacerPx.set(0);
-    this.bottomSpacerPx.set(0);
-    this.highlightLine.set(null);
-    this.searchOpen.set(false);
-    this.searchHits.set([]);
-    this.searchTotal.set(0);
-    this.currentHit.set(-1);
   }
 
-  /** Returns true when the build has finalized chunks and chunked mode is active. */
   private async fetchChunkedLog(buildId: string): Promise<boolean> {
     let index: LogChunkIndex;
     try {
@@ -908,121 +861,14 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }
     if (!index || index.total_chunks === 0 || index.total_lines === 0) return false;
 
-    this.chunkIndex = index;
-    this.logSource = 'chunks';
-    this.chunkedMode.set(true);
+    this.serverLog.set(buildLog(buildId, index.total_lines));
     this.logLineCount.set(index.total_lines);
-    await this.showTailOrDeepLink(buildId);
     return true;
   }
 
-  private async showTailOrDeepLink(buildId: string): Promise<void> {
-    const total = this.totalLines();
-    const target = this.pendingDeepLink;
-    this.pendingDeepLink = null;
-    if (target && target <= total) {
-      await this.jumpToLine(buildId, target);
-    } else {
-      await this.loadWindow(buildId, Math.max(1, total - this.WINDOW_PAGE + 1), total, 'replace');
-      this.scrollToBottomIfAuto();
-    }
-  }
-
-  private totalLines(): number {
-    return this.logSource === 'chunks' ? this.chunkIndex?.total_lines ?? 0 : this.logLines.length;
-  }
-
-  private async getLines(buildId: string, start: number, end: number): Promise<string[]> {
-    if (this.logSource === 'memory') return this.logLines.slice(start - 1, end);
-    const res = await fetch(
-      `${environment.apiUrl}/builds/${buildId}/log/lines?start=${start}&end=${end}`,
-      { method: 'GET', credentials: 'include' },
-    );
-    if (!res.ok) return [];
-    const text = await res.text();
-    const lines = text.split('\n');
-    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
-    return lines;
-  }
-
-  private renderLines(lines: string[], startLine: number): { n: number; html: SafeHtml }[] {
-    return lines.map((text, i) => ({
-      n: startLine + i,
-      html: this.sanitizer.bypassSecurityTrustHtml(this.convertAnsiToHtml(text)),
-    }));
-  }
-
-  private async loadWindow(
-    buildId: string,
-    start: number,
-    end: number,
-    mode: 'replace' | 'append' | 'prepend',
-  ): Promise<void> {
-    if (this.loadingWindow) return;
-    this.loadingWindow = true;
-    try {
-      const rendered = this.renderLines(await this.getLines(buildId, start, end), start);
-      if (mode === 'replace') {
-        this.windowStart = start;
-        this.windowLines.set(rendered);
-      } else if (mode === 'append') {
-        let next = [...this.windowLines(), ...rendered];
-        const drop = next.length - this.MAX_WINDOW;
-        if (drop > 0) {
-          next = next.slice(drop);
-          this.windowStart += drop;
-        }
-        this.windowLines.set(next);
-      } else {
-        let next = [...rendered, ...this.windowLines()];
-        this.windowStart = start;
-        if (next.length > this.MAX_WINDOW) next = next.slice(0, this.MAX_WINDOW);
-        this.windowLines.set(next);
-      }
-      this.updateSpacers();
-    } finally {
-      this.loadingWindow = false;
-    }
-  }
-
-  private updateSpacers(): void {
-    const total = this.totalLines();
-    const after = Math.max(0, total - (this.windowStart - 1 + this.windowLines().length));
-    this.topSpacerPx.set((this.windowStart - 1) * this.LINE_PX);
-    this.bottomSpacerPx.set(after * this.LINE_PX);
-    this.cdr.detectChanges();
-  }
-
-  private async jumpToLine(buildId: string, line: number): Promise<void> {
-    const total = this.totalLines();
-    const { start, end } = windowAround(total, line, this.WINDOW_PAGE);
-    await this.loadWindow(buildId, start, end, 'replace');
-    this.highlightLine.set(line);
-    this.autoScroll.set(false);
-    setTimeout(() => {
-      const el = this.logContainerRef?.nativeElement;
-      const target = el?.querySelector(`[data-line="${line}"]`) as HTMLElement | null;
-      target?.scrollIntoView({ block: 'center' });
-    }, 0);
-  }
-
-  selectLine(line: number): void {
-    this.highlightLine.set(line);
-    this.router.navigate([], {
-      relativeTo: this.route,
-      fragment: `L${line}`,
-      queryParamsHandling: 'merge',
-      replaceUrl: true,
-    });
-    const url = `${window.location.origin}${window.location.pathname}${window.location.search}#L${line}`;
-    navigator.clipboard?.writeText(url).catch(() => { /* ignore */ });
-  }
-
-  // ── Search shortcuts ──────────────────────────────────────────────────────
-
   @HostListener('document:keydown', ['$event'])
   onKeydown(event: KeyboardEvent): void {
-    const isFind = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f';
+    const isFind = isFindShortcut(event);
 
     // Ctrl/Cmd+F never reaches the browser here: it searches the builds or the
     // open log, whichever the pointer is over.
@@ -1041,10 +887,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     if (!logOpen) return;
     if (isFind) {
       event.preventDefault();
-      this.searchOpen.set(true);
-      setTimeout(() => { (document.querySelector('.log-search-input') as HTMLInputElement | null)?.focus(); }, 0);
-    } else if (event.key === 'Escape' && this.searchOpen()) {
-      this.closeSearch();
+      this.logViewer?.openSearch();
+    } else if (event.key === 'Escape' && this.logViewer?.searchOpen()) {
+      this.logViewer.closeSearch();
     }
   }
 
@@ -1063,111 +908,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.sidebarSearchOpen.set(false);
     this.sidebarSearchQuery.set('');
   }
-
-  onSearchInput(event: Event): void {
-    this.searchQuery.set((event.target as HTMLInputElement).value);
-    this.scheduleSearch();
-  }
-
-  /// Debounced auto-search: only fires once typing pauses and at least
-  /// MIN_SEARCH_LEN characters are present. Shorter queries reset results.
-  private scheduleSearch(): void {
-    if (this.searchDebounceTimer !== undefined) clearTimeout(this.searchDebounceTimer);
-    const q = this.searchQuery().trim();
-    if (q.length < this.MIN_SEARCH_LEN) {
-      this.searchSeq++;
-      this.searchLoading.set(false);
-      this.searchHits.set([]);
-      this.searchTotal.set(0);
-      this.currentHit.set(-1);
-      return;
-    }
-    this.searchLoading.set(true);
-    this.searchDebounceTimer = setTimeout(() => {
-      this.searchDebounceTimer = undefined;
-      this.runSearch();
-    }, this.SEARCH_DEBOUNCE_MS);
-  }
-
-  closeSearch(): void {
-    this.searchOpen.set(false);
-    this.highlightLine.set(null);
-    if (this.searchDebounceTimer !== undefined) clearTimeout(this.searchDebounceTimer);
-    this.searchSeq++;
-    this.searchLoading.set(false);
-  }
-
-  async runSearch(): Promise<void> {
-    const buildId = this.selectedBuildId();
-    const q = this.searchQuery().trim();
-    if (!buildId || q.length < this.MIN_SEARCH_LEN) {
-      this.searchLoading.set(false);
-      return;
-    }
-    const seq = ++this.searchSeq;
-    if (this.logSource === 'memory') {
-      const hits = searchLines(this.logLines, q);
-      this.searchHits.set(hits);
-      this.searchTotal.set(hits.length);
-      this.searchLoading.set(false);
-      if (hits.length > 0) this.gotoHit(0);
-      return;
-    }
-    this.searchHits.set([]);
-    this.searchTotal.set(0);
-    this.currentHit.set(-1);
-    this.searchLoading.set(true);
-    try {
-      const res = await fetch(
-        `${environment.apiUrl}/builds/${buildId}/log/search?q=${encodeURIComponent(q)}`,
-        { method: 'GET', credentials: 'include' },
-      );
-      if (!res.ok || !res.body) return;
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffered = '';
-      const hits: LogSearchHit[] = [];
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        // A newer search superseded this one - abandon the stale stream.
-        if (seq !== this.searchSeq) {
-          await reader.cancel().catch(() => { /* ignore */ });
-          return;
-        }
-        buffered += decoder.decode(value, { stream: true });
-        const parts = buffered.split('\n');
-        buffered = parts.pop() ?? '';
-        for (const part of parts) {
-          if (!part.trim()) continue;
-          const obj = JSON.parse(part);
-          if (obj.done === true) {
-            this.searchTotal.set(obj.total_matches ?? hits.length);
-          } else {
-            hits.push(obj as LogSearchHit);
-            this.searchHits.set([...hits]);
-          }
-        }
-      }
-      if (hits.length > 0) this.gotoHit(0);
-    } catch {
-      // ignore
-    } finally {
-      if (seq === this.searchSeq) this.searchLoading.set(false);
-    }
-  }
-
-  gotoHit(i: number): void {
-    const hits = this.searchHits();
-    if (hits.length === 0) return;
-    const idx = ((i % hits.length) + hits.length) % hits.length;
-    this.currentHit.set(idx);
-    const buildId = this.selectedBuildId();
-    if (buildId) this.jumpToLine(buildId, hits[idx].line_number);
-  }
-
-  nextHit(): void { this.gotoHit(this.currentHit() + 1); }
-  prevHit(): void { this.gotoHit(this.currentHit() - 1); }
 
   // ── Build reveal animation ──────────────────────────────────────────────────
 
@@ -1222,36 +962,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }
   }
 
-  /// Streaming hot path - strictly O(new lines) per drain tick. While
-  /// auto-scrolling the window stays pinned to the tail; otherwise only the
-  /// bottom spacer grows so the scrollbar stays truthful without re-rendering.
   private appendStreamedLines(lines: string[]): void {
-    const prevTotal = this.logLines.length;
-    const atTail = this.windowStart + this.windowLines().length - 1 === prevTotal;
-    this.logLines.push(...lines);
-    this.logLineCount.set(this.logLines.length);
-
-    if (this.autoScroll()) {
-      if (atTail) {
-        let next = [...this.windowLines(), ...this.renderLines(lines, prevTotal + 1)];
-        const drop = next.length - this.MAX_WINDOW;
-        if (drop > 0) {
-          next = next.slice(drop);
-          this.windowStart += drop;
-        }
-        this.windowLines.set(next);
-      } else {
-        // Window drifted off the tail (user paged up, then re-enabled follow)
-        const total = this.logLines.length;
-        void this.loadWindow(this.selectedBuildId() ?? '', Math.max(1, total - this.WINDOW_PAGE + 1), total, 'replace');
-      }
-    }
-
-    this.updateSpacers();
-    this.scrollToBottomIfAuto(true);
+    this.logLines.update(shown => shown.concat(lines));
+    this.logLineCount.set(this.logLines().length);
   }
 
-  // ── Log parsing & rendering ─────────────────────────────────────────────────
+  // ── Log parsing ─────────────────────────────────────────────────────────────
 
   private parseLogContent(raw: string): string[] {
     return raw
@@ -1282,168 +998,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       });
   }
 
-  private readonly ansiColorMap: Record<string, string> = {
-    // Styles
-    '1': '<span style="font-weight:bold">',
-    '2': '<span style="opacity:0.6">',
-    '3': '<span style="font-style:italic">',
-    // Standard foreground (30-37)
-    '30': '<span style="color:#374151">',
-    '31': '<span style="color:#ef4444">',
-    '32': '<span style="color:#22c55e">',
-    '33': '<span style="color:#eab308">',
-    '34': '<span style="color:#3b82f6">',
-    '35': '<span style="color:#a855f7">',
-    '36': '<span style="color:#06b6d4">',
-    '37': '<span style="color:#d1d5db">',
-    // Bright foreground (90-97)
-    '90': '<span style="color:#6b7280">',
-    '91': '<span style="color:#f87171">',
-    '92': '<span style="color:#4ade80">',
-    '93': '<span style="color:#fbbf24">',
-    '94': '<span style="color:#60a5fa">',
-    '95': '<span style="color:#c084fc">',
-    '96': '<span style="color:#22d3ee">',
-    '97': '<span style="color:#f9fafb">',
-    // Combined bold+color (common nix patterns)
-    '1;31': '<span style="color:#ef4444;font-weight:bold">',
-    '1;32': '<span style="color:#22c55e;font-weight:bold">',
-    '1;33': '<span style="color:#eab308;font-weight:bold">',
-    '1;34': '<span style="color:#3b82f6;font-weight:bold">',
-    '1;35': '<span style="color:#a855f7;font-weight:bold">',
-    '1;36': '<span style="color:#06b6d4;font-weight:bold">',
-    '31;1': '<span style="color:#ef4444;font-weight:bold">',
-    '35;1': '<span style="color:#a855f7;font-weight:bold">',
-  };
-
-  private static readonly ANSI_RESETS = new Set(['0', '', '39', '49', '22', '23', '24']);
-
-  private convertAnsiToHtml(text: string): string {
-    const escaped = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-    let openSpans = 0;
-    // Match any CSI sequence: ESC [ <param bytes> <final byte>
-    // Only SGR sequences (final byte 'm') are converted to spans; all others are stripped.
-    // eslint-disable-next-line no-control-regex -- ESC is the sequence introducer
-    const result = escaped.replace(/\u001b\[([?0-9;]*)([A-Za-z~])/g, (_, params: string, cmd: string) => {
-      if (cmd !== 'm') return '';
-      if (EvaluationLogComponent.ANSI_RESETS.has(params)) {
-        const closing = '</span>'.repeat(openSpans);
-        openSpans = 0;
-        return closing;
-      }
-      const tag = this.ansiColorMap[params];
-      if (tag) { openSpans++; return tag; }
-      return '';
-    });
-    return result + '</span>'.repeat(openSpans);
-  }
-
-  // ── Scroll management ───────────────────────────────────────────────────────
-
   onBuildsViewportScroll(event: Event): void {
     const el = event.target as HTMLElement;
     // Pre-fetch the next page as the list nears the bottom.
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
       this.loadMoreBuilds();
-    }
-  }
-
-  onLogScroll(event: Event): void {
-    const el = event.target as HTMLElement;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    if (atBottom) {
-      this.followScroll = false;
-      this.autoScroll.set(true);
-      this.showScrollBtn.set(false);
-    } else if (!this.followScroll) {
-      this.autoScroll.set(false);
-      this.showScrollBtn.set(true);
-    }
-    this.maybePageLog(el);
-  }
-
-  /// A smooth follow-scroll passes through positions above the bottom; only the
-  /// reader's own input may read those as leaving the tail.
-  onLogWheel(event: WheelEvent): void {
-    if (event.deltaY < 0) this.stopFollowScroll();
-  }
-
-  stopFollowScroll(): void {
-    this.followScroll = false;
-  }
-
-  private maybePageLog(el: HTMLElement): void {
-    if (this.loadingWindow) return;
-    const buildId = this.selectedBuildId();
-    if (!buildId) return;
-    const total = this.totalLines();
-    if (total === 0) return;
-    const windowCount = this.windowLines().length;
-    const windowEnd = this.windowStart + windowCount - 1;
-
-    // Fast scrollbar drag: the viewport jumped into a spacer region with no
-    // rendered lines. Burst-load a fresh window centred on the new position
-    // instead of crawling one page at a time from an edge.
-    if (windowCount > 0) {
-      const loadedTopPx = this.topSpacerPx();
-      const loadedBottomPx = loadedTopPx + windowCount * this.LINE_PX;
-      const outsideAbove = el.scrollTop + el.clientHeight < loadedTopPx && this.windowStart > 1;
-      const outsideBelow = el.scrollTop > loadedBottomPx && windowEnd < total;
-      if (outsideAbove || outsideBelow) {
-        const centerLine = Math.min(
-          total,
-          Math.max(1, Math.round((el.scrollTop + el.clientHeight / 2) / this.LINE_PX)),
-        );
-        const { start, end } = windowAround(total, centerLine, this.WINDOW_PAGE);
-        this.loadWindow(buildId, start, end, 'replace');
-        return;
-      }
-    }
-
-    if (el.scrollTop < 200 && this.windowStart > 1) {
-      const start = Math.max(1, this.windowStart - this.WINDOW_PAGE);
-      const end = this.windowStart - 1;
-      const prevHeight = el.scrollHeight;
-      const prevTop = el.scrollTop;
-      this.loadWindow(buildId, start, end, 'prepend').then(() => {
-        setTimeout(() => {
-          el.scrollTop = prevTop + (el.scrollHeight - prevHeight);
-        }, 0);
-      });
-    } else if (el.scrollHeight - el.scrollTop - el.clientHeight < 200 && windowEnd < total) {
-      const start = windowEnd + 1;
-      const end = Math.min(total, windowEnd + this.WINDOW_PAGE);
-      this.loadWindow(buildId, start, end, 'append');
-    }
-  }
-
-  scrollToBottom(smooth = false): void {
-    const el = this.logContainerRef?.nativeElement;
-    if (!el) return;
-    if (smooth) {
-      this.followScroll = true;
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-      this.autoScroll.set(true);
-      this.showScrollBtn.set(false);
-      return;
-    }
-    const buildId = this.selectedBuildId();
-    const total = this.totalLines();
-    if (buildId && this.windowStart + this.windowLines().length - 1 < total) {
-      void this.loadWindow(buildId, Math.max(1, total - this.WINDOW_PAGE + 1), total, 'replace')
-        .then(() => { el.scrollTop = el.scrollHeight; });
-    }
-    el.scrollTop = el.scrollHeight;
-    this.autoScroll.set(true);
-    this.showScrollBtn.set(false);
-  }
-
-  private scrollToBottomIfAuto(smooth = false): void {
-    if (this.autoScroll()) {
-      setTimeout(() => this.scrollToBottom(smooth), 0);
     }
   }
 

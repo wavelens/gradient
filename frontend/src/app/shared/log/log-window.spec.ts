@@ -5,14 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseLineFragment, chunkIndexForLine, windowAround, searchLines } from './log-window';
-import { LogChunkMeta } from '@core/models';
-
-const chunks: LogChunkMeta[] = [
-  { index: 0, line_start: 0, line_count: 10, byte_start: 0, byte_len: 100 },
-  { index: 1, line_start: 10, line_count: 10, byte_start: 100, byte_len: 100 },
-  { index: 2, line_start: 20, line_count: 5, byte_start: 200, byte_len: 40 },
-];
+import { parseLineFragment, windowAround, searchLines } from './log-window';
 
 describe('parseLineFragment', () => {
   it('parses #L style fragments', () => {
@@ -23,18 +16,6 @@ describe('parseLineFragment', () => {
     expect(parseLineFragment('foo')).toBeNull();
     expect(parseLineFragment('0')).toBeNull();
     expect(parseLineFragment(null)).toBeNull();
-  });
-});
-
-describe('chunkIndexForLine', () => {
-  it('maps lines to chunks', () => {
-    expect(chunkIndexForLine(chunks, 0)).toBe(0);
-    expect(chunkIndexForLine(chunks, 9)).toBe(0);
-    expect(chunkIndexForLine(chunks, 10)).toBe(1);
-    expect(chunkIndexForLine(chunks, 24)).toBe(2);
-  });
-  it('returns -1 out of range', () => {
-    expect(chunkIndexForLine(chunks, 25)).toBe(-1);
   });
 });
 

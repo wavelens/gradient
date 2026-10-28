@@ -1,0 +1,70 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<ng-content />
+@if (searchOpen()) {
+  <div class="log-search-bar">
+    <input
+      grInput
+      class="log-search-input"
+      type="text"
+      placeholder="Search log…"
+      [value]="searchQuery()"
+      (input)="onSearchInput($event)"
+      (keydown.enter)="searchHits().length ? nextHit() : runSearch()"
+      (keydown.shift.enter)="prevHit()"
+    />
+    <span class="log-search-count">
+      @if (searchLoading()) {
+        <gr-icon name="progress_activity" class="gr-spin" />
+      } @else {
+        {{ searchHits().length === 0 ? 0 : currentHit() + 1 }} / {{ searchTotal() }}
+      }
+    </span>
+    <button type="button" class="log-search-btn" (click)="prevHit()" title="Previous match" aria-label="Previous match">
+      <gr-icon name="keyboard_arrow_up" size="sm" />
+    </button>
+    <button type="button" class="log-search-btn" (click)="nextHit()" title="Next match" aria-label="Next match">
+      <gr-icon name="keyboard_arrow_down" size="sm" />
+    </button>
+    <button type="button" class="log-search-btn" (click)="closeSearch()" title="Close (Esc)" aria-label="Close search">
+      <gr-icon name="close" size="sm" />
+    </button>
+  </div>
+}
+<div class="log-container" #logContainer (scroll)="onLogScroll($event)"
+     (wheel)="onLogWheel($event)" (pointerdown)="stopFollowScroll()" (keydown)="stopFollowScroll()">
+  @if (lineCount() > 0) {
+    <div class="log-spacer" [style.height.px]="topSpacerPx()"></div>
+    <div class="log-lines">
+      @for (ln of windowLines(); track ln.n) {
+        <div
+          class="log-line"
+          [class.log-line--hl]="ln.n === highlightLine()"
+          [attr.data-line]="ln.n"
+        >
+          <span class="log-gutter" (click)="selectLine(ln.n)" title="Link to line">{{ ln.n }}</span>
+          @if (ln.marker !== null) {
+            <span class="log-marker" role="separator">{{ ln.marker }}</span>
+          } @else {
+            <span class="log-line-content" [innerHTML]="ln.html"></span>
+          }
+        </div>
+      }
+    </div>
+    <div class="log-spacer" [style.height.px]="bottomSpacerPx()"></div>
+  } @else {
+    <div class="no-log-hint">
+      <gr-icon name="article" size="xl" />
+      <span>No log available</span>
+    </div>
+  }
+</div>
+@if (showScrollBtn()) {
+  <button type="button" class="scroll-btn" (click)="scrollToBottom()" title="Scroll to bottom" aria-label="Scroll to bottom">
+    <gr-icon name="keyboard_arrow_down" size="sm" />
+  </button>
+}

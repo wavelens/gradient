@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { LogChunkMeta, LogSearchHit } from '@core/models';
+import type { LogSearchHit } from '@core/models';
 
-/** Parse a `#L1234` (or `L1234` / `1234`) router fragment into a 1-based line. */
 export function parseLineFragment(fragment: string | null | undefined): number | null {
   if (!fragment) return null;
   const m = /^L?(\d+)$/i.exec(fragment.trim());
@@ -15,21 +14,6 @@ export function parseLineFragment(fragment: string | null | undefined): number |
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** Index (0-based) of the chunk containing the given 0-based line, or -1. */
-export function chunkIndexForLine(chunks: LogChunkMeta[], line: number): number {
-  for (const c of chunks) {
-    if (line >= c.line_start && line < c.line_start + c.line_count) {
-      return c.index;
-    }
-  }
-  return -1;
-}
-
-/**
- * Given the total line count and a target 1-based line, compute the inclusive
- * 1-based [start, end] window of `windowSize` lines centred on the target,
- * clamped to [1, totalLines].
- */
 export function windowAround(
   totalLines: number,
   targetLine: number,
@@ -46,7 +30,6 @@ export function windowAround(
 // eslint-disable-next-line no-control-regex -- ESC is the sequence introducer
 const ANSI_ESCAPE = /\u001b\[[?0-9;]*[A-Za-z~]/g;
 
-/** Case-insensitive search over a log held in memory, as a streaming build's is. */
 export function searchLines(lines: readonly string[], query: string): LogSearchHit[] {
   const needle = query.toLowerCase();
   const hits: LogSearchHit[] = [];
