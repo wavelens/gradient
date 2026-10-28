@@ -32,12 +32,19 @@ fn cascade_dependency_failed_sql() -> String {
     {cte}
     UPDATE derivation_build AS db
     SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
-    WHERE db.status IN ({cascade_target})
+    WHERE db.status IN ({cascade_target}) AND {not_in_flight}
       AND db.derivation IN (SELECT derivation FROM wanted_by WHERE derivation <> $1)
     RETURNING db.derivation, old.status AS from_status, db.status AS to_status
     "#,
         dependency_failed = crate::sql::status::to(BuildStatus::CASCADE_DEPENDENCY_FAILED),
         cascade_target = crate::sql::status::from(BuildStatus::CASCADE_DEPENDENCY_FAILED),
+        not_in_flight = not_in_flight(),
+    )
+}
+
+fn not_in_flight() -> String {
+    crate::scheduling::assignment_record::no_open_assignment_predicate(
+        &crate::scheduling::assignment_record::build_job_key_sql("db.id"),
     )
 }
 
@@ -115,11 +122,12 @@ fn dependency_failed_repair_sql() -> String {
     {prelude}
     UPDATE derivation_build AS db
     SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
-    WHERE db.status IN ({cascade_target})
+    WHERE db.status IN ({cascade_target}) AND {not_in_flight}
       AND db.derivation IN (SELECT derivation FROM wanted_by)
       AND db.derivation IN (SELECT derivation FROM closure)
     RETURNING db.derivation, old.status AS from_status, db.status AS to_status
-    "#
+    "#,
+        not_in_flight = not_in_flight(),
     )
 }
 
@@ -195,6 +203,12 @@ mod tests {
         assert!(
             sql.contains("old.status AS from_status"),
             "must capture the pre-update status for the effects emitter: {sql}"
+        );
+        let in_flight_guard = format!("AND {}", not_in_flight());
+        assert!(
+            sql.contains(&in_flight_guard)
+                && cascade_dependency_failed_sql().contains(&in_flight_guard),
+            "neither write may take a shared build away from its open dispatch: {sql}"
         );
         assert!(
             sql.contains(
