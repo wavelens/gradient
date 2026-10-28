@@ -109,6 +109,12 @@
         Integrations
         <span slot="meta">Inbound Git host webhooks and outbound status reporters</span>
       </gr-row>
+      @if (config.execEnabled) {
+        <gr-row icon="key" linkLabel="Secrets" [link]="['/project', projectName, 'secrets']">
+          Secrets
+          <span slot="meta">Values for exec jobs, set here and never shown again</span>
+        </gr-row>
+      }
       <gr-row icon="webhook" linkLabel="Webhooks" [link]="['/project', projectName, 'webhooks']">
         Webhooks
         <span slot="meta">Signed HTTP requests for this project's events</span>
@@ -127,6 +133,15 @@
           <gr-label-help slot="label" doc="concepts/projects-and-tasks/#project" title="Project SSH key" />
           <gr-copy-field multiline [rows]="4" [value]="sshKey()" />
         </gr-form-field>
+        @if (sopsRecipient(); as recipient) {
+          <gr-form-field
+            label="Sops recipient"
+            for="sops-recipient"
+            [hint]="recipient.age ? undefined : 'Use this SSH key as the age recipient (sops 3.10 or newer)'"
+          >
+            <gr-copy-field inputId="sops-recipient" [value]="recipient.age ?? recipient.ssh" />
+          </gr-form-field>
+        }
       } @else {
         <p class="text-secondary">No SSH key generated yet.</p>
         <button

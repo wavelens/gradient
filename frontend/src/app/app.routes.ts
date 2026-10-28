@@ -499,6 +499,14 @@ export const routes: Routes = [
           ),
       },
 
+      {
+        path: 'project/:project/secrets',
+        title: 'Secrets',
+        resolve: { projectAccess: projectAccessResolver },
+        loadComponent: () =>
+          import('./features/projects/secrets/secrets.component').then((m) => m.SecretsComponent),
+      },
+
       // Webhooks
       {
         path: 'project/:project/webhooks',
