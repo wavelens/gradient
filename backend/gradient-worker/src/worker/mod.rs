@@ -9,6 +9,7 @@ mod id;
 mod jobs;
 mod message_loop;
 mod scoring;
+mod vm_report;
 
 use std::marker::PhantomData;
 use std::sync::Arc;

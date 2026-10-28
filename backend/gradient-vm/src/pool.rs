@@ -20,6 +20,7 @@ use crate::guest::{Guest, remove_guest_dirs};
 use crate::hypervisor::GuestImage;
 use crate::state::{GuestId, read_states};
 use crate::unit::GuestUnits;
+use crate::vm_states::VmStates;
 
 const FIRST_CID: u32 = 3;
 const BOOT_RETRY: Duration = Duration::from_secs(30);
@@ -33,6 +34,7 @@ pub struct GuestPool {
     reserved_cids: Mutex<BTreeSet<u32>>,
     stopping: CancellationToken,
     tasks: TaskTracker,
+    states: VmStates,
 }
 
 impl GuestPool {
@@ -46,6 +48,7 @@ impl GuestPool {
             reserved_cids: Mutex::default(),
             stopping: CancellationToken::new(),
             tasks: TaskTracker::new(),
+            states: VmStates::default(),
         })
     }
 
@@ -57,13 +60,20 @@ impl GuestPool {
         &self.units
     }
 
-    pub async fn take(self: &Arc<Self>) -> Result<Guest, GuestBootError> {
+    pub fn states(&self) -> &VmStates {
+        &self.states
+    }
+
+    pub async fn take(self: &Arc<Self>, job_id: String) -> Result<Guest, GuestBootError> {
         let warm = lock(&self.slots).take();
         let guest = match warm {
             Some(guest) => Ok(guest),
             None => self.cold_boot().await,
         };
         self.refill();
+        if let Ok(guest) = &guest {
+            self.states.running(guest.id(), job_id);
+        }
         guest
     }
 
@@ -89,7 +99,9 @@ impl GuestPool {
     }
 
     pub fn adopt_warm(self: &Arc<Self>, guest: Guest) {
+        let id = guest.id().clone();
         let surplus = lock(&self.slots).offer(guest, self.target(), self.draining());
+        self.note_parked(&id, &surplus);
         if let Some(guest) = surplus {
             self.retire(guest, ());
         }
@@ -98,7 +110,7 @@ impl GuestPool {
     pub fn retire<Held: Send + 'static>(self: &Arc<Self>, guest: Guest, held: Held) {
         let pool = Arc::clone(self);
         self.tasks.spawn(async move {
-            guest.teardown(&pool.units).await;
+            pool.teardown(guest).await;
             drop(held);
         });
     }
@@ -123,8 +135,7 @@ impl GuestPool {
         let doomed = lock(&self.slots).surplus(self.target());
         for guest in doomed {
             let pool = Arc::clone(self);
-            self.tasks
-                .spawn(async move { guest.teardown(&pool.units).await });
+            self.tasks.spawn(async move { pool.teardown(guest).await });
         }
     }
 
@@ -153,7 +164,7 @@ impl GuestPool {
         self.set_draining();
         let warm = std::mem::take(&mut lock(&self.slots).warm);
         for guest in warm {
-            guest.teardown(&self.units).await;
+            self.teardown(guest).await;
         }
     }
 
@@ -215,8 +226,10 @@ impl GuestPool {
         loop {
             match self.boot_one().await {
                 Ok(guest) => {
+                    let id = guest.id().clone();
                     let surplus_guest =
                         lock(&self.slots).finish_boot(guest, self.target(), self.draining());
+                    self.note_parked(&id, &surplus_guest);
                     return self.stop_surplus(surplus_guest).await;
                 }
                 Err(e) => warn!(error = %e, "warm guest boot failed, retrying in 30s"),
@@ -232,14 +245,27 @@ impl GuestPool {
     }
 
     async fn keep_or_stop(&self, guest: Guest) {
+        let id = guest.id().clone();
         let surplus_guest = lock(&self.slots).offer(guest, self.target(), self.draining());
+        self.note_parked(&id, &surplus_guest);
         self.stop_surplus(surplus_guest).await;
     }
 
     async fn stop_surplus(&self, guest: Option<Guest>) {
         if let Some(guest) = guest {
-            guest.teardown(&self.units).await;
+            self.teardown(guest).await;
         }
+    }
+
+    fn note_parked(&self, id: &GuestId, surplus: &Option<Guest>) {
+        if surplus.is_none() {
+            self.states.warm(id);
+        }
+    }
+
+    async fn teardown(&self, guest: Guest) {
+        self.states.stopped(guest.id());
+        guest.teardown(&self.units).await;
     }
 
     pub async fn stop_boots(&self) {

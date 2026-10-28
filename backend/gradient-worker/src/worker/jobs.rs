@@ -83,6 +83,10 @@ impl JobRegistry {
         self.running.len()
     }
 
+    pub(super) fn runs(&self, job_id: &str) -> bool {
+        self.running.contains_key(job_id)
+    }
+
     fn register(
         &mut self,
         job_id: String,
