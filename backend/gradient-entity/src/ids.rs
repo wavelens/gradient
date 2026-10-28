@@ -150,6 +150,7 @@ id_newtype!(WorkerConnectionId);
 id_newtype!(ExecJobId);
 id_newtype!(ExecJobAttemptId);
 id_newtype!(ExecJobPhaseId);
+id_newtype!(ProjectSecretId);
 id_newtype!(WorkerSampleId);
 id_newtype!(WebhookId);
 id_newtype!(WebhookDeliveryId);
