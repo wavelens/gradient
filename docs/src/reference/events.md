@@ -35,6 +35,7 @@ All three payloads use one JSON structure: websocket messages, webhook bodies, a
 | `build.status_changed`, `build.progress`, `evaluation.progress`, `evaluation.activity` | no | each build job transition, build transfer progress, fetch and eval progress |
 | `graph.*` | no | `graph.recorded`, `graph.demoted`, `graph.collected` |
 | `worker.*` | no | `worker.connected`, `worker.job_dispatched`, `worker.queue_depth` |
+| `vm.state` | no | a worker's VM became `warm`, `running` or `stopped`, with the exec job it ran |
 | `proto.client.*`, `proto.server.*` | no | message type, worker, job id and size, never the payload |
 | `cache.changed`, `cache.nar.fetched`, `cache.narinfo.served`, `cache.nar.signed` | no | cache traffic. `cache.nar.signed` marks a fresh upload as signed into a cache |
 
