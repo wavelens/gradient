@@ -50,10 +50,6 @@ impl WorkerSecrets {
         self.values.lock().keys().cloned().collect()
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the exec job reads it from the next commit on")
-    )]
     pub fn value(&self, name: &str) -> Option<SecretBytes> {
         self.values
             .lock()

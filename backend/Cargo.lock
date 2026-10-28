@@ -3672,6 +3672,7 @@ dependencies = [
  "gradient-derivation",
  "gradient-derive",
  "gradient-eval",
+ "gradient-redact",
  "gradient-sops",
  "gradient-sources",
  "gradient-storage",

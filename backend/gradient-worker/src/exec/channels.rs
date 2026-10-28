@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
+use gradient_redact::{SecretRedactor, StreamRedactor};
 use gradient_wire::guest::{GUEST_CHANNELS_AGENT_SINCE, WorkerToAgent};
 use gradient_wire::messages::{GUEST_CHANNEL_CHUNK, GuestChannelKind};
 
@@ -68,6 +69,7 @@ pub struct GuestChannelMux {
     routes: BTreeMap<u64, Route>,
     console_viewers: Vec<u64>,
     scrollback: ConsoleScrollback,
+    console_redactor: StreamRedactor,
 }
 
 impl GuestChannelMux {
@@ -79,7 +81,12 @@ impl GuestChannelMux {
             routes: BTreeMap::new(),
             console_viewers: Vec::new(),
             scrollback: ConsoleScrollback::default(),
+            console_redactor: SecretRedactor::default().stream(),
         }
+    }
+
+    pub fn mask_console(&mut self, redactor: &SecretRedactor) {
+        self.console_redactor = redactor.stream();
     }
 
     pub fn on_command(&mut self, command: GuestChannelCommand) -> Vec<MuxAction> {
@@ -128,22 +135,27 @@ impl GuestChannelMux {
     }
 
     pub fn on_console_output(&mut self, data: &[u8]) -> Vec<MuxAction> {
-        self.scrollback.push(data);
-        self.console_viewers
-            .iter()
-            .flat_map(|&channel_id| data_actions(channel_id, data))
-            .collect()
+        let masked = self.console_redactor.push(data);
+        self.scrollback.push(&masked);
+        self.to_console_viewers(&masked)
     }
 
     pub fn on_console_lost(&mut self, message: &str) -> Vec<MuxAction> {
+        let rest = self.console_redactor.finish();
+        let mut actions = self.to_console_viewers(&rest);
         self.scrollback.clear();
         let viewers = std::mem::take(&mut self.console_viewers);
-        viewers
-            .into_iter()
-            .map(|channel_id| {
-                self.routes.remove(&channel_id);
-                server_close(channel_id, Some(message.to_owned()))
-            })
+        actions.extend(viewers.into_iter().map(|channel_id| {
+            self.routes.remove(&channel_id);
+            server_close(channel_id, Some(message.to_owned()))
+        }));
+        actions
+    }
+
+    fn to_console_viewers(&self, data: &[u8]) -> Vec<MuxAction> {
+        self.console_viewers
+            .iter()
+            .flat_map(|&channel_id| data_actions(channel_id, data))
             .collect()
     }
 
@@ -220,7 +232,7 @@ impl GuestChannelMux {
         if !self.console_viewers.is_empty() {
             return Vec::new();
         }
-        self.scrollback.clear();
+        self.end_console();
         vec![MuxAction::DisconnectConsole]
     }
 
@@ -255,8 +267,13 @@ impl GuestChannelMux {
         if std::mem::take(&mut self.console_viewers).is_empty() {
             return None;
         }
-        self.scrollback.clear();
+        self.end_console();
         Some(MuxAction::DisconnectConsole)
+    }
+
+    fn end_console(&mut self) {
+        self.scrollback.clear();
+        self.console_redactor.finish();
     }
 }
 
@@ -550,6 +567,36 @@ mod tests {
             ]
         );
         assert!(mux.on_agent_data(1, b"late".to_vec()).is_empty());
+    }
+
+    #[test]
+    fn the_console_is_masked_across_chunks_for_every_viewer() {
+        let mut mux = mux();
+        mux.mask_console(&SecretRedactor::new([(
+            "wandb-token",
+            b"s3cr3t-value".as_slice(),
+        )]));
+        mux.on_command(open(1, GuestChannelKind::Console));
+
+        let mut actions = mux.on_console_output(b"tok s3cr3t");
+        actions.extend(mux.on_console_output(b"-value\n"));
+        let seen: Vec<u8> = actions
+            .iter()
+            .flat_map(|action| match action {
+                MuxAction::ToServerData {
+                    channel_id: 1,
+                    data,
+                } => data.clone(),
+                _ => Vec::new(),
+            })
+            .collect();
+        let second_viewer = mux.on_command(open(2, GuestChannelKind::Console));
+
+        assert_eq!(seen, b"tok [secret:wandb-token]\n");
+        assert_eq!(
+            second_viewer[0],
+            to_server(2, b"tok [secret:wandb-token]\n")
+        );
     }
 
     #[test]
