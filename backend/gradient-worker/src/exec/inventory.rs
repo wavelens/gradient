@@ -15,6 +15,7 @@ pub fn advertised(
     worker_id: &str,
     warm_guests: u32,
     secrets: Vec<String>,
+    guest_capacity: GuestCapacity,
 ) -> ExecInventory {
     let mut labels = config.labels.clone();
     if !labels.iter().any(|label| label == worker_id) {
@@ -40,7 +41,7 @@ pub fn advertised(
         allow: config.allow(),
         defaults: config.defaults(),
         warm_guests,
-        guest_capacity: GuestCapacity::default(),
+        guest_capacity,
     }
 }
 
@@ -64,7 +65,14 @@ mod tests {
             labels: vec!["gpu".into()],
             ..ExecArgs::default()
         };
-        let inventory = advertised(&devices, &config, "worker-7", 1, Vec::new());
+        let inventory = advertised(
+            &devices,
+            &config,
+            "worker-7",
+            1,
+            Vec::new(),
+            GuestCapacity::default(),
+        );
         assert_eq!(inventory.labels, ["gpu", "worker-7"]);
         assert_eq!(inventory.warm_guests, 1);
     }

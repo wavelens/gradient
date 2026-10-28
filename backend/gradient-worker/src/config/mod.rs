@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use gradient_eval::pool::MemoryGuard;
 use gradient_vm::{SupervisorConfig, VmConfig};
-use gradient_wire::types::{ExecAllow, ExecDefaults, GradientCapabilities};
+use gradient_wire::types::{ExecAllow, ExecDefaults, GradientCapabilities, GuestSize};
 
 pub fn host_system() -> String {
     let arch = std::env::consts::ARCH;
@@ -159,7 +159,32 @@ impl WorkerConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostResources {
+    pub cpus: u32,
+    pub memory_mb: u64,
+    pub guests_dir_free_mb: u64,
+}
+
+const DEFAULT_BUDGET_PERCENT: u64 = 80;
+
+fn budget_share(amount: u64) -> u64 {
+    amount / 100 * DEFAULT_BUDGET_PERCENT + amount % 100 * DEFAULT_BUDGET_PERCENT / 100
+}
+
 impl ExecArgs {
+    pub fn guest_budget(&self, host: &HostResources) -> GuestSize {
+        GuestSize {
+            cpus: self.guest_cpus.unwrap_or(host.cpus),
+            memory_mb: self
+                .guest_memory_mb
+                .unwrap_or_else(|| budget_share(host.memory_mb)),
+            disk_mb: self
+                .guest_disk_mb
+                .unwrap_or_else(|| budget_share(host.guests_dir_free_mb)),
+        }
+    }
+
     pub fn allow(&self) -> ExecAllow {
         let PortRange(lowest, highest) = self.allow_ports.unwrap_or(PortRange(1024, 65535));
         ExecAllow {
@@ -294,6 +319,41 @@ mod tests {
         let allowed = parse(&["--exec-allow-custom-images"]).expect("valid flag");
         assert!(allowed.exec.allow().custom_images);
         assert!(!parse(&[]).expect("defaults").exec.allow().custom_images);
+    }
+
+    #[test]
+    fn the_guest_budget_defaults_follow_the_host() {
+        let host = HostResources {
+            cpus: 16,
+            memory_mb: 64_000,
+            guests_dir_free_mb: 100_000,
+        };
+        let defaults = parse(&[]).expect("defaults");
+        assert_eq!(
+            defaults.exec.guest_budget(&host),
+            GuestSize {
+                cpus: 16,
+                memory_mb: 51_200,
+                disk_mb: 80_000
+            }
+        );
+        let set = parse(&[
+            "--exec-guest-cpus",
+            "2",
+            "--exec-guest-memory-mb",
+            "1000",
+            "--exec-guest-disk-mb",
+            "4096",
+        ])
+        .expect("valid flags");
+        assert_eq!(
+            set.exec.guest_budget(&host),
+            GuestSize {
+                cpus: 2,
+                memory_mb: 1000,
+                disk_mb: 4096
+            }
+        );
     }
 
     #[test]

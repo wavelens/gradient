@@ -384,6 +384,9 @@
 | `worker.exec.devices.*.name` | string | - | - | Device class name that exec jobs ask for. |
 | `worker.exec.devices.*.usb` | null or string matching the pattern [0-9a-f]{4}:[0-9a-f]{4} | `null` | - | USB device as `vendor:product`, attached to the guest over USB/IP. |
 | `worker.exec.devices.*.vfio` | list of string | `[ ]` | - | PCI addresses of the devices in this class, a device per address. The worker hot-plugs them into the guest over VFIO. Bind each device to `vfio-pci` first. |
+| `worker.exec.guestCpus` | null or (unsigned int) | `null` | `GRADIENT_WORKER_EXEC_GUEST_CPUS` | CPUs the running and warm guests of this worker share. An exec job waits until its `cpus` fit. `null` uses the CPU count of the host. |
+| `worker.exec.guestDiskMb` | null or (unsigned int) | `null` | `GRADIENT_WORKER_EXEC_GUEST_DISK_MB` | Disk space in MB the `/work` disks of the running guests share. An exec job waits until its `diskMb` fits. `null` uses 80 % of the free space in `<worker.baseDir>/guests` when the worker starts. |
+| `worker.exec.guestMemoryMb` | null or (unsigned int) | `null` | `GRADIENT_WORKER_EXEC_GUEST_MEMORY_MB` | Memory in MB the running and warm guests of this worker share. An exec job waits until its `memoryMb` fits. `null` uses 80 % of the host memory. |
 | `worker.exec.image` | package | derived | `GRADIENT_WORKER_EXEC_IMAGE` | Guest image for exec jobs, built with `gradient.lib.mkWorkerImage`. |
 | `worker.exec.labels` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_LABELS` | Labels an exec job can ask for. The worker ID is always a label too. |
 | `worker.exec.maxPreWarm` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_MAX_PRE_WARM` | Most guests kept warm for upcoming exec jobs the server reports. The worker keeps the larger of `worker.exec.preWarm` and the reported count, capped at this value. `0` ignores the server count. |

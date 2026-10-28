@@ -6,6 +6,7 @@
 
 pub mod addresses;
 pub mod agent;
+pub mod budget;
 pub mod config;
 pub mod console;
 pub mod custom_image;
@@ -22,6 +23,7 @@ pub mod vsock;
 
 pub use addresses::{AddressLease, GuestAddresses};
 pub use agent::{GUEST_BOOT_TIMEOUT, GuestBootError, ReadyAgent, wait_ready};
+pub use budget::{BudgetHold, GuestBudget};
 pub use config::{DeviceConfig, MountConfig, SupervisorConfig, VmConfig, check_device};
 pub use console::ConsoleLink;
 pub use custom_image::NO_GUEST_AGENT;
