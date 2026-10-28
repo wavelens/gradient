@@ -1,12 +1,13 @@
 # Cluster Jobs
 
-A cluster job bundles existing jobs, such as evaluation jobs and build jobs, so they start together on separate workers. The group either starts in full or not at all. Members stay regular jobs and carry a reference to their cluster. Every try of the whole group counts as a cluster *attempt*.
+Cluster jobs group existing jobs. Those jobs start together on separate workers. Evaluation jobs, build jobs, and the nodes of an exec job can join as members. Groups start in full or not at all. Members stay regular jobs and carry a reference to their cluster. Every try of the whole group counts as a cluster *attempt*.
 
 ```mermaid
 flowchart LR
     C[cluster_job] --> M[cluster_member]
     C --> A[cluster_attempt]
     M --> E[evaluation]
+    M --> R[exec_job]
     M --> B[derivation_build]
     A --> D[dispatched_job]
 ```
@@ -15,15 +16,15 @@ flowchart LR
 
 | Table | Links to | Role |
 |---|---|---|
-| `cluster_job` | - | The group record. Holds `status` (`Queued`, `Running`, `Completed`, `Failed`, `Aborted`), `same_zone`, `attempts`, and `retry_budget` |
-| `cluster_member` | `cluster_job` | One job in the group. Names exactly one of `evaluation` or `derivation_build` (the shared build), plus `role`, `primary`, and `pin` |
+| `cluster_job` | - | The group record. Holds `status` (`Queued`, `Running`, `Completed`, `Failed`, `Aborted`), `same_zone`, `attempts`, `attempts_outside_budget` and `retry_budget` |
+| `cluster_member` | `cluster_job` | One job in the group. Names exactly one of `evaluation`, `derivation_build` (the shared build) or `exec_job` (one node), plus `role`, `primary` and `pin` |
 | `cluster_attempt` | `cluster_job` | One try of the group. Tracks `created_at`, `started_at` (set only after every member accepted), `finished_at`, and `outcome` (`Succeeded`, `Failed`, `PrepareFailed`, `Aborted`) |
 | `dispatched_job` | `cluster_attempt` | The assignment row for a single member. Stays `NULL` for a standalone assignment |
 
 | Constraint | Effect |
 |---|---|
-| `CHECK (num_nonnulls(evaluation, derivation_build) = 1)` | A member names exactly one job. Both or neither count as invalid |
-| `idx-cluster_member-evaluation` (unique on `evaluation, coalesce(eval_index, 0)`), `idx-cluster_member-derivation_build` (unique, partial) | A job can belong to at most one cluster. A split evaluation can hold one member per `eval_index` |
+| `CHECK (num_nonnulls(evaluation, derivation_build, exec_job) = 1)` | A member names exactly one job. Two or none count as invalid |
+| `idx-cluster_member-evaluation` (unique on `evaluation, coalesce(eval_index, 0)`), `idx-cluster_member-derivation_build`, `idx-cluster_member-exec_job` (unique, partial) | A job can belong to at most one cluster. A split evaluation can hold one member per `eval_index` |
 | `idx-cluster_attempt-open` (unique on `cluster_job WHERE finished_at IS NULL`) | A cluster can hold at most one open attempt |
 | `dispatched_job.cluster_attempt` `ON DELETE SET NULL` | Member rows survive their attempt as plain telemetry |
 | `cluster_member`, `cluster_attempt` `ON DELETE CASCADE` | The hourly retention pass can remove a finished cluster job past [`retentionDays`](../../reference/configuration.md#general). Once evaluation garbage collection removed the members, deletion happens immediately. Active cluster jobs never get deleted by the pass |
@@ -33,7 +34,8 @@ flowchart LR
 The `claim_cluster` function in `backend/gradient-db/src/scheduling/cluster/claim.rs` runs all of its steps inside a single transaction.
 
 1. Insert the `cluster_attempt` row, on the condition `cluster_job.status = Queued`. A conflict on `idx-cluster_attempt-open` will insert nothing (`ON CONFLICT`).
-2. Claim each member with the single-assignment claim statement (`claim_assignment`): its own job key (`eval:<evaluation>`, `build:<shared_build>`), its own start condition, and `cluster_attempt` set.
+2. Claim each member with `claim_assignment`, the single-assignment claim statement. Claims set `cluster_attempt` and use the start condition of the member.
+    - Members retain their own job keys `eval:<evaluation>`, `build:<shared_build>` or `exec:<exec_job>`.
 3. The first statement inserting nothing will roll the whole transaction back. The return value of `claim_cluster` is then `false`.
 
 - `idx-cluster_attempt-open` can arbitrate between server instances claiming one cluster. `idx-dispatched_job-open-job` can do the same for a single job.
@@ -104,7 +106,7 @@ When a member reports `JobCompleted` or `JobFailed`, its job can be released. Th
 
 - Reports that arrive while the attempt is being settled follow the decided verdict.
 - A member with an open attempt count as tracked, so `abandoned-dispatch-sweep` and the evaluation watchdog skip them.
-- `cluster_job.retry_budget` set the number of automatic retries after the first start (`attempts <= retry_budget` permit a requeue). This budget is separate from the per-evaluation assignment budget. A user retry of a build disregard it.
+- `cluster_job.retry_budget` can hold the count of automatic retries after the first start. A requeue needs `attempts - attempts_outside_budget <= retry_budget`. This budget is separate from the per-evaluation assignment budget. A user retry of a build disregard it.
 - Members lost with their worker, or reaped after an unconfirmed abort, report into the same verdict.
 
 ## Aging Reservations
@@ -200,10 +202,44 @@ flowchart LR
 - Aborted members end the attempt as `Abort` at once.
 - The evaluation completion can happen once, for the first success. The merge of the staged `EvalStats` then covers every member.
 
+## Exec Jobs
+
+Exec apps with `nodes > 1` produce a cluster job at evaluation time. All the writes share one transaction. Those writes are the `cluster_job`, one `exec_job` row per node, and one member per row.
+
+| Field | Value |
+|---|---|
+| `same_zone` | `true` |
+| `retry_budget` | `3` |
+| Member | `role = "node"`, `primary = false`, `pin = NULL`, index = `exec_job.node_index` |
+| Job key | `exec:<exec_job>`, one per node |
+
+- Exec members with a hold take a guest address lease on the worker. Workers include that address in `AssignJobResponse.endpoint`.
+- Entries in the `StartCluster` roster list the address as `ClusterPeer.endpoint` for the member. The server can also write the address to `exec_job_attempt.guest_address`.
+- Workers free the address if a hold ended before `StartCluster`.
+
+### Exec Verdict
+
+Exec clusters swap the verdict above for `exec_verdict`. Checks run in table order.
+
+| Verdict | When | Requeue | Nodes |
+|---|---|---|---|
+| Complete | Every node succeeded | - | `Completed` |
+| Abort | A node aborted | - | Every node `Aborted` |
+| Retry | A node lost | Inside `retry_budget` | `Queued`, no retry used |
+| Fail | A node failed with `keepRunning`, after every node reported | - | Own outcome per node |
+| Restart | A node failed or timed out without `keepRunning`, retries left | `attempts_outside_budget + 1` | `Queued`, one retry used on every row |
+| Fail | Same as Restart without retries, or Retry without budget | - | Own outcome per node, survivors `Aborted` |
+
+- After a server restart, the server can requeue every open cluster with `attempts_outside_budget + 1`. Those requeues never count against `retry_budget`.
+- Members never survive a lost worker connection or a server restart. Both lead to a restart of every node from its last phase.
+- Survivor reports after a restart change nothing.
+
 ## Related
 
 - [Shared Builds](shared-builds.md)
 - [Waiting and Recovery](waiting-and-recovery.md)
 - [Workers: Zones](../../concepts/workers.md#zones)
 - [Jobs: Cluster Members](../proto/jobs.md#cluster-members)
-- `nix/tests/gradient/cluster/`: the `gradient-cluster` VM test
+- [Exec Jobs: Multi-Node Jobs](../exec/index.md#multi-node-jobs)
+- Find the `gradient-cluster` VM test in `nix/tests/gradient/cluster/`.
+- Find the `gradient-exec` VM test in `nix/tests/gradient/exec/` with a two-node job.

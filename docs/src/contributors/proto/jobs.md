@@ -173,6 +173,9 @@ Each build job contains a single `BuildSpec` and maps to one shared build (a `de
 | Worker stop | The worker releases all held members the same way, with `worker draining` |
 
 - Held members count against `eval.maxConcurrent` / `build.maxConcurrent` like running jobs.
+- Held exec members lease a guest address first and accept with `AssignJobResponse.endpoint` set to that address. Workers reject the member with `no free guest address in exec.subnet` on a full subnet.
+- Exec job executors get the roster and the lease from the worker on `StartCluster`. The executor can build the cluster context from the roster endpoints and `JobContext.master_port`.
+- Duplicate roster addresses fail the node with `two nodes have the guest address <address>; give every exec worker its own exec.subnet`.
 - `hold_secs`: the server's `scheduler.clusterPrepareTimeoutSecs` (30 s) plus a 10 s margin.
 
 ### Split Evaluation Members

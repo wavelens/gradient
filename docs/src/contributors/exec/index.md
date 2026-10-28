@@ -42,7 +42,6 @@ flowchart LR
 |---|---|
 | `exec jobs are disabled on this instance` | `exec.enable` off, checked first |
 | `exec jobs are disabled for this project` | `project.exec_enabled` off |
-| `exec jobs with more than one node are not supported yet` | `nodes > 1` |
 
 - Refused programs also lose the image entry point, even in a later batch.
 - Restarts copy `entry_point.exec` along with the entry point.
@@ -57,6 +56,29 @@ flowchart LR
 - Only workers without draining and with access to the job's project count, for placement and for wait reasons.
 - `WaitingReason::ExecWorkers` can name the unmet labels, devices, mounts, node count or custom image.
 - `ExecUnmet` can hold only the architecture when zero exec workers of the job's architecture connect.
+
+### Multi-Node Jobs
+
+Apps with `nodes > 1` turn into one `exec_job` row per node and a single [cluster job](../scheduler/clusters.md#exec-jobs). The cluster planner can place, prepare and start those nodes.
+
+| Part | Value |
+|---|---|
+| Rows | `exec_job.node_index` from 0 to `nodes - 1`, unique per entry point (`idx-exec_job-entry_point-node`) |
+| Cluster | `cluster_job` with `same_zone = true`, `retry_budget = 3` |
+| Members | One `cluster_member` per row, `role = "node"`, `primary = false`, no `pin`, member index = node index |
+| Requirement | `ExecRequirement.nodes` against `allow.nodes`. `nodes > 1` sets `network` |
+| Master | Node 0 |
+| Master port | `master_port` in `take_placement`, from `allow.ports` of the node 0 seat |
+| Devices | Held per seat until the end of each node attempt |
+| Wait reason | `unmet.nodes = N` while no zone holds `N` workers with a fit against device totals |
+
+- Master port: 29500 when the range boundaries cover it and the job's `ports` exclude it. Other setups take the lowest port of the range outside `ports`.
+- Warnings go out for fully forwarded ranges. Such ranges leave the cluster unplaced.
+- Node attempts keep the port in `exec_job_attempt.master_port`. Nodes get the port from `JobContext.master_port`.
+- Each node has its own job key `exec:<id>`, attempts, phases, logs, outputs and job token.
+- List views and job pages treat node 0 as the job. Endpoints accept any node row ID and resolve the siblings with `nodes::nodes_of`.
+- List views and events pull the combined node status from `nodes::aggregate_status`. Any open node: `Running` if one node runs, else the lowest open status. All final: `Aborted`, then `Failed`, then `Completed`.
+- Status events go out under node 0 only. `exec_job.phase` events go out for every node with the field `node`.
 
 ## Pre-Warm Counts
 
@@ -84,6 +106,23 @@ Workers get `ServerMessage::PreWarmVms { count }` as an absolute target of guest
 - Aborted jobs never restart. Late reports for a closed attempt change nothing.
 - Status changes emit `exec_job.queued`, `started`, `phase`, `completed`, `failed` or `aborted`, see [Events and Webhooks](../../reference/events.md).
 - Logs share the build log storage per attempt ID. The deep GC can keep the log of every exec attempt.
+
+The single-job rules above don't apply to multi-node jobs. `exec_verdict` can decide one fate for all nodes. A single `ExecClusterSettled` graph transition can assign that fate.
+
+| Fate | When | Nodes | Retries |
+|---|---|---|---|
+| `Complete` | Every node completed | `Completed` | - |
+| `Abort` | A node aborted | Every node `Aborted`, no restart | - |
+| `Retry` | A node lost (`Lost` end reason) | Every node `Queued` from its last phase | None used, counts against `retry_budget` |
+| `Restart` | A node failed or timed out, without `keepRunning`, `retries_left > 0` | Every node `Queued` from its last phase | One per restart on every row |
+| `Fail` | Same without retries, or a failure with `keepRunning` after the last node ended | Each node with its own end, survivors `Aborted` | - |
+
+- `ExecCluster.retries_left` is the lowest `min(retries_left, retries_cap)` over the seats.
+- `Restart` counts in `cluster_job.attempts_outside_budget` and never against `retry_budget`.
+- Requeues from a server restart also fall outside the budget.
+- Members never survive a lost worker connection or a server restart. Both end in a restart from the last phases.
+- Late reports of a survivor after a restart change nothing.
+- Only node 0 can activate `gradient/continue.json`, once every node completed.
 
 ### Job Tokens
 
@@ -182,9 +221,11 @@ flowchart LR
 | `/dev` file | Byte copy over vsock, a pty at `/dev/gradient/<name>` in the guest |
 | USB | `usbip bind` on the host, attached in the guest over vsock |
 | Mount | virtiofs at `/mnt/<name>`, `perJob` mounts get `<path>/<guest id>` |
-| Network | Tap `gr-tap-<cid>`, guest address = subnet + CID, bridge address as gateway |
+| Network | Tap `gr-tap-<cid>`, a leased guest address, bridge address as gateway |
 
-- Devices stay held until teardown. Held devices stay out of the advertised inventory.
+- Devices keep their hold until teardown. Held devices don't appear in the advertised inventory.
+- `GuestAddresses` lease the lowest free host above the bridge address of `exec.subnet`. Leases end with the guest teardown or a released cluster hold.
+- Full subnets end the job with `no free guest address in exec.subnet`.
 - Guests resolve names through the forwarder on the bridge, or through `exec.nameservers`.
 - Teardown is always an explicit step. Dropped tasks leave the guest running.
 
