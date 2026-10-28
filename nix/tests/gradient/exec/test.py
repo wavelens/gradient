@@ -6,9 +6,12 @@
 # worker, `keeper` keeps them. Covers guest units, pre-warm and pause, the PreWarmVms clamp
 # and the surplus stop, the virtiofs store and work shares, tap networking with NAT and the
 # guest DNS forwarder, the agent protocol, exit codes, retries, maxSilent, abort, both restart
-# modes with log replay and JobLost from a restarted agent. Not covered: VFIO, USB/IP,
-# /dev relays, the nested kvm device, multi-node jobs, custom images. The CI host must offer
-# nested KVM (kvm_intel or kvm_amd with nested=1), since the workers boot guests in a VM.
+# modes with log replay and JobLost from a restarted agent and the SSH gateway after a
+# resume: attach to the program terminal, a new shell, the task login, a forward to a
+# declared port and a refused forward. Not covered: the browser terminal and the serial
+# console (no browser in the test), VFIO, USB/IP, /dev relays, the nested kvm device,
+# multi-node jobs, custom images. The CI host must offer nested KVM (kvm_intel or kvm_amd
+# with nested=1), since the workers boot guests in a VM.
 
 import json
 import re
@@ -18,7 +21,8 @@ API = "http://gradient.local/api/v1"
 GUESTS = "/var/lib/gradient-worker/guests"
 GUEST_UNIT = re.compile(r"gradient-guest-[0-9a-f]{32}\.service")
 WORKERS = [stopper, keeper]
-NAMES = ["fetch", "silent", "abort", "long-stop", "fail", "long-keep", "lost"]
+NAMES = ["fetch", "silent", "abort", "long-stop", "fail", "long-keep", "lost", "interactive", "terminal"]
+SSH = "ssh -p 2222 -i /root/.ssh/gradient -o StrictHostKeyChecking=no -o BatchMode=yes"
 TERMINAL = {"completed", "failed", "aborted"}
 
 token = None
@@ -102,6 +106,16 @@ def wait_running(name, tick):
         return state["status"] == "running" and f"tick {tick}" in job_log(name).splitlines()
 
     wait_for(f"{name} runs and prints tick {tick}", check)
+
+
+def wait_started(name):
+    def check():
+        state = job(name)
+        if state["status"] in TERMINAL:
+            raise Exception(f"{name} ended {state['status']} before a login: {json.dumps(state)}")
+        return state if state["status"] == "running" else None
+
+    return wait_for(f"{name} runs", check)
 
 
 def active_guests(node):
@@ -265,7 +279,45 @@ restarted = wait_status("long-stop", "completed")
 assert end_reasons(restarted) == ["lost", "completed"], json.dumps(restarted)
 assert restarted["retries_left"] == 0, json.dumps(restarted)
 
-banner("Phase 14: the workers settle on one paused warm guest")
+banner("Phase 14: SSH reaches the jobs through the gateway")
+server.wait_for_open_port(2222)
+public_key = server.succeed(
+    "mkdir -p /root/.ssh && ssh-keygen -q -t ed25519 -N '' -f /root/.ssh/gradient && cat /root/.ssh/gradient.pub"
+).strip()
+api("POST", "user/ssh-keys", {"name": "vm", "public_key": public_key})
+
+interactive = wait_started("interactive")
+job_login = f"project/{JOBS['interactive']}@localhost"
+assert interactive["ssh_command"].startswith(f"ssh -p 2222 project/{JOBS['interactive']}@"), json.dumps(interactive)
+
+new_shell = "printf 'echo gateway-$((6*7)); whoami; pwd\\nexit\\n' | {ssh} -T '{login}' shell"
+for login in [job_login, "project/task@localhost"]:
+    lines = server.succeed(new_shell.format(ssh=SSH, login=login)).splitlines()
+    assert lines[-3:] == ["gateway-42", "gradient", "/work"], f"{login}: {lines}"
+
+forward = f"{SSH} -o ExitOnForwardFailure=yes -N -f -L {{local}}:127.0.0.1:{{port}} '{job_login}' >/dev/null 2>&1"
+server.succeed(forward.format(local=18080, port=8080))
+served = server.succeed("curl -fsS --max-time 30 http://127.0.0.1:18080/flake.nix")
+assert "apps" in served, served
+server.succeed(forward.format(local=19090, port=9090))
+server.fail("curl -fsS --max-time 5 http://127.0.0.1:19090/")
+server.succeed("pkill -x ssh")
+
+refused = server.fail(f"{SSH} '{job_login}' true 2>&1")
+assert "only the command shell is supported" in refused, refused
+
+api("POST", f"exec-jobs/{JOBS['interactive']}/abort")
+assert end_reasons(wait_status("interactive", "aborted", timeout=120)) == ["aborted"]
+
+wait_started("terminal")
+attached = server.succeed(
+    f"printf 'echo attached-$((6*7))\\nexit\\n' | {SSH} -T 'project/{JOBS['terminal']}@localhost'")
+assert "attached-42" in attached, attached
+terminal = wait_status("terminal", "completed", timeout=120)
+assert end_reasons(terminal) == ["completed"], json.dumps(terminal)
+assert "attached-42" in job_log("terminal"), job_log("terminal")
+
+banner("Phase 15: the workers settle on one paused warm guest")
 for node in WORKERS:
     wait_for(f"{node.name} settles on one paused warm guest", lambda: one_paused_guest(node))
 status, _ = keeper.execute("journalctl -u gradient-worker --no-pager | grep -q 'warm guest target changed'")
