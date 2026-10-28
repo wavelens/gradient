@@ -127,7 +127,9 @@ fn github_full_name(repo_url: &str) -> Option<String> {
 }
 
 pub(super) fn normalize_repo_url(url: &str) -> String {
-    let s = url.trim().trim_end_matches('/');
+    let s = RepositoryLocation::of(url.trim())
+        .clone_url
+        .trim_end_matches('/');
     let s = s.strip_suffix(".git").unwrap_or(s);
     if let Some(rest) = s.strip_prefix("git@")
         && let Some((host, path)) = rest.split_once(':')
@@ -242,6 +244,18 @@ pub(super) async fn resolve_github_app_targets(
 #[cfg(test)]
 mod tests {
     use super::{event_repo_matches_task, github_full_name, normalize_repo_url};
+
+    #[test]
+    fn a_task_url_with_a_flake_directory_matches_its_push() {
+        assert!(event_repo_matches_task(
+            &["https://github.com/acme/infra.git".into()],
+            "https://github.com/acme/infra?dir=nix"
+        ));
+        assert_eq!(
+            normalize_repo_url("https://github.com/acme/infra.git?dir=nix"),
+            "https://github.com/acme/infra"
+        );
+    }
 
     #[test]
     fn event_repo_matches_task_is_host_agnostic_on_owner_repo() {
