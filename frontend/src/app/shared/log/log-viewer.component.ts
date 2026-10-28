@@ -243,7 +243,7 @@ export class LogViewerComponent implements OnDestroy {
     this.windowLines.set(next);
   }
 
-  private async jumpToLine(line: number): Promise<void> {
+  async jumpToLine(line: number): Promise<void> {
     const { start, end } = windowAround(this.totalLines(), line, this.WINDOW_PAGE);
     await this.loadWindow(start, end, 'replace');
     this.highlightLine.set(line);

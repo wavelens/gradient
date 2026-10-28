@@ -8,15 +8,16 @@
 
 :host { display: block; }
 
-h3 { margin: $space-section 0 $spacing-sm; font-size: $font-size-md; }
+a.sidebar-item-label {
+  font-size: $font-size-xs;
+  text-decoration: none;
 
-gr-table.outputs { display: block; overflow-x: auto; }
+  &:hover { text-decoration: underline; }
+}
 
-.path { overflow-wrap: anywhere; }
-.size { white-space: nowrap; }
-
-.muted { color: var(--gr-text-muted); font-weight: 400; }
-
-@media (max-width: $breakpoint-sm) {
-  th:nth-child(3), td:nth-child(3) { display: none; }
+.size {
+  flex-shrink: 0;
+  font-size: $font-size-xs;
+  color: var(--gr-text-muted);
+  white-space: nowrap;
 }

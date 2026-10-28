@@ -6,123 +6,8 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-// Region stylesheets: sidebar (builds list), messages (eval messages + panel),
-// log (log area, hints, chunked viewer). Kept separate to stay within the
-// per-component style budget (#325).
-
-// ── Layout ──────────────────────────────────────────────────────────────────
-
-:host {
-  display: block;
-  height: $below-header-height;
-  overflow: hidden;
-}
-
-.full-loading,
-.error-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: $below-header-height;
-  text-align: center;
-}
-
-.eval-layout {
-  position: relative;
-  display: flex;
-  height: $below-header-height;
-  overflow: hidden;
-}
-
-.log-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-width: 0;
-  background: var(--gr-surface-sunken);
-}
-
-// ── Info bar ──────────────────────────────────────────────────────────────────
-
-.info-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 $spacing-lg;
-  height: 48px;
-  background: var(--gr-surface-raised);
-  border-bottom: 1px solid var(--gr-border-subtle);
-  flex-shrink: 0;
-  gap: $spacing-md;
-}
-
-.info-bar-left {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  overflow: hidden;
-  min-width: 0;
-}
-
-.builds-toggle {
-  display: none;
-}
-
-@media (max-width: $breakpoint-md) {
-  .info-bar {
-    padding-inline: $spacing-md;
-    gap: $spacing-sm;
-  }
-
-  .builds-toggle {
-    display: inline-flex;
-    flex-shrink: 0;
-  }
-
-  .info-bar-left {
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-}
-
-.info-bar-right {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  flex-shrink: 0;
-}
-
-// Each metric: label · value separated by dividers
-.info-metric {
-  display: flex;
-  align-items: center;
-  gap: $spacing-xs;
-  padding: 0 $spacing-md;
-  height: 48px;
-  border-right: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
-  flex-shrink: 0;
-
-  &:first-child { padding-left: 0; }
-
-  &:last-child { border-right: none; }
-}
-
-.metric-label {
-  font-size: $font-size-xs;
-  color: var(--gr-text-muted);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  white-space: nowrap;
-}
-
-.metric-value {
-  font-size: $font-size-sm;
-  color: var(--gr-text-primary);
-  white-space: nowrap;
-}
+// The page frame lives in shared/log/log-page.scss; the region stylesheets stay
+// separate to fit the per-component style budget (#325).
 
 .commit-hash {
   font-family: $font-family-mono;
@@ -132,7 +17,6 @@
   padding: 1px 6px;
   border-radius: $border-radius-sm;
 }
-// ── Error banner ──────────────────────────────────────────────────────────────
 
 .error-text {
   margin: $spacing-xs 0 0;

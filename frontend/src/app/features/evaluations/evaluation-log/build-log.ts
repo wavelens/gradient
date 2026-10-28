@@ -5,14 +5,8 @@
  */
 
 import type { LogSearchHit } from '@core/models';
-import type { ServerLog } from '@shared/log';
+import { type ServerLog, splitLogLines } from '@shared/log';
 import { environment } from '@environments/environment';
-
-function splitLines(text: string): string[] {
-  const lines = text.split('\n');
-  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
-  return lines;
-}
 
 async function fetchLines(buildId: string, start: number, end: number): Promise<string[]> {
   const res = await fetch(
@@ -20,7 +14,7 @@ async function fetchLines(buildId: string, start: number, end: number): Promise<
     { method: 'GET', credentials: 'include' },
   );
   if (!res.ok) return [];
-  return splitLines(await res.text());
+  return splitLogLines(await res.text());
 }
 
 async function searchLog(

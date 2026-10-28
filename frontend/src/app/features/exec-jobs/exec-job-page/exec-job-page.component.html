@@ -4,201 +4,195 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" [title]="job()?.entry_point ?? 'Exec job'">
-  @if (open()) {
-    <button *appWritable="triggerAccess()" slot="actions" grButton label="Keep VM running" icon="push_pin"
-            [severity]="keepVmRunning() ? 'primary' : 'secondary'" [attr.aria-pressed]="keepVmRunning()"
-            [loading]="switchingKeep()" [disabled]="switchingKeep()" (click)="toggleKeepVmRunning()"></button>
-  }
-  @if (waitsForManualStart()) {
-    <button *appWritable="triggerAccess()" slot="actions" grButton label="Run" icon="play_arrow"
-            [loading]="starting()" [disabled]="starting()" (click)="run()"></button>
-  }
-  @if (open()) {
-    <button *appWritable="triggerAccess()" slot="actions" grButton label="Abort" icon="close" severity="danger"
-            [loading]="aborting()" [disabled]="aborting()" (click)="abortOpen.set(true)"></button>
-  } @else if (job()) {
-    <button *appWritable="triggerAccess()" slot="actions" grButton label="Run again" icon="refresh"
-            [loading]="starting()" [disabled]="starting()" (click)="run()"></button>
-  }
-
-  @if (errorMessage(); as message) {
-    <p class="error">{{ message }}</p>
-  }
-
-  @if (job(); as job) {
-    <div class="summary" [attr.data-phase]="phase(job.status)">
-      <gr-status-icon [phase]="phase(job.status)" [label]="job.status" />
-      <span class="status">{{ job.status }}</span>
-      @if (waiting(); as reason) { <span class="muted">{{ reason }}</span> }
-      @if (job.message) { <span class="muted">{{ job.message }}</span> }
-      @if (job.worker) { <span class="muted mono">on {{ job.worker }}</span> }
-      <span class="muted">{{ guestSize(job.guest) }}</span>
-      <span class="muted">{{ job.retries_left }} {{ job.retries_left === 1 ? 'retry' : 'retries' }} left</span>
-      <span class="needs">
-        @if (job.nodes > 1) { <gr-badge>{{ job.nodes }} nodes</gr-badge> }
-        @for (label of job.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
-        @for (d of job.devices; track d.name) { <gr-badge severity="info">{{ device(d) }}</gr-badge> }
-      </span>
-    </div>
-
-    @if (keptExitCode() !== null) {
-      <gr-message-banner class="kept-vm">
-        Program exited with code {{ keptExitCode() }}. The VM keeps running.
-        <button *appWritable="triggerAccess()" grButton label="Let VM stop" size="small" severity="secondary"
-                [loading]="switchingKeep()" [disabled]="switchingKeep()" (click)="letVmStop()"></button>
-      </gr-message-banner>
+@if (job(); as job) {
+  <div class="log-page">
+    @if (sidebarOpen()) {
+      <div class="log-sidebar-backdrop gr-dialog-backdrop" aria-hidden="true" (click)="sidebarOpen.set(false)"></div>
     }
-
-    @if (job.nodes > 1) {
-      <h3>Nodes</h3>
-      <gr-table class="nodes">
-        <thead>
-          <tr><th>Node</th><th>Status</th><th>Worker</th><th>Guest address</th></tr>
-        </thead>
-        <tbody>
-          @for (n of job.node_jobs; track n.node) {
-            <tr>
-              <td>{{ n.node }}</td>
-              <td><gr-status-icon size="sm" [phase]="phase(n.status)" [label]="n.status" /> {{ n.status }}</td>
-              <td class="mono">{{ n.worker ?? '-' }}</td>
-              <td class="mono">{{ n.guest_address ?? '-' }}</td>
-            </tr>
+    <aside id="job-drawer" class="log-sidebar" [class.open]="sidebarOpen()" (keydown.escape)="sidebarOpen.set(false)">
+      <nav class="sidebar-breadcrumb" aria-label="Breadcrumb">
+        @for (crumb of crumbs(); track $index; let last = $last) {
+          @if (last) {
+            <span class="breadcrumb-current" aria-current="page">{{ crumb.label }}</span>
+          } @else {
+            <a [routerLink]="crumb.link" class="breadcrumb-link">{{ crumb.label }}</a>
+            <span class="breadcrumb-sep">/</span>
           }
-        </tbody>
-      </gr-table>
-      <gr-form-field class="node-picker" label="Node" for="exec-job-node">
-        <gr-select inputId="exec-job-node" [options]="nodeOptions()" optionLabel="label" optionValue="value"
-                   [ngModel]="node()" (ngModelChange)="pickNode($event)" />
-      </gr-form-field>
-    }
+        }
+      </nav>
 
-    @if (job.attempts.length > 0) {
-      <h3>Attempts</h3>
-      <gr-table class="attempts">
-        <thead>
-          <tr><th>#</th><th>Worker</th><th>Started</th><th>Ended</th><th>Result</th></tr>
-        </thead>
-        <tbody>
-          @for (attempt of job.attempts; track attempt.number) {
-            <tr>
-              <td>{{ attempt.number }}</td>
-              <td class="mono">{{ attempt.worker }}</td>
-              <td>{{ time(attempt.started_at) }}</td>
-              <td>{{ attempt.ended_at ? time(attempt.ended_at) : '-' }}</td>
-              <td>{{ attempt.end_reason ?? 'running' }}@if (attempt.message) { <span class="muted">: {{ attempt.message }}</span> }</td>
-            </tr>
+      <div class="overview-block">
+        <div class="status-row">
+          <span class="job-status">
+            <gr-status-icon [phase]="phase(job.status)" [label]="job.status" />
+            {{ job.status }}
+          </span>
+          <span class="item-meta">{{ job.retries_left }} {{ job.retries_left === 1 ? 'retry' : 'retries' }} left</span>
+        </div>
+      </div>
+
+      <div class="sidebar-items">
+        @for (option of views(); track option.value) {
+          <div class="sidebar-item" role="button" tabindex="0" [class.selected]="view() === option.value"
+               [attr.aria-pressed]="view() === option.value"
+               (click)="showView(option.value)" (keydown.enter)="showView(option.value)">
+            <gr-icon [name]="option.icon" size="sm" />
+            <span class="sidebar-item-label">{{ option.label }}</span>
+          </div>
+        }
+
+        @if (phaseLines().length > 0) {
+          <div class="sidebar-group-header">
+            Phases
+            <span class="sidebar-group-count">{{ phaseLines().length }}</span>
+          </div>
+          @for (p of phaseLines(); track p.line) {
+            <div class="sidebar-item phase-item" role="button" tabindex="0"
+                 (click)="showPhase(p.line)" (keydown.enter)="showPhase(p.line)">
+              <span class="sidebar-item-label mono">{{ p.name }}</span>
+              <span class="item-meta">L{{ p.line }}</span>
+            </div>
           }
-        </tbody>
-      </gr-table>
-    }
-
-    @if (job.phases.length > 0) {
-      <h3>Phases</h3>
-      <ol class="phases">
-        @for (p of job.phases; track $index) {
-          <li><span class="mono">{{ p.name }}</span> <span class="muted">attempt {{ p.attempt }}, {{ time(p.created_at) }}</span></li>
         }
-      </ol>
-    }
 
-    <app-exec-job-outputs [job]="job" [node]="node()" />
+        <app-exec-job-outputs [job]="job" />
 
-    @if (pullRequests().length > 0) {
-      <h3>Pull requests</h3>
-      <ul class="links">
-        @for (pr of pullRequests(); track pr.url) {
-          <li>
-            <a [href]="pr.url" target="_blank" rel="noopener">#{{ pr.number }}</a>
-            <span class="mono branch">{{ pr.branch }}</span>
-            <span class="muted">{{ pr.integration }}, {{ time(pr.created_at) }}</span>
-          </li>
-        }
-      </ul>
-    }
-
-    @if (job.started_evaluations.length > 0) {
-      <h3>Started evaluations</h3>
-      <ul class="links">
-        @for (started of job.started_evaluations; track started.evaluation) {
-          <li>
-            <gr-status-icon size="sm" [phase]="evaluationPhase(started.status)" [label]="started.status" />
-            <a [routerLink]="['/project', job.project, 'log', started.evaluation]">{{ started.task }}</a>
-            <span class="muted">{{ time(started.created_at) }}</span>
-          </li>
-        }
-      </ul>
-    }
-
-    @if (job.tokens.length > 0) {
-      <h3>Job tokens</h3>
-      <gr-table class="tokens">
-        <thead>
-          <tr><th>Attempt</th><th>Created</th><th>Expires</th><th>State</th></tr>
-        </thead>
-        <tbody>
-          @for (token of job.tokens; track token.attempt) {
-            <tr>
-              <td>{{ token.attempt }}</td>
-              <td>{{ time(token.created_at) }}</td>
-              <td>{{ day(token.expires_at) }} {{ time(token.expires_at) }}</td>
-              <td>
-                @if (token.revoked) {
-                  <gr-badge severity="danger">revoked</gr-badge>
-                } @else {
-                  <gr-badge severity="success">active</gr-badge>
-                }
-              </td>
-            </tr>
+        @if (pullRequests().length > 0) {
+          <div class="sidebar-group-header">
+            Pull Requests
+            <span class="sidebar-group-count">{{ pullRequests().length }}</span>
+          </div>
+          @for (pr of pullRequests(); track pr.url) {
+            <a class="sidebar-item" [href]="pr.url" target="_blank" rel="noopener" [title]="pr.branch">
+              <span class="sidebar-item-label">#{{ pr.number }} <span class="mono item-meta">{{ pr.branch }}</span></span>
+              <span class="item-meta">{{ time(pr.created_at) }}</span>
+            </a>
           }
-        </tbody>
-      </gr-table>
-    }
+        }
 
-    @if (terminalReachable()) {
-      <gr-tab-switch class="views" ariaLabel="Job output" [options]="views" optionLabel="label" optionValue="value"
-                     [ngModel]="view()" (ngModelChange)="showView($event)" />
-    } @else {
-      <h3>Log</h3>
-    }
+        @if (job.started_evaluations.length > 0) {
+          <div class="sidebar-group-header">
+            Started Evaluations
+            <span class="sidebar-group-count">{{ job.started_evaluations.length }}</span>
+          </div>
+          @for (started of job.started_evaluations; track started.evaluation) {
+            <a class="sidebar-item" [routerLink]="['/project', job.project, 'log', started.evaluation]">
+              <gr-status-icon size="sm" [phase]="evaluationPhase(started.status)" [label]="started.status" />
+              <span class="sidebar-item-label">{{ started.task }}</span>
+              <span class="item-meta">{{ time(started.created_at) }}</span>
+            </a>
+          }
+        }
+      </div>
+    </aside>
 
-    @if (view() === 'terminal') {
-      <gr-select-button ariaLabel="Terminal" [options]="terminalModes()" optionLabel="label" optionValue="value"
-                        [allowEmpty]="false" [ngModel]="terminalMode()" (ngModelChange)="openTerminal($event)" />
-      @if (terminal(); as source) {
-        <gr-terminal class="terminal" [source]="source" />
-      }
-      @if (job.ssh_command; as sshCommand) {
-        <div class="ssh-commands">
-          <gr-form-field label="SSH login">
-            <gr-copy-field [value]="sshCommand" />
-          </gr-form-field>
-          @for (command of job.forward_commands; track command) {
-            <gr-form-field label="Port forward">
-              <gr-copy-field [value]="command" />
-            </gr-form-field>
+    <main class="log-main">
+      <div class="info-bar">
+        <button grButton class="sidebar-toggle" icon="view_list" severity="secondary" size="small"
+                aria-label="Job details" aria-controls="job-drawer" [attr.aria-expanded]="sidebarOpen()"
+                (click)="sidebarOpen.set(!sidebarOpen())"></button>
+        <div class="info-bar-left">
+          <div class="info-metric">
+            <gr-status-icon [phase]="phase(job.status)" [label]="job.status" />
+            <span class="metric-value job-status">{{ job.status }}</span>
+          </div>
+          <div class="info-metric">
+            <span class="metric-label">Duration</span>
+            <span class="metric-value">{{ duration() }}</span>
+          </div>
+          <div class="info-metric">
+            <span class="metric-label">Created</span>
+            <span class="metric-value">{{ day(job.created_at) }} {{ time(job.created_at) }}</span>
+          </div>
+          @if (job.worker) {
+            <div class="info-metric">
+              <span class="metric-label">Worker</span>
+              <code class="metric-value worker" [title]="job.worker">{{ job.worker }}</code>
+            </div>
+          }
+          @if (job.nodes > 1 || job.labels.length > 0 || job.devices.length > 0) {
+            <div class="info-metric">
+              <span class="metric-label">Needs</span>
+              @if (job.nodes > 1) { <gr-badge>{{ job.nodes }} nodes</gr-badge> }
+              @for (label of job.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
+              @for (d of job.devices; track d.name) { <gr-badge severity="info">{{ device(d) }}</gr-badge> }
+            </div>
           }
         </div>
-      }
-    } @else {
-      <pre class="log">@for (segment of logSegments(); track $index) {@if (segment.kind === 'phase') {<span class="phase-marker" role="separator">{{ segment.name }}</span>} @else {<span>{{ segment.text }}</span>}} @empty {No output yet.}</pre>
-    }
-  } @else if (!errorMessage()) {
-    <gr-loading-spinner message="Loading exec job..." />
-  }
+        <div class="info-bar-right">
+          @if (open()) {
+            <button *appWritable="triggerAccess()" grButton label="Abort" icon="close" severity="danger" size="small"
+                    [loading]="aborting()" [disabled]="aborting()" (click)="abortOpen.set(true)"></button>
+          }
+        </div>
+      </div>
 
-  <gr-dialog
-    header="Abort exec job"
-    [visible]="abortOpen()"
-    (visibleChange)="!$event && !aborting() && abortOpen.set(false)"
-    width="400px"
-  >
-    <p>Do you really want to abort this exec job? It does not restart.</p>
-    <div grDialogFooter>
-      <button grButton label="Cancel" severity="secondary" [disabled]="aborting()"
-              (click)="abortOpen.set(false)"></button>
-      <button grButton label="Abort" severity="danger" [loading]="aborting()"
-              [disabled]="aborting()" (click)="confirmAbort()"></button>
-    </div>
-  </gr-dialog>
-</gr-page-layout>
+      <div class="log-area">
+        @if (errorMessage(); as message) {
+          <gr-message-banner type="error">{{ message }}</gr-message-banner>
+        }
+        @if (waiting(); as reason) {
+          <gr-message-banner type="warning" icon="pause_circle">{{ reason }}</gr-message-banner>
+        }
+        @if (job.message) {
+          <gr-message-banner [type]="phase(job.status) === 'failure' ? 'error' : 'info'">{{ job.message }}</gr-message-banner>
+        }
+
+        @if (view() === 'terminal') {
+          <div class="log-header">
+            <span class="log-header-title">Terminal</span>
+            <gr-select-button ariaLabel="Terminal" [options]="terminalModes()" optionLabel="label" optionValue="value"
+                              [allowEmpty]="false" [ngModel]="terminalMode()" (ngModelChange)="openTerminal($event)" />
+          </div>
+          @if (terminal(); as source) {
+            <gr-terminal class="terminal" [source]="source" />
+          }
+          @if (job.ssh_command; as sshCommand) {
+            <div class="ssh-commands">
+              <gr-form-field label="SSH login">
+                <gr-copy-field [value]="sshCommand" />
+              </gr-form-field>
+              @for (command of job.forward_commands; track command) {
+                <gr-form-field label="Port forward">
+                  <gr-copy-field [value]="command" />
+                </gr-form-field>
+              }
+            </div>
+          }
+        } @else {
+          <gr-log-viewer [lines]="logLines()" [marker]="phaseMarker" [initialLine]="initialLine">
+            <div class="log-header">
+              <code class="log-header-title">{{ job.entry_point }}</code>
+              @if (logLines().length > 0) {
+                <span class="log-line-count">{{ logLines().length }} {{ logLines().length === 1 ? 'line' : 'lines' }}</span>
+              }
+            </div>
+          </gr-log-viewer>
+        }
+      </div>
+    </main>
+  </div>
+} @else if (errorMessage(); as message) {
+  <div class="error-state">
+    <gr-empty-state icon="error" title="Exec job not available" [message]="message" />
+  </div>
+} @else {
+  <div class="full-loading">
+    <gr-loading-spinner message="Loading exec job..." />
+  </div>
+}
+
+<gr-dialog
+  header="Abort exec job"
+  [visible]="abortOpen()"
+  (visibleChange)="!$event && !aborting() && abortOpen.set(false)"
+  width="400px"
+>
+  <p>Do you really want to abort this exec job? It does not restart.</p>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" [disabled]="aborting()"
+            (click)="abortOpen.set(false)"></button>
+    <button grButton label="Abort" severity="danger" [loading]="aborting()"
+            [disabled]="aborting()" (click)="confirmAbort()"></button>
+  </div>
+</gr-dialog>

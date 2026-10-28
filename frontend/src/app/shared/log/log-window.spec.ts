@@ -5,7 +5,15 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseLineFragment, windowAround, searchLines } from './log-window';
+import { parseLineFragment, windowAround, searchLines, splitLogLines } from './log-window';
+
+describe('splitLogLines', () => {
+  it('keeps blank lines and drops only the end of the final newline', () => {
+    expect(splitLogLines('a\n\nb\n')).toEqual(['a', '', 'b']);
+    expect(splitLogLines('a\npartial')).toEqual(['a', 'partial']);
+    expect(splitLogLines('')).toEqual([]);
+  });
+});
 
 describe('parseLineFragment', () => {
   it('parses #L style fragments', () => {

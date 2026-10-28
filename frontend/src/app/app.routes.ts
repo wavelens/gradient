@@ -128,6 +128,7 @@ export const routes: Routes = [
           {
             path: 'exec-jobs/:job',
             title: 'Exec Job',
+            data: { hideFooter: true },
             loadComponent: () =>
               import('./features/exec-jobs/exec-job-page/exec-job-page.component').then(
                 (m) => m.ExecJobPageComponent,

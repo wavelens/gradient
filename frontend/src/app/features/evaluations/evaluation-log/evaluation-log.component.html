@@ -17,13 +17,13 @@
     </gr-empty-state>
   </div>
 } @else if (evaluation(); as ev) {
-  <div class="eval-layout">
+  <div class="log-page">
 
     <!-- ── Sidebar ──────────────────────────────────────────────── -->
     @if (buildsOpen()) {
-      <div class="builds-backdrop gr-dialog-backdrop" aria-hidden="true" (click)="buildsOpen.set(false)"></div>
+      <div class="log-sidebar-backdrop gr-dialog-backdrop" aria-hidden="true" (click)="buildsOpen.set(false)"></div>
     }
-    <aside id="builds-drawer" class="builds-sidebar" [class.open]="buildsOpen()"
+    <aside id="builds-drawer" class="log-sidebar" [class.open]="buildsOpen()"
            (focusin)="setSidebarFocus(true)" (focusout)="setSidebarFocus(false)"
            (mouseenter)="setPointerOver('builds')" (mouseleave)="setPointerOver(null)" (keydown.escape)="buildsOpen.set(false)">
 
@@ -41,14 +41,14 @@
       </div>
 
       <div class="overview-block">
-        <div class="eval-status-row">
+        <div class="status-row">
           <gr-eval-status-badge [status]="ev.status" [prioritized]="ev.prioritized" />
           <span class="builds-count">{{ completedBuildsCount() }}/{{ totalBuildsCount() }}</span>
         </div>
       </div>
 
       <div
-        class="evaluation-messages-item"
+        class="sidebar-item evaluation-messages-item"
         [class.selected]="selectedSection() === 'messages'"
         (click)="selectEvaluationSection()"
         (keydown.enter)="selectEvaluationSection()"
@@ -56,7 +56,7 @@
         role="option"
         [attr.aria-selected]="selectedSection() === 'messages'"
       >
-        <span class="evaluation-label">Evaluation</span>
+        <span class="sidebar-item-label">Evaluation</span>
         @if (errorMessages().length > 0) {
           <gr-badge severity="danger">{{ errorMessages().length }}</gr-badge>
         }
@@ -88,15 +88,15 @@
             <div class="build-group">
               <button
                 type="button"
-                class="build-group-header"
+                class="sidebar-group-header"
                 [class.collapsed]="group.collapsed"
                 [attr.aria-expanded]="!group.collapsed"
                 (click)="toggleGroup(group.key)"
               >
-                <gr-icon name="expand_more" size="sm" class="build-group-chevron" />
+                <gr-icon name="expand_more" size="sm" class="sidebar-group-chevron" />
                 <span class="build-dot status-{{ group.key }}"></span>
                 {{ group.label }}
-                <span class="build-group-count">{{ group.builds.length }}</span>
+                <span class="sidebar-group-count">{{ group.builds.length }}</span>
               </button>
               @for (build of group.collapsed ? [] : group.builds; track build.id) {
                 <div
@@ -140,7 +140,7 @@
 
       <!-- Info bar -->
       <div class="info-bar">
-        <button grButton class="builds-toggle" icon="view_list" severity="secondary" size="small"
+        <button grButton class="sidebar-toggle" icon="view_list" severity="secondary" size="small"
           aria-label="Builds" aria-controls="builds-drawer" [attr.aria-expanded]="buildsOpen()"
           (click)="buildsOpen.set(!buildsOpen())"></button>
         <div class="info-bar-left">
@@ -289,8 +289,8 @@
           <gr-build-progress class="download-panel" [progress]="p" />
         } @else {
           <gr-log-viewer [lines]="logLines()" [serverLog]="serverLog()" [initialLine]="deepLinkLine()" [shortcuts]="false">
-            <div class="log-build-header">
-              <code class="log-build-path">{{ selectedBuild()?.name }}</code>
+            <div class="log-header">
+              <code class="log-header-title">{{ selectedBuild()?.name }}</code>
               @if (logLineCount() > 0) {
                 <span class="log-line-count">{{ logLineCount() }} {{ logLineCount() === 1 ? 'line' : 'lines' }}</span>
               }

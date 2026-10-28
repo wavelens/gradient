@@ -5,19 +5,14 @@
 -->
 
 @if (outputs().length > 0) {
-  <h3>Outputs <span class="muted">{{ size(job().outputs_size) }}</span></h3>
-  <gr-table class="outputs">
-    <thead>
-      <tr><th>Path</th><th>Size</th><th>Updated</th></tr>
-    </thead>
-    <tbody>
-      @for (output of outputs(); track output.path) {
-        <tr>
-          <td class="path"><a class="mono" [href]="url(output.path)">{{ output.path }}</a></td>
-          <td class="size">{{ size(output.size) }}</td>
-          <td>{{ time(output.updated_at) }}</td>
-        </tr>
-      }
-    </tbody>
-  </gr-table>
+  <div class="sidebar-group-header">
+    Outputs
+    <span class="sidebar-group-count">{{ size(job().outputs_size) }}</span>
+  </div>
+  @for (output of outputs(); track output.path) {
+    <div class="sidebar-item" [title]="output.path + ', updated ' + time(output.updated_at)">
+      <a class="sidebar-item-label mono" [href]="url(output.path)">{{ output.path }}</a>
+      <span class="size">{{ size(output.size) }}</span>
+    </div>
+  }
 }

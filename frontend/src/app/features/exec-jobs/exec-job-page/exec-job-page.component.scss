@@ -6,81 +6,58 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-h3 { margin: $space-section 0 $spacing-sm; font-size: $font-size-md; }
-
-.summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: $spacing-sm $spacing-md;
-
-  .status { font-weight: 600; }
-  .needs { display: inline-flex; flex-wrap: wrap; gap: $spacing-xs; }
+.sidebar-items {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
-.kept-vm { display: block; margin-top: $spacing-md; }
+a.sidebar-item { text-decoration: none; }
 
-gr-table.attempts, gr-table.tokens, gr-table.nodes { display: block; overflow-x: auto; }
-
-.node-picker { display: block; max-width: 16rem; margin-top: $spacing-sm; }
-
-.links {
-  display: flex;
-  flex-direction: column;
+.job-status {
+  display: inline-flex;
+  align-items: center;
   gap: $spacing-xs;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-
-  li { display: flex; flex-wrap: wrap; align-items: center; gap: $spacing-xs $spacing-sm; }
-  .branch { overflow-wrap: anywhere; }
-}
-
-.phase-marker {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  margin: $spacing-sm 0;
-  color: var(--gr-text-muted);
+  font-size: $font-size-sm;
   font-weight: 600;
-
-  &::before, &::after {
-    flex: 1;
-    border-top: 1px solid var(--gr-border-subtle);
-    content: '';
-  }
+  color: var(--gr-text-primary);
 }
 
-.phases {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-xs;
-  margin: 0;
-  padding-left: $spacing-lg;
+.item-meta {
+  flex-shrink: 0;
+  font-size: $font-size-xs;
+  font-weight: 400;
+  color: var(--gr-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.views { margin: $space-section 0 $spacing-sm; }
+.worker {
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  color: var(--gr-text-secondary);
+}
 
-.terminal { margin-top: $spacing-sm; }
+.log-area gr-message-banner {
+  flex-shrink: 0;
+  margin: $spacing-sm $spacing-md 0;
+}
+
+gr-terminal.terminal {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  padding: $spacing-sm $spacing-md;
+}
 
 .ssh-commands {
   display: flex;
-  flex-direction: column;
-  gap: $spacing-sm;
-  margin-top: $spacing-md;
-}
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: $spacing-sm $spacing-md;
+  padding: $spacing-sm $spacing-md $spacing-md;
+  border-top: 1px solid var(--gr-border-subtle);
+  background: var(--gr-surface-raised);
 
-.log {
-  max-height: 60vh;
-  margin: 0;
-  padding: $spacing-md;
-  overflow: auto;
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-md;
-  background-color: var(--gr-surface-control);
-  font-size: $font-size-xs;
-  white-space: pre-wrap;
+  gr-form-field { flex: 1 1 20rem; min-width: 0; }
 }
-
-.muted { color: var(--gr-text-muted); }
-.error { color: var(--gr-status-danger-text); }

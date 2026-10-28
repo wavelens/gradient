@@ -17,7 +17,7 @@ import {
   ChangeDetectionStrategy
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, parseLineFragment } from '@shared/log';
+import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, parseLineFragment, splitLogLines } from '@shared/log';
 import { matchesBuildSearch } from './build-search';
 import { buildLog } from './build-log';
 import { CommonModule } from '@angular/common';
@@ -74,6 +74,8 @@ import { saveResponse } from '@shared/download';
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
+    '../../../shared/log/log-page.scss',
+    '../../../shared/log/log-sidebar.scss',
     './evaluation-log.component.scss',
     './evaluation-log.sidebar.scss',
     './evaluation-log.messages.scss',
@@ -446,7 +448,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   loadBuilds(): void {
     // Initial load uses PAGE_SIZE for speed. Subsequent polls fetch ALL builds so that
-    // builds which changed sort rank (e.g. Building → Completed moves from rank 0 to rank 4)
+    // builds which changed sort rank (e.g. Building -> Completed moves from rank 0 to rank 4)
     // are never left in `beyondFirstPage` with a stale status.
     const limit = this.isInitialBuildsLoad
       ? this.PAGE_SIZE
@@ -485,7 +487,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
             // Auto-select first Building build when no explicit build was requested
             const firstBuilding = this.builds().find(b => b.status === 'Building');
             if (firstBuilding) {
-              this.selectBuild(firstBuilding); // isUserAction=false → auto-follow mode
+              this.selectBuild(firstBuilding); // isUserAction=false -> auto-follow mode
             } else {
               this.autoFollowBuilding = true; // wait for first build to start
             }
@@ -514,14 +516,14 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
         // ── Log transitions ─────────────────────────────────────────────────
 
-        // Queued → Building: reload logs for the newly started build
+        // Queued -> Building: reload logs for the newly started build
         if (prevSelected?.status === 'Queued' && newSelected?.status === 'Building') {
           this.pendingLogLines = [];
           this.logLoading.set(true);
           this.fetchInitialLogs(newSelected.id);
         }
 
-        // Building → Completed: flush logs.
+        // Building -> Completed: flush logs.
         // Only auto-switch to the next building build when in auto-follow mode
         // (the user hasn't manually picked a build). When the user explicitly
         // selected or navigated to this build, stay on it so they can read the log.
@@ -739,10 +741,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       if (response.ok) {
         const data = await response.json();
         if (!data.error && typeof data.message === 'string' && data.message !== '') {
-          // data.message is already a decoded JS string - split directly to preserve blank lines
-          const lines = (data.message as string).split('\n');
-          // Trim a single trailing empty string produced by a final newline
-          if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+          const lines = splitLogLines(data.message);
           this.logLines.set(lines);
           this.logLineCount.set(lines.length);
         }
@@ -1157,13 +1156,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }, 0);
   }
 
-  // <hash>-name-version.drv → <hash>-name-version (the store file name, without .drv)
+  // <hash>-name-version.drv -> <hash>-name-version (the store file name, without .drv)
   private buildFileName(path: string): string {
     return (path.split('/').pop() ?? path).replace(/\.drv$/, '');
   }
 
   buildDisplayName(path: string): string {
-    // <hash>-name-version.drv → name-version (strip leading hash, drop .drv)
+    // <hash>-name-version.drv -> name-version (strip leading hash, drop .drv)
     const filename = path.split('/').pop() ?? path;
     return filename.replace(/^[^-]+-/, '').replace(/\.drv$/, '');
   }
