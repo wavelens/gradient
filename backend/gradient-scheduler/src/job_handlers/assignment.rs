@@ -211,6 +211,10 @@ pub(crate) async fn assigned_transition(
             assignment: rec.assignment_id,
             worker: worker_id.to_owned(),
             retries_cap: exec.retries_cap,
+            token_hash: gradient_types::exec::hash_job_token(
+                &gradient_types::exec::mint_job_token(),
+            ),
+            token_expires_at: gradient_types::exec::job_token_expiry(now(), None),
         },
         (None, None) => return Ok(true),
     };

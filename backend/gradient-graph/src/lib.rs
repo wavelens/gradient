@@ -12,6 +12,7 @@ pub mod writer;
 #[cfg(test)]
 mod cases;
 mod claims;
+mod continuation;
 mod demote;
 mod exec;
 mod gc;

@@ -25,6 +25,14 @@ pub struct RecordBatch {
     pub derivations: Vec<DiscoveredDerivation>,
     pub warnings: Vec<String>,
     pub errors: Vec<String>,
+    pub continuation: Option<ExecJobId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContinuationOutcome {
+    Done,
+    Retry,
+    Failed { error: String },
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -188,6 +196,12 @@ pub enum Transition {
         assignment: DispatchedJobId,
         worker: String,
         retries_cap: u32,
+        token_hash: String,
+        token_expires_at: NaiveDateTime,
+    },
+    ContinuationEnded {
+        exec_job: ExecJobId,
+        outcome: ContinuationOutcome,
     },
     ExecProgramStarted {
         attempt: ExecJobAttemptId,
@@ -225,6 +239,7 @@ pub struct TransitionReport {
     pub prioritized_shared_builds: Vec<DerivationBuildId>,
     pub already_aborted: bool,
     pub aborted_exec_jobs: Vec<ExecJobId>,
+    pub aborted_continuations: Vec<ExecJobId>,
     pub substitute_log: Option<SubstituteLog>,
     pub refusal: Option<BuildRefusal>,
     pub consistency: Option<ConsistencyReport>,
@@ -288,6 +303,7 @@ pub struct GcReport {
     pub attempt_logs: Vec<BuildAttemptId>,
     pub retired: Vec<String>,
     pub deleted_evaluations: Vec<EvaluationId>,
+    pub deleted_exec_jobs: Vec<ExecJobId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
