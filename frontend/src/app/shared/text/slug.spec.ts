@@ -27,6 +27,11 @@ describe('slugify', () => {
     expect(slugify('Señor')).toBe('senor');
   });
 
+  it('transliterates letters that have no combining accent', () => {
+    expect(slugify('Søren Æble Łódź')).toBe('soren-aeble-lodz');
+    expect(slugify('Привет')).toBe('privet');
+  });
+
   it('lowercases, collapses separators to single hyphens and trims them', () => {
     expect(slugify('My  Cool__Task!!')).toBe('my-cool-task');
     expect(slugify('  spaced  ')).toBe('spaced');
@@ -34,6 +39,6 @@ describe('slugify', () => {
 
   it('returns an empty string when nothing slug-worthy remains', () => {
     expect(slugify('')).toBe('');
-    expect(slugify('—')).toBe('');
+    expect(slugify('?!')).toBe('');
   });
 });
