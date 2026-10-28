@@ -10,7 +10,7 @@ use gradient_types::{
     DEFAULT_TASK_WILDCARD, NIXOS_CACHE_NAME, NIXOS_CACHE_PUBLIC_KEY, NIXOS_CACHE_URL,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +35,8 @@ pub struct StateProject {
     #[serde(default)]
     pub description: Option<String>,
     pub private_key_file: String,
+    #[serde(default)]
+    pub secret_files: BTreeMap<String, String>,
     pub public: bool,
     #[serde(default)]
     pub hide_build_requests: bool,

@@ -82,6 +82,9 @@
       "gradient_user_${user.username}_password:${user.password_file}"
   ) cfg.state.users);
   projectPrivateKeyFiles = lib.mapAttrsToList (_: project: "gradient_project_${project.name}_private_key:${project.private_key_file}") cfg.state.projects;
+  projectSecretFiles = lib.concatLists (lib.mapAttrsToList (_: project:
+    lib.mapAttrsToList (name: file: "gradient_project_${project.name}_secret_${name}:${file}") project.secret_files
+  ) cfg.state.projects);
   cacheSigningKeyFiles = lib.mapAttrsToList (_: cache: "gradient_cache_${cache.name}_signing_key:${cache.signing_key_file}") cfg.state.caches;
   apiKeyFiles = lib.mapAttrsToList (_: api_key: "gradient_api_${api_key.name}_key:${api_key.key_file}") cfg.state.api_keys;
   workerTokenFiles = lib.mapAttrsToList (_: worker: "gradient_worker_${worker.worker_id}_token:${worker.token_file}") cfg.state.workers;
@@ -637,7 +640,7 @@ in {
               "gradient_ssh_host_key:${cfg.ssh.hostKeyFile}"
             ++ lib.optional (cfg.metrics.tokenFile != null)
               "gradient_metrics_token:${cfg.metrics.tokenFile}"
-            ++ userPasswordFiles ++ projectPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
+            ++ userPasswordFiles ++ projectPrivateKeyFiles ++ projectSecretFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
               ++ workerTokenFiles ++ integrationSecretFiles ++ integrationTokenFiles
               ++ actionSecretFiles;
           };

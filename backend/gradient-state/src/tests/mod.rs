@@ -9,9 +9,7 @@ mod fixtures;
 use super::StateConfiguration;
 use fixtures::{integration_cfg, reporter_cfg, worker_cfg};
 
-#[test]
-fn project_task_cache_descriptions_optional() {
-    let json = r#"{
+const WITHOUT_OPTIONAL_FIELDS: &str = r#"{
         "users": {
             "alice": {
                 "username": "alice",
@@ -49,11 +47,20 @@ fn project_task_cache_descriptions_optional() {
             }
         }
     }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+
+#[test]
+fn project_task_cache_descriptions_optional() {
+    let cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
     assert!(cfg.projects["acme"].description.is_none());
     assert!(cfg.tasks["web"].description.is_none());
     assert!(cfg.caches["main"].description.is_none());
     assert!(cfg.validate().is_valid);
+}
+
+#[test]
+fn secret_files_default_to_empty() {
+    let cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
+    assert!(cfg.projects["acme"].secret_files.is_empty());
 }
 
 #[test]
