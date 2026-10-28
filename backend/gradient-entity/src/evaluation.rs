@@ -9,7 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{CommitId, EvaluationId, TaskId, TaskTriggerId, UserId};
+use crate::ids::{CommitId, EvaluationId, ExecJobId, TaskId, TaskTriggerId, UserId};
 
 #[repr(i32)]
 #[derive(
@@ -355,6 +355,7 @@ pub struct Model {
     pub graph_version: i64,
     pub walk_mode: WalkMode,
     pub prioritized: bool,
+    pub parent_exec_job: Option<ExecJobId>,
 }
 
 impl Model {
