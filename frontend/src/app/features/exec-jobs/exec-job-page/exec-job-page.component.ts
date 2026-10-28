@@ -31,7 +31,7 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import type { ExecJobPullRequestView, ExecJobResponse, ExecJobStatus } from '@core/models';
-import { deviceLabel, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
+import { deviceLabel, guestSizeLabel, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 import { splitPhaseMarkers } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
 
@@ -126,6 +126,7 @@ export class ExecJobPageComponent implements OnInit {
 
   protected readonly phase = execJobPhase;
   protected readonly device = deviceLabel;
+  protected readonly guestSize = guestSizeLabel;
   protected readonly time = clockTime;
   protected readonly day = monthDay;
   protected readonly evaluationPhase = evaluationPhase;

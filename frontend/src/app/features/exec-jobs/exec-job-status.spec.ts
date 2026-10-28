@@ -6,7 +6,7 @@
 
 import type { ExecJobStatus, WaitingReason } from '@core/models';
 import type { StatusPhase } from '@shared/evaluation';
-import { deviceLabel, isOpenExecJob, execJobPhase, waitingReasonText } from './exec-job-status';
+import { deviceLabel, guestSizeLabel, isOpenExecJob, execJobPhase, waitingReasonText } from './exec-job-status';
 
 describe('execJobPhase', () => {
   it.each<[ExecJobStatus, StatusPhase]>([
@@ -83,6 +83,19 @@ describe('waitingReasonText', () => {
     expect(waitingReasonText(reason)).toBe('needs 2 workers in one zone');
   });
 
+  it('names the guest size no worker can hold', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: {
+        labels: [], devices: [], mounts: [], nodes: 0, custom_image: false,
+        guest: { cpus: 64, memory_mb: 0, disk_mb: 0 },
+      },
+      connected_workers: 1,
+      matching_workers: 0,
+    };
+    expect(waitingReasonText(reason)).toBe('needs 64 CPUs');
+  });
+
   it('counts the matching workers whose devices are busy', () => {
     const reason: WaitingReason = {
       kind: 'exec_workers',
@@ -95,6 +108,13 @@ describe('waitingReasonText', () => {
 
   it('has no text without a reason', () => {
     expect(waitingReasonText(null)).toBeNull();
+  });
+});
+
+describe('guestSizeLabel', () => {
+  it('lists CPUs, memory and disk', () => {
+    expect(guestSizeLabel({ cpus: 2, memory_mb: 500, disk_mb: 10240 })).toBe('2 CPUs · 500 MB memory · 10240 MB disk');
+    expect(guestSizeLabel({ cpus: 1, memory_mb: 768, disk_mb: 256 })).toBe('1 CPU · 768 MB memory · 256 MB disk');
   });
 });
 
