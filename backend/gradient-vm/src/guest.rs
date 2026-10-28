@@ -341,13 +341,7 @@ impl Guest {
         .await?;
         self.state.tap = Some(tap.clone());
         self.save()?;
-        let mac = format!(
-            "02:47:52:{:02x}:{:02x}:{:02x}",
-            (cid >> 16) & 0xff,
-            (cid >> 8) & 0xff,
-            cid & 0xff
-        );
-        self.api.vm_add_net(&tap, &mac, "net0").await?;
+        self.api.vm_add_net(&tap, &network.mac, "net0").await?;
         self.state.address = Some(network.address.clone());
         self.save()
     }
@@ -406,7 +400,17 @@ pub fn guest_address(subnet: &str, cid: u32, nameservers: &[String]) -> Result<G
         prefix,
         gateway,
         nameservers,
+        mac: guest_mac(cid),
     })
+}
+
+pub fn guest_mac(cid: u32) -> String {
+    format!(
+        "02:47:52:{:02x}:{:02x}:{:02x}",
+        (cid >> 16) & 0xff,
+        (cid >> 8) & 0xff,
+        cid & 0xff
+    )
 }
 
 pub fn device_groups(units: &[(String, DeviceUnit)]) -> Vec<String> {
@@ -491,6 +495,7 @@ mod tests {
                 prefix: 16,
                 gateway: "10.233.0.1".into(),
                 nameservers: vec!["10.233.0.1".into()],
+                mac: "02:47:52:00:00:03".into(),
             }
         );
     }

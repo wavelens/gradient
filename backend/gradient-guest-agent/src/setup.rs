@@ -34,6 +34,8 @@ const RESOLV_CONF: &str = "/etc/resolv.conf";
 const DEVICE_LINK_DIR: &str = "/dev/gradient";
 const DEVICE_GROUP: &str = "dialout";
 const INTERFACE_WAIT: Duration = Duration::from_secs(60);
+const INTERFACE_POLL: Duration = Duration::from_millis(100);
+const NET_CLASS_DIR: &str = "/sys/class/net";
 
 pub struct PreparedJob {
     pub program: Command,
@@ -148,7 +150,7 @@ async fn mount_shares(mounts: &[GuestMount]) -> Result<()> {
 }
 
 async fn configure_network(network: &GuestNetwork) -> Result<()> {
-    let interface = guest_interface().await?;
+    let interface = interface_with_mac(Path::new(NET_CLASS_DIR), &network.mac).await?;
     let address = format!("{}/{}", network.address, network.prefix);
     run_command("ip", &["link", "set", "dev", &interface, "up"]).await?;
     run_command("ip", &["addr", "add", &address, "dev", &interface]).await?;
@@ -176,23 +178,36 @@ async fn write_resolv_conf(path: &Path, nameservers: &[String]) -> Result<()> {
         .with_context(|| format!("write {}", path.display()))
 }
 
-async fn guest_interface() -> Result<String> {
+async fn interface_with_mac(net_dir: &Path, mac: &str) -> Result<String> {
     let deadline = tokio::time::Instant::now() + INTERFACE_WAIT;
+    let mut previous = None;
     loop {
-        let mut names = std::fs::read_dir("/sys/class/net")?
-            .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-            .filter(|name| name != "lo")
-            .collect::<Vec<_>>();
-        names.sort();
-        if let Some(name) = names.into_iter().next() {
-            return Ok(name);
+        let found = interface_named_by_mac(net_dir, mac)?;
+        if let Some(name) = found.as_ref().filter(|_| found == previous) {
+            return Ok(name.clone());
         }
 
         if tokio::time::Instant::now() >= deadline {
-            bail!("no network interface appeared in the guest");
+            bail!("no network interface with MAC {mac} appeared in the guest");
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        previous = found;
+        tokio::time::sleep(INTERFACE_POLL).await;
     }
+}
+
+fn interface_named_by_mac(net_dir: &Path, mac: &str) -> Result<Option<String>> {
+    let mut names = std::fs::read_dir(net_dir)?
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| name != "lo")
+        .filter(|name| mac.is_empty() || has_mac(&net_dir.join(name), mac))
+        .collect::<Vec<_>>();
+    names.sort();
+    Ok(names.into_iter().next())
+}
+
+fn has_mac(interface: &Path, mac: &str) -> bool {
+    std::fs::read_to_string(interface.join("address"))
+        .is_ok_and(|address| address.trim().eq_ignore_ascii_case(mac))
 }
 
 async fn start_relays(relays: &[GuestRelay], tasks: &Shutdown) -> Result<()> {
@@ -292,7 +307,31 @@ async fn run_command(program: &str, args: &[&str]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::write_resolv_conf;
+    use super::{interface_with_mac, write_resolv_conf};
+
+    #[tokio::test]
+    async fn the_interface_is_found_by_its_mac() {
+        let net = tempfile::tempdir().expect("tempdir");
+        for (name, address) in [
+            ("lo", "00:00:00:00:00:00"),
+            ("eth0", "52:54:00:12:34:56"),
+            ("enp0s5", "02:47:52:00:00:0A"),
+        ] {
+            std::fs::create_dir(net.path().join(name)).expect("interface dir");
+            std::fs::write(
+                net.path().join(name).join("address"),
+                format!("{address}\n"),
+            )
+            .expect("address");
+        }
+
+        assert_eq!(
+            interface_with_mac(net.path(), "02:47:52:00:00:0a")
+                .await
+                .expect("interface"),
+            "enp0s5"
+        );
+    }
 
     #[tokio::test]
     async fn the_nameservers_replace_a_linked_resolv_conf() {
