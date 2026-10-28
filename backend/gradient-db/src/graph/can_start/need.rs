@@ -121,7 +121,7 @@ pub(crate) static RECOUNT_WANTED_SQL: LazyLock<String> = LazyLock::new(|| {
 /// An aborted evaluation and an aborted entry point want nothing. Aborted shared builds are
 /// open, and such entry points kept them wanted and thawed. Completed and failed evaluations
 /// still want a retired output built again.
-fn wanted_by_its_evaluation(entry_point: &str) -> String {
+pub(crate) fn wanted_by_its_evaluation(entry_point: &str) -> String {
     format!(
         "JOIN evaluation ev ON ev.id = {entry_point}.evaluation AND ev.status <> {aborted} \
          AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = {entry_point}.evaluation \

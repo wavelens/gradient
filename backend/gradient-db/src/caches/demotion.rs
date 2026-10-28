@@ -125,6 +125,9 @@ pub async fn demote_cached_output(
         crate::graph::runtime_can_start::retire_outputs(&txn, &[hash.to_owned()]).await?;
     retired
         .transitions
+        .extend(crate::graph::needed_outputs::forget_unneeded_outputs(&txn, &producers).await?);
+    retired
+        .transitions
         .extend(crate::graph::can_start::unpromote_ungated(&txn, &producers).await?);
     txn.commit().await?;
 
@@ -160,6 +163,7 @@ pub(crate) fn unbacked_trusted_outputs_select() -> String {
     JOIN derivation_build db ON db.derivation = o.derivation
     WHERE db.status IN ({terminal_success})
       AND o.external_url IS NULL
+      AND o.name <> ALL(db.unneeded_outputs)
       AND NOT EXISTS (
           SELECT 1 FROM cached_path cp
           WHERE cp.hash = o.hash AND cp.file_hash IS NOT NULL)
@@ -263,6 +267,8 @@ mod tests {
                 none.clone(),
                 none.clone(),
                 none.clone(),
+                none.clone(),
+                none.clone(),
                 none,
             ])
             .append_exec_results(vec![
@@ -289,11 +295,12 @@ mod tests {
         );
         assert_eq!(
             log.len(),
-            17,
+            20,
             "outputs, demote, path lock, shared build lock, trust clear, retire lock, \
              producers of the hash, the complete closure they had, delete, \
-             shared build lock, mark, reset, owners, un-promote, and the raised, locked \
-             update of what the producers now need: {log:?}"
+             shared build lock, mark, reset, owners, the unneeded outputs forgotten under \
+             their lock and closure read, un-promote and the raised, locked update of what \
+             the producers now need: {log:?}"
         );
         let paths = log
             .iter()
@@ -419,6 +426,8 @@ mod tests {
                 none.clone(),
                 none.clone(),
                 none.clone(),
+                none.clone(),
+                none.clone(),
                 none,
             ])
             .append_exec_results(vec![
@@ -426,7 +435,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                9
+                10
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -439,12 +448,13 @@ mod tests {
         let log = statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            21,
+            24,
             "outputs, demote, path lock, shared build lock, trust clear, retire lock, \
              producers of the hash, the complete closure they had, the delete that finds \
              nothing, shared build lock, mark, ripple, the raised, locked update below \
-             what the mark flipped, reset, owners, un-promote, and the raised, locked \
-             update of what the producers now need: {log:?}"
+             what the mark flipped, reset, owners, the unneeded outputs forgotten under \
+             their lock and closure read, un-promote and the raised, locked update of \
+             what the producers now need: {log:?}"
         );
         assert!(
             log.iter()
@@ -502,6 +512,10 @@ mod tests {
         assert!(
             sql.contains("NOT EXISTS") && sql.contains("cp.file_hash IS NOT NULL"),
             "must require a missing backing NAR: {sql}"
+        );
+        assert!(
+            sql.contains("o.name <> ALL(db.unneeded_outputs)"),
+            "must skip outputs no wanted parent needs: {sql}"
         );
     }
 

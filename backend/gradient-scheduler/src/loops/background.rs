@@ -116,6 +116,28 @@ async fn transient_retry_pass(graph: &Graph) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub(crate) struct NeededOutputRequeue {
+    pub(crate) graph: Arc<Graph>,
+}
+
+impl Pass for NeededOutputRequeue {
+    const NAME: &'static str = "needed-output-requeue";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: Duration = super::ASSIGN_BUDGET;
+
+    fn period(&self) -> Duration {
+        super::ASSIGN_TICK
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        self.graph
+            .requeue(RequeueScope::NeededOutputs)
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+}
+
 pub(crate) struct GraphStuckReheal {
     pub(crate) db: WorkerDb,
     pub(crate) graph: Arc<Graph>,

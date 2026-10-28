@@ -362,7 +362,7 @@ async fn retire_shared_builds(
     Ok(transitions)
 }
 
-async fn reset_uncached_producers(
+pub(crate) async fn reset_uncached_producers(
     txn: &DatabaseTransaction,
     producers: &[DerivationId],
 ) -> Result<Vec<crate::status::TransitionChange>, DbErr> {

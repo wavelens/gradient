@@ -5,7 +5,7 @@
  */
 
 use gradient_types::events::evaluation;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::{Context, Result, anyhow};
 use gradient_db::{
@@ -67,12 +67,14 @@ ON CONFLICT (hash, name) DO NOTHING
         params = [DerivationHashes(64)];
 
     EDGE_INSERT = r#"
-INSERT INTO derivation_dependency (derivation, dependency)
-SELECT DISTINCT e.derivation, e.dependency FROM unnest($1::uuid[], $2::uuid[]) AS e(derivation, dependency)
-ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 1
+INSERT INTO derivation_dependency (derivation, dependency, dependency_outputs)
+SELECT e.derivation, e.dependency, string_to_array(NULLIF(e.outputs, ''), ' ')
+FROM unnest($1::uuid[], $2::uuid[], $3::text[]) AS e(derivation, dependency, outputs)
+ON CONFLICT (derivation, dependency) DO UPDATE
+SET kind = 2, dependency_outputs = EXCLUDED.dependency_outputs WHERE derivation_dependency.kind = 1
 RETURNING derivation
 "#,
-        params = [DerivationIds(64), DerivationIds(64)];
+        params = [DerivationIds(64), DerivationIds(64), Texts("out", 64)];
 
     SHARED_BUILD_LIMITS_UPDATE = r#"
 UPDATE derivation_build AS db
@@ -100,16 +102,19 @@ RETURNING db.derivation
 
 gradient_db::sql_fn! {
     FLIP_CACHE_AVAILABLE = flip_cache_available_sql,
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64), DerivationIds(64), Texts("dev", 64)];
 }
 
 fn flip_cache_available_sql() -> String {
     format!(
-        "UPDATE derivation_build SET cache_available = true, \
+        "UPDATE derivation_build db SET cache_available = true, \
+         unneeded_outputs = coalesce((SELECT array_agg(u.name ORDER BY u.name) \
+                                      FROM unnest($2::uuid[], $3::text[]) AS u(derivation, name) \
+                                      WHERE u.derivation = db.derivation), '{{}}'), \
          updated_at = (now() AT TIME ZONE 'UTC') \
-         WHERE derivation = ANY($1::uuid[]) AND NOT cache_available \
-           AND status NOT IN ({terminal_success}) \
-         RETURNING derivation",
+         WHERE db.derivation = ANY($1::uuid[]) AND NOT db.cache_available \
+           AND db.status NOT IN ({terminal_success}) \
+         RETURNING db.derivation, db.unneeded_outputs <> '{{}}' AS partial",
         terminal_success = gradient_db::sql::status::build_in(&BuildStatus::TERMINAL_SUCCESS),
     )
 }
@@ -117,6 +122,52 @@ fn flip_cache_available_sql() -> String {
 struct Resolved {
     by_path: HashMap<String, DerivationId>,
     by_hash: HashMap<String, DerivationId>,
+}
+
+#[derive(Default)]
+struct EdgeOutputs(BTreeMap<(DerivationId, DerivationId), Option<Vec<String>>>);
+
+impl EdgeOutputs {
+    fn add(
+        &mut self,
+        derivation: DerivationId,
+        dependency: DerivationId,
+        named: Option<&Vec<String>>,
+    ) {
+        let named = named.filter(|names| !names.is_empty()).cloned();
+        self.0
+            .entry((derivation, dependency))
+            .and_modify(|known| *known = merged_outputs(known.take(), named.clone()))
+            .or_insert(named);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn into_columns(self) -> [sea_orm::Value; 3] {
+        let mut from: Vec<uuid::Uuid> = Vec::with_capacity(self.0.len());
+        let mut to: Vec<uuid::Uuid> = Vec::with_capacity(self.0.len());
+        let mut outputs: Vec<String> = Vec::with_capacity(self.0.len());
+        for ((derivation, dependency), named) in self.0 {
+            from.push(derivation.into_inner());
+            to.push(dependency.into_inner());
+            outputs.push(named.map(|names| names.join(" ")).unwrap_or_default());
+        }
+
+        [from.into(), to.into(), outputs.into()]
+    }
+}
+
+fn merged_outputs(known: Option<Vec<String>>, named: Option<Vec<String>>) -> Option<Vec<String>> {
+    let (mut known, named) = (known?, named?);
+    for name in named {
+        if !known.contains(&name) {
+            known.push(name);
+        }
+    }
+
+    Some(known)
 }
 
 struct BatchWriter<'a> {
@@ -317,8 +368,7 @@ impl BatchWriter<'_> {
     ) -> Result<Vec<DerivationId>> {
         let now = gradient_types::now();
         let mut outputs: Vec<ADerivationOutput> = Vec::new();
-        let mut edge_from: Vec<uuid::Uuid> = Vec::new();
-        let mut edge_to: Vec<uuid::Uuid> = Vec::new();
+        let mut edges = EdgeOutputs::default();
         for d in derivations {
             let Some(&id) = ids.get(&d.drv_path) else {
                 continue;
@@ -340,10 +390,9 @@ impl BatchWriter<'_> {
                 );
             }
 
-            for dep in &d.dependencies {
+            for (at, dep) in d.dependencies.iter().enumerate() {
                 if let Some(&dep_id) = ids.get(dep) {
-                    edge_from.push(id.into_inner());
-                    edge_to.push(dep_id.into_inner());
+                    edges.add(id, dep_id, d.dependency_outputs.get(at));
                 }
             }
         }
@@ -367,13 +416,13 @@ impl BatchWriter<'_> {
             }
         }
 
-        if edge_from.is_empty() {
+        if edges.is_empty() {
             return Ok(Vec::new());
         }
 
         let grew = self
             .db()
-            .query_all_raw(EDGE_INSERT.bind([edge_from.into(), edge_to.into()]))
+            .query_all_raw(EDGE_INSERT.bind(edges.into_columns()))
             .await
             .context("insert dependency edges")?;
 
@@ -1165,25 +1214,93 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
     Ok(report)
 }
 
-async fn flip_cache_available<C: ConnectionTrait>(
-    db: &C,
-    upstream: &[DerivationId],
-) -> Result<Vec<DerivationId>> {
-    if upstream.is_empty() {
-        return Ok(Vec::new());
+#[derive(Default)]
+struct Substitutable {
+    shared_builds: Vec<DerivationId>,
+    unneeded: Vec<(DerivationId, String)>,
+}
+
+fn substitutable(
+    outputs: &[MDerivationOutput],
+    available: impl Fn(&MDerivationOutput) -> bool,
+    needed: &HashSet<(DerivationId, String)>,
+) -> Substitutable {
+    let mut by_shared_build: BTreeMap<DerivationId, Vec<(&str, bool)>> = BTreeMap::new();
+    for o in outputs {
+        by_shared_build
+            .entry(o.derivation)
+            .or_default()
+            .push((o.name.as_str(), available(o)));
     }
 
-    let ids: Vec<uuid::Uuid> = upstream.iter().map(|d| d.into_inner()).collect();
+    let mut found = Substitutable::default();
+    for (derivation, outputs) in by_shared_build {
+        let blocked = outputs
+            .iter()
+            .any(|(name, held)| !held && needed.contains(&(derivation, (*name).to_owned())));
+        if blocked || !outputs.iter().any(|(_, held)| *held) {
+            continue;
+        }
+
+        found.shared_builds.push(derivation);
+        found.unneeded.extend(
+            outputs
+                .iter()
+                .filter(|(_, held)| !held)
+                .map(|(name, _)| (derivation, (*name).to_owned())),
+        );
+    }
+
+    found
+}
+
+struct Flipped {
+    all: Vec<DerivationId>,
+    partly: Vec<DerivationId>,
+}
+
+async fn flip_cache_available<C: ConnectionTrait>(
+    db: &C,
+    substitutable: Substitutable,
+) -> Result<Flipped> {
+    if substitutable.shared_builds.is_empty() {
+        return Ok(Flipped {
+            all: Vec::new(),
+            partly: Vec::new(),
+        });
+    }
+
+    let ids: Vec<uuid::Uuid> = substitutable
+        .shared_builds
+        .iter()
+        .map(|d| d.into_inner())
+        .collect();
+    let (owners, names): (Vec<uuid::Uuid>, Vec<String>) = substitutable
+        .unneeded
+        .into_iter()
+        .map(|(derivation, name)| (derivation.into_inner(), name))
+        .unzip();
     let rows = db
-        .query_all_raw(FLIP_CACHE_AVAILABLE.bind([ids.into()]))
+        .query_all_raw(FLIP_CACHE_AVAILABLE.bind([ids.into(), owners.into(), names.into()]))
         .await
         .context("flag shared builds cache_available from upstream")?;
 
-    Ok(rows
-        .iter()
-        .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
-        .map(DerivationId::new)
-        .collect())
+    let mut flipped = Flipped {
+        all: Vec::new(),
+        partly: Vec::new(),
+    };
+    for row in &rows {
+        let Ok(derivation) = row.try_get::<uuid::Uuid>("", "derivation") else {
+            continue;
+        };
+        let derivation = DerivationId::new(derivation);
+        flipped.all.push(derivation);
+        if row.try_get::<bool>("", "partial").unwrap_or(false) {
+            flipped.partly.push(derivation);
+        }
+    }
+
+    Ok(flipped)
 }
 
 pub(crate) async fn apply_upstream_hits(
@@ -1237,27 +1354,18 @@ pub(crate) async fn apply_upstream_hits(
     let cached = gradient_db::derivation_outputs::cached_anywhere(db, &outputs)
         .await
         .context("find the outputs some cache already holds")?;
-    let mut by_shared_build: HashMap<DerivationId, Vec<bool>> = HashMap::new();
-    for o in &outputs {
-        by_shared_build
-            .entry(o.derivation)
-            .or_default()
-            .push(o.hash.as_ref().is_some_and(|h| hits.contains_key(h)) || cached.contains(&o.id));
-    }
-
-    let served: Vec<DerivationId> = touched
-        .iter()
-        .copied()
-        .filter(|d| {
-            by_shared_build
-                .get(d)
-                .is_some_and(|outs| !outs.is_empty() && outs.iter().all(|served| *served))
-        })
-        .collect();
-    let newly_cache_available = flip_cache_available(db, &served).await?;
+    let needed = gradient_db::graph::needed_outputs::needed_outputs(db, &touched)
+        .await
+        .context("find the outputs a wanted parent needs")?;
+    let available = |o: &MDerivationOutput| {
+        o.hash.as_ref().is_some_and(|h| hits.contains_key(h)) || cached.contains(&o.id)
+    };
+    let flipped = flip_cache_available(db, substitutable(&outputs, available, &needed)).await?;
+    let newly_cache_available = flipped.all;
 
     let seeded =
-        gradient_db::graph::runtime_can_start::seed_runtime_deps(txn, &[], &touched).await?;
+        gradient_db::graph::runtime_can_start::seed_runtime_deps(txn, &flipped.partly, &touched)
+            .await?;
     if !seeded.complete.is_empty() {
         let lock = gradient_db::graph::can_start::lock_shared_builds(txn, &seeded.complete).await?;
         let changes = gradient_db::graph::can_start::became_fetchable(&lock).await?;

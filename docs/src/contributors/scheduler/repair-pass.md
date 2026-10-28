@@ -94,7 +94,7 @@ Changes to `evaluation.graph_version` can invalidate the per-entry-point status 
 | 5 | `settle_skipped`: settle shared builds wanted by no evaluation to `Skipped`, thaw needed ones | `skipped_moves` |
 | 6 | Recount `blocking_deps` over the repair scope, then un-queue and queue | `counter_drift`, `unpromoted_startable` |
 | 7 | Adopt pending shared builds reachable by a live evaluation and named by nobody | `adopted` |
-| 8 | Count unbacked outputs of terminal-success producers (read-only) | `unbacked_trusted_outputs` |
+| 8 | Count unbacked outputs of terminal-success producers, without `unneeded_outputs` (read-only) | `unbacked_trusted_outputs` |
 | 9 | Recount evaluation shared-build counters | `eval_counter_drift` |
 | 10 | Tally `Building` evaluations where `active_shared_builds = 0`. These evaluations lack an open exec job and a queued continue file. Keep the tally read-only. | `wedged_building_evals` |
 

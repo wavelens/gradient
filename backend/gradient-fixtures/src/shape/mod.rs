@@ -154,6 +154,20 @@ impl Shape {
         self.edge(path, EdgeKind::Buildtime)
     }
 
+    pub fn depends_on_outputs(mut self, path: &str, outputs: &[&str]) -> Self {
+        let derivation = self.derivations[self.current_derivation()].id;
+        let to = self.derivation_at(path);
+        let dependency = self.derivations[to].id;
+        self = self.edge(path, EdgeKind::Buildtime);
+        let edge = self
+            .edges
+            .iter_mut()
+            .find(|e| e.derivation == derivation && e.dependency == dependency)
+            .expect("the edge just declared");
+        edge.dependency_outputs = Some(outputs.iter().map(|o| (*o).to_owned()).collect());
+        self
+    }
+
     pub fn runtime_depends_on(self, path: &str) -> Self {
         self.edge(path, EdgeKind::Runtime)
     }
@@ -217,6 +231,23 @@ impl Shape {
             }
             self.outputs.push(output);
         }
+        self
+    }
+
+    pub fn unneeded_output(mut self, hash: &str, name: &str) -> Self {
+        let at = self.current_derivation();
+        self = self.named_output(hash, name);
+        let derivation = self.derivations[at].id;
+        if let Some(output) = self
+            .outputs
+            .iter_mut()
+            .find(|o| o.derivation == derivation && o.name == name)
+        {
+            output.external_url = None;
+            output.nar_hash = None;
+            output.nar_size = None;
+        }
+        self.shared_builds[at].unneeded_outputs.push(name.into());
         self
     }
 
@@ -565,6 +596,7 @@ impl Shape {
                 derivation,
                 dependency,
                 kind,
+                dependency_outputs: None,
             }),
         }
         self
