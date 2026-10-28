@@ -63,6 +63,10 @@ impl Replacements {
         }
     }
 
+    pub(crate) fn replacement(&self, index: usize) -> &[u8] {
+        &self.replacements[index]
+    }
+
     pub fn longest(&self) -> usize {
         self.longest
     }
