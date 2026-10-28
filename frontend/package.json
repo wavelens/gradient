@@ -41,6 +41,7 @@
     "@angular/platform-browser": "^22.2.3",
     "@angular/router": "^22.2.3",
     "@gradient/ui": "workspace:*",
+    "@sindresorhus/slugify": "3.0.0",
     "@xterm/addon-fit": "0.10.0",
     "@xterm/xterm": "5.5.0",
     "d3-sankey": "^0.12.3",
