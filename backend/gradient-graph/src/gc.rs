@@ -241,6 +241,9 @@ async fn delete_evaluations(ctx: &DbContext, evaluations: &[EvaluationId]) -> Re
         .filter_map(|r| r.try_get::<Uuid>("", "derivation").ok())
         .map(DerivationId::new)
         .collect();
+    let deleted_exec_jobs = gradient_db::exec_jobs::outputs::jobs_of_evaluations(db, evaluations)
+        .await
+        .context("GC: collect the exec jobs of the evaluations to delete")?;
 
     unlink(db, evaluations)
         .await
@@ -265,6 +268,7 @@ async fn delete_evaluations(ctx: &DbContext, evaluations: &[EvaluationId]) -> Re
 
     Ok(GcReport {
         deleted_evaluations: evaluations.to_vec(),
+        deleted_exec_jobs,
         ..Default::default()
     })
 }

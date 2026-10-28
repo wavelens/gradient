@@ -1058,6 +1058,16 @@ fn accepts_batches(status: EvaluationStatus, held: bool) -> bool {
     }
 }
 
+async fn continues_its_evaluation(ctx: &DbContext, batch: &RecordBatch) -> Result<bool> {
+    let Some(job) = batch.continuation else {
+        return Ok(false);
+    };
+
+    gradient_db::exec_jobs::continuations::is_queued(&ctx.worker_db, job)
+        .await
+        .context("check the continuation of the batch")
+}
+
 #[tracing::instrument(level = "debug", skip_all, fields(eval_id = %batch.evaluation, derivations = batch.derivations.len()))]
 pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<RecordReport> {
     let evaluation_id = batch.evaluation;
@@ -1065,7 +1075,8 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
         .one(&ctx.worker_db)
         .await
         .context("fetch evaluation")?;
-    let held = ctx.memory.held_evaluations.holds(evaluation_id).await;
+    let held = ctx.memory.held_evaluations.holds(evaluation_id).await
+        || continues_its_evaluation(ctx, batch).await?;
     match evaluation {
         Some(e) if !accepts_batches(e.status, held) => {
             warn!(%evaluation_id, status = ?e.status, "batch for an evaluation that is not streaming; dropped as stale");

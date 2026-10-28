@@ -5,10 +5,7 @@
  */
 
 use chrono::NaiveDateTime;
-use gradient_types::{
-    EExecJobToken, ExecJobAttemptId, ExecJobId, ExecJobTokenId, MExecJobToken, ProjectId, TaskId,
-    UserId,
-};
+use gradient_types::{ExecJobAttemptId, ExecJobId, ExecJobTokenId, ProjectId, TaskId, UserId};
 use sea_orm::{ConnectionTrait, DbErr, FromQueryResult, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
@@ -31,6 +28,16 @@ pub struct JobTokenRow {
 }
 
 crate::sql! {
+    INSERT_EXEC_JOB_TOKEN = "INSERT INTO exec_job_token \
+         (id, attempt, token_hash, project, task, expires_at, revoked, created_at) \
+         SELECT $1::uuid, a.id, $3::text, tk.project, tk.id, $4::timestamp, false, \
+              (now() AT TIME ZONE 'UTC') \
+         FROM exec_job_attempt a \
+         JOIN exec_job j ON j.id = a.exec_job \
+         JOIN evaluation ev ON ev.id = j.evaluation \
+         JOIN task tk ON tk.id = ev.task \
+         WHERE a.id = $2",
+        params = [NewUuid, NewUuid, Text("0000"), Now];
     RESOLVE_JOB_TOKEN = "SELECT a.exec_job AS job, t.attempt, t.project, t.task, \
          p.name AS project_name, tk.name AS task_name, \
          COALESCE(ev.started_by, tk.created_by) AS acting_user \
@@ -52,25 +59,17 @@ pub async fn insert<C: ConnectionTrait>(
     db: &C,
     attempt: ExecJobAttemptId,
     token_hash: &str,
-    project: ProjectId,
-    task: TaskId,
     expires_at: NaiveDateTime,
-) -> Result<(), DbErr> {
-    crate::rows::insert::<EExecJobToken, _>(
-        db,
-        MExecJobToken {
-            id: ExecJobTokenId::now_v7(),
-            attempt,
-            token_hash: token_hash.to_owned(),
-            project,
-            task,
-            expires_at,
-            revoked: false,
-            created_at: gradient_types::now(),
-        },
-    )
-    .await?;
-    Ok(())
+) -> Result<bool, DbErr> {
+    let inserted = db
+        .execute_raw(INSERT_EXEC_JOB_TOKEN.bind([
+            Value::Uuid(Some(ExecJobTokenId::now_v7().into_inner())),
+            Value::Uuid(Some(attempt.into_inner())),
+            Value::String(Some(token_hash.to_owned())),
+            Value::ChronoDateTime(Some(expires_at)),
+        ]))
+        .await?;
+    Ok(inserted.rows_affected() == 1)
 }
 
 pub async fn resolve<C: ConnectionTrait>(
@@ -96,6 +95,7 @@ pub async fn of_job<C: ConnectionTrait>(db: &C, job: ExecJobId) -> Result<Vec<Jo
 mod tests {
     use super::*;
     use gradient_fixtures::mock::{all_statements, mock_db};
+    use gradient_types::MExecJobToken;
 
     #[tokio::test]
     async fn a_token_resolves_only_unrevoked_and_unexpired() {

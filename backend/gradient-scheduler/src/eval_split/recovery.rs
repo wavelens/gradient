@@ -65,6 +65,7 @@ impl Scheduler {
             derivations: Vec::new(),
             warnings: Vec::new(),
             errors: failed.iter().map(shard_error).collect(),
+            continuation: None,
         };
         if let Err(e) = self.graph.record(batch).await {
             warn!(%evaluation, error = %e, "recording the errors of failed shards failed");
