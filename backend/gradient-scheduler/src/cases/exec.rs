@@ -26,11 +26,11 @@ use super::{
 use crate::jobs::Assignment;
 use crate::test_jobs::allow_all;
 
-const W1: &str = "w1";
-const W2: &str = "w2";
-const ATTR: &str = "apps.x86_64-linux.a";
+pub(super) const W1: &str = "w1";
+pub(super) const W2: &str = "w2";
+pub(super) const ATTR: &str = "apps.x86_64-linux.a";
 
-fn exec_shape(evaluation: EvaluationId) -> Shape {
+pub(super) fn exec_shape(evaluation: EvaluationId) -> Shape {
     shape()
         .evaluation(evaluation)
         .evaluation_status(EvaluationStatus::Building)
@@ -45,7 +45,7 @@ fn exec_shape(evaluation: EvaluationId) -> Shape {
         .cached_output(A)
 }
 
-fn spec() -> ExecSpec {
+pub(super) fn spec() -> ExecSpec {
     ExecSpec {
         program: format!("/nix/store/{A_OUT}-a/bin/a"),
         nodes: 1,
@@ -53,7 +53,7 @@ fn spec() -> ExecSpec {
     }
 }
 
-fn inventory() -> ExecInventory {
+pub(super) fn inventory() -> ExecInventory {
     ExecInventory {
         labels: vec![W1.into()],
         allow: allow_all(),

@@ -13,14 +13,15 @@ use gradient_db::exec_jobs::dispatch::{self, ExecDispatchRow};
 use gradient_db::exec_jobs::program_closure;
 use gradient_graph::Transition;
 use gradient_pool::{WorkerCaps, WorkerInfo};
-use gradient_types::ProjectId;
 use gradient_types::exec::{ExecDefaults, ExecSpec};
+use gradient_types::{ExecJobId, ProjectId};
 use gradient_util::supervision::{Pass, PassError, RunsOn};
 use gradient_wire::types::RequiredPath;
 use tracing::{debug, error, warn};
 
 use crate::Scheduler;
 use crate::buildability::exec_waiting_reason;
+use crate::cluster::Membership;
 use crate::exec_secrets::{resolve_secret_names, secret_refusal};
 use crate::jobs::{ExecAssignment, PendingExecJob, PendingJob, exec_job_key};
 
@@ -57,10 +58,13 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
     let untracked: HashSet<String> = scheduler.untracked(keys).await.into_iter().collect();
     let workers = scheduler.board_workers().await;
     let api_url = scheduler.db.config.server.serve_url.clone();
-    let new_rows = rows
+    let new_rows: Vec<&ExecDispatchRow> = rows
         .iter()
-        .filter(|row| untracked.contains(&exec_job_key(row.job.id)));
-    let closures = ProgramClosures::load(&scheduler.db.worker_db, new_rows).await?;
+        .filter(|row| untracked.contains(&exec_job_key(row.job.id)))
+        .collect();
+    let closures = ProgramClosures::load(&scheduler.db.worker_db, new_rows.iter().copied()).await?;
+    let new_ids: Vec<ExecJobId> = new_rows.iter().map(|row| row.job.id).collect();
+    let membership = Membership::load(&scheduler.db.worker_db, &[], &[], &new_ids).await?;
 
     for row in rows {
         let key = exec_job_key(row.job.id);
@@ -91,7 +95,7 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
         }
         if let Err(e) = scheduler
             .enqueue_routed(
-                crate::cluster::Route::Single,
+                membership.route(&key),
                 key.clone(),
                 PendingJob::Exec(Box::new(pending)),
             )
@@ -243,6 +247,7 @@ pub(crate) fn pending_exec_job(
     let now = gradient_types::now();
     Some(PendingExecJob {
         exec_job: row.job.id,
+        node_index: row.node_index,
         evaluation_id: row.job.evaluation,
         project_id: row.project,
         task_id: row.task,
@@ -269,6 +274,7 @@ pub(crate) fn pending_exec_job(
             retries_cap: u32::try_from(row.job.retries_left).unwrap_or(0),
             token_hash: String::new(),
             token_expires_at: chrono::NaiveDateTime::default(),
+            master_port: None,
         }),
         secrets: Default::default(),
         spec,

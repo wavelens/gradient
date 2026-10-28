@@ -225,7 +225,7 @@ async fn membership_after_splits(
 ) -> anyhow::Result<Membership> {
     let db = &scheduler.db.worker_db;
     let ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
-    let membership = Membership::load(db, &ids, &[]).await?;
+    let membership = Membership::load(db, &ids, &[], &[]).await?;
     scheduler
         .split_decisions
         .keep_only(&ids.iter().copied().collect());
@@ -241,7 +241,7 @@ async fn membership_after_splits(
         return Ok(membership);
     }
 
-    Ok(Membership::load(db, &ids, &[]).await?)
+    Ok(Membership::load(db, &ids, &[], &[]).await?)
 }
 
 fn assemble_eval_job(

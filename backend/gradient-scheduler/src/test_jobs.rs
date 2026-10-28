@@ -109,6 +109,7 @@ pub(crate) fn eval_worker_caps() -> GradientCapabilities {
 pub(crate) fn exec_job(spec: ExecSpec) -> PendingExecJob {
     PendingExecJob {
         exec_job: ExecJobId::now_v7(),
+        node_index: 0,
         evaluation_id: EvaluationId::now_v7(),
         project_id: ProjectId::now_v7(),
         task_id: TaskId::now_v7(),

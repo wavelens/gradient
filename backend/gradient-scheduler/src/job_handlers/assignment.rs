@@ -213,7 +213,7 @@ pub(crate) async fn assigned_transition(
             retries_cap: exec.retries_cap,
             token_hash: exec.token_hash.clone(),
             token_expires_at: exec.token_expires_at,
-            master_port: None,
+            master_port: exec.master_port,
         },
         (None, None) => return Ok(true),
     };

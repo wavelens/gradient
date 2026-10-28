@@ -8,10 +8,10 @@ use std::collections::HashMap;
 
 use gradient_db::scheduling::cluster::MemberOf;
 use gradient_entity::cluster_job::ClusterJobStatus;
-use gradient_types::ids::{DerivationBuildId, EvaluationId};
+use gradient_types::ids::{DerivationBuildId, EvaluationId, ExecJobId};
 use sea_orm::{ConnectionTrait, DbErr};
 
-use crate::jobs::{build_job_key, eval_job_key};
+use crate::jobs::{build_job_key, eval_job_key, exec_job_key};
 
 pub(crate) enum Route {
     Single,
@@ -29,20 +29,23 @@ impl Membership {
         db: &C,
         evaluations: &[EvaluationId],
         shared_builds: &[DerivationBuildId],
+        exec_jobs: &[ExecJobId],
     ) -> Result<Self, DbErr> {
         let by_key = gradient_db::scheduling::cluster::cluster_membership(
             db,
             evaluations,
             shared_builds,
-            &[],
+            exec_jobs,
         )
         .await?
         .into_iter()
         .filter_map(|of| {
-            let key = match (of.member.evaluation, of.member.derivation_build) {
-                (Some(e), _) => eval_job_key(e, member_index(&of)),
-                (None, Some(a)) => build_job_key(a),
-                (None, None) => return None,
+            let member = &of.member;
+            let key = match (member.evaluation, member.derivation_build, member.exec_job) {
+                (Some(e), _, _) => eval_job_key(e, member_index(&of)),
+                (None, Some(a), _) => build_job_key(a),
+                (None, None, Some(job)) => exec_job_key(job),
+                (None, None, None) => return None,
             };
             Some((key, of))
         })

@@ -118,10 +118,17 @@ mod tests {
             labels: vec!["lab-a".into()],
             ..ExecSpec::default()
         })];
+        let two_node_worker = |id: &str, label: &str| {
+            let mut caps = exec_caps_labelled(label);
+            if let Some(inventory) = caps.exec.as_mut() {
+                inventory.allow.nodes = 2;
+            }
+            worker_info(id, caps)
+        };
         let workers = [
-            worker_info("w1", exec_caps_labelled("lab-a")),
-            worker_info("w2", exec_caps_labelled("lab-a")),
-            worker_info("w3", exec_caps_labelled("lab-b")),
+            two_node_worker("w1", "lab-a"),
+            two_node_worker("w2", "lab-a"),
+            two_node_worker("w3", "lab-b"),
             worker_info("b1", build_only_caps()),
         ];
         assert_eq!(

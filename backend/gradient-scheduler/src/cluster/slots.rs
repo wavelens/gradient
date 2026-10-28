@@ -26,10 +26,11 @@ pub enum SlotKind {
 
 impl From<&ClusterMember> for SlotKind {
     fn from(m: &ClusterMember) -> Self {
-        if m.key
-            .starts_with(gradient_db::scheduling::assignment_record::BUILD_KEY_PREFIX)
-        {
+        use gradient_db::scheduling::assignment_record::{BUILD_KEY_PREFIX, EXEC_KEY_PREFIX};
+        if m.key.starts_with(BUILD_KEY_PREFIX) {
             SlotKind::Build
+        } else if m.key.starts_with(EXEC_KEY_PREFIX) {
+            SlotKind::Exec
         } else {
             SlotKind::Eval
         }

@@ -192,6 +192,30 @@ impl PendingJob {
         }
     }
 
+    pub fn cluster_index(&self) -> Option<u32> {
+        match self {
+            PendingJob::Exec(j) => Some(j.node_index),
+            PendingJob::Eval(_) | PendingJob::Build(_) => None,
+        }
+    }
+
+    pub(crate) fn assigned_job(
+        &mut self,
+        caps: Option<&WorkerCaps>,
+        record: &mut AssignmentRecord,
+        master_port: Option<u16>,
+    ) -> Option<Job> {
+        match self {
+            PendingJob::Exec(exec) => {
+                let dispatch = caps.and_then(|caps| exec.dispatch_on(caps, master_port));
+                exec.assignment = dispatch.as_ref().map(|(assignment, _)| assignment.clone());
+                record.exec = exec.assignment.clone();
+                dispatch.map(|(_, wire)| Job::Exec(Box::new(wire)))
+            }
+            other => other.clone().into_job(record.choice.map(|c| c.cores)),
+        }
+    }
+
     pub(crate) fn into_job(self, cores: Option<u32>) -> Option<Job> {
         match self {
             PendingJob::Eval(j) => Some(Job::Flake(j.job)),
@@ -1233,16 +1257,7 @@ impl JobTracker {
         caps: Option<&WorkerCaps>,
     ) -> Option<Assignment> {
         let mut job = self.pending.remove(job_id)?;
-        let wire_job = match &mut job {
-            PendingJob::Exec(exec) => {
-                let dispatch = caps.and_then(|c| exec.dispatch_on(c));
-                exec.assignment = dispatch.as_ref().map(|(assignment, _)| assignment.clone());
-                record.exec = exec.assignment.clone();
-                dispatch.map(|(_, wire)| Job::Exec(Box::new(wire)))
-            }
-            other => other.clone().into_job(record.choice.map(|c| c.cores)),
-        };
-        let Some(wire_job) = wire_job else {
+        let Some(wire_job) = job.assigned_job(caps, &mut record, None) else {
             self.pending.insert(job_id.to_owned(), job);
             return None;
         };
