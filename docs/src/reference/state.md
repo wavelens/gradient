@@ -70,7 +70,7 @@ services.gradient.state = {
 | `actions.*.config` | attribute set | `{ }` | Configuration specific to the action type. |
 | `actions.*.events` | list of string | `[ ]` | Events this action subscribes to. |
 | `actions.*.name` | string | - | Action name, unique within the task. |
-| `actions.*.type` | one of `send_mail` `send_web_request` `send_matrix_message` `send_slack_message` `git_host_status_report` `open_pr` | - | The kind of action, which determines the expected `config`. |
+| `actions.*.type` | one of `send_mail` `send_web_request` `send_matrix_message` `send_slack_message` `git_host_status_report` `open_pr` `start_evaluation` | - | The kind of action, which determines the expected `config`. |
 | `active` | bool | `true` | Whether this task is active. |
 | `concurrency` | one of `auto` `hard_abort` `soft_abort` `skip` `all` | `"auto"` | What happens when a new trigger event arrives while an evaluation of the same branch is still running, see [concurrency](../concepts/projects-and-tasks.md#concurrency). |
 | `created_by` | string | - | User name of the task's creator. |
@@ -219,6 +219,7 @@ Each worker registration has the following options.
 | `send_matrix_message` | Required | `homeserver`, `room_id`, `access_token_file` |
 | `send_slack_message` | Required | `webhook_url_file` |
 | `git_host_status_report` | Empty | `integration`: an outbound integration |
-| `open_pr` | Empty | `integration`, `generator`, `granularity`, `verify_gate`, `branch_pattern`, `title_template`, `body_template`, `update_existing`, see [Update Flake Inputs](../guides/flake-updates.md) |
+| `open_pr` | Empty | `integration`, `generator`, `granularity`, `verify_gate`, `branch_pattern`, `title_template`, `body_template`, `update_existing`, see [Update Flake Inputs](../guides/flake-updates.md). `generator` is `flake_lock` (default) or `exec_tree` for the `gradient/tree.patch` output of an exec job |
+| `start_evaluation` | Required | `task`: a task of the same project, evaluated at its head commit |
 
 Event names live in the [events reference](events.md).

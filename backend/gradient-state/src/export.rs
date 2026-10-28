@@ -154,6 +154,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         config.projects.insert(o.name.clone(), project);
     }
 
+    let task_name: HashMap<TaskId, String> = tasks.iter().map(|t| (t.id, t.name.clone())).collect();
     for p in &tasks {
         if p.managed && p.name == "build-request" {
             continue;
@@ -166,7 +167,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         let task_actions = actions
             .iter()
             .filter(|a| a.task == p.id)
-            .filter_map(|a| export_action(a, &integration_name))
+            .filter_map(|a| export_action(a, &integration_name, &task_name))
             .collect();
         let flake_input_overrides = overrides
             .iter()
@@ -537,9 +538,10 @@ fn enum_str<T: serde::Serialize>(value: &T) -> String {
         .unwrap_or_default()
 }
 
-fn export_action(
+pub(crate) fn export_action(
     a: &gradient_entity::task_action::Model,
     integration_name: &HashMap<IntegrationId, String>,
+    task_name: &HashMap<TaskId, String>,
 ) -> Option<super::StateAction> {
     let cfg: ActionConfig = serde_json::from_value(a.config.clone()).ok()?;
     let events: Vec<String> = serde_json::from_value(a.events.clone()).unwrap_or_default();
@@ -615,7 +617,11 @@ fn export_action(
         ActionConfig::SendSlackMessage { .. } => {
             (ActionType::SendSlackMessage, serde_json::Map::new())
         }
-        ActionConfig::StartEvaluation { .. } => return None,
+        ActionConfig::StartEvaluation { task } => {
+            let mut c = serde_json::Map::new();
+            c.insert("task".into(), task_name.get(&task).cloned()?.into());
+            (ActionType::StartEvaluation, c)
+        }
     };
     Some(super::StateAction {
         name: a.name.clone(),
