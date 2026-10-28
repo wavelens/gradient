@@ -104,6 +104,9 @@ crate::sql! {
          SET ended_at = (now() AT TIME ZONE 'UTC'), end_reason = $2, message = $3 \
          WHERE id = $1 AND ended_at IS NULL RETURNING *",
         params = [NewUuid, Int(3), Text("lost")];
+    REVOKE_EXEC_JOB_TOKENS_OF_ATTEMPT = "UPDATE exec_job_token SET revoked = true \
+         WHERE attempt = $1 AND NOT revoked",
+        params = [NewUuid];
 }
 
 pub async fn open<C: ConnectionTrait>(
@@ -169,6 +172,10 @@ pub async fn close<C: ConnectionTrait>(
     else {
         return Ok(None);
     };
+    db.execute_raw(
+        REVOKE_EXEC_JOB_TOKENS_OF_ATTEMPT.bind([Value::Uuid(Some(attempt.into_inner()))]),
+    )
+    .await?;
     let job = EExecJob::find_by_id(closed.exec_job)
         .one(db)
         .await?
@@ -262,6 +269,40 @@ mod tests {
             log[0].sql.contains("waiting_reason = NULL"),
             "{}",
             log[0].sql
+        );
+    }
+
+    #[tokio::test]
+    async fn closing_an_attempt_revokes_its_tokens() {
+        let attempt = ExecJobAttemptId::now_v7();
+        let job = MExecJob {
+            id: ExecJobId::now_v7(),
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_query_results([vec![MExecJobAttempt {
+                id: attempt,
+                exec_job: job.id,
+                ..Default::default()
+            }]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![job]])
+            .into_connection();
+
+        close(&db, attempt, AttemptEndReason::Completed, None)
+            .await
+            .unwrap()
+            .expect("the attempt closes");
+
+        let log = all_statements(db.into_transaction_log());
+        assert!(
+            log.iter().any(|s| s
+                .sql
+                .starts_with("UPDATE exec_job_token SET revoked = true WHERE attempt = $1")),
+            "{log:?}"
         );
     }
 }

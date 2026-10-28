@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::tokens::JobTokenRow;
 use chrono::NaiveDateTime;
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_types::{
     CEvaluation, CExecJob, CExecJobAttempt, CExecJobPhase, EEntryPoint, EEvaluation, EExecJob,
@@ -38,6 +40,16 @@ pub struct ExecJobDetail {
     pub project: Option<ProjectId>,
     pub attempts: Vec<MExecJobAttempt>,
     pub phases: Vec<ExecJobPhaseRow>,
+    pub tokens: Vec<JobTokenRow>,
+    pub started_evaluations: Vec<StartedEvaluation>,
+}
+
+#[derive(Debug, Clone, PartialEq, FromQueryResult)]
+pub struct StartedEvaluation {
+    pub evaluation: EvaluationId,
+    pub task: String,
+    pub status: EvaluationStatus,
+    pub created_at: NaiveDateTime,
 }
 
 crate::sql! {
@@ -47,6 +59,10 @@ crate::sql! {
          FROM exec_job r JOIN entry_point e ON e.id = r.entry_point \
          WHERE r.evaluation = $1 ORDER BY e.eval",
         params = [EvaluationId];
+    EVALUATIONS_STARTED_BY_EXEC_JOB = "SELECT ev.id AS evaluation, t.name AS task, ev.status, \
+         ev.created_at FROM evaluation ev JOIN task t ON t.id = ev.task \
+         WHERE ev.parent_exec_job = $1 ORDER BY ev.created_at",
+        params = [NewUuid];
 }
 
 pub async fn open_of_evaluation<C: ConnectionTrait>(
@@ -138,6 +154,8 @@ pub async fn one<C: ConnectionTrait>(
         .into_model::<ExecJobPhaseRow>()
         .all(db)
         .await?;
+    let tokens = super::tokens::of_job(db, job.id).await?;
+    let started_evaluations = started_evaluations(db, job.id).await?;
     Ok(Some(ExecJobDetail {
         job,
         entry_point,
@@ -145,5 +163,18 @@ pub async fn one<C: ConnectionTrait>(
         project,
         attempts,
         phases,
+        tokens,
+        started_evaluations,
     }))
+}
+
+async fn started_evaluations<C: ConnectionTrait>(
+    db: &C,
+    job: ExecJobId,
+) -> Result<Vec<StartedEvaluation>, DbErr> {
+    StartedEvaluation::find_by_statement(
+        EVALUATIONS_STARTED_BY_EXEC_JOB.bind([Value::Uuid(Some(job.into_inner()))]),
+    )
+    .all(db)
+    .await
 }

@@ -45,7 +45,9 @@ pub async fn check_evaluation_done(
         return Ok(());
     }
 
-    if crate::exec_jobs::has_open_exec_jobs(db, evaluation_id).await? {
+    if crate::exec_jobs::has_open_exec_jobs(db, evaluation_id).await?
+        || crate::exec_jobs::continuations::has_open(db, evaluation_id).await?
+    {
         return Ok(());
     }
 
@@ -156,6 +158,7 @@ mod tests {
             .append_query_results([flag("blocked", false)])
             .append_query_results([vec![eval.clone()]])
             .append_query_results([flag("open", false)])
+            .append_query_results([flag("open", false)])
             .append_query_results([flag("failed", false)])
             .append_query_results([flag("failed", false)])
             .append_query_results([Vec::<MEvaluationMessage>::new()])
@@ -205,6 +208,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_open_continuation_keeps_the_evaluation_building() {
+        let eval = building();
+        let db = mock_db()
+            .append_query_results([counters(0, 0)])
+            .append_query_results([flag("blocked", false)])
+            .append_query_results([vec![eval.clone()]])
+            .append_query_results([flag("open", false)])
+            .append_query_results([flag("open", true)])
+            .into_connection();
+
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+        check_evaluation_done(&ctx, eval.id).await.unwrap();
+        drop(ctx);
+
+        let log = statements(pool.into_transaction_log());
+        assert!(
+            log.iter().any(|s| s.contains("FROM exec_job_continuation")),
+            "the continuation is read: {log:?}"
+        );
+        assert!(
+            !log.iter().any(|s| s.contains(r#"UPDATE \"evaluation\""#)),
+            "a queued continuation keeps the evaluation open: {log:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn a_held_evaluation_stays_open() {
         let eval = building();
         let db = empty_db();
@@ -241,6 +270,7 @@ mod tests {
             .append_query_results([counters(0, 0)])
             .append_query_results([flag("blocked", false)])
             .append_query_results([vec![eval.clone()]])
+            .append_query_results([flag("open", false)])
             .append_query_results([flag("open", false)])
             .append_query_results([flag("failed", true)])
             .append_query_results([Vec::<MEvaluationMessage>::new()])
