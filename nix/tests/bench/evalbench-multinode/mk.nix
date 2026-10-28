@@ -95,6 +95,8 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
       diskSize = 8192;
       writableStore = true;
     };
+    # The test framework boots on acpi_pm, where every clock read traps to the hypervisor.
+    boot.kernelParams = lib.mkAfter [ "clocksource=kvm-clock" ];
     documentation.enable = false;
     nix.settings.max-jobs = 0;
   };
@@ -118,6 +120,7 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
         })
       ];
 
+      services.gradient.postgres.sharedBuffers = lib.mkForce "2GB";
       services.postgresql.settings = {
         log_min_duration_statement = 5000;
         "auto_explain.log_min_duration" = lib.mkForce 5000;

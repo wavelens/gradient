@@ -115,6 +115,9 @@ in
         host all all 127.0.0.1/32 trust
       '';
       settings = {
+        fsync = false;
+        full_page_writes = false;
+        max_wal_size = "4GB";
         shared_preload_libraries = "pg_stat_statements,auto_explain";
         "pg_stat_statements.max" = 10000;
         "pg_stat_statements.track_planning" = true;
