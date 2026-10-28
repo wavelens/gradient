@@ -266,7 +266,7 @@ The **Terminal** tab of the job page offers three sessions.
 
 | Session | Job status | Content |
 |---|---|---|
-| **Console** | `starting` or `running` | Serial console of the guest, starting with the last 64 KiB of output |
+| **Console** | `starting` or `running` | Serial console of the guest, logged in as `gradient`, starting with the last 64 KiB of output |
 | **Attach to program** | `running`, `ssh = true` | The terminal of the program |
 | **New shell** | `running`, `ssh = true` | A new shell next to the program |
 
