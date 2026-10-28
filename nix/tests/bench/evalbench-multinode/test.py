@@ -221,10 +221,17 @@ spans_seen = 0
 
 def unseen_spans():
     global spans_seen
-    text = server.succeed(f"cat {SERVER_SPANS} | tail -n +{spans_seen + 1}")
+    text = server.succeed(f"awk 1 {SERVER_SPANS} | tail -n +{spans_seen + 1}")
     complete = text.split("\n")[:-1]
     spans_seen += len(complete)
-    return [json.loads(line) for line in complete if line.startswith("{")]
+    return [span for span in map(parsed_span, complete) if span]
+
+
+def parsed_span(line):
+    try:
+        return json.loads(line) if line.startswith("{") else None
+    except json.JSONDecodeError:
+        return None
 
 
 def save_slow_spans(label):
