@@ -11,6 +11,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
+import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import {
   BadgeComponent,
@@ -72,6 +73,7 @@ export class TaskActionsComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private accessSvc = inject(AccessService);
   private teamsService = inject(TeamsService);
+  private tasksService = inject(TasksService);
 
   access = injectTaskAccess();
 
@@ -105,6 +107,7 @@ export class TaskActionsComponent implements OnInit {
   actions = signal<ActionResponse[]>([]);
   outboundIntegrations = signal<IntegrationOption[]>([]);
   mailTeams = signal<string[]>([]);
+  projectTasks = signal<{ id: string; name: string }[]>([]);
 
   editingAction = signal<ActionResponse | null>(null);
   showCreateDialog = signal(false);
@@ -122,6 +125,7 @@ export class TaskActionsComponent implements OnInit {
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
     this.loadActions();
     this.loadIntegrations();
+    this.loadProjectTasks();
     this.teamsService.projectGrants(this.projectName).subscribe({
       next: (grants) => this.mailTeams.set(grants.filter((g) => g.users && !g.pending).map((g) => g.team)),
       error: () => this.mailTeams.set([]),
@@ -148,6 +152,13 @@ export class TaskActionsComponent implements OnInit {
             .map((i) => ({ id: i.id, display_name: i.display_name })),
         ),
       error: () => this.outboundIntegrations.set([]),
+    });
+  }
+
+  private loadProjectTasks(): void {
+    this.tasksService.getTasks(this.projectName, 1, 100).subscribe({
+      next: (page) => this.projectTasks.set(page.items.map((t) => ({ id: t.id, name: t.name }))),
+      error: () => this.projectTasks.set([]),
     });
   }
 
@@ -274,6 +285,7 @@ export class TaskActionsComponent implements OnInit {
       case 'open_pr': return 'neutral';
       case 'send_matrix_message': return 'info';
       case 'send_slack_message': return 'info';
+      case 'start_evaluation': return 'success';
     }
   }
 
@@ -285,6 +297,7 @@ export class TaskActionsComponent implements OnInit {
       case 'open_pr': return 'code';
       case 'send_matrix_message': return 'forum';
       case 'send_slack_message': return 'chat';
+      case 'start_evaluation': return 'play_arrow';
     }
   }
 

@@ -40,6 +40,16 @@ interface IntegrationOption {
   display_name: string;
 }
 
+interface TaskOption {
+  id: string;
+  name: string;
+}
+
+const DEFAULT_BRANCH_PATTERN: Record<PatchGeneratorKind, string> = {
+  flake_lock: 'gradient/flake-lock-update',
+  exec_tree: 'gradient/{entry_point}',
+};
+
 @Component({
   selector: 'app-action-form',
   standalone: true,
@@ -68,6 +78,7 @@ export class ActionFormComponent implements OnChanges {
   mode = input<FormMode>('create');
   existing = input<ActionResponse | null>(null);
   outboundIntegrations = input<IntegrationOption[]>([]);
+  tasks = input<TaskOption[]>([]);
   open = input<boolean>(false);
   error = input<string | null>(null);
 
@@ -79,7 +90,7 @@ export class ActionFormComponent implements OnChanges {
   name = signal('');
   active = signal(true);
   events = signal<string[]>([]);
-  readonly taskFamilies = ['build', 'evaluation', 'task'];
+  readonly taskFamilies = ['build', 'evaluation', 'exec_job', 'task'];
   recipientsRaw = signal('');
   teams = input<string[]>([]);
   teamOptions = computed(() => this.teams().map((team) => ({ label: team, value: team })));
@@ -100,13 +111,15 @@ export class ActionFormComponent implements OnChanges {
   prGenerator = signal<PatchGeneratorKind>('flake_lock');
   prGranularity = signal<PrGranularity>('per_run');
   prVerifyGate = signal<VerifyGate>('build');
-  prBranchPattern = signal('gradient/flake-lock-update');
+  prBranchPattern = signal(DEFAULT_BRANCH_PATTERN.flake_lock);
   prTitleTemplate = signal('');
   prBodyTemplate = signal('');
   prUpdateExisting = signal(true);
+  startTask = signal('');
 
   readonly generatorOptions: { label: string; value: PatchGeneratorKind }[] = [
     { label: 'Flake Lock', value: 'flake_lock' },
+    { label: 'Exec Tree', value: 'exec_tree' },
   ];
 
   readonly granularityOptions: { label: string; value: PrGranularity }[] = [
@@ -131,11 +144,14 @@ export class ActionFormComponent implements OnChanges {
         'send_slack_message',
         'git_host_status_report',
         'open_pr',
+        'start_evaluation',
       ] as ActionType[]
     )
       .filter((value) => value !== 'send_mail' || this.smtpEnabled())
       .map((value) => ({ label: ACTION_TYPE_LABEL[value], value })),
   );
+
+  readonly taskOptions = computed(() => this.tasks().map((t) => ({ label: t.name, value: t.id })));
 
   readonly integrationOptions = computed(() =>
     this.outboundIntegrations().map((i) => ({ label: i.display_name, value: i.id })),
@@ -147,9 +163,17 @@ export class ActionFormComponent implements OnChanges {
 
   // `git_host_status_report` and `open_pr` fire on an internal gate, not
   // user-selected events: the status reporter tracks the whole lifecycle, and
-  // A PR action fires when an input_update evaluation passes its verify gate.
+  // a PR action fires on the gate of its generator.
   readonly eventsHardwired = computed(
     () => this.type() === 'git_host_status_report' || this.type() === 'open_pr',
+  );
+
+  readonly defaultBranchPattern = computed(() => DEFAULT_BRANCH_PATTERN[this.prGenerator()]);
+
+  readonly prEventsHint = computed(() =>
+    this.prGenerator() === 'exec_tree'
+      ? 'Fires when an exec job of this task completes with a changed tree.'
+      : 'A PR action fires automatically when an input_update evaluation passes its verify gate. No event triggers apply.',
   );
 
   readonly typeRadioDisabled = computed(() => this.mode() === 'edit');
@@ -188,6 +212,7 @@ export class ActionFormComponent implements OnChanges {
     this.roomId.set('');
     this.secretValue.set('');
     this.integrationId.set('');
+    this.startTask.set('');
     this.resetPrFields();
   }
 
@@ -195,7 +220,7 @@ export class ActionFormComponent implements OnChanges {
     this.prGenerator.set('flake_lock');
     this.prGranularity.set('per_run');
     this.prVerifyGate.set('build');
-    this.prBranchPattern.set('gradient/flake-lock-update');
+    this.prBranchPattern.set(DEFAULT_BRANCH_PATTERN.flake_lock);
     this.prTitleTemplate.set('');
     this.prBodyTemplate.set('');
     this.prUpdateExisting.set(true);
@@ -230,6 +255,9 @@ export class ActionFormComponent implements OnChanges {
         break;
       case 'send_slack_message':
         break;
+      case 'start_evaluation':
+        this.startTask.set(cfg.task);
+        break;
     }
   }
 
@@ -237,6 +265,13 @@ export class ActionFormComponent implements OnChanges {
     this.type.set(newType);
     this.resetConfigFields();
     if (newType === 'git_host_status_report') this.events.set([...GIT_HOST_STATUS_EVENTS]);
+  }
+
+  onGeneratorChange(generator: PatchGeneratorKind): void {
+    if (this.prBranchPattern() === DEFAULT_BRANCH_PATTERN[this.prGenerator()]) {
+      this.prBranchPattern.set(DEFAULT_BRANCH_PATTERN[generator]);
+    }
+    this.prGenerator.set(generator);
   }
 
   generateToken(): void {
@@ -277,11 +312,13 @@ export class ActionFormComponent implements OnChanges {
           type: 'open_pr',
           integration_id: this.integrationId(),
           generator: this.prGenerator(),
-          granularity: this.prGranularity(),
-          verify_gate: this.prVerifyGate(),
           branch_pattern: this.prBranchPattern().trim(),
           update_existing: this.prUpdateExisting(),
         };
+        if (this.prGenerator() === 'flake_lock') {
+          cfg.granularity = this.prGranularity();
+          cfg.verify_gate = this.prVerifyGate();
+        }
         const title = this.prTitleTemplate().trim();
         const body = this.prBodyTemplate().trim();
         if (title) cfg.title_template = title;
@@ -304,6 +341,8 @@ export class ActionFormComponent implements OnChanges {
         if (secret) cfg.webhook_url = secret;
         return cfg;
       }
+      case 'start_evaluation':
+        return { type: 'start_evaluation', task: this.startTask() };
     }
   }
 

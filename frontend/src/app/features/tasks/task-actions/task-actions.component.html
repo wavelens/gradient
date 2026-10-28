@@ -127,6 +127,7 @@
   [error]="error()"
   [outboundIntegrations]="outboundIntegrations()"
   [teams]="mailTeams()"
+  [tasks]="projectTasks()"
   (saved)="onCreateSaved($event)"
   (closed)="showCreateDialog.set(false)"
 />
@@ -138,6 +139,7 @@
   [existing]="editingAction()"
   [outboundIntegrations]="outboundIntegrations()"
   [teams]="mailTeams()"
+  [tasks]="projectTasks()"
   (saved)="onEditSaved($event)"
   (closed)="showEditDialog.set(false); editingAction.set(null)"
 />

@@ -17,13 +17,20 @@ export interface EventGroup {
   items: { value: string; label: string }[];
 }
 
+function familyLabel(family: string): string {
+  return family
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 /** Durable events grouped by their first dotted segment, optionally limited to `families`. */
 export function groupCatalog(entries: CatalogEntry[], families?: string[]): EventGroup[] {
   const groups = new Map<string, EventGroup>();
   for (const { name, durable } of entries) {
     const [family, ...rest] = name.split('.');
     if (!durable || (families && !families.includes(family))) continue;
-    const group = family.charAt(0).toUpperCase() + family.slice(1);
+    const group = familyLabel(family);
     if (!groups.has(group)) groups.set(group, { group, items: [] });
     groups.get(group)!.items.push({ value: name, label: rest.join('.') || name });
   }
