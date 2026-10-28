@@ -175,6 +175,10 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(tasks::management::post_task_transfer))
                 .routes(routes!(tasks::management::post_task_check_repository))
                 .routes(routes!(tasks::evaluations::post_task_evaluate))
+                .routes(limited(
+                    routes!(tasks::pull_requests::post_task_pull_request),
+                    gradient_ci::pull_requests::MAX_PULL_REQUEST_PATCH_BYTES,
+                ))
                 .routes(routes!(
                     tasks::management::post_task_active,
                     tasks::management::delete_task_active

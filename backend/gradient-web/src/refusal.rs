@@ -18,6 +18,7 @@ pub enum RefusalStatus {
     Gone,
     PayloadTooLarge,
     UnprocessableEntity,
+    BadGateway,
     ServiceUnavailable,
 }
 
@@ -32,6 +33,7 @@ impl RefusalStatus {
             Self::Gone => ErrorCode::GONE,
             Self::PayloadTooLarge => ErrorCode::PAYLOAD_TOO_LARGE,
             Self::UnprocessableEntity => ErrorCode::UNPROCESSABLE_ENTITY,
+            Self::BadGateway => ErrorCode::BAD_GATEWAY,
             Self::ServiceUnavailable => ErrorCode::SERVICE_UNAVAILABLE,
         }
     }
@@ -148,6 +150,7 @@ impl<R: Refusal> From<R> for WebError {
             RefusalStatus::Gone => Self::Gone(code, message),
             RefusalStatus::PayloadTooLarge => Self::PayloadTooLarge(code, message),
             RefusalStatus::UnprocessableEntity => Self::UnprocessableEntity(code, message),
+            RefusalStatus::BadGateway => Self::BadGateway(code, message),
             RefusalStatus::ServiceUnavailable => Self::ServiceUnavailable(code, message),
         }
     }

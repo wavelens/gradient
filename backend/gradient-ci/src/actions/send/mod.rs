@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-mod git_host_status;
+pub(crate) mod git_host_status;
 mod mail;
 pub(crate) mod matrix;
-mod open_pr;
+pub(crate) mod open_pr;
 pub(crate) mod slack;
 mod web_request;
 

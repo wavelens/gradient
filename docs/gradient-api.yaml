@@ -10082,6 +10082,52 @@ paths:
       security:
       - {}
       - bearerAuth: []
+  /api/v1/tasks/{project}/{task}/pull-requests:
+    post:
+      tags:
+      - tasks
+      summary: Open a pull request from a patch
+      description: |-
+        Applies a unified diff to the start commit and opens or updates a pull request through the Git host integration of the task's `open_pr` action. Inside an exec job the start commit is the job's evaluation commit and the pull request is listed on the job; any other caller passes `commit`. Without `branch` the branch name follows the touched paths, so the same paths update one pull request. The patch may add and change files but not delete them.
+
+        **Access:** Members with the `triggerEvaluation` permission, or the job token of an exec job of the task.
+      operationId: openTaskPullRequest
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePullRequestRequest'
+        required: true
+      responses:
+        '200':
+          description: Opened pull request
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/PullRequestResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/tasks/{project}/{task}/transfer:
     post:
       tags:
@@ -14957,6 +15003,32 @@ components:
       - none
       - superusers
       - everyone
+    CreatePullRequestRequest:
+      type: object
+      required:
+      - title
+      - patch
+      properties:
+        title:
+          type: string
+        body:
+          type:
+          - string
+          - 'null'
+        branch:
+          type:
+          - string
+          - 'null'
+        base:
+          type:
+          - string
+          - 'null'
+        patch:
+          type: string
+        commit:
+          type:
+          - string
+          - 'null'
     CreateRoleRequest:
       type: object
       required:
@@ -18859,6 +18931,20 @@ components:
           type:
           - string
           - 'null'
+    PullRequestResponse:
+      type: object
+      required:
+      - url
+      - number
+      - branch
+      properties:
+        url:
+          type: string
+        number:
+          type: integer
+          format: int64
+        branch:
+          type: string
     PutProjectSecretRequest:
       type: object
       required:

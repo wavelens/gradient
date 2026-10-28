@@ -10,6 +10,7 @@ pub mod evaluations;
 pub mod flake_inputs;
 pub mod management;
 pub mod metrics;
+pub mod pull_requests;
 mod refusal;
 pub mod triggers;
 

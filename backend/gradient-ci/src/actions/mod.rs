@@ -10,7 +10,7 @@ mod executor;
 mod matchers;
 mod payload;
 mod report;
-mod send;
+pub(crate) mod send;
 pub(crate) mod summary;
 
 use crate::context::CiContext;

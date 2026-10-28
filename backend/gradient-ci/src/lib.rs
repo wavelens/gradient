@@ -14,6 +14,7 @@ pub mod github_app_manifest;
 pub mod integration_lookup;
 pub mod manifest_state;
 pub mod pull_request_summary;
+pub mod pull_requests;
 pub mod reactions;
 pub mod reporting;
 pub mod trigger;
