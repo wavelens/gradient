@@ -141,6 +141,7 @@ in {
             reverseProxy.nginx.enable = true;
             postgres.enable = true;
             domain = "gradient.local";
+            useTls = false;
             proto.public = true;
             ssh.enable = true;
             secrets.jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4");
@@ -219,7 +220,7 @@ in {
             resolveLocalQueries = false;
             settings = {
               no-resolv = true;
-              address = "/web.exec.test/${config.networking.primaryIPAddress}";
+              address = map (name: "/${name}/${config.networking.primaryIPAddress}") [ "web.exec.test" "gradient.local" ];
             };
           };
 
@@ -245,7 +246,7 @@ in {
         label = "stop";
         maxPreWarm = 2;
         stopGuestsWithWorker = true;
-        memorySize = 5120;
+        memorySize = 6144;
         sops = {
           files = [ "${sopsFixtures}/worker.yaml" "${clashSops}" ];
           keyFile = "${sopsFixtures}/ed25519";

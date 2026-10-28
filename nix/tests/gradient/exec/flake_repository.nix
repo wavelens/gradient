@@ -32,6 +32,8 @@
         args = [ "@gradient.secret.wandb-token@" ];
       };
       clash = app "clash" { labels = [ "stop" ]; secrets = [ "clash-key" ]; };
+      outputs = app "outputs" { labels = [ "stop" ]; network = true; };
     };
+    packages.x86_64-linux.hello = programs.hello;
   };
 }

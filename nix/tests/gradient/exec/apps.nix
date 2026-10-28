@@ -54,6 +54,18 @@ in {
     echo "clash started"
   '';
 
+  outputs = pkgs.writeShellScript "exec-outputs" ''
+    set -euo pipefail
+    gradient-phase epoch-1 <(echo state-1)
+    ${pkgs.coreutils}/bin/head -c 3000000 /dev/urandom > /tmp/w.bin
+    gradient-upload /tmp/w.bin model/w.bin
+    echo changed >> README
+    echo new > new.txt
+    gradient build --no-link --background packages.x86_64-linux.hello
+  '';
+
+  hello = pkgs.writeText "exec-hello" "hello\n";
+
   abort = ticks "exec-abort" 600;
   long-stop = ticks "exec-long-stop" 300;
   long-keep = ticks "exec-long-keep" 150;
