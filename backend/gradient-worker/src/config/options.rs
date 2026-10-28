@@ -390,7 +390,8 @@ pub struct ExecArgs {
     pub bridge: String,
 
     /// IPv4 subnet of {option}`services.gradient.worker.exec.bridge`. The bridge takes the
-    /// first host address, each guest the address of its vsock CID.
+    /// first host address. Guests with network access get the lowest free address after it.
+    /// Multi-node exec jobs need a different subnet on each exec worker of a zone.
     #[arg(default_value = "10.233.0.0/16")]
     pub subnet: String,
 

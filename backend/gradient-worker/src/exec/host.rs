@@ -7,7 +7,9 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use gradient_vm::{DeviceInventory, GuestPool, GuestUnits, SysfsProbe, plan_reattach, read_states};
+use gradient_vm::{
+    DeviceInventory, GuestAddresses, GuestPool, GuestUnits, SysfsProbe, plan_reattach, read_states,
+};
 use gradient_wire::types::ExecInventory;
 use tokio_util::sync::CancellationToken;
 
@@ -19,6 +21,7 @@ use crate::config::{ExecArgs, WorkerConfig};
 pub struct ExecHost {
     pub pool: Arc<GuestPool>,
     pub devices: DeviceInventory,
+    pub addresses: GuestAddresses,
     pub config: ExecArgs,
     pub worker_id: String,
     pub zone: Option<String>,
@@ -60,9 +63,12 @@ impl ExecHost {
         let vm = config.exec.vm_config(config.guests_dir(), &worker_exe);
         let units = GuestUnits::connect().await?;
         let devices = DeviceInventory::from_config(&vm.devices, &SysfsProbe);
+        let addresses = GuestAddresses::new(&config.exec.subnet, &config.exec.nameservers)
+            .context("exec.subnet")?;
         Ok(Arc::new(ExecHost {
             pool: GuestPool::new(vm, units),
             devices,
+            addresses,
             config: config.exec.clone(),
             worker_id,
             zone: config.zone.clone().filter(|zone| !zone.is_empty()),
@@ -75,7 +81,8 @@ impl ExecHost {
         let units = self.pool.units().list().await?;
         let states = read_states(&self.pool.config().guests_dir);
         let plan = plan_reattach(&units, states);
-        let busy = gradient_vm::reattach::apply(plan, &self.pool, &self.devices).await;
+        let busy =
+            gradient_vm::reattach::apply(plan, &self.pool, &self.devices, &self.addresses).await;
         Ok(resumable(busy, self.pool.units()).await)
     }
 

@@ -634,7 +634,7 @@
     "flag": "exec-subnet",
     "env": "GRADIENT_WORKER_EXEC_SUBNET",
     "type": "String",
-    "description": "IPv4 subnet of {option}`services.gradient.worker.exec.bridge`. The bridge takes the\nfirst host address, each guest the address of its vsock CID.",
+    "description": "IPv4 subnet of {option}`services.gradient.worker.exec.bridge`. The bridge takes the\nfirst host address. Guests with network access get the lowest free address after it.\nMulti-node exec jobs need a different subnet on each exec worker of a zone.",
     "default": "10.233.0.0/16",
     "values": []
   },
