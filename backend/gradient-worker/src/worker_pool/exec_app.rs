@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use gradient_eval::ipc::ExecApp;
-use gradient_wire::types::{DeviceRequest, ExecSpec};
+use gradient_wire::types::{DeviceRequest, ExecSpec, SopsFile, validate_secret_name};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -54,6 +54,7 @@ fn spec_of(app: ExecApp) -> Result<ExecSpec, String> {
     if block.ports.contains(&0) {
         return Err("ports: port 0 cannot be forwarded".into());
     }
+    check_secret_names(&block.secrets)?;
 
     Ok(ExecSpec {
         program: app.program,
@@ -68,12 +69,31 @@ fn spec_of(app: ExecApp) -> Result<ExecSpec, String> {
         env: block.env,
         args: block.args,
         secrets: block.secrets,
-        sops: vec![],
+        sops: app
+            .sops
+            .into_iter()
+            .map(|file| SopsFile {
+                path: file.path,
+                ciphertext: file.content.into_bytes(),
+            })
+            .collect(),
         keep_running: block.keep_running,
         timeout_secs: block.timeout,
         max_silent_secs: block.max_silent,
         retries: block.retries,
     })
+}
+
+fn check_secret_names(names: &[String]) -> Result<(), String> {
+    let mut seen = BTreeSet::new();
+    for name in names {
+        validate_secret_name(name).map_err(|e| format!("secrets: {e}"))?;
+        if !seen.insert(name) {
+            return Err(format!("secrets: \"{name}\" is listed twice"));
+        }
+    }
+
+    Ok(())
 }
 
 fn nix_block(json: &str) -> Result<NixBlock, String> {
@@ -101,7 +121,39 @@ mod tests {
             program: "/nix/store/aaaa-train/bin/train".into(),
             program_drv: "aaaa-train.drv".into(),
             image_drv: None,
+            sops: vec![],
         }
+    }
+
+    #[test]
+    fn a_bad_secret_name_names_itself() {
+        assert!(
+            exec_spec(app(r#"{"secrets":["Bad_Name"]}"#))
+                .unwrap_err()
+                .contains("Bad_Name")
+        );
+        assert!(
+            exec_spec(app(r#"{"secrets":["a1b2c3d4","a1b2c3d4"]}"#))
+                .unwrap_err()
+                .contains("a1b2c3d4")
+        );
+    }
+
+    #[test]
+    fn sops_files_reach_the_spec_as_bytes() {
+        let mut with_sops = app("{}");
+        with_sops.sops = vec![gradient_eval::ipc::ExecAppFile {
+            path: "secrets/train.yaml".into(),
+            content: "wandb-token: ENC[x]".into(),
+        }];
+        let spec = exec_spec(with_sops).unwrap();
+        assert_eq!(
+            spec.sops,
+            vec![SopsFile {
+                path: "secrets/train.yaml".into(),
+                ciphertext: b"wandb-token: ENC[x]".to_vec()
+            }]
+        );
     }
 
     #[test]

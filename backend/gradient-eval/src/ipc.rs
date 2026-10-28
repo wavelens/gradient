@@ -14,7 +14,7 @@ use crate::stats::{AttrCost, StatsDelta};
 
 /// The version must be bumped whenever the frame layout or a type's rkyv shape changes.
 /// A mismatch can only happen when the binary is replaced mid-run.
-pub const EVAL_IPC_VERSION: u8 = 16;
+pub const EVAL_IPC_VERSION: u8 = 17;
 
 pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
 
@@ -168,6 +168,17 @@ pub struct ExecApp {
     pub program: String,
     pub program_drv: String,
     pub image_drv: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sops: Vec<ExecAppFile>,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize,
+)]
+#[rkyv(derive(Debug))]
+pub struct ExecAppFile {
+    pub path: String,
+    pub content: String,
 }
 
 pub fn encode_request(req: &EvalRequest) -> Result<AlignedVec, RkyvError> {

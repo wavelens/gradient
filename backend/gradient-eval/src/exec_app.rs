@@ -9,7 +9,7 @@ use nix_bindings::EvalState;
 use nix_bindings::eval_cache::AttrCursor;
 use serde::Deserialize;
 
-use crate::ipc::ExecApp;
+use crate::ipc::{ExecApp, ExecAppFile};
 use crate::strip_nix_store_prefix;
 
 pub const EXEC_APP_EXPR: &str = r#"app: let
@@ -24,7 +24,13 @@ in builtins.unsafeDiscardStringContext (builtins.toJSON (if problem != null then
   block = removeAttrs g [ "image" "sops" ];
   program = app.program;
   programDrvs = builtins.filter (k: ctx.${k} ? outputs) (builtins.attrNames ctx);
+  sops = map (p: {
+    path = if builtins.isPath p then toString p else null;
+    content = if builtins.isPath p then builtins.readFile p else "";
+  }) (g.sops or [ ]);
 }))"#;
+
+pub const MAX_SOPS_FILE_BYTES: usize = 1 << 20;
 
 const IMAGE_TOPLEVEL: [&str; 4] = ["config", "system", "build", "toplevel"];
 
@@ -41,6 +47,14 @@ struct ReadApp {
     block: serde_json::Value,
     program: String,
     program_drvs: Vec<String>,
+    #[serde(default)]
+    sops: Vec<ReadSopsFile>,
+}
+
+#[derive(Deserialize)]
+struct ReadSopsFile {
+    path: Option<String>,
+    content: String,
 }
 
 pub fn is_exec_app(cursor: &AttrCursor) -> Result<bool> {
@@ -116,11 +130,39 @@ fn exec_app(app: ReadApp, image_drv: Option<&str>) -> Result<ExecApp, String> {
         ));
     };
 
+    let sops = app
+        .sops
+        .into_iter()
+        .map(sops_file)
+        .collect::<Result<_, _>>()?;
+
     Ok(ExecApp {
         block: app.block.to_string(),
         program_drv: strip_nix_store_prefix(program_drv),
         image_drv: image_drv.map(strip_nix_store_prefix),
         program: app.program,
+        sops,
+    })
+}
+
+fn sops_file(file: ReadSopsFile) -> Result<ExecAppFile, String> {
+    let stored = file
+        .path
+        .ok_or("passthru.gradient: sops entry is not a path")?;
+    let path = stored
+        .strip_prefix("/nix/store/")
+        .and_then(|rest| rest.split_once('/'))
+        .map(|(_, relative)| relative.to_owned())
+        .ok_or_else(|| format!("passthru.gradient: sops file {stored} is not in the repository"))?;
+    if file.content.len() > MAX_SOPS_FILE_BYTES {
+        return Err(format!(
+            "passthru.gradient: sops file {path} is larger than 1 MiB"
+        ));
+    }
+
+    Ok(ExecAppFile {
+        path,
+        content: file.content,
     })
 }
 
@@ -165,5 +207,28 @@ mod tests {
             ("aaaa-x.drv", Some("bbbb-nixos-system.drv"))
         );
         assert_eq!(app.block, r#"{"network":true}"#);
+    }
+
+    #[test]
+    fn a_sops_file_is_named_relative_to_the_repository() {
+        let json = r#"{"block":{},"program":"/nix/store/aaaa-x/bin/x","programDrvs":["/nix/store/aaaa-x.drv"],"image":null,
+            "sops":[{"path":"/nix/store/bbbb-source/secrets/train.yaml","content":"wandb-token: ENC[x]"}]}"#;
+        let app = exec_app_from_json(json, None).unwrap();
+        assert_eq!(
+            app.sops,
+            vec![ExecAppFile {
+                path: "secrets/train.yaml".into(),
+                content: "wandb-token: ENC[x]".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_sops_entry_that_is_not_a_path_is_a_field_error() {
+        let json = r#"{"block":{},"program":"/nix/store/aaaa-x/bin/x","programDrvs":["/nix/store/aaaa-x.drv"],"image":null,"sops":[{"path":null,"content":""}]}"#;
+        assert_eq!(
+            exec_app_from_json(json, None).unwrap_err(),
+            "passthru.gradient: sops entry is not a path"
+        );
     }
 }

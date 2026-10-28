@@ -49,7 +49,8 @@
       machine.succeed("install -Dm644 ${./fixture.nix} /root/fixture/flake.nix")
       machine.succeed("${git} -C /root/fixture init -q")
       machine.succeed("${git} -C /root/fixture config user.email t@t && ${git} -C /root/fixture config user.name t")
-      machine.succeed("${git} -C /root/fixture add flake.nix")
+      machine.succeed("install -Dm644 ${./secrets/train.yaml} /root/fixture/secrets/train.yaml")
+      machine.succeed("${git} -C /root/fixture add flake.nix secrets/train.yaml")
       machine.succeed("${git} -C /root/fixture commit -qm fixture")
       machine.succeed("${nix} flake lock /root/fixture")
       machine.succeed("${git} -C /root/fixture add -A && ${git} -C /root/fixture commit -qm lock --allow-empty")
@@ -133,6 +134,8 @@
       curl = apps["curl"]["exec"]
       assert curl["program_drv"].endswith("-check.drv"), curl
       assert json.loads(curl["block"]) == {"network": True, "devices": ["gpu:h100:8"]}, curl
+      assert curl["sops"][0]["path"] == "secrets/train.yaml", curl
+      assert curl["sops"][0]["content"] == open("${./secrets/train.yaml}").read(), curl
       assert "is not a store path" in apps["outside"].get("error", ""), apps["outside"]
       assert apps["trainer"]["exec"]["image_drv"].endswith(".drv"), apps["trainer"]
 
