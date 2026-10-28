@@ -309,7 +309,8 @@ impl Scheduler {
                 r
             }
             PendingJob::Exec(j) => {
-                let reason = super::exec_status::attempt_end_reason(failure.kind);
+                let reason =
+                    super::exec_status::attempt_end_reason(failure.kind, j.image_path.is_some());
                 super::exec_status::end_attempt(
                     &self.graph,
                     &j,

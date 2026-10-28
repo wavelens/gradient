@@ -23,9 +23,10 @@ use crate::jobs::{PendingExecJob, exec_job_key};
 const WORKER_LOST: &str = "the worker running the job was lost";
 const WORKER_REJECTED: &str = "the worker rejected the job";
 
-pub(crate) fn attempt_end_reason(kind: BuildFailureKind) -> AttemptEndReason {
+pub(crate) fn attempt_end_reason(kind: BuildFailureKind, custom_image: bool) -> AttemptEndReason {
     match kind {
         BuildFailureKind::Permanent => AttemptEndReason::Failed,
+        BuildFailureKind::GuestBoot if custom_image => AttemptEndReason::Failed,
         BuildFailureKind::Timeout => AttemptEndReason::Timeout,
         BuildFailureKind::Aborted => AttemptEndReason::Aborted,
         BuildFailureKind::Transient
@@ -195,9 +196,18 @@ mod tests {
     #[test]
     fn attempt_end_reason_maps_every_failure_kind() {
         use BuildFailureKind::*;
-        assert_eq!(attempt_end_reason(Permanent), AttemptEndReason::Failed);
-        assert_eq!(attempt_end_reason(Timeout), AttemptEndReason::Timeout);
-        assert_eq!(attempt_end_reason(Aborted), AttemptEndReason::Aborted);
+        assert_eq!(
+            attempt_end_reason(Permanent, false),
+            AttemptEndReason::Failed
+        );
+        assert_eq!(
+            attempt_end_reason(Timeout, false),
+            AttemptEndReason::Timeout
+        );
+        assert_eq!(
+            attempt_end_reason(Aborted, false),
+            AttemptEndReason::Aborted
+        );
         for lost in [
             Transient,
             Canceled,
@@ -206,7 +216,21 @@ mod tests {
             InputsUnavailable,
             CorruptEvalCache,
         ] {
-            assert_eq!(attempt_end_reason(lost), AttemptEndReason::Lost, "{lost:?}");
+            assert_eq!(
+                attempt_end_reason(lost, false),
+                AttemptEndReason::Lost,
+                "{lost:?}"
+            );
         }
+    }
+
+    #[test]
+    fn a_custom_image_that_fails_to_boot_consumes_a_retry() {
+        use BuildFailureKind::GuestBoot;
+        assert_eq!(
+            attempt_end_reason(GuestBoot, true),
+            AttemptEndReason::Failed
+        );
+        assert_eq!(attempt_end_reason(GuestBoot, false), AttemptEndReason::Lost);
     }
 }
