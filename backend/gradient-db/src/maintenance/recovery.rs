@@ -34,7 +34,6 @@ pub struct RecoveryReport {
     pub cluster_attempts_closed: u64,
     pub clusters_requeued: u64,
     pub clusters_aborted: u64,
-    pub clusters_failed: u64,
     pub connections_closed: u64,
 }
 
@@ -103,7 +102,6 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     report.cluster_attempts_closed = clusters.attempts_closed;
     report.clusters_requeued = clusters.clusters_requeued;
     report.clusters_aborted = clusters.clusters_aborted;
-    report.clusters_failed = clusters.clusters_failed;
 
     report.connections_closed = gradient_entity::worker_connection::Entity::update_many()
         .col_expr(
@@ -249,7 +247,7 @@ mod tests {
             .append_query_results([kept])
             .append_query_results([Vec::<Row>::new()])
             .append_query_results([Vec::<MEval>::new()])
-            .append_exec_results([0, 0, 0, 0, 0].map(affected))
+            .append_exec_results([0, 0, 0, 0].map(affected))
             .append_query_results([Vec::<Row>::new()])
             .append_exec_results([affected(0)])
             .into_connection()
@@ -281,7 +279,7 @@ mod tests {
             .append_query_results([vec![eval_row(EvaluationStatus::Fetching, Some(task_id))]])
             .append_exec_results([affected(1)])
             .append_query_results([crate::test_ctx::inserted_phase_event()])
-            .append_exec_results([1, 0, 0, 0, 1].map(affected))
+            .append_exec_results([1, 0, 0, 1].map(affected))
             .append_query_results([Vec::<Row>::new()])
             .append_exec_results([affected(0)])
             .into_connection();

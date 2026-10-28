@@ -30,19 +30,23 @@ impl Membership {
         evaluations: &[EvaluationId],
         shared_builds: &[DerivationBuildId],
     ) -> Result<Self, DbErr> {
-        let by_key =
-            gradient_db::scheduling::cluster::cluster_membership(db, evaluations, shared_builds)
-                .await?
-                .into_iter()
-                .filter_map(|of| {
-                    let key = match (of.member.evaluation, of.member.derivation_build) {
-                        (Some(e), _) => eval_job_key(e, member_index(&of)),
-                        (None, Some(a)) => build_job_key(a),
-                        (None, None) => return None,
-                    };
-                    Some((key, of))
-                })
-                .collect();
+        let by_key = gradient_db::scheduling::cluster::cluster_membership(
+            db,
+            evaluations,
+            shared_builds,
+            &[],
+        )
+        .await?
+        .into_iter()
+        .filter_map(|of| {
+            let key = match (of.member.evaluation, of.member.derivation_build) {
+                (Some(e), _) => eval_job_key(e, member_index(&of)),
+                (None, Some(a)) => build_job_key(a),
+                (None, None) => return None,
+            };
+            Some((key, of))
+        })
+        .collect();
         Ok(Self { by_key })
     }
 
