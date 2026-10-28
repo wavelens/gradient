@@ -21,13 +21,16 @@ use gradient_types::*;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-use super::api_key::MaybeApiKey;
+use super::api_key::{DecodedRequest, MaybeApiKey};
+use super::job_scope::{JobScopeRefusal, job_scope_of_request};
 use super::jwt::{bearer_token, decode_jwt, extract_bearer_or_cookie, session_cookie_token};
 use crate::audit::{Audit, RequestInfo};
 use crate::client_ip::{ClientIp, resolve_client_ip};
 use crate::error::{WebError, WebResult};
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
+use axum::http::request::Parts;
+use axum::response::IntoResponse;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
@@ -88,7 +91,7 @@ async fn deny(
 
 pub async fn authorize(
     state: State<Arc<ServerState>>,
-    mut req: Request,
+    req: Request,
     next: Next,
 ) -> WebResult<Response<Body>> {
     let peer = req
@@ -129,7 +132,11 @@ pub async fn authorize(
         return Err(deny(&audit, Some(user_id), method, path, denial).await);
     }
 
-    let api_key_extension = MaybeApiKey::from(&decoded);
+    let (mut parts, body) = req.into_parts();
+    if let Err(denial) = job_scope_of_caller(&mut parts, &decoded).await {
+        return Err(deny(&audit, Some(user_id), method, path, denial).await);
+    }
+
     let Some(current_user) = by_id::<EUser, _>(&state.web_db, user_id).await? else {
         let denial = Denial::UnknownUser;
         return Err(deny(&audit, Some(user_id), method, path, denial).await);
@@ -140,10 +147,21 @@ pub async fn authorize(
         return Err(deny(&audit, Some(user_id), method, path, denial).await);
     }
 
-    req.extensions_mut().insert(current_user);
-    req.extensions_mut().insert(api_key_extension);
-    req.extensions_mut().insert(ClientIp(client_ip));
-    Ok(next.run(req).await)
+    parts.extensions.insert(current_user);
+    parts.extensions.insert(MaybeApiKey::from(&decoded));
+    parts.extensions.insert(decoded.principal());
+    parts.extensions.insert(ClientIp(client_ip));
+    Ok(next.run(Request::from_parts(parts, body)).await)
+}
+
+async fn job_scope_of_caller(
+    parts: &mut Parts,
+    decoded: &DecodedRequest,
+) -> Result<(), JobScopeRefusal> {
+    match decoded.job() {
+        Some(job) => job_scope_of_request(parts, job).await,
+        None => Ok(()),
+    }
 }
 
 async fn optional_caller(
@@ -152,7 +170,7 @@ async fn optional_caller(
     last_used_stamps: &Debounce<Uuid>,
     headers: &HeaderMap,
     client_ip: IpAddr,
-) -> Option<(MUser, MaybeApiKey)> {
+) -> Option<(MUser, DecodedRequest)> {
     let token = extract_bearer_or_cookie(headers)?.to_owned();
     let decoded = decode_jwt(db, jwt_secret, last_used_stamps, token)
         .await
@@ -171,12 +189,12 @@ async fn optional_caller(
         .flatten()
         .filter(|user| user.active)?;
 
-    Some((user, MaybeApiKey::from(&decoded)))
+    Some((user, decoded))
 }
 
 pub async fn authorize_optional(
     state: State<Arc<ServerState>>,
-    mut req: Request,
+    req: Request,
     next: Next,
 ) -> Response<Body> {
     let peer = req
@@ -186,22 +204,33 @@ pub async fn authorize_optional(
         .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
 
     let client_ip = resolve_client_ip(req.headers(), peer, &state.config.network.trusted_proxies);
-    let (maybe_user, maybe_api_key) = optional_caller(
+    let caller = optional_caller(
         &state.web_db,
         &state.jwt_secret,
         &state.memory.last_used_stamps,
         req.headers(),
         client_ip,
     )
-    .await
-    .map_or((None, MaybeApiKey::none()), |(user, api_key)| {
-        (Some(user), api_key)
-    });
+    .await;
 
-    req.extensions_mut().insert(MaybeUser(maybe_user));
-    req.extensions_mut().insert(maybe_api_key);
-    req.extensions_mut().insert(ClientIp(client_ip));
-    next.run(req).await
+    let (mut parts, body) = req.into_parts();
+    match caller {
+        Some((user, decoded)) => {
+            if let Err(refusal) = job_scope_of_caller(&mut parts, &decoded).await {
+                return WebError::from(refusal).into_response();
+            }
+            parts.extensions.insert(MaybeUser(Some(user)));
+            parts.extensions.insert(MaybeApiKey::from(&decoded));
+            parts.extensions.insert(decoded.principal());
+        }
+        None => {
+            parts.extensions.insert(MaybeUser(None));
+            parts.extensions.insert(MaybeApiKey::none());
+        }
+    }
+
+    parts.extensions.insert(ClientIp(client_ip));
+    next.run(Request::from_parts(parts, body)).await
 }
 
 pub async fn update_last_login(db: &WebDb, user: MUser) -> Result<MUser> {

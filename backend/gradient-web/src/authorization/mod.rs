@@ -5,12 +5,14 @@
  */
 
 mod api_key;
+mod job_scope;
 mod jwt;
 mod middleware;
 mod oidc;
 mod scim;
 
-pub use self::api_key::{ApiKeyContext, DecodedRequest, MaybeApiKey};
+pub use self::api_key::{ApiKeyContext, DecodedRequest, JobPrincipal, MaybeApiKey, Principal};
+pub use self::job_scope::{JobScopeRefusal, job_mask};
 pub use self::jwt::{
     Cliams, DownloadClaims, cookie_value, create_session_and_token, decode_download_token,
     decode_jwt, encode_download_token, generate_api_key, hash_api_key, session_claims,
