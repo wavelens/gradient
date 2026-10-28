@@ -615,6 +615,7 @@ fn export_action(
         ActionConfig::SendSlackMessage { .. } => {
             (ActionType::SendSlackMessage, serde_json::Map::new())
         }
+        ActionConfig::StartEvaluation { .. } => return None,
     };
     Some(super::StateAction {
         name: a.name.clone(),

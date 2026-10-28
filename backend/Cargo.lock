@@ -2794,6 +2794,7 @@ dependencies = [
  "gradient-storage",
  "gradient-types",
  "gradient-util",
+ "gradient-wire",
  "hex",
  "hmac 0.13.0",
  "num_enum",

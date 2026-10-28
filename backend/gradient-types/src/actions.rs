@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::ids::IntegrationId;
+use crate::ids::{IntegrationId, TaskId};
 use serde::{Deserialize, Serialize};
 
 pub use gradient_entity::task_action::ActionType;
@@ -14,6 +14,7 @@ pub use gradient_entity::task_action::ActionType;
 pub enum PatchGeneratorKind {
     #[default]
     FlakeLock,
+    ExecTree,
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -76,6 +77,9 @@ pub enum ActionConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         webhook_url: Option<String>,
     },
+    StartEvaluation {
+        task: TaskId,
+    },
 }
 
 fn default_branch_pattern() -> String {
@@ -95,6 +99,7 @@ impl ActionConfig {
             ActionConfig::OpenPr { .. } => ActionType::OpenPr,
             ActionConfig::SendMatrixMessage { .. } => ActionType::SendMatrixMessage,
             ActionConfig::SendSlackMessage { .. } => ActionType::SendSlackMessage,
+            ActionConfig::StartEvaluation { .. } => ActionType::StartEvaluation,
         }
     }
 
@@ -184,5 +189,25 @@ mod tests {
         assert!(!is_matrix_room_id("!abc:"));
         assert!(!is_matrix_room_id("!:example.org"));
         assert!(!is_matrix_room_id("!abc def"));
+    }
+
+    #[test]
+    fn start_evaluation_round_trips_by_its_wire_name() {
+        let task = "a0000000-0000-0000-0000-0000000000ff";
+        let config: ActionConfig =
+            serde_json::from_value(serde_json::json!({ "type": "start_evaluation", "task": task }))
+                .unwrap();
+
+        assert_eq!(
+            config,
+            ActionConfig::StartEvaluation {
+                task: task.parse().unwrap()
+            }
+        );
+        assert_eq!(config.action_type(), ActionType::StartEvaluation);
+        assert_eq!(
+            ActionType::from_name("start_evaluation"),
+            Some(ActionType::StartEvaluation)
+        );
     }
 }
