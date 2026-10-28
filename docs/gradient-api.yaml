@@ -5888,7 +5888,7 @@ paths:
         - A text frame `{"type":"resize","cols":120,"rows":40}` from the client is accepted and ignored by the console.
         - The last server frame is the text frame `{"type":"closed","exit_code":null,"message":"..."}`, also when the channel is refused after the upgrade.
 
-        `node` accepts `0` only. Requires the `TriggerEvaluation` permission on the project.
+        `node` picks the node of a multi-node job by its index, node 0 by default; an unknown index closes with `no node <n> in this job`. Requires the `TriggerEvaluation` permission on the project.
       operationId: execJobConsole
       parameters:
       - name: job
@@ -6103,7 +6103,7 @@ paths:
         - A text frame `{"type":"resize","cols":120,"rows":40}` from the client resizes the terminal.
         - The last server frame is the text frame `{"type":"closed","exit_code":0,"message":null}`, also when the channel is refused after the upgrade.
 
-        Closing an attached terminal leaves the program running. `node` accepts `0` only. Requires the `TriggerEvaluation` permission on the project.
+        Closing an attached terminal leaves the program running. `node` picks the node of a multi-node job by its index, node 0 by default; an unknown index closes with `no node <n> in this job`. Requires the `TriggerEvaluation` permission on the project.
       operationId: execJobShell
       parameters:
       - name: job

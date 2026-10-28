@@ -6,14 +6,13 @@
 
 use std::fmt;
 
-use gradient_db::exec_jobs::attempts;
+use gradient_db::exec_jobs::{attempts, nodes};
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_pool::guest_channels::{GuestChannelEvent, GuestChannelHandle};
+use gradient_types::MExecJob;
 use gradient_types::exec::ExecSpec;
 use gradient_types::ids::ExecJobId;
-use gradient_types::{EExecJob, MExecJob};
 use gradient_wire::types::GuestChannelKind;
-use sea_orm::EntityTrait;
 use tokio::sync::mpsc;
 
 use crate::Scheduler;
@@ -36,7 +35,7 @@ impl fmt::Display for GuestChannelRefusal {
             Self::SshDisabled => f.write_str("the exec job was started with ssh = false"),
             Self::NoProgramTerminal => f.write_str("program has no terminal, set ssh = true"),
             Self::PortNotDeclared(port) => write!(f, "port {port} is not in the job's ports"),
-            Self::NoSuchNode(node) => write!(f, "node {node} does not exist, the job has 1 node"),
+            Self::NoSuchNode(node) => write!(f, "no node {node} in this job"),
             Self::WorkerOffline => f.write_str("the job's worker is not connected"),
         }
     }
@@ -54,12 +53,8 @@ pub(crate) fn check_guest_channel(
     status: ExecJobStatus,
     spec_ssh: Option<bool>,
     ports: &[u16],
-    node: u32,
     kind: &GuestChannelKind,
 ) -> Result<(), GuestChannelRefusal> {
-    if node > 0 {
-        return Err(GuestChannelRefusal::NoSuchNode(node));
-    }
     match kind {
         GuestChannelKind::Console => check_console(status),
         GuestChannelKind::Shell { attach, .. } => check_shell(status, spec_ssh, *attach),
@@ -114,14 +109,14 @@ impl Scheduler {
         kind: GuestChannelKind,
     ) -> anyhow::Result<Result<GuestChannelOpened, GuestChannelRefusal>> {
         let db = &self.db.worker_db;
-        let Some(row) = EExecJob::find_by_id(job).one(db).await? else {
-            return Ok(Err(GuestChannelRefusal::NotRunning));
+        let Some(row) = nodes::node_of(db, job, node).await? else {
+            return Ok(Err(GuestChannelRefusal::NoSuchNode(node)));
         };
         let spec = spec_of(&row);
-        if let Err(refusal) = check_guest_channel(row.status, spec.ssh, &spec.ports, node, &kind) {
+        if let Err(refusal) = check_guest_channel(row.status, spec.ssh, &spec.ports, &kind) {
             return Ok(Err(refusal));
         }
-        let Some(attempt) = attempts::open_of_job(db, job).await? else {
+        let Some(attempt) = attempts::open_of_job(db, row.id).await? else {
             return Ok(Err(GuestChannelRefusal::NotRunning));
         };
         let Some(port) = self.worker_port(&attempt.worker).await else {
@@ -129,7 +124,7 @@ impl Scheduler {
         };
         let (handle, events) =
             self.guest_channels
-                .open(&attempt.worker, port, exec_job_key(job), kind);
+                .open(&attempt.worker, port, exec_job_key(row.id), kind);
         Ok(Ok(GuestChannelOpened { handle, events }))
     }
 }
@@ -149,17 +144,17 @@ mod tests {
             pty: true,
             attach: true,
         };
-        assert_eq!(check_guest_channel(Running, None, &[], 0, &shell), Ok(()));
+        assert_eq!(check_guest_channel(Running, None, &[], &shell), Ok(()));
         assert_eq!(
-            check_guest_channel(Starting, None, &[], 0, &shell),
+            check_guest_channel(Starting, None, &[], &shell),
             Err(GuestChannelRefusal::NotRunning)
         );
         assert_eq!(
-            check_guest_channel(Running, Some(false), &[], 0, &shell),
+            check_guest_channel(Running, Some(false), &[], &shell),
             Err(GuestChannelRefusal::SshDisabled)
         );
         assert_eq!(
-            check_guest_channel(Running, Some(false), &[], 0, &attach),
+            check_guest_channel(Running, Some(false), &[], &attach),
             Err(GuestChannelRefusal::NoProgramTerminal)
         );
         assert_eq!(
@@ -167,14 +162,9 @@ mod tests {
                 Running,
                 None,
                 &[6006],
-                0,
                 &GuestChannelKind::Forward { port: 8080 }
             ),
             Err(GuestChannelRefusal::PortNotDeclared(8080))
-        );
-        assert_eq!(
-            check_guest_channel(Running, None, &[], 1, &shell),
-            Err(GuestChannelRefusal::NoSuchNode(1))
         );
     }
 
@@ -185,7 +175,6 @@ mod tests {
                 ExecJobStatus::Starting,
                 Some(false),
                 &[],
-                0,
                 &GuestChannelKind::Console
             ),
             Ok(())
@@ -195,7 +184,6 @@ mod tests {
                 ExecJobStatus::Completed,
                 None,
                 &[],
-                0,
                 &GuestChannelKind::Console
             ),
             Err(GuestChannelRefusal::NotRunning)
@@ -210,7 +198,7 @@ mod tests {
         );
         assert_eq!(
             GuestChannelRefusal::NoSuchNode(2).to_string(),
-            "node 2 does not exist, the job has 1 node"
+            "no node 2 in this job"
         );
         assert_eq!(
             GuestChannelRefusal::NoProgramTerminal.to_string(),
