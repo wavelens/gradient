@@ -14,16 +14,20 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait,
+    IntoActiveModel, QueryFilter, TransactionTrait,
 };
 
 /// A restart never walks. The new evaluation is taking over the previous one's names because the
 /// graph heal is seeding its thaw from them.
-pub async fn trigger_evaluation_retry<C: ConnectionTrait>(
+pub async fn trigger_evaluation_retry<C>(
     db: &C,
     task: &MTask,
     prev_eval: &MEvaluation,
-) -> Result<MEvaluation, TriggerError> {
+) -> Result<MEvaluation, TriggerError>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     ensure_no_active_evaluation(db, task.id, &prev_eval.branch).await?;
 
     let prev_entry_points = EEntryPoint::find()

@@ -17,6 +17,7 @@ use crate::sql::status::{exec, exec_in};
 #[derive(Debug, Clone)]
 pub struct ExecDispatchRow {
     pub job: MExecJob,
+    pub node_index: u32,
     pub entry_point: String,
     pub task: TaskId,
     pub project: ProjectId,
@@ -127,8 +128,10 @@ fn dispatch_row(row: &QueryResult) -> Result<ExecDispatchRow, DbErr> {
     let phase_payload: Option<Vec<u8>> = row.try_get("", "last_phase_payload")?;
     let open_attempt_id: Option<ExecJobAttemptId> = row.try_get("", "open_attempt_id")?;
     let open_attempt_number: Option<i32> = row.try_get("", "open_attempt_number")?;
+    let job = MExecJob::from_query_result(row, "")?;
     Ok(ExecDispatchRow {
-        job: MExecJob::from_query_result(row, "")?,
+        node_index: u32::try_from(job.node_index).unwrap_or_default(),
+        job,
         entry_point: row.try_get("", "entry_point_name")?,
         task: row.try_get("", "task_id")?,
         project: row.try_get("", "project_id")?,
