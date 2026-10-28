@@ -9,6 +9,44 @@
 
   nixpkgsTarball = import ../../harness/nixpkgs-tarball.nix { inherit pkgs; inherit (self.inputs) nixpkgs; };
   programs = import ./apps.nix { inherit pkgs; };
+  gradientPackages = self.packages.x86_64-linux;
+
+  tarball = name: source: pkgs.runCommand "${name}.tar.gz" { } ''
+    tar -C ${source} --transform 's,^\.,${name},S' --sort=name --mtime=@1 \
+      --owner=0 --group=0 --numeric-owner -czf $out .
+  '';
+
+  hostTrainer = (self.inputs.nixpkgs.lib.nixosSystem {
+    system = "x86_64-linux";
+    modules = [
+      ../../../modules/guest.nix
+      ./trainer.nix
+      {
+        gradient.guest.package = gradientPackages.gradient.guest;
+        nixpkgs.overlays = [ (_: _: { gradient-cli = gradientPackages.gradient-cli; }) ];
+      }
+    ];
+  }).config;
+
+  # The test repository builds the image again with the agent from a tarball, so the upstream
+  # cache needs the direct inputs of every derivation that depends on the agent or the CLI.
+  trainerBuildInputs = let
+    c = hostTrainer;
+    agentDependent = [
+      c.system.build.toplevel
+      c.system.path
+      c.system.build.etc
+      c.environment.etc."systemd/system".source
+      c.environment.etc."systemd/user".source
+      c.environment.etc."dbus-1".source
+      c.systemd.units."gradient-guest-agent.service".unit
+      c.systemd.units."dbus-broker.service".unit
+      c.systemd.user.units."dbus-broker.service".unit
+    ] ++ lib.filter (p: lib.elem (p.name or "") [ "gradient-phase" "gradient-upload" ]) c.environment.systemPackages;
+  in pkgs.writeText "trainer-build-inputs" (builtins.toJSON [
+    (map (drv: drv.drvAttrs) agentDependent)
+    c.system.activationScripts.script
+  ]);
   workerToken = "C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
   workerIds = {
     stopper = "a0000000-0000-0000-0000-000000000011";
@@ -52,7 +90,7 @@
     inherit text;
   };
 
-  execWorker = { name, peer, label, maxPreWarm, stopGuestsWithWorker, memorySize ? 4096, sops ? { } }: { nodes, pkgs, lib, ... }: {
+  execWorker = { name, peer, label, maxPreWarm, stopGuestsWithWorker, memorySize ? 4096, sops ? { }, customImages ? false }: { nodes, pkgs, lib, ... }: {
     imports = [ ../../../modules/gradient-worker.nix ];
 
     virtualisation = {
@@ -60,6 +98,7 @@
       inherit memorySize;
       diskSize = 8192;
       writableStore = true;
+      additionalPaths = [ hostTrainer.system.build.toplevel trainerBuildInputs ];
     };
 
     networking = {
@@ -102,6 +141,7 @@
           ssh = true;
           retries = 1;
           nodes = 2;
+          inherit customImages;
         };
       };
     };
@@ -120,9 +160,9 @@ in {
         virtualisation = {
           cores = 2;
           memorySize = 2048;
-          diskSize = 8192;
+          diskSize = 16384;
           writableStore = true;
-          additionalPaths = lib.attrValues programs;
+          additionalPaths = lib.attrValues programs ++ [ trainerBuildInputs ];
         };
 
         networking = {
@@ -186,6 +226,17 @@ in {
                 }];
               };
 
+              tasks.images = {
+                project = "project";
+                repository = "git://server/images?dir=nix";
+                wildcard = "apps.x86_64-linux.*";
+                created_by = "admin";
+                triggers = [{
+                  type = "polling";
+                  config.interval_secs = 10;
+                }];
+              };
+
               caches.main = {
                 signing_key_file = "/etc/gradient/secrets/main_cache_key";
                 projects = [ "project" ];
@@ -218,6 +269,8 @@ in {
                 extraConfig = "autoindex off;";
               };
               locations."= /nixpkgs.tar.gz".alias = nixpkgsTarball;
+              locations."= /gradient-guest.tar.gz".alias = tarball "gradient-guest" gradientPackages.gradient.guest;
+              locations."= /gradient-cli.tar.gz".alias = tarball "gradient-cli" gradientPackages.gradient-cli;
             };
 
             "web.exec.test" = {
@@ -253,6 +306,9 @@ in {
           "L+ /var/lib/git/flake.lock - - - - ${../e2e/flake_repository.lock}"
           "L+ /var/lib/git/apps.nix - - - - ${./apps.nix}"
           "L+ /var/lib/git/train.yaml - - - - ${sopsFixtures}/secrets.yaml"
+          "L+ /var/lib/git/images.nix - - - - ${./images_repository.nix}"
+          "L+ /var/lib/git/guest.nix - - - - ${../../../modules/guest.nix}"
+          "L+ /var/lib/git/trainer.nix - - - - ${./trainer.nix}"
         ];
       };
 
@@ -262,6 +318,7 @@ in {
         label = "stop";
         maxPreWarm = 2;
         stopGuestsWithWorker = true;
+        customImages = true;
         memorySize = 6144;
         sops = {
           files = [ "${sopsFixtures}/worker.yaml" "${clashSops}" ];
@@ -283,6 +340,7 @@ in {
       GIT = "${lib.getExe pkgs.git}"
       NIXPKGS_HASH = "${self.inputs.nixpkgs.narHash}"
       PROGRAMS = "${lib.concatStringsSep " " (lib.attrValues programs)}"
+      TRAINER_INPUTS = "${trainerBuildInputs}"
       AGE_RECIPIENT = "${ageRecipient}"
       STOPPER_ID = "${workerIds.stopper}"
     '' + builtins.readFile ./test.py;
