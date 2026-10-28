@@ -5,7 +5,7 @@
  */
 
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
@@ -37,6 +37,7 @@ use super::uploads::{GuestUploads, OutputUpload};
 use super::watchdog::{Watchdog, Watched};
 use crate::executor::AbortSignal;
 use crate::executor::failure::{BuildError, JobAborted};
+use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
 use crate::proto::credentials::CredentialStore;
 use crate::proto::job::{JobUpdater, push_exec_output};
@@ -157,9 +158,14 @@ impl Stop {
     }
 }
 
+pub struct StoreAccess<'a> {
+    pub store: &'a LocalNixStore,
+    pub gcroots: &'a GcRootKeeper,
+}
+
 pub async fn execute(
     host: &ExecHost,
-    store: &LocalNixStore,
+    nix: StoreAccess<'_>,
     mut job: ExecJob,
     updater: &mut JobUpdater,
     credentials: &CredentialStore,
@@ -184,14 +190,34 @@ pub async fn execute(
         updater,
         abort,
     };
-    run.ensure_program(store).await?;
+    let source = guest_source(&run.job, host.config.allow_custom_images)?;
+    run.ensure_program(nix.store).await?;
     let devices = run.reserve_devices()?;
-    let mut guest = run.take_guest().await?;
+    let (mut guest, image_root) = run.take_guest(source, &nix).await?;
     let outcome = run
         .run_in_guest(&mut guest, &devices, credentials, channels)
         .await;
-    host.pool.retire(guest, devices);
+    host.pool.retire(guest, (devices, image_root));
     outcome
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum GuestSource {
+    Warm,
+    Custom(PathBuf),
+}
+
+pub(crate) fn guest_source(
+    job: &ExecJob,
+    allow_custom_images: bool,
+) -> Result<GuestSource, BuildError> {
+    match &job.image {
+        None => Ok(GuestSource::Warm),
+        Some(_) if !allow_custom_images => Err(BuildError::guest_boot(anyhow!(
+            "custom images are not allowed on this worker"
+        ))),
+        Some(image) => Ok(GuestSource::Custom(PathBuf::from(image))),
+    }
 }
 
 pub(crate) fn job_secrets(
@@ -477,12 +503,6 @@ struct ExecRun<'a> {
 
 impl ExecRun<'_> {
     async fn ensure_program(&mut self, store: &LocalNixStore) -> Result<()> {
-        if self.job.image.is_some() {
-            return Err(BuildError::permanent(anyhow!(
-                "this worker boots only its own guest image, custom images are not supported yet"
-            ))
-            .into());
-        }
         let program = program_store_path(&self.job.program)?.to_owned();
         let abort = self.abort.clone();
         let fetch = crate::proto::prefetch::ensure_path(store, &program, self.updater);
@@ -500,13 +520,35 @@ impl ExecRun<'_> {
             .ok_or_else(|| BuildError::transient(anyhow!("devices no longer free")).into())
     }
 
-    async fn take_guest(&self) -> Result<Guest> {
-        let guest = unless_aborted(
-            &self.abort,
-            self.host.pool.take(self.updater.job_id.clone()),
-        )
-        .await?;
-        Ok(guest.map_err(BuildError::guest_boot)?)
+    async fn take_guest(
+        &mut self,
+        source: GuestSource,
+        nix: &StoreAccess<'_>,
+    ) -> Result<(Guest, Option<GcRootHandle>)> {
+        let job_id = self.updater.job_id.clone();
+        let (booted, image_root) = match source {
+            GuestSource::Warm => {
+                let warm = unless_aborted(&self.abort, self.host.pool.take(job_id)).await?;
+                (warm, None)
+            }
+            GuestSource::Custom(image) => {
+                let root = self.realise_image(&image, nix).await?;
+                let custom = self.host.pool.boot_custom(&image, job_id);
+                (unless_aborted(&self.abort, custom).await?, Some(root))
+            }
+        };
+        Ok((booted.map_err(BuildError::guest_boot)?, image_root))
+    }
+
+    async fn realise_image(&mut self, image: &Path, nix: &StoreAccess<'_>) -> Result<GcRootHandle> {
+        let image = image.to_string_lossy();
+        let root = nix.gcroots.add(&image).await;
+        let abort = self.abort.clone();
+        let fetch = crate::proto::prefetch::ensure_path(nix.store, &image, self.updater);
+        unless_aborted(&abort, fetch)
+            .await?
+            .map_err(BuildError::transient)?;
+        Ok(root)
     }
 
     async fn run_in_guest(
@@ -1205,5 +1247,42 @@ mod tests {
         );
         assert!(program_store_path("/usr/bin/train").is_err());
         assert!(program_store_path("/nix/store/").is_err());
+    }
+
+    #[test]
+    fn a_worker_without_custom_images_refuses_an_image_job() {
+        let image = "/nix/store/bbbb-nixos-system-trainer";
+        let plain = ExecJob {
+            program: "/nix/store/aaaa-train/bin/train".into(),
+            args: vec![],
+            env: Default::default(),
+            image: None,
+            requirement: Default::default(),
+            context: Default::default(),
+            secrets: vec![],
+            keep_running: false,
+            timeout_secs: None,
+            max_silent_secs: None,
+            attempt: 1,
+        };
+        let with_image = ExecJob {
+            image: Some(image.into()),
+            ..plain.clone()
+        };
+
+        let refused = guest_source(&with_image, false).unwrap_err();
+        assert_eq!(
+            refused.kind,
+            gradient_wire::types::BuildFailureKind::GuestBoot
+        );
+        assert_eq!(
+            refused.to_string(),
+            "custom images are not allowed on this worker"
+        );
+        assert_eq!(
+            guest_source(&with_image, true).unwrap(),
+            GuestSource::Custom(image.into())
+        );
+        assert_eq!(guest_source(&plain, false).unwrap(), GuestSource::Warm);
     }
 }
