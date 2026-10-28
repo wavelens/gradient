@@ -18,15 +18,29 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, DeleteMany, EntityTrait, ExprTrait, QueryFilter,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Requeue {
+    No,
+    WithinBudget,
+    OutsideBudget,
+}
+
 fn retries_left() -> Expr {
-    Expr::col(CClusterJob::Attempts).lte(Expr::col(CClusterJob::RetryBudget))
+    Expr::col(CClusterJob::Attempts)
+        .sub(Expr::col(CClusterJob::AttemptsOutsideBudget))
+        .lte(Expr::col(CClusterJob::RetryBudget))
+}
+
+fn counted_outside_budget() -> Expr {
+    Expr::col(CClusterJob::AttemptsOutsideBudget).add(1)
 }
 
 pub async fn requeue_cluster_job<C: ConnectionTrait>(
     db: &C,
     cluster: ClusterJobId,
+    requeue: Requeue,
 ) -> Result<bool, DbErr> {
-    let res = EClusterJob::update_many()
+    let update = EClusterJob::update_many()
         .col_expr(
             CClusterJob::Status,
             Expr::value(i16::from(ClusterJobStatus::Queued)),
@@ -34,12 +48,16 @@ pub async fn requeue_cluster_job<C: ConnectionTrait>(
         .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
         .filter(CClusterJob::Id.eq(cluster))
         .filter(CClusterJob::Status.eq(ClusterJobStatus::Running))
-        .filter(retries_left())
-        .filter(Expr::exists(dead_member_of_cluster()).not())
-        .exec(db)
-        .await?;
+        .filter(Expr::exists(dead_member_of_cluster()).not());
+    let update = match requeue {
+        Requeue::No => return Ok(false),
+        Requeue::WithinBudget => update.filter(retries_left()),
+        Requeue::OutsideBudget => {
+            update.col_expr(CClusterJob::AttemptsOutsideBudget, counted_outside_budget())
+        }
+    };
 
-    Ok(res.rows_affected == 1)
+    Ok(update.exec(db).await?.rows_affected == 1)
 }
 
 pub async fn finish_cluster_job<C: ConnectionTrait>(
@@ -119,7 +137,6 @@ pub struct ClusterRecovery {
     pub attempts_closed: u64,
     pub clusters_requeued: u64,
     pub clusters_aborted: u64,
-    pub clusters_failed: u64,
 }
 
 pub async fn recover_cluster_attempts<C: ConnectionTrait>(
@@ -138,22 +155,12 @@ pub async fn recover_cluster_attempts<C: ConnectionTrait>(
         .exec(conn)
         .await?
         .rows_affected;
-    let failed = EClusterJob::update_many()
-        .col_expr(
-            CClusterJob::Status,
-            Expr::value(i16::from(ClusterJobStatus::Failed)),
-        )
-        .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
-        .filter(CClusterJob::Status.eq(ClusterJobStatus::Running))
-        .filter(retries_left().not())
-        .exec(conn)
-        .await?
-        .rows_affected;
     let requeued = EClusterJob::update_many()
         .col_expr(
             CClusterJob::Status,
             Expr::value(i16::from(ClusterJobStatus::Queued)),
         )
+        .col_expr(CClusterJob::AttemptsOutsideBudget, counted_outside_budget())
         .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
         .filter(CClusterJob::Status.eq(ClusterJobStatus::Running))
         .exec(conn)
@@ -165,7 +172,6 @@ pub async fn recover_cluster_attempts<C: ConnectionTrait>(
         attempts_closed: unstarted + started,
         clusters_requeued: requeued,
         clusters_aborted: aborted + dead_queued,
-        clusters_failed: failed,
     })
 }
 
@@ -198,12 +204,14 @@ mod tests {
     use super::*;
     use crate::scheduling::cluster::test_rows::exec;
     use gradient_fixtures::mock::{all_statements, mock_db};
+    use gradient_fixtures::shape::shape;
+    use gradient_types::EvaluationId;
 
     #[tokio::test]
-    async fn a_cluster_requeues_only_within_its_budget_with_live_members() {
+    async fn the_budget_counts_only_attempts_inside_it() {
         let db = mock_db().append_exec_results([exec(1)]).into_connection();
 
-        let requeued = requeue_cluster_job(&db, ClusterJobId::now_v7())
+        let requeued = requeue_cluster_job(&db, ClusterJobId::now_v7(), Requeue::WithinBudget)
             .await
             .expect("requeue");
 
@@ -214,7 +222,10 @@ mod tests {
             sql.starts_with("UPDATE \"cluster_job\" SET \"status\" = $1"),
             "{sql}"
         );
-        assert!(sql.contains("\"attempts\" <= \"retry_budget\""), "{sql}");
+        assert!(
+            sql.contains("\"attempts\" - \"attempts_outside_budget\" <= \"retry_budget\""),
+            "{sql}"
+        );
         assert!(sql.contains("NOT EXISTS(SELECT"), "{sql}");
         assert!(sql.contains("FROM \"cluster_member\""), "{sql}");
         assert!(
@@ -276,7 +287,7 @@ mod tests {
     #[tokio::test]
     async fn startup_closes_every_open_attempt_then_requeues_live_clusters() {
         let db = mock_db()
-            .append_exec_results([exec(2), exec(1), exec(1), exec(1), exec(3)])
+            .append_exec_results([exec(2), exec(1), exec(1), exec(3)])
             .append_query_results([Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()])
             .into_connection();
 
@@ -288,7 +299,6 @@ mod tests {
                 attempts_closed: 3,
                 clusters_requeued: 3,
                 clusters_aborted: 1,
-                clusters_failed: 1,
             }
         );
         let statements = all_statements(db.into_transaction_log());
@@ -308,7 +318,9 @@ mod tests {
             "{sql:?}"
         );
         assert!(
-            sql[3].starts_with("UPDATE \"cluster_job\"") && !sql[3].contains("EXISTS"),
+            sql[3].starts_with("UPDATE \"cluster_job\"")
+                && sql[3].contains("\"attempts_outside_budget\" = \"attempts_outside_budget\" + ")
+                && !sql[3].contains("EXISTS"),
             "{sql:?}"
         );
         let prepare_failed = format!(
@@ -316,5 +328,49 @@ mod tests {
             i16::from(ClusterAttemptOutcome::PrepareFailed)
         );
         assert!(format!("{:?}", statements[0].values).contains(&prepare_failed));
+    }
+
+    #[tokio::test]
+    async fn a_restart_outside_the_budget_requeues_and_counts_itself() {
+        let (cluster, evaluation) = (ClusterJobId::now_v7(), EvaluationId::now_v7());
+        let db = shape()
+            .evaluation(evaluation)
+            .cluster(
+                cluster,
+                true,
+                3,
+                ClusterJobStatus::Running,
+                4,
+                gradient_types::now(),
+            )
+            .evaluation_member_of(cluster, "server", true, None)
+            .into_database()
+            .await;
+        let conn = db.connection();
+        let row = || async { db.find::<EClusterJob>(cluster).await.expect("the cluster") };
+
+        let spent = requeue_cluster_job(&conn, cluster, Requeue::WithinBudget).await;
+        assert!(
+            !spent.expect("requeue"),
+            "four attempts spend a budget of 3"
+        );
+        let restarted = requeue_cluster_job(&conn, cluster, Requeue::OutsideBudget).await;
+        assert!(restarted.expect("requeue"));
+        let requeued = row().await;
+        assert_eq!(
+            (requeued.status, requeued.attempts_outside_budget),
+            (ClusterJobStatus::Queued, 1)
+        );
+
+        db.execute("UPDATE cluster_job SET status = 1").await;
+        let within = requeue_cluster_job(&conn, cluster, Requeue::WithinBudget).await;
+        assert!(
+            within.expect("requeue"),
+            "one of four attempts is outside it"
+        );
+        let skipped = requeue_cluster_job(&conn, cluster, Requeue::No).await;
+        assert!(!skipped.expect("requeue"));
+        assert_eq!(row().await.attempts_outside_budget, 1);
+        db.finish().await;
     }
 }

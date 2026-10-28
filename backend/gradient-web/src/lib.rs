@@ -419,7 +419,6 @@ pub async fn serve_web(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> st
                     cluster_attempts_closed = r.cluster_attempts_closed,
                     clusters_requeued = r.clusters_requeued,
                     clusters_aborted = r.clusters_aborted,
-                    clusters_failed = r.clusters_failed,
                     connections_closed = r.connections_closed,
                     "recovered interrupted work from previous process"
                 );

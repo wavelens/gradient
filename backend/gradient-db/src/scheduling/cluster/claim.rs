@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::recovery::{finish_cluster_job, requeue_cluster_job};
+use super::recovery::{Requeue, finish_cluster_job, requeue_cluster_job};
 use crate::scheduling::assignment_record::{ClaimGate, abandon_open, claim_statement};
 use chrono::NaiveDateTime;
 use gradient_entity::cluster_attempt::{
@@ -174,7 +174,7 @@ pub async fn resolve_cluster_attempt<C>(
     cluster: ClusterJobId,
     attempt: ClusterAttemptId,
     outcome: ClusterAttemptOutcome,
-    retry: bool,
+    requeue: Requeue,
     finished: ClusterJobStatus,
 ) -> Result<Option<bool>, DbErr>
 where
@@ -185,7 +185,7 @@ where
         txn.rollback().await?;
         return Ok(None);
     }
-    let requeued = retry && requeue_cluster_job(&txn, cluster).await?;
+    let requeued = requeue_cluster_job(&txn, cluster, requeue).await?;
     if !requeued {
         finish_cluster_job(&txn, cluster, finished).await?;
     }
@@ -496,7 +496,7 @@ mod tests {
             ClusterJobId::now_v7(),
             ClusterAttemptId::now_v7(),
             ClusterAttemptOutcome::Failed,
-            true,
+            Requeue::WithinBudget,
             ClusterJobStatus::Failed,
         )
         .await
@@ -525,7 +525,7 @@ mod tests {
             ClusterJobId::now_v7(),
             ClusterAttemptId::now_v7(),
             ClusterAttemptOutcome::Failed,
-            true,
+            Requeue::WithinBudget,
             ClusterJobStatus::Failed,
         )
         .await

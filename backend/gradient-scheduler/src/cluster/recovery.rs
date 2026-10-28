@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use gradient_db::eval_reports::drop_eval_reports;
+use gradient_db::scheduling::cluster::Requeue;
 use gradient_db::status::BuildRefusal;
 use gradient_graph::Transition;
 use gradient_pool::session_port::SessionSignal;
@@ -68,7 +69,11 @@ impl Scheduler {
             cluster,
             attempt,
             fate.into(),
-            fate == Fate::Retry,
+            if fate == Fate::Retry {
+                Requeue::WithinBudget
+            } else {
+                Requeue::No
+            },
             fate.into(),
         )
         .await;
