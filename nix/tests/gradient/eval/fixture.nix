@@ -26,6 +26,7 @@
           passthru.gradient = {
             network = true;
             devices = [ "gpu:h100:8" ];
+            sops = [ ./secrets/train.yaml ];
           };
         };
 
