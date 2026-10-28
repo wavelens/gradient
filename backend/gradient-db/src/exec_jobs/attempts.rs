@@ -107,8 +107,15 @@ crate::sql! {
     REVOKE_EXEC_JOB_TOKENS_OF_ATTEMPT = "UPDATE exec_job_token SET revoked = true \
          WHERE attempt = $1 AND NOT revoked",
         params = [NewUuid];
+    SET_EXEC_JOB_ATTEMPT_GUEST_ADDRESS = "UPDATE exec_job_attempt SET guest_address = $2 \
+         WHERE id = $1",
+        params = [NewUuid, Text("10.233.0.2")];
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "an attempt row is written from the fields of one assignment"
+)]
 pub async fn open<C: ConnectionTrait>(
     db: &C,
     job: ExecJobId,
@@ -117,6 +124,7 @@ pub async fn open<C: ConnectionTrait>(
     assignment: DispatchedJobId,
     worker: &str,
     retries_cap: i32,
+    master_port: Option<u16>,
 ) -> Result<bool, DbErr> {
     let started = db
         .execute_raw(OPEN_EXEC_JOB_ATTEMPT.bind([
@@ -138,6 +146,7 @@ pub async fn open<C: ConnectionTrait>(
             worker: worker.to_owned(),
             number,
             started_at: gradient_types::now(),
+            master_port: master_port.map(i32::from),
             ..Default::default()
         },
     )
@@ -236,6 +245,19 @@ pub async fn open_of_job<C: ConnectionTrait>(
         .await
 }
 
+pub async fn set_guest_address<C: ConnectionTrait>(
+    db: &C,
+    attempt: ExecJobAttemptId,
+    address: &str,
+) -> Result<(), DbErr> {
+    db.execute_raw(SET_EXEC_JOB_ATTEMPT_GUEST_ADDRESS.bind([
+        Value::Uuid(Some(attempt.into_inner())),
+        Value::String(Some(address.to_owned())),
+    ]))
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,6 +281,7 @@ mod tests {
             DispatchedJobId::now_v7(),
             "w1",
             2,
+            None,
         )
         .await
         .unwrap();

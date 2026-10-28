@@ -8,6 +8,7 @@ pub mod attempts;
 pub mod continuations;
 pub mod create;
 pub mod dispatch;
+pub mod nodes;
 pub mod outputs;
 pub mod phases;
 pub mod pull_requests;

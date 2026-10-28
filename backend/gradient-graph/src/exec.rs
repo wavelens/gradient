@@ -88,6 +88,7 @@ pub(crate) async fn assigned(ctx: &DbContext, assignment: Assignment) -> Result<
         assignment.assignment,
         &assignment.worker,
         i32::try_from(assignment.retries_cap).unwrap_or(i32::MAX),
+        None,
     )
     .await?;
     if !opened {
