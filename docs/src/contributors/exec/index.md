@@ -85,6 +85,50 @@ Workers get `ServerMessage::PreWarmVms { count }` as an absolute target of guest
 - Status changes emit `exec_job.queued`, `started`, `phase`, `completed`, `failed` or `aborted`, see [Events and Webhooks](../../reference/events.md).
 - Logs share the build log storage per attempt ID. The deep GC can keep the log of every exec attempt.
 
+### Job Tokens
+
+| Step | Effect |
+|---|---|
+| Dispatch | `mint_job_token` can mint `GRJ_` plus 64 alphanumeric characters into `JobContext.token` |
+| Attempt insert | The graph writer can store the lowercase hex SHA-256 in `exec_job_token`, in the attempt transaction |
+| Attempt close | `attempts::close` can revoke the tokens of the attempt in the same statement batch |
+
+- Tokens expire `timeout + 3600 s` after dispatch. 30 days cover the case with no timeout.
+- New attempts get a fresh token. Route scope and the acting user live in [Exec Actions](actions.md#job-principal).
+
+### Phases
+
+- Programs post phases to the agent with `gradient-phase`. Agents append `::gradient-phase:: <name>` to the output log. They send `Phase` afterwards.
+- Names hold 1 to 128 printable characters. Payloads cap at 65536 bytes. A call to `SecretRedactor::redact` can process each payload.
+- The scheduler can put the last phase into `JobContext.last_phase` of the next attempt.
+
+### Outputs
+
+```mermaid
+flowchart LR
+    agent["Agent POST /outputs"] -- "UploadStart, UploadChunk, UploadEnd" --> worker["GuestUploads"]
+    worker -- "UploadRequest ExecOutput" --> server["Session"]
+    server --> store["exec-outputs/job/path"]
+```
+
+| Part | Step |
+|---|---|
+| Agent | Streams the request body over vsock, refuses `gradient/tree.patch` from the program |
+| Worker | Stages each upload in `guests/<id>/outputs/<upload_id>`, then `push_exec_output` with a passthrough grant |
+| Server | `place_exec_output` adopts the file into `exec-outputs/<job>/<path>`, `record_exec_output` upserts `exec_job_output` |
+
+- `follow` can wait for open uploads before mapping `Exited`. All outputs reach the store before the attempt is over.
+- The agent can upload `gradient/tree.patch` after the post-script. The upload can happen before `Exited`.
+- Paths pass `check_output_path` when relative and `/`-separated. Paths don't allow empty, `.` or `..` segments. The limit is 1024 bytes.
+- Per-task evaluation GC can delete the outputs of `GcReport.deleted_exec_jobs` right away. Task and project deletions leave objects behind. The deep GC pass `exec-outputs` can remove those objects.
+
+### Continuations
+
+`exec_job_continuation` can hold one row per job with a `gradient/continue.json` output. Rows move from `Recorded` to `Queued`, then `Done` or `Failed`.
+
+- New attempts drop a `Recorded` row.
+- Queued rows keep evaluation `Building`. Find the full sequence in [Exec Actions](actions.md#continue-evaluation).
+
 ## Guests
 
 Exec jobs start in their own cloud-hypervisor guests. Guest units, pools and devices belong to `gradient-vm`. Jobs don't appear in `gradient-vm`. Code in `gradient-worker/src/exec/` can convert an `ExecJob` to `gradient-vm` calls.
@@ -173,12 +217,14 @@ The agent `gradient-guest-agent` can accept the worker on vsock port 7000. Frame
 | `Attach { output_offset }` | Output replay from the offset, then `ProgramStarted` and `Exited` once known |
 | `RunJob` | The job, accepted once per agent life |
 | `Kill` | SIGTERM to the program group, SIGKILL after 10 s |
+| `UploadSettled { upload_id, error }` | Answer of the server to one output upload |
 
 | Agent to worker | Worker result |
 |---|---|
 | `ProgramStarted` | `JobUpdateKind::ProgramStarted`, the job moves to `Running` |
 | `Output`, `OutputDropped` | Log chunks, a note on dropped bytes |
 | `Phase` | `JobPhase`, dropped above 64 KiB |
+| `UploadStart`, `UploadChunk`, `UploadEnd` | One output upload, guest protocol version 3 |
 | `SetupFailed` | `Permanent` |
 | `Exited` | `Permanent` for a non-zero code |
 | `JobLost` | `Transient`, sent by a restarted agent |
@@ -186,16 +232,17 @@ The agent `gradient-guest-agent` can accept the worker on vsock port 7000. Frame
 ### Job Steps
 
 1. Resolve placeholders in `args` and `env`. Unknown placeholders fail the setup.
-2. Write `/run/gradient/context.json` and `/run/gradient/secrets/<name>`, both mode `0400`.
+2. Write `/run/gradient/context.json` and `/run/gradient/secrets/<name>` with mode `0400`. Write the CLI config `/home/gradient/.config/gradient/config.toml` with mode `0600`.
 3. Write `/run/gradient/phase-payload` for a job with an earlier phase.
 4. Mount the virtiofs shares.
 5. Configure the network and `/etc/resolv.conf`.
 6. Start the device bridges over vsock and attach USB devices.
-7. Run `/etc/gradient/pre-script` as root, the program as `gradient` in `/work`, then `/etc/gradient/post-script` as root.
+7. Execute `/etc/gradient/pre-script` as root. Start the program as `gradient` in `/work`. Then run `/etc/gradient/post-script` as root.
+8. Upload the diff of `/work` against the start commit as `gradient/tree.patch`. Untracked files count too. An empty diff triggers no upload.
 
 - `GRADIENT_*` variables win over app `env` of the same name.
 - Output from programs can land in `/run/gradient/output.log`. Only the last 64 MiB stay.
-- `127.0.0.1:7777` can answer `POST /phase` and `POST /upload` with `501` for now.
+- `127.0.0.1:7777` handles `POST /phases?name=<name>`, `POST /outputs/{*path}` and `POST /redact`. `gradient-phase`, `gradient-upload` and `gradient pr open` hit those routes.
 - Timeouts belong to the worker watchdog. Workers send `Kill` and log the timeout line.
 
 ### Guest Channels

@@ -139,7 +139,7 @@ passthru.gradient = {
 
 - Workers report the labels, devices and limits they allow. Requests outside those limits rule out that worker. Downgrades of a request never happen.
 - Lost workers lead to a restart without using a retry. Ten losses in a row fail the job.
-- None of these exist yet: `nodes` above 1, `image`, outputs and phase markers in the UI.
+- `nodes` above 1 and `image` don't exist yet.
 
 ## 5. Read the Job Context
 
@@ -148,10 +148,12 @@ Programs start as the user `gradient` in `/work`, a checkout of the evaluated co
 | Variable | Value |
 |---|---|
 | `GRADIENT_JOB`, `GRADIENT_EVALUATION`, `GRADIENT_TASK`, `GRADIENT_PROJECT` | IDs of the job and its origin |
+| `GRADIENT_PROJECT_NAME`, `GRADIENT_TASK_NAME` | Names of the project and task |
+| `GRADIENT_PARENT_JOB` | The exec job that started this evaluation, empty otherwise |
 | `GRADIENT_COMMIT`, `GRADIENT_ENTRY_POINT` | Commit and app attribute |
 | `GRADIENT_ATTEMPT` | Attempt number, starting at 1 |
-| `GRADIENT_PHASE`, `GRADIENT_PHASE_PAYLOAD_FILE` | Last phase of an earlier attempt |
-| `GRADIENT_API`, `GRADIENT_TOKEN` | Server API and the job token, empty for now |
+| `GRADIENT_PHASE`, `GRADIENT_PHASE_PAYLOAD_FILE` | Last phase of an earlier attempt, see [Use Exec Job Results](exec-job-results.md) |
+| `GRADIENT_API`, `GRADIENT_TOKEN` | Server API and the job token of the attempt |
 | `GRADIENT_WORKER`, `GRADIENT_ZONE` | Worker ID and zone |
 | `GRADIENT_DEVICES`, `GRADIENT_GPU_INDICES` | Device handles in the guest as JSON, GPU indices |
 | `GRADIENT_MOUNT_<NAME>` | Path of a mount |
@@ -304,7 +306,8 @@ ssh -p 2222 -N -L 8888:127.0.0.1:8888 myproject/<job-id>@ci.example.com # (3)!
 
 ## Next Steps
 
-- [Workers](../concepts/workers.md): capabilities and registrations
+- [Use Exec Job Results](exec-job-results.md): chained evaluations, pull requests, outputs and phases
+- [Workers](../concepts/workers.md): registrations and capabilities
 - [Evaluation Wildcards](../reference/wildcards.md): select the apps of a flake
 - [Declarative State](../reference/state.md): the `exec_enabled` flag, `enable_exec` and `secret_files`
 - [Configuration](../reference/configuration.md): the `exec.enable` and `exec.allow.ssh` settings
