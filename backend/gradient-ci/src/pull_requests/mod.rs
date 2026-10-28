@@ -11,7 +11,6 @@ use crate::actions::send::git_host_status::build_reporter_for_integration;
 use crate::actions::send::open_pr::configured_commit_ident;
 use crate::context::CiContext;
 use anyhow::{Context, anyhow};
-use gradient_db::WorkerDb;
 use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::{CiReporter, parse_owner_repo};
 use gradient_git_host::{BranchCommit, CommitFile, CommitIdent};
@@ -20,7 +19,7 @@ use gradient_types::{
     ActionConfig, ActionType, CTaskAction, ECommit, EEvaluation, EExecJob, EProject, ETaskAction,
     ExecJobId, IntegrationId, MCommit, MTask, TaskId,
 };
-use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder};
 
 pub use apply::{patch_paths, patched_files};
 pub use branch::default_branch_name;
@@ -131,8 +130,8 @@ pub(crate) async fn open_with_reporter(
     })
 }
 
-pub async fn pull_request_integration(
-    db: &WorkerDb,
+pub async fn pull_request_integration<C: ConnectionTrait>(
+    db: &C,
     task: TaskId,
 ) -> Result<Option<IntegrationId>, DbErr> {
     let actions = ETaskAction::find()
@@ -150,8 +149,8 @@ pub async fn pull_request_integration(
     }))
 }
 
-pub async fn evaluation_commit_of_job(
-    db: &WorkerDb,
+pub async fn evaluation_commit_of_job<C: ConnectionTrait>(
+    db: &C,
     job: ExecJobId,
 ) -> Result<String, PullRequestError> {
     let commit = evaluation_commit_row(db, job)
@@ -163,7 +162,10 @@ pub async fn evaluation_commit_of_job(
     Ok(vec_to_hex(&commit.hash))
 }
 
-async fn evaluation_commit_row(db: &WorkerDb, job: ExecJobId) -> Result<Option<MCommit>, DbErr> {
+async fn evaluation_commit_row<C: ConnectionTrait>(
+    db: &C,
+    job: ExecJobId,
+) -> Result<Option<MCommit>, DbErr> {
     let Some(job) = by_id::<EExecJob, _>(db, job).await? else {
         return Ok(None);
     };

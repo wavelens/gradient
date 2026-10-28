@@ -19,9 +19,9 @@ use gradient_ci::pull_requests::{
     open_from_patch, patch_paths, pull_request_integration,
 };
 use gradient_core::ServerState;
-use gradient_db::WorkerDb;
 use gradient_types::input::hex_to_vec;
 use gradient_types::*;
+use sea_orm::ConnectionTrait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -84,8 +84,8 @@ pub async fn post_task_pull_request(
     Json(body): Json<CreatePullRequestRequest>,
 ) -> WebResult<Json<BaseResponse<PullRequestResponse>>> {
     let job = principal.and_then(|Extension(principal)| principal.job().map(|job| job.job));
-    let start_commit = start_commit(&db.worker_db, job, body.commit.as_deref()).await?;
-    let integration = pull_request_integration(&db.worker_db, task.id)
+    let start_commit = start_commit(&db.web_db, job, body.commit.as_deref()).await?;
+    let integration = pull_request_integration(&db.web_db, task.id)
         .await?
         .ok_or(PullRequestError::NoIntegration)?;
     let patch = body.patch.into_bytes();
@@ -114,7 +114,7 @@ pub async fn post_task_pull_request(
 }
 
 async fn start_commit(
-    db: &WorkerDb,
+    db: &impl ConnectionTrait,
     job: Option<ExecJobId>,
     commit: Option<&str>,
 ) -> WebResult<String> {
