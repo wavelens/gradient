@@ -16124,6 +16124,10 @@ components:
           minimum: 0
         custom_image:
           type: boolean
+        secrets:
+          type: array
+          items:
+            type: string
     ExpensiveBuild:
       type: object
       required:

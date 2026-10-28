@@ -93,6 +93,18 @@ impl WorkerCaps {
                 .all(|p| (lowest_port..=highest_port).contains(p))
             && (!req.custom_image || allow.custom_images)
             && allow.nodes >= 1
+            && self.holds_secrets(req, inventory)
+    }
+
+    fn holds_secrets(&self, req: &ExecRequirement, inventory: &ExecInventory) -> bool {
+        req.secrets
+            .iter()
+            .all(|name| inventory.secrets.contains(name))
+            && (req.server_secrets.is_empty() || self.capabilities.secrets)
+            && !req
+                .server_secrets
+                .iter()
+                .any(|name| inventory.secrets.contains(name))
     }
 
     pub fn can_run_build(&self, job: &BuildJob) -> bool {
@@ -302,6 +314,31 @@ mod tests {
             name: "gpu:h100".into(),
             count,
         }]
+    }
+
+    #[test]
+    fn worker_sops_names_must_be_advertised() {
+        let mut w = exec_worker();
+        w.exec.as_mut().unwrap().secrets = vec!["lab-key".into()];
+        assert!(w.can_run_exec(&req(|r| r.secrets = vec!["lab-key".into()])));
+        assert!(!w.can_run_exec(&req(|r| r.secrets = vec!["hf-token".into()])));
+    }
+
+    #[test]
+    fn server_held_secrets_need_the_secrets_capability() {
+        let mut w = exec_worker();
+        w.capabilities.secrets = false;
+        assert!(!w.can_run_exec(&req(|r| r.server_secrets = vec!["wandb-token".into()])));
+        w.capabilities.secrets = true;
+        assert!(w.can_run_exec(&req(|r| r.server_secrets = vec!["wandb-token".into()])));
+    }
+
+    #[test]
+    fn a_worker_advertising_a_server_held_name_does_not_fit() {
+        let mut w = exec_worker();
+        w.capabilities.secrets = true;
+        w.exec.as_mut().unwrap().secrets = vec!["wandb-token".into()];
+        assert!(!w.can_run_exec(&req(|r| r.server_secrets = vec!["wandb-token".into()])));
     }
 
     #[test]

@@ -252,7 +252,7 @@ pub(crate) fn exec_waiting_reason(
     }
 
     Some(WaitingReason::ExecWorkers {
-        unmet: exec_unmet(spec, architecture, workers),
+        unmet: exec_unmet(spec, architecture, &[], workers),
         connected_workers: clamp_to_u32(workers.len()),
         matching_workers: clamp_to_u32(
             exec_workers
@@ -263,7 +263,12 @@ pub(crate) fn exec_waiting_reason(
     })
 }
 
-pub(crate) fn exec_unmet(spec: &ExecSpec, architecture: &str, workers: &[WorkerCaps]) -> ExecUnmet {
+pub(crate) fn exec_unmet(
+    spec: &ExecSpec,
+    architecture: &str,
+    secrets: &[String],
+    workers: &[WorkerCaps],
+) -> ExecUnmet {
     let inventories: Vec<&ExecInventory> = workers
         .iter()
         .filter(|w| runs_exec_jobs(w) && w.architectures.iter().any(|a| a == architecture))
@@ -306,6 +311,11 @@ pub(crate) fn exec_unmet(spec: &ExecSpec, architecture: &str, workers: &[WorkerC
             spec.nodes
         },
         custom_image: spec.image.is_some() && !offered(&|i| i.allow.custom_images),
+        secrets: secrets
+            .iter()
+            .filter(|name| !offered(&|i| i.secrets.contains(name)))
+            .cloned()
+            .collect(),
     }
 }
 
@@ -685,6 +695,18 @@ mod tests {
         );
         assert!(unmet.mounts.is_empty());
         assert_eq!((connected_workers, matching_workers), (1, 0));
+    }
+
+    #[test]
+    fn a_missing_worker_secret_shows_in_the_wait_reason() {
+        use crate::test_jobs::eight_gpu_exec_caps;
+        let unmet = exec_unmet(
+            &ExecSpec::default(),
+            "x86_64-linux",
+            &["lab-key".to_owned()],
+            &[eight_gpu_exec_caps()],
+        );
+        assert_eq!(unmet.secrets, vec!["lab-key".to_owned()]);
     }
 
     #[test]
