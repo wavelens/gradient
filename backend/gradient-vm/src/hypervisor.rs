@@ -77,6 +77,11 @@ impl HypervisorApi {
         parse(self.put("vm.add-fs", Some(&body)).await?)
     }
 
+    pub async fn vm_add_disk(&self, path: &Path, id: &str) -> Result<PciDeviceInfo> {
+        let body = json!({ "path": path, "id": id, "serial": id });
+        parse(self.put("vm.add-disk", Some(&body)).await?)
+    }
+
     pub async fn vm_add_net(&self, tap: &str, mac: &str, id: &str) -> Result<PciDeviceInfo> {
         let body = json!({ "tap": tap, "mac": mac, "id": id });
         parse(self.put("vm.add-net", Some(&body)).await?)

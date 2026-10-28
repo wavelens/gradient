@@ -24,7 +24,7 @@ use tokio_vsock::{VMADDR_CID_ANY, VsockAddr, VsockListener};
 use crate::cli_config::write_cli_config;
 use crate::context::{context_env, context_json};
 use crate::redaction::job_redactor;
-use crate::run::program_command;
+use crate::run::{WORK_DIR, program_command};
 
 pub const PROGRAM_USER: &str = "gradient";
 const CONTEXT_FILE: &str = "/run/gradient/context.json";
@@ -36,6 +36,7 @@ const DEVICE_GROUP: &str = "dialout";
 const INTERFACE_WAIT: Duration = Duration::from_secs(60);
 const INTERFACE_POLL: Duration = Duration::from_millis(100);
 const NET_CLASS_DIR: &str = "/sys/class/net";
+const WORK_DISK: &str = "/dev/disk/by-id/virtio-work";
 
 pub struct PreparedJob {
     pub program: Command,
@@ -58,6 +59,9 @@ async fn prepare_steps(job: &RunJob, tasks: &Shutdown) -> Result<PreparedJob> {
     write_cli_config(&job.context).await?;
     write_secrets(job).await?;
     write_phase_payload(job).await?;
+    if job.work_disk {
+        mount_work_disk(Path::new(WORK_DISK)).await?;
+    }
     mount_shares(&job.mounts).await?;
     if let Some(network) = &job.network {
         configure_network(network).await?;
@@ -147,6 +151,24 @@ async fn mount_shares(mounts: &[GuestMount]) -> Result<()> {
         run_command("mount", &args).await?;
     }
     Ok(())
+}
+
+async fn mount_work_disk(disk: &Path) -> Result<()> {
+    let deadline = tokio::time::Instant::now() + INTERFACE_WAIT;
+    while !tokio::fs::try_exists(disk).await.unwrap_or(false) {
+        if tokio::time::Instant::now() >= deadline {
+            bail!(
+                "the work disk {} did not appear in the guest",
+                disk.display()
+            );
+        }
+        tokio::time::sleep(INTERFACE_POLL).await;
+    }
+    let disk = disk.to_string_lossy();
+    tokio::fs::create_dir_all(WORK_DIR).await?;
+    run_command("mount", &["-t", "ext4", &disk, WORK_DIR]).await?;
+    let owner = format!("{PROGRAM_USER}:{PROGRAM_USER}");
+    run_command("chown", &["-R", &owner, WORK_DIR]).await
 }
 
 async fn configure_network(network: &GuestNetwork) -> Result<()> {

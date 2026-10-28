@@ -32,10 +32,16 @@ pub const WORK_MOUNT_TAG: &str = "work";
 const SOCKET_WAIT: Duration = Duration::from_secs(30);
 const USBIP_PORT: u16 = 3240;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkVolume {
+    Share(PathBuf),
+    Disk(PathBuf),
+}
+
 pub struct PlugPlan {
     pub units: Vec<(String, DeviceUnit)>,
     pub mounts: Vec<(MountConfig, PathBuf)>,
-    pub work: PathBuf,
+    pub work: WorkVolume,
     pub network: Option<GuestNetwork>,
 }
 
@@ -304,8 +310,15 @@ impl Guest {
         self.save()
     }
 
+    pub async fn add_disk(&self, id: &str, path: &Path) -> Result<()> {
+        self.api.vm_add_disk(path, id).await.map(drop)
+    }
+
     async fn plug_mounts(&mut self, plan: &PlugPlan) -> Result<()> {
-        self.add_mount(WORK_MOUNT_TAG, &plan.work, false).await?;
+        match &plan.work {
+            WorkVolume::Share(dir) => self.add_mount(WORK_MOUNT_TAG, dir, false).await?,
+            WorkVolume::Disk(image) => self.add_disk(WORK_MOUNT_TAG, image).await?,
+        }
         for (mount, dir) in &plan.mounts {
             if mount.per_job {
                 std::fs::create_dir_all(dir)

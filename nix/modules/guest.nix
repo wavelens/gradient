@@ -77,7 +77,7 @@ in {
     boot = {
       loader.grub.enable = false;
       kernelParams = [ "console=ttyS0" ];
-      kernelModules = [ "vhci-hcd" ];
+      kernelModules = [ "vhci-hcd" "virtio_blk" "ext4" ];
       initrd.kernelModules = [ "virtio_pci" "virtiofs" "vsock" "vmw_vsock_virtio_transport" ];
     };
 

@@ -7,6 +7,7 @@
 { lib
 , cacert
 , craneLib
+, e2fsprogs
 , git
 , glibc
 , installShellFiles
@@ -155,7 +156,7 @@ craneLib.buildPackage (commonArgs // rec {
     cargoNextestExtraArgs = "--no-fail-fast";
     doInstallCargoArtifacts = false;
 
-    nativeCheckInputs = [ cacert git postgresql_18 postgresqlTestHook ];
+    nativeCheckInputs = [ cacert e2fsprogs git postgresql_18 postgresqlTestHook ];
     postgresqlTestUserOptions = "LOGIN CREATEDB";
     postgresqlExtraSettings = ''
       fsync = off

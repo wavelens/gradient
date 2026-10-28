@@ -17,3 +17,4 @@ pub mod sops;
 pub mod state;
 pub mod uploads;
 pub mod watchdog;
+pub mod work_disk;

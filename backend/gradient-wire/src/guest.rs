@@ -19,10 +19,11 @@ use crate::codec::agreement::{agree, version_frame};
 use crate::codec::{Proto, from_bytes, to_bytes};
 use crate::types::GuestChannelKind;
 
-pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=4;
+pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=5;
 pub const GUEST_CHANNELS_AGENT_SINCE: u16 = 2;
 pub const GUEST_JOB_SECRETS_SINCE: u16 = 2;
 pub const GUEST_UPLOADS_SINCE: u16 = 3;
+pub const GUEST_WORK_DISK_SINCE: u16 = 5;
 pub const AGENT_VSOCK_PORT: u32 = 7000;
 pub const AGENT_RELAY_PORT_BASE: u32 = 7100;
 
@@ -79,6 +80,8 @@ pub struct RunJob {
     pub program_pty: bool,
     #[proto(4, default)]
     pub flake_dir: String,
+    #[proto(5, default)]
+    pub work_disk: bool,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Default)]
@@ -344,19 +347,29 @@ mod tests {
             usb_bus_ids: vec!["1-2".into()],
             program_pty: false,
             flake_dir: "nix/hosts".into(),
+            work_disk: true,
         }
+    }
+
+    fn run_job_at(version: u16) -> RunJob {
+        let job = WorkerToAgent::RunJob(Box::new(run_job()));
+        let Ok(WorkerToAgent::RunJob(received)) =
+            from_bytes::<WorkerToAgent>(to_bytes(&job, version).expect("encodes"), version)
+        else {
+            panic!("expected the run job");
+        };
+        *received
     }
 
     #[test]
     fn an_older_worker_sends_no_flake_directory() {
-        let older = *GUEST_PROTO_VERSIONS.end() - 1;
-        let job = WorkerToAgent::RunJob(Box::new(run_job()));
-        let Ok(WorkerToAgent::RunJob(received)) =
-            from_bytes::<WorkerToAgent>(to_bytes(&job, older).expect("encodes"), older)
-        else {
-            panic!("expected the run job");
-        };
-        assert_eq!(received.flake_dir, "");
+        assert_eq!(run_job_at(3).flake_dir, "");
+    }
+
+    #[test]
+    fn an_older_agent_gets_no_work_disk() {
+        assert!(run_job_at(GUEST_WORK_DISK_SINCE).work_disk);
+        assert!(!run_job_at(GUEST_WORK_DISK_SINCE - 1).work_disk);
     }
 
     #[tokio::test]
