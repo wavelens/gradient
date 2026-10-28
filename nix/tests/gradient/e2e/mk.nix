@@ -2632,6 +2632,20 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "INSERT INTO exec_job_attempt (id, exec_job, assignment_id, worker, number, started_at, ended_at) "
         "SELECT gen_random_uuid(), id, gen_random_uuid(), 'gate', 1, created_at, created_at FROM exec_job;"
     )
+    sql(
+        "INSERT INTO exec_job_phase (id, exec_job, attempt, name, payload, created_at) "
+        "SELECT gen_random_uuid(), exec_job, id, 'gate', decode('00', 'hex'), started_at FROM exec_job_attempt;"
+    )
+    sql(
+        "INSERT INTO exec_job_token (id, attempt, token_hash, project, task, expires_at, revoked, created_at) "
+        "SELECT gen_random_uuid(), a.id, 'gate', t.project, t.id, a.started_at, true, a.started_at "
+        "FROM exec_job_attempt a JOIN exec_job j ON j.id = a.exec_job "
+        "JOIN evaluation ev ON ev.id = j.evaluation JOIN task t ON t.id = ev.task;"
+    )
+    sql(
+        "INSERT INTO exec_job_continuation (exec_job, evaluation, attributes, status, created_at, updated_at) "
+        "SELECT id, evaluation, '[]'::jsonb, 2, created_at, created_at FROM exec_job;"
+    )
 
     print(server.succeed(
         "${pkgs.gradient.gate}/bin/gradient-sql-gate "
