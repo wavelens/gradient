@@ -6,7 +6,8 @@
 
 use anyhow::{Context, Result};
 use gradient_db::DbContext;
-use gradient_graph::{GcRequest, Graph};
+use gradient_graph::{GcReport, GcRequest, Graph};
+use gradient_storage::NarStore;
 use gradient_types::events::gc::{Pass, Swept};
 use gradient_types::*;
 use sea_orm::EntityTrait;
@@ -46,6 +47,7 @@ pub(crate) async fn cleanup_old_evaluations(db: &DbContext, graph: &Graph) -> Re
                 }
             };
 
+            delete_exec_outputs_of(&db.storage.nar_storage, &report).await;
             removed += report.deleted_evaluations.len() as u64;
             let deleted: Vec<MEvaluation> = chunk
                 .iter()
@@ -68,6 +70,14 @@ pub(crate) async fn cleanup_old_evaluations(db: &DbContext, graph: &Graph) -> Re
         .await;
     }
     Ok(())
+}
+
+async fn delete_exec_outputs_of(nar_storage: &NarStore, report: &GcReport) {
+    for job in &report.deleted_exec_jobs {
+        if let Err(e) = nar_storage.delete_exec_outputs(job.into_inner()).await {
+            warn!(error = %e, %job, "Evaluation GC failed to delete exec outputs");
+        }
+    }
 }
 
 pub(crate) async fn collect_orphan_derivations(db: &DbContext, graph: &Graph) -> Result<usize> {
@@ -104,4 +114,26 @@ pub(crate) async fn collect_orphan_derivations(db: &DbContext, graph: &Graph) ->
         info!(deleted, "Removed orphan derivations");
     }
     Ok(deleted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn per_task_gc_deletes_the_outputs_of_its_exec_jobs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tempfile::tempdir().unwrap();
+        let nar = NarStore::local(tmp.path()).unwrap();
+        let j1 = ExecJobId::now_v7();
+        crate::test_support::store_exec_output(&nar, j1.into_inner(), staging.path()).await;
+
+        let report = GcReport {
+            deleted_exec_jobs: vec![j1],
+            ..Default::default()
+        };
+        delete_exec_outputs_of(&nar, &report).await;
+
+        assert!(nar.list_exec_output_jobs().await.unwrap().is_empty());
+    }
 }

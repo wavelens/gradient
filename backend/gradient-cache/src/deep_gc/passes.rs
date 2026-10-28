@@ -19,17 +19,25 @@ use tracing::warn;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Pass {
     Blobs,
+    ExecOutputs,
     Logs,
     Nars,
     Partials,
 }
 
 impl Pass {
-    const ALL: [Pass; 4] = [Pass::Blobs, Pass::Logs, Pass::Nars, Pass::Partials];
+    const ALL: [Pass; 5] = [
+        Pass::Blobs,
+        Pass::ExecOutputs,
+        Pass::Logs,
+        Pass::Nars,
+        Pass::Partials,
+    ];
 
     fn name(self) -> &'static str {
         match self {
             Pass::Blobs => "blobs",
+            Pass::ExecOutputs => "exec-outputs",
             Pass::Logs => "logs",
             Pass::Nars => "nars",
             Pass::Partials => "partials",
@@ -40,7 +48,7 @@ impl Pass {
         match self {
             Pass::Logs => log_shards(),
             Pass::Nars => NarStore::shards(),
-            Pass::Blobs | Pass::Partials => Vec::new(),
+            Pass::Blobs | Pass::ExecOutputs | Pass::Partials => Vec::new(),
         }
     }
 }
@@ -74,6 +82,9 @@ pub(super) async fn run(
     };
     match pass {
         Pass::Blobs => pass_blobs(&db.worker_db, &db.storage.nar_storage, report).await,
+        Pass::ExecOutputs => {
+            pass_exec_outputs(&db.worker_db, &db.storage.nar_storage, report).await
+        }
         Pass::Logs => {
             pass_logs(
                 &db.worker_db,
@@ -188,6 +199,49 @@ async fn pass_logs(
         }
     }
     Ok(())
+}
+
+async fn pass_exec_outputs(
+    db: &WorkerDb,
+    nar_storage: &NarStore,
+    report: &mut DeepGcReport,
+) -> Result<()> {
+    let jobs: Vec<ExecJobId> = nar_storage
+        .list_exec_output_jobs()
+        .await
+        .context("list exec output jobs")?
+        .into_iter()
+        .map(ExecJobId::new)
+        .collect();
+    report.exec_output_jobs_scanned += jobs.len() as u64;
+    if jobs.is_empty() {
+        return Ok(());
+    }
+
+    let existing = existing_exec_jobs(db, &jobs).await?;
+    for job in jobs.into_iter().filter(|job| !existing.contains(job)) {
+        if let Err(e) = nar_storage.delete_exec_outputs(job.into_inner()).await {
+            warn!(error = %e, %job, "deep_gc: failed to delete orphan exec outputs");
+        } else {
+            report.orphan_exec_outputs_removed += 1;
+        }
+    }
+    Ok(())
+}
+
+async fn existing_exec_jobs(db: &WorkerDb, ids: &[ExecJobId]) -> Result<HashSet<ExecJobId>> {
+    Ok(gradient_db::fetch_in_chunks(ids, |chunk| {
+        EExecJob::find()
+            .select_only()
+            .column(CExecJob::Id)
+            .filter(CExecJob::Id.is_in(chunk))
+            .into_tuple::<ExecJobId>()
+            .all(db)
+    })
+    .await
+    .context("query exec_jobs by id")?
+    .into_iter()
+    .collect())
 }
 
 async fn referenced_build_attempts(
@@ -435,5 +489,37 @@ mod tests {
         assert_eq!(report.logs_scanned, 2);
         assert_eq!(report.orphan_logs_removed, 1);
         assert_eq!(log.list_shard("00").await.unwrap(), vec![kept]);
+    }
+
+    #[tokio::test]
+    async fn pass_exec_outputs_removes_outputs_of_deleted_jobs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tempfile::tempdir().unwrap();
+        let nar = NarStore::local(tmp.path()).unwrap();
+        let j1 = uuid::Uuid::from_u128(0x0400);
+        let j2 = uuid::Uuid::from_u128(0x0500);
+        crate::test_support::store_exec_output(&nar, j1, staging.path()).await;
+        crate::test_support::store_exec_output(&nar, j2, staging.path()).await;
+
+        let db = mock_db()
+            .append_query_results([id_row(j1)])
+            .into_connection();
+        let state = make_state(nar, Arc::new(NoopLogStorage), db);
+
+        let mut report = DeepGcReport::default();
+        pass_exec_outputs(&state.worker_db, &state.nar_storage, &mut report)
+            .await
+            .unwrap();
+        assert_eq!(
+            state.nar_storage.list_exec_output_jobs().await.unwrap(),
+            vec![j1]
+        );
+        assert_eq!(
+            (
+                report.exec_output_jobs_scanned,
+                report.orphan_exec_outputs_removed
+            ),
+            (2, 1)
+        );
     }
 }
