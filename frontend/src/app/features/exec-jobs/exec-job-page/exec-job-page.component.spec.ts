@@ -10,6 +10,7 @@ import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import type { ExecJobResponse, ExecJobStatus } from '@core/models';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
+import { clockTime } from '@shared/text';
 import { ExecJobPageComponent } from './exec-job-page.component';
 
 vi.mock('@xterm/xterm', () => ({
@@ -37,6 +38,14 @@ vi.mock('@xterm/addon-fit', () => ({
 
 const SSH = 'ssh -p 2222 acme/j1@ci.example.com';
 const FORWARD = 'ssh -p 2222 -N -L 6006:127.0.0.1:6006 acme/j1@ci.example.com';
+const LOG = 'hello\n::gradient-phase:: epoch-3\nbye\n';
+const PULL_REQUEST = {
+  url: 'https://github.com/acme/infra/pull/7',
+  branch: 'update/flake',
+  number: 7,
+  integration: 'github',
+  created_at: '2026-01-01T00:00:04',
+};
 
 function job(status: ExecJobStatus, sshCommand: string | null = SSH): ExecJobResponse {
   return {
@@ -56,6 +65,9 @@ function job(status: ExecJobStatus, sshCommand: string | null = SSH): ExecJobRes
     phases: [{ name: 'epoch-3', attempt: 1, created_at: '2026-01-01T00:00:02' }],
     ssh_command: sshCommand,
     forward_commands: sshCommand ? [FORWARD] : [],
+    tokens: [{ attempt: 1, created_at: '2026-01-01T00:00:01', expires_at: '2026-01-01T02:00:01', revoked: true }],
+    started_evaluations: [{ evaluation: 'e2', task: 'deploy', status: 'Completed', created_at: '2026-01-01T00:00:03' }],
+    outputs_size: 0,
   };
 }
 
@@ -75,7 +87,13 @@ function setup(
       { provide: ActivatedRoute, useValue: route },
       {
         provide: ExecJobsService,
-        useValue: { get: () => of(job(status, sshCommand)), log: () => of('hello'), abort },
+        useValue: {
+          get: () => of(job(status, sshCommand)),
+          log: () => of(LOG),
+          pullRequests: () => of([PULL_REQUEST]),
+          outputs: () => of([]),
+          abort,
+        },
       },
     ],
   });
@@ -128,7 +146,7 @@ describe('ExecJobPageComponent', () => {
         providers: [
           provideRouter([]),
           { provide: ActivatedRoute, useValue: route },
-          { provide: ExecJobsService, useValue: { get, log: () => of('hello'), abort: vi.fn() } },
+          { provide: ExecJobsService, useValue: { get, log: () => of('hello'), pullRequests: () => of([]), outputs: () => of([]), abort: vi.fn() } },
         ],
       });
       const fixture = TestBed.createComponent(ExecJobPageComponent);
@@ -150,6 +168,36 @@ describe('ExecJobPageComponent', () => {
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('epoch-3');
     expect(text).toContain('hello');
+  });
+
+  it('lists the job tokens by attempt, expiry and revocation, never a value', () => {
+    const { fixture } = setup('completed');
+    const row = (fixture.nativeElement as HTMLElement).querySelector('.tokens tbody tr');
+    expect(row?.querySelector('td')?.textContent?.trim()).toBe('1');
+    expect(row?.textContent).toContain(clockTime('2026-01-01T02:00:01'));
+    expect(row?.querySelector('gr-badge')?.textContent?.trim()).toBe('revoked');
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('GRJ_');
+  });
+
+  it('links each opened pull request', () => {
+    const { fixture } = setup('completed');
+    const link = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>(`a[href="${PULL_REQUEST.url}"]`);
+    expect(link?.textContent).toContain('#7');
+  });
+
+  it('links each started evaluation to its log page', () => {
+    const { fixture } = setup('completed');
+    const link = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('a[href="/project/acme/log/e2"]');
+    expect(link?.textContent?.trim()).toBe('deploy');
+    expect(link?.closest('li')?.querySelector('gr-status-icon')).toBeTruthy();
+  });
+
+  it('shows each phase marker in the log as a divider with the phase name', () => {
+    const { fixture } = setup('completed');
+    const log = (fixture.nativeElement as HTMLElement).querySelector('.log');
+    expect(log?.querySelector('.phase-marker')?.textContent?.trim()).toBe('epoch-3');
+    expect(log?.textContent).not.toContain('::gradient-phase::');
+    expect(log?.textContent).toContain('bye');
   });
 
   describe('terminal', () => {
