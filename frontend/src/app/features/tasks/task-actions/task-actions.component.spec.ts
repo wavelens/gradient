@@ -70,7 +70,13 @@ function setup(
       },
       { provide: IntegrationsService, useValue: { listProjectIntegrations: () => of([]) } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
-      { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }) } },
+      {
+        provide: TasksService,
+        useValue: {
+          getTaskInfo: () => of({ display_name: 'Demo Task' }),
+          getTasks: () => of({ items: [], total: 0, page: 1, per_page: 100 }),
+        },
+      },
       { provide: TeamsService, useValue: { projectGrants: () => of([]) } },
       { provide: ConfigService, useValue: { smtpEnabled: true } },
     ],
