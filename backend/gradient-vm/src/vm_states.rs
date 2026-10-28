@@ -45,7 +45,8 @@ impl VmStates {
     }
 
     pub fn stopped(&self, vm: &GuestId) {
-        let Some(last) = self.lock().remove(vm) else {
+        let mut live = self.lock();
+        let Some(last) = live.remove(vm) else {
             return;
         };
         let _ = self.changes.send(VmStateChange {
@@ -68,7 +69,8 @@ impl VmStates {
             state,
             job_id,
         };
-        self.lock().insert(vm.clone(), change.clone());
+        let mut live = self.lock();
+        live.insert(vm.clone(), change.clone());
         let _ = self.changes.send(change);
     }
 
