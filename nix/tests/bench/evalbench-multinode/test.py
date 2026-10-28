@@ -34,10 +34,11 @@ def pin_vms():
     for index, node in enumerate(WORKER_NODES):
         first = SERVER_CORES + WORKER_CORES * index
         pin(node, CPUS[first:first + WORKER_CORES])
-    siblings = {
-        cpu: pathlib.Path(f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list").read_text().strip()
-        for cpu in CPUS
-    }
+    siblings = {}
+    for cpu in CPUS:
+        topology = pathlib.Path(f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list")
+        if topology.exists():
+            siblings[cpu] = topology.read_text().strip()
     print(f"builder CPUs {CPUS} of {os.cpu_count()}, load {os.getloadavg()}, siblings {siblings}")
 
 
