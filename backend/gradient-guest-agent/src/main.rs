@@ -5,6 +5,7 @@
  */
 
 mod channels;
+mod cli_config;
 mod context;
 mod http;
 mod listener;
@@ -15,6 +16,7 @@ mod run;
 mod setup;
 mod shell;
 mod terminal;
+mod tree_patch;
 mod upload;
 
 use std::path::{Path, PathBuf};

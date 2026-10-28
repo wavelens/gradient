@@ -21,6 +21,7 @@ use tokio::net::TcpListener;
 use tokio::process::Command;
 use tokio_vsock::{VMADDR_CID_ANY, VsockAddr, VsockListener};
 
+use crate::cli_config::write_cli_config;
 use crate::context::{context_env, context_json};
 use crate::redaction::job_redactor;
 use crate::run::program_command;
@@ -39,6 +40,7 @@ pub struct PreparedJob {
     pub env: BTreeMap<String, String>,
     pub terminal: bool,
     pub redactor: SecretRedactor,
+    pub start_commit: String,
 }
 
 pub async fn prepare(job: &RunJob, tasks: &Shutdown) -> Result<PreparedJob, String> {
@@ -51,6 +53,7 @@ async fn prepare_steps(job: &RunJob, tasks: &Shutdown) -> Result<PreparedJob> {
     let env = job_env(job);
     let program = program_command(job, &env)?;
     write_context(job).await?;
+    write_cli_config(&job.context).await?;
     write_secrets(job).await?;
     write_phase_payload(job).await?;
     mount_shares(&job.mounts).await?;
@@ -64,6 +67,7 @@ async fn prepare_steps(job: &RunJob, tasks: &Shutdown) -> Result<PreparedJob> {
         env,
         terminal: job.program_pty,
         redactor: job_redactor(job),
+        start_commit: job.context.job.get("commit").cloned().unwrap_or_default(),
     })
 }
 
@@ -110,7 +114,7 @@ async fn write_phase_payload(job: &RunJob) -> Result<()> {
     .await
 }
 
-async fn write_file(path: &Path, data: &[u8], mode: u32) -> Result<()> {
+pub async fn write_file(path: &Path, data: &[u8], mode: u32) -> Result<()> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
@@ -121,7 +125,7 @@ async fn write_file(path: &Path, data: &[u8], mode: u32) -> Result<()> {
     give_to_program_user(path, mode).await
 }
 
-async fn give_to_program_user(path: &Path, mode: u32) -> Result<()> {
+pub async fn give_to_program_user(path: &Path, mode: u32) -> Result<()> {
     let user = User::from_name(PROGRAM_USER)?
         .ok_or_else(|| anyhow!("user {PROGRAM_USER} does not exist"))?;
     chown(path, Some(user.uid.as_raw()), Some(user.gid.as_raw()))
