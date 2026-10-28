@@ -118,6 +118,7 @@ pub fn load_store(dir: &Path) -> StoreFixture {
             ifd: false,
             licenses: vec![],
             exec: None,
+            dependency_outputs: Vec::new(),
         });
     }
 

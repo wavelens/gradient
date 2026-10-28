@@ -396,6 +396,8 @@ pub struct DiscoveredDerivation {
     pub licenses: Vec<License>,
     #[proto(43, default)]
     pub exec: Option<ExecSpec>,
+    #[proto(50, default)]
+    pub dependency_outputs: Vec<Vec<String>>,
 }
 
 #[derive(Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Eq)]
