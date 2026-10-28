@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::io::SeekFrom;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -17,6 +19,7 @@ use gradient_worker_client::correlation::{
     AssignmentHandle, CacheWaiters, ImportWaiters, InputWaiters, KnownDerivationWaiters,
     cache_query_with_timeout, known_derivations_with_timeout,
 };
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tracing::{debug, warn};
 
 use crate::count::clamp_to_u32;
@@ -86,6 +89,68 @@ async fn passthrough_blob(
             is_final: true,
         })
         .await
+}
+
+pub(crate) async fn passthrough_file(
+    uploads: &UploadClient,
+    request_id: u64,
+    file: &Path,
+    resume_offset: u64,
+) -> Result<()> {
+    let writer = uploads.writer();
+    let mut staged = tokio::fs::File::open(file)
+        .await
+        .with_context(|| format!("open {}", file.display()))?;
+    let mut offset = staged.seek(SeekFrom::Start(resume_offset)).await?;
+    let mut chunk = vec![0; uploads.chunk_bytes()];
+    loop {
+        let read = staged.read(&mut chunk).await?;
+        if read == 0 {
+            break;
+        }
+        writer
+            .send_now(ClientMessage::UploadChunk {
+                request_id,
+                data: Bytes::copy_from_slice(&chunk[..read]),
+                offset,
+                is_final: false,
+            })
+            .await?;
+        offset += read as u64;
+    }
+    writer
+        .send_now(ClientMessage::UploadChunk {
+            request_id,
+            data: Bytes::new(),
+            offset,
+            is_final: true,
+        })
+        .await
+}
+
+pub(crate) async fn push_exec_output(
+    uploads: &UploadClient,
+    job_id: &str,
+    object: UploadObject,
+    file: &Path,
+    size_bytes: u64,
+) -> Result<()> {
+    let mut upload = uploads.start(job_id, object, size_bytes).await?;
+    while let Some((request_id, target)) = upload.next_grant().await? {
+        let sent = match target {
+            GrantTarget::Passthrough { resume_offset } => {
+                passthrough_file(uploads, request_id, file, resume_offset).await
+            }
+            other => Err(anyhow::anyhow!("an exec output cannot use {other:?}")),
+        };
+        if upload
+            .settle(sent.map(|()| UploadMetadata::ExecOutput { size_bytes }))
+            .await?
+        {
+            break;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default)]
