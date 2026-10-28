@@ -5,6 +5,7 @@
  */
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -76,17 +77,19 @@ pub async fn fetch_repository(
                 }
             };
             let checkout_path = checkout.path().to_string_lossy().into_owned();
+            let flake_root = flake_root(checkout.path(), job.flake_dir.as_deref())?;
 
             if let Some(spec) = &job.input_update {
-                run_input_update(spec, &checkout_path, ssh_key.as_deref(), updater).await?;
+                run_input_update(spec, &flake_root, ssh_key.as_deref(), updater).await?;
             }
 
             let source_path = super::source::add_git_tree(store, &checkout_path, &commit).await?;
-            (source_path, checkout_path, Some(checkout))
+            (source_path, flake_root, Some(checkout))
         }
         FlakeSource::Cached { store_path } => {
             debug!(%store_path, has_ssh_key = ssh_key.is_some(), "using the cached build source");
-            (store_path.clone(), store_path.clone(), None)
+            let flake_root = flake_root(Path::new(store_path), job.flake_dir.as_deref())?;
+            (store_path.clone(), flake_root, None)
         }
     };
 
@@ -98,7 +101,10 @@ pub async fn fetch_repository(
             let declared = declared_inputs_from_lock(lock)?;
             resolve_overrides(&overrides_in, &declared, lock)?
         }
-        (None, false) => anyhow::bail!("input overrides need a flake.lock in {flake_root}"),
+        (None, false) => anyhow::bail!(
+            "input overrides need a flake.lock in {}",
+            flake_root.display()
+        ),
     };
 
     for msg in &warnings {
@@ -158,8 +164,16 @@ struct LockedInput {
     request: String,
 }
 
-async fn read_lock(flake_root: &str) -> Result<Option<serde_json::Value>> {
-    let path = std::path::Path::new(flake_root).join("flake.lock");
+pub(super) fn flake_root(base: &Path, flake_dir: Option<&str>) -> Result<PathBuf> {
+    let Some(dir) = flake_dir else {
+        return Ok(base.to_path_buf());
+    };
+    gradient_types::check_flake_dir(dir)?;
+    Ok(base.join(dir))
+}
+
+async fn read_lock(flake_root: &Path) -> Result<Option<serde_json::Value>> {
+    let path = flake_root.join("flake.lock");
     match tokio::fs::read(&path).await {
         Ok(bytes) => Ok(Some(
             serde_json::from_slice(&bytes).context("parse flake.lock")?,
@@ -388,14 +402,14 @@ async fn fetch_inputs(
 #[tracing::instrument(level = "debug", skip_all)]
 async fn run_input_update(
     spec: &gradient_wire::messages::InputUpdateSpec,
-    checkout: &str,
+    flake_root: &Path,
     ssh_key: Option<&str>,
     updater: &mut dyn JobReporter,
 ) -> Result<()> {
     use gradient_sources::flake_lock::PatchGenerator as _;
 
     if spec.discover_only {
-        let lock_path = std::path::Path::new(checkout).join("flake.lock");
+        let lock_path = flake_root.join("flake.lock");
         let bytes = tokio::fs::read(&lock_path)
             .await
             .with_context(|| format!("read {}", lock_path.display()))?;
@@ -426,7 +440,7 @@ async fn run_input_update(
         spec.inputs.iter().cloned().map(Into::into).collect();
 
     let Some(patch) = generator
-        .produce(std::path::Path::new(checkout), &tracked)
+        .produce(flake_root, &tracked)
         .await
         .context("run the flake.lock update generator")?
     else {
@@ -434,7 +448,7 @@ async fn run_input_update(
     };
 
     for edit in &patch.edits {
-        let dest = std::path::Path::new(checkout).join(&edit.path);
+        let dest = flake_root.join(&edit.path);
         tokio::fs::write(&dest, &edit.contents)
             .await
             .with_context(|| format!("write {}", dest.display()))?;
@@ -666,27 +680,33 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn fetch_repository_adds_the_clone_to_the_store_without_nix() {
-        use std::process::Command;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let repo_dir = tmp.path().join("repo");
-
-        let rd = repo_dir.to_str().unwrap();
-        Command::new("git")
-            .args(["init", rd, "-b", "main"])
+    fn git(repo: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
             .output()
             .unwrap();
-        std::fs::write(repo_dir.join("flake.nix"), "{}").unwrap();
-        Command::new("git")
-            .args(["-C", rd, "add", "."])
-            .output()
-            .unwrap();
-        let commit_out = Command::new("git")
-            .args([
-                "-C",
-                rd,
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap().trim().to_owned()
+    }
+
+    fn committed_repo(repo: &Path, files: &[(&str, &str)]) -> String {
+        std::fs::create_dir_all(repo).unwrap();
+        git(repo, &["init", "-b", "main"]);
+        for (path, contents) in files {
+            let file = repo.join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, contents).unwrap();
+        }
+        git(repo, &["add", "."]);
+        git(
+            repo,
+            &[
                 "-c",
                 "user.name=test",
                 "-c",
@@ -696,39 +716,34 @@ mod tests {
                 "commit",
                 "-m",
                 "init",
-            ])
-            .output()
-            .unwrap();
-        assert!(
-            commit_out.status.success(),
-            "git commit failed: {}",
-            String::from_utf8_lossy(&commit_out.stderr)
+            ],
         );
+        git(repo, &["rev-parse", "HEAD"])
+    }
 
-        let sha = String::from_utf8(
-            Command::new("git")
-                .args(["-C", rd, "rev-parse", "HEAD"])
-                .output()
-                .unwrap()
-                .stdout,
-        )
-        .unwrap()
-        .trim()
-        .to_string();
-        assert!(sha.len() == 40, "expected 40-char SHA, got: {sha}");
-
-        let job = FlakeJob {
-            steps: vec![FlakeStep::FetchFlake],
+    fn repository_job(repo: &Path, commit: String) -> FlakeJob {
+        FlakeJob {
             source: FlakeSource::Repository {
-                url: format!("file://{}", repo_dir.display()),
-                commit: sha,
+                url: format!("file://{}", repo.display()),
+                commit,
             },
-            wildcards: vec![],
-            timeout_secs: None,
-            input_overrides: vec![],
-            input_update: None,
-            flake_dir: None,
-        };
+            ..make_flake_job()
+        }
+    }
+
+    async fn fetch(job: &FlakeJob, store: &FakeWorkerStore) -> Result<FetchOutcome> {
+        let credentials = crate::proto::credentials::CredentialStore::new();
+        let mut reporter = RecordingJobReporter::new();
+        fetch_repository(job, &mut reporter, &credentials, store, no_abort()).await
+    }
+
+    #[tokio::test]
+    async fn fetch_repository_adds_the_clone_to_the_store_without_nix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_dir = tmp.path().join("repo");
+        let sha = committed_repo(&repo_dir, &[("flake.nix", "{}")]);
+        assert!(sha.len() == 40, "expected 40-char SHA, got: {sha}");
+        let job = repository_job(&repo_dir, sha);
 
         let credentials = crate::proto::credentials::CredentialStore::new();
         let mut reporter = RecordingJobReporter::new();
@@ -743,6 +758,63 @@ mod tests {
         assert_eq!(outcome.input_paths, vec![outcome.source_path.clone()]);
         assert!(store.has_path(&outcome.source_path).await.unwrap());
         assert!(matches!(reporter.events()[0], ReportedEvent::Fetching));
+    }
+
+    #[tokio::test]
+    async fn a_subdirectory_flake_reads_its_own_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_dir = tmp.path().join("repo");
+        let sha = committed_repo(
+            &repo_dir,
+            &[
+                ("flake.nix", "{}"),
+                ("sub/flake.nix", "{}"),
+                (
+                    "sub/flake.lock",
+                    r#"{"nodes":{"root":{}},"root":"root","version":7}"#,
+                ),
+            ],
+        );
+        let in_sub = FlakeJob {
+            input_overrides: vec![gradient_wire::types::FlakeInputOverride {
+                input_name: "missing".into(),
+                url: None,
+            }],
+            flake_dir: Some("sub".into()),
+            ..repository_job(&repo_dir, sha)
+        };
+        let at_root = FlakeJob {
+            flake_dir: None,
+            ..in_sub.clone()
+        };
+
+        fetch(&in_sub, &FakeWorkerStore::new()).await.unwrap();
+        let Err(err) = fetch(&at_root, &FakeWorkerStore::new()).await else {
+            panic!("a root flake without a lock takes no overrides")
+        };
+        assert!(
+            err.to_string()
+                .contains("input overrides need a flake.lock"),
+            "{err:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_escaping_flake_directory_fails_the_fetch() {
+        let job = FlakeJob {
+            source: FlakeSource::Cached {
+                store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source".into(),
+            },
+            flake_dir: Some("../x".into()),
+            ..make_flake_job()
+        };
+        let Err(err) = fetch(&job, &FakeWorkerStore::new()).await else {
+            panic!("an escaping flake directory is refused")
+        };
+        assert_eq!(
+            err.to_string(),
+            gradient_types::InputError::InvalidFlakeDir("../x".into()).to_string()
+        );
     }
 
     #[tokio::test]
