@@ -15,6 +15,7 @@ pub mod draining;
 pub mod eval;
 pub mod eval_split;
 pub mod exec_job;
+pub mod exec_secrets;
 pub mod import_waits;
 pub mod input_waits;
 pub mod instance;

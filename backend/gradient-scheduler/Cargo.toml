@@ -19,6 +19,7 @@ gradient-core = { workspace = true }
 gradient-ci = { workspace = true }
 gradient-graph = { workspace = true }
 gradient-sources = { workspace = true }
+gradient-sops = { workspace = true }
 gradient-db = { workspace = true }
 gradient-types = { workspace = true }
 gradient-pool = { workspace = true }
@@ -36,10 +37,12 @@ reqwest    = { workspace = true }
 sea-orm    = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
+thiserror  = { workspace = true }
 tokio      = { workspace = true, features = ["macros", "sync", "time"] }
 tracing    = { workspace = true }
 utoipa     = { workspace = true }
 uuid       = { workspace = true }
+zeroize    = { workspace = true }
 
 [dev-dependencies]
 git2 = { workspace = true }

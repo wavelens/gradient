@@ -3230,6 +3230,7 @@ dependencies = [
  "gradient-fixtures",
  "gradient-graph",
  "gradient-pool",
+ "gradient-sops",
  "gradient-sources",
  "gradient-test-support",
  "gradient-types",
@@ -3241,11 +3242,13 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "utoipa",
  "uuid",
  "wiremock",
+ "zeroize",
 ]
 
 [[package]]

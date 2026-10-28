@@ -14,7 +14,7 @@ use gradient_entity::ids::{DispatchedJobId, EvaluationId, ProjectId};
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::WaitingReason;
-use gradient_types::exec::{ExecInventory, ExecSpec};
+use gradient_types::exec::{ExecInventory, ExecSpec, SopsFile};
 use gradient_wire::types::BuildFailureKind;
 use gradient_wire::types::{DiscoveredDerivation, Job, JobKind};
 
@@ -431,6 +431,49 @@ async fn a_worker_of_another_project_gets_no_count() {
     assert!(
         pre_warms(&case.signals(W2)).is_empty(),
         "after 1: no count for W2"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_wrong_sops_recipient_fails_the_job_before_dispatch() {
+    let e1 = EvaluationId::now_v7();
+    let spec = ExecSpec {
+        secrets: vec!["wandb-token".into()],
+        sops: vec![SopsFile {
+            path: "secrets/train.yaml".into(),
+            ciphertext: include_bytes!("../../../gradient-sops/tests/fixtures/other.yaml").to_vec(),
+        }],
+        ..spec()
+    };
+    let case = SchedulerCase::start_then(exec_shape(e1), async |case| {
+        let (private_key, public_key) =
+            gradient_sources::generate_ssh_key(&case.ctx.config.secrets.crypt_file)
+                .expect("a project key");
+        case.db
+            .execute(&format!(
+                "UPDATE project SET private_key = '{private_key}', public_key = '{public_key}'"
+            ))
+            .await;
+        seed_queued_job(case, &spec).await;
+    })
+    .await;
+    case.connect(W1, w_exec(inventory()), &[]).await;
+
+    case.assign_exec_jobs().await;
+
+    let job = the_job(&case).await;
+    assert_eq!(
+        (job.status, job.message.as_deref()),
+        (
+            ExecJobStatus::Failed,
+            Some("sops file secrets/train.yaml: not encrypted for the project key")
+        ),
+        "after 1: the job"
+    );
+    assert!(
+        case.db.rows::<dispatched_job::Entity>().await.is_empty(),
+        "after 1: no dispatch"
     );
     case.finish().await;
 }
