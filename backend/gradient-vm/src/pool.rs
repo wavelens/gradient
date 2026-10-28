@@ -5,6 +5,7 @@
  */
 
 use std::collections::BTreeSet;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -16,6 +17,7 @@ use tracing::{info, warn};
 
 use crate::agent::GuestBootError;
 use crate::config::VmConfig;
+use crate::custom_image::{custom_boot_error, image_from_toplevel};
 use crate::guest::{Guest, remove_guest_dirs};
 use crate::hypervisor::GuestImage;
 use crate::state::{GuestId, read_states};
@@ -212,11 +214,31 @@ impl GuestPool {
         cid
     }
 
+    pub async fn boot_custom(
+        &self,
+        toplevel: &Path,
+        job_id: String,
+    ) -> Result<Guest, GuestBootError> {
+        let image = image_from_toplevel(toplevel, &self.worker_image()?)?;
+        let guest = self
+            .boot_image(&image)
+            .await
+            .map_err(|e| custom_boot_error(e, toplevel))?;
+        self.states.running(guest.id(), job_id);
+        Ok(guest)
+    }
+
     async fn boot_one(&self) -> Result<Guest, GuestBootError> {
-        let image =
-            GuestImage::load(&self.config.image).map_err(|e| GuestBootError(format!("{e:#}")))?;
+        self.boot_image(&self.worker_image()?).await
+    }
+
+    fn worker_image(&self) -> Result<GuestImage, GuestBootError> {
+        GuestImage::load(&self.config.image).map_err(|e| GuestBootError(format!("{e:#}")))
+    }
+
+    async fn boot_image(&self, image: &GuestImage) -> Result<Guest, GuestBootError> {
         let cid = self.next_cid();
-        let guest = Guest::boot(&self.units, &self.config, &image, cid, &self.stopping).await;
+        let guest = Guest::boot(&self.units, &self.config, image, cid, &self.stopping).await;
         lock(&self.reserved_cids).remove(&cid);
         guest
     }

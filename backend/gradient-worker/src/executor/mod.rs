@@ -720,7 +720,10 @@ impl JobExecutor {
             .context("this worker runs no exec jobs")?;
         crate::exec::job::execute(
             host,
-            &self.store,
+            crate::exec::job::StoreAccess {
+                store: &self.store,
+                gcroots: &self.gcroots,
+            },
             job,
             updater,
             credentials,
