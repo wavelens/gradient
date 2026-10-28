@@ -58,6 +58,19 @@ fn project_task_cache_descriptions_optional() {
 }
 
 #[test]
+fn a_state_task_with_an_escaping_flake_directory_is_refused() {
+    let with_repository = |repository: &str| {
+        let mut cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
+        cfg.tasks.get_mut("web").unwrap().repository = repository.to_owned();
+        cfg.validate()
+    };
+    let escaping = with_repository("https://github.com/acme/infra?dir=../x");
+    let fields: Vec<&str> = escaping.errors.iter().map(|e| e.field.as_str()).collect();
+    assert_eq!(fields, ["tasks.web.repository"]);
+    assert!(with_repository("https://github.com/acme/infra?dir=nix").is_valid);
+}
+
+#[test]
 fn secret_files_default_to_empty() {
     let cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
     assert!(cfg.projects["acme"].secret_files.is_empty());
