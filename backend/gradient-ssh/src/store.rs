@@ -446,7 +446,7 @@ mod tests {
 
     async fn session_in(state: TestState) -> Arc<Session> {
         let session = Session::open(
-            SshHandles::from_state(&state.build()),
+            SshHandles::for_tests(&state.build()),
             gradient_fixtures::rows::user(),
             gradient_fixtures::rows::project(),
             0,

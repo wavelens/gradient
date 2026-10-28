@@ -12,6 +12,8 @@ mod build_wait;
 mod commands;
 mod daemon_build;
 mod exec;
+mod gateway;
+mod gateway_user;
 mod host_key;
 mod ingest;
 mod listener;
@@ -24,6 +26,7 @@ mod store;
 mod store_paths;
 
 use gradient_core::ServerState;
+use gradient_scheduler::Scheduler;
 use russh::server::Server as _;
 use session::SshHandles;
 use std::sync::Arc;
@@ -32,7 +35,7 @@ use tokio::net::TcpListener;
 
 const ROOTS_TTL: Duration = Duration::from_secs(3600);
 
-pub async fn start(state: Arc<ServerState>) -> std::io::Result<()> {
+pub async fn start(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> std::io::Result<()> {
     let ssh = &state.config.ssh;
     let key =
         host_key::load_or_generate(ssh.host_key_file.as_deref(), &state.config.server.base_dir)
@@ -40,7 +43,7 @@ pub async fn start(state: Arc<ServerState>) -> std::io::Result<()> {
             .map_err(std::io::Error::other)?;
     let config = Arc::new(server::config(key));
     let roots = Arc::new(roots::Roots::new(ROOTS_TTL));
-    let handles = SshHandles::from_state(&state);
+    let handles = SshHandles::from_state(&state, scheduler);
     for host in &ssh.listen_addresses {
         let listener = listener::bind(host, ssh.port).await?;
         tracing::info!(%host, port = ssh.port, "ssh server listening");

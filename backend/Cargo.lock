@@ -3098,6 +3098,7 @@ dependencies = [
  "gradient-entity",
  "gradient-fixtures",
  "gradient-graph",
+ "gradient-pool",
  "gradient-proto",
  "gradient-scheduler",
  "gradient-sources",
