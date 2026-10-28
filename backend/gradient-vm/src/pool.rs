@@ -99,9 +99,8 @@ impl GuestPool {
     }
 
     pub fn adopt_warm(self: &Arc<Self>, guest: Guest) {
-        let id = guest.id().clone();
-        let surplus = lock(&self.slots).offer(guest, self.target(), self.draining());
-        self.note_parked(&id, &surplus);
+        let (target, draining) = (self.target(), self.draining());
+        let surplus = self.park(guest, |slots, guest| slots.offer(guest, target, draining));
         if let Some(guest) = surplus {
             self.retire(guest, ());
         }
@@ -226,10 +225,10 @@ impl GuestPool {
         loop {
             match self.boot_one().await {
                 Ok(guest) => {
-                    let id = guest.id().clone();
-                    let surplus_guest =
-                        lock(&self.slots).finish_boot(guest, self.target(), self.draining());
-                    self.note_parked(&id, &surplus_guest);
+                    let (target, draining) = (self.target(), self.draining());
+                    let surplus_guest = self.park(guest, |slots, guest| {
+                        slots.finish_boot(guest, target, draining)
+                    });
                     return self.stop_surplus(surplus_guest).await;
                 }
                 Err(e) => warn!(error = %e, "warm guest boot failed, retrying in 30s"),
@@ -245,9 +244,8 @@ impl GuestPool {
     }
 
     async fn keep_or_stop(&self, guest: Guest) {
-        let id = guest.id().clone();
-        let surplus_guest = lock(&self.slots).offer(guest, self.target(), self.draining());
-        self.note_parked(&id, &surplus_guest);
+        let (target, draining) = (self.target(), self.draining());
+        let surplus_guest = self.park(guest, |slots, guest| slots.offer(guest, target, draining));
         self.stop_surplus(surplus_guest).await;
     }
 
@@ -257,10 +255,18 @@ impl GuestPool {
         }
     }
 
-    fn note_parked(&self, id: &GuestId, surplus: &Option<Guest>) {
+    fn park(
+        &self,
+        guest: Guest,
+        place: impl FnOnce(&mut Slots<Guest>, Guest) -> Option<Guest>,
+    ) -> Option<Guest> {
+        let id = guest.id().clone();
+        let mut slots = lock(&self.slots);
+        let surplus = place(&mut slots, guest);
         if surplus.is_none() {
-            self.states.warm(id);
+            self.states.warm(&id);
         }
+        surplus
     }
 
     async fn teardown(&self, guest: Guest) {
