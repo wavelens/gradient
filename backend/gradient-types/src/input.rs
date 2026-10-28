@@ -33,6 +33,10 @@ pub enum InputError {
         forms = REPOSITORY_URL_FORMS
     )]
     RepositoryUrlPortInvalid { scheme: String, port: String },
+    #[error("Flake directory `{0}` must be a relative path inside the repository")]
+    InvalidFlakeDir(String),
+    #[error("Repository URL query `{0}` is not supported, only `dir` is")]
+    UnsupportedRepositoryQuery(String),
     #[error("Evaluation wildcard cannot have leading or trailing whitespace")]
     EvaluationWildcardWhitespace,
     #[error("Evaluation wildcard cannot have consecutive commas")]

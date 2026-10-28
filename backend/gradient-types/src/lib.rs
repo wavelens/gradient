@@ -47,7 +47,7 @@ pub use self::entity_aliases::*;
 pub use self::events::build::{BuildProgress, BuildProgressPhase};
 pub use self::events::evaluation::EvaluationProgress;
 pub use self::events::{Envelope, Event, EventBus, EventRx};
-pub use self::flake_url::{NixFlakeUrl, RepositoryUrl};
+pub use self::flake_url::{NixFlakeUrl, RepositoryLocation, RepositoryUrl, check_flake_dir};
 pub use self::git_host::GitHostType;
 pub use self::ids::*;
 pub use self::input::*;

@@ -52,9 +52,10 @@ impl FromStr for RepositoryUrl {
             return Err(InputError::LocalFileUrlNotAllowed);
         }
 
-        match s.split_once("://") {
+        let clone_url = RepositoryLocation::check(s)?.clone_url;
+        match clone_url.split_once("://") {
             Some((scheme, rest)) => check_authority(scheme, rest)?,
-            None if !s.contains('@') && !s.contains(':') => {
+            None if !clone_url.contains('@') && !clone_url.contains(':') => {
                 return Err(InputError::InvalidRepositoryUrl);
             }
             None => {}
@@ -64,6 +65,62 @@ impl FromStr for RepositoryUrl {
             url: Self::normalize(s),
         })
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepositoryLocation<'a> {
+    pub clone_url: &'a str,
+    pub flake_dir: Option<&'a str>,
+}
+
+impl<'a> RepositoryLocation<'a> {
+    pub fn of(url: &'a str) -> Self {
+        let (clone_url, query) = split_query(url);
+        Self {
+            clone_url,
+            flake_dir: query_pairs(query)
+                .find(|(key, _)| *key == "dir")
+                .map(|(_, value)| value),
+        }
+    }
+
+    pub fn check(url: &'a str) -> Result<Self, InputError> {
+        let (_, query) = split_query(url);
+        if let Some((key, _)) = query_pairs(query).find(|(key, _)| *key != "dir") {
+            return Err(InputError::UnsupportedRepositoryQuery(key.to_owned()));
+        }
+        let location = Self::of(url);
+        if let Some(dir) = location.flake_dir {
+            check_flake_dir(dir)?;
+        }
+        Ok(location)
+    }
+}
+
+fn split_query(url: &str) -> (&str, &str) {
+    url.split_once('?').unwrap_or((url, ""))
+}
+
+fn query_pairs(query: &str) -> impl Iterator<Item = (&str, &str)> {
+    query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| pair.split_once('=').unwrap_or((pair, "")))
+}
+
+pub fn check_flake_dir(dir: &str) -> Result<(), InputError> {
+    if dir.split('/').all(is_flake_dir_segment) {
+        Ok(())
+    } else {
+        Err(InputError::InvalidFlakeDir(dir.to_owned()))
+    }
+}
+
+fn is_flake_dir_segment(segment: &str) -> bool {
+    !matches!(segment, "" | "." | "..")
+        && segment
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
 fn check_authority(scheme: &str, rest: &str) -> Result<(), InputError> {
@@ -248,6 +305,47 @@ mod tests {
     fn nix_url_invalid_input_is_rejected() {
         assert!(NixFlakeUrl::new("https://github.com/foo/bar.git", "abc123").is_err());
         assert!(NixFlakeUrl::new("file:///local/repo", REV).is_err());
+    }
+
+    #[test]
+    fn a_dir_query_names_the_flake_directory() {
+        let l = RepositoryLocation::check("https://github.com/acme/infra?dir=nix/hosts").unwrap();
+        assert_eq!(
+            (l.clone_url, l.flake_dir),
+            ("https://github.com/acme/infra", Some("nix/hosts"))
+        );
+        let plain = RepositoryLocation::check("git@github.com:acme/infra.git").unwrap();
+        assert_eq!(
+            (plain.clone_url, plain.flake_dir),
+            ("git@github.com:acme/infra.git", None)
+        );
+    }
+
+    #[test]
+    fn a_flake_directory_outside_the_checkout_is_refused() {
+        for dir in [
+            "",
+            "/etc",
+            "../up",
+            "a/../../b",
+            "a/./b",
+            "a/",
+            "%2e%2e",
+            "a b",
+        ] {
+            assert!(check_flake_dir(dir).is_err(), "{dir:?}");
+        }
+        assert!(check_flake_dir("nix/hosts-1.x_y").is_ok());
+    }
+
+    #[test]
+    fn only_the_dir_query_is_accepted() {
+        assert_eq!(
+            RepositoryLocation::check("https://h/o/r?ref=main").unwrap_err(),
+            InputError::UnsupportedRepositoryQuery("ref".into())
+        );
+        assert!("https://h/o/r?dir=../x".parse::<RepositoryUrl>().is_err());
+        assert!("https://h/o/r?dir=sub".parse::<RepositoryUrl>().is_ok());
     }
 
     #[test]
