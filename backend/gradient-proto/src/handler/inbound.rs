@@ -124,7 +124,7 @@ impl ActiveJobs {
         job_id: &str,
     ) -> Option<gradient_types::ids::ExecJobAttemptId> {
         match &self.0.lock().get(job_id)?.pending {
-            PendingJob::Exec(j) => j.assignment.map(|a| a.attempt),
+            PendingJob::Exec(j) => j.assignment.as_ref().map(|a| a.attempt),
             PendingJob::Eval(_) | PendingJob::Build(_) => None,
         }
     }
@@ -1517,6 +1517,7 @@ pub(in crate::handler) mod fixture {
             eval_index: 0,
             prioritized: false,
             build_request: false,
+            continuation: None,
         })
     }
 
@@ -1524,11 +1525,14 @@ pub(in crate::handler) mod fixture {
         attempt: gradient_types::ids::ExecJobAttemptId,
     ) -> PendingJob {
         let exec_job = gradient_types::ids::ExecJobId::now_v7();
-        PendingJob::Exec(gradient_scheduler::jobs::PendingExecJob {
+        PendingJob::Exec(Box::new(gradient_scheduler::jobs::PendingExecJob {
             exec_job,
             evaluation_id: EvaluationId::now_v7(),
             project_id: ProjectId::now_v7(),
             task_id: TaskId::now_v7(),
+            project_name: "infra".into(),
+            task_name: "master".into(),
+            parent_job: None,
             entry_point: "apps.x86_64-linux.train".into(),
             repository: "https://example.com/repo".into(),
             commit: "abc123".into(),
@@ -1548,9 +1552,11 @@ pub(in crate::handler) mod fixture {
                 attempt,
                 number: 1,
                 retries_cap: 0,
+                token_hash: String::new(),
+                token_expires_at: gradient_types::now(),
             }),
             secrets: Default::default(),
-        })
+        }))
     }
 
     pub(in crate::handler) struct TestSession {
