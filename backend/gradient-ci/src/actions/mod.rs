@@ -14,7 +14,9 @@ pub(crate) mod send;
 pub(crate) mod summary;
 
 use crate::context::CiContext;
-use gradient_types::{ActionType, CTaskAction, ETaskAction, TaskId};
+use gradient_types::{
+    ActionConfig, ActionType, CTaskAction, ETaskAction, PatchGeneratorKind, TaskId,
+};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value as JsonValue;
 
@@ -67,8 +69,9 @@ pub async fn active_actions_for_task(
         .await
 }
 
-/// `OpenPr` must act only on `input_update` evaluations. Git host reports must skip them because
-/// their commit is blank until the PR is pushed. The PR's own CI run is reporting normally.
+/// A flake.lock `OpenPr` must act only on `input_update` evaluations. Git host reports must skip
+/// them because their commit is blank until the PR is pushed. The PR's own CI run is reporting
+/// normally.
 pub fn matching_actions(
     actions: Vec<gradient_types::MTaskAction>,
     event: &str,
@@ -80,9 +83,19 @@ pub fn matching_actions(
     actions
         .into_iter()
         .filter(|a| matches_event(a, event))
-        .filter(|a| a.action_type != ActionType::OpenPr || is_input_update)
+        .filter(|a| a.action_type != ActionType::OpenPr || opens_for(a, is_input_update))
         .filter(|a| a.action_type != ActionType::GitHostStatusReport || !is_input_update)
         .collect()
+}
+
+fn opens_for(action: &gradient_types::MTaskAction, is_input_update: bool) -> bool {
+    match serde_json::from_value::<ActionConfig>(action.config.clone()) {
+        Ok(ActionConfig::OpenPr {
+            generator: PatchGeneratorKind::ExecTree,
+            ..
+        }) => true,
+        _ => is_input_update,
+    }
 }
 
 #[cfg(test)]

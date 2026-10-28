@@ -41,6 +41,7 @@ pub(crate) async fn execute_git_host_status_report(
     let reporter = build_reporter_for_integration(ctx, integration_id).await?;
     let evaluation_id = payload
         .get("evaluation_id")
+        .or_else(|| payload.get("evaluation"))
         .and_then(|v| v.as_str())
         .and_then(|eid| eid.parse::<EvaluationId>().ok());
     let mut first_id = None;

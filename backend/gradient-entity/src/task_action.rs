@@ -42,6 +42,8 @@ pub enum ActionType {
     SendMatrixMessage = 4,
     #[sea_orm(num_value = 5)]
     SendSlackMessage = 5,
+    #[sea_orm(num_value = 6)]
+    StartEvaluation = 6,
 }
 
 impl ActionType {
@@ -53,6 +55,7 @@ impl ActionType {
             ActionType::OpenPr => "open_pr",
             ActionType::SendMatrixMessage => "send_matrix_message",
             ActionType::SendSlackMessage => "send_slack_message",
+            ActionType::StartEvaluation => "start_evaluation",
         }
     }
 

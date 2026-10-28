@@ -130,6 +130,14 @@ pub(super) async fn build_ci_reports_from_payload(
                 None => Vec::new(),
             }
         }
+        Some(reporting::CheckContextKind::ExecJob) => match s("entry_point_name") {
+            Some(entry_point) => vec![target.report(
+                reporting::build_check_context(&task.name, &entry_point),
+                status,
+                description,
+            )],
+            None => Vec::new(),
+        },
         Some(reporting::CheckContextKind::Evaluation) | None => {
             evaluation_reports(ctx, &target, &task, status, description).await?
         }
@@ -188,7 +196,7 @@ async fn load_subject(
         return Ok((evaluation, Some(build_job)));
     }
 
-    let Some(eid) = s("evaluation_id") else {
+    let Some(eid) = s("evaluation_id").or_else(|| s("evaluation")) else {
         anyhow::bail!(
             "payload missing 'build_id', 'evaluation_id', and the full owner/repo/sha/context set"
         );

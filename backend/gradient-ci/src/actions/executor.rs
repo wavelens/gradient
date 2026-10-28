@@ -5,13 +5,16 @@
  */
 
 use super::send::{
-    execute_git_host_status_report, execute_open_pr, execute_send_mail,
+    execute_exec_tree_pr, execute_git_host_status_report, execute_open_pr, execute_send_mail,
     execute_send_matrix_message, execute_send_slack_message, execute_send_web_request,
+    execute_start_evaluation,
 };
 use super::{MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
 use anyhow::{Context, Result};
-use gradient_types::{ActionConfig, MTaskAction, MTaskActionDelivery, TaskActionDeliveryId};
+use gradient_types::{
+    ActionConfig, MTaskAction, MTaskActionDelivery, PatchGeneratorKind, TaskActionDeliveryId,
+};
 use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 use serde_json::Value as JsonValue;
 use std::time::Instant;
@@ -63,6 +66,28 @@ pub async fn execute_action(
         }
         ActionConfig::OpenPr {
             integration_id,
+            generator: PatchGeneratorKind::ExecTree,
+            branch_pattern,
+            title_template,
+            body_template,
+            update_existing,
+            ..
+        } => {
+            execute_exec_tree_pr(
+                ctx,
+                &content,
+                action_id,
+                task_id,
+                integration_id,
+                &branch_pattern,
+                title_template.as_deref(),
+                body_template.as_deref(),
+                update_existing,
+            )
+            .await
+        }
+        ActionConfig::OpenPr {
+            integration_id,
             branch_pattern,
             title_template,
             body_template,
@@ -101,6 +126,9 @@ pub async fn execute_action(
         }
         ActionConfig::SendSlackMessage { webhook_url } => {
             execute_send_slack_message(ctx, event, &envelope, webhook_url.as_deref()).await
+        }
+        ActionConfig::StartEvaluation { task } => {
+            execute_start_evaluation(ctx, &content, task_id, task).await
         }
     };
 

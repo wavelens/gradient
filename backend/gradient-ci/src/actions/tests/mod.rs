@@ -308,3 +308,245 @@ fn an_action_that_does_not_subscribe_is_not_matched() {
 
     assert!(matching_actions(actions, "build.completed", &json!({})).is_empty());
 }
+
+fn exec_tree() -> gradient_types::MTaskAction {
+    use gradient_types::{ActionConfig, IntegrationId, PatchGeneratorKind};
+
+    let mut a = action_with(ActionType::OpenPr, vec![]);
+    a.config = serde_json::to_value(ActionConfig::OpenPr {
+        integration_id: IntegrationId::now_v7(),
+        generator: PatchGeneratorKind::ExecTree,
+        granularity: Default::default(),
+        verify_gate: Default::default(),
+        branch_pattern: "gradient/{entry_point}".into(),
+        title_template: None,
+        body_template: None,
+        update_existing: true,
+    })
+    .unwrap();
+    a
+}
+
+#[test]
+fn exec_tree_fires_on_exec_job_completed_only() {
+    let kinds = |event: &str, payload: serde_json::Value| {
+        matching_actions(
+            vec![exec_tree(), open_pr(gradient_types::VerifyGate::Build)],
+            event,
+            &payload,
+        )
+        .iter()
+        .map(|a| super::matchers::open_pr_gate_events(a).unwrap()[0])
+        .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        kinds("exec_job.completed", json!({})),
+        vec!["exec_job.completed"]
+    );
+    assert!(kinds("exec_job.failed", json!({})).is_empty());
+    assert!(kinds("evaluation.completed", json!({})).is_empty());
+    assert_eq!(
+        kinds(
+            "evaluation.completed",
+            json!({"evaluation_kind": "input_update"})
+        ),
+        vec!["evaluation.completed"]
+    );
+}
+
+#[test]
+fn an_exec_tree_action_without_a_tree_patch_opens_nothing() {
+    use gradient_entity::exec_job_output;
+    use gradient_types::{ExecJobId, IntegrationId, TaskActionId, TaskId};
+
+    for outputs in [
+        vec![],
+        vec![exec_job_output::Model {
+            path: "gradient/tree.patch".into(),
+            size: 0,
+            ..Default::default()
+        }],
+    ] {
+        run(async {
+            let ctx = make_ctx_with(mock_db().append_query_results([outputs]));
+            let payload = json!({ "job": ExecJobId::now_v7().to_string() });
+
+            let ok = super::send::execute_exec_tree_pr(
+                &ctx,
+                &payload,
+                TaskActionId::now_v7(),
+                TaskId::now_v7(),
+                IntegrationId::now_v7(),
+                "gradient/{entry_point}",
+                None,
+                None,
+                true,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(ok.status_code, Some(204));
+        });
+    }
+}
+
+#[test]
+fn start_evaluation_queues_with_the_parent_job() {
+    use gradient_entity::commit;
+    use gradient_fixtures::mock::{exec_ok, raw_statements};
+    use gradient_sources::HeadCommit;
+    use gradient_types::{EvaluationId, ExecJobId, MEvaluation, MTask, TaskId};
+
+    run(async {
+        let task = MTask {
+            id: TaskId::now_v7(),
+            ..Default::default()
+        };
+        let job = ExecJobId::now_v7();
+        let db = mock_db()
+            .append_query_results([vec![commit::Model::default()]])
+            .append_query_results([vec![MEvaluation {
+                id: EvaluationId::now_v7(),
+                concurrent: true,
+                ..Default::default()
+            }]])
+            .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+            .append_query_results([vec![task.clone()]])
+            .append_exec_results([exec_ok()])
+            .into_connection();
+        let head = HeadCommit {
+            hash: vec![0xab; 20],
+            message: "m".into(),
+            author_email: None,
+            author_name: "a".into(),
+        };
+
+        super::send::queue_evaluation(&db, &task, head, Some(job))
+            .await
+            .unwrap();
+
+        let log = raw_statements(db.into_transaction_log());
+        let insert = log
+            .iter()
+            .find(|s| s.sql.starts_with(r#"INSERT INTO "evaluation""#))
+            .expect("the evaluation is inserted");
+        let columns: Vec<&str> = insert.sql
+            [insert.sql.find('(').unwrap() + 1..insert.sql.find(')').unwrap()]
+            .split(", ")
+            .collect();
+        let concurrent = columns
+            .iter()
+            .position(|c| *c == r#""concurrent""#)
+            .unwrap();
+        assert_eq!(
+            insert.values.as_ref().unwrap().0[concurrent],
+            sea_orm::Value::Bool(Some(true))
+        );
+        let parent = log
+            .iter()
+            .find(|s| {
+                s.sql.starts_with(r#"UPDATE "evaluation""#) && s.sql.contains("parent_exec_job")
+            })
+            .expect("the parent job is recorded");
+        assert!(
+            parent
+                .values
+                .as_ref()
+                .unwrap()
+                .0
+                .contains(&sea_orm::Value::Uuid(Some(job.into_inner()))),
+            "{parent:?}"
+        );
+    });
+}
+
+#[test]
+fn start_evaluation_refuses_a_task_of_another_project() {
+    use gradient_types::{MTask, ProjectId, TaskId};
+
+    run(async {
+        let owner = MTask {
+            id: TaskId::now_v7(),
+            project: ProjectId::now_v7(),
+            ..Default::default()
+        };
+        let other = MTask {
+            id: TaskId::now_v7(),
+            project: ProjectId::now_v7(),
+            ..Default::default()
+        };
+        let ctx = make_ctx_with(
+            mock_db()
+                .append_query_results([vec![owner.clone()]])
+                .append_query_results([vec![other.clone()]]),
+        );
+
+        let refused = super::send::execute_start_evaluation(&ctx, &json!({}), owner.id, other.id)
+            .await
+            .err()
+            .expect("a task of another project is refused");
+
+        assert_eq!(
+            refused.to_string(),
+            "the task to start belongs to another project"
+        );
+    });
+}
+
+#[test]
+fn exec_events_report_one_status_per_entry_point() {
+    use gradient_types::{EvaluationId, ExecJobId, MCommit, MEvaluation, MTask, TaskId};
+
+    for (event, status) in [
+        ("exec_job.started", CiStatus::Running),
+        ("exec_job.completed", CiStatus::Success),
+        ("exec_job.failed", CiStatus::Failure),
+        ("exec_job.aborted", CiStatus::Error),
+    ] {
+        assert_eq!(git_host_status_for_event(event), Some(status), "{event}");
+    }
+
+    run(async {
+        let evaluation_id = EvaluationId::now_v7();
+        let task = TaskId::now_v7();
+        let db = mock_db()
+            .append_query_results([vec![MEvaluation {
+                id: evaluation_id,
+                task: Some(task),
+                ..Default::default()
+            }]])
+            .append_query_results([vec![MTask {
+                id: task,
+                name: "master".into(),
+                repository: "https://git.example.com/acme/infra".into(),
+                ..Default::default()
+            }]])
+            .append_query_results([vec![MCommit {
+                hash: vec![0xab, 0xcd],
+                ..Default::default()
+            }]])
+            .append_query_results([Vec::<gradient_types::MProject>::new()]);
+        let ctx = make_ctx_with(db);
+        let payload = json!({
+            "job": ExecJobId::now_v7().to_string(),
+            "evaluation": evaluation_id.to_string(),
+            "entry_point_name": "apps.x86_64-linux.update",
+        });
+
+        let reports =
+            build_ci_reports_from_payload(&ctx, "exec_job.completed", &payload, CiStatus::Success)
+                .await
+                .unwrap();
+
+        let [report] = reports.as_slice() else {
+            panic!("one report per exec job: {reports:?}");
+        };
+        assert_eq!(
+            report.context,
+            crate::build_check_context("master", "apps.x86_64-linux.update")
+        );
+        assert_eq!(report.sha, "abcd");
+        assert_eq!(report.status, CiStatus::Success);
+    });
+}
