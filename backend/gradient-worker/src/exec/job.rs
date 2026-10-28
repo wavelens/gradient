@@ -240,6 +240,10 @@ async fn forward<R: ExecReport>(
             )))));
         }
         AgentToWorker::Exited { code } => return Ok(Some(Followed::Exited(code))),
+        AgentToWorker::ChannelData { channel_id, .. }
+        | AgentToWorker::CloseChannel { channel_id, .. } => {
+            debug!(channel_id, "guest channel frame dropped");
+        }
     }
     Ok(None)
 }
@@ -445,6 +449,7 @@ impl ExecRun<'_> {
             network,
             relays: plugged.relays.clone(),
             usb_bus_ids: plugged.usb_bus_ids.clone(),
+            program_pty: false,
         }
     }
 
