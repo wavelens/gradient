@@ -52,10 +52,6 @@ impl CredentialStore {
         self.inner.lock().ssh_key.as_ref().map(copy)
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the exec job reads it from the next commit on")
-    )]
     pub fn job_secret(&self, job_id: &str, name: &str) -> Option<SecretBytes> {
         self.inner
             .lock()

@@ -21,6 +21,7 @@ workspace = true
 [dependencies]
 gradient-eval = { path = "../gradient-eval" }
 gradient-sources = { workspace = true }
+gradient-redact = { workspace = true }
 gradient-sops = { workspace = true }
 gradient-derivation = { workspace = true }
 gradient-derive = { workspace = true }

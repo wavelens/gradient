@@ -10,12 +10,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
+use gradient_redact::SecretRedactor;
 use gradient_types::secret::SecretString;
 use gradient_vm::{
     DeviceHold, GUEST_BOOT_TIMEOUT, Guest, MountConfig, PlugPlan, PluggedDevices, WORK_MOUNT_TAG,
     guest_address, wait_ready,
 };
-use gradient_wire::guest::{AgentToWorker, GuestMount, GuestNetwork, RunJob};
+use gradient_wire::guest::{AgentToWorker, GuestMount, GuestNetwork, GuestSecret, RunJob};
 use gradient_wire::types::{ExecJob, MAX_PHASE_PAYLOAD};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -28,6 +29,7 @@ use super::context::context_layers;
 use super::host::ExecHost;
 use super::inventory::device_requests;
 use super::job_channels::{GuestChannelInbox, JobChannels};
+use super::sops::WorkerSecrets;
 use super::state::StoredJob;
 use super::watchdog::{Watchdog, Watched};
 use crate::executor::AbortSignal;
@@ -148,10 +150,20 @@ pub async fn execute(
     channels: GuestChannelInbox,
 ) -> Result<()> {
     let token = SecretString::new(std::mem::take(&mut job.context.token));
+    let secrets = job_secrets(
+        &updater.job_id,
+        &job.secrets,
+        credentials,
+        &host.secrets,
+        &host.worker_id,
+    )?;
+    let redactor = job_redactor(&secrets, token.expose());
     let mut run = ExecRun {
         host,
         job,
         token,
+        secrets,
+        redactor,
         updater,
         abort,
     };
@@ -163,6 +175,47 @@ pub async fn execute(
         .await;
     host.pool.retire(guest, devices);
     outcome
+}
+
+pub(crate) fn job_secrets(
+    job_id: &str,
+    names: &[String],
+    credentials: &CredentialStore,
+    worker: &WorkerSecrets,
+    worker_id: &str,
+) -> Result<Vec<GuestSecret>, BuildError> {
+    names
+        .iter()
+        .map(|name| {
+            let value = match (credentials.job_secret(job_id, name), worker.value(name)) {
+                (Some(value), None) | (None, Some(value)) => value,
+                (Some(_), Some(_)) => {
+                    return Err(BuildError::permanent(anyhow!(
+                        "secret \"{name}\" found in two sources: server, worker sops of {worker_id}"
+                    )));
+                }
+                (None, None) => {
+                    return Err(BuildError::permanent(anyhow!(
+                        "secret \"{name}\" not available on this worker"
+                    )));
+                }
+            };
+            Ok(GuestSecret {
+                name: name.clone(),
+                value: value.expose().to_vec(),
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn job_redactor(secrets: &[GuestSecret], token: &str) -> SecretRedactor {
+    let token = (!token.is_empty()).then_some(("job-token", token.as_bytes()));
+    SecretRedactor::new(
+        secrets
+            .iter()
+            .map(|secret| (secret.name.as_str(), secret.value.as_slice()))
+            .chain(token),
+    )
 }
 
 pub async fn finish<R: ExecReport>(
@@ -250,6 +303,10 @@ pub async fn follow<R: ExecReport>(
                     .await;
                 continue;
             }
+            AgentToWorker::JobSecrets { secrets, token } => {
+                channels.mask_console(&job_redactor(&secrets, &token));
+                continue;
+            }
             message => message,
         };
         if matches!(
@@ -330,6 +387,8 @@ struct ExecRun<'a> {
     host: &'a ExecHost,
     job: ExecJob,
     token: SecretString,
+    secrets: Vec<GuestSecret>,
+    redactor: SecretRedactor,
     updater: &'a mut JobUpdater,
     abort: AbortSignal,
 }
@@ -375,7 +434,9 @@ impl ExecRun<'_> {
         let mut agent =
             unless_aborted(&abort, self.start_program(guest, devices, credentials)).await??;
         let requirement = &self.job.requirement;
-        let mux = GuestChannelMux::new(requirement.ssh, requirement.ports.clone(), agent.version());
+        let mut mux =
+            GuestChannelMux::new(requirement.ssh, requirement.ports.clone(), agent.version());
+        mux.mask_console(&self.redactor);
         let mut channels = JobChannels::new(inbox, mux, guest.dir().to_owned());
         let mut watchdog = Watchdog::new(
             Instant::now(),
@@ -510,7 +571,7 @@ impl ExecRun<'_> {
                 .as_ref()
                 .map(|phase| phase.payload.clone())
                 .unwrap_or_default(),
-            secrets: Vec::new(),
+            secrets: self.secrets.clone(),
             mounts: guest_mounts(mounts),
             groups: plugged.groups.clone(),
             network,
@@ -579,7 +640,7 @@ mod tests {
     use gradient_wire::guest::{
         AgentToWorker, GUEST_CHANNELS_AGENT_SINCE, GuestConnection, WorkerToAgent,
     };
-    use gradient_wire::messages::{BuildFailureKind, GuestChannelKind};
+    use gradient_wire::messages::{BuildFailureKind, CredentialKind, GuestChannelKind};
     use tokio::net::UnixStream;
     use tokio::sync::mpsc;
 
@@ -807,6 +868,104 @@ mod tests {
         );
         assert_eq!(started.elapsed(), Duration::from_secs(10));
         assert_eq!(recorder.0, [Reported::ChannelData(4, b"$ ".to_vec())]);
+    }
+
+    fn credential(name: &str, value: &[u8]) -> CredentialStore {
+        let store = CredentialStore::new();
+        store.store(
+            CredentialKind::JobSecret {
+                job_id: "exec:1".into(),
+                name: name.into(),
+            },
+            value.to_vec(),
+        );
+        store
+    }
+
+    fn worker_sops() -> std::sync::Arc<WorkerSecrets> {
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../gradient-sops/tests/fixtures");
+        WorkerSecrets::open(
+            &[fixtures.join("worker.yaml")],
+            Some(&fixtures.join("ed25519")),
+        )
+        .unwrap()
+    }
+
+    fn names(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn secrets_come_from_the_credential_or_the_worker_sops() {
+        let credentials = credential("wandb-token", b"s3cr3t-value");
+        let secrets = job_secrets(
+            "exec:1",
+            &names(&["lab-key", "wandb-token"]),
+            &credentials,
+            &worker_sops(),
+            "worker-7",
+        )
+        .unwrap();
+
+        assert_eq!(
+            secrets,
+            [
+                GuestSecret {
+                    name: "lab-key".into(),
+                    value: b"lab-value-123".to_vec()
+                },
+                GuestSecret {
+                    name: "wandb-token".into(),
+                    value: b"s3cr3t-value".to_vec()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_name_in_the_credential_and_the_worker_sops_fails() {
+        let credentials = credential("lab-key", b"other-value");
+        let error = job_secrets(
+            "exec:1",
+            &names(&["lab-key"]),
+            &credentials,
+            &worker_sops(),
+            "worker-7",
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind, BuildFailureKind::Permanent);
+        assert_eq!(
+            error.to_string(),
+            r#"secret "lab-key" found in two sources: server, worker sops of worker-7"#
+        );
+    }
+
+    #[test]
+    fn a_missing_secret_names_itself() {
+        let error = job_secrets(
+            "exec:1",
+            &names(&["hf-token"]),
+            &CredentialStore::new(),
+            &worker_sops(),
+            "worker-7",
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind, BuildFailureKind::Permanent);
+        assert_eq!(
+            error.to_string(),
+            r#"secret "hf-token" not available on this worker"#
+        );
+    }
+
+    #[test]
+    fn the_job_token_is_masked_as_job_token() {
+        assert_eq!(
+            job_redactor(&[], "gr_job_abcdefgh123").redact(b"t=gr_job_abcdefgh123"),
+            b"t=[secret:job-token]"
+        );
     }
 
     #[test]

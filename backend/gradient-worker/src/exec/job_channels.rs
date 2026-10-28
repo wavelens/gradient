@@ -7,6 +7,7 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
+use gradient_redact::SecretRedactor;
 use gradient_vm::ConsoleLink;
 use tokio::sync::mpsc;
 use tracing::debug;
@@ -41,6 +42,10 @@ impl JobChannels {
             guest_dir,
             console: None,
         }
+    }
+
+    pub fn mask_console(&mut self, redactor: &SecretRedactor) {
+        self.mux.mask_console(redactor);
     }
 
     pub async fn next_event(&mut self) -> ChannelEvent {
