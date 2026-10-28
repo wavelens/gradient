@@ -19,9 +19,10 @@ use crate::codec::agreement::{agree, version_frame};
 use crate::codec::{Proto, from_bytes, to_bytes};
 use crate::types::GuestChannelKind;
 
-pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=2;
+pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=3;
 pub const GUEST_CHANNELS_AGENT_SINCE: u16 = 2;
 pub const GUEST_JOB_SECRETS_SINCE: u16 = 2;
+pub const GUEST_UPLOADS_SINCE: u16 = 3;
 pub const AGENT_VSOCK_PORT: u32 = 7000;
 pub const AGENT_RELAY_PORT_BASE: u32 = 7100;
 
@@ -53,6 +54,11 @@ pub enum WorkerToAgent {
         channel_id: u64,
         cols: u16,
         rows: u16,
+    },
+    #[proto(3)]
+    UploadSettled {
+        upload_id: u64,
+        error: Option<String>,
     },
 }
 
@@ -152,6 +158,21 @@ pub enum AgentToWorker {
     JobSecrets {
         secrets: Vec<GuestSecret>,
         token: String,
+    },
+    #[proto(3)]
+    UploadStart {
+        upload_id: u64,
+        path: String,
+        size: u64,
+    },
+    #[proto(3)]
+    UploadChunk {
+        upload_id: u64,
+        data: Vec<u8>,
+    },
+    #[proto(3)]
+    UploadEnd {
+        upload_id: u64,
     },
 }
 
@@ -408,10 +429,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_upload_crosses_a_guest_connection_and_is_settled() {
+        let (mut worker, mut agent) = connected(GUEST_PROTO_VERSIONS).await;
+        let sent = [
+            AgentToWorker::UploadStart {
+                upload_id: 1,
+                path: "model/w.bin".into(),
+                size: 3,
+            },
+            AgentToWorker::UploadChunk {
+                upload_id: 1,
+                data: b"abc".to_vec(),
+            },
+            AgentToWorker::UploadEnd { upload_id: 1 },
+        ];
+        for msg in &sent {
+            agent.send(msg).await.expect("send");
+        }
+        for msg in sent {
+            assert_eq!(
+                worker.recv::<AgentToWorker>().await.expect("recv"),
+                Some(msg)
+            );
+        }
+
+        let settled = WorkerToAgent::UploadSettled {
+            upload_id: 1,
+            error: None,
+        };
+        worker.send(&settled).await.expect("send");
+        assert_eq!(
+            agent.recv::<WorkerToAgent>().await.expect("recv"),
+            Some(settled)
+        );
+    }
+
+    #[tokio::test]
     async fn a_frame_of_a_disjoint_version_range_is_refused() {
         let (ours, theirs) = tokio::io::duplex(64 * 1024);
         let mut peer = Framed::new(theirs, LengthDelimitedCodec::new());
-        peer.send(version_frame(&(3..=4)))
+        peer.send(version_frame(&(10..=11)))
             .await
             .expect("peer frame");
 
