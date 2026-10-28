@@ -182,7 +182,10 @@
 
     nixosModules = rec {
       client = ./nix/modules/gradient-client;
-      guest = ./nix/modules/guest.nix;
+      guest = { config, lib, ... }: {
+        imports = [ ./nix/modules/guest.nix ];
+        nixpkgs.overlays = lib.mkIf config.gradient.guest.enable [ self.overlays.default ];
+      };
       gradient = { config, lib, ... }: {
         imports = [ ./nix/modules/gradient.nix ];
         nixpkgs.overlays = lib.mkIf (config.services.gradient.enable || config.services.gradient.worker.enable) [
