@@ -79,6 +79,19 @@ mod tests {
     }
 
     #[test]
+    fn a_stored_project_key_with_a_trailing_blank_line_decrypts() {
+        let stored = format!("{}\n", include_str!("../tests/fixtures/ed25519"));
+        let key = SopsKey::from_ssh_private_key(&stored).expect("key with a blank line");
+        let secrets = decrypt_file(
+            "secrets/train.yaml",
+            include_bytes!("../tests/fixtures/secrets.yaml"),
+            &key,
+        )
+        .expect("decrypts");
+        assert_eq!(secrets.get("wandb-token"), Some(b"s3cr3t-value".as_slice()));
+    }
+
+    #[test]
     fn a_json_file_decrypts_with_the_project_key() {
         let secrets = decrypt_file(
             "secrets/train.json",

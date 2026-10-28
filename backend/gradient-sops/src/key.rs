@@ -21,6 +21,7 @@ pub struct SopsKey {
 
 impl SopsKey {
     pub fn from_ssh_private_key(openssh: &str) -> Result<SopsKey, SopsError> {
+        let openssh = &Zeroizing::new(format!("{}\n", openssh.trim()));
         let private = PrivateKey::from_openssh(openssh).map_err(key_error)?;
         if private.is_encrypted() {
             return Err(SopsError::Key {
