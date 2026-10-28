@@ -206,6 +206,7 @@ impl ProtoPeer {
             job_id: assignment.job_id.clone(),
             accepted: true,
             reason: None,
+            endpoint: None,
         })
         .await?;
         Ok(assignment)

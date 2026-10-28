@@ -728,6 +728,7 @@ impl MessageLoopState {
                         job_id,
                         accepted: true,
                         reason: None,
+                        endpoint: None,
                     })
                     .await?;
                 return Ok(());
@@ -739,6 +740,7 @@ impl MessageLoopState {
                         job_id,
                         accepted: false,
                         reason: Some("an aborted run of this job is still stopping".to_owned()),
+                        endpoint: None,
                     })
                     .await?;
                 return Ok(());
@@ -753,6 +755,7 @@ impl MessageLoopState {
                     job_id,
                     accepted: false,
                     reason: Some("worker is draining".to_owned()),
+                    endpoint: None,
                 })
                 .await?;
             return Ok(());
@@ -773,6 +776,7 @@ impl MessageLoopState {
                     job_id,
                     accepted: false,
                     reason: Some(format!("at capacity ({}/{})", active_count, max)),
+                    endpoint: None,
                 })
                 .await?;
             return Ok(());
@@ -795,6 +799,7 @@ impl MessageLoopState {
                     accepted,
                     reason: (!accepted)
                         .then(|| "already holds a member of this cluster attempt".to_owned()),
+                    endpoint: None,
                 })
                 .await?;
             if accepted && active_count + 1 < max {
@@ -809,6 +814,7 @@ impl MessageLoopState {
                 job_id: job_id.clone(),
                 accepted: true,
                 reason: None,
+                endpoint: None,
             })
             .await?;
 

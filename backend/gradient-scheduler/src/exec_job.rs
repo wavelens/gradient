@@ -124,6 +124,7 @@ impl PendingExecJob {
                 parent_job: self.parent_job.map(|job| job.to_string()),
                 project_name: self.project_name.clone(),
                 task_name: self.task_name.clone(),
+                master_port: None,
             },
             secrets: self.spec.secrets.clone(),
             keep_running: self.spec.keep_running,
