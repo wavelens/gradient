@@ -119,6 +119,15 @@ fn git_transport_url_passes_through_bare_schemes_and_scp() {
 }
 
 #[test]
+fn git_transport_url_drops_the_flake_directory() {
+    assert_eq!(
+        git_transport_url("git+https://h/o/r?dir=sub"),
+        "https://h/o/r"
+    );
+    assert_eq!(git_transport_url("git@h:o/r.git?dir=a/b"), "git@h:o/r.git");
+}
+
+#[test]
 fn parse_git_protocol_url_default_port() {
     let (host, port, path) = parse_git_protocol_url("git://server.example.com/repo.git").unwrap();
     assert_eq!(host, "server.example.com");

@@ -5,6 +5,7 @@
  */
 
 use crate::SourceError;
+use gradient_types::RepositoryLocation;
 
 pub(super) fn parse_git_protocol_url(url: &str) -> Result<(&str, u16, &str), SourceError> {
     let rest = url.strip_prefix("git://").ok_or(SourceError::InvalidUrl)?;
@@ -20,7 +21,8 @@ pub(super) fn parse_git_protocol_url(url: &str) -> Result<(&str, u16, &str), Sou
 /// libgit2 has no `git+https` or `git+http` transport. It is misrouting such a URL to SSH, and the
 /// connect is failing with "invalid argument port".
 pub(super) fn git_transport_url(url: &str) -> &str {
-    url.strip_prefix("git+").unwrap_or(url)
+    let clone_url = RepositoryLocation::of(url).clone_url;
+    clone_url.strip_prefix("git+").unwrap_or(clone_url)
 }
 
 /// The local transport cannot fetch shallow. A local repository is cheap to read whole.
