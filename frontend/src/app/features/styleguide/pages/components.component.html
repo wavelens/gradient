@@ -113,6 +113,12 @@
   </tbody>
 </gr-table>
 
+<h2>Terminal</h2>
+<p>An interactive terminal over a <code>TerminalSource</code>: bytes in, typed text and size
+   changes out. <code>terminalSocket(path)</code> is the source for the server's terminal
+   websockets; this demo echoes what you type. The terminal disposes its source when it goes away.</p>
+<gr-terminal [source]="echo" />
+
 <h2>Overlays</h2>
 <button grButton label="Open menu" icon="more_vert" severity="secondary" (click)="menu.toggle($event)"></button>
 <gr-menu #menu [model]="menuItems" />

@@ -28,6 +28,17 @@ gr-table.attempts { display: block; overflow-x: auto; }
   padding-left: $spacing-lg;
 }
 
+.views { margin: $space-section 0 $spacing-sm; }
+
+.terminal { margin-top: $spacing-sm; }
+
+.ssh-commands {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+  margin-top: $spacing-md;
+}
+
 .log {
   max-height: 60vh;
   margin: 0;
