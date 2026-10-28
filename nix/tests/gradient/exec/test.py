@@ -13,10 +13,11 @@
 # uploaded output with a range download, the tree patch, the job token behind `gradient build`
 # and its revocation, a two-node job across both workers on routed guest subnets, a custom
 # image booted cold on the worker that allows custom images with the program started in the
-# flake directory and a custom image without the guest agent. Not covered: the browser
-# terminal and the serial console (no browser in the test), VFIO, USB/IP, /dev relays, the
-# nested kvm device. The CI host must offer nested KVM (kvm_intel or kvm_amd with nested=1),
-# since the workers boot guests in a VM.
+# flake directory, a custom image without the guest agent, a guest booted cold with its own
+# CPUs, memory and `/work` disk size and a guest size no worker can hold. Not covered: the
+# browser terminal and the serial console (no browser in the test), VFIO, USB/IP, /dev relays,
+# the nested kvm device. The CI host must offer nested KVM (kvm_intel or kvm_amd with
+# nested=1), since the workers boot guests in a VM.
 
 import ipaddress
 import json
@@ -30,7 +31,7 @@ GUEST_UNIT = re.compile(r"gradient-guest-[0-9a-f]{32}\.service")
 WORKERS = [stopper, keeper]
 NAMES = [
     "fetch", "silent", "abort", "long-stop", "fail", "long-keep", "lost", "interactive", "terminal",
-    "secrets", "clash", "outputs", "pair",
+    "secrets", "clash", "outputs", "pair", "sized", "toolarge",
 ]
 GUEST_SUBNETS = [ipaddress.ip_network("10.233.0.0/16"), ipaddress.ip_network("10.234.0.0/16")]
 IMAGE_NAMES = ["trainer", "noagent"]
@@ -328,6 +329,26 @@ cluster = sql(
 )
 assert cluster == "2|1", f"expected one completed cluster job with one started attempt, got {cluster!r}"
 
+banner("Phase 7d: a job boots cold with its own CPUs, memory and /work disk")
+sized = wait_status("sized", "completed")
+assert sized["guest"] == {"cpus": 1, "memory_mb": 768, "disk_mb": 256}, json.dumps(sized)
+report = dict(line.split(None, 1) for line in job_log("sized").splitlines() if line.startswith(("cpus ", "memory_kb ", "work_mb ")))
+assert report.get("cpus") == "1", f"sized guest CPUs: {report}"
+assert 700 <= int(report["memory_kb"]) // 1024 <= 768, f"sized guest memory: {report}"
+assert 200 <= int(report["work_mb"]) <= 256, f"sized guest /work disk: {report}"
+
+banner("Phase 7e: a guest size no worker can hold waits with that size")
+def unmet_guest(name):
+    reason = job(name).get("waiting_reason") or {}
+    return reason.get("unmet", {}).get("guest")
+
+
+unmet = wait_for("toolarge waits for its guest size", lambda: unmet_guest("toolarge"))
+assert unmet == {"cpus": 64, "memory_mb": 0, "disk_mb": 0}, f"toolarge waits for {unmet}"
+assert job("toolarge")["attempts"] == [], json.dumps(job("toolarge"))
+api("POST", f"exec-jobs/{JOBS['toolarge']}/abort")
+wait_status("toolarge", "aborted", timeout=120)
+
 banner("Phase 8: a silent program times out")
 silent = wait_status("silent", "failed")
 assert end_reasons(silent) == ["timeout"], json.dumps(silent)
@@ -360,8 +381,9 @@ lost_guest = guest_of_job(keeper, JOBS["lost"])
 assert keep_guest and lost_guest, f"guests of the kept jobs: {keep_guest!r} {lost_guest!r}"
 pid = main_pid(keeper, keep_guest)
 keeper.succeed("systemctl stop gradient-worker.service")
-keeper.succeed(f"touch {GUESTS}/{lost_guest}/work/restart-agent")
-keeper.wait_until_fails(f"test -e {GUESTS}/{lost_guest}/work/restart-agent", timeout=60)
+restart = keeper.succeed(
+    f"printf 'CONNECT {RESTART_AGENT_PORT}\\n' | timeout 90 socat STDIO,ignoreeof UNIX-CONNECT:{GUESTS}/{lost_guest}/vsock.sock")
+assert "restarted" in restart, f"the lost guest did not restart its agent: {restart!r}"
 keeper.succeed("systemctl start gradient-worker.service")
 keeper.wait_until_succeeds(
     "journalctl -u gradient-worker --no-pager | grep -q 'resuming an exec job in its guest'", timeout=60)

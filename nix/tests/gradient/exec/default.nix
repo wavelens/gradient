@@ -56,19 +56,22 @@
     stopper = "10.233.0.0";
     keeper = "10.234.0.0";
   };
+  restartAgentPort = 5999;
 
   guestImage = self.lib.mkWorkerImage {
     modules = [
-      ({ pkgs, ... }: {
+      ({ pkgs, ... }: let
+        restartAgent = pkgs.writeShellScript "restart-agent" ''
+          ${pkgs.systemd}/bin/systemctl restart gradient-guest-agent
+          echo restarted
+        '';
+      in {
         gradient.guest = {
-          cpus = 1;
-          memoryMb = 512;
+          cpus = 2;
+          memoryMb = 500;
           preScript = ''
-            ${pkgs.systemd}/bin/systemd-run --unit=gradient-test-agent-restart ${pkgs.runtimeShell} -c '
-              while [ ! -e /work/restart-agent ]; do ${pkgs.coreutils}/bin/sleep 1; done
-              ${pkgs.systemd}/bin/systemctl restart gradient-guest-agent
-              ${pkgs.coreutils}/bin/rm /work/restart-agent
-            '
+            ${pkgs.systemd}/bin/systemd-run --unit=gradient-test-agent-restart \
+              ${pkgs.socat}/bin/socat -U VSOCK-LISTEN:${toString restartAgentPort} EXEC:${restartAgent}
           '';
         };
       })
@@ -110,7 +113,7 @@
       }];
     };
     nix.settings.substituters = lib.mkForce [ ];
-    environment.systemPackages = [ pkgs.curl pkgs.jq ];
+    environment.systemPackages = [ pkgs.curl pkgs.jq pkgs.socat ];
 
     environment.etc."gradient/secrets/worker_peers" = {
       mode = "0600";
@@ -135,6 +138,8 @@
         preWarm = 1;
         labels = [ label "pair" ];
         subnet = "${guestSubnets.${name}}/16";
+        guestCpus = 32;
+        guestDiskMb = 131072;
         inherit maxPreWarm stopGuestsWithWorker sops;
         allow = {
           network = true;
@@ -331,6 +336,7 @@ in {
         label = "keep";
         maxPreWarm = 0;
         stopGuestsWithWorker = false;
+        memorySize = 5120;
       };
     };
 
@@ -343,6 +349,7 @@ in {
       TRAINER_INPUTS = "${trainerBuildInputs}"
       AGE_RECIPIENT = "${ageRecipient}"
       STOPPER_ID = "${workerIds.stopper}"
+      RESTART_AGENT_PORT = ${toString restartAgentPort}
     '' + builtins.readFile ./test.py;
   });
 }
