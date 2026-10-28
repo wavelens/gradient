@@ -93,13 +93,33 @@ pub fn open_predicate(alias: &str) -> String {
 }
 
 /// Parents built here need every dependency. Parents available in a cache only need the
-/// runtime dependencies. A stored dependency ends the walk, as it ends the need walk.
+/// dependency outputs their own outputs reference and the reference probe joins under the
+/// passthrough row for the planner to price it by the passthrough share.
 pub fn failure_spreads_predicate(edge: &str) -> String {
     format!(
-        "(({edge}.kind IN (1, 2) OR NOT EXISTS (SELECT 1 FROM derivation_build rb \
-         WHERE rb.derivation = {edge}.derivation AND rb.cache_available)) \
+        "(NOT EXISTS (SELECT 1 FROM derivation_build rb \
+         WHERE rb.derivation = {edge}.derivation AND rb.cache_available \
+           AND NOT {referenced_unavailable}) \
          AND NOT EXISTS (SELECT 1 FROM derivation_build fb \
-         WHERE fb.derivation = {edge}.dependency AND fb.fetchable))"
+         WHERE fb.derivation = {edge}.dependency AND fb.fetchable))",
+        referenced_unavailable = references_unavailable_output(edge, "rb.derivation"),
+    )
+}
+
+fn references_unavailable_output(edge: &str, parent: &str) -> String {
+    let refs = "coalesce(pcp.\"references\", po.references_list)";
+    format!(
+        "EXISTS (SELECT 1 FROM derivation_output o \
+         WHERE o.derivation = {edge}.dependency AND o.external_url IS NULL \
+           AND NOT EXISTS (SELECT 1 FROM cached_path cp \
+                           WHERE cp.hash = o.hash AND cp.file_hash IS NOT NULL) \
+           AND EXISTS (SELECT 1 FROM derivation_output po \
+                       LEFT JOIN cached_path pcp ON pcp.hash = po.hash \
+                       WHERE po.derivation = {parent} \
+                         AND CASE WHEN {refs} IS NULL THEN {edge}.kind IN (1, 2) \
+                                  ELSE string_to_array({refs}, ' ') \
+                                       && ARRAY[o.hash || '-' || o.package, \
+                                                '/nix/store/' || o.hash || '-' || o.package] END))"
     )
 }
 
