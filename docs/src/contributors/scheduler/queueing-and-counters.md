@@ -151,7 +151,9 @@ The `evaluation` table holds five counter columns. They cover the shared builds 
 - A fresh terminal-failure transition lets `cascade_dependency_failed` mark every `Created`, `Queued` and `FailedTransient` derivation that wants the failed build as `DependencyFailed`.
 - `repair_dependency_failed` can repeat that walk inside the closure of an evaluation, at stream completion and during the graph-stuck heal. A shared build thawed after its dependency failed gets caught by this repeat.
 - The repeat can also take each shared build the evaluation aborted (`build_job.aborted`) as a starting point. Derivations wanting such a build end as `DependencyFailed`.
-- Both walks skip any shared build available in a cache (`graph_sql::non_passthrough_predicate`).
+- Both walks share one edge rule (`failure_spreads_predicate`). A shared build built here can fail with any dependency.
+- A passthrough can fail only on a dependency output its own outputs reference. That output must also be missing from our cache and from every upstream cache.
+- Unknown references of a passthrough output fall back to the edge kind. Runtime dependencies then fail the passthrough.
 - Both walks skip a shared build with an open dispatch. The worker report of that dispatch must settle the status, as with an unqueue.
 
 ## Build Abort and Retry

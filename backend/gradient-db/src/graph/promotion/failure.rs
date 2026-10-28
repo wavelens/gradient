@@ -147,13 +147,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_failure_walk_enters_a_passthrough_over_a_runtime_dependency_only() {
+    fn a_failure_walk_enters_a_passthrough_only_over_an_unavailable_referenced_output() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
         let fence = norm(failure_spreads_predicate("e"));
         assert!(
-            fence.starts_with("((e.kind IN (1, 2) OR NOT EXISTS")
-                && fence.contains("rb.cache_available"),
-            "a build input of a passthrough is no failure of the passthrough: {fence}"
+            fence.contains("rb.cache_available AND NOT EXISTS (SELECT 1 FROM derivation_output o")
+                && fence.contains("o.external_url IS NULL")
+                && fence.contains("THEN e.kind IN (1, 2)"),
+            "a passthrough fails only on a dependency output it references and nobody holds: {fence}"
         );
         for sql in [
             norm(cascade_dependency_failed_sql()),
