@@ -5,10 +5,12 @@
  */
 
 use super::api_key::{ApiKeyContext, DecodedRequest};
+use super::job_scope::job_mask;
 use axum::http::{HeaderMap, StatusCode, header};
 use chrono::{Duration, Utc};
 use gradient_db::WebDb;
 use gradient_db::lookup::by_id;
+use gradient_types::exec::{JOB_TOKEN_PREFIX, hash_job_token};
 use gradient_types::*;
 use gradient_util::debounce::Debounce;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
@@ -147,6 +149,10 @@ pub async fn decode_jwt(
     last_used_stamps: &Debounce<Uuid>,
     jwt: String,
 ) -> Result<DecodedRequest, StatusCode> {
+    if jwt.starts_with(JOB_TOKEN_PREFIX) {
+        return decode_job_token(db, &jwt).await;
+    }
+
     if let Some(raw) = jwt.strip_prefix("GRAD") {
         return decode_api_key(db, last_used_stamps, raw).await;
     }
@@ -188,7 +194,6 @@ async fn decode_api_key(
     }
 
     let context = ApiKeyContext {
-        api_id: api_key.id,
         mask: api_key.permission,
         project: api_key.project,
         cache_pin: api_key.cache,
@@ -209,6 +214,28 @@ async fn decode_api_key(
     }
 
     Ok(DecodedRequest::ApiKey { user_id, context })
+}
+
+async fn decode_job_token(db: &WebDb, raw: &str) -> Result<DecodedRequest, StatusCode> {
+    let job =
+        gradient_db::exec_jobs::tokens::resolve(db, &hash_job_token(raw), gradient_types::now())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let context = ApiKeyContext {
+        mask: job_mask(),
+        project: Some(job.project),
+        cache_pin: None,
+        cache_permission_mask: None,
+        allowed_ips: Vec::new(),
+    };
+
+    Ok(DecodedRequest::Job {
+        user_id: job.acting_user,
+        context,
+        job,
+    })
 }
 
 pub fn encode_download_token(
