@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#[expect(
-    dead_code,
-    reason = "the listener serves channels from the next commit on"
-)]
 mod channels;
 mod context;
 mod http;
@@ -15,21 +11,7 @@ mod listener;
 mod output;
 mod run;
 mod setup;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the listener serves channels from the next commit on"
-    )
-)]
 mod shell;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the listener serves channels from the next commit on"
-    )
-)]
 mod terminal;
 
 use std::path::{Path, PathBuf};

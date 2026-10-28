@@ -186,6 +186,12 @@ impl AgentChannels {
     }
 }
 
+impl Drop for AgentChannels {
+    fn drop(&mut self) {
+        self.close_all();
+    }
+}
+
 fn closed(channel_id: u64, exit_code: Option<i32>, message: Option<String>) -> AgentToWorker {
     AgentToWorker::CloseChannel {
         channel_id,

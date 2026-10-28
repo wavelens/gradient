@@ -10,7 +10,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use gradient_util::shutdown::Shutdown;
 use gradient_wire::guest::{
-    AGENT_VSOCK_PORT, AgentToWorker, GuestConnection, RunJob, WorkerToAgent,
+    AGENT_VSOCK_PORT, AgentToWorker, GuestConnection, GuestSender, RunJob, WorkerToAgent,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -18,9 +18,11 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 use tokio_vsock::{VMADDR_CID_ANY, VsockAddr, VsockListener, VsockStream};
 
+use crate::channels::AgentChannels;
 use crate::output::{OutputChunk, OutputLog, OutputReader, OutputReaders};
 use crate::run::run;
 use crate::setup::{PreparedJob, prepare};
+use crate::shell::ShellContext;
 
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 const SETUP_TIMEOUT: Duration = Duration::from_secs(300);
@@ -43,7 +45,24 @@ struct Agent {
     unclaimed_output: Mutex<Option<OutputLog>>,
     progress: watch::Sender<Progress>,
     kill: CancellationToken,
+    shell: Mutex<Option<ShellContext>>,
     tasks: Shutdown,
+}
+
+impl Agent {
+    fn shell_context(&self) -> Option<ShellContext> {
+        self.shell
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn keep_shell_context(&self, context: ShellContext) {
+        *self
+            .shell
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(context);
+    }
 }
 
 pub async fn listen(output: OutputLog, tasks: Shutdown, restarted: bool) -> Result<()> {
@@ -52,6 +71,7 @@ pub async fn listen(output: OutputLog, tasks: Shutdown, restarted: bool) -> Resu
         unclaimed_output: Mutex::new((!restarted).then_some(output)),
         progress: watch::Sender::new(initial_progress(restarted)),
         kill: CancellationToken::new(),
+        shell: Mutex::new(None),
         tasks,
     });
     let listener = VsockListener::bind(VsockAddr::new(VMADDR_CID_ANY, AGENT_VSOCK_PORT))
@@ -106,30 +126,49 @@ async fn serve_connection(agent: Arc<Agent>, stream: VsockStream) -> Result<()> 
     })
     .await?;
 
-    let (outgoing, mut to_send) = mpsc::channel(16);
+    let (sender, mut receiver) = conn.split();
+    let (outgoing, to_send) = mpsc::channel(16);
+    let _writer = AbortOnDropHandle::new(agent.tasks.spawn(write_to_worker(sender, to_send)));
+    let mut channels = AgentChannels::new(outgoing.clone(), agent.tasks.clone());
     let mut _streamer = spawn_streamer(&agent, None, outgoing.clone());
-    loop {
-        tokio::select! {
-            message = conn.recv::<WorkerToAgent>() => match message? {
-                Some(WorkerToAgent::Attach { output_offset }) => {
-                    let reader = agent.readers.reader_from(output_offset);
-                    _streamer = spawn_streamer(&agent, Some(reader), outgoing.clone());
+    while let Some(message) = receiver.recv::<WorkerToAgent>().await? {
+        match message {
+            WorkerToAgent::Attach { output_offset } => {
+                let reader = agent.readers.reader_from(output_offset);
+                _streamer = spawn_streamer(&agent, Some(reader), outgoing.clone());
+            }
+            WorkerToAgent::RunJob(job) => {
+                if let Some(refused) = start_job(&agent, job) {
+                    outgoing.send(refused).await?;
                 }
-                Some(WorkerToAgent::RunJob(job)) => {
-                    if let Some(refused) = start_job(&agent, job) {
-                        conn.send(&refused).await?;
-                    }
-                }
-                Some(WorkerToAgent::Kill) => agent.kill.cancel(),
-                Some(
-                    WorkerToAgent::OpenChannel { .. }
-                    | WorkerToAgent::ChannelData { .. }
-                    | WorkerToAgent::CloseChannel { .. }
-                    | WorkerToAgent::Resize { .. },
-                ) => {}
-                None => return Ok(()),
-            },
-            Some(message) = to_send.recv() => conn.send(&message).await?,
+            }
+            WorkerToAgent::Kill => agent.kill.cancel(),
+            WorkerToAgent::OpenChannel { channel_id, kind } => {
+                let context = agent.shell_context();
+                channels.open(channel_id, kind, context.as_ref()).await;
+            }
+            WorkerToAgent::ChannelData { channel_id, data } => {
+                channels.data(channel_id, data).await;
+            }
+            WorkerToAgent::Resize {
+                channel_id,
+                cols,
+                rows,
+            } => channels.resize(channel_id, cols, rows),
+            WorkerToAgent::CloseChannel { channel_id } => channels.close(channel_id),
+        }
+    }
+    Ok(())
+}
+
+async fn write_to_worker(
+    mut sender: GuestSender<VsockStream>,
+    mut to_send: mpsc::Receiver<AgentToWorker>,
+) {
+    while let Some(message) = to_send.recv().await {
+        if let Err(e) = sender.send(&message).await {
+            tracing::warn!(error = %format!("{e:#}"), "cannot send to the worker");
+            return;
         }
     }
 }
@@ -151,6 +190,7 @@ fn start_job(agent: &Arc<Agent>, job: Box<RunJob>) -> Option<AgentToWorker> {
         let agent = job_agent;
         let outcome = match prepare_until_stopped(&job, &agent).await {
             Ok(prepared) => {
+                agent.keep_shell_context(ShellContext::of(&prepared.program, &job.groups));
                 let (started, started_rx) = oneshot::channel();
                 let mark_started = async {
                     if started_rx.await.is_ok() {
