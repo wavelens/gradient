@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { DeviceRequest, ExecJobStatus, ExecUnmet, WaitingReason } from '@core/models';
+import type { DeviceRequest, ExecJobStatus, ExecUnmet, GuestSize, WaitingReason } from '@core/models';
 import type { StatusPhase } from '@shared/evaluation';
 
 export function execJobPhase(status: ExecJobStatus): StatusPhase {
@@ -27,11 +27,28 @@ export function deviceLabel(device: DeviceRequest): string {
   return device.count === 1 ? device.name : `${device.name}:${device.count}`;
 }
 
+function cpusLabel(cpus: number): string {
+  return cpus === 1 ? '1 CPU' : `${cpus} CPUs`;
+}
+
+function guestSizeParts(size: GuestSize): string[] {
+  return [
+    ...(size.cpus > 0 ? [cpusLabel(size.cpus)] : []),
+    ...(size.memory_mb > 0 ? [`${size.memory_mb} MB memory`] : []),
+    ...(size.disk_mb > 0 ? [`${size.disk_mb} MB disk`] : []),
+  ];
+}
+
+export function guestSizeLabel(size: GuestSize): string {
+  return guestSizeParts(size).join(' · ');
+}
+
 export function unmetParts(unmet: ExecUnmet): string[] {
   return [
     ...(unmet.architecture ? [`architecture ${unmet.architecture}`] : []),
     ...unmet.labels.map((label) => `label ${label}`),
     ...unmet.devices.map(deviceLabel),
+    ...(unmet.guest ? guestSizeParts(unmet.guest) : []),
     ...unmet.mounts.map((mount) => `mount ${mount}`),
     ...(unmet.nodes > 1 ? [`${unmet.nodes} workers in one zone`] : []),
     ...(unmet.custom_image ? ['a worker that allows custom images'] : []),
