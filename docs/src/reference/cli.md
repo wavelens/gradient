@@ -101,6 +101,15 @@ gradient login https://gradient.example.com
 | `gradient builds log <ID>` | `--interactive`, `--lines <LINES>`, `--search <SEARCH>`, `--case` | View a build's log |
 | `gradient eval <PATTERN>...` | `--workers <N>`, `--max-rss <MiB>`, `--max-memory <MiB>` | Evaluate a flake to derivations locally, a JSON line per attribute. Only in `gradient-cli-full`, see [below](#local-evaluation) |
 
+## Pull Requests
+
+| Command | Options | Description |
+|---|---|---|
+| `gradient pr open [PATH]...` | `--title <TITLE>`, `--body <FILE>`, `--branch <NAME>`, `--base <REF>` | Open or update a pull request from the working tree changes of the listed paths, all paths by default |
+
+- Start commit: `GRADIENT_COMMIT` inside an exec job, else the merge base of `HEAD` and `origin/<base>`.
+- The pull request can use the integration of the selected task's `open_pr` action, see [Use Exec Job Results](../guides/exec-job-results.md#4-open-pull-requests).
+
 ## Caches
 
 | Command | Options | Description |

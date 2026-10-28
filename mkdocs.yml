@@ -68,6 +68,7 @@ nav:
       - Notify with Actions: guides/actions.md
       - Update Flake Inputs: guides/flake-updates.md
       - Run Exec Jobs: guides/exec-jobs.md
+      - Use Exec Job Results: guides/exec-job-results.md
       - Set Up Single Sign-On: guides/sso.md
       - Manage Gradient with Nix: guides/manage-with-nix.md
       - Connect an AI Assistant: guides/mcp.md
@@ -126,6 +127,7 @@ nav:
       - Exec Jobs:
           - contributors/exec/index.md
           - Secrets: contributors/exec/secrets.md
+          - Actions: contributors/exec/actions.md
       - Evaluation Metrics: contributors/eval-metrics.md
       - Eval Benchmark: contributors/eval-benchmark.md
       - Diagnostic Reports: contributors/diagnostic-reports.md
