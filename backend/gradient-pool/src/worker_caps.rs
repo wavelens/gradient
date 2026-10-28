@@ -389,6 +389,11 @@ mod tests {
     #[test]
     fn a_custom_image_needs_custom_images_and_a_worker_without_exec_runs_nothing() {
         assert!(!exec_worker().can_run_exec(&req(|r| r.custom_image = true)));
+        let mut custom_images = exec_worker();
+        if let Some(inventory) = custom_images.exec.as_mut() {
+            inventory.allow.custom_images = true;
+        }
+        assert!(custom_images.can_run_exec(&req(|r| r.custom_image = true)));
         let mut no_exec = exec_worker();
         no_exec.capabilities.exec = false;
         assert!(!no_exec.can_run_exec(&req(|_| {})));

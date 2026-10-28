@@ -703,6 +703,29 @@ mod tests {
     }
 
     #[test]
+    fn a_custom_image_waits_for_a_worker_that_allows_it() {
+        use crate::test_jobs::eight_gpu_exec_caps;
+        let mut no_custom_images = eight_gpu_exec_caps();
+        if let Some(inventory) = no_custom_images.exec.as_mut() {
+            inventory.allow.custom_images = false;
+        }
+        let spec = ExecSpec {
+            image: Some("/nix/store/bbbb-nixos-system.drv".into()),
+            ..ExecSpec::default()
+        };
+        let Some(WaitingReason::ExecWorkers {
+            unmet,
+            matching_workers,
+            ..
+        }) = exec_waiting_reason(&job_on(spec, "x86_64-linux"), &[no_custom_images])
+        else {
+            panic!("exec wait")
+        };
+        assert!(unmet.custom_image);
+        assert_eq!(matching_workers, 0);
+    }
+
+    #[test]
     fn a_missing_worker_secret_shows_in_the_wait_reason() {
         use crate::test_jobs::eight_gpu_exec_caps;
         let unmet = exec_unmet(

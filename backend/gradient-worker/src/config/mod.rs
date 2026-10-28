@@ -290,6 +290,13 @@ mod tests {
     }
 
     #[test]
+    fn custom_images_follow_allow_custom_images() {
+        let allowed = parse(&["--exec-allow-custom-images"]).expect("valid flag");
+        assert!(allowed.exec.allow().custom_images);
+        assert!(!parse(&[]).expect("defaults").exec.allow().custom_images);
+    }
+
+    #[test]
     fn a_device_with_two_sources_is_refused() {
         assert!(
             parse(&[
