@@ -371,31 +371,35 @@ impl NarStore {
         Ok(())
     }
 
-    pub async fn put_streaming(&self, hash: &str, chunk_size: usize) -> Result<WriteMultipart> {
-        let upload = self
-            .inner
-            .put_multipart(&self.object_path(hash))
-            .await
-            .context("initiate multipart upload")?;
-        Ok(WriteMultipart::new_with_chunk_size(upload, chunk_size))
-    }
-
     pub async fn put_reader<R: AsyncRead + Unpin + Send>(
         &self,
         hash: &str,
+        reader: R,
+    ) -> Result<()> {
+        self.put_reader_at(self.object_path(hash), reader).await
+    }
+
+    async fn put_reader_at<R: AsyncRead + Unpin + Send>(
+        &self,
+        object: Path,
         mut reader: R,
     ) -> Result<()> {
         const PART_SIZE: usize = 8 * 1024 * 1024;
         const MAX_INFLIGHT_PARTS: usize = 2;
         const READ_CHUNK: usize = 256 * 1024;
 
-        let mut upload = self.put_streaming(hash, PART_SIZE).await?;
+        let multipart = self
+            .inner
+            .put_multipart(&object)
+            .await
+            .context("initiate multipart upload")?;
+        let mut upload = WriteMultipart::new_with_chunk_size(multipart, PART_SIZE);
         let mut buf = vec![0u8; READ_CHUNK];
         loop {
             let n = reader
                 .read(&mut buf)
                 .await
-                .context("read NAR while streaming to storage")?;
+                .context("read the object while streaming to storage")?;
             if n == 0 {
                 break;
             }
@@ -410,7 +414,7 @@ impl NarStore {
         bounded(
             upload.finish(),
             WRITE_STALL_TIMEOUT,
-            "finish multipart NAR upload",
+            "finish multipart upload",
         )
         .await?;
         Ok(())
@@ -421,28 +425,31 @@ impl NarStore {
     }
 
     pub async fn adopt_file(&self, hash: &str, path: &std::path::Path) -> Result<()> {
-        let object = self.object_path(hash);
+        self.adopt_into(self.object_path(hash), path).await
+    }
+
+    async fn adopt_into(&self, object: Path, staged: &std::path::Path) -> Result<()> {
         if let Some(base) = &self.local_base {
             let dest = base.join(object.as_ref());
             if let Some(parent) = dest.parent() {
                 tokio::fs::create_dir_all(parent)
                     .await
-                    .context("create NAR shard dir")?;
+                    .context("create the object directory")?;
             }
-            match tokio::fs::rename(path, &dest).await {
+            match tokio::fs::rename(staged, &dest).await {
                 Ok(()) => return Ok(()),
                 Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {}
-                Err(e) => return Err(e).context("rename staged NAR into store"),
+                Err(e) => return Err(e).context("rename the staged file into the store"),
             }
         }
 
-        let file = tokio::fs::File::open(path)
+        let file = tokio::fs::File::open(staged)
             .await
-            .context("open staged NAR")?;
-        self.put_reader(hash, file).await?;
-        tokio::fs::remove_file(path)
+            .context("open the staged file")?;
+        self.put_reader_at(object, file).await?;
+        tokio::fs::remove_file(staged)
             .await
-            .context("remove staged NAR after upload")
+            .context("remove the staged file after upload")
     }
 
     pub async fn get_stream(
@@ -609,6 +616,75 @@ impl NarStore {
         self.delete_object(&self.blob_path(project, hash)).await
     }
 
+    fn exec_output_path(&self, job: uuid::Uuid, path: &str) -> Path {
+        Path::from(format!("{}{}", self.prefix, exec_output_key(job, path)))
+    }
+
+    pub async fn adopt_exec_output(
+        &self,
+        job: uuid::Uuid,
+        path: &str,
+        staged: &std::path::Path,
+    ) -> Result<()> {
+        self.adopt_into(self.exec_output_path(job, path), staged)
+            .await
+    }
+
+    pub async fn open_exec_output(
+        &self,
+        job: uuid::Uuid,
+        path: &str,
+        offset: u64,
+    ) -> Result<Option<(u64, BoxStream<'static, Result<Bytes>>)>> {
+        self.get_stream_object(&self.exec_output_path(job, path), Some(offset))
+            .await
+    }
+
+    pub async fn get_exec_output(
+        &self,
+        job: uuid::Uuid,
+        path: &str,
+        max: usize,
+    ) -> Result<Option<Vec<u8>>> {
+        let object = self.exec_output_path(job, path);
+        match self.head_object(&object).await? {
+            None => Ok(None),
+            Some(meta) if meta.size > max as u64 => {
+                anyhow::bail!(
+                    "exec output {path} is {} bytes, the limit is {max}",
+                    meta.size
+                )
+            }
+            Some(_) => self.get_object(&object).await,
+        }
+    }
+
+    pub async fn delete_exec_outputs(&self, job: uuid::Uuid) -> Result<()> {
+        let listed = Path::from(format!("{}{EXEC_OUTPUTS_DIR}/{job}", self.prefix));
+        let mut stream = self.inner.list(Some(&listed));
+        while let Some(item) = stream.next().await {
+            let meta = item.context("list exec outputs")?;
+            self.delete_object(&meta.location).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn list_exec_output_jobs(&self) -> Result<Vec<uuid::Uuid>> {
+        let listed = Path::from(format!("{}{EXEC_OUTPUTS_DIR}", self.prefix));
+        let mut stream = self.inner.list(Some(&listed));
+        let mut jobs = std::collections::BTreeSet::new();
+        while let Some(item) = stream.next().await {
+            let location = item.context("list exec outputs")?.location.to_string();
+            let job = location
+                .strip_prefix(self.prefix.as_str())
+                .and_then(|key| key.strip_prefix(EXEC_OUTPUTS_DIR))
+                .and_then(|rest| rest.split('/').nth(1))
+                .and_then(|job| uuid::Uuid::parse_str(job).ok());
+            jobs.extend(job);
+        }
+        Ok(jobs.into_iter().collect())
+    }
+
     pub fn shards() -> Vec<String> {
         let chars = gradient_util::nix_hash::NIX32_CHARS;
         chars
@@ -717,6 +793,12 @@ impl NarStore {
         }
         Ok(out)
     }
+}
+
+const EXEC_OUTPUTS_DIR: &str = "exec-outputs";
+
+pub fn exec_output_key(job: uuid::Uuid, path: &str) -> String {
+    format!("{EXEC_OUTPUTS_DIR}/{job}/{path}")
 }
 
 async fn local_stream(
@@ -1318,6 +1400,72 @@ mod tests {
             buf.extend_from_slice(&c.unwrap());
         }
         assert_eq!(buf, b"abcdef");
+    }
+
+    async fn adopt_output(dir: &TempDir, store: &NarStore, job: uuid::Uuid, path: &str) {
+        let staged = dir.path().join("staged.partial");
+        tokio::fs::write(&staged, b"abcdef").await.unwrap();
+        store.adopt_exec_output(job, path, &staged).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_adopted_output_reads_back_from_an_offset() {
+        let (dir, store) = local_store();
+        let job = uuid::Uuid::now_v7();
+        adopt_output(&dir, &store, job, "model/weights.bin").await;
+        let (size, stream) = store
+            .open_exec_output(job, "model/weights.bin", 2)
+            .await
+            .unwrap()
+            .expect("the output exists");
+        assert_eq!(size, 6);
+        assert_eq!(&collect(stream, size - 2).await.unwrap()[..], b"cdef");
+        assert!(
+            store
+                .open_exec_output(job, "missing", 0)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_a_jobs_outputs_leaves_other_jobs() {
+        let (dir, store) = local_store();
+        let (gone, kept) = (uuid::Uuid::now_v7(), uuid::Uuid::now_v7());
+        adopt_output(&dir, &store, gone, "a.txt").await;
+        adopt_output(&dir, &store, gone, "nested/b.txt").await;
+        adopt_output(&dir, &store, kept, "a.txt").await;
+        store.delete_exec_outputs(gone).await.unwrap();
+        assert_eq!(store.list_exec_output_jobs().await.unwrap(), vec![kept]);
+        assert!(
+            store
+                .get_exec_output(gone, "a.txt", 64)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_output_above_the_read_cap_is_an_error() {
+        let (dir, store) = local_store();
+        let job = uuid::Uuid::now_v7();
+        adopt_output(&dir, &store, job, "gradient/continue.json").await;
+        assert!(
+            store
+                .get_exec_output(job, "gradient/continue.json", 5)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            store
+                .get_exec_output(job, "gradient/continue.json", 6)
+                .await
+                .unwrap()
+                .unwrap(),
+            b"abcdef"
+        );
     }
 
     #[tokio::test]
