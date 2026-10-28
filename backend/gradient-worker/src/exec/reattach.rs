@@ -17,6 +17,7 @@ use super::host::ExecHost;
 use super::job::{finish, unix_now, unless_aborted};
 use super::job_channels::{GuestChannelInbox, JobChannels};
 use super::state::StoredJob;
+use super::uploads::GuestUploads;
 use super::watchdog::Watchdog;
 use crate::executor::AbortSignal;
 use crate::executor::failure::BuildError;
@@ -96,6 +97,7 @@ async fn follow_again(
     let leave_running = host.worker_stop_keeping_guests();
     let mux = GuestChannelMux::new(stored.ssh, stored.ports.clone(), agent.version());
     let mut channels = JobChannels::new(inbox, mux, guest.dir().to_owned());
+    let mut uploads = GuestUploads::new(guest.dir().join("outputs"));
     finish(
         &mut agent,
         updater,
@@ -103,6 +105,7 @@ async fn follow_again(
         &mut abort,
         &leave_running,
         &mut channels,
+        &mut uploads,
     )
     .await
 }

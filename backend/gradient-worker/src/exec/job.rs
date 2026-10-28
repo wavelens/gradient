@@ -16,8 +16,10 @@ use gradient_vm::{
     DeviceHold, GUEST_BOOT_TIMEOUT, Guest, MountConfig, PlugPlan, PluggedDevices, WORK_MOUNT_TAG,
     guest_address, wait_ready,
 };
-use gradient_wire::guest::{AgentToWorker, GuestMount, GuestNetwork, GuestSecret, RunJob};
-use gradient_wire::types::{ExecJob, MAX_PHASE_PAYLOAD};
+use gradient_wire::guest::{
+    AgentToWorker, GuestMount, GuestNetwork, GuestSecret, RunJob, WorkerToAgent,
+};
+use gradient_wire::types::{ExecJob, MAX_PHASE_PAYLOAD, UploadObject};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -31,14 +33,16 @@ use super::inventory::device_requests;
 use super::job_channels::{GuestChannelInbox, JobChannels};
 use super::sops::WorkerSecrets;
 use super::state::StoredJob;
+use super::uploads::{GuestUploads, OutputUpload};
 use super::watchdog::{Watchdog, Watched};
 use crate::executor::AbortSignal;
 use crate::executor::failure::{BuildError, JobAborted};
 use crate::nix::store::LocalNixStore;
 use crate::proto::credentials::CredentialStore;
-use crate::proto::job::JobUpdater;
+use crate::proto::job::{JobUpdater, push_exec_output};
 
 const STORE_DIR: &str = "/nix/store/";
+const EXEC_KEY_PREFIX: &str = "exec:";
 const KILL_GRACE: Duration = Duration::from_secs(15);
 
 #[async_trait]
@@ -55,10 +59,23 @@ pub trait ExecReport: Send {
         exit_code: Option<i32>,
         message: Option<String>,
     );
+    fn output_upload(&self, path: String, file: PathBuf, size: u64) -> OutputUpload;
 }
 
 #[async_trait]
 impl ExecReport for JobUpdater {
+    fn output_upload(&self, path: String, file: PathBuf, size: u64) -> OutputUpload {
+        let uploads = self.uploads.clone();
+        let job_id = self.job_id.clone();
+        Box::pin(async move {
+            let object = UploadObject::ExecOutput {
+                job: exec_job_of(&job_id).to_owned(),
+                path,
+            };
+            push_exec_output(&uploads, &job_id, object, &file, size).await
+        })
+    }
+
     async fn program_started(&mut self) -> Result<()> {
         self.report_program_started().await
     }
@@ -208,6 +225,10 @@ pub(crate) fn job_secrets(
         .collect()
 }
 
+fn exec_job_of(job_id: &str) -> &str {
+    job_id.strip_prefix(EXEC_KEY_PREFIX).unwrap_or(job_id)
+}
+
 pub(crate) fn job_redactor(secrets: &[GuestSecret], token: &str) -> SecretRedactor {
     let token = (!token.is_empty()).then_some(("job-token", token.as_bytes()));
     SecretRedactor::new(
@@ -225,8 +246,18 @@ pub async fn finish<R: ExecReport>(
     abort: &mut AbortSignal,
     leave_running: &CancellationToken,
     channels: &mut JobChannels,
+    uploads: &mut GuestUploads,
 ) -> Result<()> {
-    let followed = follow(agent, reporter, watchdog, abort, leave_running, channels).await;
+    let followed = follow(
+        agent,
+        reporter,
+        watchdog,
+        abort,
+        leave_running,
+        channels,
+        uploads,
+    )
+    .await;
     if !matches!(followed, Followed::LeftRunning) {
         let exit_code = match followed {
             Followed::Exited(code) => Some(code),
@@ -264,12 +295,17 @@ pub async fn follow<R: ExecReport>(
     abort: &mut AbortSignal,
     leave_running: &CancellationToken,
     channels: &mut JobChannels,
+    uploads: &mut GuestUploads,
 ) -> Followed {
     loop {
         let watched = tokio::select! {
             () = leave_running.cancelled() => return Followed::LeftRunning,
             event = channels.next_event() => {
                 channels.handle(event, agent, reporter).await;
+                continue;
+            }
+            Some((upload_id, error)) = uploads.next_settled() => {
+                answer_upload(agent, upload_id, error).await;
                 continue;
             }
             watched = async { watchdog.next(&mut agent.messages(), abort).await } => watched,
@@ -307,6 +343,28 @@ pub async fn follow<R: ExecReport>(
                 channels.mask_console(&job_redactor(&secrets, &token));
                 continue;
             }
+            AgentToWorker::UploadStart {
+                upload_id,
+                path,
+                size,
+            } => {
+                if let Err(e) = uploads.start(upload_id, path, size).await {
+                    debug!(upload_id, error = %e, "guest upload not staged");
+                }
+                continue;
+            }
+            AgentToWorker::UploadChunk { upload_id, data } => {
+                if let Err(e) = uploads.chunk(upload_id, &data).await {
+                    debug!(upload_id, error = %e, "guest upload chunk refused");
+                }
+                continue;
+            }
+            AgentToWorker::UploadEnd { upload_id } => {
+                uploads.end(upload_id, |path, file, size| {
+                    reporter.output_upload(path, file, size)
+                });
+                continue;
+            }
             message => message,
         };
         if matches!(
@@ -317,9 +375,28 @@ pub async fn follow<R: ExecReport>(
         }
         match forward(message, reporter).await {
             Ok(None) => {}
+            Ok(Some(Followed::Exited(code))) => {
+                return tokio::select! {
+                    () = abort.aborted() => Followed::Stopped(Stop::Aborted),
+                    () = answer_open_uploads(agent, uploads) => Followed::Exited(code),
+                };
+            }
             Ok(Some(end)) => return end,
             Err(e) => return Followed::Ended(BuildError::transient(e)),
         }
+    }
+}
+
+async fn answer_open_uploads(agent: &mut AgentClient, uploads: &mut GuestUploads) {
+    for (upload_id, error) in uploads.drain().await {
+        answer_upload(agent, upload_id, error).await;
+    }
+}
+
+async fn answer_upload(agent: &mut AgentClient, upload_id: u64, error: Option<String>) {
+    let settled = WorkerToAgent::UploadSettled { upload_id, error };
+    if let Err(e) = agent.send(&settled).await {
+        warn!(upload_id, error = %e, "could not tell the guest agent an upload settled");
     }
 }
 
@@ -447,6 +524,7 @@ impl ExecRun<'_> {
             GuestChannelMux::new(requirement.ssh, requirement.ports.clone(), agent.version());
         mux.mask_console(&self.redactor);
         let mut channels = JobChannels::new(inbox, mux, guest.dir().to_owned());
+        let mut uploads = GuestUploads::new(guest.dir().join("outputs"));
         let mut watchdog = Watchdog::new(
             Instant::now(),
             self.job.timeout_secs.map(Duration::from_secs),
@@ -459,6 +537,7 @@ impl ExecRun<'_> {
             &mut self.abort,
             &self.host.worker_stop_keeping_guests(),
             &mut channels,
+            &mut uploads,
         )
         .await
     }
@@ -668,11 +747,23 @@ mod tests {
         ChannelClosed(u64, Option<i32>),
     }
 
+    type Uploaded = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+
     #[derive(Default)]
-    struct Recorder(Vec<Reported>);
+    struct Recorder(Vec<Reported>, Uploaded);
 
     #[async_trait]
     impl ExecReport for Recorder {
+        fn output_upload(&self, path: String, file: PathBuf, _size: u64) -> OutputUpload {
+            let uploaded = self.1.clone();
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let bytes = tokio::fs::read(&file).await?;
+                uploaded.lock().unwrap().push((path, bytes));
+                Ok(())
+            })
+        }
+
         async fn program_started(&mut self) -> Result<()> {
             self.0.push(Reported::Started);
             Ok(())
@@ -722,6 +813,70 @@ mod tests {
         job_channels(false).1
     }
 
+    fn no_uploads() -> GuestUploads {
+        GuestUploads::new(PathBuf::new())
+    }
+
+    #[tokio::test]
+    async fn follow_waits_for_open_uploads_before_the_exit() {
+        let (mut agent, mut guest) = connected().await;
+        let fake_agent = async move {
+            let script = [
+                AgentToWorker::UploadStart {
+                    upload_id: 1,
+                    path: "model/w.bin".into(),
+                    size: 3,
+                },
+                AgentToWorker::UploadChunk {
+                    upload_id: 1,
+                    data: b"abc".to_vec(),
+                },
+                AgentToWorker::UploadEnd { upload_id: 1 },
+                AgentToWorker::Exited { code: 0 },
+            ];
+            for message in script {
+                guest.send(&message).await.unwrap();
+            }
+            let settled = tokio::time::timeout(Duration::from_secs(5), guest.recv())
+                .await
+                .expect("the worker answers the upload");
+            (settled.unwrap(), guest)
+        };
+        let mut recorder = Recorder::default();
+        let uploaded = recorder.1.clone();
+        let dir = tempfile::tempdir().unwrap();
+        let mut uploads = GuestUploads::new(dir.path().join("outputs"));
+        let mut channels = no_channels();
+        let mut watchdog = Watchdog::new(Instant::now(), None, None);
+        let (mut abort, running) = (AbortSignal::never(), CancellationToken::new());
+
+        let (followed, (settled, _guest)) = tokio::join!(
+            follow(
+                &mut agent,
+                &mut recorder,
+                &mut watchdog,
+                &mut abort,
+                &running,
+                &mut channels,
+                &mut uploads,
+            ),
+            fake_agent
+        );
+
+        assert!(matches!(followed, Followed::Exited(0)), "{followed:?}");
+        assert_eq!(
+            settled,
+            Some(WorkerToAgent::UploadSettled {
+                upload_id: 1,
+                error: None
+            })
+        );
+        assert_eq!(
+            *uploaded.lock().unwrap(),
+            [("model/w.bin".to_owned(), b"abc".to_vec())]
+        );
+    }
+
     async fn connected() -> (AgentClient, GuestConnection<UnixStream>) {
         let (worker_end, agent_end) = UnixStream::pair().unwrap();
         let (worker, agent) = tokio::join!(
@@ -746,6 +901,7 @@ mod tests {
         let mut watchdog = Watchdog::new(Instant::now(), None, None);
         let (mut abort, running) = (AbortSignal::never(), CancellationToken::new());
         let mut channels = no_channels();
+        let mut uploads = no_uploads();
         let (followed, ()) = tokio::join!(
             follow(
                 &mut agent,
@@ -754,6 +910,7 @@ mod tests {
                 &mut abort,
                 &running,
                 &mut channels,
+                &mut uploads,
             ),
             fake_agent
         );
@@ -783,6 +940,7 @@ mod tests {
         let mut watchdog = Watchdog::new(Instant::now(), None, Some(Duration::from_secs(1)));
         let (mut abort, running) = (AbortSignal::never(), CancellationToken::new());
         let mut channels = no_channels();
+        let mut uploads = no_uploads();
         let finished = finish(
             &mut agent,
             &mut recorder,
@@ -790,6 +948,7 @@ mod tests {
             &mut abort,
             &running,
             &mut channels,
+            &mut uploads,
         );
 
         let (finished, _guest) = tokio::join!(finished, fake_agent);
@@ -822,6 +981,7 @@ mod tests {
             &mut AbortSignal::never(),
             &stopping,
             &mut no_channels(),
+            &mut no_uploads(),
         )
         .await;
 
@@ -832,6 +992,7 @@ mod tests {
     async fn channel_traffic_does_not_reset_max_silent() {
         let (mut agent, mut guest) = connected().await;
         let (commands, mut channels) = job_channels(true);
+        let mut uploads = no_uploads();
         let shell = GuestChannelKind::Shell {
             pty: true,
             attach: false,
@@ -867,6 +1028,7 @@ mod tests {
                 &mut abort,
                 &running,
                 &mut channels,
+                &mut uploads,
             ),
             fake_agent
         );
