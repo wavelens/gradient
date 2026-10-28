@@ -6,8 +6,8 @@
 
 use gradient_entity::build::BuildStatus;
 use gradient_entity::exec_job::ExecJobStatus;
-use gradient_types::MExecJob;
-use sea_orm::{ConnectionTrait, DbErr, FromQueryResult};
+use gradient_types::{ExecJobId, MExecJob};
+use sea_orm::{ConnectionTrait, DbErr, FromQueryResult, Value};
 use std::sync::LazyLock;
 
 use crate::sql::StatusWrite;
@@ -76,7 +76,20 @@ static REFUSE_DISABLED_PROJECTS_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+static FAIL_UNDISPATCHED_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE exec_job SET status = {failed}, message = $2, waiting_reason = NULL, \
+         finished_at = (now() AT TIME ZONE 'UTC') \
+         WHERE id = $1 AND status IN ({undispatched}) RETURNING *",
+        failed = exec(ExecJobStatus::Failed),
+        undispatched = exec_in(&[ExecJobStatus::Queued, ExecJobStatus::Starting]),
+    )
+});
+
 crate::sql_lazy! {
+    FAIL_UNDISPATCHED_EXEC_JOB = || FAIL_UNDISPATCHED_SQL.as_str(),
+        params = [NewUuid, Text("secret not found")],
+        status_write = StatusWrite::exec_job(ExecJobStatus::Failed);
     QUEUE_CACHED_EXEC_JOBS = || QUEUE_SQL.as_str(),
         params = [],
         status_write = StatusWrite::exec_job(ExecJobStatus::Queued);
@@ -111,6 +124,19 @@ pub async fn waiting<C: ConnectionTrait>(db: &C) -> Result<Settled, DbErr> {
         .all(db)
         .await?;
     Ok(Settled { queued, failed })
+}
+
+pub async fn fail_open<C: ConnectionTrait>(
+    db: &C,
+    job: ExecJobId,
+    message: &str,
+) -> Result<Option<MExecJob>, DbErr> {
+    MExecJob::find_by_statement(FAIL_UNDISPATCHED_EXEC_JOB.bind([
+        Value::Uuid(Some(job.into_inner())),
+        Value::String(Some(message.to_owned())),
+    ]))
+    .one(db)
+    .await
 }
 
 #[cfg(test)]

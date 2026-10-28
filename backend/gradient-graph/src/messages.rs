@@ -205,6 +205,10 @@ pub enum Transition {
     AbortExecJob {
         exec_job: ExecJobId,
     },
+    FailExecJob {
+        exec_job: ExecJobId,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -154,6 +154,32 @@ pub(crate) async fn abort(ctx: &DbContext, exec_job: ExecJobId) -> Result<bool> 
     end(ctx, exec_job, ExecJobStatus::Aborted, None, attempt).await
 }
 
+pub(crate) async fn fail_before_start(
+    ctx: &DbContext,
+    exec_job: ExecJobId,
+    message: &str,
+) -> Result<()> {
+    let Some(job) = settle::fail_open(&ctx.worker_db, exec_job, message).await? else {
+        info!(%exec_job, "failure for an exec job past dispatch; ignored");
+        return Ok(());
+    };
+    let attempt = match attempts::open_of_job(&ctx.worker_db, exec_job).await? {
+        Some(open) => attempts::close(
+            &ctx.worker_db,
+            open.id,
+            AttemptEndReason::Failed,
+            Some(message.to_owned()),
+        )
+        .await?
+        .map(|(_, closed)| closed.id),
+        None => None,
+    };
+
+    announce(ctx, &job, attempt, None).await;
+    check_evaluation_done(ctx, job.evaluation).await?;
+    Ok(())
+}
+
 pub(crate) async fn abort_evaluation(
     ctx: &DbContext,
     evaluation: EvaluationId,

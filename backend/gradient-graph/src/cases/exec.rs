@@ -17,6 +17,8 @@ use super::{A, A_OUT, B, B_OUT, Case, drv, nar, with_attr, with_output, with_ref
 use crate::messages::{Transition, TransitionReport};
 
 const ATTR: &str = "apps.x86_64-linux.a";
+const MISSING_SECRET: &str =
+    "secret \"hf-token\" not found in project secrets, repository sops files or worker sops files";
 
 fn entry_point(path: &str, output: &str, attr: &str) -> DiscoveredDerivation {
     with_attr(with_output(drv(path, &[]), output), attr)
@@ -608,5 +610,88 @@ async fn a_program_start_moves_the_job_to_running_once() {
         1,
         "after 2: one started event: {events:?}"
     );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_job_failed_before_dispatch_ends_failed_without_a_retry() {
+    let (case, e1) = queued_case(with_retries(2)).await;
+
+    case.transition(Transition::FailExecJob {
+        exec_job: job(&case, e1).await.id,
+        message: MISSING_SECRET.into(),
+    })
+    .await;
+
+    let failed = job(&case, e1).await;
+    assert_eq!(
+        (
+            failed.status,
+            failed.message.as_deref(),
+            failed.retries_left
+        ),
+        (ExecJobStatus::Failed, Some(MISSING_SECRET), 2),
+        "after 1: the job"
+    );
+    let events = exec_events(&case).await;
+    assert_eq!(
+        count_status(&events, ExecJobStatus::Failed),
+        1,
+        "after 1: one failed event: {events:?}"
+    );
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Failed,
+        "after 1: the evaluation"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_job_failed_at_hand_out_closes_its_attempt() {
+    let (case, e1) = queued_case(spec()).await;
+    let attempt = assign(&case, e1, 1, 5).await;
+
+    case.transition(Transition::FailExecJob {
+        exec_job: job(&case, e1).await.id,
+        message: MISSING_SECRET.into(),
+    })
+    .await;
+
+    assert_eq!(
+        job(&case, e1).await.status,
+        ExecJobStatus::Failed,
+        "after 1: the job"
+    );
+    assert_eq!(
+        attempt_row(&case, attempt).await.end_reason,
+        Some(AttemptEndReason::Failed),
+        "after 1: the attempt"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_finished_job_ignores_a_late_failure() {
+    let (case, e1) = queued_case(spec()).await;
+    let attempt = assign(&case, e1, 1, 5).await;
+    case.transition(Transition::ExecProgramStarted { attempt })
+        .await;
+    end_attempt(&case, attempt, AttemptEndReason::Completed).await;
+    let events = exec_events(&case).await;
+
+    case.transition(Transition::FailExecJob {
+        exec_job: job(&case, e1).await.id,
+        message: MISSING_SECRET.into(),
+    })
+    .await;
+
+    let finished = job(&case, e1).await;
+    assert_eq!(
+        (finished.status, finished.message),
+        (ExecJobStatus::Completed, None),
+        "after 1: the job"
+    );
+    assert_eq!(exec_events(&case).await, events, "after 1: no new event");
     case.finish().await;
 }
