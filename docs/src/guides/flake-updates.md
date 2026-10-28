@@ -1,6 +1,6 @@
 # Update Flake Inputs
 
-Pull requests that bump `flake.lock`, opened only after a successful build of the updated flake.
+Pull requests carry `flake.lock` bumps. Successful builds of the updated flake precede them.
 
 **Requirements:**
 
@@ -27,7 +27,7 @@ Pull requests that bump `flake.lock`, opened only after a successful build of th
 Supported input types: `github`, `gitlab` and `git`, including `git` over SSH with the project's SSH key.
 
 !!! warning
-    An override with a **URL** pins that input at the given address. The pin blocks every update run of the task. No pull request can land while the pin is in place.
+    An override with a **URL** pins that input at the given address. No update round of the task can run while pins exist. No pull request can land while the pin is in place.
 
 ## 2. Add the PR Action
 
@@ -64,17 +64,50 @@ flowchart LR
     bump[Bump tracked inputs] --> verify[Evaluate and build] --> pr[Open or update the PR]
 ```
 
-- Gradient force-pushes the branch as a single commit on top of the current base.
-- The pull request never falls behind.
-- An unchanged `flake.lock` leads to no pull request.
+- A force-push can land each branch as a single commit on top of the current base.
+- Pull requests never lag behind.
+- Unchanged `flake.lock` files trigger no pull request.
 - A failed build with the default `build` check blocks pull request creation.
+
+## Update in an Exec Job
+
+The update can run as a script in an [exec job](exec-jobs.md). Any check can happen before the pull request. The PR action in Step 2 can handle the integration. Step 1 can stay unused.
+
+```nix
+# flake.nix
+apps.x86_64-linux.update = {
+  type = "app";
+  program = "${pkgs.writeShellScript "update" ''
+    nix flake update
+    gradient build 'nixosConfigurations.*.config.system.build.toplevel' # (1)!
+    gradient pr open --title "flake: update inputs" --branch update/flake flake.lock
+  ''}";
+  passthru.gradient = { network = true; };
+};
+```
+
+1. A failed build can end the script before the pull request.
+
+A loop can create one pull request per input.
+
+```sh
+for input in $(nix flake metadata --json | jq -r '.locks.nodes.root.inputs | keys[]'); do
+  nix flake update "$input"
+  gradient build && gradient pr open --title "update $input" --branch "update/$input" flake.lock
+  git checkout -- flake.lock
+done
+```
+
+- Choose the exec job for custom checks or one pull request per input. Use the PR action for a plain lock bump.
+- Find details on `gradient pr open` and the job token in [Use Exec Job Results](exec-job-results.md).
 
 ## Verify Deployment
 
-- A second evaluation of the update can be triggered with **Start Evaluation** in the task.
-- After the evaluation, the pull request on the Git host will list the old and new revision of each input.
+- The task's **Start Evaluation** can run a second evaluation of the update.
+- Pull request bodies carry the old revision and the new revision of each input.
 
 ## Next Steps
 
-- [Notify with Actions](actions.md): send mail and web requests when an update fails
+- [Notify with Actions](actions.md): update failures trigger mail and web requests
+- [Use Exec Job Results](exec-job-results.md): exec jobs open pull requests
 - [Projects and Tasks](../concepts/projects-and-tasks.md): how triggers and actions work together
