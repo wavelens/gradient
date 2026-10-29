@@ -1354,12 +1354,19 @@ pub(crate) async fn apply_upstream_hits(
     let cached = gradient_db::derivation_outputs::cached_anywhere(db, &outputs)
         .await
         .context("find the outputs some cache already holds")?;
-    let needed = gradient_db::graph::needed_outputs::needed_outputs(db, &touched)
-        .await
-        .context("find the outputs a wanted parent needs")?;
     let available = |o: &MDerivationOutput| {
         o.hash.as_ref().is_some_and(|h| hits.contains_key(h)) || cached.contains(&o.id)
     };
+    let mut partial: Vec<DerivationId> = outputs
+        .iter()
+        .filter(|o| !available(o))
+        .map(|o| o.derivation)
+        .collect();
+    partial.sort_unstable();
+    partial.dedup();
+    let needed = gradient_db::graph::needed_outputs::needed_outputs(db, &partial)
+        .await
+        .context("find the outputs a wanted parent needs")?;
     let flipped = flip_cache_available(db, substitutable(&outputs, available, &needed)).await?;
     let newly_cache_available = flipped.all;
 
