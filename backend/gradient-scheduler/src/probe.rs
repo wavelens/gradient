@@ -76,6 +76,7 @@ impl UpstreamProbe {
     }
 
     async fn probe_round(&self, shared_builds: Vec<DerivationId>) -> Result<()> {
+        let answered_before = probed_wanted(&self.db, &shared_builds).await?;
         let mut targets = unprobed_wanted(&self.db, &shared_builds).await?;
         targets.extend(unprobed_dependencies(&self.db, &targets).await?);
         let plan = plan_probes(&self.db, &targets).await?;
@@ -107,8 +108,10 @@ impl UpstreamProbe {
             }
         }
 
+        let mut answered = plan.answered_except(&unanswered_outputs);
+        answered.extend(answered_before);
         self.graph
-            .upstream_probed(plan.answered_except(&unanswered_outputs))
+            .upstream_probed(answered)
             .await
             .context("record the shared builds this round answered for")
     }
@@ -209,6 +212,27 @@ impl ProbePlan {
             .filter(|d| !waiting.contains(d))
             .collect()
     }
+}
+
+/// An earlier answer stays valid, but outputs our cache gained since then can make the shared
+/// build available without asking any upstream again.
+async fn probed_wanted(db: &WorkerDb, shared_builds: &[DerivationId]) -> Result<Vec<DerivationId>> {
+    Ok(
+        gradient_db::fetch_in_chunks(shared_builds, |chunk| async move {
+            EDerivationBuild::find()
+                .filter(CDerivationBuild::Derivation.is_in(chunk))
+                .filter(CDerivationBuild::Wanted.eq(true))
+                .filter(CDerivationBuild::Probed.eq(true))
+                .filter(CDerivationBuild::CacheAvailable.eq(false))
+                .all(db)
+                .await
+        })
+        .await
+        .context("load which requested shared builds an earlier probe answered")?
+        .into_iter()
+        .map(|a| a.derivation)
+        .collect(),
+    )
 }
 
 async fn unprobed_wanted(

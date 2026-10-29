@@ -318,3 +318,26 @@ async fn s07_a_producer_whose_needed_output_our_cache_already_holds_is_not_built
     case.zero_drift("step 1").await;
     case.finish().await;
 }
+
+#[tokio::test]
+async fn s08_a_producer_probed_before_our_cache_held_its_needed_output_is_not_built() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        a_builds_with(e1, &["out"])
+            .cached_output(B)
+            .derivation(B)
+            .probed(),
+    )
+    .await;
+
+    case.upstream_probed(&[B]).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.cache_available, b.unneeded_outputs),
+        (true, vec!["dev".to_owned()]),
+        "after 1: sb(B) cache_available, unneeded_outputs"
+    );
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
