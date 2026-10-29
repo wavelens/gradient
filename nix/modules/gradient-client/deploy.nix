@@ -19,12 +19,37 @@ in {
   options = {
     system.gradient-deploy = {
       enable = lib.mkEnableOption "pull deployments from Gradient";
+      type = lib.mkOption {
+        type = lib.types.enum [ "system" "microvm" ];
+        default = "system";
+        description = "Deploy the host system or an imperative MicroVM on this host.";
+      };
+
       deployFor = lib.mkOption {
         type = lib.types.str;
         default = config.networking.hostName;
         defaultText = lib.literalExpression "config.networking.hostName";
         example = "my-server";
-        description = "Name of the deployment configuration to deploy.";
+        description = "Name of the system configuration to deploy.";
+      };
+
+      microvm = {
+        hostnames = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+          example = [ "guest" "worker" ];
+          description = ''
+            Hostnames of imperative MicroVMs to deploy. Each hostname must also be the name of its
+            NixOS configuration and the MicroVM's host-side state directory.
+          '';
+        };
+
+        stateDir = lib.mkOption {
+          type = lib.types.str;
+          default = "/var/lib/microvms";
+          example = "/var/lib/microvms";
+          description = "Host-side microvm.nix state directory.";
+        };
       };
 
       server = lib.mkOption {
@@ -102,6 +127,18 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = cfg.type != "microvm" || cfg.microvm.hostnames != [ ];
+        message = "MicroVM deployment requires at least one system.gradient-deploy.microvm.hostnames entry";
+      }
+      {
+        assertion = cfg.type != "microvm" ||
+          lib.hasPrefix "/" cfg.microvm.stateDir;
+        message = "MicroVM deployment requires an absolute stateDir";
+      }
+    ];
+
     environment.systemPackages = [
       (pkgs.writeScriptBin "gradient-update" ''
         systemctl start -v gradient-deploy.service
@@ -126,7 +163,10 @@ in {
         // {
           GRADIENT_API_URL = apiUrl;
           GRADIENT_DEPLOY_FOR = cfg.deployFor;
+          GRADIENT_DEPLOY_TYPE = cfg.type;
           GRADIENT_LIVE_URL = liveUrl;
+          GRADIENT_MICROVM_HOSTNAMES = builtins.toJSON (lib.unique cfg.microvm.hostnames);
+          GRADIENT_MICROVM_STATE_DIR = cfg.microvm.stateDir;
           GRADIENT_POLL_INTERVAL_SEC = toString cfg.pollIntervalSec;
           GRADIENT_SYSTEM_PATH_REGEX = systemPathRegex;
           GRADIENT_TASK = cfg.task;
