@@ -326,7 +326,9 @@ async fn s08_a_producer_probed_before_our_cache_held_its_needed_output_is_not_bu
         a_builds_with(e1, &["out"])
             .cached_output(B)
             .derivation(B)
-            .probed(),
+            .probed()
+            .derivation(C)
+            .build_status(BuildStatus::Created),
     )
     .await;
 
@@ -337,6 +339,10 @@ async fn s08_a_producer_probed_before_our_cache_held_its_needed_output_is_not_bu
         (b.cache_available, b.unneeded_outputs),
         (true, vec!["dev".to_owned()]),
         "after 1: sb(B) cache_available, unneeded_outputs"
+    );
+    assert!(
+        !case.sb(C).await.wanted,
+        "after 1: sb(C) is no longer wanted"
     );
     case.zero_drift("step 1").await;
     case.finish().await;
