@@ -11,6 +11,7 @@ import { FormsModule } from '@angular/forms';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { ConfigService } from '@core/services/config.service';
 import {
   AutoCompleteComponent,
   ButtonComponent,
@@ -70,6 +71,7 @@ export class TaskSettingsComponent implements OnInit {
   private tasksService = inject(TasksService);
   private projectsService = inject(ProjectsService);
   private crumbs = inject(BreadcrumbsService);
+  protected config = inject(ConfigService);
 
   access = injectTaskAccess();
 
@@ -105,6 +107,7 @@ export class TaskSettingsComponent implements OnInit {
     wait_for_workers: boolean;
     retry_failed_builds: boolean;
     multi_node_evaluation: boolean;
+    exec_enabled: boolean;
   } = {
     display_name: '',
     description: '',
@@ -116,6 +119,7 @@ export class TaskSettingsComponent implements OnInit {
     wait_for_workers: false,
     retry_failed_builds: true,
     multi_node_evaluation: false,
+    exec_enabled: false,
   };
 
   concurrencyOptions: { label: string; value: ConcurrencyPolicy; disabled?: boolean }[] = [
@@ -157,6 +161,7 @@ export class TaskSettingsComponent implements OnInit {
           wait_for_workers: task.wait_for_workers,
           retry_failed_builds: task.retry_failed_builds,
           multi_node_evaluation: task.multi_node_evaluation,
+          exec_enabled: task.exec_enabled,
         };
         this.loading.set(false);
       },
