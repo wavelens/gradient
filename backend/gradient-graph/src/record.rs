@@ -1459,7 +1459,10 @@ pub(crate) async fn mark_probed(
     }
 
     let newly_cache_available =
-        substitute_available(ctx, &answered, Found::HeldBeforeTheProbe).await?;
+        substitute_available(ctx, shared_builds, Found::HeldBeforeTheProbe).await?;
+    answered.extend_from_slice(&newly_cache_available);
+    answered.sort_unstable();
+    answered.dedup();
 
     let mut changes = Vec::new();
     let mut gained_need = Vec::new();

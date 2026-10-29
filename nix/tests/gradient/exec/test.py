@@ -121,16 +121,22 @@ def unbuilt_image_derivations(state):
 
 
 def unbuilt_derivations(evaluation):
-    return f"--- derivations of evaluation {evaluation} no cache holds ---\n" + sql(
-        "SELECT db.status, d.name, db.unneeded_outputs, left(coalesce(("
-        "  SELECT string_agg(DISTINCT pd.name || '[' || coalesce(array_to_string(e.dependency_outputs, ','), 'every') "
+    held = "cp.file_hash IS NOT NULL OR o.external_url IS NOT NULL"
+    outputs = ("(SELECT string_agg(o.name, ',' ORDER BY o.name) FROM derivation_output o "
+               "LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = d.id AND {})")
+    return f"--- partly held shared builds of evaluation {evaluation} no cache made available ---\n" + sql(
+        "SELECT db.status, db.wanted, db.probed, d.name, db.unneeded_outputs, "
+        f"{outputs.format(held)} AS held, {outputs.format(f'NOT ({held})')} AS missing, left(coalesce(("
+        "  SELECT string_agg(DISTINCT pd.name || '{' || e.kind || ',' || p.status || ',' || p.wanted || ',' "
+        "         || p.cache_available || '}[' || coalesce(array_to_string(e.dependency_outputs, ','), 'every') "
         "         || ']', ' ') FROM derivation_dependency e "
         "  JOIN derivation_build p ON p.derivation = e.derivation JOIN derivation pd ON pd.id = e.derivation "
-        "  WHERE e.dependency = d.id AND p.wanted), ''), 300) "
+        "  WHERE e.dependency = d.id), ''), 600) "
         "FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build "
         "JOIN derivation d ON d.id = bj.derivation "
-        f"WHERE bj.evaluation = '{evaluation}' AND db.wanted AND NOT db.cache_available "
-        "AND db.status NOT IN (3, 7) ORDER BY db.status = 4 DESC, d.name LIMIT 40"
+        f"WHERE bj.evaluation = '{evaluation}' AND NOT db.cache_available AND db.status NOT IN (3, 7) "
+        f"AND {outputs.format(held)} IS NOT NULL AND {outputs.format(f'NOT ({held})')} IS NOT NULL "
+        "ORDER BY d.name LIMIT 40"
     )
 
 
