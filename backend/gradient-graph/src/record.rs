@@ -121,7 +121,7 @@ fn forget_earlier_misses_sql() -> String {
         "UPDATE derivation_build db SET probed = false, probed_at = NULL, \
          updated_at = (now() AT TIME ZONE 'UTC') \
          WHERE db.derivation = ANY($1::uuid[]) AND db.probed AND NOT db.cache_available \
-           AND db.status IN ({idle}) \
+           AND NOT db.wanted AND db.status IN ({idle}) \
            AND db.probed_at < (SELECT ev.created_at FROM evaluation ev WHERE ev.id = $2) \
          RETURNING db.derivation",
         idle = gradient_db::sql::status::build_in(&[BuildStatus::Created, BuildStatus::Skipped]),
