@@ -228,3 +228,42 @@ async fn x04_a_later_evaluation_over_a_finished_graph_completes_at_stream_end_wi
     case.zero_drift("step 2").await;
     case.finish().await;
 }
+
+#[tokio::test]
+async fn x05_a_later_evaluation_asks_the_probe_again_about_an_earlier_miss() {
+    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(A_OUT)
+            .depends_on(B)
+            .derivation(B)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(B_OUT)
+            .build_status(BuildStatus::Queued)
+            .evaluation(e2)
+            .evaluation_status(EvaluationStatus::Building),
+    )
+    .await;
+
+    let report = case.walk(case.tasked(e2, walk_of_a(&[B])).await).await;
+
+    let missed = case.ids(&[B]).await;
+    assert!(
+        missed.iter().all(|b| report.to_probe.contains(b)),
+        "after 1: report.to_probe holds B: {:?}",
+        report.to_probe
+    );
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}

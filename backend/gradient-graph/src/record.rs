@@ -104,7 +104,12 @@ RETURNING db.derivation
         params = [DerivationIds(64)],
         tier = Bulk;
 
-    MARK_IFD ="UPDATE derivation SET ifd = true WHERE hash = ANY($1::text[]) AND NOT ifd",
+    EARLIER_MISSES = "SELECT derivation FROM derivation_build \
+         WHERE derivation = ANY($1::uuid[]) AND wanted AND probed AND NOT cache_available \
+         ORDER BY derivation",
+        params = [DerivationIds(64)];
+
+    MARK_IFD = "UPDATE derivation SET ifd = true WHERE hash = ANY($1::text[]) AND NOT ifd",
         params = [DerivationHashes(64)];
 }
 
@@ -794,6 +799,30 @@ impl BatchWriter<'_> {
         Ok(settled.moved.gained)
     }
 
+    /// A probe miss stays with the evaluation that asked. An upstream cache can gain the outputs
+    /// before a later evaluation names the same shared build.
+    async fn earlier_misses(
+        &self,
+        ids: &HashMap<String, DerivationId>,
+    ) -> Result<Vec<DerivationId>> {
+        let named: Vec<DerivationId> = ids.values().copied().collect();
+        let mut missed = Vec::new();
+        for chunk in named.chunks(gradient_db::IN_CHUNK_SIZE) {
+            let chunk: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
+            let rows = self
+                .db()
+                .query_all_raw(EARLIER_MISSES.bind([chunk.into()]))
+                .await
+                .context("find the shared builds an earlier probe missed")?;
+            missed.extend(
+                rows.iter()
+                    .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+                    .map(DerivationId::new),
+            );
+        }
+        Ok(missed)
+    }
+
     async fn settle_created(&self, ids: &HashMap<String, DerivationId>) -> Result<()> {
         let mut derivations: Vec<DerivationId> = ids.values().copied().collect();
         derivations.sort_unstable();
@@ -1197,6 +1226,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
                 .iter()
                 .filter_map(|h| resolved.by_hash.get(h).copied()),
         );
+        report.to_probe.extend(writer.earlier_misses(ids).await?);
 
         gradient_db::task_board::dep_counts::bump_graph_version(writer.db(), &[evaluation_id])
             .await
