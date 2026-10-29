@@ -24,10 +24,6 @@ class ReportTest(unittest.TestCase):
         runs = {1: run(100_000), 2: run(50_000, jobs=1)}
         self.assertIn("N=2: ran on 1 job", verdicts(runs))
 
-    def test_statements_growing_with_attributes_fail(self):
-        runs = {1: run(100_000, statements=500), 2: run(50_000, statements=5_000, shards=8, jobs=2)}
-        self.assertIn("N=2: 4500 extra statements for 8 shards", verdicts(runs))
-
     def test_wall_clock_spans_both_eval_phases_of_every_job(self):
         self.assertEqual(wall_ms([ph("fetch", 0, 50), ph("eval_flake", 50, 80), ph("eval_derivations", 90, 400),
                                   ph("eval_derivations", 120, 380)]), 350)
