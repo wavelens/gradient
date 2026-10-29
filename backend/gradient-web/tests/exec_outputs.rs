@@ -95,7 +95,7 @@ async fn the_outputs_list_shows_live_sizes() {
         .append_query_results([vec![output("a.txt", 3), output("b/c.bin", 4096)]]);
 
     let res = make_test_server(db.into_connection())
-        .get(&format!("/api/v1/exec-jobs/{}/outputs", job_id()))
+        .get(&format!("/api/v1/exec/{}/outputs", job_id()))
         .await;
 
     res.assert_status_ok();
@@ -118,7 +118,7 @@ async fn a_range_past_a_growing_output_answers_416_until_it_grows() {
         .web_db(db.into_connection())
         .nar_storage(store.clone())
         .server();
-    let url = format!("/api/v1/exec-jobs/{}/outputs/log.txt", job_id());
+    let url = format!("/api/v1/exec/{}/outputs/log.txt", job_id());
 
     let res = server.get(&url).add_header("range", "bytes=4-").await;
     assert_eq!(res.status_code(), StatusCode::RANGE_NOT_SATISFIABLE);
@@ -138,7 +138,7 @@ async fn an_outsider_cannot_read_a_private_jobs_outputs() {
         .append_query_results([Vec::<project_access::Model>::new()]);
 
     let res = make_test_server(db.into_connection())
-        .get(&format!("/api/v1/exec-jobs/{}/outputs", job_id()))
+        .get(&format!("/api/v1/exec/{}/outputs", job_id()))
         .add_header("authorization", auth)
         .await;
 
@@ -151,7 +151,7 @@ async fn the_job_page_lists_tokens_without_their_value() {
         .append_query_results([vec![output("a.txt", 3), output("b.txt", 4)]]);
 
     let res = make_test_server(db.into_connection())
-        .get(&format!("/api/v1/exec-jobs/{}", job_id()))
+        .get(&format!("/api/v1/exec/{}", job_id()))
         .await;
 
     res.assert_status_ok();

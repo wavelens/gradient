@@ -309,7 +309,7 @@ describe('ExecJobPageComponent', () => {
       return root;
     }
 
-    const path = (url: string): string => url.slice(url.indexOf('/exec-jobs/'));
+    const path = (url: string): string => url.slice(url.indexOf('/exec/'));
 
     it('offers the console, attach, a new shell and the ssh commands for a running job', () => {
       const { fixture } = setup('running');
@@ -319,7 +319,7 @@ describe('ExecJobPageComponent', () => {
       expect(buttonNamed(root, 'New shell')).toBeTruthy();
       const copied = Array.from(root.querySelectorAll('gr-copy-field input')).map((i) => (i as HTMLInputElement).value);
       expect(copied).toEqual([SSH, FORWARD]);
-      expect(opened.map(path)).toEqual(['/exec-jobs/j1/console?node=0']);
+      expect(opened.map(path)).toEqual(['/exec/j1/console?node=0']);
     });
 
     it('attaches to the program or opens a new shell', () => {
@@ -330,9 +330,9 @@ describe('ExecJobPageComponent', () => {
       buttonNamed(root, 'New shell')?.click();
       fixture.detectChanges();
       expect(opened.map(path)).toEqual([
-        '/exec-jobs/j1/console?node=0',
-        '/exec-jobs/j1/shell?node=0&attach=true',
-        '/exec-jobs/j1/shell?node=0',
+        '/exec/j1/console?node=0',
+        '/exec/j1/shell?node=0&attach=true',
+        '/exec/j1/shell?node=0',
       ]);
     });
 
@@ -342,7 +342,7 @@ describe('ExecJobPageComponent', () => {
       const root = openTerminalTab(fixture);
       buttonNamed(root, 'Attach to program')?.click();
       fixture.detectChanges();
-      expect(opened.map(path)).toEqual(['/exec-jobs/j1/console?node=1', '/exec-jobs/j1/shell?node=1&attach=true']);
+      expect(opened.map(path)).toEqual(['/exec/j1/console?node=1', '/exec/j1/shell?node=1&attach=true']);
     });
 
     it('offers no terminal for a completed job', () => {

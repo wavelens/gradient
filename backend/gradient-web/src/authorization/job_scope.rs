@@ -16,7 +16,7 @@ const JOB_READ_PREFIXES: &[&str] = &[
     "/tasks/{project}",
     "/evals/{evaluation}",
     "/builds/{build}",
-    "/exec-jobs/{job}",
+    "/exec/{job}",
 ];
 
 const JOB_WRITE_ROUTES: &[&str] = &[
@@ -187,11 +187,7 @@ mod tests {
                 "/api/v1/evals/{evaluation}",
                 vec![("evaluation", "e")],
             ),
-            (
-                Method::POST,
-                "/api/v1/exec-jobs/{job}/run",
-                vec![("job", "j")],
-            ),
+            (Method::POST, "/api/v1/exec/{job}/run", vec![("job", "j")]),
         ] {
             assert!(
                 matches!(

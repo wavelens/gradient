@@ -167,7 +167,7 @@ async fn output_body(
 
 #[utoipa::path(
     get,
-    path = "/exec-jobs/{job}/outputs",
+    path = "/exec/{job}/outputs",
     operation_id = "listExecJobOutputs",
     tag = "exec-jobs",
     summary = "List exec job outputs",
@@ -190,7 +190,7 @@ pub async fn list_exec_job_outputs(
 
 #[utoipa::path(
     get,
-    path = "/exec-jobs/{job}/outputs/{path}",
+    path = "/exec/{job}/outputs/{path}",
     operation_id = "getExecJobOutput",
     tag = "exec-jobs",
     summary = "Download an exec job output",

@@ -53,7 +53,7 @@ describe('terminalSocket', () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
     (globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWebSocket;
-    source = terminalSocket('/exec-jobs/j1/console');
+    source = terminalSocket('/exec/j1/console');
   });
 
   afterEach(() => {
@@ -65,7 +65,7 @@ describe('terminalSocket', () => {
 
   it('opens the api path as a binary websocket', () => {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    expect(socket().url).toBe(`${proto}://${location.host}${environment.apiUrl}/exec-jobs/j1/console`);
+    expect(socket().url).toBe(`${proto}://${location.host}${environment.apiUrl}/exec/j1/console`);
     expect(socket().binaryType).toBe('arraybuffer');
   });
 

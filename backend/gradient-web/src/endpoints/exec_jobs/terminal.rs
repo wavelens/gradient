@@ -66,7 +66,7 @@ struct TerminalRequest {
 
 #[utoipa::path(
     get,
-    path = "/exec-jobs/{job}/console",
+    path = "/exec/{job}/console",
     operation_id = "execJobConsole",
     tag = "exec-jobs",
     summary = "Exec job serial console (WebSocket)",
@@ -97,7 +97,7 @@ pub async fn get_exec_job_console(
 
 #[utoipa::path(
     get,
-    path = "/exec-jobs/{job}/shell",
+    path = "/exec/{job}/shell",
     operation_id = "execJobShell",
     tag = "exec-jobs",
     summary = "Exec job shell (WebSocket)",

@@ -27,7 +27,7 @@ pub struct ExecJobLogQuery {
 
 #[utoipa::path(
     get,
-    path = "/exec-jobs/{job}/log",
+    path = "/exec/{job}/log",
     operation_id = "getExecJobLog",
     tag = "exec-jobs",
     summary = "Get exec job log",

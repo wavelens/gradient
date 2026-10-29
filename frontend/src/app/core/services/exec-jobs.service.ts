@@ -20,35 +20,35 @@ export class ExecJobsService {
   private api = inject(ApiService);
 
   forEvaluation(evaluation: string): Observable<ExecJobSummary[]> {
-    return this.api.get<ExecJobSummary[]>(`evals/${evaluation}/exec-jobs`);
+    return this.api.get<ExecJobSummary[]>(`evals/${evaluation}/exec`);
   }
 
   get(job: string): Observable<ExecJobResponse> {
-    return this.api.get<ExecJobResponse>(`exec-jobs/${job}`);
+    return this.api.get<ExecJobResponse>(`exec/${job}`);
   }
 
   log(job: string, attempt?: number, node?: number): Observable<string> {
-    return this.api.get<string>(`exec-jobs/${job}/log${query({ attempt, node })}`);
+    return this.api.get<string>(`exec/${job}/log${query({ attempt, node })}`);
   }
 
   outputs(job: string, node?: number): Observable<ExecJobOutputView[]> {
-    return this.api.get<ExecJobOutputView[]>(`exec-jobs/${job}/outputs${query({ node })}`);
+    return this.api.get<ExecJobOutputView[]>(`exec/${job}/outputs${query({ node })}`);
   }
 
   outputUrl(job: string, path: string, node?: number): string {
     const encoded = path.split('/').map(encodeURIComponent).join('/');
-    return `${environment.apiUrl}/exec-jobs/${job}/outputs/${encoded}${query({ node })}`;
+    return `${environment.apiUrl}/exec/${job}/outputs/${encoded}${query({ node })}`;
   }
 
   pullRequests(job: string): Observable<ExecJobPullRequestView[]> {
-    return this.api.get<ExecJobPullRequestView[]>(`exec-jobs/${job}/pull-requests`);
+    return this.api.get<ExecJobPullRequestView[]>(`exec/${job}/pull-requests`);
   }
 
   abort(job: string): Observable<string> {
-    return this.api.post<string>(`exec-jobs/${job}/abort`);
+    return this.api.post<string>(`exec/${job}/abort`);
   }
 
   run(job: string): Observable<string> {
-    return this.api.post<string>(`exec-jobs/${job}/run`);
+    return this.api.post<string>(`exec/${job}/run`);
   }
 }
