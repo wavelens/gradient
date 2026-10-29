@@ -477,6 +477,7 @@ async fn l03_skip_and_thaw_over_three_evaluations_and_a_gc() {
 
     let b_as_entry_point = vec![with_attr(with_output(drv(B, &[]), B_OUT), "pkg.b")];
     case.walk(case.tasked(e3, b_as_entry_point).await).await;
+    case.upstream_probed(&[B]).await;
 
     let b = case.sb(B).await;
     assert_eq!(

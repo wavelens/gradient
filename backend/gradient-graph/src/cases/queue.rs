@@ -127,7 +127,8 @@ async fn q02_adoption_supplies_the_job_when_the_only_naming_evaluation_is_collec
 }
 
 #[tokio::test]
-async fn q03_an_entry_point_of_a_second_evaluation_thaws_and_queues_the_skipped_build() {
+async fn q03_an_entry_point_of_a_second_evaluation_thaws_the_skipped_build_and_queues_it_on_the_answer()
+ {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = Case::start(pass(e1).evaluation(e2)).await;
 
@@ -138,6 +139,7 @@ async fn q03_an_entry_point_of_a_second_evaluation_thaws_and_queues_the_skipped_
         )
         .await;
     case.walk(walk_of_b).await;
+    case.upstream_probed(&[B]).await;
 
     let entry_point = case.entry_point(e2, "pkg.b").await.map(|p| p.derivation);
     assert_eq!(
