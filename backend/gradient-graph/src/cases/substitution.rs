@@ -9,7 +9,9 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::EvaluationId;
 use gradient_fixtures::shape::{Shape, shape};
 
-use super::{A, A_OUT, B, B_OUT, B_OUT2, C, C_OUT, C_OUT2, Case, D, D_OUT, commit_of, narinfo};
+use super::{
+    A, A_OUT, B, B_OUT, B_OUT2, C, C_OUT, C_OUT2, Case, D, D_OUT, chain, commit_of, narinfo,
+};
 
 fn a_builds_with(evaluation: EvaluationId, outputs_of_b: &[&str]) -> Shape {
     shape()
@@ -387,52 +389,24 @@ async fn s09_a_parent_turning_available_frees_the_partly_held_input_it_blocked()
 }
 
 #[tokio::test]
-async fn s10_a_partly_held_miss_gaining_need_is_fetched_without_building_its_inputs() {
+async fn s10_a_miss_holds_only_while_its_build_is_wanted() {
     let e1 = EvaluationId::now_v7();
-    let case = Case::start(
-        shape()
-            .evaluation(e1)
-            .evaluation_status(EvaluationStatus::Building)
-            .derivation(A)
-            .walked()
-            .entry_point("pkg.a")
-            .job()
-            .drv_cached()
-            .output(A_OUT)
-            .depends_on_outputs(B, &["out"])
-            .derivation(B)
-            .walked()
-            .job()
-            .probed()
-            .drv_cached()
-            .output(B_OUT)
-            .named_output(B_OUT2, "dev")
-            .cached_output(B)
-            .build_status(BuildStatus::Skipped)
-            .depends_on(C)
-            .derivation(C)
-            .walked()
-            .job()
-            .drv_cached()
-            .output(C_OUT)
-            .build_status(BuildStatus::Skipped),
-    )
-    .await;
+    let case = Case::start(chain(e1)).await;
 
-    case.upstream_probed(&[A]).await;
+    case.upstream_hits(&[(A_OUT, narinfo(&[(A_OUT, "a")]))])
+        .await;
 
     let b = case.sb(B).await;
     assert_eq!(
-        (b.wanted, b.cache_available, b.unneeded_outputs),
-        (true, true, vec!["dev".to_owned()]),
-        "after 1: sb(B) wanted, cache_available, unneeded_outputs"
-    );
-    let c = case.sb(C).await;
-    assert_eq!(
-        (c.status, c.wanted),
-        (BuildStatus::Skipped, false),
-        "after 1: sb(C) status, wanted"
+        (b.status, b.wanted, b.probed),
+        (BuildStatus::Skipped, false, false),
+        "after 1: sb(B) status, wanted, probed"
     );
     case.zero_drift("step 1").await;
+
+    case.upstream_probed(&[B]).await;
+
+    assert!(!case.sb(B).await.probed, "after 2: sb(B).probed");
+    case.zero_drift("step 2").await;
     case.finish().await;
 }
