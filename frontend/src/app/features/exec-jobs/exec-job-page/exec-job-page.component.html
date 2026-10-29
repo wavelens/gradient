@@ -53,7 +53,7 @@
           </div>
           @for (n of job.node_jobs; track n.node) {
             <div class="sidebar-item node-item" role="button" tabindex="0" [class.selected]="node() === n.node"
-                 [attr.aria-pressed]="node() === n.node" [title]="n.worker ?? ''"
+                 [attr.aria-pressed]="node() === n.node" [title]="n.worker_name ?? n.worker ?? ''"
                  (click)="pickNode(n.node)" (keydown.enter)="pickNode(n.node)">
               <gr-status-icon size="sm" [phase]="phase(n.status)" [label]="n.status" />
               <span class="sidebar-item-label">Node {{ n.node }}{{ n.node === 0 ? ' (master)' : '' }}</span>
@@ -127,7 +127,7 @@
           @if (job.worker) {
             <div class="info-metric">
               <span class="metric-label">Worker</span>
-              <code class="metric-value worker" [title]="job.worker">{{ job.worker }}</code>
+              <code class="metric-value worker" [title]="job.worker">{{ job.worker_name ?? job.worker }}</code>
             </div>
           }
           @if (guestSize(job.guest); as guest) {

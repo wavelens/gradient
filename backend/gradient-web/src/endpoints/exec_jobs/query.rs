@@ -26,7 +26,9 @@ use std::sync::Arc;
 
 use super::ExecJobAccessContext;
 use super::terminal::{ssh_commands, ssh_host};
+use crate::endpoints::board_subjects::WorkerNames;
 use crate::endpoints::evals::EvalAccessContext;
+use crate::metrics_scope::MetricsScope;
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct ExecJobAttemptView {
@@ -44,6 +46,7 @@ pub struct ExecJobNode {
     pub id: ExecJobId,
     pub status: ExecJobStatus,
     pub worker: Option<String>,
+    pub worker_name: Option<String>,
     pub guest_address: Option<String>,
     pub master_port: Option<u16>,
     pub attempts: Vec<ExecJobAttemptView>,
@@ -94,6 +97,7 @@ pub struct ExecJobResponse {
     pub started_at: Option<NaiveDateTime>,
     pub finished_at: Option<NaiveDateTime>,
     pub worker: Option<String>,
+    pub worker_name: Option<String>,
     pub attempts: Vec<ExecJobAttemptView>,
     pub node_jobs: Vec<ExecJobNode>,
     pub phases: Vec<ExecJobPhaseView>,
@@ -169,13 +173,14 @@ fn placed_attempt(job: &MExecJob, attempts: &[MExecJobAttempt]) -> Option<MExecJ
         .cloned()
 }
 
-fn node_view(node: &ExecNodeDetail) -> ExecJobNode {
+fn node_view(node: &ExecNodeDetail, names: &WorkerNames) -> ExecJobNode {
     let placed = placed_attempt(&node.job, &node.attempts);
     ExecJobNode {
         node: u32::try_from(node.job.node_index).unwrap_or_default(),
         id: node.job.id,
         status: node.job.status,
         worker: placed.as_ref().map(|a| a.worker.clone()),
+        worker_name: placed.as_ref().and_then(|a| names.name(&a.worker)),
         guest_address: placed.as_ref().and_then(|a| a.guest_address.clone()),
         master_port: placed
             .as_ref()
@@ -203,9 +208,18 @@ fn started_evaluation_view(row: StartedEvaluation) -> StartedEvaluationView {
     }
 }
 
+fn attempt_workers(detail: &ExecJobDetail) -> impl Iterator<Item = String> + '_ {
+    detail
+        .attempts
+        .iter()
+        .chain(detail.nodes.iter().flat_map(|node| &node.attempts))
+        .map(|attempt| attempt.worker.clone())
+}
+
 fn response(
     ctx: ExecJobAccessContext,
     outputs_size: i64,
+    names: &WorkerNames,
     config: &RuntimeConfig,
 ) -> ExecJobResponse {
     let ExecJobDetail {
@@ -256,9 +270,10 @@ fn response(
         created_at: job.created_at,
         started_at: job.started_at,
         finished_at: job.finished_at,
+        worker_name: worker.as_deref().and_then(|w| names.name(w)),
         worker,
         attempts: attempts.iter().map(attempt_view).collect(),
-        node_jobs: nodes.iter().map(node_view).collect(),
+        node_jobs: nodes.iter().map(|node| node_view(node, names)).collect(),
         phases,
         tokens: tokens.into_iter().map(token_view).collect(),
         started_evaluations: started_evaluations
@@ -296,7 +311,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
     operation_id = "getExecJob",
     tag = "exec-jobs",
     summary = "Get exec job",
-    description = "Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` tells whether the guest stays up after the program exits, `program_exit_code` holds the exit code of a program whose guest is kept running.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start and `worker_name` its display name when the caller can see the worker. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` tells whether the guest stays up after the program exits, `program_exit_code` holds the exit code of a program whose guest is kept running.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Exec job", body = ExecJobResponse), WebError)
 )]
@@ -312,7 +327,9 @@ pub async fn get_exec_job(
         .iter()
         .map(|output| output.size)
         .sum();
-    Ok(ok_json(response(ctx, outputs_size, &state.config)))
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+    let names = WorkerNames::load(&state.web_db, &scope, attempt_workers(&ctx.detail)).await?;
+    Ok(ok_json(response(ctx, outputs_size, &names, &state.config)))
 }
 
 #[utoipa::path(
