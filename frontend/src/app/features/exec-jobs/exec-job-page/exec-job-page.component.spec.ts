@@ -169,6 +169,13 @@ describe('ExecJobPageComponent', () => {
     expect(root.querySelector('gr-message-banner')?.textContent).toContain('exec jobs are disabled for this task');
   });
 
+  it('names the worker and keeps its id on hover', () => {
+    const { fixture } = setup('running', SSH, {}, { ...job('running'), worker_name: 'gpu-box' });
+    const worker = (fixture.nativeElement as HTMLElement).querySelector('.info-bar .worker');
+    expect(worker?.textContent?.trim()).toBe('gpu-box');
+    expect(worker?.getAttribute('title')).toBe('w1');
+  });
+
   it('shows the guest size of the job', () => {
     const { fixture } = setup('completed');
     const guest = (fixture.nativeElement as HTMLElement).querySelector('.info-bar .guest')?.textContent ?? '';
