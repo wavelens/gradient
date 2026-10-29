@@ -7,7 +7,9 @@ NixOS machines that fetch and switch to their newest configuration built by Grad
 - A task building the machine's `nixosConfigurations`, see [First Project](../get-started/first-project.md)
 - The task's cache as a substituter on the machine, see [Share a Cache](share-a-cache.md#1-use-the-cache-on-a-machine)
 
-## 1. Build the System
+## 1. Choose the Deployment Output
+
+### Host System
 
 Set the task's wildcard to the system attribute path so every machine builds its own NixOS closure:
 
@@ -16,6 +18,32 @@ nixosConfigurations.*.config.system.build.toplevel
 ```
 
 Each machine resolves to an output named `nixos-system-<hostname>-...`. Keep the host name in the configuration identical to that machine's `deployFor` value.
+
+### MicroVM
+
+For an imperative [`microvm.nix`](https://github.com/microvm-nix/microvm.nix) guest, set the task wildcard to:
+
+```text
+nixosConfigurations.*.config.microvm.declaredRunner
+```
+
+Configure deployment on the MicroVM host. Each hostname must match the NixOS configuration name
+and the MicroVM's host-side name:
+
+```nix
+system.gradient-deploy = {
+  enable = true;
+  type = "microvm";
+  microvm.hostnames = [ "guest" "second-guest" ];
+  server = "https://gradient.example.com";
+  task = "acme/machines";
+  apiKeyFile = "/run/secrets/gradient-deploy-key";
+};
+```
+
+For each hostname, the build result of `nixosConfigurations.<hostname>.config.microvm.declaredRunner` is being fetched into the host's Nix store,
+updates the matching MicroVM's `current` runner link and restarts `microvm@<hostname>.service`.
+Each MicroVM must already exist under `microvm.stateDir` (default `/var/lib/microvms`) and must not be declarative.
 
 ## 2. Create an API Key
 
@@ -58,30 +86,35 @@ sudo gradient-update
 journalctl -u gradient-deploy
 ```
 
-To run a deployment right away instead of waiting for the timer, use `gradient-update`. The last journal lines show either `Deployment to /nix/store/...-nixos-system-office-pc-... completed successfully` or the reason why no deployment ran.
+To run a deployment right away instead of waiting for the timer, use `gradient-update`. The journal shows which system or MicroVM runner was activated or why no deployment ran.
 
 The message `... without a deployment for <name>` means no system matched: the `networking.hostName` of the built configuration did not match `deployFor`.
 
-An `Error:` line in the journal means a failed fetch or switch. In that case no switch happened.
+An `Error:` line in the journal means a failed fetch or activation.
+
+A failed MicroVM restart leaves the new runner symlink installed and, like normally, preserves the previous runner under `old`.
 
 ## Run Behavior
 
 Each round evaluates the task's latest evaluation and reacts to the result.
 
-| Latest system on the machine | Action |
+| Latest deployment target | Action |
 |---|---|
-| Already running | Immediate stop |
-| Built | Fetch from cache and switch |
-| Still building | Wait for the build, then switch |
+| Already active at the evaluated output | Immediate stop |
+| Built | Fetch from cache and activate |
+| Still building | Wait for the build, then activate |
 | Failed, or evaluation failed | Stop, report in the journal |
-| Not fetchable, or switch failed | `Error:` in the journal, retry after 10 seconds, no switch |
+| Not fetchable, or activation failed | `Error:` in the journal; retry after 10 seconds |
 
 The waiting outcomes keep the unit in a successful state. The waiting service can track the task's live WebSocket. A finished build can turn into an immediate switch.
 
 | Option | Default | Effect |
 |---|---|---|
-| `deployFor` | host name | Which `nixos-system-<name>` to deploy |
-| `waitForBuild` | `true` | `false` stops at once if the latest system has not been built yet |
+| `type` | `"system"` | Deploy the host system or an imperative MicroVM |
+| `deployFor` | host name | System output name when `type = "system"` |
+| `microvm.hostnames` | `[]` | NixOS configuration and host-side MicroVM names to deploy |
+| `microvm.stateDir` | `"/var/lib/microvms"` | Host-side MicroVM state directory |
+| `waitForBuild` | `true` | `false` stops at once if a selected output has not been built yet |
 | `websockets` | `true` | `false` checks every `pollIntervalSec` instead, for networks that block WebSocket upgrades |
 | `pollIntervalSec` | `60` | Check interval without WebSockets |
 | `randomizedDelaySec` | `"0"` | Spread out deployments across many machines |

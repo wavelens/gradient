@@ -43,6 +43,62 @@
       apiKeyFile = "/etc/gradient-deploy-api-key";
       task = "wavelens/dotfiles";
     };
+
+    systemd.services.gradient-deploy.serviceConfig.Restart = lib.mkForce "no";
+  };
+
+  microvmRunner = name: pkgs.runCommand "microvm-runner-${name}" { } ''
+    mkdir -p "$out/bin"
+    printf '#!/bin/sh\nexit 0\n' > "$out/bin/microvm-run"
+    chmod +x "$out/bin/microvm-run"
+  '';
+
+  microvmRunners = {
+    old = microvmRunner "old";
+    new = microvmRunner "new";
+    newer = microvmRunner "newer";
+    invalid = pkgs.runCommand "microvm-runner-invalid" { } "mkdir -p $out/bin";
+  };
+
+  microvmTarget = { ... }: {
+    imports = [ target ];
+
+    environment.etc."microvm-runners".text = builtins.toJSON
+      (builtins.mapAttrs (_: runner: toString runner) microvmRunners);
+
+    system.gradient-deploy = {
+      type = "microvm";
+      microvm.hostnames = [ "guest" "second-guest" ];
+    };
+
+    systemd.tmpfiles.rules = [
+      "d /nix/var/nix/gcroots/microvm 0755 root root -"
+      "L+ /nix/var/nix/gcroots/microvm/guest - - - - /var/lib/microvms/guest/current"
+      "L+ /nix/var/nix/gcroots/microvm/second-guest - - - - /var/lib/microvms/second-guest/current"
+      "d /var/lib/microvms/guest 0775 root root -"
+      "L+ /var/lib/microvms/guest/current - - - - ${microvmRunners.old}"
+      "L+ /var/lib/microvms/guest/booted - - - - ${microvmRunners.old}"
+      "d /var/lib/microvms/second-guest 0775 root root -"
+      "L+ /var/lib/microvms/second-guest/current - - - - ${microvmRunners.old}"
+      "L+ /var/lib/microvms/second-guest/booted - - - - ${microvmRunners.old}"
+    ];
+
+    systemd.services."microvm@" = {
+      description = "Mock MicroVM service for the deployment test";
+      scriptArgs = "%i";
+      script = ''
+        if [[ -e /run/fail-microvm-restart ]]; then
+          exit 1
+        fi
+        runner=$(readlink -f "/var/lib/microvms/$1/current")
+        ln -sfnT "$runner" "/var/lib/microvms/$1/booted"
+        echo "$runner" >> /run/microvm-runs
+      '';
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+    };
   };
 in {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
@@ -51,6 +107,7 @@ in {
 
     nodes = {
       machine = target;
+      microvm = microvmTarget;
 
       # The same target with the live socket off is covering the fallback for networks without
       # WebSocket upgrades.

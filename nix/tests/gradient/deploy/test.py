@@ -34,10 +34,19 @@ def set_state(node, status, entry_points, evaluation_id="e1"):
     })
 
 
-def entry_point(path, build_status):
+def entry_point(path, build_status, eval=""):
     return {"build_id": "00000000-0000-0000-0000-000000000001",
+            "eval": eval,
             "build_status": build_status,
             "outputs": {"out": path}}
+
+
+def microvm_entry_point(name, path, build_status):
+    return entry_point(
+        path,
+        build_status,
+        f"nixosConfigurations.{name}.config.microvm.declaredRunner",
+    )
 
 
 def stats(node):
@@ -45,6 +54,7 @@ def stats(node):
 
 
 def start_deploy(node):
+    node.succeed("systemctl reset-failed gradient-deploy.service")
     node.succeed("systemctl start --no-block gradient-deploy.service")
 
 
@@ -86,6 +96,12 @@ def current_system(node):
     return node.succeed("readlink /run/current-system").strip()
 
 
+def microvm_runner(node, name="guest", link="current"):
+    return node.succeed(
+        f"readlink -f /var/lib/microvms/{name}/{link}"
+    ).strip()
+
+
 def boot(node):
     node.wait_for_unit("gradient-stub-api.service")
     node.wait_until_succeeds(f"curl -sSf {API}/api/v1/health")
@@ -97,6 +113,10 @@ def boot(node):
 
 start_all()
 BASE_SYSTEM, DEPLOY_SYSTEM = boot(machine)
+MICROVM_RUNNERS = json.loads(microvm.succeed("cat /etc/microvm-runners"))
+MICROVM_OLD_RUNNER = MICROVM_RUNNERS["old"]
+MICROVM_NEW_RUNNER = MICROVM_RUNNERS["new"]
+MICROVM_NEWER_RUNNER = MICROVM_RUNNERS["newer"]
 
 # ── Already running the evaluated system ──────────────────────────────────────
 # The output path is known at evaluation time, so a target that already runs it
@@ -172,3 +192,179 @@ log = await_deploy_failure_from_journal(
 assert f"Error: cannot fetch {unfetchable} from a substituter" in log, log
 assert "completed successfully" not in log, log
 assert current_system(machine) == DEPLOY_SYSTEM, "a failed fetch must not switch the system"
+
+# ── MicroVM deployment installs the correct runner ──────────────────────
+banner("MicroVM deployment installs the exact selected runner and restarts it")
+microvm.wait_for_unit("gradient-stub-api.service")
+microvm.wait_until_succeeds(f"curl -sSf {API}/api/v1/health")
+
+# A configured VM missing from the host must fail before querying Gradient and
+# must not be recreated by the deployer.
+banner("An undeployed MicroVM exits early without creating state")
+microvm.succeed(
+    "mv /var/lib/microvms/second-guest /var/lib/microvms/second-guest.not-deployed"
+)
+post(microvm, "/control/reset")
+set_state(microvm, "Building", [
+    microvm_entry_point("guest", MICROVM_NEW_RUNNER, "Completed"),
+    microvm_entry_point("second-guest", MICROVM_NEWER_RUNNER, "Completed"),
+])
+start_deploy(microvm)
+log = await_deploy_failure_from_journal(microvm, "MicroVM second-guest is not deployed")
+assert stats(microvm)["evaluations"] == 0
+assert stats(microvm)["entry_points"] == 0
+microvm.succeed("test ! -e /var/lib/microvms/second-guest")
+microvm.succeed(
+    "mv /var/lib/microvms/second-guest.not-deployed /var/lib/microvms/second-guest"
+)
+
+assert microvm_runner(microvm, "guest") == MICROVM_OLD_RUNNER
+assert microvm_runner(microvm, "second-guest") == MICROVM_OLD_RUNNER
+post(microvm, "/control/reset")
+set_state(microvm, "Building", [
+    microvm_entry_point("guest", MICROVM_NEW_RUNNER, "Completed"),
+    microvm_entry_point("second-guest", MICROVM_NEWER_RUNNER, "Completed"),
+])
+start_deploy(microvm)
+log = await_deploy(microvm)
+assert f"Deployment of MicroVM guest to {MICROVM_NEW_RUNNER} completed successfully" in log, log
+assert f"Deployment of MicroVM second-guest to {MICROVM_NEWER_RUNNER} completed successfully" in log, log
+assert microvm_runner(microvm, "guest") == MICROVM_NEW_RUNNER
+assert microvm_runner(microvm, "guest", "booted") == MICROVM_NEW_RUNNER
+assert microvm_runner(microvm, "second-guest") == MICROVM_NEWER_RUNNER
+assert microvm_runner(microvm, "second-guest", "booted") == MICROVM_NEWER_RUNNER
+assert "active" == microvm.succeed(
+    "systemctl show microvm@guest.service -p ActiveState --value"
+).strip()
+assert "active" == microvm.succeed(
+    "systemctl show microvm@second-guest.service -p ActiveState --value"
+).strip()
+microvm.succeed(
+    f"test \"$(readlink -f /nix/var/nix/gcroots/microvm/guest)\" = {MICROVM_NEW_RUNNER}"
+)
+microvm.succeed(
+    f"test \"$(readlink -f /nix/var/nix/gcroots/microvm/old-guest)\" = {MICROVM_OLD_RUNNER}"
+)
+microvm.succeed(
+    f"test \"$(readlink -f /nix/var/nix/gcroots/microvm/second-guest)\" = {MICROVM_NEWER_RUNNER}"
+)
+microvm.succeed(
+    f"test \"$(readlink -f /nix/var/nix/gcroots/microvm/old-second-guest)\" = {MICROVM_OLD_RUNNER}"
+)
+
+# Current and booted runner links plus an active unit settle without waiting for
+# another build or restarting the VM.
+banner("An already-running MicroVM runner settles without waiting")
+post(microvm, "/control/reset")
+set_state(microvm, "Building", [
+    microvm_entry_point("guest", MICROVM_NEW_RUNNER, "Queued"),
+    microvm_entry_point("second-guest", MICROVM_NEWER_RUNNER, "Queued"),
+])
+start_deploy(microvm)
+log = await_deploy(microvm)
+assert "already up-to-date" in log, log
+assert stats(microvm)["connections"] == 0
+
+# A terminal evaluation must stop waiting even if a MicroVM build status is
+# still nonterminal.
+banner("A failed MicroVM evaluation stops waiting for its build")
+post(microvm, "/control/reset")
+set_state(microvm, "Building", [
+    microvm_entry_point("guest", MICROVM_OLD_RUNNER, "Building"),
+    microvm_entry_point("second-guest", MICROVM_NEWER_RUNNER, "Completed"),
+], evaluation_id="e6")
+start_deploy(microvm)
+await_connected(microvm)
+set_state(microvm, "Failed", [
+    microvm_entry_point("guest", MICROVM_OLD_RUNNER, "Building"),
+    microvm_entry_point("second-guest", MICROVM_NEWER_RUNNER, "Completed"),
+], evaluation_id="e6")
+log = await_deploy(microvm)
+assert "was still Building when evaluation finished Failed" in log, log
+assert "New deployment found for MicroVM guest" not in log, log
+assert microvm_runner(microvm, "guest") == MICROVM_NEW_RUNNER
+
+# A missing runner cannot change current or cause a restart.
+banner("A MicroVM runner no substituter can supply")
+unfetchable_runner = "/nix/store/" + "a" * 32 + "-microvm-runner-unfetchable"
+post(microvm, "/control/reset")
+set_state(microvm, "Building", [
+    microvm_entry_point("guest", unfetchable_runner, "Completed"),
+    microvm_entry_point("second-guest", MICROVM_NEWER_RUNNER, "Completed"),
+])
+start_deploy(microvm)
+log = await_deploy_failure_from_journal(
+    microvm, f"cannot fetch {unfetchable_runner} from a substituter"
+)
+assert microvm_runner(microvm, "guest") == MICROVM_NEW_RUNNER
+assert microvm_runner(microvm, "guest", "booted") == MICROVM_NEW_RUNNER
+
+# A realized path that is not a MicroVM runner is rejected before changing links.
+banner("A non-runner output cannot be activated as a MicroVM")
+invalid_runner = MICROVM_RUNNERS["invalid"]
+post(microvm, "/control/reset")
+set_state(microvm, "Building", [
+    microvm_entry_point("guest", invalid_runner, "Completed"),
+    microvm_entry_point("second-guest", MICROVM_NEWER_RUNNER, "Completed"),
+])
+start_deploy(microvm)
+log = await_deploy_failure_from_journal(
+    microvm, "MicroVM runner .* has no executable bin/microvm-run"
+)
+assert microvm_runner(microvm, "guest") == MICROVM_NEW_RUNNER
+assert microvm_runner(microvm, "guest", "booted") == MICROVM_NEW_RUNNER
+
+# The upstream toplevel marker identifies MicroVMs managed declaratively.
+banner("A declarative MicroVM is rejected")
+microvm.succeed("touch /var/lib/microvms/second-guest/toplevel")
+post(microvm, "/control/reset")
+set_state(microvm, "Building", [
+    microvm_entry_point("guest", MICROVM_OLD_RUNNER, "Completed"),
+    microvm_entry_point("second-guest", MICROVM_NEWER_RUNNER, "Completed"),
+])
+start_deploy(microvm)
+log = await_deploy_failure_from_journal(microvm, "MicroVM second-guest is declarative")
+assert microvm_runner(microvm, "guest") == MICROVM_NEW_RUNNER
+assert microvm_runner(microvm, "second-guest") == MICROVM_NEWER_RUNNER
+microvm.succeed("rm /var/lib/microvms/second-guest/toplevel")
+
+# A restart failure is reported, with the previous runner retained for recovery.
+banner("A failed MicroVM restart preserves the previous runner")
+microvm.succeed("touch /run/fail-microvm-restart")
+post(microvm, "/control/reset")
+set_state(microvm, "Building", [
+    microvm_entry_point("guest", MICROVM_OLD_RUNNER, "Completed"),
+    microvm_entry_point("second-guest", MICROVM_NEWER_RUNNER, "Completed"),
+])
+start_deploy(microvm)
+log = await_deploy_failure_from_journal(microvm, "restarting MicroVM guest failed")
+assert microvm_runner(microvm, "guest") == MICROVM_OLD_RUNNER
+assert microvm_runner(microvm, "guest", "old") == MICROVM_NEW_RUNNER
+assert microvm_runner(microvm, "guest", "booted") == MICROVM_NEW_RUNNER
+microvm.succeed(
+    f"test \"$(readlink -f /nix/var/nix/gcroots/microvm/old-guest)\" = {MICROVM_NEW_RUNNER}"
+)
+
+# A second failed restart must not replace the last known-good runner.
+banner("A repeated MicroVM restart failure preserves the previous runner")
+start_deploy(microvm)
+log = await_deploy_failure_from_journal(microvm, "restarting MicroVM guest failed")
+assert microvm_runner(microvm, "guest") == MICROVM_OLD_RUNNER
+assert microvm_runner(microvm, "guest", "old") == MICROVM_NEW_RUNNER
+assert microvm_runner(microvm, "guest", "booted") == MICROVM_NEW_RUNNER
+microvm.succeed(
+    f"test \"$(readlink -f /nix/var/nix/gcroots/microvm/old-guest)\" = {MICROVM_NEW_RUNNER}"
+)
+
+# A later run retries activation if current was updated but the VM did not restart.
+banner("A failed MicroVM restart can be retried")
+microvm.succeed("rm /run/fail-microvm-restart")
+start_deploy(microvm)
+log = await_deploy(microvm)
+assert "completed successfully" in log, log
+assert microvm_runner(microvm, "guest") == MICROVM_OLD_RUNNER
+assert microvm_runner(microvm, "guest", "booted") == MICROVM_OLD_RUNNER
+assert microvm_runner(microvm, "guest", "old") == MICROVM_NEW_RUNNER
+microvm.succeed(
+    f"test \"$(readlink -f /nix/var/nix/gcroots/microvm/old-guest)\" = {MICROVM_NEW_RUNNER}"
+)
