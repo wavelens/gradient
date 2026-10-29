@@ -385,3 +385,54 @@ async fn s09_a_parent_turning_available_frees_the_partly_held_input_it_blocked()
     case.zero_drift("step 1").await;
     case.finish().await;
 }
+
+#[tokio::test]
+async fn s10_a_partly_held_miss_gaining_need_is_fetched_without_building_its_inputs() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .drv_cached()
+            .output(A_OUT)
+            .depends_on_outputs(B, &["out"])
+            .derivation(B)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(B_OUT)
+            .named_output(B_OUT2, "dev")
+            .cached_output(B)
+            .build_status(BuildStatus::Skipped)
+            .depends_on(C)
+            .derivation(C)
+            .walked()
+            .job()
+            .drv_cached()
+            .output(C_OUT)
+            .build_status(BuildStatus::Skipped),
+    )
+    .await;
+
+    case.upstream_probed(&[A]).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.wanted, b.cache_available, b.unneeded_outputs),
+        (true, true, vec!["dev".to_owned()]),
+        "after 1: sb(B) wanted, cache_available, unneeded_outputs"
+    );
+    let c = case.sb(C).await;
+    assert_eq!(
+        (c.status, c.wanted),
+        (BuildStatus::Skipped, false),
+        "after 1: sb(C) status, wanted"
+    );
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
