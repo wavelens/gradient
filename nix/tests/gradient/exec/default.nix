@@ -106,7 +106,7 @@
 
     networking = {
       nameservers = [ nodes.server.networking.primaryIPAddress ];
-      dhcpcd.extraConfig = "nohook resolv.conf";
+      useDHCP = false;
       interfaces.eth1.ipv4.routes = [{
         address = guestSubnets.${peer};
         prefixLength = 16;
