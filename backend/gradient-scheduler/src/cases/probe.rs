@@ -718,6 +718,42 @@ fn tally(upstream: &UpstreamServer, requests: i32, hits: i32, misses: i32) -> Up
     }
 }
 
+#[tokio::test]
+async fn p15_a_new_need_asks_again_after_an_earlier_miss() {
+    let e1 = EvaluationId::now_v7();
+    let u1 = UpstreamServer::start().await;
+    u1.hit(A_OUT, "a", &[]).await;
+    let given = shape()
+        .evaluation(e1)
+        .evaluation_status(EvaluationStatus::Building)
+        .derivation(A)
+        .walked()
+        .entry_point(&attr_of(A))
+        .job()
+        .output(A_OUT)
+        .probed()
+        .build_status(BuildStatus::Queued)
+        .into_cache(CacheId::now_v7())
+        .http_upstream(&u1, CacheSubscriptionMode::ReadWrite, true);
+    let case = SchedulerCase::start(given).await;
+
+    case.probe_round(&[A]).await;
+    let sb_a = case.sb(A).await;
+    assert_eq!(
+        (sb_a.probed, sb_a.cache_available),
+        (true, true),
+        "after 1: sb(A) {{probed, cache_available}}"
+    );
+    assert_eq!(
+        case.upstream_metrics().await,
+        vec![tally(&u1, 1, 1, 0)],
+        "after 1: upstream_metric(U1.url)"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
 fn sorted_tallies(mut tallies: Vec<UpstreamTally>) -> Vec<UpstreamTally> {
     tallies.sort_by(|a, b| a.url.cmp(&b.url));
     tallies
