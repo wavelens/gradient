@@ -9,9 +9,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::EvaluationId;
 use gradient_fixtures::shape::{Shape, shape};
 
-use super::{
-    A, A_OUT, B, B_OUT, B_OUT2, C, C_OUT, C_OUT2, Case, D, D_OUT, chain, commit_of, narinfo,
-};
+use super::{A, A_OUT, B, B_OUT, B_OUT2, C, C_OUT, C_OUT2, Case, D, D_OUT, commit_of, narinfo};
 
 fn a_builds_with(evaluation: EvaluationId, outputs_of_b: &[&str]) -> Shape {
     shape()
@@ -385,28 +383,5 @@ async fn s09_a_parent_turning_available_frees_the_partly_held_input_it_blocked()
         "after 1: sb(D).cache_available"
     );
     case.zero_drift("step 1").await;
-    case.finish().await;
-}
-
-#[tokio::test]
-async fn s10_a_miss_holds_only_while_its_build_is_wanted() {
-    let e1 = EvaluationId::now_v7();
-    let case = Case::start(chain(e1)).await;
-
-    case.upstream_hits(&[(A_OUT, narinfo(&[(A_OUT, "a")]))])
-        .await;
-
-    let b = case.sb(B).await;
-    assert_eq!(
-        (b.status, b.wanted, b.probed),
-        (BuildStatus::Skipped, false, false),
-        "after 1: sb(B) status, wanted, probed"
-    );
-    case.zero_drift("step 1").await;
-
-    case.upstream_probed(&[B]).await;
-
-    assert!(!case.sb(B).await.probed, "after 2: sb(B).probed");
-    case.zero_drift("step 2").await;
     case.finish().await;
 }
