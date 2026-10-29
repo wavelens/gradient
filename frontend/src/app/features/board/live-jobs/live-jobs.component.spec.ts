@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, UrlTree, provideRouter } from '@angular/router';
 import { of, EMPTY } from 'rxjs';
 import { vi } from 'vitest';
 import { BoardLiveJobsComponent } from './live-jobs.component';
@@ -105,6 +105,24 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     const fixture = setupWithAssigned([{ ...ASSIGNED, kind: 0, build_id: null, subject: 'https://git.example/acme.git' }]);
     fixture.detectChanges();
     expect(subjectCell(fixture)).toBe('https://git.example/acme.git');
+  });
+
+  it('names an exec job by task, entry point and node, with its score', () => {
+    const exec_job = { id: 'x1', project: 'infra', task: 'nightly', entry_point: 'apps.x86_64-linux.train', node_index: 1, nodes: 2 };
+    const fixture = setupWithAssigned([{ ...ASSIGNED, kind: 2, build_id: null, score: 7.25, subject: exec_job.entry_point, exec_job }]);
+    fixture.detectChanges();
+    const cells = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('tbody tr td'))
+      .map((cell) => cell.textContent?.trim());
+    expect(cells.slice(0, 4)).toEqual(['exec', 'worker-1', 'nightly: apps.x86_64-linux.train (node 1)', '7.3']);
+  });
+
+  it('keeps exec jobs under the exec type filter only', () => {
+    const fixture = setupWithAssigned([ASSIGNED, { ...ASSIGNED, id: 'x', kind: 2, build_id: null }]);
+    const cmp = fixture.componentInstance;
+    cmp.kindFilter.set('exec');
+    expect(cmp.filteredJobs().map((j) => j.id)).toEqual(['x']);
+    cmp.kindFilter.set('build');
+    expect(cmp.filteredJobs().map((j) => j.id)).toEqual([ASSIGNED.id]);
   });
 
   it('heads the column for both kinds', () => {
@@ -226,6 +244,36 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     fixture.detectChanges();
     const stored = JSON.parse(sessionStorage.getItem('board.live-jobs.filters') ?? '{}');
     expect(stored.view).toBe('pending');
+  });
+
+  it('lists a pending exec job and opens it by its exec job id', () => {
+    const exec_job = { id: 'x1', project: 'infra', task: 'nightly', entry_point: 'apps.x86_64-linux.train', node_index: 0, nodes: 1 };
+    TestBed.configureTestingModule({
+      imports: [BoardLiveJobsComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: BoardService,
+          useValue: {
+            getAssignedJobs: () => of({ jobs: [], other_running: 0 }),
+            getPendingJobs: () => of({ jobs: [{ ...PENDING, kind: 2, build_id: null, exec_job }], other_pending: 0 }),
+          },
+        },
+        { provide: BoardLiveService, useValue: { connect: () => EMPTY } },
+        authAs(false),
+      ],
+    });
+    const fixture = TestBed.createComponent(BoardLiveJobsComponent);
+    fixture.componentInstance.setView('pending');
+    fixture.detectChanges();
+
+    const row = (fixture.nativeElement as HTMLElement).querySelector('tbody tr') as HTMLElement;
+    expect(Array.from(row.querySelectorAll('td')).slice(0, 2).map((c) => c.textContent?.trim()))
+      .toEqual(['exec', 'nightly: apps.x86_64-linux.train']);
+    const router = TestBed.inject(Router);
+    const navigate = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+    row.click();
+    expect(router.serializeUrl(navigate.mock.calls[0][0] as UrlTree)).toBe('/board/jobs/x1');
   });
 
   it('loads pending jobs when switching to pending view', () => {

@@ -60,7 +60,7 @@ export interface JobEstimateView {
 }
 
 export interface JobContextView {
-  kind: 'Build' | 'Eval';
+  kind: 'Build' | 'Eval' | 'Exec';
   architecture: string;
   missing_count: number | null;
   missing_nar_size: number | null;

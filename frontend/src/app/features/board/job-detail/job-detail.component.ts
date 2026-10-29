@@ -9,7 +9,9 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { BoardService, AssignedJobDetail, InstanceContextView, Windowed } from '@core/services/board.service';
+import { Observable } from 'rxjs';
 import { EvaluationsService } from '@core/services/evaluations.service';
+import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { AuthService } from '@core/services/auth.service';
 import {
   ButtonComponent,
@@ -18,9 +20,10 @@ import {
   PopoverComponent,
   TableComponent,
 } from '@gradient/ui/ui';
-import { formatBytes, formatDuration, formatMegabytes } from '@shared/text';
+import { formatBytes, formatDuration, formatMegabytes, serverTime } from '@shared/text';
 import { LabelHelpComponent } from '@shared/ui';
 import { JobTimelineComponent } from './job-timeline.component';
+import { EXEC_KIND, execJobLink, jobKindName, jobSubjectLabel } from '../job-kind';
 import {
   PendingJobSummary,
   RuleDescription,
@@ -46,7 +49,7 @@ interface RuleRow {
     @if (job(); as j) {
       <header class="head">
         <div>
-          <span class="kind" [class.build]="j.kind === 1">{{ j.kind === 1 ? 'build' : 'eval' }}</span>
+          <span class="kind" [class.build]="j.kind === 1">{{ jobKindName(j.kind) }}</span>
           <h1>{{ j.passed_over ? 'Passed over' : 'Assigned job' }}</h1>
         </div>
         <div class="head-actions phone-icon-buttons">
@@ -95,11 +98,39 @@ interface RuleRow {
         </section>
       }
 
+      @if (j.exec_job; as ex) {
+        <section class="ctx exec">
+          <h2>Exec job</h2>
+          <gr-table class="kv">
+            <tbody>
+              <tr><td class="label">Task</td><td class="mono">{{ ex.task }}</td></tr>
+              <tr>
+                <td class="label">Entry point</td>
+                <td class="mono"><a class="exec-link" [routerLink]="execJobLink(ex)">{{ ex.entry_point }}</a></td>
+              </tr>
+              @if (ex.nodes > 1) {
+                <tr><td class="label">Node</td><td class="mono">{{ ex.node_index }} of {{ ex.nodes }} nodes</td></tr>
+              }
+              @if (j.exec_attempt; as a) {
+                <tr><td class="label">Attempt</td><td class="mono">{{ a.number }}</td></tr>
+                <tr><td class="label">Ended</td><td class="mono">{{ a.ended_at ? (serverTime(a.ended_at) | date: 'medium') : '-' }}</td></tr>
+                @if (a.end_reason) {
+                  <tr><td class="label">End reason</td><td class="mono" [title]="a.message ?? ''">{{ a.end_reason }}</td></tr>
+                }
+              }
+            </tbody>
+          </gr-table>
+        </section>
+      }
+
       <section class="timeline">
         <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | date: 'medium' }}</span></div>
         <div class="step"><span class="label">Ready</span><span>{{ j.ready_at ? (j.ready_at | date: 'medium') : '-' }}</span></div>
         <div class="step"><span class="label">Wait</span><span class="hl">{{ waitLabel() }}</span></div>
         <div class="step"><span class="label">{{ j.passed_over ? 'Scored' : 'Assigned' }}</span><span>{{ j.dispatched_at | date: 'medium' }}</span></div>
+        @if (j.exec_attempt; as a) {
+          <div class="step"><span class="label">Started</span><span>{{ serverTime(a.started_at) | date: 'medium' }}</span></div>
+        }
         <div class="step"><span class="label">Finished</span><span>{{ j.finished_at ? (j.finished_at | date: 'medium') : '-' }}</span></div>
         @if (j.worker_tail_ms !== null) {
           <div class="step"><span class="label">Worker tail</span><span>{{ formatDuration(j.worker_tail_ms) }}</span></div>
@@ -176,7 +207,7 @@ interface RuleRow {
         <gr-table class="kv">
           <tbody>
             <tr><td class="label">Kind</td><td class="mono">{{ j.job_context.kind }}</td></tr>
-            @if (j.job_context.kind === 'Build') {
+            @if (j.job_context.kind !== 'Eval') {
               <tr><td class="label">Architecture</td><td class="mono">{{ j.job_context.architecture }}</td></tr>
             }
             <tr><td class="label">Missing count</td><td class="mono">{{ j.job_context.missing_count ?? '-' }}</td></tr>
@@ -195,7 +226,7 @@ interface RuleRow {
               <tr><td class="label">Closure size</td><td class="mono">{{ formatBytes(j.job_context.closure_size) }}</td></tr>
               <tr><td class="label">Prefer local build</td><td class="mono">{{ j.job_context.prefer_local_build ? 'yes' : 'no' }}</td></tr>
               <tr><td class="label">Fixed output</td><td class="mono">{{ j.job_context.is_fixed_output ? 'yes' : 'no' }}</td></tr>
-            } @else {
+            } @else if (j.job_context.kind === 'Eval') {
               <tr><td class="label">Fetch flake</td><td class="mono">{{ j.job_context.fetch_flake ? 'yes' : 'no' }}</td></tr>
             }
           </tbody>
@@ -284,13 +315,18 @@ interface RuleRow {
     } @else if (pending(); as p) {
       <header class="head">
         <div>
-          <span class="kind" [class.build]="p.kind === 1">{{ p.kind === 1 ? 'build' : 'eval' }}</span>
+          <span class="kind" [class.build]="p.kind === 1">{{ jobKindName(p.kind) }}</span>
           <h1>Pending job</h1>
         </div>
       </header>
       <p class="muted">Still queued - limited details are available until the job is assigned.</p>
       <section class="ids">
-        @if (p.subject) {
+        @if (p.exec_job; as ex) {
+          <div>
+            <span class="label">Exec job</span>
+            <a class="mono exec-link" [routerLink]="execJobLink(ex)">{{ jobSubjectLabel(p.subject, ex) }}</a>
+          </div>
+        } @else if (p.subject) {
           <div><span class="label">{{ p.kind === 1 ? 'Derivation' : 'Repository' }}</span><span class="mono">{{ p.subject }}</span></div>
         }
         <div><span class="label">Evaluation</span><span class="mono">{{ p.evaluation_id }}</span></div>
@@ -348,7 +384,7 @@ interface RuleRow {
       (visibleChange)="!$event && !aborting() && abortOpen.set(false)"
       width="400px"
     >
-      <p>Do you really want to abort the {{ job()?.kind === 1 ? 'build' : 'evaluation' }}?</p>
+      <p>Do you really want to abort the {{ abortTarget() }}?</p>
       @if (abortError()) {
         <p class="muted">{{ abortError() }}</p>
       }
@@ -367,6 +403,7 @@ export class BoardJobDetailComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private board = inject(BoardService);
   private evaluations = inject(EvaluationsService);
+  private execJobs = inject(ExecJobsService);
   private auth = inject(AuthService);
   private destroyRef = inject(DestroyRef);
 
@@ -386,9 +423,20 @@ export class BoardJobDetailComponent implements OnInit {
   canAbort = computed(() => {
     const j = this.job();
     if (!j || j.passed_over || j.finished_at || this.auth.user()?.superuser !== true) return false;
+    if (j.kind === EXEC_KIND) return !!j.exec_job;
     return j.kind !== 1 || !!j.build_id;
   });
 
+  abortTarget = computed(() => {
+    const kind = this.job()?.kind;
+    if (kind === EXEC_KIND) return 'exec job';
+    return kind === 1 ? 'build' : 'evaluation';
+  });
+
+  protected readonly jobKindName = jobKindName;
+  protected readonly jobSubjectLabel = jobSubjectLabel;
+  protected readonly execJobLink = execJobLink;
+  protected readonly serverTime = serverTime;
   protected readonly formatBytes = formatBytes;
   protected readonly formatMegabytes = formatMegabytes;
   protected readonly formatDuration = formatDuration;
@@ -477,7 +525,7 @@ export class BoardJobDetailComponent implements OnInit {
   private loadPending(id: string): void {
     this.board.getPendingJobs().subscribe({
       next: (r) => {
-        const match = r.jobs.find((p) => p.evaluation_id === id || p.build_id === id);
+        const match = r.jobs.find((p) => p.exec_job?.id === id || (!p.exec_job && (p.evaluation_id === id || p.build_id === id)));
         if (match) this.pending.set(match);
         else this.notFound.set(true);
       },
@@ -485,15 +533,18 @@ export class BoardJobDetailComponent implements OnInit {
     });
   }
 
+  private abortRequest(j: AssignedJobDetail): Observable<unknown> {
+    if (j.kind === EXEC_KIND && j.exec_job) return this.execJobs.abort(j.exec_job.id);
+    if (j.kind === 1 && j.build_id) return this.evaluations.abortBuild(j.build_id);
+    return this.evaluations.abortEvaluation(j.evaluation_id);
+  }
+
   abortJob(): void {
     const j = this.job();
     if (!j) return;
     this.aborting.set(true);
     this.abortError.set(null);
-    const request = j.kind === 1 && j.build_id
-      ? this.evaluations.abortBuild(j.build_id)
-      : this.evaluations.abortEvaluation(j.evaluation_id);
-    request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.abortRequest(j).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.aborting.set(false);
         this.abortOpen.set(false);

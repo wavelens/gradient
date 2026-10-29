@@ -58,7 +58,7 @@ The **Storage** tab pulls its data from the metric keys below. Each bucket keeps
 
 Open a job from **Live Jobs** to see five sections.
 
-- The server's marks: **Queued**, **Ready**, **Assigned**, **Finished**.
+- The server's marks: **Queued**, **Ready**, **Assigned**, **Finished**. Exec jobs add **Started**, the start of the attempt on the worker.
 - **Worker tail**: for finished jobs, the time the worker spent after its last phase.
 - **Transit**: for finished jobs, the remaining time between **Assigned** and **Finished**, consumed by the network and by queues on both ends.
 - The worker timeline: nested phases (fetch, evaluate, build, compress, upload wait, NAR push) with duration, share and bytes moved.
