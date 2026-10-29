@@ -39,7 +39,7 @@ use gradient_wire::messages::JobPhase;
 
 use crate::count::clamp_to_u32;
 use crate::exec::host::ExecHost;
-use crate::exec::job_channels::GuestChannelInbox;
+use crate::exec::keep_vm::ExecInbox;
 use crate::exec::reattach::ResumedJob;
 use crate::executor::timeline::PhaseGuard;
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
@@ -713,7 +713,7 @@ impl JobExecutor {
         updater: &mut JobUpdater,
         credentials: &CredentialStore,
         abort: AbortSignal,
-        channels: GuestChannelInbox,
+        inbox: ExecInbox,
         cluster: Option<ClusterStart>,
     ) -> Result<()> {
         let host = self
@@ -730,7 +730,7 @@ impl JobExecutor {
             updater,
             credentials,
             abort,
-            channels,
+            inbox,
             cluster,
         )
         .await
@@ -742,13 +742,13 @@ impl JobExecutor {
         resumed: ResumedJob,
         updater: &mut JobUpdater,
         abort: AbortSignal,
-        channels: GuestChannelInbox,
+        inbox: ExecInbox,
     ) -> Result<()> {
         let host = self
             .exec
             .as_deref()
             .context("this worker runs no exec jobs")?;
-        crate::exec::reattach::resume(host, resumed, updater, abort, channels).await
+        crate::exec::reattach::resume(host, resumed, updater, abort, inbox).await
     }
 }
 

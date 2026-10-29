@@ -63,6 +63,10 @@ pub enum SessionSignal {
         count: u32,
     },
     GuestChannel(GuestChannelSignal),
+    ExecKeepVmRunning {
+        job_id: String,
+        keep_vm_running: bool,
+    },
 }
 
 pub trait SessionPort: Send + Sync + 'static {

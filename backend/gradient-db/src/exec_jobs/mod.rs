@@ -9,6 +9,7 @@ pub mod closure;
 pub mod continuations;
 pub mod create;
 pub mod dispatch;
+pub mod keep_vm_running;
 pub mod labels;
 pub mod nodes;
 pub mod outputs;

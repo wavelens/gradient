@@ -11,7 +11,10 @@ pub mod pull_requests;
 pub mod query;
 pub mod terminal;
 
-pub use self::actions::{post_exec_job_abort, post_exec_job_run};
+pub use self::actions::{
+    delete_exec_job_keep_vm_running, post_exec_job_abort, post_exec_job_keep_vm_running,
+    post_exec_job_run,
+};
 pub use self::log::get_exec_job_log;
 pub use self::outputs::{ExecJobOutputView, get_exec_job_output, list_exec_job_outputs};
 pub use self::pull_requests::{ExecJobPullRequestView, list_exec_job_pull_requests};

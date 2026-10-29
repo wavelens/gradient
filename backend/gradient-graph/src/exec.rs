@@ -134,6 +134,21 @@ pub(crate) async fn program_started(ctx: &DbContext, attempt: ExecJobAttemptId) 
     Ok(())
 }
 
+pub(crate) async fn program_exited(
+    ctx: &DbContext,
+    attempt: ExecJobAttemptId,
+    code: i32,
+) -> Result<()> {
+    if attempts::program_exited(&ctx.worker_db, attempt, code)
+        .await?
+        .is_none()
+    {
+        info!(%attempt, code, "program exit for an attempt that does not run; ignored");
+    }
+
+    Ok(())
+}
+
 pub(crate) async fn phase(
     ctx: &DbContext,
     attempt: ExecJobAttemptId,

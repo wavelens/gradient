@@ -260,6 +260,8 @@ pub struct ExecJob {
     pub timeout_secs: Option<u64>,
     pub max_silent_secs: Option<u64>,
     pub attempt: u32,
+    #[proto(52, default)]
+    pub keep_vm_running: bool,
 }
 
 #[derive(

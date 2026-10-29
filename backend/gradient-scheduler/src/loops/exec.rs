@@ -260,6 +260,7 @@ pub(crate) fn pending_exec_job(
         architecture: row.architecture.clone(),
         image_path: row.image_path.clone(),
         retries_left: u32::try_from(row.job.retries_left).unwrap_or(0),
+        keep_vm_running: row.job.keep_vm_running,
         attempts_done: u32::try_from(row.attempts_done).unwrap_or(0),
         last_phase: row.last_phase.clone(),
         required_paths,

@@ -121,6 +121,7 @@ pub(crate) fn exec_job(spec: ExecSpec) -> PendingExecJob {
         commit: "abc123".into(),
         architecture: "x86_64-linux".into(),
         retries_left: spec.retries,
+        keep_vm_running: false,
         spec,
         image_path: None,
         attempts_done: 0,

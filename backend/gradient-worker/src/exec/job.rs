@@ -32,7 +32,8 @@ use super::checkout::checkout_work;
 use super::context::{ClusterContext, cluster_context, context_layers};
 use super::host::ExecHost;
 use super::inventory::device_requests;
-use super::job_channels::{GuestChannelInbox, JobChannels};
+use super::job_channels::JobChannels;
+use super::keep_vm::{ExecInbox, KeepVmRunning, marker_file};
 use super::sops::WorkerSecrets;
 use super::state::StoredJob;
 use super::uploads::{GuestUploads, OutputUpload};
@@ -52,10 +53,15 @@ const KILL_GRACE: Duration = Duration::from_secs(15);
 const NO_FREE_ADDRESS: &str = "no free guest address in exec.subnet";
 const WORK_STAGING: &str = "work-staging";
 const WORK_DISK_IMAGE: &str = "work.img";
+const SHUTDOWN_ABORT_WAIT: Duration = Duration::from_secs(30);
+const GUEST_SHUT_DOWN: &str = "the guest was shut down";
+const GUEST_SHUTDOWN_NOTE: &str = "the guest shuts down, the job ends as aborted";
 
 #[async_trait]
 pub trait ExecReport: Send {
     async fn program_started(&mut self) -> Result<()>;
+    async fn program_exited(&mut self, code: i32) -> Result<()>;
+    async fn abort_requested(&mut self) -> Result<bool>;
     async fn output(&mut self, data: Vec<u8>) -> Result<()>;
     async fn output_dropped(&mut self, bytes: u64) -> Result<()>;
     async fn phase(&mut self, name: String, payload: Vec<u8>) -> Result<()>;
@@ -86,6 +92,14 @@ impl ExecReport for JobUpdater {
 
     async fn program_started(&mut self) -> Result<()> {
         self.report_program_started().await
+    }
+
+    async fn program_exited(&mut self, code: i32) -> Result<()> {
+        self.report_program_exited(code).await
+    }
+
+    async fn abort_requested(&mut self) -> Result<bool> {
+        self.report_abort_requested().await
     }
 
     async fn output(&mut self, data: Vec<u8>) -> Result<()> {
@@ -181,7 +195,7 @@ pub async fn execute(
     updater: &mut JobUpdater,
     credentials: &CredentialStore,
     abort: AbortSignal,
-    channels: GuestChannelInbox,
+    inbox: ExecInbox,
     cluster: Option<ClusterStart>,
 ) -> Result<()> {
     let (cluster, held_address) = cluster_member(cluster, job.context.master_port)?;
@@ -213,13 +227,7 @@ pub async fn execute(
     };
     let (mut guest, budget, image_root) = run.take_guest(source, &nix).await?;
     let outcome = run
-        .run_in_guest(
-            &mut guest,
-            &devices,
-            address.as_ref(),
-            credentials,
-            channels,
-        )
+        .run_in_guest(&mut guest, &devices, address.as_ref(), credentials, inbox)
         .await;
     host.pool
         .retire(guest, (devices, image_root, address, budget));
@@ -315,31 +323,27 @@ pub(crate) fn job_redactor(secrets: &[GuestSecret], token: &str) -> SecretRedact
     )
 }
 
+pub struct GuestJob {
+    pub watchdog: Watchdog,
+    pub abort: AbortSignal,
+    pub leave_running: CancellationToken,
+    pub channels: JobChannels,
+    pub uploads: GuestUploads,
+    pub keep_vm_running: KeepVmRunning,
+}
+
 pub async fn finish<R: ExecReport>(
     agent: &mut AgentClient,
     reporter: &mut R,
-    watchdog: &mut Watchdog,
-    abort: &mut AbortSignal,
-    leave_running: &CancellationToken,
-    channels: &mut JobChannels,
-    uploads: &mut GuestUploads,
+    job: &mut GuestJob,
 ) -> Result<()> {
-    let followed = follow(
-        agent,
-        reporter,
-        watchdog,
-        abort,
-        leave_running,
-        channels,
-        uploads,
-    )
-    .await;
+    let followed = follow(agent, reporter, job).await;
     if !matches!(followed, Followed::LeftRunning) {
         let exit_code = match followed {
             Followed::Exited(code) => Some(code),
             _ => None,
         };
-        channels.end(exit_code, agent, reporter).await;
+        job.channels.end(exit_code, agent, reporter).await;
     }
     let stop = match followed {
         Followed::Exited(code) => return exit_result(code).map_err(anyhow::Error::from),
@@ -367,16 +371,27 @@ pub async fn finish<R: ExecReport>(
 pub async fn follow<R: ExecReport>(
     agent: &mut AgentClient,
     reporter: &mut R,
-    watchdog: &mut Watchdog,
-    abort: &mut AbortSignal,
-    leave_running: &CancellationToken,
-    channels: &mut JobChannels,
-    uploads: &mut GuestUploads,
+    job: &mut GuestJob,
 ) -> Followed {
+    let GuestJob {
+        watchdog,
+        abort,
+        leave_running,
+        channels,
+        uploads,
+        keep_vm_running,
+    } = job;
+    let mut exited = None;
     loop {
+        if let Some(code) = exited
+            && !keep_vm_running.requested()
+        {
+            return Followed::Exited(code);
+        }
         let watched = tokio::select! {
             biased;
             () = leave_running.cancelled() => return Followed::LeftRunning,
+            () = keep_vm_running.changed() => continue,
             event = channels.next_event() => {
                 channels.handle(event, agent, reporter).await;
                 continue;
@@ -389,62 +404,27 @@ pub async fn follow<R: ExecReport>(
         };
         let message = match watched {
             Watched::Item(Ok(message)) => message,
-            Watched::End => {
-                return Followed::Ended(BuildError::transient(anyhow!(
-                    "the guest agent closed the connection before the program exited"
-                )));
-            }
-            Watched::Item(Err(e)) => {
-                return Followed::Ended(BuildError::transient(e.context("lost the guest agent")));
+            lost @ (Watched::End | Watched::Item(Err(_))) => {
+                return exited.map_or_else(|| agent_lost(lost), Followed::Exited);
             }
             Watched::Silent(after) => return Followed::Stopped(Stop::Silent(after)),
+            Watched::TotalExceeded(after) if exited.is_some() => {
+                return held_past_timeout(reporter, after).await;
+            }
             Watched::TotalExceeded(after) => return Followed::Stopped(Stop::Total(after)),
             Watched::Aborted if leave_running.is_cancelled() => return Followed::LeftRunning,
             Watched::Aborted => return Followed::Stopped(Stop::Aborted),
         };
-        let message = match message {
-            AgentToWorker::ChannelData { channel_id, data } => {
-                channels.agent_data(channel_id, data, agent, reporter).await;
-                continue;
-            }
-            AgentToWorker::CloseChannel {
-                channel_id,
-                exit_code,
-                message,
-            } => {
-                channels
-                    .agent_closed(channel_id, exit_code, message, agent, reporter)
-                    .await;
-                continue;
-            }
-            AgentToWorker::JobSecrets { secrets, token } => {
-                channels.mask_console(&job_redactor(&secrets, &token));
-                continue;
-            }
-            AgentToWorker::UploadStart {
-                upload_id,
-                path,
-                size,
-            } => {
-                if let Err(e) = uploads.start(upload_id, path, size).await {
-                    debug!(upload_id, error = %e, "guest upload not staged");
-                }
-                continue;
-            }
-            AgentToWorker::UploadChunk { upload_id, data } => {
-                if let Err(e) = uploads.chunk(upload_id, &data).await {
-                    debug!(upload_id, error = %e, "guest upload chunk refused");
-                }
-                continue;
-            }
-            AgentToWorker::UploadEnd { upload_id } => {
-                uploads.end(upload_id, |path, file, size| {
-                    reporter.output_upload(path, file, size)
-                });
-                continue;
-            }
-            message => message,
+        let Some(message) = take_side_message(message, agent, reporter, channels, uploads).await
+        else {
+            continue;
         };
+        if message == AgentToWorker::GuestShutdown {
+            return match exited {
+                Some(code) => Followed::Exited(code),
+                None => end_on_guest_shutdown(reporter, abort).await,
+            };
+        }
         if matches!(
             message,
             AgentToWorker::Output { .. } | AgentToWorker::OutputDropped { .. }
@@ -454,15 +434,115 @@ pub async fn follow<R: ExecReport>(
         match forward(message, reporter).await {
             Ok(None) => {}
             Ok(Some(Followed::Exited(code))) => {
-                return tokio::select! {
-                    () = abort.aborted() => Followed::Stopped(Stop::Aborted),
-                    () = answer_open_uploads(agent, uploads) => Followed::Exited(code),
-                };
+                tokio::select! {
+                    () = abort.aborted() => return Followed::Stopped(Stop::Aborted),
+                    () = answer_open_uploads(agent, uploads) => {}
+                }
+                exited = Some(code);
+                if keep_vm_running.requested() {
+                    watchdog.program_exited();
+                    hold_after_exit(reporter, code).await;
+                }
             }
             Ok(Some(end)) => return end,
             Err(e) => return Followed::Ended(BuildError::transient(e)),
         }
     }
+}
+
+fn agent_lost(watched: Watched<Result<AgentToWorker>>) -> Followed {
+    let error = match watched {
+        Watched::Item(Err(e)) => e.context("lost the guest agent"),
+        _ => anyhow!("the guest agent closed the connection before the program exited"),
+    };
+    Followed::Ended(BuildError::transient(error))
+}
+
+async fn hold_after_exit<R: ExecReport>(reporter: &mut R, code: i32) {
+    info!(code, "the program exited, the guest keeps running");
+    if let Err(e) = reporter.program_exited(code).await {
+        warn!(error = %e, "could not report the program exit of a kept guest");
+    }
+}
+
+async fn held_past_timeout<R: ExecReport>(reporter: &mut R, after: Duration) -> Followed {
+    let line = Stop::Total(after).log_line().unwrap_or_default();
+    if let Err(e) = reporter.note(&line).await {
+        warn!(error = %e, "could not log the timeout");
+    }
+    Followed::Ended(BuildError::timeout(anyhow!(line)))
+}
+
+async fn end_on_guest_shutdown<R: ExecReport>(
+    reporter: &mut R,
+    abort: &mut AbortSignal,
+) -> Followed {
+    if let Err(e) = reporter.note(GUEST_SHUTDOWN_NOTE).await {
+        warn!(error = %e, "could not log the guest shutdown");
+    }
+    match reporter.abort_requested().await {
+        Ok(true) => {}
+        Ok(false) => return guest_shut_down(),
+        Err(e) => {
+            warn!(error = %e, "could not ask the server to abort the job");
+            return guest_shut_down();
+        }
+    }
+    match tokio::time::timeout(SHUTDOWN_ABORT_WAIT, abort.aborted()).await {
+        Ok(()) => Followed::Stopped(Stop::Aborted),
+        Err(_) => guest_shut_down(),
+    }
+}
+
+fn guest_shut_down() -> Followed {
+    Followed::Ended(BuildError::permanent(anyhow!(GUEST_SHUT_DOWN)))
+}
+
+async fn take_side_message<R: ExecReport>(
+    message: AgentToWorker,
+    agent: &mut AgentClient,
+    reporter: &mut R,
+    channels: &mut JobChannels,
+    uploads: &mut GuestUploads,
+) -> Option<AgentToWorker> {
+    match message {
+        AgentToWorker::ChannelData { channel_id, data } => {
+            channels.agent_data(channel_id, data, agent, reporter).await;
+        }
+        AgentToWorker::CloseChannel {
+            channel_id,
+            exit_code,
+            message,
+        } => {
+            channels
+                .agent_closed(channel_id, exit_code, message, agent, reporter)
+                .await;
+        }
+        AgentToWorker::JobSecrets { secrets, token } => {
+            channels.mask_console(&job_redactor(&secrets, &token));
+        }
+        AgentToWorker::UploadStart {
+            upload_id,
+            path,
+            size,
+        } => {
+            if let Err(e) = uploads.start(upload_id, path, size).await {
+                debug!(upload_id, error = %e, "guest upload not staged");
+            }
+        }
+        AgentToWorker::UploadChunk { upload_id, data } => {
+            if let Err(e) = uploads.chunk(upload_id, &data).await {
+                debug!(upload_id, error = %e, "guest upload chunk refused");
+            }
+        }
+        AgentToWorker::UploadEnd { upload_id } => {
+            uploads.end(upload_id, |path, file, size| {
+                reporter.output_upload(path, file, size)
+            });
+        }
+        message => return Some(message),
+    }
+    None
 }
 
 async fn answer_open_uploads(agent: &mut AgentClient, uploads: &mut GuestUploads) {
@@ -518,7 +598,7 @@ async fn forward<R: ExecReport>(
             debug!(channel_id, "guest channel frame dropped");
         }
         AgentToWorker::JobSecrets { .. } => debug!("job secrets from the guest agent dropped"),
-        AgentToWorker::GuestShutdown => debug!("guest shutdown dropped"),
+        AgentToWorker::GuestShutdown => debug!("guest shutdown after the program end dropped"),
         AgentToWorker::UploadStart { upload_id, .. }
         | AgentToWorker::UploadChunk { upload_id, .. }
         | AgentToWorker::UploadEnd { upload_id } => {
@@ -620,7 +700,7 @@ impl ExecRun<'_> {
         devices: &DeviceHold,
         address: Option<&AddressLease>,
         credentials: &CredentialStore,
-        inbox: GuestChannelInbox,
+        inbox: ExecInbox,
     ) -> Result<()> {
         let abort = self.abort.clone();
         let started = self.start_program(guest, devices, address, credentials);
@@ -629,23 +709,23 @@ impl ExecRun<'_> {
         let mut mux =
             GuestChannelMux::new(requirement.ssh, requirement.ports.clone(), agent.version());
         mux.mask_console(&self.redactor);
-        let mut channels = JobChannels::new(inbox, mux, guest.dir().to_owned());
-        let mut uploads = GuestUploads::new(guest.dir().join("outputs"));
-        let mut watchdog = Watchdog::new(
-            Instant::now(),
-            self.job.timeout_secs.map(Duration::from_secs),
-            self.job.max_silent_secs.map(Duration::from_secs),
-        );
-        finish(
-            &mut agent,
-            &mut *self.updater,
-            &mut watchdog,
-            &mut self.abort,
-            &self.host.worker_stop_keeping_guests(),
-            &mut channels,
-            &mut uploads,
-        )
-        .await
+        let mut job = GuestJob {
+            watchdog: Watchdog::new(
+                Instant::now(),
+                self.job.timeout_secs.map(Duration::from_secs),
+                self.job.max_silent_secs.map(Duration::from_secs),
+            ),
+            abort,
+            leave_running: self.host.worker_stop_keeping_guests(),
+            channels: JobChannels::new(inbox.channels, mux, guest.dir().to_owned()),
+            uploads: GuestUploads::new(guest.dir().join("outputs")),
+            keep_vm_running: KeepVmRunning::new(
+                inbox.keep_vm_running,
+                self.job.keep_vm_running,
+                Some(marker_file(guest.dir())),
+            ),
+        };
+        finish(&mut agent, &mut *self.updater, &mut job).await
     }
 
     async fn start_program(
@@ -879,7 +959,7 @@ mod tests {
     };
     use gradient_wire::messages::{BuildFailureKind, CredentialKind, GuestChannelKind};
     use tokio::net::UnixStream;
-    use tokio::sync::mpsc;
+    use tokio::sync::{mpsc, watch};
 
     use crate::exec::channels::GuestChannelCommand;
 
@@ -888,6 +968,8 @@ mod tests {
     #[derive(Debug, PartialEq)]
     enum Reported {
         Started,
+        Exited(i32),
+        AbortRequested,
         Output(Vec<u8>),
         Dropped(u64),
         Phase(String),
@@ -899,7 +981,7 @@ mod tests {
     type Uploaded = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
     #[derive(Default)]
-    struct Recorder(Vec<Reported>, Uploaded);
+    struct Recorder(Vec<Reported>, Uploaded, Option<watch::Sender<bool>>);
 
     #[async_trait]
     impl ExecReport for Recorder {
@@ -916,6 +998,19 @@ mod tests {
         async fn program_started(&mut self) -> Result<()> {
             self.0.push(Reported::Started);
             Ok(())
+        }
+
+        async fn program_exited(&mut self, code: i32) -> Result<()> {
+            self.0.push(Reported::Exited(code));
+            Ok(())
+        }
+
+        async fn abort_requested(&mut self) -> Result<bool> {
+            self.0.push(Reported::AbortRequested);
+            if let Some(abort) = &self.2 {
+                abort.send_replace(true);
+            }
+            Ok(true)
         }
 
         async fn output(&mut self, data: Vec<u8>) -> Result<()> {
@@ -958,12 +1053,32 @@ mod tests {
         (commands, JobChannels::new(inbox, mux, PathBuf::new()))
     }
 
-    fn no_channels() -> JobChannels {
-        job_channels(false).1
+    fn guest_job(watchdog: Watchdog) -> GuestJob {
+        GuestJob {
+            watchdog,
+            abort: AbortSignal::never(),
+            leave_running: CancellationToken::new(),
+            channels: job_channels(false).1,
+            uploads: GuestUploads::new(PathBuf::new()),
+            keep_vm_running: KeepVmRunning::new(watch::channel(false).1, false, None),
+        }
     }
 
-    fn no_uploads() -> GuestUploads {
-        GuestUploads::new(PathBuf::new())
+    fn unwatched_job() -> GuestJob {
+        guest_job(Watchdog::new(Instant::now(), None, None))
+    }
+
+    fn kept_job() -> (watch::Sender<bool>, GuestJob) {
+        let (switch, updates) = watch::channel(true);
+        let job = GuestJob {
+            keep_vm_running: KeepVmRunning::new(updates, true, None),
+            ..guest_job(Watchdog::new(
+                Instant::now(),
+                None,
+                Some(Duration::from_secs(5)),
+            ))
+        };
+        (switch, job)
     }
 
     #[tokio::test]
@@ -994,23 +1109,13 @@ mod tests {
         let mut recorder = Recorder::default();
         let uploaded = recorder.1.clone();
         let dir = tempfile::tempdir().unwrap();
-        let mut uploads = GuestUploads::new(dir.path().join("outputs"));
-        let mut channels = no_channels();
-        let mut watchdog = Watchdog::new(Instant::now(), None, None);
-        let (mut abort, running) = (AbortSignal::never(), CancellationToken::new());
+        let mut job = GuestJob {
+            uploads: GuestUploads::new(dir.path().join("outputs")),
+            ..unwatched_job()
+        };
 
-        let (followed, (settled, _guest)) = tokio::join!(
-            follow(
-                &mut agent,
-                &mut recorder,
-                &mut watchdog,
-                &mut abort,
-                &running,
-                &mut channels,
-                &mut uploads,
-            ),
-            fake_agent
-        );
+        let (followed, (settled, _guest)) =
+            tokio::join!(follow(&mut agent, &mut recorder, &mut job), fake_agent);
 
         assert!(matches!(followed, Followed::Exited(0)), "{followed:?}");
         assert_eq!(
@@ -1039,31 +1144,23 @@ mod tests {
         (client, agent.unwrap())
     }
 
-    async fn followed(script: Vec<AgentToWorker>) -> (Followed, Vec<Reported>) {
+    async fn followed_in(
+        mut job: GuestJob,
+        mut recorder: Recorder,
+        script: Vec<AgentToWorker>,
+    ) -> (Followed, Vec<Reported>) {
         let (mut agent, mut guest) = connected().await;
         let fake_agent = async move {
             for message in script {
                 guest.send(&message).await.unwrap();
             }
         };
-        let mut recorder = Recorder::default();
-        let mut watchdog = Watchdog::new(Instant::now(), None, None);
-        let (mut abort, running) = (AbortSignal::never(), CancellationToken::new());
-        let mut channels = no_channels();
-        let mut uploads = no_uploads();
-        let (followed, ()) = tokio::join!(
-            follow(
-                &mut agent,
-                &mut recorder,
-                &mut watchdog,
-                &mut abort,
-                &running,
-                &mut channels,
-                &mut uploads,
-            ),
-            fake_agent
-        );
+        let (followed, ()) = tokio::join!(follow(&mut agent, &mut recorder, &mut job), fake_agent);
         (followed, recorder.0)
+    }
+
+    async fn followed(script: Vec<AgentToWorker>) -> (Followed, Vec<Reported>) {
+        followed_in(unwatched_job(), Recorder::default(), script).await
     }
 
     #[tokio::test]
@@ -1086,19 +1183,12 @@ mod tests {
             guest
         };
         let mut recorder = Recorder::default();
-        let mut watchdog = Watchdog::new(Instant::now(), None, Some(Duration::from_secs(1)));
-        let (mut abort, running) = (AbortSignal::never(), CancellationToken::new());
-        let mut channels = no_channels();
-        let mut uploads = no_uploads();
-        let finished = finish(
-            &mut agent,
-            &mut recorder,
-            &mut watchdog,
-            &mut abort,
-            &running,
-            &mut channels,
-            &mut uploads,
-        );
+        let mut job = guest_job(Watchdog::new(
+            Instant::now(),
+            None,
+            Some(Duration::from_secs(1)),
+        ));
+        let finished = finish(&mut agent, &mut recorder, &mut job);
 
         let (finished, _guest) = tokio::join!(finished, fake_agent);
 
@@ -1122,17 +1212,12 @@ mod tests {
         let (mut agent, _guest) = connected().await;
         let stopping = CancellationToken::new();
         stopping.cancel();
+        let mut job = GuestJob {
+            leave_running: stopping,
+            ..unwatched_job()
+        };
 
-        let followed = follow(
-            &mut agent,
-            &mut Recorder::default(),
-            &mut Watchdog::new(Instant::now(), None, None),
-            &mut AbortSignal::never(),
-            &stopping,
-            &mut no_channels(),
-            &mut no_uploads(),
-        )
-        .await;
+        let followed = follow(&mut agent, &mut Recorder::default(), &mut job).await;
 
         assert!(matches!(followed, Followed::LeftRunning), "{followed:?}");
     }
@@ -1142,20 +1227,16 @@ mod tests {
         let (mut agent, _guest) = connected().await;
         let stopping = CancellationToken::new();
         stopping.cancel();
-        let (registration, mut abort) = AbortSignal::channel();
+        let (registration, abort) = AbortSignal::channel();
         drop(registration);
+        let mut job = GuestJob {
+            abort,
+            leave_running: stopping,
+            ..unwatched_job()
+        };
 
         for _ in 0..32 {
-            let followed = follow(
-                &mut agent,
-                &mut Recorder::default(),
-                &mut Watchdog::new(Instant::now(), None, None),
-                &mut abort,
-                &stopping,
-                &mut no_channels(),
-                &mut no_uploads(),
-            )
-            .await;
+            let followed = follow(&mut agent, &mut Recorder::default(), &mut job).await;
 
             assert!(matches!(followed, Followed::LeftRunning), "{followed:?}");
         }
@@ -1164,8 +1245,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn channel_traffic_does_not_reset_max_silent() {
         let (mut agent, mut guest) = connected().await;
-        let (commands, mut channels) = job_channels(true);
-        let mut uploads = no_uploads();
+        let (commands, channels) = job_channels(true);
         let shell = GuestChannelKind::Shell {
             pty: true,
             attach: false,
@@ -1190,21 +1270,13 @@ mod tests {
         };
         let mut recorder = Recorder::default();
         let started = Instant::now();
-        let mut watchdog = Watchdog::new(started, None, Some(Duration::from_secs(10)));
-        let (mut abort, running) = (AbortSignal::never(), CancellationToken::new());
+        let mut job = GuestJob {
+            channels,
+            ..guest_job(Watchdog::new(started, None, Some(Duration::from_secs(10))))
+        };
 
-        let (followed, _guest) = tokio::join!(
-            follow(
-                &mut agent,
-                &mut recorder,
-                &mut watchdog,
-                &mut abort,
-                &running,
-                &mut channels,
-                &mut uploads,
-            ),
-            fake_agent
-        );
+        let (followed, _guest) =
+            tokio::join!(follow(&mut agent, &mut recorder, &mut job), fake_agent);
 
         assert!(
             matches!(followed, Followed::Stopped(Stop::Silent(_))),
@@ -1212,6 +1284,93 @@ mod tests {
         );
         assert_eq!(started.elapsed(), Duration::from_secs(10));
         assert_eq!(recorder.0, [Reported::ChannelData(4, b"$ ".to_vec())]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_exit_while_the_vm_is_kept_holds_the_job_until_the_release() {
+        let (mut agent, mut guest) = connected().await;
+        let (switch, mut job) = kept_job();
+        let started = Instant::now();
+        let release = async move {
+            guest
+                .send(&AgentToWorker::Exited { code: 3 })
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            switch.send_replace(false);
+            (guest, switch)
+        };
+        let mut recorder = Recorder::default();
+
+        let (followed, _guest) = tokio::join!(follow(&mut agent, &mut recorder, &mut job), release);
+
+        assert!(matches!(followed, Followed::Exited(3)), "{followed:?}");
+        assert_eq!(started.elapsed(), Duration::from_secs(60));
+        assert_eq!(recorder.0, [Reported::Exited(3)]);
+    }
+
+    #[tokio::test]
+    async fn a_release_while_the_program_runs_only_clears_the_switch() {
+        let (switch, job) = kept_job();
+        switch.send_replace(false);
+
+        let (followed, reported) = followed_in(
+            job,
+            Recorder::default(),
+            vec![AgentToWorker::Exited { code: 0 }],
+        )
+        .await;
+
+        assert!(matches!(followed, Followed::Exited(0)), "{followed:?}");
+        assert!(reported.is_empty(), "{reported:?}");
+    }
+
+    #[tokio::test]
+    async fn a_guest_shutdown_while_the_program_runs_asks_the_server_to_abort() {
+        let (abort_job, abort) = AbortSignal::channel();
+        let recorder = Recorder(Vec::new(), Uploaded::default(), Some(abort_job));
+        let job = GuestJob {
+            abort,
+            ..unwatched_job()
+        };
+
+        let (followed, reported) = followed_in(
+            job,
+            recorder,
+            vec![AgentToWorker::ProgramStarted, AgentToWorker::GuestShutdown],
+        )
+        .await;
+
+        assert!(
+            matches!(followed, Followed::Stopped(Stop::Aborted)),
+            "{followed:?}"
+        );
+        assert_eq!(
+            reported,
+            [
+                Reported::Started,
+                Reported::Note(GUEST_SHUTDOWN_NOTE.into()),
+                Reported::AbortRequested,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_guest_shutdown_of_a_kept_vm_ends_the_job_with_the_exit_code() {
+        let (_switch, job) = kept_job();
+
+        let (followed, reported) = followed_in(
+            job,
+            Recorder::default(),
+            vec![
+                AgentToWorker::Exited { code: 2 },
+                AgentToWorker::GuestShutdown,
+            ],
+        )
+        .await;
+
+        assert!(matches!(followed, Followed::Exited(2)), "{followed:?}");
+        assert_eq!(reported, [Reported::Exited(2)]);
     }
 
     fn credential(name: &str, value: &[u8]) -> CredentialStore {
@@ -1406,6 +1565,7 @@ mod tests {
             timeout_secs: None,
             max_silent_secs: None,
             attempt: 1,
+            keep_vm_running: false,
         };
         let with_image = ExecJob {
             image: Some(image.into()),

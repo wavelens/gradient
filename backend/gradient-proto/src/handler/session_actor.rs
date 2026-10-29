@@ -38,7 +38,8 @@ use super::store_paths::{outbound_message, outbound_offer, project_mapper};
 use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::Rejection;
 use gradient_wire::messages::{
-    ClientMessage, GradientCapabilities, RUNNING_JOBS_SINCE, ServerMessage,
+    ClientMessage, EXEC_KEEP_VM_RUNNING_SINCE, GradientCapabilities, RUNNING_JOBS_SINCE,
+    ServerMessage,
 };
 use gradient_wire::session::frame::ProtoReader;
 
@@ -420,6 +421,22 @@ impl Actor for SessionActor {
                         None,
                         Some(WORKER_TOO_OLD.into()),
                     ),
+                }
+            }
+            SessionMsg::Signal(SessionSignal::ExecKeepVmRunning {
+                job_id,
+                keep_vm_running,
+            }) => {
+                if st.writer.version() < EXEC_KEEP_VM_RUNNING_SINCE {
+                    debug!(peer_id = %st.peer_id, %job_id, "the worker is too old to keep a VM running");
+                    return Ok(());
+                }
+                let msg = ServerMessage::ExecKeepVmRunning {
+                    job_id,
+                    keep_vm_running,
+                };
+                if send_server_msg(&st.writer, &msg).await.is_err() {
+                    myself.stop(Some("write failed".into()));
                 }
             }
             SessionMsg::Signal(SessionSignal::ClusterAssign { job_id }) => {

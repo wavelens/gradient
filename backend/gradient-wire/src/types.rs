@@ -175,6 +175,12 @@ pub enum JobUpdateKind {
     Stage(BuildStage),
     #[proto(43)]
     ProgramStarted,
+    #[proto(52)]
+    AbortRequested,
+    #[proto(52)]
+    ProgramExited {
+        code: i32,
+    },
 }
 
 #[derive(Proto, Debug, Clone, Copy, PartialEq, Eq, Hash)]

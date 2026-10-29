@@ -28,7 +28,7 @@ use tracing::{debug, warn};
 use crate::config::WorkerConfig;
 use crate::count::clamp_to_u32;
 use crate::exec::channels::GuestChannelCommand;
-use crate::exec::job_channels::GuestChannelInbox;
+use crate::exec::keep_vm::ExecInbox;
 use crate::executor::AbortSignal;
 use crate::executor::timeline::JobTimeline;
 use crate::exit_clock;
@@ -50,6 +50,7 @@ pub(super) struct ActiveJob {
     pub(super) cluster: Option<String>,
     pub(super) log: JobLog,
     guest_channels: Option<mpsc::Sender<GuestChannelCommand>>,
+    keep_vm_running: watch::Sender<bool>,
 }
 
 pub(super) struct JobRegistry {
@@ -71,7 +72,7 @@ pub(super) struct Registered {
     pub(super) timeline: Arc<JobTimeline>,
     pub(super) log: JobLog,
     pub(super) done_tx: mpsc::UnboundedSender<JobDone>,
-    pub(super) guest_channels: GuestChannelInbox,
+    pub(super) exec_inbox: ExecInbox,
 }
 
 impl JobRegistry {
@@ -99,10 +100,12 @@ impl JobRegistry {
         let (abort, abort_rx) = AbortSignal::channel();
         let timeline = JobTimeline::new();
         let (commands, inbox) = mpsc::channel(GUEST_CHANNEL_INBOX);
+        let (keep_vm_running, keep_vm_running_updates) = watch::channel(false);
         self.running.insert(
             job_id,
             ActiveJob {
                 guest_channels: (kind == JobKind::Exec).then_some(commands),
+                keep_vm_running,
                 kind,
                 assignment_id: assignment_id.clone(),
                 abort,
@@ -117,7 +120,20 @@ impl JobRegistry {
             timeline,
             log,
             done_tx: self.done_tx.clone(),
-            guest_channels: inbox,
+            exec_inbox: ExecInbox {
+                channels: inbox,
+                keep_vm_running: keep_vm_running_updates,
+            },
+        }
+    }
+
+    pub(super) fn keep_vm_running(&self, job_id: &str, keep: bool) -> bool {
+        match self.running.get(job_id) {
+            Some(job) if job.kind == JobKind::Exec => {
+                job.keep_vm_running.send_replace(keep);
+                true
+            }
+            _ => false,
         }
     }
 
@@ -359,7 +375,7 @@ impl WorkerJobs {
         &self,
         job_id: String,
         assignment_id: String,
-        run: impl FnOnce(JobUpdater, AbortSignal, GuestChannelInbox) -> BoxFuture<'static, Result<()>>,
+        run: impl FnOnce(JobUpdater, AbortSignal, ExecInbox) -> BoxFuture<'static, Result<()>>,
     ) {
         self.writer.forget_reports(&job_id);
         let log = JobLog::reopen(&self.log_dir, &job_id, JOB_LOG_BUFFER_CAP).unwrap_or_else(|e| {
@@ -377,7 +393,7 @@ impl WorkerJobs {
             registered.log.clone(),
             None,
         );
-        let job = run(updater, registered.abort, registered.guest_channels);
+        let job = run(updater, registered.abort, registered.exec_inbox);
         let (log, done_tx) = (registered.log, registered.done_tx);
         #[expect(
             clippy::disallowed_methods,
@@ -907,15 +923,15 @@ mod tests {
 
         assert!(jobs.open_guest_channel("exec:b", 9, GuestChannelKind::Console));
         assert_eq!(
-            b.guest_channels.try_recv().ok(),
+            b.exec_inbox.channels.try_recv().ok(),
             Some(GuestChannelCommand::Open {
                 channel_id: 9,
                 kind: GuestChannelKind::Console
             })
         );
-        assert!(a.guest_channels.try_recv().is_err());
+        assert!(a.exec_inbox.channels.try_recv().is_err());
         assert!(jobs.route_guest_channel(data(9)));
-        assert_eq!(b.guest_channels.try_recv().ok(), Some(data(9)));
+        assert_eq!(b.exec_inbox.channels.try_recv().ok(), Some(data(9)));
         assert!(!jobs.open_guest_channel("exec:x", 10, GuestChannelKind::Console));
         assert!(!jobs.route_guest_channel(data(10)));
     }
@@ -929,11 +945,11 @@ mod tests {
         jobs.end_session(RUNNING_JOBS_SINCE);
 
         assert_eq!(
-            a.guest_channels.try_recv().ok(),
+            a.exec_inbox.channels.try_recv().ok(),
             Some(GuestChannelCommand::CloseAll)
         );
         assert_eq!(
-            b.guest_channels.try_recv().ok(),
+            b.exec_inbox.channels.try_recv().ok(),
             Some(GuestChannelCommand::CloseAll)
         );
         assert!(!a.abort.is_aborted() && !b.abort.is_aborted());

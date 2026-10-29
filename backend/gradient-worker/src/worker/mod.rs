@@ -257,17 +257,13 @@ fn resume_exec_job(jobs: &WorkerJobs, executor: &JobExecutor, resumed: ResumedJo
     let job_id = resumed.stored.job_id.clone();
     let assignment_id = resumed.stored.assignment_id.clone();
     let executor = executor.clone();
-    jobs.resume_job(
-        job_id,
-        assignment_id,
-        move |mut updater, abort, channels| {
-            Box::pin(async move {
-                executor
-                    .resume_exec_job(resumed, &mut updater, abort, channels)
-                    .await
-            })
-        },
-    );
+    jobs.resume_job(job_id, assignment_id, move |mut updater, abort, inbox| {
+        Box::pin(async move {
+            executor
+                .resume_exec_job(resumed, &mut updater, abort, inbox)
+                .await
+        })
+    });
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -14,8 +14,9 @@ use tracing::{info, warn};
 use super::agent_client::AgentClient;
 use super::channels::GuestChannelMux;
 use super::host::ExecHost;
-use super::job::{finish, unix_now, unless_aborted};
-use super::job_channels::{GuestChannelInbox, JobChannels};
+use super::job::{GuestJob, finish, unix_now, unless_aborted};
+use super::job_channels::JobChannels;
+use super::keep_vm::{ExecInbox, KeepVmRunning};
 use super::state::StoredJob;
 use super::uploads::GuestUploads;
 use super::watchdog::Watchdog;
@@ -53,7 +54,7 @@ pub async fn resume(
     resumed: ResumedJob,
     updater: &mut JobUpdater,
     abort: AbortSignal,
-    inbox: GuestChannelInbox,
+    inbox: ExecInbox,
 ) -> Result<()> {
     let ResumedJob {
         guest:
@@ -85,8 +86,8 @@ async fn follow_again(
     guest: &Guest,
     stored: &StoredJob,
     updater: &mut JobUpdater,
-    mut abort: AbortSignal,
-    inbox: GuestChannelInbox,
+    abort: AbortSignal,
+    inbox: ExecInbox,
 ) -> Result<()> {
     let ready = unless_aborted(
         &abort,
@@ -99,21 +100,16 @@ async fn follow_again(
         .attach(updater.log.accepted())
         .await
         .map_err(BuildError::transient)?;
-    let mut watchdog = resumed_watchdog(stored);
-    let leave_running = host.worker_stop_keeping_guests();
     let mux = GuestChannelMux::new(stored.ssh, stored.ports.clone(), agent.version());
-    let mut channels = JobChannels::new(inbox, mux, guest.dir().to_owned());
-    let mut uploads = GuestUploads::new(guest.dir().join("outputs"));
-    finish(
-        &mut agent,
-        updater,
-        &mut watchdog,
-        &mut abort,
-        &leave_running,
-        &mut channels,
-        &mut uploads,
-    )
-    .await
+    let mut job = GuestJob {
+        watchdog: resumed_watchdog(stored),
+        abort,
+        leave_running: host.worker_stop_keeping_guests(),
+        channels: JobChannels::new(inbox.channels, mux, guest.dir().to_owned()),
+        uploads: GuestUploads::new(guest.dir().join("outputs")),
+        keep_vm_running: KeepVmRunning::resumed(inbox.keep_vm_running, guest.dir()),
+    };
+    finish(&mut agent, updater, &mut job).await
 }
 
 fn resumed_watchdog(stored: &StoredJob) -> Watchdog {

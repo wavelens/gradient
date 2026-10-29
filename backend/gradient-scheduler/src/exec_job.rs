@@ -32,6 +32,7 @@ pub struct PendingExecJob {
     pub spec: ExecSpec,
     pub image_path: Option<String>,
     pub retries_left: u32,
+    pub keep_vm_running: bool,
     pub attempts_done: u32,
     pub last_phase: Option<Phase>,
     pub required_paths: Vec<RequiredPath>,
@@ -143,6 +144,7 @@ impl PendingExecJob {
             timeout_secs: limits.timeout_secs,
             max_silent_secs: limits.max_silent_secs,
             attempt: assignment.number,
+            keep_vm_running: self.keep_vm_running,
         }
     }
 }

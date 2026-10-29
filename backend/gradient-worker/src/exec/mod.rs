@@ -12,6 +12,7 @@ pub mod host;
 pub mod inventory;
 pub mod job;
 pub mod job_channels;
+pub mod keep_vm;
 pub mod reattach;
 pub mod sops;
 pub mod state;

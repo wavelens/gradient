@@ -126,6 +126,22 @@ The single-job rules above don't apply to multi-node jobs. `exec_verdict` can de
 - Late reports of a survivor after a restart change nothing.
 - Only node 0 can activate `gradient/continue.json`, once every node completed.
 
+### Held Guests
+
+`exec_job.keep_vm_running` can hold the guest after the program exit. `ExecJob.keep_vm_running` carries the switch at dispatch, `ServerMessage::ExecKeepVmRunning` later.
+
+| Step | Effect |
+|---|---|
+| `Exited` while held | The worker sent `JobUpdateKind::ProgramExited`. `exec_job.program_exit_code` keeps the code, the job stays `Running` |
+| Release | The worker reported the result of the recorded code |
+| `GuestShutdown` while held | Same as a release |
+| `GuestShutdown` during the program | The worker sent `JobUpdateKind::AbortRequested`. `abort_exec_job` ended the job `Aborted` |
+
+- A switch set after dispatch makes the server send it again through `ProgramStarted`.
+- The worker stores the switch in `guests/<id>/keep-vm-running`. A reattach after a restart reads it from there.
+- A new attempt clears `program_exit_code`. A finished job clears `keep_vm_running`.
+- The worker waits up to 30 s for the abort after `AbortRequested`. A guest lost during that wait never ends the attempt as `Lost`.
+
 ### Job Tokens
 
 | Step | Effect |
@@ -319,8 +335,12 @@ The agent `gradient-guest-agent` can accept the worker on vsock port 7000. Frame
 | `Phase` | `JobPhase`, dropped above 64 KiB |
 | `UploadStart`, `UploadChunk`, `UploadEnd` | One output upload, guest protocol version 3 |
 | `SetupFailed` | `Permanent` |
-| `Exited` | `Permanent` for a non-zero code |
+| `Exited` | `Permanent` for a non-zero code, or a [held guest](#held-guests) |
 | `JobLost` | `Transient`, sent by a restarted agent |
+| `GuestShutdown` | Guest protocol version 6, see [Held Guests](#held-guests) |
+
+- Stops of `gradient-guest-shutdown` trigger `gradient-guest-agent shutdown`. Calls to `POST /shutdown` on the local API of the agent yield `GuestShutdown`.
+- Polkit rules in `nixosModules.guest` allow `poweroff`, `reboot` and `halt` for `gradient`.
 
 ### Job Steps
 

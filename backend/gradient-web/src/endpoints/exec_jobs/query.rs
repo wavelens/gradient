@@ -87,6 +87,8 @@ pub struct ExecJobResponse {
     pub waiting_reason: Option<WaitingReason>,
     pub message: Option<String>,
     pub retries_left: i32,
+    pub keep_vm_running: bool,
+    pub program_exit_code: Option<i32>,
     pub created_at: NaiveDateTime,
     pub started_at: Option<NaiveDateTime>,
     pub finished_at: Option<NaiveDateTime>,
@@ -111,6 +113,8 @@ pub struct ExecJobSummary {
     pub nodes: u32,
     pub labels: Vec<String>,
     pub devices: Vec<DeviceRequest>,
+    pub keep_vm_running: bool,
+    pub program_exit_code: Option<i32>,
     pub started_at: Option<NaiveDateTime>,
     pub last_phase: Option<String>,
 }
@@ -241,6 +245,8 @@ fn response(
         waiting_reason: waiting_reason_of(&job),
         message: job.message,
         retries_left: job.retries_left,
+        keep_vm_running: job.keep_vm_running,
+        program_exit_code: job.program_exit_code,
         created_at: job.created_at,
         started_at: job.started_at,
         finished_at: job.finished_at,
@@ -270,6 +276,8 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
         nodes: spec.nodes,
         labels: spec.labels,
         devices: spec.devices,
+        keep_vm_running: row.job.keep_vm_running,
+        program_exit_code: row.job.program_exit_code,
         started_at: row.job.started_at,
         last_phase: row.last_phase,
     }
@@ -281,7 +289,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
     operation_id = "getExecJob",
     tag = "exec-jobs",
     summary = "Get exec job",
-    description = "Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` tells whether the guest stays up after the program exits, `program_exit_code` holds the exit code of a program whose guest is kept running.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Exec job", body = ExecJobResponse), WebError)
 )]
