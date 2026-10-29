@@ -235,28 +235,23 @@ async fn x05_a_later_evaluation_asks_the_probe_again_about_an_earlier_miss() {
     let case = Case::start(
         shape()
             .evaluation(e1)
-            .evaluation_status(EvaluationStatus::Building)
-            .derivation(A)
-            .walked()
-            .entry_point("pkg.a")
-            .job()
-            .probed()
-            .drv_cached()
-            .output(A_OUT)
-            .depends_on(B)
             .derivation(B)
             .walked()
             .job()
             .probed()
             .drv_cached()
             .output(B_OUT)
-            .build_status(BuildStatus::Queued)
+            .build_status(BuildStatus::Skipped)
             .evaluation(e2),
     )
     .await;
+    let before_e2 = gradient_fixtures::test_date() - chrono::Duration::days(1);
+    case.override_sb(B, |build| build.probed_at = Some(before_e2))
+        .await;
 
     let report = case.walk(case.tasked(e2, walk_of_a(&[B])).await).await;
 
+    assert!(!case.sb(B).await.probed, "after 1: sb(B).probed");
     let missed = case.ids(&[B]).await;
     assert!(
         missed.iter().all(|b| report.to_probe.contains(b)),

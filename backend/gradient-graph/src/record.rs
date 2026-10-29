@@ -89,7 +89,7 @@ WHERE db.derivation = l.derivation
     MARK_PROBED = r#"
 UPDATE derivation_build db
 SET probed = true, probed_at = (now() AT TIME ZONE 'UTC'), updated_at = (now() AT TIME ZONE 'UTC')
-WHERE db.derivation = ANY($1::uuid[]) AND NOT db.probed AND db.wanted
+WHERE db.derivation = ANY($1::uuid[]) AND NOT db.probed
   AND EXISTS (SELECT 1 FROM derivation w WHERE w.id = db.derivation AND w.walked)
   AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)
 RETURNING db.derivation
@@ -104,11 +104,6 @@ RETURNING db.derivation
         params = [DerivationIds(64)],
         tier = Bulk;
 
-    EARLIER_MISSES = "SELECT derivation FROM derivation_build \
-         WHERE derivation = ANY($1::uuid[]) AND wanted AND probed AND NOT cache_available \
-         ORDER BY derivation",
-        params = [DerivationIds(64)];
-
     MARK_IFD = "UPDATE derivation SET ifd = true WHERE hash = ANY($1::text[]) AND NOT ifd",
         params = [DerivationHashes(64)];
 }
@@ -116,6 +111,21 @@ RETURNING db.derivation
 gradient_db::sql_fn! {
     FLIP_CACHE_AVAILABLE = flip_cache_available_sql,
         params = [DerivationIds(64), DerivationIds(64), Texts("dev", 64)];
+
+    FORGET_EARLIER_MISSES = forget_earlier_misses_sql,
+        params = [DerivationIds(64), EvaluationId];
+}
+
+fn forget_earlier_misses_sql() -> String {
+    format!(
+        "UPDATE derivation_build db SET probed = false, probed_at = NULL, \
+         updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE db.derivation = ANY($1::uuid[]) AND db.probed AND NOT db.cache_available \
+           AND db.status IN ({idle}) \
+           AND db.probed_at < (SELECT ev.created_at FROM evaluation ev WHERE ev.id = $2) \
+         RETURNING db.derivation",
+        idle = gradient_db::sql::status::build_in(&[BuildStatus::Created, BuildStatus::Skipped]),
+    )
 }
 
 fn flip_cache_available_sql() -> String {
@@ -800,8 +810,9 @@ impl BatchWriter<'_> {
     }
 
     /// A probe miss stays with the evaluation that asked. An upstream cache can gain the outputs
-    /// before a later evaluation names the same shared build.
-    async fn earlier_misses(
+    /// before a later evaluation names the same shared build and a miss still answered would
+    /// let the need of that evaluation descend below it before the probe asks again.
+    async fn forget_earlier_misses(
         &self,
         ids: &HashMap<String, DerivationId>,
     ) -> Result<Vec<DerivationId>> {
@@ -809,11 +820,12 @@ impl BatchWriter<'_> {
         let mut missed = Vec::new();
         for chunk in named.chunks(gradient_db::IN_CHUNK_SIZE) {
             let chunk: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
+            let evaluation = sea_orm::Value::Uuid(Some(self.evaluation_id.into_inner()));
             let rows = self
                 .db()
-                .query_all_raw(EARLIER_MISSES.bind([chunk.into()]))
+                .query_all_raw(FORGET_EARLIER_MISSES.bind([chunk.into(), evaluation]))
                 .await
-                .context("find the shared builds an earlier probe missed")?;
+                .context("forget the misses an earlier evaluation's probe answered")?;
             missed.extend(
                 rows.iter()
                     .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
@@ -1210,6 +1222,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
             }
             None => (Vec::new(), 0),
         };
+        let forgotten = writer.forget_earlier_misses(ids).await?;
         report.to_probe = writer
             .advance_can_start(
                 &stored,
@@ -1226,7 +1239,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
                 .iter()
                 .filter_map(|h| resolved.by_hash.get(h).copied()),
         );
-        report.to_probe.extend(writer.earlier_misses(ids).await?);
+        report.to_probe.extend(forgotten);
 
         gradient_db::task_board::dep_counts::bump_graph_version(writer.db(), &[evaluation_id])
             .await
