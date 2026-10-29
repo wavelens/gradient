@@ -331,9 +331,9 @@ assert cluster == "2|1", f"expected one completed cluster job with one started a
 
 banner("Phase 7d: a job boots cold with its own CPUs, memory and /work disk")
 sized = wait_status("sized", "completed")
-assert sized["guest"] == {"cpus": 1, "memory_mb": 768, "disk_mb": 256}, json.dumps(sized)
+assert sized["guest"] == {"cpus": 2, "memory_mb": 768, "disk_mb": 256}, json.dumps(sized)
 report = dict(line.split(None, 1) for line in job_log("sized").splitlines() if line.startswith(("cpus ", "memory_kb ", "work_mb ")))
-assert report.get("cpus") == "1", f"sized guest CPUs: {report}"
+assert report.get("cpus") == "2", f"sized guest CPUs: {report}"
 assert 700 <= int(report["memory_kb"]) // 1024 <= 768, f"sized guest memory: {report}"
 assert 200 <= int(report["work_mb"]) <= 256, f"sized guest /work disk: {report}"
 
