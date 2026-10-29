@@ -7,7 +7,6 @@
 @use '@gradient/ui/styles/variables' as *;
 
 .pkg-label { margin: $space-section 0 $spacing-sm; h3 { font-size: $font-size-md; } }
-.pkg-list { display: flex; flex-direction: column; gap: $space-pair; }
 
 .pkg-search {
   box-sizing: border-box;
@@ -43,38 +42,19 @@
 }
 
 .pkg {
-  background-color: var(--gr-surface-control);
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-md;
-  border-left: 4px solid var(--rail-c, var(--idle));
-  padding: $spacing-sm $spacing-md;
-  position: relative;
-  display: grid;
   // Each row is its own grid: only fixed-width columns line up across rows.
   grid-template-columns: 24px minmax(0, 400px) 8rem minmax(0, 360px) 9rem 1fr auto;
-  align-items: center;
-  gap: $spacing-sm;
   animation: pkg-in $transition-base ease backwards;
   content-visibility: auto;
   contain-intrinsic-size: auto 42px;
-
-  &:hover { border-color: var(--gr-text-muted); border-left-color: var(--rail-c, var(--idle)); }
 
   // Skipping off-screen rows also clips whatever leaves the row, so the row under the pointer
   // or the keyboard is rendered in full and its bar tooltip can rise above it.
   &:hover,
   &:focus-within { content-visibility: visible; }
 
-  .si { grid-column: 1; width: 24px; height: 24px; }
-
-  .pkg-name {
-    grid-column: 2;
-    font-weight: 600;
-    font-size: $font-size-sm;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .phase-swatch { grid-column: 1; }
+  .pkg-name { grid-column: 2; }
 
   .pkg-ifd { margin-right: $spacing-xs; }
 
@@ -104,27 +84,7 @@
     gap: $spacing-xs;
   }
 
-  // The link stretches across the row so a middle click opens the log in a
-  // new tab; the kebab stacks above it.
-  .pkg-link {
-    position: absolute;
-    inset: 0;
-    padding: 0;
-    border-radius: inherit;
-    &:hover { background: transparent; }
-    &:focus-visible { outline-offset: -$focus-ring-width; }
-  }
-
-  .kebab {
-    grid-column: 7;
-    position: relative;
-    color: var(--gr-text-muted);
-    padding-left: $spacing-sm;
-    border: none;
-    border-left: 1px solid var(--gr-border-subtle);
-    background: none;
-    cursor: pointer;
-  }
+  .entry-kebab { grid-column: 7; }
 }
 
 @media (max-width: $breakpoint-sm) {
@@ -135,12 +95,12 @@
     grid-template-columns: auto minmax(0, 1fr) auto auto auto;
     gap: $spacing-xs $spacing-sm;
 
-    .si { grid-area: icon; }
+    .phase-swatch { grid-area: icon; }
     .chip-arch { grid-area: arch; justify-self: end; }
     .pkg-deps { grid-area: deps; }
     .pkg-error { grid-area: bar; }
     .pkg-time { grid-area: time; }
-    .kebab { grid-area: kebab; align-self: stretch; }
+    .entry-kebab { grid-area: kebab; align-self: stretch; }
 
     .pkg-name {
       grid-area: name;
@@ -159,23 +119,7 @@
   from { opacity: 0; transform: translateY(6px); }
 }
 
-// One status swatch recipe for both the tab icon and the package row icon.
-.si,
-.s-ico {
-  transition: background $transition-slow, color $transition-slow;
-
-  &[data-phase='success'] { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
-  &[data-phase='failure'] { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); }
-  &[data-phase='queued'],
-  &[data-phase='running'] { color: var(--run); background: color-mix(in srgb, var(--run) 14%, transparent); }
-  &[data-phase='waiting'] { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
-  &[data-phase='aborted'] { color: var(--gr-text-muted); background: var(--gr-surface-hover); }
-}
-
-.si { border-radius: 50%; flex-shrink: 0; }
-
-.eval-card,
-.pkg {
+.eval-card {
   &[data-phase='success'] { --rail-c: var(--ok); }
   &[data-phase='failure'] { --rail-c: var(--err); }
   &[data-phase='queued'],
@@ -187,9 +131,7 @@
 @media (prefers-reduced-motion: reduce) {
   .eval-card,
   .eval-card::before,
-  .eval-card::after,
-  .si,
-  .s-ico { transition: none; }
+  .eval-card::after { transition: none; }
 
   .panel-body,
   .pkg { animation: none; }

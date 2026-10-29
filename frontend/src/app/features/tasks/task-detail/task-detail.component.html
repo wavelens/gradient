@@ -86,7 +86,7 @@
           <div class="eval-card" [attr.data-phase]="evaluationPhase(e.status)" [class.selected]="selected()?.id === e.id" (click)="select(e)"
                (contextmenu)="select(e); evalMenu.openAt($event)">
             <div class="l1">
-              <gr-status-icon class="si" [phase]="evaluationPhase(e.status)" [prioritized]="e.prioritized" size="sm" />
+              <gr-status-icon class="phase-swatch" [phase]="evaluationPhase(e.status)" [prioritized]="e.prioritized" size="sm" />
               <span class="ev-title" [class.mono]="!e.commit_message">{{ evalTitle(e) }}</span>
             </div>
             <div class="l2"><span>{{ triggerLabel(e) }}</span><span>{{ evalDuration(e) }}</span></div>
@@ -104,7 +104,7 @@
         <div class="panel-head">
           <div>
             <div class="panel-title">
-              <gr-status-icon class="s-ico" [phase]="evaluationPhase(sel.status)" [prioritized]="sel.prioritized" />
+              <gr-status-icon class="s-ico phase-swatch" [phase]="evaluationPhase(sel.status)" [prioritized]="sel.prioritized" />
               <div>
                 <div class="title-line">
                   <h2 [title]="evalTitle(sel)">{{ evalTitle(sel) }}</h2>
@@ -171,17 +171,17 @@
         <div class="panel-body">
           @for (group of entryPointGroups(); track group.title) {
             <div class="pkg-label"><h3>{{ group.title }}</h3></div>
-            <div class="pkg-list">
+            <div class="entry-list">
               @for (row of group.rows; track row.key) {
                 @if (row.kind === 'build') {
                   @let ep = row.entry;
                   @let counts = barCounts(ep);
-                  <div class="pkg" [attr.data-phase]="entryPointPhase(ep)" [style.animation-delay.ms]="($index % staggeredRows) * 18"
+                  <div class="entry-row pkg" [attr.data-phase]="entryPointPhase(ep)" [style.animation-delay.ms]="($index % staggeredRows) * 18"
                        (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
-                    <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }"
+                    <a class="entry-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }"
                        [title]="ep.eval + ' - ' + ep.derivation_path" [attr.aria-label]="row.label"></a>
-                    <gr-status-icon class="si" [phase]="entryPointPhase(ep)" [prioritized]="ep.prioritized" size="sm" />
-                    <span class="pkg-name">@if (ep.ifd) { <gr-badge class="pkg-ifd" severity="info">IFD</gr-badge> }{{ row.label }}</span>
+                    <gr-status-icon class="phase-swatch" [phase]="entryPointPhase(ep)" [prioritized]="ep.prioritized" size="sm" />
+                    <span class="pkg-name entry-name">@if (ep.ifd) { <gr-badge class="pkg-ifd" severity="info">IFD</gr-badge> }{{ row.label }}</span>
                     <span class="chip-arch mono">{{ ep.architecture }}</span>
                     <gr-segmented-bar class="pkg-bar" [counts]="counts" />
                     @let depTally = buildTally(counts);
@@ -190,16 +190,16 @@
                       {{ pkgDuration(ep) }}
                       @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }
                     </span>
-                    <button type="button" class="kebab"
+                    <button type="button" class="entry-kebab"
                             (click)="openPkgMenu($event, ep, sel.id, pkgMenu)"
                             aria-label="Package actions"><gr-icon name="more_vert" /></button>
                   </div>
                 } @else {
-                  <div class="pkg" data-phase="failure" [style.animation-delay.ms]="($index % staggeredRows) * 18">
-                    <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }"
+                  <div class="entry-row pkg" data-phase="failure" [style.animation-delay.ms]="($index % staggeredRows) * 18">
+                    <a class="entry-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }"
                        [title]="row.failure.eval + ' - ' + row.failure.message" [attr.aria-label]="row.label + ', failed to evaluate'"></a>
-                    <gr-status-icon class="si" [phase]="'failure'" size="sm" />
-                    <span class="pkg-name">{{ row.label }}</span>
+                    <gr-status-icon class="phase-swatch" [phase]="'failure'" size="sm" />
+                    <span class="pkg-name entry-name">{{ row.label }}</span>
                     <span class="pkg-error">Failed to evaluate</span>
                   </div>
                 }
@@ -210,10 +210,10 @@
           }
           @if (entryPoints().length > 0 || matchingFailedAttributes().length > 0) {
             @if (entryPoints().length < entryPointsTotal()) {
-              <div class="pkg pkg-more" aria-busy="true" [attr.aria-label]="'Loading packages, ' + entryPoints().length + ' of ' + entryPointsTotal()"
+              <div class="entry-row pkg pkg-more" aria-busy="true" [attr.aria-label]="'Loading packages, ' + entryPoints().length + ' of ' + entryPointsTotal()"
                    (grInView)="loadMoreEntryPoints()" [grInViewKey]="entryPoints().length" grInViewMargin="100%">
-                <gr-skeleton class="si" />
-                <gr-skeleton class="pkg-name" />
+                <gr-skeleton class="phase-swatch" />
+                <gr-skeleton class="pkg-name entry-name" />
                 <gr-skeleton class="pkg-bar" height="7px" />
                 <gr-skeleton class="pkg-deps" width="5rem" />
               </div>
@@ -223,11 +223,11 @@
               [message]="'No package of this evaluation contains &quot;' + searchTerm() + '&quot;.'" />
           } @else if (!entryPointsLoading() && isRunning(sel.status)) {
             @if (selectedFetchRows().length) {
-              <div class="pkg-list">
+              <div class="entry-list">
                 @for (row of selectedFetchRows(); track row.name) {
-                  <div class="pkg" [attr.data-phase]="inputFetchPhase(row.state)" [style.animation-delay.ms]="$index * 18">
-                    <gr-status-icon class="si" [phase]="inputFetchPhase(row.state)" size="sm" />
-                    <span class="pkg-name mono">{{ row.name }}</span>
+                  <div class="entry-row pkg" [attr.data-phase]="inputFetchPhase(row.state)" [style.animation-delay.ms]="$index * 18">
+                    <gr-status-icon class="phase-swatch" [phase]="inputFetchPhase(row.state)" size="sm" />
+                    <span class="pkg-name entry-name mono">{{ row.name }}</span>
                     <gr-segmented-bar class="pkg-bar" [segments]="row.segments"
                                       role="progressbar" aria-valuemin="0" aria-valuemax="100"
                                       [attr.aria-label]="row.name" [attr.aria-valuenow]="row.percent"

@@ -1,0 +1,80 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+.entry-list { display: flex; flex-direction: column; gap: $space-pair; }
+
+.entry-row {
+  --entry-stripe: var(--gr-border-subtle);
+  position: relative;
+  display: grid;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid var(--gr-border-subtle);
+  border-left: 4px solid var(--entry-stripe);
+  border-radius: $border-radius-md;
+  background-color: var(--gr-surface-control);
+
+  &:hover { border-color: var(--gr-text-muted); border-left-color: var(--entry-stripe); }
+
+  &[data-phase='success'] { --entry-stripe: var(--gr-indicator-success); }
+  &[data-phase='failure'] { --entry-stripe: var(--gr-indicator-danger); }
+  &[data-phase='queued'],
+  &[data-phase='running'] { --entry-stripe: var(--gr-indicator-info); }
+  &[data-phase='waiting'] { --entry-stripe: var(--gr-status-warning); }
+
+  .phase-swatch { width: 24px; height: 24px; }
+}
+
+.entry-name {
+  overflow: hidden;
+  font-size: $font-size-sm;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// The link stretches across the row so a middle click opens it in a new tab; the kebab stacks above it.
+.entry-link {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border-radius: inherit;
+
+  &:hover { background: transparent; }
+  &:focus-visible { outline-offset: -$focus-ring-width; }
+}
+
+.entry-kebab {
+  position: relative;
+  padding-left: $spacing-sm;
+  border: none;
+  border-left: 1px solid var(--gr-border-subtle);
+  background: none;
+  color: var(--gr-text-muted);
+  cursor: pointer;
+
+  &:hover { color: var(--gr-text-primary); }
+}
+
+.phase-swatch {
+  flex-shrink: 0;
+  border-radius: 50%;
+  transition: background $transition-slow, color $transition-slow;
+
+  &[data-phase='success'] { color: var(--gr-indicator-success); background: color-mix(in srgb, var(--gr-indicator-success) 14%, transparent); }
+  &[data-phase='failure'] { color: var(--gr-indicator-danger); background: color-mix(in srgb, var(--gr-indicator-danger) 14%, transparent); }
+  &[data-phase='queued'],
+  &[data-phase='running'] { color: var(--gr-indicator-info); background: color-mix(in srgb, var(--gr-indicator-info) 14%, transparent); }
+  &[data-phase='waiting'] { color: var(--gr-status-warning); background: color-mix(in srgb, var(--gr-status-warning) 14%, transparent); }
+  &[data-phase='aborted'] { color: var(--gr-text-muted); background: var(--gr-surface-hover); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phase-swatch { transition: none; }
+}
