@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -39,11 +39,52 @@ struct WarmGuest {
     hold: BudgetHold,
 }
 
+struct WarmBootTicket {
+    id: u64,
+    stop: CancellationToken,
+}
+
+struct WarmBoots<H> {
+    next: u64,
+    reserved: BTreeMap<u64, (CancellationToken, H)>,
+}
+
+impl<H> WarmBoots<H> {
+    fn new() -> Self {
+        Self {
+            next: 0,
+            reserved: BTreeMap::new(),
+        }
+    }
+
+    fn reserve(&mut self, hold: H, pool_stop: &CancellationToken) -> WarmBootTicket {
+        let (id, stop) = (self.next, pool_stop.child_token());
+        self.next += 1;
+        self.reserved.insert(id, (stop.clone(), hold));
+        WarmBootTicket { id, stop }
+    }
+
+    fn finish(&mut self, id: u64) -> Option<H> {
+        self.reserved.remove(&id).map(|(_, hold)| hold)
+    }
+
+    fn holds(&self) -> impl Iterator<Item = &H> {
+        self.reserved.values().map(|(_, hold)| hold)
+    }
+
+    fn steal(&mut self) -> Option<H> {
+        let (stop, hold) = self.reserved.pop_last()?.1;
+        stop.cancel();
+        Some(hold)
+    }
+}
+
 pub struct GuestPool {
     config: VmConfig,
     units: GuestUnits,
     budget: GuestBudget,
     slots: Mutex<Slots<WarmGuest>>,
+    warm_boots: Mutex<WarmBoots<BudgetHold>>,
     upcoming_exec_jobs: AtomicU32,
     draining: AtomicBool,
     reserved_cids: Mutex<BTreeSet<u32>>,
@@ -59,6 +100,7 @@ impl GuestPool {
             units,
             budget,
             slots: Mutex::new(Slots::new()),
+            warm_boots: Mutex::new(WarmBoots::new()),
             upcoming_exec_jobs: AtomicU32::new(0),
             draining: AtomicBool::new(false),
             reserved_cids: Mutex::default(),
@@ -81,11 +123,12 @@ impl GuestPool {
     }
 
     pub fn capacity(&self) -> GuestCapacity {
-        let warm: Vec<GuestSize> = lock(&self.slots)
+        let mut warm: Vec<GuestSize> = lock(&self.slots)
             .warm
             .iter()
             .map(|warm| warm.hold.size())
             .collect();
+        warm.extend(lock(&self.warm_boots).holds().map(BudgetHold::size));
         with_warm_guests_free(self.budget.capacity(), &warm)
     }
 
@@ -141,11 +184,16 @@ impl GuestPool {
                 return Ok(done);
             }
             let evicted = lock(&self.slots).take(|_| true);
-            let Some(warm) = evicted else {
+            if let Some(warm) = evicted {
+                info!(guest = %warm.guest.id(), "stopping a warm guest to make room for a job");
+                self.teardown_warm(warm).await;
+                continue;
+            }
+            let Some(stolen) = lock(&self.warm_boots).steal() else {
                 return Err(GuestBootError(NO_GUEST_BUDGET.to_owned()));
             };
-            info!(guest = %warm.guest.id(), "stopping a warm guest to make room for a job of another size");
-            self.teardown_warm(warm).await;
+            info!("stopping a warm guest boot to make room for a job");
+            drop(stolen);
         }
     }
 
@@ -178,9 +226,10 @@ impl GuestPool {
         };
         lock(&self.slots).cancel_boots(wanted - count(holds.len()));
         for hold in holds {
+            let boot = lock(&self.warm_boots).reserve(hold, &self.stopping);
             let pool = Arc::clone(self);
             self.tasks
-                .spawn(async move { pool.boot_into_pool(hold).await });
+                .spawn(async move { pool.boot_into_pool(boot).await });
         }
     }
 
@@ -320,8 +369,8 @@ impl GuestPool {
         self.running(guest, hold, size, job_id)
     }
 
-    async fn boot_one(&self) -> Result<Guest, GuestBootError> {
-        self.boot_image(&self.worker_image()?).await
+    async fn boot_warm(&self, stop: &CancellationToken) -> Result<Guest, GuestBootError> {
+        self.boot_image_until(&self.worker_image()?, stop).await
     }
 
     fn worker_image(&self) -> Result<GuestImage, GuestBootError> {
@@ -333,32 +382,55 @@ impl GuestPool {
     }
 
     async fn boot_image(&self, image: &GuestImage) -> Result<Guest, GuestBootError> {
+        self.boot_image_until(image, &self.stopping).await
+    }
+
+    async fn boot_image_until(
+        &self,
+        image: &GuestImage,
+        stop: &CancellationToken,
+    ) -> Result<Guest, GuestBootError> {
         let cid = self.next_cid();
-        let guest = Guest::boot(&self.units, &self.config, image, cid, &self.stopping).await;
+        let guest = Guest::boot(&self.units, &self.config, image, cid, stop).await;
         lock(&self.reserved_cids).remove(&cid);
         guest
     }
 
-    async fn boot_into_pool(self: Arc<Self>, hold: BudgetHold) {
+    async fn boot_into_pool(self: Arc<Self>, boot: WarmBootTicket) {
         loop {
-            match self.boot_one().await {
-                Ok(guest) => {
-                    let (target, draining) = (self.target(), self.draining());
-                    let surplus = self.park(WarmGuest { guest, hold }, |slots, warm| {
-                        slots.finish_boot(warm, target, draining)
-                    });
-                    return self.stop_surplus(surplus).await;
+            match self.boot_warm(&boot.stop).await {
+                Ok(guest) => return self.park_warm_boot(&boot, guest).await,
+                Err(e) if !boot.stop.is_cancelled() => {
+                    warn!(error = %e, "warm guest boot failed, retrying in 30s");
                 }
-                Err(e) => warn!(error = %e, "warm guest boot failed, retrying in 30s"),
+                Err(_) => {}
             }
             tokio::select! {
                 () = tokio::time::sleep(BOOT_RETRY) => {}
-                () = self.stopping.cancelled() => {}
+                () = boot.stop.cancelled() => {}
             }
-            if !lock(&self.slots).retry_boot(self.target(), self.draining()) {
+            let retry = !boot.stop.is_cancelled()
+                && lock(&self.slots).retry_boot(self.target(), self.draining());
+            if !retry {
+                if boot.stop.is_cancelled() {
+                    lock(&self.slots).cancel_boots(1);
+                }
+                drop(lock(&self.warm_boots).finish(boot.id));
                 return;
             }
         }
+    }
+
+    async fn park_warm_boot(&self, boot: &WarmBootTicket, guest: Guest) {
+        let Some(hold) = lock(&self.warm_boots).finish(boot.id) else {
+            lock(&self.slots).cancel_boots(1);
+            return self.teardown(guest).await;
+        };
+        let (target, draining) = (self.target(), self.draining());
+        let surplus = self.park(WarmGuest { guest, hold }, |slots, warm| {
+            slots.finish_boot(warm, target, draining)
+        });
+        self.stop_surplus(surplus).await;
     }
 
     async fn keep_or_stop(&self, guest: Guest, mut hold: BudgetHold) {
@@ -581,6 +653,33 @@ mod tests {
             "the job adds its disk to the warm guest it takes"
         );
         assert!(warm_boot_holds(&budget, image, 1).is_empty());
+    }
+
+    #[test]
+    fn a_job_takes_the_budget_of_a_booting_warm_guest() {
+        let warm_size = size(2, 500, 0);
+        let budget = GuestBudget::new(size(2, 500, 10_240));
+        let pool_stop = CancellationToken::new();
+        let mut boots = WarmBoots::new();
+        let boot = boots.reserve(budget.hold(warm_size).unwrap(), &pool_stop);
+        assert_eq!(
+            with_warm_guests_free(
+                budget.capacity(),
+                &boots.holds().map(BudgetHold::size).collect::<Vec<_>>()
+            )
+            .cpus
+            .free,
+            2,
+            "a booting warm guest counts as free"
+        );
+        assert!(budget.hold(GuestSize::default_request()).is_none());
+
+        drop(boots.steal().expect("the boot holds budget"));
+
+        assert!(boot.stop.is_cancelled(), "the boot is stopped");
+        assert!(budget.hold(GuestSize::default_request()).is_some());
+        assert!(boots.finish(boot.id).is_none(), "the boot parks no guest");
+        assert!(!pool_stop.is_cancelled());
     }
 
     #[test]
