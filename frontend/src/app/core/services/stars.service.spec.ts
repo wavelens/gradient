@@ -83,6 +83,22 @@ describe('StarsService', () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  it('announces a star change only once the server took it', () => {
+    const put = vi.fn().mockReturnValueOnce(throwError(() => new Error('down'))).mockReturnValue(of(true));
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: ApiService, useValue: { put } },
+        { provide: AuthService, useValue: { initialized$: of(true), isAuthenticated: () => true } },
+      ],
+    });
+    const service = TestBed.inject(StarsService);
+    const changed: unknown[] = [];
+    service.changed$.subscribe((t) => changed.push(t));
+    service.set({ kind: 'cache', cache: 'main' }, true).subscribe({ error: () => undefined });
+    service.set({ kind: 'cache', cache: 'main' }, true).subscribe();
+    expect(changed).toEqual([{ kind: 'cache', cache: 'main' }]);
+  });
+
   it('reads a failed list as unstarred', () => {
     const { service } = setup(true, throwError(() => new Error('down')));
     expect(first(service.starred({ kind: 'project', project: 'acme' }))).toEqual([false]);

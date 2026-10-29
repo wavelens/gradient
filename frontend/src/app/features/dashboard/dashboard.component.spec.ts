@@ -18,7 +18,7 @@ function render(rail: RailStub | Observable<RailStub>) {
     imports: [DashboardComponent],
     providers: [
       provideRouter([]),
-      { provide: StarsService, useValue: { set: () => of(true) } },
+      { provide: StarsService, useValue: { set: () => of(true), changed$: NEVER } },
       { provide: DashboardService, useValue: {
         rail: () => (rail instanceof Observable ? rail : of(rail)),
         stats: () => of({ cpu_time_ms: 0, cpu_time_ms_7d: 0, builds_completed: 0, cache_size_bytes: 0, workers: { online: 0, busy_pct: 0 }, queue_wait_p50_ms: 0 }),
