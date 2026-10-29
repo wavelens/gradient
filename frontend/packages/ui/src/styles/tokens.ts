@@ -165,7 +165,7 @@ export const LIGHT_ROLES: Record<string, string> = {
   '--gr-status-info-text': '--gr-blue-900',
   '--gr-indicator-success': '--gr-sage-500',
   '--gr-indicator-danger': '--gr-red-300',
-  '--gr-indicator-info': '--gr-cyan-500',
+  '--gr-indicator-info': '--gr-blue-600',
   '--gr-graph-success': '--gr-green-600',
   '--gr-graph-danger': '--gr-red-600',
   '--gr-graph-warning': '--gr-orange-500',
