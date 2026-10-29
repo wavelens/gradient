@@ -13947,6 +13947,33 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SeriesPoint'
+    BoardExecJob:
+      type: object
+      required:
+      - id
+      - project
+      - entry_point
+      - task
+      - node_index
+      - nodes
+      properties:
+        id:
+          type: string
+          format: uuid
+        project:
+          type: string
+        entry_point:
+          type: string
+        task:
+          type: string
+        node_index:
+          type: integer
+          format: int32
+          minimum: 0
+        nodes:
+          type: integer
+          format: int32
+          minimum: 0
     BoardFleetPoint:
       type: object
       required:
@@ -15221,6 +15248,10 @@ components:
           type:
           - string
           - 'null'
+        exec_job:
+          oneOf:
+          - $ref: '#/components/schemas/BoardExecJob'
+          - type: 'null'
         score:
           type: number
           format: double
@@ -15552,6 +15583,14 @@ components:
             oneOf:
             - $ref: '#/components/schemas/JobEvaluationView'
             - type: 'null'
+          exec_job:
+            oneOf:
+            - $ref: '#/components/schemas/BoardExecJob'
+            - type: 'null'
+          exec_attempt:
+            oneOf:
+            - $ref: '#/components/schemas/ExecJobAttemptView'
+            - type: 'null'
           pname:
             type:
             - string
@@ -15613,6 +15652,10 @@ components:
           type:
           - string
           - 'null'
+        exec_job:
+          oneOf:
+          - $ref: '#/components/schemas/BoardExecJob'
+          - type: 'null'
     DispatchedJobsResponse:
       type: object
       required:
@@ -18744,6 +18787,10 @@ components:
           type:
           - string
           - 'null'
+        exec_job:
+          oneOf:
+          - $ref: '#/components/schemas/BoardExecJob'
+          - type: 'null'
     PendingJobsResponse:
       type: object
       required:

@@ -5,8 +5,10 @@
  */
 
 use super::board_subjects::{
-    BoardProject, JobEvaluationView, JobSubjects, WorkerNames, board_projects, job_evaluation,
+    BoardExecJob, BoardProject, JobEvaluationView, JobSubject, JobSubjects, WorkerNames,
+    board_projects, job_evaluation,
 };
+use super::exec_jobs::query::{ExecJobAttemptView, attempt_view};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult, require_superuser};
@@ -29,6 +31,7 @@ use gradient_db::metrics::resource_usage::{
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::{build_attempt, dispatched_job, dispatched_job_phase, flake_output_node};
 use gradient_scheduler::Scheduler;
+use gradient_scheduler::jobs::PendingJobInfo;
 use gradient_types::events::{Envelope, Event, EventRx, names, worker};
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::*;
@@ -51,15 +54,16 @@ pub struct DispatchedJobSummary {
     pub build_id: Option<Uuid>,
     pub evaluation_id: Uuid,
     pub subject: Option<String>,
+    pub exec_job: Option<BoardExecJob>,
 }
 
 impl DispatchedJobSummary {
     fn new(
         job: dispatched_job::Model,
         worker_name: Option<String>,
-        shared_build: Option<DerivationBuildId>,
-        subject: Option<String>,
+        subjects: &JobSubjects,
     ) -> Self {
+        let subject = subject_of(&job);
         Self {
             id: job.id.into(),
             kind: i16::from(job.kind),
@@ -68,11 +72,29 @@ impl DispatchedJobSummary {
             worker_name,
             score: job.score,
             dispatched_at: job.dispatched_at.and_utc().to_rfc3339(),
-            build_id: shared_build.map(Into::into),
+            build_id: subject.and_then(JobSubject::shared_build).map(Into::into),
             evaluation_id: job.evaluation_id.into(),
-            subject,
+            subject: subjects.subject(subject),
+            exec_job: subjects.exec_job(subject),
         }
     }
+}
+
+fn subject_of(job: &dispatched_job::Model) -> Option<JobSubject> {
+    JobSubject::of_key(job.kind, job.job_id.as_deref(), job.evaluation_id)
+}
+
+fn pending_subject(job: &PendingJobInfo) -> JobSubject {
+    match (job.derivation_build, job.exec_job) {
+        (Some(shared_build), _) => JobSubject::Build(shared_build),
+        (None, Some(exec_job)) => JobSubject::Exec(exec_job),
+        (None, None) => JobSubject::Evaluation(job.evaluation_id),
+    }
+}
+
+fn candidate_subject(kind: i16, job_key: &str, evaluation: EvaluationId) -> Option<JobSubject> {
+    let kind = DispatchedJobKind::try_from(kind).ok()?;
+    JobSubject::of_key(kind, Some(job_key), evaluation)
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -90,6 +112,7 @@ pub struct PendingJobSummary {
     pub queued_at: String,
     pub dependency_count: u32,
     pub subject: Option<String>,
+    pub exec_job: Option<BoardExecJob>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -119,26 +142,22 @@ pub async fn get_pending_jobs(
         .into_iter()
         .partition(|j| scope.allows(&Uuid::from(j.project)));
     let other_pending = hidden.len() as u64;
-
-    let shared_builds: Vec<DerivationBuildId> =
-        snapshot.iter().filter_map(|j| j.derivation_build).collect();
-    let evaluations: Vec<EvaluationId> = snapshot
-        .iter()
-        .filter(|j| j.derivation_build.is_none())
-        .map(|j| j.evaluation_id)
-        .collect();
-    let subjects = JobSubjects::load(&state.web_db, &shared_builds, &evaluations).await?;
+    let subjects = JobSubjects::load(&state.web_db, snapshot.iter().map(pending_subject)).await?;
 
     let jobs = snapshot
         .into_iter()
-        .map(|j| PendingJobSummary {
-            kind: i16::from(j.kind),
-            project: j.project.into(),
-            evaluation_id: j.evaluation_id.into(),
-            build_id: j.derivation_build.map(Into::into),
-            queued_at: j.queued_at.and_utc().to_rfc3339(),
-            dependency_count: j.dependency_count,
-            subject: subjects.subject(j.derivation_build, j.evaluation_id),
+        .map(|j| {
+            let subject = Some(pending_subject(&j));
+            PendingJobSummary {
+                kind: i16::from(j.kind),
+                project: j.project.into(),
+                evaluation_id: j.evaluation_id.into(),
+                build_id: j.derivation_build.map(Into::into),
+                queued_at: j.queued_at.and_utc().to_rfc3339(),
+                dependency_count: j.dependency_count,
+                subject: subjects.subject(subject),
+                exec_job: subjects.exec_job(subject),
+            }
         })
         .collect();
 
@@ -169,14 +188,7 @@ pub async fn get_dispatched_jobs(
         .partition(|j| scope.allows(&Uuid::from(j.project)));
     let other_running = other_running.len() as u64;
 
-    let shared_builds: Vec<DerivationBuildId> =
-        visible.iter().filter_map(shared_build_of).collect();
-    let evaluations: Vec<EvaluationId> = visible
-        .iter()
-        .filter(|j| j.kind == DispatchedJobKind::Eval)
-        .map(|j| j.evaluation_id)
-        .collect();
-    let subjects = JobSubjects::load(&state.web_db, &shared_builds, &evaluations).await?;
+    let subjects = JobSubjects::load(&state.web_db, visible.iter().filter_map(subject_of)).await?;
     let worker_names = WorkerNames::load(
         &state.web_db,
         &scope,
@@ -187,11 +199,8 @@ pub async fn get_dispatched_jobs(
     let jobs = visible
         .into_iter()
         .map(|j| {
-            let shared_build = shared_build_of(&j);
-            let subject = subjects.subject(shared_build, j.evaluation_id);
             let worker_name = worker_names.name(&j.worker_id);
-
-            DispatchedJobSummary::new(j, worker_name, shared_build, subject)
+            DispatchedJobSummary::new(j, worker_name, &subjects)
         })
         .collect();
 
@@ -210,6 +219,7 @@ pub struct DecisionCandidateView {
     pub build_id: Option<Uuid>,
     pub evaluation_id: Uuid,
     pub subject: Option<String>,
+    pub exec_job: Option<BoardExecJob>,
     pub score: f64,
     pub won: bool,
 }
@@ -241,16 +251,14 @@ pub async fn get_assign_decisions(
     require_superuser(&user)?;
 
     let decisions = scheduler.recent_decisions().await;
-    let candidates = decisions.iter().flat_map(|d| &d.candidates);
-    let shared_builds: Vec<DerivationBuildId> = candidates
-        .clone()
-        .filter_map(|c| c.derivation_build)
-        .collect();
-    let evaluations: Vec<EvaluationId> = candidates
-        .filter(|c| c.derivation_build.is_none())
-        .map(|c| c.evaluation_id)
-        .collect();
-    let subjects = JobSubjects::load(&state.web_db, &shared_builds, &evaluations).await?;
+    let subjects = JobSubjects::load(
+        &state.web_db,
+        decisions
+            .iter()
+            .flat_map(|d| &d.candidates)
+            .filter_map(|c| candidate_subject(c.kind, &c.job_id, c.evaluation_id)),
+    )
+    .await?;
     let worker_names = WorkerNames::load(
         &state.web_db,
         &MetricsScope::All,
@@ -269,16 +277,20 @@ pub async fn get_assign_decisions(
             candidates: d
                 .candidates
                 .into_iter()
-                .map(|c| DecisionCandidateView {
-                    id: c.id.into(),
-                    job_id: c.job_id,
-                    kind: c.kind,
-                    project: c.project.into(),
-                    build_id: c.derivation_build.map(Into::into),
-                    evaluation_id: c.evaluation_id.into(),
-                    subject: subjects.subject(c.derivation_build, c.evaluation_id),
-                    score: c.score,
-                    won: c.won,
+                .map(|c| {
+                    let subject = candidate_subject(c.kind, &c.job_id, c.evaluation_id);
+                    DecisionCandidateView {
+                        id: c.id.into(),
+                        job_id: c.job_id,
+                        kind: c.kind,
+                        project: c.project.into(),
+                        build_id: c.derivation_build.map(Into::into),
+                        evaluation_id: c.evaluation_id.into(),
+                        subject: subjects.subject(subject),
+                        exec_job: subjects.exec_job(subject),
+                        score: c.score,
+                        won: c.won,
+                    }
                 })
                 .collect(),
         })
@@ -486,6 +498,8 @@ pub struct DispatchedJobDetail {
     pub derivations: Vec<JobDerivationView>,
     pub evaluation_id: Uuid,
     pub evaluation: Option<JobEvaluationView>,
+    pub exec_job: Option<BoardExecJob>,
+    pub exec_attempt: Option<ExecJobAttemptView>,
     pub pname: Option<String>,
     pub score_breakdown: serde_json::Value,
     pub worker_context: serde_json::Value,
@@ -537,6 +551,11 @@ pub async fn get_dispatched_job(
             }
             None => None,
         };
+        let exec_job = exec_job_of(
+            &state.web_db,
+            candidate_subject(c.kind, &c.job_id, c.evaluation_id),
+        )
+        .await?;
 
         return Ok(ok_json(DispatchedJobDetail {
             id: c.id.into(),
@@ -565,6 +584,8 @@ pub async fn get_dispatched_job(
                 c.evaluation_id,
             )
             .await?,
+            exec_job,
+            exec_attempt: None,
             pname: c.pname,
             score_breakdown: c.score_breakdown,
             worker_context: c.worker_context,
@@ -606,6 +627,14 @@ pub async fn get_dispatched_job(
     };
     let derivations = job_derivations(&state.web_db, j.evaluation_id, &j.job_context).await;
     let phases = job_phases(&state.web_db, j.id).await;
+    let exec_job = exec_job_of(&state.web_db, subject_of(&j)).await?;
+    let exec_attempt = match exec_job {
+        Some(_) => gradient_db::exec_jobs::labels::attempt_of_assignment(&state.web_db, j.id)
+            .await?
+            .as_ref()
+            .map(attempt_view),
+        None => None,
+    };
 
     let pname = match shared_build_id {
         Some(aid) => {
@@ -666,6 +695,8 @@ pub async fn get_dispatched_job(
         evaluation_id: j.evaluation_id.into(),
         evaluation: eval_job_evaluation(&state.web_db, &mapper, i16::from(j.kind), j.evaluation_id)
             .await?,
+        exec_job,
+        exec_attempt,
         pname,
         score_breakdown: j.score_breakdown,
         worker_context: j.worker_context,
@@ -681,6 +712,14 @@ fn shared_build_of(job: &dispatched_job::Model) -> Option<DerivationBuildId> {
     job.job_id
         .as_deref()
         .and_then(gradient_db::scheduling::assignment_record::shared_build_of_key)
+}
+
+async fn exec_job_of<C: ConnectionTrait>(
+    db: &C,
+    subject: Option<JobSubject>,
+) -> Result<Option<BoardExecJob>, sea_orm::DbErr> {
+    let exec = subject.filter(|s| matches!(s, JobSubject::Exec(_)));
+    Ok(JobSubjects::load(db, exec).await?.exec_job(exec))
 }
 
 async fn job_names<C: ConnectionTrait>(
@@ -1691,6 +1730,49 @@ mod tests {
                 "derivations": [{ "drv_path": format!("{original}-a.drv"), "name": "a" }]
             })
         );
+    }
+
+    #[test]
+    fn pending_jobs_are_named_by_their_build_exec_job_or_evaluation() {
+        let pending = |derivation_build, exec_job| PendingJobInfo {
+            kind: DispatchedJobKind::Exec,
+            evaluation_id: EvaluationId::nil(),
+            derivation_build,
+            exec_job,
+            project: ProjectId::now_v7(),
+            queued_at: now(),
+            dependency_count: 0,
+            pname: None,
+        };
+        let (shared_build, exec_job) = (DerivationBuildId::now_v7(), ExecJobId::now_v7());
+
+        assert_eq!(
+            pending_subject(&pending(Some(shared_build), None)),
+            JobSubject::Build(shared_build)
+        );
+        assert_eq!(
+            pending_subject(&pending(None, Some(exec_job))),
+            JobSubject::Exec(exec_job)
+        );
+        assert_eq!(
+            pending_subject(&pending(None, None)),
+            JobSubject::Evaluation(EvaluationId::nil())
+        );
+    }
+
+    #[test]
+    fn a_decision_candidate_of_an_exec_job_is_named_by_its_key() {
+        let exec_job = ExecJobId::now_v7();
+
+        assert_eq!(
+            candidate_subject(
+                i16::from(DispatchedJobKind::Exec),
+                &format!("exec:{exec_job}"),
+                EvaluationId::nil()
+            ),
+            Some(JobSubject::Exec(exec_job))
+        );
+        assert_eq!(candidate_subject(99, "exec:x", EvaluationId::nil()), None);
     }
 
     #[test]

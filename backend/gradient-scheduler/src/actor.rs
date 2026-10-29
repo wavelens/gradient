@@ -730,6 +730,7 @@ impl SchedulerCore {
             .collect();
         self.tracker.activate_members(attempt, active);
         for s in &seats {
+            self.tracker.record_placement(&s.worker, &s.record, &s.job);
             let need = s.job.ram_need_with(s.record.choice, false);
             self.occupy(&s.worker, &s.key, s.job.job_kind(), need);
             if let gradient_wire::types::Job::Exec(exec) = &s.assigned {

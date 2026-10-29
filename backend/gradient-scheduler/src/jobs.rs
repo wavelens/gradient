@@ -590,6 +590,7 @@ pub struct PendingJobInfo {
     pub kind: DispatchedJobKind,
     pub evaluation_id: EvaluationId,
     pub derivation_build: Option<DerivationBuildId>,
+    pub exec_job: Option<ExecJobId>,
     pub project: ProjectId,
     pub queued_at: chrono::NaiveDateTime,
     pub dependency_count: u32,
@@ -637,6 +638,7 @@ pub struct AssignDecision {
 #[derive(Debug, Clone)]
 pub struct CandidateDetail {
     pub id: DispatchedJobId,
+    pub job_id: String,
     pub kind: i16,
     pub project: ProjectId,
     pub derivation_build: Option<DerivationBuildId>,
@@ -846,6 +848,7 @@ impl JobTracker {
             if let Some(c) = d.candidates.iter().find(|c| c.id == id) {
                 return Some(CandidateDetail {
                     id: c.id,
+                    job_id: c.job_id.clone(),
                     kind: c.kind,
                     project: c.project,
                     derivation_build: c.derivation_build,
@@ -1247,6 +1250,36 @@ impl JobTracker {
             worker_context: worker_context.clone(),
             instance_context: instance_context.clone(),
             candidates,
+        });
+    }
+
+    pub fn record_placement(
+        &mut self,
+        worker_id: &str,
+        record: &AssignmentRecord,
+        job: &PendingJob,
+    ) {
+        self.push_decision(AssignDecision {
+            at: gradient_types::now(),
+            worker_id: worker_id.to_owned(),
+            kind: i16::from(record.kind),
+            winner: Some(record.job_id.clone()),
+            worker_context: record.worker_context.clone(),
+            instance_context: record.instance_context.clone(),
+            candidates: vec![DecisionCandidate {
+                id: DispatchedJobId::now_v7(),
+                job_id: record.job_id.clone(),
+                kind: i16::from(record.kind),
+                project: record.project,
+                derivation_build: record.derivation_build,
+                evaluation_id: record.evaluation_id,
+                pname: job.pname(),
+                score: record.score,
+                won: true,
+                queued_at: record.queued_at,
+                score_breakdown: record.score_breakdown.clone(),
+                job_context: record.job_context.clone(),
+            }],
         });
     }
 
@@ -1841,27 +1874,22 @@ impl JobTracker {
     }
 
     pub fn pending_snapshot(&self) -> Vec<PendingJobInfo> {
+        let members = self.clusters.jobs().map(|(_, job)| job);
         self.pending
             .values()
-            .map(|job| {
-                let (kind, derivation_build, pname) = match job {
-                    PendingJob::Build(b) => (
-                        DispatchedJobKind::Build,
-                        Some(b.derivation_build),
-                        b.pname.clone(),
-                    ),
-                    PendingJob::Eval(_) => (DispatchedJobKind::Eval, None, None),
-                    PendingJob::Exec(_) => (DispatchedJobKind::Exec, None, None),
-                };
-                PendingJobInfo {
-                    kind,
-                    evaluation_id: job.evaluation_id(),
-                    derivation_build,
-                    project: job.project_id(),
-                    queued_at: job.queued_at(),
-                    dependency_count: job.dependency_count(),
-                    pname,
-                }
+            .chain(members)
+            .map(|job| PendingJobInfo {
+                kind: job.kind_disc(),
+                evaluation_id: job.evaluation_id(),
+                derivation_build: job.derivation_build(),
+                exec_job: match job {
+                    PendingJob::Exec(exec) => Some(exec.exec_job),
+                    PendingJob::Eval(_) | PendingJob::Build(_) => None,
+                },
+                project: job.project_id(),
+                queued_at: job.queued_at(),
+                dependency_count: job.dependency_count(),
+                pname: job.pname(),
             })
             .collect()
     }
@@ -3346,6 +3374,71 @@ mod tests {
         assert_eq!(snap[0].kind, DispatchedJobKind::Eval);
         assert_eq!(snap[0].project, project);
         assert!(snap[0].derivation_build.is_none());
+    }
+
+    #[test]
+    fn the_pending_snapshot_names_exec_jobs_and_waiting_cluster_nodes() {
+        use gradient_types::exec::ExecSpec;
+        let single = crate::test_jobs::exec_job(ExecSpec::default());
+        let node = crate::test_jobs::exec_job(ExecSpec {
+            nodes: 2,
+            ..ExecSpec::default()
+        });
+        let (single_id, node_id) = (single.exec_job, node.exec_job);
+        let mut tracker = JobTracker::new();
+        tracker.add_pending(exec_job_key(single_id), PendingJob::Exec(Box::new(single)));
+        tracker.add_member(
+            member(ClusterJobId::now_v7(), 2),
+            exec_job_key(node_id),
+            PendingJob::Exec(Box::new(node)),
+        );
+
+        let mut snap: Vec<(DispatchedJobKind, Option<ExecJobId>)> = tracker
+            .pending_snapshot()
+            .into_iter()
+            .map(|info| (info.kind, info.exec_job))
+            .collect();
+        snap.sort_by_key(|(_, id)| *id);
+
+        let mut expected = vec![
+            (DispatchedJobKind::Exec, Some(single_id)),
+            (DispatchedJobKind::Exec, Some(node_id)),
+        ];
+        expected.sort_by_key(|(_, id)| *id);
+        assert_eq!(snap, expected);
+    }
+
+    #[test]
+    fn a_cluster_placement_is_kept_as_a_won_decision() {
+        use gradient_types::exec::ExecSpec;
+        let job = PendingJob::Exec(Box::new(crate::test_jobs::exec_job(ExecSpec {
+            nodes: 2,
+            ..ExecSpec::default()
+        })));
+        let key = job.job_key();
+        let mut tracker = JobTracker::new();
+        let record = tracker.member_record(
+            "w1",
+            None,
+            &key,
+            &job,
+            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
+            &gradient_pool::score::InstanceContext::default(),
+        );
+
+        tracker.record_placement("w1", &record, &job);
+
+        let decisions = tracker.recent_decisions();
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].winner.as_deref(), Some(key.as_str()));
+        assert_eq!(decisions[0].kind, i16::from(DispatchedJobKind::Exec));
+        let candidate = &decisions[0].candidates[0];
+        assert!(candidate.won);
+        assert_eq!(candidate.score, record.score);
+        assert_eq!(candidate.score_breakdown, record.score_breakdown);
+        let detail = tracker.candidate_detail(candidate.id).expect("kept");
+        assert_eq!(detail.job_id, key);
+        assert_eq!(detail.worker_id, "w1");
     }
 
     #[test]
