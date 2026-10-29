@@ -6,6 +6,7 @@
 
 import type { DeviceRequest, ExecJobStatus, ExecUnmet, GuestSize, WaitingReason } from '@core/models';
 import type { StatusPhase } from '@shared/evaluation';
+import type { MenuItem } from '@gradient/ui/ui';
 
 export function execJobPhase(status: ExecJobStatus): StatusPhase {
   switch (status) {
@@ -21,6 +22,22 @@ export function execJobPhase(status: ExecJobStatus): StatusPhase {
 
 export function isOpenExecJob(status: ExecJobStatus): boolean {
   return execJobPhase(status) === 'queued' || execJobPhase(status) === 'running';
+}
+
+export function hasExecTerminal(status: ExecJobStatus): boolean {
+  return status === 'starting' || status === 'running';
+}
+
+export interface ExecJobMenuActions {
+  terminal: Pick<MenuItem, 'routerLink' | 'queryParams' | 'command'>;
+  abort: () => void;
+}
+
+export function execJobMenu(status: ExecJobStatus, canTrigger: boolean, actions: ExecJobMenuActions): MenuItem[] {
+  return [
+    ...(hasExecTerminal(status) ? [{ label: 'Terminal', icon: 'terminal', ...actions.terminal }] : []),
+    ...(isOpenExecJob(status) && canTrigger ? [{ label: 'Abort', icon: 'stop_circle', command: actions.abort }] : []),
+  ];
 }
 
 export function deviceLabel(device: DeviceRequest): string {

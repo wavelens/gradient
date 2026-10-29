@@ -52,7 +52,7 @@ describe('ExecJobListComponent', () => {
     expect(host.textContent).toContain('waiting for free devices on 1 worker');
     expect(host.textContent).toContain('lab-a');
     expect(host.textContent).toContain('gpu:h100:8');
-    expect(host.querySelector('a.job')?.getAttribute('href')).toBe('/project/acme/task/demo/exec/j1');
+    expect(host.querySelector('a.job-link')?.getAttribute('href')).toBe('/project/acme/task/demo/exec/j1');
   });
 
   it('shows a job that waits for its manual start by its wait reason', () => {
@@ -147,5 +147,57 @@ describe('ExecJobListComponent', () => {
     fixture.detectChanges();
 
     expect((fixture.nativeElement as HTMLElement).querySelector('.exec-jobs')).toBeNull();
+  });
+
+  describe('job actions', () => {
+    function renderJob(status: ExecJobSummary['status'], canTrigger: boolean) {
+      const abort = vi.fn(() => of('Success'));
+      TestBed.configureTestingModule({
+        imports: [ExecJobListComponent],
+        providers: [
+          provideRouter([]),
+          { provide: ExecJobsService, useValue: { forEvaluation: () => of([{ ...queuedJob(), status }]), abort } },
+        ],
+      });
+      const fixture = TestBed.createComponent(ExecJobListComponent);
+      fixture.componentRef.setInput('evaluation', 'e1');
+      fixture.componentRef.setInput('project', 'acme');
+      fixture.componentRef.setInput('task', 'demo');
+      fixture.componentRef.setInput('canTrigger', canTrigger);
+      fixture.detectChanges();
+      return { fixture, abort };
+    }
+
+    function openMenu(fixture: ReturnType<typeof renderJob>['fixture'], via: 'kebab' | 'contextmenu'): HTMLElement[] {
+      const root = fixture.nativeElement as HTMLElement;
+      if (via === 'kebab') (root.querySelector('.job .kebab') as HTMLElement).click();
+      else root.querySelector('.job')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      fixture.detectChanges();
+      return Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item'));
+    }
+
+    const labels = (items: HTMLElement[]) => items.map((item) =>
+      (item.textContent ?? '').replace(item.querySelector('.gr-menu__icon')?.textContent ?? '', '').trim());
+
+    it.each(['kebab', 'contextmenu'] as const)('offers the terminal and abort for a running job via %s', (via) => {
+      const { fixture } = renderJob('running', true);
+      expect(labels(openMenu(fixture, via))).toEqual(['Terminal', 'Abort']);
+    });
+
+    it('offers no menu for a finished job', () => {
+      const { fixture } = renderJob('completed', true);
+      expect((fixture.nativeElement as HTMLElement).querySelector('.job .kebab')).toBeNull();
+    });
+
+    it('hides abort from a visitor who may not trigger', () => {
+      const { fixture } = renderJob('running', false);
+      expect(labels(openMenu(fixture, 'kebab'))).not.toContain('Abort');
+    });
+
+    it('aborts the job from the menu', () => {
+      const { fixture, abort } = renderJob('running', true);
+      openMenu(fixture, 'kebab').find((item) => item.textContent?.includes('Abort'))!.click();
+      expect(abort).toHaveBeenCalledWith('j1');
+    });
   });
 });

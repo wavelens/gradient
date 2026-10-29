@@ -73,3 +73,21 @@ button.sidebar-group-header {
 
   &:hover { color: var(--gr-text-primary); }
 }
+
+.sidebar-kebab {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-right: -$spacing-xs;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--gr-text-muted);
+  cursor: pointer;
+  opacity: 0;
+
+  :is(.sidebar-item, .build-item):hover &,
+  :is(.sidebar-item, .build-item):focus-within &,
+  :is(.sidebar-item, .build-item).selected & { opacity: 1; }
+
+  &:hover { color: var(--gr-text-primary); }
+}

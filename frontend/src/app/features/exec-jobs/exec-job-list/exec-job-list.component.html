@@ -9,8 +9,8 @@
     <h3>Exec Jobs</h3>
     <div class="job-list">
       @for (job of jobs(); track job.id) {
-        <a class="job" [attr.data-phase]="phase(job.status)"
-           [routerLink]="['/project', project(), 'task', task(), 'exec', job.id]">
+        <div class="job" [attr.data-phase]="phase(job.status)" (contextmenu)="openContextMenu($event, job, jobMenu)">
+          <a class="job-link" [routerLink]="link(job)" [attr.aria-label]="job.entry_point"></a>
           <gr-status-icon class="si" [phase]="phase(job.status)" [label]="job.status" size="sm" />
           <span class="job-name">{{ job.entry_point }}</span>
           <span class="job-detail">{{ detail(job) }}</span>
@@ -19,8 +19,14 @@
             @for (label of job.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
             @for (d of job.devices; track d.name) { <gr-badge severity="info">{{ device(d) }}</gr-badge> }
           </span>
-        </a>
+          @if (hasActions(job)) {
+            <button type="button" class="kebab" aria-label="Exec job actions" (click)="openMenu($event, job, jobMenu)">
+              <gr-icon name="more_vert" />
+            </button>
+          }
+        </div>
       }
     </div>
+    <gr-menu #jobMenu [model]="menuModel()" />
   </section>
 }

@@ -18,6 +18,8 @@ import {
   FormFieldComponent,
   IconComponent,
   LoadingSpinnerComponent,
+  MenuComponent,
+  type MenuItem,
   MessageBannerComponent,
   SelectButtonComponent,
 } from '@gradient/ui/ui';
@@ -30,8 +32,8 @@ import { evaluationPhase, formatEvaluationDuration, parseUtcTimestamp } from '@s
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
-import type { ExecJobPullRequestView, ExecJobResponse, ExecJobStatus } from '@core/models';
-import { deviceLabel, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
+import type { ExecJobPullRequestView, ExecJobResponse } from '@core/models';
+import { deviceLabel, execJobMenu, hasExecTerminal, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
 
@@ -49,14 +51,12 @@ const TERMINAL_PATHS: Record<TerminalMode, string> = {
 const LOG_VIEW = { label: 'Log', value: 'log', icon: 'article' } as const;
 const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' } as const;
 
-const hasTerminal = (status: ExecJobStatus): boolean => status === 'starting' || status === 'running';
-
 @Component({
   selector: 'app-exec-job-page',
   standalone: true,
   imports: [
     RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent, DialogComponent,
-    EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MessageBannerComponent,
+    EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MenuComponent, MessageBannerComponent,
     SelectButtonComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
     LogViewerComponent,
   ],
@@ -85,6 +85,7 @@ export class ExecJobPageComponent implements OnInit {
   private poll?: Subscription;
   private log = '';
   private now = signal(Date.now());
+  private wantsTerminal = false;
 
   job = signal<ExecJobResponse | null>(null);
   logLines = signal<readonly string[]>([]);
@@ -101,7 +102,7 @@ export class ExecJobPageComponent implements OnInit {
 
   terminalReachable = computed(() => {
     const job = this.job();
-    return job ? hasTerminal(job.status) : false;
+    return job ? hasExecTerminal(job.status) : false;
   });
   views = computed(() => this.terminalReachable() ? [LOG_VIEW, TERMINAL_VIEW] : [LOG_VIEW]);
   terminalModes = computed(() => {
@@ -122,6 +123,14 @@ export class ExecJobPageComponent implements OnInit {
     return job ? isOpenExecJob(job.status) : false;
   });
   waiting = computed(() => waitingReasonText(this.job()?.waiting_reason));
+  jobMenu = computed<MenuItem[]>(() => {
+    const job = this.job();
+    if (!job) return [];
+    return execJobMenu(job.status, this.triggerAccess().canEdit, {
+      terminal: { command: () => this.showView('terminal') },
+      abort: () => this.abortOpen.set(true),
+    });
+  });
   crumbs = computed(() =>
     this.breadcrumbs.task(this.projectName, this.taskName, { label: this.job()?.entry_point ?? 'Exec job' }).slice(1),
   );
@@ -145,6 +154,7 @@ export class ExecJobPageComponent implements OnInit {
     this.taskName = params.get('task') ?? '';
     this.jobId = params.get('job') ?? '';
     this.initialLine = parseLineFragment(this.route.snapshot.fragment);
+    this.wantsTerminal = this.route.snapshot.queryParamMap?.get('view') === 'terminal';
     this.watch();
   }
 
@@ -170,7 +180,9 @@ export class ExecJobPageComponent implements OnInit {
       this.job.set(job);
       this.showLog(log);
       this.pullRequests.set(pullRequests);
-      if (!hasTerminal(job.status)) this.showView('log');
+      if (!hasExecTerminal(job.status)) this.showView('log');
+      else if (this.wantsTerminal) this.showView('terminal');
+      this.wantsTerminal = false;
     });
   }
 
