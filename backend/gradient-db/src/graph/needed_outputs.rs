@@ -46,7 +46,8 @@ fn unneeded_outputs_now_needed_sql() -> String {
 
 crate::sql_fn! {
     NEEDED_OUTPUTS = needed_outputs_sql,
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        tier = Bulk;
 
     UNNEEDED_OUTPUTS_NOW_NEEDED = unneeded_outputs_now_needed_sql,
         params = [],
