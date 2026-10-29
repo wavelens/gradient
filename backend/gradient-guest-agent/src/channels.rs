@@ -177,6 +177,7 @@ impl AgentChannels {
         let channel = self.channel_with_input(Box::new(input), Some(master));
         self.tasks.spawn(attached_output(
             channel_id,
+            program.follow(),
             program.clone(),
             self.outbound.clone(),
             channel.ended.clone(),
@@ -360,12 +361,13 @@ async fn forward_output(
 
 async fn attached_output(
     channel_id: u64,
+    reader: OutputReader,
     program: ProgramTerminal,
     outbound: mpsc::Sender<AgentToWorker>,
     ended: CancellationToken,
 ) {
     tokio::select! {
-        () = send_followed(channel_id, program.follow(), &outbound) => {
+        () = send_followed(channel_id, reader, &outbound) => {
             let _ = outbound.send(closed(channel_id, program.exit_code(), None)).await;
             ended.cancel();
         }
