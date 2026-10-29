@@ -7,7 +7,9 @@
 use gradient_db::{
     DbContext,
     graph::can_start::settle_created,
-    graph::needed_outputs::{forget_unneeded_outputs, unneeded_outputs_now_needed},
+    graph::needed_outputs::{
+        ask_again_for_missing_outputs, forget_unneeded_outputs, unneeded_outputs_now_needed,
+    },
     status::{emit_transition_effects, update_derivation_build_status},
 };
 use gradient_entity::build::BuildStatus;
@@ -26,8 +28,11 @@ pub(crate) async fn apply(ctx: &DbContext, scope: RequeueScope) -> anyhow::Resul
 
 async fn needed_outputs(ctx: &DbContext) -> anyhow::Result<u64> {
     let needed = unneeded_outputs_now_needed(&ctx.worker_db).await?;
-    let changes = forget_unneeded_outputs(&ctx.worker_db, &needed).await?;
+    let mut changes = forget_unneeded_outputs(&ctx.worker_db, &needed).await?;
+    let (unprobed, asked) = ask_again_for_missing_outputs(&ctx.worker_db, &needed).await?;
+    changes.extend(asked);
     emit_transition_effects(ctx, &changes).await?;
+    ctx.memory.probe_requests.send(unprobed);
 
     Ok(needed.len() as u64)
 }

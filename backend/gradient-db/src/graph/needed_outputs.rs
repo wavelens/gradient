@@ -52,6 +52,19 @@ crate::sql_fn! {
     UNNEEDED_OUTPUTS_NOW_NEEDED = unneeded_outputs_now_needed_sql,
         params = [],
         tier = Sweep;
+
+    FORGET_PROBE_ANSWERS = forget_probe_answers_sql,
+        params = [DerivationIds(64)];
+}
+
+fn forget_probe_answers_sql() -> String {
+    format!(
+        "UPDATE derivation_build SET probed = false, probed_at = NULL, \
+         updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE derivation = ANY($1::uuid[]) AND probed AND NOT cache_available \
+           AND status IN ({created}) RETURNING derivation",
+        created = crate::sql::status::build_in(&[gradient_entity::build::BuildStatus::Created]),
+    )
 }
 
 crate::sql! {
@@ -98,6 +111,28 @@ pub async fn unneeded_outputs_now_needed<C: ConnectionTrait>(
     Ok(derivation_ids(
         &db.query_all_raw(UNNEEDED_OUTPUTS_NOW_NEEDED.stmt()).await?,
     ))
+}
+
+/// The missing outputs were absent when the probe answered, so a parent needing one asks the
+/// probe again before the shared build turns into a real build.
+pub async fn ask_again_for_missing_outputs<C>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<(Vec<DerivationId>, Vec<TransitionChange>), DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    if derivations.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+
+    let unprobed = derivation_ids(
+        &db.query_all_raw(FORGET_PROBE_ANSWERS.bind([ids(derivations)]))
+            .await?,
+    );
+    let changes = update_and_settle_need(db, &unprobed).await?.changes;
+
+    Ok((unprobed, changes))
 }
 
 pub async fn forget_unneeded_outputs<C>(

@@ -103,7 +103,8 @@ async fn s01_a_build_needing_only_out_fetches_it_and_leaves_the_inputs_of_its_pr
 }
 
 #[tokio::test]
-async fn s02_a_second_build_needing_the_missing_output_turns_its_producer_into_a_real_build() {
+async fn s02_a_second_build_needing_the_missing_output_asks_again_then_turns_its_producer_into_a_real_build()
+ {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(
         a_builds_with(e1, &["out"])
@@ -131,28 +132,44 @@ async fn s02_a_second_build_needing_the_missing_output_turns_its_producer_into_a
 
     let turned = case.requeue_needed_outputs().await;
 
-    assert_eq!(turned, 1, "after 2: shared builds turned into real builds");
+    assert_eq!(turned, 1, "after 2: shared builds asked about again");
     let b = case.sb(B).await;
     assert_eq!(
-        (b.status, b.cache_available, b.unneeded_outputs, b.fetchable),
+        (b.status, b.cache_available, b.unneeded_outputs, b.probed),
         (BuildStatus::Created, false, Vec::<String>::new(), false),
-        "after 2: sb(B) status, cache_available, unneeded_outputs, fetchable"
+        "after 2: sb(B) status, cache_available, unneeded_outputs, probed"
+    );
+    let c = case.sb(C).await;
+    assert_eq!(
+        (c.status, c.wanted),
+        (BuildStatus::Skipped, false),
+        "after 2: sb(C) waits for the answer about B"
+    );
+    case.zero_drift("step 2").await;
+
+    case.upstream_probed(&[B]).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.cache_available, b.fetchable),
+        (BuildStatus::Created, false, false),
+        "after 3: sb(B) status, cache_available, fetchable"
     );
     let c = case.sb(C).await;
     assert_eq!(
         (c.status, c.wanted),
         (BuildStatus::Created, true),
-        "after 2: sb(C) status, wanted"
+        "after 3: sb(C) status, wanted"
     );
     let a = case.sb(A).await;
     assert_eq!(
         (a.status, a.blocking_deps),
         (BuildStatus::Created, 1),
-        "after 2: sb(A) status, blocking_deps"
+        "after 3: sb(A) status, blocking_deps"
     );
     let d = case.sb(D).await.blocking_deps;
-    assert_eq!(d, 1, "after 2: sb(D).blocking_deps");
-    case.zero_drift("step 2").await;
+    assert_eq!(d, 1, "after 3: sb(D).blocking_deps");
+    case.zero_drift("step 3").await;
     case.finish().await;
 }
 
