@@ -10,9 +10,9 @@ use chrono::NaiveDateTime;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_types::{
-    CEvaluation, CExecJob, CExecJobAttempt, CExecJobPhase, EEntryPoint, EEvaluation, EExecJob,
-    EExecJobAttempt, EExecJobPhase, ETask, EntryPointId, EvaluationId, ExecJobAttemptId, ExecJobId,
-    MExecJob, MExecJobAttempt, ProjectId, TaskId,
+    CEvaluation, CExecJob, CExecJobAttempt, CExecJobPhase, DispatchedJobId, EEntryPoint,
+    EEvaluation, EExecJob, EExecJobAttempt, EExecJobPhase, ETask, EntryPointId, EvaluationId,
+    ExecJobAttemptId, ExecJobId, MExecJob, MExecJobAttempt, ProjectId, TaskId,
 };
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, JoinType, QueryFilter,
@@ -26,6 +26,7 @@ pub struct ExecJobRow {
     pub status: ExecJobStatus,
     pub entry_point: String,
     pub last_phase: Option<String>,
+    pub last_dispatched_job: Option<DispatchedJobId>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,7 +75,9 @@ pub struct StartedEvaluation {
 crate::sql! {
     EXEC_JOBS_OF_EVALUATION = "SELECT r.*, e.eval AS entry_point_name, \
          (SELECT p.name FROM exec_job_phase p WHERE p.exec_job = r.id \
-              ORDER BY p.created_at DESC, p.id DESC LIMIT 1) AS last_phase_name \
+              ORDER BY p.created_at DESC, p.id DESC LIMIT 1) AS last_phase_name, \
+         (SELECT a.assignment_id FROM exec_job_attempt a WHERE a.exec_job = r.id \
+              ORDER BY a.number DESC LIMIT 1) AS last_assignment_id \
          FROM exec_job r JOIN entry_point e ON e.id = r.entry_point \
          WHERE r.evaluation = $1 ORDER BY e.eval",
         params = [EvaluationId];
@@ -139,6 +142,7 @@ fn job_row(row: &QueryResult) -> Result<ExecJobRow, DbErr> {
         job,
         entry_point: row.try_get("", "entry_point_name")?,
         last_phase: row.try_get("", "last_phase_name")?,
+        last_dispatched_job: row.try_get("", "last_assignment_id")?,
     })
 }
 
@@ -259,6 +263,7 @@ mod tests {
             job,
             entry_point: name.into(),
             last_phase: None,
+            last_dispatched_job: None,
         }
     }
 

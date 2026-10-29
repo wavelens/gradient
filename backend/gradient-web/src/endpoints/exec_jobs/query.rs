@@ -98,6 +98,7 @@ pub struct ExecJobResponse {
     pub finished_at: Option<NaiveDateTime>,
     pub worker: Option<String>,
     pub worker_name: Option<String>,
+    pub dispatched_job: Option<DispatchedJobId>,
     pub attempts: Vec<ExecJobAttemptView>,
     pub node_jobs: Vec<ExecJobNode>,
     pub phases: Vec<ExecJobPhaseView>,
@@ -123,6 +124,7 @@ pub struct ExecJobSummary {
     pub program_exit_code: Option<i32>,
     pub started_at: Option<NaiveDateTime>,
     pub last_phase: Option<String>,
+    pub dispatched_job: Option<DispatchedJobId>,
 }
 
 fn spec_of(job: &MExecJob) -> ExecSpec {
@@ -272,6 +274,7 @@ fn response(
         finished_at: job.finished_at,
         worker_name: worker.as_deref().and_then(|w| names.name(w)),
         worker,
+        dispatched_job: attempts.last().map(|a| a.assignment_id),
         attempts: attempts.iter().map(attempt_view).collect(),
         node_jobs: nodes.iter().map(|node| node_view(node, names)).collect(),
         phases,
@@ -302,6 +305,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
         program_exit_code: row.job.program_exit_code,
         started_at: row.job.started_at,
         last_phase: row.last_phase,
+        dispatched_job: row.last_dispatched_job,
     }
 }
 
@@ -311,7 +315,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
     operation_id = "getExecJob",
     tag = "exec-jobs",
     summary = "Get exec job",
-    description = "Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start and `worker_name` its display name when the caller can see the worker. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` tells whether the guest stays up after the program exits, `program_exit_code` holds the exit code of a program whose guest is kept running.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start and `worker_name` its display name when the caller can see the worker. `dispatched_job` is the job board assignment of the latest attempt. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` tells whether the guest stays up after the program exits, `program_exit_code` holds the exit code of a program whose guest is kept running.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Exec job", body = ExecJobResponse), WebError)
 )]
@@ -338,7 +342,7 @@ pub async fn get_exec_job(
     operation_id = "listEvaluationExecJobs",
     tag = "exec-jobs",
     summary = "List exec jobs of an evaluation",
-    description = "Returns every exec job of the evaluation, ordered by entry point, with its status, wait reason and last phase. A multi-node job is listed once, under node 0's id, with the status of all its nodes.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns every exec job of the evaluation, ordered by entry point, with its status, wait reason, last phase and the job board assignment of its latest attempt. A multi-node job is listed once, under node 0's id, with the status of all its nodes.\n\n**Access:** Public projects, or members of the project.",
     params(("evaluation" = EvaluationId, Path)),
     responses((status = OK, description = "Exec jobs", body = Vec<ExecJobSummary>), WebError)
 )]

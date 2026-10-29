@@ -1003,6 +1003,7 @@ export interface ExecJobResponse {
   finished_at?: string | null;
   worker?: string | null;
   worker_name?: string | null;
+  dispatched_job?: DispatchedJobId | null;
   attempts: ExecJobAttemptView[];
   node_jobs: ExecJobNode[];
   phases: ExecJobPhaseView[];
@@ -1029,6 +1030,7 @@ export interface ExecJobSummary {
   program_exit_code?: number | null;
   started_at?: string | null;
   last_phase?: string | null;
+  dispatched_job?: DispatchedJobId | null;
 }
 
 export interface ExecJobTokenView {
