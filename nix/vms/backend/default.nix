@@ -9,9 +9,9 @@
   testScript = { nodes, ... }: ''
     start_all()
 
-    server.succeed("${lib.getExe pkgs.curl} http://gradient.local/api/v1/health -i --fail")
+    machine.succeed("${lib.getExe pkgs.curl} http://gradient.local/api/v1/health -i --fail")
 
-    server.succeed("""
+    machine.succeed("""
         ${lib.getExe pkgs.curl} \
         -X POST \
         -H "Content-Type: application/json" \
@@ -19,7 +19,7 @@
         http://gradient.local/api/v1/auth/basic/register
     """)
 
-    token = server.succeed("""
+    token = machine.succeed("""
       ${lib.getExe pkgs.curl} \
         -X POST \
         -H "Content-Type: application/json" \
@@ -30,17 +30,17 @@
 
     print(f"Got Token: {token}")
 
-    server.succeed("${lib.getExe pkgs.gradient-cli} config Server http://gradient.local")
-    server.succeed("${lib.getExe pkgs.gradient-cli} config AuthToken ACCESS_TOKEN".replace("ACCESS_TOKEN", token))
-    server.succeed("${lib.getExe pkgs.gradient-cli} project create --name testproject --display-name MyProject --description 'My Test Project'")
+    machine.succeed("${lib.getExe pkgs.gradient-cli} config Server http://gradient.local")
+    machine.succeed("${lib.getExe pkgs.gradient-cli} config AuthToken ACCESS_TOKEN".replace("ACCESS_TOKEN", token))
+    machine.succeed("${lib.getExe pkgs.gradient-cli} project create --name testproject --display-name MyProject --description 'My Test Project'")
   '';
 
   interactive = {
     sshBackdoor.enable = true;
-    nodes.server.virtualisation.graphics = false;
+    nodes.machine.virtualisation.graphics = false;
   };
 
-  nodes.server = { config, pkgs, lib, ... }: {
+  nodes.machine = { config, pkgs, lib, ... }: {
     imports = [
       ../../modules/gradient.nix
     ];

@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ pkgs, lib, ... }: let
+{ inputs, pkgs, lib, ... }: let
+  nixpkgsTarball = import ../../tests/harness/nixpkgs-tarball.nix { inherit pkgs; inherit (inputs) nixpkgs; };
+  execPrograms = import ./exec_apps.nix { inherit pkgs; };
+  guestImage = inputs.self.lib.mkWorkerImage {
+    modules = [ { gradient.guest = { cpus = 1; memoryMb = 512; }; } ];
+  };
+  upstreamKey = pkgs.writeText "upstream-key" "file-upstream-1:eZPukjHYgRpJ+hLlnUgG+qpi/k4QMTr3bd4ftngZJwkIXutyHrlDclZGwczy+IKCAt82HkKrDtM16u9HR9uzkQ==";
+
   # These are the fixture secrets of the integration tests. The admin password is "admin_password".
   adminPwHash = pkgs.writeText "admin-pw-hash" "$argon2id$v=19$m=4096,t=3,p=1$c29tZXNhbHQxMjM0NQ$hIKBEy9SOWlnAlcwUv2PLPBdsMkKhVlCyjTxaWIK+v4";
   projectSshKey = pkgs.writeText "project-ssh-key" ''
@@ -23,36 +30,51 @@ in {
   globalTimeout = 604800;
   testScript = { nodes, ... }: ''
     start_all()
-    server.wait_for_unit("gradient-server.service")
-    server.wait_for_unit("git-daemon.service")
-    server.wait_for_open_port(3000)
-    server.wait_for_unit("nginx.service")
+    machine.wait_for_unit("gradient-server.service")
+    machine.wait_for_unit("git-daemon.service")
+    machine.wait_for_open_port(3000)
+    machine.wait_for_unit("nginx.service")
 
-    server.succeed("${lib.getExe pkgs.curl} http://gradient.local/api/v1/health -i --fail")
+    machine.succeed("${lib.getExe pkgs.curl} http://gradient.local/api/v1/health -i --fail")
 
-    server.succeed("${lib.getExe pkgs.git} config --global --add safe.directory '*'")
-    server.succeed("${lib.getExe pkgs.git} config --global init.defaultBranch main")
-    server.succeed("${lib.getExe pkgs.git} config --global user.email 'nixos@localhost'")
-    server.succeed("${lib.getExe pkgs.git} config --global user.name 'NixOS test'")
+    machine.succeed("${lib.getExe pkgs.git} config --global --add safe.directory '*'")
+    machine.succeed("${lib.getExe pkgs.git} config --global init.defaultBranch main")
+    machine.succeed("${lib.getExe pkgs.git} config --global user.email 'nixos@localhost'")
+    machine.succeed("${lib.getExe pkgs.git} config --global user.name 'NixOS test'")
 
-    server.succeed("${lib.getExe pkgs.git} init /var/lib/git/test")
-    server.succeed("cp /var/lib/git/{,test/}flake.nix")
-    server.succeed("chown git:git -R /var/lib/git/test")
-    server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add flake.nix")
-    server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test commit -m 'Initial commit'")
+    machine.succeed("${lib.getExe pkgs.git} init /var/lib/git/test")
+    machine.succeed("cp /var/lib/git/{,test/}flake.nix")
+    machine.succeed("chown git:git -R /var/lib/git/test")
+    machine.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add flake.nix")
+    machine.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test commit -m 'Initial commit'")
 
-    server.wait_for_unit("gradient-worker.service")
+    machine.succeed(
+        "nix --extra-experimental-features nix-command copy "
+        "--to 'file:///srv/upstream?secret-key=${upstreamKey}' "
+        "--no-check-sigs ${lib.concatStringsSep " " (lib.attrValues execPrograms)}"
+    )
+    machine.succeed("chown -R nginx:nginx /srv/upstream")
+
+    machine.succeed("${lib.getExe pkgs.git} init /var/lib/git/exec")
+    machine.succeed("cp /var/lib/git/exec-src/{flake.nix,flake.lock,exec_apps.nix} /var/lib/git/exec/")
+    machine.succeed("chmod u+w /var/lib/git/exec/*")
+    machine.succeed("sed -i -e 's#\\[hash\\]#${inputs.nixpkgs.narHash}#g' -e 's#//server/#//gradient.local/#g' /var/lib/git/exec/flake.lock")
+    machine.succeed("${lib.getExe pkgs.git} -C /var/lib/git/exec add flake.nix flake.lock exec_apps.nix")
+    machine.succeed("${lib.getExe pkgs.git} -C /var/lib/git/exec commit -m 'Exec apps'")
+    machine.succeed("chown git:git -R /var/lib/git/exec")
+
+    machine.wait_for_unit("gradient-worker.service")
 
     print("Dev environment ready: frontend proxy target http://localhost:3000")
-    print("Login: admin / admin_password")
+    print("Login: admin / admin_password, alice / admin_password")
   '';
 
   interactive = {
     sshBackdoor.enable = true;
-    nodes.server.virtualisation.graphics = false;
+    nodes.machine.virtualisation.graphics = false;
   };
 
-  nodes.server = { config, pkgs, lib, ... }: {
+  nodes.machine = { config, pkgs, lib, ... }: {
     imports = [
       ../../modules/gradient.nix
       ../../modules/gradient-worker.nix
@@ -66,9 +88,10 @@ in {
     documentation.enable = false;
     virtualisation = {
       cores = 4;
-      memorySize = 4096;
-      diskSize = 4096;
+      memorySize = 8192;
+      diskSize = 16384;
       writableStore = true;
+      additionalPaths = lib.attrValues execPrograms;
       forwardPorts = [
         {
           from = "host";
@@ -91,6 +114,11 @@ in {
     systemd.tmpfiles.rules = [
       "d /var/lib/git 0755 git git"
       "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
+      "d /var/lib/git/exec-src 0755 git git"
+      "L+ /var/lib/git/exec-src/flake.nix - - - - ${./exec_repository.nix}"
+      "L+ /var/lib/git/exec-src/flake.lock - - - - ${../../tests/gradient/e2e/flake_repository.lock}"
+      "L+ /var/lib/git/exec-src/exec_apps.nix - - - - ${./exec_apps.nix}"
+      "d /srv/upstream 0755 nginx nginx"
       "d /var/lib/gradient-worker 0755 gradient-worker gradient-worker"
       "f /var/lib/gradient-worker/worker-id 0644 gradient-worker gradient-worker - a0000000-0000-0000-0000-000000000001"
     ];
@@ -124,9 +152,19 @@ in {
             superuser = true;
           };
 
+          users.alice = {
+            name = "Alice Example";
+            email = "alice@gradient.local";
+            password_file = toString adminPwHash;
+            email_verified = true;
+          };
+
           teams.testteam = {
             display_name = "MyTeam";
-            members = [ { user = "admin"; role = "Admin"; } ];
+            members = [
+              { user = "admin"; role = "Admin"; }
+              { user = "alice"; role = "Member"; }
+            ];
             new_projects = {
               users = true;
               workers = true;
@@ -134,20 +172,71 @@ in {
             };
           };
 
+          teams.research = {
+            display_name = "Research";
+            members = [
+              { user = "alice"; role = "Admin"; }
+              { user = "admin"; role = "Member"; }
+            ];
+          };
+
           projects.testproject = {
             display_name = "MyProject";
             description = "My Test Project";
             private_key_file = toString projectSshKey;
             public = true;
+            exec_enabled = true;
             created_by = "admin";
             teams = [ { team = "testteam"; role = "Admin"; } ];
+          };
+
+          projects.researchproject = {
+            display_name = "Research Project";
+            description = "Members of the Research team own this private project.";
+            private_key_file = toString projectSshKey;
+            created_by = "alice";
+            teams = [
+              { team = "research"; role = "Admin"; }
+              { team = "testteam"; role = "View"; }
+            ];
+          };
+
+          tasks.failingtask = {
+            project = "researchproject";
+            display_name = "Failing Task";
+            description = "One build failed in this task.";
+            repository = "git://gradient.local/test";
+            wildcard = "packages.**.buildFail,packages.**.lib1";
+            created_by = "alice";
+            triggers = [
+              {
+                type = "polling";
+                config = { interval_secs = 300; };
+              }
+            ];
+          };
+
+          tasks.exectask = {
+            project = "testproject";
+            display_name = "Exec Task";
+            description = "One exec job per task.";
+            repository = "git://gradient.local/exec";
+            wildcard = "apps.x86_64-linux.*";
+            exec_enabled = true;
+            created_by = "admin";
+            triggers = [
+              {
+                type = "polling";
+                config = { interval_secs = 600; };
+              }
+            ];
           };
 
           tasks.testtask = {
             project = "testproject";
             display_name = "MyTask";
             description = "My Test Task";
-            repository = "git://server/test";
+            repository = "git://gradient.local/test";
             wildcard = "packages.**.buildWait5Sec,packages.**.deployment";
             keep_evaluations = 10;
             created_by = "admin";
@@ -165,6 +254,25 @@ in {
             projects = [ "testproject" ];
             public = true;
             created_by = "admin";
+            upstream_caches = [{
+              type = "external";
+              display_name = "file-upstream";
+              url = "http://gradient.local/upstream";
+              public_key = "file-upstream-1:CF7rch65Q3JWRsHM8viCggLfNh5Cqw7TNervR0fbs5E=";
+            }];
+          };
+
+          caches.researchcache = {
+            display_name = "Research Cache";
+            description = "A private cache can use MyCache as upstream cache.";
+            signing_key_file = toString cacheSigningKey;
+            projects = [ "researchproject" ];
+            created_by = "alice";
+            teams = [ { team = "research"; role = "Admin"; } ];
+            upstream_caches = [{
+              type = "internal";
+              cache_name = "testcache";
+            }];
           };
 
           workers.devworker = {
@@ -173,6 +281,7 @@ in {
             token_file = toString workerToken;
             display_name = "Dev Worker";
             created_by = "admin";
+            enable_exec = true;
           };
         };
 
@@ -183,8 +292,18 @@ in {
           capabilities = {
             eval = true;
             build = true;
+            exec = true;
           };
+          exec.image = guestImage;
         };
+      };
+
+      nginx.virtualHosts."gradient.local".locations = {
+        "/upstream/" = {
+          alias = "/srv/upstream/";
+          extraConfig = "autoindex off;";
+        };
+        "= /nixpkgs.tar.gz".alias = nixpkgsTarball;
       };
 
       postgresql = {
