@@ -89,7 +89,7 @@ impl GuestSize {
         GuestSize {
             cpus: 2,
             memory_mb: 500,
-            disk_mb: 10240,
+            disk_mb: 2048,
         }
     }
 
