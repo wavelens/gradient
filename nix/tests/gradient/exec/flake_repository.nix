@@ -9,10 +9,12 @@
   outputs = { nixpkgs, ... }: let
     pkgs = import nixpkgs { system = "x86_64-linux"; };
     programs = import ./apps.nix { inherit pkgs; };
+    # Jobs ask for the size of the 1-vCPU warm guests, since 2-vCPU guests booting together outrun the boot timeout on the 2-core workers.
+    warmGuestSize = { cpus = 1; memoryMb = 500; };
     app = name: gradient: {
       type = "app";
       program = "${programs.${name}}";
-      passthru = { inherit gradient; };
+      passthru.gradient = warmGuestSize // gradient;
     };
   in {
     apps.x86_64-linux = {
