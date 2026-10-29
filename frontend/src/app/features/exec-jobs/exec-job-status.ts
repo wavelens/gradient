@@ -68,6 +68,8 @@ export function waitingReasonText(reason: WaitingReason | null | undefined): str
       if (workers === 0) return 'waiting for a matching worker';
       return `waiting for free devices on ${workers} ${workers === 1 ? 'worker' : 'workers'}`;
     }
+    case 'manual_start':
+      return 'waits for a manual start';
     default:
       return null;
   }

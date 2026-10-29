@@ -10,12 +10,16 @@
             [severity]="keepVmRunning() ? 'primary' : 'secondary'" [attr.aria-pressed]="keepVmRunning()"
             [loading]="switchingKeep()" [disabled]="switchingKeep()" (click)="toggleKeepVmRunning()"></button>
   }
+  @if (waitsForManualStart()) {
+    <button *appWritable="triggerAccess()" slot="actions" grButton label="Run" icon="play_arrow"
+            [loading]="starting()" [disabled]="starting()" (click)="run()"></button>
+  }
   @if (open()) {
     <button *appWritable="triggerAccess()" slot="actions" grButton label="Abort" icon="close" severity="danger"
             [loading]="aborting()" [disabled]="aborting()" (click)="abortOpen.set(true)"></button>
   } @else if (job()) {
     <button *appWritable="triggerAccess()" slot="actions" grButton label="Run again" icon="refresh"
-            [loading]="starting()" [disabled]="starting()" (click)="runAgain()"></button>
+            [loading]="starting()" [disabled]="starting()" (click)="run()"></button>
   }
 
   @if (errorMessage(); as message) {

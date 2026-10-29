@@ -993,6 +993,7 @@ export interface ExecJobResponse {
   waiting_reason?: WaitingReason | null;
   message?: string | null;
   retries_left: number;
+  autostart: boolean;
   keep_vm_running: boolean;
   program_exit_code?: number | null;
   created_at: string;
@@ -1020,6 +1021,7 @@ export interface ExecJobSummary {
   nodes: number;
   labels: string[];
   devices: DeviceRequest[];
+  autostart: boolean;
   keep_vm_running: boolean;
   program_exit_code?: number | null;
   started_at?: string | null;
@@ -2634,6 +2636,8 @@ export type WaitingReason = {
   connected_workers: number;
   matching_workers: number;
   kind: "exec_workers";
+} | {
+  kind: "manual_start";
 };
 
 export type WalkMode = "pruned" | "full";

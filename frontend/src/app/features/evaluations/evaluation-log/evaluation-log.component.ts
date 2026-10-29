@@ -1682,6 +1682,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           ? `Waiting for free devices on ${reason.matching_workers} ${workerWord}.`
           : 'No connected worker offers what the exec job needs.';
       }
+      case 'manual_start':
+        return 'The exec job waits for a manual start.';
     }
   }
 
