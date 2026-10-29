@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal, viewChild } from '@angular/core';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Subscription, catchError, forkJoin, interval, startWith, switchMap, takeWhile } from 'rxjs';
@@ -33,7 +33,7 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import type { ExecJobPullRequestView, ExecJobResponse } from '@core/models';
-import { deviceLabel, execJobMenu, hasExecTerminal, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
+import { deviceLabel, execJobMenu, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
 
@@ -42,11 +42,16 @@ const POLL_MS = 2000;
 type JobView = 'log' | 'terminal';
 type TerminalMode = 'console' | 'attach' | 'shell';
 
-const TERMINAL_PATHS: Record<TerminalMode, string> = {
-  console: 'console',
-  attach: 'shell?attach=true',
-  shell: 'shell',
+const TERMINAL_PATHS: Record<TerminalMode, (node: number) => string> = {
+  console: (node) => `console?node=${node}`,
+  attach: (node) => `shell?node=${node}&attach=true`,
+  shell: (node) => `shell?node=${node}`,
 };
+
+function nodeFromQuery(value: string | null | undefined): number {
+  const node = Number(value);
+  return Number.isInteger(node) && node > 0 ? node : 0;
+}
 
 const LOG_VIEW = { label: 'Log', value: 'log', icon: 'article' } as const;
 const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' } as const;
@@ -70,6 +75,7 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
 })
 export class ExecJobPageComponent implements OnInit {
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   private destroyRef = inject(DestroyRef);
   private execJobs = inject(ExecJobsService);
   private breadcrumbs = inject(BreadcrumbsService);
@@ -88,11 +94,13 @@ export class ExecJobPageComponent implements OnInit {
   private wantsTerminal = false;
 
   job = signal<ExecJobResponse | null>(null);
+  node = signal(0);
   logLines = signal<readonly string[]>([]);
   initialLine: number | null = null;
   pullRequests = signal<ExecJobPullRequestView[]>([]);
   abortOpen = signal(false);
   aborting = signal(false);
+  starting = signal(false);
   errorMessage = signal<string | null>(null);
   sidebarOpen = signal(false);
 
@@ -143,6 +151,7 @@ export class ExecJobPageComponent implements OnInit {
 
   protected readonly phase = execJobPhase;
   protected readonly device = deviceLabel;
+  protected readonly guestSize = guestSizeLabel;
   protected readonly time = clockTime;
   protected readonly day = monthDay;
   protected readonly evaluationPhase = evaluationPhase;
@@ -155,7 +164,21 @@ export class ExecJobPageComponent implements OnInit {
     this.jobId = params.get('job') ?? '';
     this.initialLine = parseLineFragment(this.route.snapshot.fragment);
     this.wantsTerminal = this.route.snapshot.queryParamMap?.get('view') === 'terminal';
+    this.node.set(nodeFromQuery(this.route.snapshot.queryParamMap?.get('node')));
     this.watch();
+  }
+
+  pickNode(node: number): void {
+    this.node.set(node);
+    this.sidebarOpen.set(false);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { node: node === 0 ? null : node },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+    this.watch();
+    if (this.view() === 'terminal') this.openTerminal(this.terminalMode());
   }
 
   private watch(): void {
@@ -164,7 +187,7 @@ export class ExecJobPageComponent implements OnInit {
       startWith(0),
       switchMap(() => forkJoin({
         job: this.execJobs.get(this.jobId),
-        log: this.execJobs.log(this.jobId),
+        log: this.execJobs.log(this.jobId, undefined, this.node()),
         pullRequests: this.execJobs.pullRequests(this.jobId),
       }).pipe(
         catchError((error: Error) => {
@@ -206,7 +229,7 @@ export class ExecJobPageComponent implements OnInit {
 
   openTerminal(mode: TerminalMode): void {
     this.terminalMode.set(mode);
-    this.terminal.set(terminalSocket(`/exec-jobs/${this.jobId}/${TERMINAL_PATHS[mode]}`));
+    this.terminal.set(terminalSocket(`/exec/${this.jobId}/${TERMINAL_PATHS[mode](this.node())}`));
   }
 
   confirmAbort(): void {
@@ -220,6 +243,21 @@ export class ExecJobPageComponent implements OnInit {
       error: (error: Error) => {
         this.aborting.set(false);
         this.abortOpen.set(false);
+        this.errorMessage.set(error.message);
+      },
+    });
+  }
+
+  runAgain(): void {
+    this.starting.set(true);
+    this.execJobs.run(this.jobId).subscribe({
+      next: () => {
+        this.starting.set(false);
+        this.errorMessage.set(null);
+        this.watch();
+      },
+      error: (error: Error) => {
+        this.starting.set(false);
         this.errorMessage.set(error.message);
       },
     });

@@ -46,6 +46,22 @@
         }
         <gr-menu #jobActions [model]="jobMenu()" />
 
+        @if (job.nodes > 1) {
+          <div class="sidebar-group-header">
+            Nodes
+            <span class="sidebar-group-count">{{ job.nodes }}</span>
+          </div>
+          @for (n of job.node_jobs; track n.node) {
+            <div class="sidebar-item node-item" role="button" tabindex="0" [class.selected]="node() === n.node"
+                 [attr.aria-pressed]="node() === n.node" [title]="n.worker ?? ''"
+                 (click)="pickNode(n.node)" (keydown.enter)="pickNode(n.node)">
+              <gr-status-icon size="sm" [phase]="phase(n.status)" [label]="n.status" />
+              <span class="sidebar-item-label">Node {{ n.node }}{{ n.node === 0 ? ' (master)' : '' }}</span>
+              <span class="item-meta mono">{{ n.guest_address ?? '-' }}</span>
+            </div>
+          }
+        }
+
         @if (phaseLines().length > 0) {
           <div class="sidebar-group-header">
             Phases
@@ -60,7 +76,7 @@
           }
         }
 
-        <app-exec-job-outputs [job]="job" />
+        <app-exec-job-outputs [job]="job" [node]="node()" />
 
         @if (pullRequests().length > 0) {
           <div class="sidebar-group-header">
@@ -114,6 +130,12 @@
               <code class="metric-value worker" [title]="job.worker">{{ job.worker }}</code>
             </div>
           }
+          @if (guestSize(job.guest); as guest) {
+            <div class="info-metric">
+              <span class="metric-label">Guest</span>
+              <span class="metric-value guest">{{ guest }}</span>
+            </div>
+          }
           @if (job.nodes > 1 || job.labels.length > 0 || job.devices.length > 0) {
             <div class="info-metric">
               <span class="metric-label">Needs</span>
@@ -127,6 +149,9 @@
           @if (open()) {
             <button *appWritable="triggerAccess()" grButton label="Abort" icon="close" severity="danger" size="small"
                     [loading]="aborting()" [disabled]="aborting()" (click)="abortOpen.set(true)"></button>
+          } @else {
+            <button *appWritable="triggerAccess()" grButton label="Run again" icon="refresh" size="small"
+                    [loading]="starting()" [disabled]="starting()" (click)="runAgain()"></button>
           }
         </div>
       </div>
