@@ -103,6 +103,12 @@ fn a_project_without_exec_enabled_keeps_exec_jobs_off() {
 }
 
 #[test]
+fn a_task_without_exec_enabled_keeps_exec_jobs_off() {
+    let cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
+    assert!(!cfg.tasks["web"].exec_enabled);
+}
+
+#[test]
 fn state_task_keep_evaluations_zero_rejected_by_validator() {
     let json = r#"{
         "users": {

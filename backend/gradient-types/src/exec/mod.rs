@@ -18,12 +18,19 @@ pub use gradient_wire::types::{
 
 pub const DISABLED_ON_INSTANCE: &str = "exec jobs are disabled on this instance";
 pub const DISABLED_FOR_PROJECT: &str = "exec jobs are disabled for this project";
+pub const DISABLED_FOR_TASK: &str = "exec jobs are disabled for this task";
 
-pub fn exec_refusal(instance_enabled: bool, project_enabled: bool) -> Option<&'static str> {
+pub fn exec_refusal(
+    instance_enabled: bool,
+    project_enabled: bool,
+    task_enabled: bool,
+) -> Option<&'static str> {
     if !instance_enabled {
         Some(DISABLED_ON_INSTANCE)
     } else if !project_enabled {
         Some(DISABLED_FOR_PROJECT)
+    } else if !task_enabled {
+        Some(DISABLED_FOR_TASK)
     } else {
         None
     }
@@ -34,15 +41,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_instance_switch_is_checked_before_the_project_switch() {
+    fn the_switches_are_checked_from_instance_over_project_to_task() {
         assert_eq!(
-            exec_refusal(false, false),
+            exec_refusal(false, false, false),
             Some("exec jobs are disabled on this instance")
         );
         assert_eq!(
-            exec_refusal(true, false),
+            exec_refusal(true, false, false),
             Some("exec jobs are disabled for this project")
         );
-        assert_eq!(exec_refusal(true, true), None);
+        assert_eq!(
+            exec_refusal(true, true, false),
+            Some("exec jobs are disabled for this task")
+        );
+        assert_eq!(exec_refusal(true, true, true), None);
     }
 }

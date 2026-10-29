@@ -19,7 +19,7 @@ async fn list_tasks_returns_paginated() {
                     "created_by": "00000000-0000-0000-0000-000000000003", "created_at": "2024-01-01T00:00:00", "managed": false,
                     "can_edit": true, "can_trigger": true, "concurrency": "skip",
                     "force_evaluation": false, "keep_evaluations": 30, "last_evaluation": null,
-                    "last_evaluation_status": null, "retry_failed_builds": false, "multi_node_evaluation": false,
+                    "last_evaluation_status": null, "retry_failed_builds": false, "multi_node_evaluation": false, "exec_enabled": false,
                     "sign_cache": true, "wait_for_workers": false
                 }],
                 "total": 1, "page": 1, "per_page": 10

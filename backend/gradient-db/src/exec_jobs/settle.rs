@@ -12,7 +12,7 @@ use std::sync::LazyLock;
 
 use crate::sql::StatusWrite;
 use crate::sql::status::{build_in, exec, exec_in};
-use gradient_types::exec::{DISABLED_FOR_PROJECT, DISABLED_ON_INSTANCE};
+use gradient_types::exec::{DISABLED_FOR_PROJECT, DISABLED_FOR_TASK, DISABLED_ON_INSTANCE};
 
 #[derive(Debug, Default)]
 pub struct Settled {
@@ -58,7 +58,7 @@ static FAIL_SQL: LazyLock<String> = LazyLock::new(|| {
 fn refuse_sql(message: &str, from: &str, condition: &str) -> String {
     format!(
         "UPDATE exec_job r SET status = {failed}, finished_at = (now() AT TIME ZONE 'UTC'), \
-         waiting_reason = NULL, message = '{message}' {from} \
+         waiting_reason = NULL, message = {message} {from} \
          WHERE r.status IN ({waiting}) {condition} RETURNING r.*",
         failed = exec(ExecJobStatus::Failed),
         waiting = exec_in(&[ExecJobStatus::Created, ExecJobStatus::Queued]),
@@ -66,13 +66,16 @@ fn refuse_sql(message: &str, from: &str, condition: &str) -> String {
 }
 
 static REFUSE_ALL_SQL: LazyLock<String> =
-    LazyLock::new(|| refuse_sql(DISABLED_ON_INSTANCE, "", ""));
+    LazyLock::new(|| refuse_sql(&format!("'{DISABLED_ON_INSTANCE}'"), "", ""));
 
-static REFUSE_DISABLED_PROJECTS_SQL: LazyLock<String> = LazyLock::new(|| {
+static REFUSE_DISABLED_PROJECTS_OR_TASKS_SQL: LazyLock<String> = LazyLock::new(|| {
     refuse_sql(
-        DISABLED_FOR_PROJECT,
+        &format!(
+            "CASE WHEN NOT p.exec_enabled THEN '{DISABLED_FOR_PROJECT}' \
+             ELSE '{DISABLED_FOR_TASK}' END"
+        ),
         "FROM evaluation ev JOIN task t ON t.id = ev.task JOIN project p ON p.id = t.project",
-        "AND ev.id = r.evaluation AND NOT p.exec_enabled",
+        "AND ev.id = r.evaluation AND NOT (p.exec_enabled AND t.exec_enabled)",
     )
 });
 
@@ -99,7 +102,7 @@ crate::sql_lazy! {
     REFUSE_WAITING_EXEC_JOBS = || REFUSE_ALL_SQL.as_str(),
         params = [],
         status_write = StatusWrite::exec_job(ExecJobStatus::Failed);
-    REFUSE_EXEC_JOBS_OF_DISABLED_PROJECTS = || REFUSE_DISABLED_PROJECTS_SQL.as_str(),
+    REFUSE_EXEC_JOBS_OF_DISABLED_PROJECTS_OR_TASKS = || REFUSE_DISABLED_PROJECTS_OR_TASKS_SQL.as_str(),
         params = [],
         status_write = StatusWrite::exec_job(ExecJobStatus::Failed);
 }
@@ -109,7 +112,7 @@ pub async fn refused<C: ConnectionTrait>(
     instance_enabled: bool,
 ) -> Result<Vec<MExecJob>, DbErr> {
     let statement = if instance_enabled {
-        &REFUSE_EXEC_JOBS_OF_DISABLED_PROJECTS
+        &REFUSE_EXEC_JOBS_OF_DISABLED_PROJECTS_OR_TASKS
     } else {
         &REFUSE_WAITING_EXEC_JOBS
     };

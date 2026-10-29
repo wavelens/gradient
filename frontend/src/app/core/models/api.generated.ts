@@ -1760,6 +1760,7 @@ export interface PatchTaskRequest {
   wait_for_workers?: boolean | null;
   retry_failed_builds?: boolean | null;
   multi_node_evaluation?: boolean | null;
+  exec_enabled?: boolean | null;
 }
 
 export interface PatchTeamRequest {
@@ -2289,6 +2290,7 @@ export interface TaskResponse {
   wait_for_workers: boolean;
   retry_failed_builds: boolean;
   multi_node_evaluation: boolean;
+  exec_enabled: boolean;
   can_edit: boolean;
   can_trigger: boolean;
 }
