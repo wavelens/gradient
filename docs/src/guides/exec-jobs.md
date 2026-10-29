@@ -9,31 +9,36 @@ Flake apps started on workers after each evaluation, with the hardware they ask 
 
 ## 1. Turn On Exec Jobs
 
-Exec jobs need three switches. A repository alone can never start code on a worker.
+Exec jobs need four switches. A repository alone can never start code on a worker.
 
 | Switch | Default | Where |
 |---|---|---|
 | Instance | on | `services.gradient.exec.enable` |
 | Project | off | Project **Settings -> Run exec jobs**, or `exec_enabled` in the state |
+| Task | off | Task **Settings -> Run exec jobs**, or `exec_enabled` in the state |
 | Worker | off | `services.gradient.worker.capabilities.exec` and `enable_exec` on the worker registration |
 
 === "UI"
 
-    Open the project **Settings** and tick **Run exec jobs**. Only project admins can change the switch.
+    Open the project **Settings** and tick **Run exec jobs**. Only project admins can change the project switch.
+
+    Open the task **Settings**, tick **Run exec jobs** and save. Members who can edit the task can change the task switch.
 
 === "Declarative"
 
     ```nix
     services.gradient.state.projects.acme.exec_enabled = true;
+    services.gradient.state.tasks.apps.exec_enabled = true;
     services.gradient.state.workers.gpu-box.enable_exec = true;
     ```
 
-Exec apps of a project without the switch fail with a message on the task page.
+Exec apps fail with a message on the task page while the instance, project or task switch is off.
 
 | Message | Cause |
 |---|---|
 | `exec jobs are disabled on this instance` | `exec.enable` is off |
 | `exec jobs are disabled for this project` | The project switch is off |
+| `exec jobs are disabled for this task` | The task switch is off |
 
 ## 2. Set Up an Exec Worker
 
@@ -470,6 +475,6 @@ networking.interfaces.eth0.ipv4.routes = [
 - [Use Exec Job Results](exec-job-results.md): chained evaluations, pull requests, outputs and phases
 - [Workers](../concepts/workers.md): registrations and capabilities
 - [Evaluation Wildcards](../reference/wildcards.md): select the apps of a flake
-- [Declarative State](../reference/state.md): the `exec_enabled` flag, `enable_exec` and `secret_files`
+- [Declarative State](../reference/state.md): the project and task `exec_enabled` flags, `enable_exec` and `secret_files`
 - [Configuration](../reference/configuration.md): where the `exec.enable`, `exec.allow.ssh` and `exec.allow.customImages` settings live
 - [Build over SSH](build-over-ssh.md): SSH server and key setup
