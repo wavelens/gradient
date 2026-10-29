@@ -147,11 +147,20 @@
         </div>
         <div class="info-bar-right">
           @if (open()) {
+            <button *appWritable="triggerAccess()" grButton label="Keep VM running" icon="push_pin" size="small"
+                    [severity]="keepVmRunning() ? 'primary' : 'secondary'" [attr.aria-pressed]="keepVmRunning()"
+                    [loading]="switchingKeep()" [disabled]="switchingKeep()" (click)="toggleKeepVmRunning()"></button>
+          }
+          @if (waitsForManualStart()) {
+            <button *appWritable="triggerAccess()" grButton label="Run" icon="play_arrow" size="small"
+                    [loading]="starting()" [disabled]="starting()" (click)="run()"></button>
+          }
+          @if (open()) {
             <button *appWritable="triggerAccess()" grButton label="Abort" icon="close" severity="danger" size="small"
                     [loading]="aborting()" [disabled]="aborting()" (click)="abortOpen.set(true)"></button>
           } @else {
             <button *appWritable="triggerAccess()" grButton label="Run again" icon="refresh" size="small"
-                    [loading]="starting()" [disabled]="starting()" (click)="runAgain()"></button>
+                    [loading]="starting()" [disabled]="starting()" (click)="run()"></button>
           }
         </div>
       </div>
@@ -162,6 +171,13 @@
         }
         @if (waiting(); as reason) {
           <gr-message-banner type="warning" icon="pause_circle">{{ reason }}</gr-message-banner>
+        }
+        @if (keptExitCode() !== null) {
+          <gr-message-banner class="kept-vm">
+            Program exited with code {{ keptExitCode() }}. The VM keeps running.
+            <button *appWritable="triggerAccess()" grButton label="Let VM stop" size="small" severity="secondary"
+                    [loading]="switchingKeep()" [disabled]="switchingKeep()" (click)="letVmStop()"></button>
+          </gr-message-banner>
         }
         @if (job.message) {
           <gr-message-banner [type]="phase(job.status) === 'failure' ? 'error' : 'info'">{{ job.message }}</gr-message-banner>
