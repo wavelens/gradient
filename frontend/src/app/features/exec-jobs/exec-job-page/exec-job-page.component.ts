@@ -16,6 +16,7 @@ import {
   DialogComponent,
   FormFieldComponent,
   LoadingSpinnerComponent,
+  MessageBannerComponent,
   PageLayoutComponent,
   SelectButtonComponent,
   SelectComponent,
@@ -60,7 +61,8 @@ const hasTerminal = (status: ExecJobStatus): boolean => status === 'starting' ||
   standalone: true,
   imports: [
     RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent, DialogComponent,
-    FormFieldComponent, LoadingSpinnerComponent, PageLayoutComponent, SelectButtonComponent, SelectComponent,
+    FormFieldComponent, LoadingSpinnerComponent, MessageBannerComponent, PageLayoutComponent, SelectButtonComponent,
+    SelectComponent,
     TabSwitchComponent, TableComponent, StatusIconComponent, TerminalComponent, WritableDirective,
     ExecJobOutputsComponent,
   ],
@@ -95,6 +97,7 @@ export class ExecJobPageComponent implements OnInit {
   abortOpen = signal(false);
   aborting = signal(false);
   starting = signal(false);
+  switchingKeep = signal(false);
   errorMessage = signal<string | null>(null);
 
   protected readonly views = [
@@ -113,7 +116,8 @@ export class ExecJobPageComponent implements OnInit {
     const job = this.job();
     const modes: { label: string; value: TerminalMode }[] = [{ label: 'Console', value: 'console' }];
     if (job?.status === 'running' && job.ssh_command) {
-      modes.push({ label: 'Attach to program', value: 'attach' }, { label: 'New shell', value: 'shell' });
+      if (job.program_exit_code == null) modes.push({ label: 'Attach to program', value: 'attach' });
+      modes.push({ label: 'New shell', value: 'shell' });
     }
     return modes;
   });
@@ -121,6 +125,11 @@ export class ExecJobPageComponent implements OnInit {
   open = computed(() => {
     const job = this.job();
     return job ? isOpenExecJob(job.status) : false;
+  });
+  keepVmRunning = computed(() => this.job()?.keep_vm_running ?? false);
+  keptExitCode = computed(() => {
+    const job = this.job();
+    return this.open() && job?.keep_vm_running ? job.program_exit_code ?? null : null;
   });
   waiting = computed(() => waitingReasonText(this.job()?.waiting_reason));
   breadcrumb = computed(() => this.crumbs.task(this.projectName, this.taskName, { label: this.job()?.entry_point ?? 'Exec job' }));
@@ -200,6 +209,30 @@ export class ExecJobPageComponent implements OnInit {
       error: (error: Error) => {
         this.aborting.set(false);
         this.abortOpen.set(false);
+        this.errorMessage.set(error.message);
+      },
+    });
+  }
+
+  toggleKeepVmRunning(): void {
+    this.switchKeepVmRunning(!this.keepVmRunning());
+  }
+
+  letVmStop(): void {
+    this.switchKeepVmRunning(false);
+  }
+
+  private switchKeepVmRunning(keep: boolean): void {
+    this.switchingKeep.set(true);
+    const request = keep ? this.execJobs.keepVmRunning(this.jobId) : this.execJobs.letVmStop(this.jobId);
+    request.subscribe({
+      next: () => {
+        this.switchingKeep.set(false);
+        this.errorMessage.set(null);
+        this.watch();
+      },
+      error: (error: Error) => {
+        this.switchingKeep.set(false);
         this.errorMessage.set(error.message);
       },
     });

@@ -27,6 +27,7 @@ function queuedJob(): ExecJobSummary {
     nodes: 1,
     labels: ['lab-a'],
     devices: [{ name: 'gpu:h100', count: 8 }],
+    keep_vm_running: false,
   };
 }
 
