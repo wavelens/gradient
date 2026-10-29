@@ -13,7 +13,10 @@ let
 in builtins.listToAttrs (map (vm: {
   name = builtins.replaceStrings [ "/" ] [ "-" ] vm;
   value = let
-    driver = (pkgs.testers.runNixOSTest ./${vm}).driverInteractive;
+    driver = (pkgs.testers.runNixOSTest {
+      imports = [ ./${vm} ];
+      _module.args = { inherit inputs; };
+    }).driverInteractive;
   in {
     type = "app";
     program = "${driver}/bin/nixos-test-driver";

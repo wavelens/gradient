@@ -148,10 +148,17 @@
         args = [ "-c" "while [ $SECONDS -lt 5 ]; do :; done; echo \"Hello World!\" > $out" ];
       };
 
+      buildFail = builtins.derivation {
+        name = "buildFail";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "echo 'compiling...'; echo 'error: this build always fails' >&2; exit 1" ];
+      };
+
     in {
-      inherit base lib1 lib2 util1 util2 util3 tool1 tool2 tool3 
-              service1 service2 service3 app1 app2 app3 system1 system2 
-              platform deployment buildWait5Sec;
+      inherit base lib1 lib2 util1 util2 util3 tool1 tool2 tool3
+              service1 service2 service3 app1 app2 app3 system1 system2
+              platform deployment buildWait5Sec buildFail;
     };
   };
 }
