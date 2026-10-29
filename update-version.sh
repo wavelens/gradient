@@ -102,5 +102,8 @@ cargo run --manifest-path "$REPO_ROOT/backend/Cargo.toml" --features api-spec --
 cargo run --manifest-path "$REPO_ROOT/backend/Cargo.toml" --features api-spec --bin gradient-api-spec -- typescript > "$API_TYPES"
 echo "updated docs/gradient-api.yaml and the frontend API types"
 
+node "$REPO_ROOT/frontend/scripts/whats-new.mts"
+echo "updated the release notes of docs/whats-new in the frontend"
+
 echo ""
 echo "Version updated to $VERSION"

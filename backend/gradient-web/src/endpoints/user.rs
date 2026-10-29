@@ -62,6 +62,8 @@ enum UserRefusal {
         "Cannot modify profile of an OIDC user. Your profile is managed by your identity provider."
     )]
     ModifyOidcUserProfile,
+    #[error("Invalid version '{version}'.")]
+    InvalidVersion { version: String },
 }
 
 impl Refusal for UserRefusal {
@@ -76,7 +78,8 @@ impl Refusal for UserRefusal {
             | Self::ModifyOidcUserProfile => RefusalStatus::Forbidden,
             Self::UnknownProjectOrNotMember { .. }
             | Self::PinToProjectAndCache
-            | Self::NoPermissionsSelected => RefusalStatus::BadRequest,
+            | Self::NoPermissionsSelected
+            | Self::InvalidVersion { .. } => RefusalStatus::BadRequest,
         }
     }
 }
@@ -88,6 +91,7 @@ pub struct UserInfoResponse {
     pub name: String,
     pub email: String,
     pub superuser: bool,
+    pub last_seen_version: Option<String>,
 }
 
 impl From<&MUser> for UserInfoResponse {
@@ -98,8 +102,21 @@ impl From<&MUser> for UserInfoResponse {
             name: user.name.clone(),
             email: user.email.clone(),
             superuser: user.superuser,
+            last_seen_version: user.last_seen_version.clone(),
         }
     }
+}
+
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
+pub struct SeenVersionRequest {
+    pub version: String,
+}
+
+fn is_version(version: &str) -> bool {
+    (1..=64).contains(&version.len())
+        && version
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'))
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -327,6 +344,35 @@ pub async fn get(
     };
 
     Ok(Json(res))
+}
+
+#[utoipa::path(
+    put,
+    path = "/user/whats-new",
+    operation_id = "putUserSeenVersion",
+    tag = "user",
+    summary = "Mark release notes as seen",
+    description = "Stores the version whose release notes the user saw last. The web UI shows the notes of every newer version once and sends the version it runs here when the user closes them. `last_seen_version` of `GET /user` holds the value and it is empty for an account that never saw any notes.",
+    request_body = SeenVersionRequest,
+    responses((status = OK, description = "Version stored", body = String, content_type = "application/json"), WebError)
+)]
+pub async fn put_seen_version(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    JsonBody(body): JsonBody<SeenVersionRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    if !is_version(&body.version) {
+        return Err(UserRefusal::InvalidVersion {
+            version: body.version,
+        }
+        .into());
+    }
+
+    let mut auser: AUser = user.into();
+    auser.last_seen_version = Set(Some(body.version));
+    gradient_db::rows::update::<EUser, _>(&state.web_db, auser).await?;
+
+    Ok(ok_json("Version stored".to_string()))
 }
 
 #[utoipa::path(
@@ -927,4 +973,18 @@ pub async fn patch_settings(
     };
 
     Ok(Json(res))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_version;
+
+    #[test]
+    fn seen_versions_are_release_names_only() {
+        assert!(is_version("2.1.0"));
+        assert!(is_version("2.1.0-rc1+build.5"));
+        assert!(!is_version(""));
+        assert!(!is_version("2.1.0 <b>"));
+        assert!(!is_version(&"1".repeat(65)));
+    }
 }

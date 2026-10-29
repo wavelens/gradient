@@ -52,6 +52,7 @@
       cli-unittest = self.packages.${system}.gradient-cli-full.tests;
       cli-static-clippy = self.packages.${system}.gradient-cli-static.clippy;
       store-spec = import ./nix/tests/store-spec/check.nix { inherit pkgs; inherit (pkgs) lib; };
+      whats-new = import ./nix/tests/whats-new/check.nix { inherit pkgs; inherit (pkgs) lib; };
       test-topologies = import ./nix/tests/harness/check.nix { inherit pkgs; inherit (pkgs) lib; };
       evalbench-summarize = import ./nix/tests/bench/evalbench/check.nix { inherit pkgs; };
       evalbench-multinode-report = import ./nix/tests/bench/evalbench-multinode/check.nix { inherit pkgs; };

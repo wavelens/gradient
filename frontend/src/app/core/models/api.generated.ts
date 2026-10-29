@@ -2123,6 +2123,10 @@ export interface SearchHit {
   starred: boolean;
 }
 
+export interface SeenVersionRequest {
+  version: string;
+}
+
 export interface SeriesPoint {
   bucket_start: string;
   count: number;
@@ -2570,6 +2574,7 @@ export interface UserInfoResponse {
   name: string;
   email: string;
   superuser: boolean;
+  last_seen_version?: string | null;
 }
 
 export interface UserRequest {

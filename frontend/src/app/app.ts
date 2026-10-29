@@ -15,6 +15,7 @@ import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { ThemeService } from '@core/services/theme.service';
 import { followOverscroll } from '@core/overscroll/overscroll';
+import { WhatsNewDialogComponent } from '@core/whats-new/whats-new-dialog.component';
 
 const FOOTER_LINKS: FooterLink[] = [
   {
@@ -28,7 +29,7 @@ const FOOTER_LINKS: FooterLink[] = [
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, AppHeaderComponent, FooterComponent, CommandPaletteComponent],
+  imports: [RouterOutlet, AppHeaderComponent, FooterComponent, CommandPaletteComponent, WhatsNewDialogComponent],
   templateUrl: './app.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './app.scss'

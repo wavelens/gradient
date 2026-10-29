@@ -12555,6 +12555,38 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/user/whats-new:
+    put:
+      tags:
+      - user
+      summary: Mark release notes as seen
+      description: Stores the version whose release notes the user saw last. The web UI shows the notes of every newer version once and sends the version it runs here when the user closes them. `last_seen_version` of `GET /user` holds the value and it is empty for an account that never saw any notes.
+      operationId: putUserSeenVersion
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SeenVersionRequest'
+        required: true
+      responses:
+        '200':
+          description: Version stored
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /cache/{cache}:
     get:
       tags:
@@ -19615,6 +19647,13 @@ components:
           type: string
         starred:
           type: boolean
+    SeenVersionRequest:
+      type: object
+      required:
+      - version
+      properties:
+        version:
+          type: string
     SeriesPoint:
       type: object
       required:
@@ -20836,6 +20875,10 @@ components:
           type: string
         superuser:
           type: boolean
+        last_seen_version:
+          type:
+          - string
+          - 'null'
     UserRequest:
       type: object
       required:
