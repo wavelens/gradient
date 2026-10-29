@@ -117,28 +117,39 @@ def end_reasons(state):
 def unbuilt_image_derivations(state):
     if "image build failed" not in json.dumps(state):
         return ""
-    return unbuilt_derivations(images_eval)
+    _, roots = server.execute("cat /tmp/wanted-roots.txt")
+    return f"--- topmost wanted uncached builds above the first wanted bootstrap source ---\n{roots}"
 
 
-def unbuilt_derivations(evaluation):
+def watch_wanted_roots():
     held = "(cp.file_hash IS NOT NULL OR o.external_url IS NOT NULL)"
     outputs = ("(SELECT string_agg(o.name, ',' ORDER BY o.name) FROM derivation_output o "
                "LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = d.id AND {})")
-    return f"--- partly held shared builds of evaluation {evaluation} no cache made available ---\n" + sql(
-        "SELECT db.status, db.wanted, db.probed, to_char(db.probed_at, 'MI:SS.MS'), "
-        "to_char(db.updated_at, 'MI:SS.MS'), d.name, db.unneeded_outputs, "
-        f"{outputs.format(held)} AS held, {outputs.format(f'NOT ({held})')} AS missing, left(coalesce(("
-        "  SELECT string_agg(DISTINCT pd.name || '{' || e.kind || ',' || p.status || ',' || p.wanted || ',' "
-        "         || p.cache_available || ',' || p.probed || ',' || coalesce(to_char(p.probed_at, 'MI:SS.MS'), '-') "
-        "         || '}[' || coalesce(array_to_string(e.dependency_outputs, ','), 'every') "
-        "         || ']', ' ') FROM derivation_dependency e "
-        "  JOIN derivation_build p ON p.derivation = e.derivation JOIN derivation pd ON pd.id = e.derivation "
-        "  WHERE e.dependency = d.id), ''), 1200) "
-        "FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build "
-        "JOIN derivation d ON d.id = bj.derivation "
-        f"WHERE bj.evaluation = '{evaluation}' AND NOT db.cache_available AND db.status NOT IN (3, 7) "
-        f"AND {outputs.format(held)} IS NOT NULL AND {outputs.format(f'NOT ({held})')} IS NOT NULL "
-        "ORDER BY d.name LIMIT 40"
+    bootstrap = ("SELECT db.derivation FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
+                 "WHERE d.name LIKE 'stage0-posix%' AND db.wanted")
+    builds_here = ("SELECT 1 FROM derivation_dependency e JOIN derivation_build p ON p.derivation = e.derivation "
+                   "WHERE e.dependency = up.derivation AND p.wanted AND NOT p.cache_available")
+    roots = (
+        f"WITH RECURSIVE up(derivation) AS ({bootstrap} UNION "
+        "  SELECT e.derivation FROM up JOIN derivation_dependency e ON e.dependency = up.derivation "
+        "  JOIN derivation_build p ON p.derivation = e.derivation WHERE p.wanted AND NOT p.cache_available) "
+        "SELECT d.name, db.status, db.probed, db.fetchable, db.unneeded_outputs, "
+        f"{outputs.format(held)} AS held, {outputs.format(f'NOT ({held})')} AS missing, "
+        "EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = d.id) AS entry_point, left(coalesce(("
+        "  SELECT string_agg(DISTINCT pd.name || '{' || e.kind || ',' || p.status || ',' || p.cache_available "
+        "         || ',' || p.probed || ',' || p.fetchable || '}[' "
+        "         || coalesce(array_to_string(e.dependency_outputs, ','), 'every') || ']', ' ') "
+        "  FROM derivation_dependency e JOIN derivation_build p ON p.derivation = e.derivation "
+        "  JOIN derivation pd ON pd.id = e.derivation WHERE e.dependency = d.id AND p.wanted), ''), 1500) "
+        "FROM up JOIN derivation d ON d.id = up.derivation JOIN derivation_build db ON db.derivation = up.derivation "
+        f"WHERE NOT EXISTS ({builds_here}) ORDER BY d.name LIMIT 40"
+    )
+    psql = "runuser -u postgres -- psql -d gradient -At"
+    server.succeed(f"printf %s {shlex.quote(bootstrap)} > /tmp/bootstrap-wanted.sql")
+    server.succeed(f"printf %s {shlex.quote(roots)} > /tmp/wanted-roots.sql")
+    server.execute(
+        f"(until {psql} -f /tmp/bootstrap-wanted.sql | grep -q .; do sleep 0.5; done; "
+        f"{psql} -f /tmp/wanted-roots.sql > /tmp/wanted-roots.txt 2>&1) >/dev/null 2>&1 &"
     )
 
 
@@ -267,7 +278,7 @@ eval_id = wait_for(
 
 def recorded_jobs(evaluation, names):
     status = api("GET", f"evals/{evaluation}")["status"]
-    assert status not in ("Failed", "Aborted"), f"evaluation {evaluation} ended {status}\n{unbuilt_derivations(evaluation)}"
+    assert status not in ("Failed", "Aborted"), f"evaluation {evaluation} ended {status}"
     jobs = api("GET", f"evals/{evaluation}/exec")
     by_name = {entry["entry_point"].rsplit(".", 1)[-1]: entry["id"] for entry in jobs}
     return by_name if set(names) <= by_name.keys() else None
@@ -488,6 +499,7 @@ status, _ = keeper.execute("journalctl -u gradient-worker --no-pager | grep -q '
 assert status != 0, "keeper with maxPreWarm = 0 changed its warm target"
 
 banner("Phase 17: push the custom images into a flake directory of a second repository")
+watch_wanted_roots()
 warm_guests = active_guests(stopper)
 server.succeed(
     "nix --extra-experimental-features nix-command copy "
