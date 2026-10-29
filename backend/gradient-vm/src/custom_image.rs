@@ -31,7 +31,8 @@ pub fn image_from_toplevel(
 }
 
 fn has_guest_agent(toplevel: &Path) -> bool {
-    toplevel.join(GUEST_AGENT_UNIT).exists()
+    std::fs::canonicalize(toplevel.join(GUEST_AGENT_UNIT))
+        .is_ok_and(|unit| unit != Path::new("/dev/null"))
 }
 
 pub fn custom_boot_error(error: GuestBootError, toplevel: &Path) -> GuestBootError {
@@ -130,5 +131,15 @@ mod tests {
         );
         write_unit(top.path());
         assert_eq!(custom_boot_error(timeout.clone(), top.path()).0, timeout.0);
+    }
+
+    #[test]
+    fn a_boot_timeout_with_a_masked_agent_unit_names_the_guest_module() {
+        let top = toplevel();
+        let unit = top.path().join(GUEST_AGENT_UNIT);
+        std::fs::create_dir_all(unit.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("/dev/null", &unit).unwrap();
+        let timeout = GuestBootError("guest agent did not answer within 120 s".into());
+        assert_eq!(custom_boot_error(timeout, top.path()).0, NO_GUEST_AGENT);
     }
 }
