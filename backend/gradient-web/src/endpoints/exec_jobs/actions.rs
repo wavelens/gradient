@@ -66,6 +66,66 @@ pub async fn post_exec_job_run(
     Ok(ok_json("Success".to_string()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/exec/{job}/keep-vm-running",
+    operation_id = "keepExecJobVmRunning",
+    tag = "exec-jobs",
+    summary = "Keep the VM of an exec job running",
+    description = "Keeps the guest of an exec job running after its program exits, every node of a multi-node job included. The job stays `Running` with the program's exit code in `program_exit_code`, terminals keep working and `maxSilent` no longer applies; the overall timeout still does. The job ends when the switch is released, when it is aborted or when the guest shuts down. Works before the job starts too. Requires project membership or a superuser. Answers 409 when the job has already finished.",
+    params(("job" = ExecJobId, Path)),
+    responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
+)]
+pub async fn post_exec_job_keep_vm_running(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
+    Path(job): Path<ExecJobId>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    switch_keep_vm_running(&state.web_db, &user, &api_key, &scheduler, job, true).await
+}
+
+#[utoipa::path(
+    delete,
+    path = "/exec/{job}/keep-vm-running",
+    operation_id = "releaseExecJobVm",
+    tag = "exec-jobs",
+    summary = "Let the VM of an exec job stop",
+    description = "Releases the keep VM running switch. A job whose program already exited ends `Completed` or `Failed` by the recorded exit code; a job whose program still runs only loses the switch. Requires project membership or a superuser. Answers 409 when the job has already finished.",
+    params(("job" = ExecJobId, Path)),
+    responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
+)]
+pub async fn delete_exec_job_keep_vm_running(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
+    Path(job): Path<ExecJobId>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    switch_keep_vm_running(&state.web_db, &user, &api_key, &scheduler, job, false).await
+}
+
+async fn switch_keep_vm_running(
+    db: &WebDb,
+    user: &MUser,
+    api_key: &MaybeApiKey,
+    scheduler: &gradient_scheduler::Scheduler,
+    job: ExecJobId,
+    keep: bool,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let ctx = member_context(db, user, api_key, job).await?;
+    if ctx.detail.status.is_terminal()
+        || !scheduler
+            .keep_exec_vm_running(ctx.detail.job.id, keep)
+            .await?
+    {
+        return Err(ExecJobRefusal::Finished.into());
+    }
+
+    Ok(ok_json("Success".to_string()))
+}
+
 async fn member_context(
     db: &WebDb,
     user: &MUser,

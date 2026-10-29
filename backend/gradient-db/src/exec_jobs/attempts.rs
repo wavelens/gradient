@@ -21,7 +21,7 @@ use crate::sql::status::{exec, exec_in};
 static OPEN_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE exec_job SET status = {starting}, waiting_reason = NULL, \
-         retries_left = LEAST(retries_left, $2) \
+         program_exit_code = NULL, retries_left = LEAST(retries_left, $2) \
          WHERE id = $1 AND status = {queued} \
          AND NOT EXISTS (SELECT 1 FROM exec_job_attempt a \
               WHERE a.exec_job = $1 AND a.number >= $3)",
@@ -39,6 +39,16 @@ static PROGRAM_STARTED_SQL: LazyLock<String> = LazyLock::new(|| {
          RETURNING r.*",
         running = exec(ExecJobStatus::Running),
         starting = exec(ExecJobStatus::Starting),
+    )
+});
+
+static PROGRAM_EXITED_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE exec_job r SET program_exit_code = $2 \
+         FROM exec_job_attempt a \
+         WHERE a.id = $1 AND a.ended_at IS NULL AND r.id = a.exec_job AND r.status = {running} \
+         RETURNING r.*",
+        running = exec(ExecJobStatus::Running),
     )
 });
 
@@ -80,7 +90,7 @@ static REQUEUE_NODES_SQL: LazyLock<String> = LazyLock::new(|| {
 fn finish_sql(status: ExecJobStatus) -> String {
     format!(
         "UPDATE exec_job SET status = {to}, message = $2, waiting_reason = NULL, \
-         finished_at = (now() AT TIME ZONE 'UTC') \
+         keep_vm_running = false, finished_at = (now() AT TIME ZONE 'UTC') \
          WHERE id = $1 AND status IN ({open}) RETURNING *",
         to = exec(status),
         open = exec_in(&ExecJobStatus::OPEN),
@@ -115,6 +125,8 @@ crate::sql_lazy! {
         status_write = StatusWrite::exec_job(ExecJobStatus::Running);
     EXEC_LOSSES_IN_A_ROW = || LOSSES_IN_A_ROW_SQL.as_str(),
         params = [NewUuid];
+    EXEC_PROGRAM_EXITED = || PROGRAM_EXITED_SQL.as_str(),
+        params = [NewUuid, Int(3)];
 }
 
 crate::sql! {
@@ -179,6 +191,19 @@ pub async fn program_started<C: ConnectionTrait>(
     MExecJob::find_by_statement(
         EXEC_PROGRAM_STARTED.bind([Value::Uuid(Some(attempt.into_inner()))]),
     )
+    .one(db)
+    .await
+}
+
+pub async fn program_exited<C: ConnectionTrait>(
+    db: &C,
+    attempt: ExecJobAttemptId,
+    code: i32,
+) -> Result<Option<MExecJob>, DbErr> {
+    MExecJob::find_by_statement(EXEC_PROGRAM_EXITED.bind([
+        Value::Uuid(Some(attempt.into_inner())),
+        Value::Int(Some(code)),
+    ]))
     .one(db)
     .await
 }

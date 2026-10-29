@@ -193,6 +193,10 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(builds::actions::post_build_retry))
                 .routes(routes!(exec_jobs::actions::post_exec_job_abort))
                 .routes(routes!(exec_jobs::actions::post_exec_job_run))
+                .routes(routes!(
+                    exec_jobs::actions::post_exec_job_keep_vm_running,
+                    exec_jobs::actions::delete_exec_job_keep_vm_running
+                ))
                 .routes(routes!(exec_jobs::terminal::get_exec_job_console))
                 .routes(routes!(exec_jobs::terminal::get_exec_job_shell))
                 .routes(routes!(builds::log::post_build_log))

@@ -212,6 +212,10 @@ pub enum Transition {
     ExecProgramStarted {
         attempt: ExecJobAttemptId,
     },
+    ExecProgramExited {
+        attempt: ExecJobAttemptId,
+        code: i32,
+    },
     ExecPhase {
         attempt: ExecJobAttemptId,
         name: String,

@@ -41,6 +41,10 @@ pub const GUEST_CHANNELS_SINCE: u16 = 44;
 
 pub const VM_STATE_SINCE: u16 = 46;
 
+pub const EXEC_ABORT_REQUEST_SINCE: u16 = 52;
+
+pub const EXEC_KEEP_VM_RUNNING_SINCE: u16 = 52;
+
 pub const GUEST_CHANNEL_CHUNK: usize = 32 * 1024;
 
 pub const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);

@@ -41,6 +41,10 @@ impl Watchdog {
         self.last_output = Instant::now();
     }
 
+    pub fn program_exited(&mut self) {
+        self.silent = None;
+    }
+
     pub async fn next<S: Stream + Unpin>(
         &mut self,
         stream: &mut S,

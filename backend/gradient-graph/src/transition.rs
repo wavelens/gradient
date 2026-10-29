@@ -248,6 +248,10 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             exec::program_started(ctx, attempt).await?;
             Ok(TransitionReport::default())
         }
+        Transition::ExecProgramExited { attempt, code } => {
+            exec::program_exited(ctx, attempt, code).await?;
+            Ok(TransitionReport::default())
+        }
         Transition::ExecPhase {
             attempt,
             name,

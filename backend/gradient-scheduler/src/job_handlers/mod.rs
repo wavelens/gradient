@@ -9,6 +9,7 @@ mod assignment;
 mod build_status;
 mod cluster;
 mod eval_status;
+mod exec_keep_vm;
 pub(crate) mod exec_status;
 pub(crate) mod guest_channel;
 pub(crate) mod import;

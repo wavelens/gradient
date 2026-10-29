@@ -299,12 +299,35 @@ The **Terminal** tab of the job page offers three sessions.
 | Session | Job status | Content |
 |---|---|---|
 | **Console** | `starting` or `running` | Serial console of the guest, logged in as `gradient`, starting with the last 64 KiB of output |
-| **Attach to program** | `running`, `ssh = true` | The terminal of the program |
+| **Attach to program** | `running`, `ssh = true`, program not exited | The terminal of the program |
 | **New shell** | `running`, `ssh = true` | A new shell next to the program |
 
 - The oldest viewer can type into the console. Later viewers see a read-only view.
 - Programs stay active past the close of an attached view.
 - Multi-node jobs add a **Node** picker. The log and every session follow the picked node.
+- Terminals and the console log in as `gradient`. The default guest image has no root login.
+
+### Keep the VM Running { #keep-vm-running }
+
+Click **Keep VM running** on the job page to hold the guest up after the program exit. The switch is available before the start and during the job.
+
+| Event | Result |
+|---|---|
+| Program exit | The job stays `running`, with the notice "Program exited with code N. The VM keeps running." |
+| **Let VM stop**, or a second click on **Keep VM running** | End as `completed` or `failed` by the recorded exit code |
+| **Abort** | End as `aborted` |
+| Guest shutdown | End by the recorded exit code |
+
+- New shells, SSH logins and the console remain usable on a held guest.
+- Program exits end `maxSilent`. The job `timeout` is in force.
+- All nodes of a multi-node job follow the switch.
+
+### Shut Down the Guest
+
+`poweroff`, `shutdown`, `reboot`, `halt` and `systemctl poweroff` run in every terminal and on the console. The user `gradient` can run them without a password.
+
+- Shutdowns during the program leave the job `aborted`, same as **Abort**. The job won't restart.
+- Shutdowns of a [held guest](#keep-vm-running) close the job by the recorded exit code.
 
 ### SSH Logins
 

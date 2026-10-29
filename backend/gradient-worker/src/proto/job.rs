@@ -13,7 +13,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation,
-    EvalCachePullOutcome, EvalMessageLevel, EvalStatsReport, JobPhase, JobUpdateKind, QueryMode,
+    EXEC_ABORT_REQUEST_SINCE, EXEC_KEEP_VM_RUNNING_SINCE, EvalCachePullOutcome, EvalMessageLevel,
+    EvalStatsReport, JobPhase, JobUpdateKind, QueryMode,
 };
 use gradient_worker_client::correlation::{
     AssignmentHandle, CacheWaiters, ImportWaiters, InputWaiters, KnownDerivationWaiters,
@@ -666,6 +667,26 @@ impl JobUpdater {
 
     pub async fn report_program_started(&self) -> Result<()> {
         self.send_update(JobUpdateKind::ProgramStarted).await
+    }
+
+    pub async fn report_program_exited(&self, code: i32) -> Result<()> {
+        if self.server_older_than(EXEC_KEEP_VM_RUNNING_SINCE) {
+            return Ok(());
+        }
+        self.send_update(JobUpdateKind::ProgramExited { code })
+            .await
+    }
+
+    pub async fn report_abort_requested(&self) -> Result<bool> {
+        if self.server_older_than(EXEC_ABORT_REQUEST_SINCE) {
+            return Ok(false);
+        }
+        self.send_update(JobUpdateKind::AbortRequested).await?;
+        Ok(true)
+    }
+
+    fn server_older_than(&self, since: u16) -> bool {
+        self.writer.version().is_some_and(|version| version < since)
     }
 
     pub async fn send_job_phase(&self, name: String, payload: Vec<u8>) -> Result<()> {

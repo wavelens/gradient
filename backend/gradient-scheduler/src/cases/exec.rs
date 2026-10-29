@@ -311,6 +311,91 @@ async fn an_abort_sends_abort_job_and_ends_aborted() {
 }
 
 #[tokio::test]
+async fn a_guest_shutdown_aborts_the_job_without_a_retry() {
+    let e1 = EvaluationId::now_v7();
+    let case = with_queued_job(
+        e1,
+        ExecSpec {
+            retries: 2,
+            ..spec()
+        },
+    )
+    .await;
+    let (key, _) = dispatched(&case).await;
+    case.signals(W1);
+
+    case.scheduler.handle_exec_abort_requested(W2, &key).await;
+    assert_eq!(
+        the_job(&case).await.status,
+        ExecJobStatus::Starting,
+        "after 1: a request of another worker changes nothing"
+    );
+
+    case.scheduler.handle_exec_abort_requested(W1, &key).await;
+
+    let job = the_job(&case).await;
+    assert_eq!(
+        (job.status, job.retries_left),
+        (ExecJobStatus::Aborted, 2),
+        "after 2: aborted with its retries left"
+    );
+    assert_eq!(
+        the_attempt(&case).await.end_reason,
+        Some(AttemptEndReason::Aborted),
+        "after 2: the attempt"
+    );
+    assert!(
+        case.signals(W1)
+            .iter()
+            .any(|s| matches!(s, SessionSignal::Abort { job_id, .. } if *job_id == key)),
+        "after 2: the worker was told to abort {key}"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn the_keep_vm_running_switch_reaches_the_worker_until_the_job_ends() {
+    let e1 = EvaluationId::now_v7();
+    let case = with_queued_job(e1, spec()).await;
+    let (key, _) = dispatched(&case).await;
+    let id = the_job(&case).await.id;
+    case.signals(W1);
+
+    let kept = case
+        .scheduler
+        .keep_exec_vm_running(id, true)
+        .await
+        .expect("the switch runs");
+
+    assert!(kept, "after 1: the open job takes the switch");
+    assert!(the_job(&case).await.keep_vm_running, "after 1: the job");
+    assert!(
+        case.signals(W1).iter().any(|s| matches!(
+            s,
+            SessionSignal::ExecKeepVmRunning { job_id, keep_vm_running: true } if *job_id == key
+        )),
+        "after 1: the worker of {key} got the switch"
+    );
+
+    case.scheduler
+        .abort_exec_job(id)
+        .await
+        .expect("the abort runs");
+    let refused = !case
+        .scheduler
+        .keep_exec_vm_running(id, false)
+        .await
+        .expect("the switch runs");
+
+    assert!(refused, "after 3: a finished job refuses the switch");
+    assert!(
+        !the_job(&case).await.keep_vm_running,
+        "after 3: the finished job dropped the switch"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn a_refused_job_runs_again_once_its_task_switch_is_on() {
     let e1 = EvaluationId::now_v7();
     let retried = ExecSpec {

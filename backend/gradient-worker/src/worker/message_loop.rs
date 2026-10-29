@@ -23,7 +23,7 @@ use tracing::{debug, error, info, warn};
 use crate::config::WorkerConfig;
 use crate::exec::channels::GuestChannelCommand;
 use crate::exec::job::lease_guest_address;
-use crate::exec::job_channels::GuestChannelInbox;
+use crate::exec::keep_vm::ExecInbox;
 use crate::executor::eval_split::SplitMember;
 use crate::executor::timeline::{JobTimeline, TimelineSnapshot};
 use crate::executor::{AbortSignal, JobExecutor};
@@ -494,6 +494,15 @@ impl MessageLoopState {
             ServerMessage::CloseGuestChannel { channel_id } => {
                 self.route_guest_channel(GuestChannelCommand::Close { channel_id });
             }
+            ServerMessage::ExecKeepVmRunning {
+                job_id,
+                keep_vm_running,
+            } => {
+                let registry = self.jobs.registry.lock();
+                if !registry.keep_vm_running(&job_id, keep_vm_running) {
+                    debug!(%job_id, "the keep VM running switch for no running exec job was dropped");
+                }
+            }
         }
         Ok(())
     }
@@ -896,7 +905,7 @@ impl MessageLoopState {
             Some(Arc::clone(&executor.store)),
         );
         let (log, abort, done_tx) = (registered.log, registered.abort, registered.done_tx);
-        let guest_channels = registered.guest_channels;
+        let exec_inbox = registered.exec_inbox;
 
         #[expect(
             clippy::disallowed_methods,
@@ -910,7 +919,7 @@ impl MessageLoopState {
                 &credentials,
                 abort,
                 split,
-                guest_channels,
+                exec_inbox,
                 exec_member,
             )
             .await;
@@ -1195,7 +1204,7 @@ async fn run_job(
     credentials: &CredentialStore,
     abort: AbortSignal,
     split: Option<SplitMember>,
-    guest_channels: GuestChannelInbox,
+    exec_inbox: ExecInbox,
     exec_member: Option<ClusterStart>,
 ) -> Result<()> {
     let job_abort = abort.clone();
@@ -1215,7 +1224,7 @@ async fn run_job(
                     updater,
                     credentials,
                     abort,
-                    guest_channels,
+                    exec_inbox,
                     exec_member,
                 )
                 .await

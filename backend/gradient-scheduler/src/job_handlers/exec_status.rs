@@ -110,6 +110,31 @@ impl Scheduler {
         {
             warn!(error = %e, %worker_id, %job_id, "recording an exec program start failed");
         }
+        self.resend_keep_vm_running(worker_id, job_id).await;
+    }
+
+    pub async fn handle_exec_program_exited(&self, worker_id: &str, job_id: &str, code: i32) {
+        let Some(attempt) = self.active_exec_attempt(worker_id, job_id).await else {
+            return;
+        };
+        if let Err(e) = self
+            .graph
+            .transition(Transition::ExecProgramExited { attempt, code })
+            .await
+        {
+            warn!(error = %e, %worker_id, %job_id, "recording an exec program exit failed");
+        }
+    }
+
+    pub async fn handle_exec_abort_requested(&self, worker_id: &str, job_id: &str) {
+        let attempt = self.active_exec_attempt(worker_id, job_id).await;
+        let (Some(_), Some(exec_job)) = (attempt, exec_job_of_key(job_id)) else {
+            return;
+        };
+        info!(%worker_id, %job_id, "the guest shut down; the exec job is aborted");
+        if let Err(e) = self.abort_exec_job(exec_job).await {
+            warn!(error = %e, %worker_id, %job_id, "aborting an exec job on a guest shutdown failed");
+        }
     }
 
     pub async fn handle_exec_phase(

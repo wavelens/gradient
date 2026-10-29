@@ -5812,7 +5812,7 @@ paths:
       - exec-jobs
       summary: Get exec job
       description: |-
-        Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`.
+        Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` tells whether the guest stays up after the program exits, `program_exit_code` holds the exit code of a program whose guest is kept running.
 
         **Access:** Public projects, or members of the project.
       operationId: getExecJob
@@ -5906,6 +5906,69 @@ paths:
       responses:
         '101':
           description: Switching Protocols - WebSocket upgrade successful
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/exec/{job}/keep-vm-running:
+    post:
+      tags:
+      - exec-jobs
+      summary: Keep the VM of an exec job running
+      description: Keeps the guest of an exec job running after its program exits, every node of a multi-node job included. The job stays `Running` with the program's exit code in `program_exit_code`, terminals keep working and `maxSilent` no longer applies; the overall timeout still does. The job ends when the switch is released, when it is aborted or when the guest shuts down. Works before the job starts too. Requires project membership or a superuser. Answers 409 when the job has already finished.
+      operationId: keepExecJobVmRunning
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - exec-jobs
+      summary: Let the VM of an exec job stop
+      description: Releases the keep VM running switch. A job whose program already exited ends `Completed` or `Failed` by the recorded exit code; a job whose program still runs only loses the switch. Requires project membership or a superuser. Answers 409 when the job has already finished.
+      operationId: releaseExecJobVm
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -16325,6 +16388,7 @@ components:
       - devices
       - guest
       - retries_left
+      - keep_vm_running
       - created_at
       - attempts
       - node_jobs
@@ -16370,6 +16434,13 @@ components:
           - 'null'
         retries_left:
           type: integer
+          format: int32
+        keep_vm_running:
+          type: boolean
+        program_exit_code:
+          type:
+          - integer
+          - 'null'
           format: int32
         created_at:
           type: string
@@ -16438,6 +16509,7 @@ components:
       - nodes
       - labels
       - devices
+      - keep_vm_running
       properties:
         id:
           $ref: '#/components/schemas/ExecJobId'
@@ -16465,6 +16537,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DeviceRequest'
+        keep_vm_running:
+          type: boolean
+        program_exit_code:
+          type:
+          - integer
+          - 'null'
+          format: int32
         started_at:
           type:
           - string

@@ -379,6 +379,16 @@ impl SchedulerJobEvents {
             JobUpdateKind::ProgramStarted => {
                 scheduler.handle_exec_started(peer_id, &job_id).await;
             }
+            JobUpdateKind::ProgramExited { code } => {
+                scheduler
+                    .handle_exec_program_exited(peer_id, &job_id, code)
+                    .await;
+            }
+            JobUpdateKind::AbortRequested => {
+                scheduler
+                    .handle_exec_abort_requested(peer_id, &job_id)
+                    .await;
+            }
             JobUpdateKind::Stage(stage) => {
                 scheduler.enter_build_stage(peer_id, &job_id, stage).await;
             }

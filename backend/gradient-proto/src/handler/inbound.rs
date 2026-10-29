@@ -1547,6 +1547,7 @@ pub(in crate::handler) mod fixture {
             spec: Default::default(),
             image_path: None,
             retries_left: 0,
+            keep_vm_running: false,
             attempts_done: 0,
             last_phase: None,
             required_paths: vec![],

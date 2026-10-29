@@ -654,6 +654,47 @@ async fn a_program_start_moves_the_job_to_running_once() {
 }
 
 #[tokio::test]
+async fn a_program_exit_is_kept_until_the_next_attempt_starts() {
+    let (case, e1) = queued_case(with_retries(3)).await;
+    let first = assign(&case, e1, 1, 5).await;
+    case.transition(Transition::ExecProgramExited {
+        attempt: first,
+        code: 7,
+    })
+    .await;
+    assert_eq!(
+        job(&case, e1).await.program_exit_code,
+        None,
+        "after 1: an exit before the program start is ignored"
+    );
+
+    case.transition(Transition::ExecProgramStarted { attempt: first })
+        .await;
+    let events = exec_events(&case).await;
+    case.transition(Transition::ExecProgramExited {
+        attempt: first,
+        code: 3,
+    })
+    .await;
+    let kept = job(&case, e1).await;
+    assert_eq!(
+        (kept.status, kept.program_exit_code),
+        (ExecJobStatus::Running, Some(3)),
+        "after 3: the job keeps running with the exit code"
+    );
+    assert_eq!(exec_events(&case).await, events, "after 3: no new event");
+
+    end_attempt(&case, first, AttemptEndReason::Lost).await;
+    assign(&case, e1, 2, 5).await;
+    assert_eq!(
+        job(&case, e1).await.program_exit_code,
+        None,
+        "after 5: the next attempt starts without an exit code"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn a_job_failed_before_dispatch_ends_failed_without_a_retry() {
     let (case, e1) = queued_case(with_retries(2)).await;
 

@@ -194,6 +194,7 @@ fn an_exec_job_and_a_phase_round_trip() {
         timeout_secs: Some(1),
         max_silent_secs: None,
         attempt: 1,
+        keep_vm_running: true,
     }));
     assert_eq!(
         from_bytes::<Job>(to_bytes(&job, newest).unwrap(), newest).unwrap(),
@@ -415,6 +416,79 @@ fn a_requirement_from_the_previous_version_has_no_guest_size() {
     );
     let older: ExecRequirement = from_bytes(to_bytes(&requirement, 50).unwrap(), 50).unwrap();
     assert_eq!(older.guest, GuestSize::default());
+}
+
+#[test]
+fn abort_requests_and_program_exits_cross_the_wire_since_version_52() {
+    use crate::codec::{EncodeError, from_bytes, to_bytes};
+    use crate::messages::{
+        ClientMessage, EXEC_ABORT_REQUEST_SINCE, EXEC_KEEP_VM_RUNNING_SINCE, JobUpdateKind,
+    };
+
+    let update = |update| ClientMessage::JobUpdate {
+        job_id: "exec:x".into(),
+        assignment_id: "a1".into(),
+        update,
+    };
+    for (since, sent) in [
+        (
+            EXEC_ABORT_REQUEST_SINCE,
+            update(JobUpdateKind::AbortRequested),
+        ),
+        (
+            EXEC_KEEP_VM_RUNNING_SINCE,
+            update(JobUpdateKind::ProgramExited { code: 3 }),
+        ),
+    ] {
+        assert_eq!(
+            from_bytes::<ClientMessage>(to_bytes(&sent, since).unwrap(), since).unwrap(),
+            sent
+        );
+        assert!(matches!(
+            to_bytes(&sent, since - 1),
+            Err(EncodeError::NewerThanPeer { .. })
+        ));
+    }
+}
+
+#[test]
+fn the_keep_vm_running_switch_reaches_only_a_worker_of_version_52() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{EXEC_KEEP_VM_RUNNING_SINCE, ServerMessage};
+    use crate::types::ExecJob;
+
+    let since = EXEC_KEEP_VM_RUNNING_SINCE;
+    let switch = ServerMessage::ExecKeepVmRunning {
+        job_id: "exec:x".into(),
+        keep_vm_running: true,
+    };
+    assert_eq!(
+        from_bytes::<ServerMessage>(to_bytes(&switch, since).unwrap(), since).unwrap(),
+        switch
+    );
+    assert!(to_bytes(&switch, since - 1).is_err());
+    assert_eq!(switch.job_id(), Some("exec:x"));
+
+    let job = ExecJob {
+        program: "/nix/store/aaaa-check".into(),
+        args: vec![],
+        env: Default::default(),
+        image: None,
+        requirement: Default::default(),
+        context: Default::default(),
+        secrets: vec![],
+        keep_running: false,
+        timeout_secs: None,
+        max_silent_secs: None,
+        attempt: 1,
+        keep_vm_running: true,
+    };
+    assert_eq!(
+        from_bytes::<ExecJob>(to_bytes(&job, since).unwrap(), since).unwrap(),
+        job
+    );
+    let older: ExecJob = from_bytes(to_bytes(&job, since - 1).unwrap(), since - 1).unwrap();
+    assert!(!older.keep_vm_running);
 }
 
 #[test]

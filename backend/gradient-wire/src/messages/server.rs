@@ -228,6 +228,12 @@ pub enum ServerMessage {
         cols: u16,
         rows: u16,
     },
+
+    #[proto(52)]
+    ExecKeepVmRunning {
+        job_id: String,
+        keep_vm_running: bool,
+    },
 }
 
 impl ServerMessage {
@@ -245,7 +251,8 @@ impl ServerMessage {
             | ServerMessage::InputResult { job_id, .. }
             | ServerMessage::InputProgress { job_id, .. }
             | ServerMessage::EvalShardReply { job_id, .. }
-            | ServerMessage::OpenGuestChannel { job_id, .. } => Some(job_id),
+            | ServerMessage::OpenGuestChannel { job_id, .. }
+            | ServerMessage::ExecKeepVmRunning { job_id, .. } => Some(job_id),
             _ => None,
         }
     }
@@ -288,6 +295,7 @@ impl ServerMessage {
             ServerMessage::GuestChannelData { .. } => "GuestChannelData",
             ServerMessage::CloseGuestChannel { .. } => "CloseGuestChannel",
             ServerMessage::GuestChannelResize { .. } => "GuestChannelResize",
+            ServerMessage::ExecKeepVmRunning { .. } => "ExecKeepVmRunning",
         }
     }
 
