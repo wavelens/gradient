@@ -94,7 +94,7 @@
     imports = [ ../../../modules/gradient-worker.nix ];
 
     virtualisation = {
-      cores = 2;
+      cores = 4;
       inherit memorySize;
       diskSize = 8192;
       writableStore = true;
