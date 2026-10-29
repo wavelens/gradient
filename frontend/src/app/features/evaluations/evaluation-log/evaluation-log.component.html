@@ -120,7 +120,7 @@
                   @if (getBuildElapsed(build)) {
                     <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
                   }
-                  <button type="button" class="build-kebab" aria-label="Build actions" tabindex="-1"
+                  <button type="button" class="sidebar-kebab" aria-label="Build actions" tabindex="-1"
                           (click)="toggleBuildMenu($event, build, buildMenu)">
                     <gr-icon name="more_vert" size="sm" />
                   </button>

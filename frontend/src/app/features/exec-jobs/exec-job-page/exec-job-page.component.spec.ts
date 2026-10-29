@@ -73,10 +73,14 @@ function job(status: ExecJobStatus, sshCommand: string | null = SSH): ExecJobRes
 function setup(
   status: ExecJobStatus,
   sshCommand: string | null = SSH,
+  query: Record<string, string> = {},
 ): { fixture: ComponentFixture<ExecJobPageComponent>; abort: ReturnType<typeof vi.fn> } {
   const abort = vi.fn(() => of('Success'));
   const route = {
-    snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo', job: 'j1' }) },
+    snapshot: {
+      paramMap: convertToParamMap({ project: 'acme', task: 'demo', job: 'j1' }),
+      queryParamMap: convertToParamMap(query),
+    },
     parent: { data: of({ taskAccess: { access: { managed: false, canEdit: true, canTrigger: true } } }) },
   } as unknown as ActivatedRoute;
   TestBed.configureTestingModule({
@@ -120,6 +124,27 @@ describe('ExecJobPageComponent', () => {
     const { fixture } = setup('running');
     const actions = (fixture.nativeElement as HTMLElement).querySelector('.info-bar-right');
     expect(actions ? abortButton(actions as HTMLElement) : undefined).toBeTruthy();
+  });
+
+  it('opens the job menu of the task page from the log entry, by right click or its dots', () => {
+    const { fixture } = setup('running');
+    const root = fixture.nativeElement as HTMLElement;
+    const log = root.querySelector('.log-sidebar .sidebar-item') as HTMLElement;
+    log.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+    fixture.detectChanges();
+    const items = () => Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item'))
+      .map((item) => (item.textContent ?? '').replace(item.querySelector('.gr-menu__icon')?.textContent ?? '', '').trim());
+    expect(items()).toEqual(['Terminal', 'Abort']);
+    expect(log.querySelector('.sidebar-kebab')).not.toBeNull();
+
+    Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item')).find((item) => item.textContent?.includes('Abort'))!.click();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('abort this exec job');
+  });
+
+  it('offers no job menu on a finished job', () => {
+    const { fixture } = setup('completed');
+    expect((fixture.nativeElement as HTMLElement).querySelector('.log-sidebar .sidebar-kebab')).toBeNull();
   });
 
   it('asks in the dialog before it aborts', () => {
@@ -293,6 +318,13 @@ describe('ExecJobPageComponent', () => {
       expect(buttonNamed(root, 'New shell')).toBeTruthy();
       const copied = Array.from(root.querySelectorAll('gr-copy-field input')).map((i) => (i as HTMLInputElement).value);
       expect(copied).toEqual([SSH, FORWARD]);
+      expect(opened.map(path)).toEqual(['/exec-jobs/j1/console']);
+    });
+
+    it('opens straight into the terminal from a link with view=terminal', () => {
+      const { fixture } = setup('running', SSH, { view: 'terminal' });
+      fixture.detectChanges();
+      expect((fixture.nativeElement as HTMLElement).querySelector('gr-terminal')).not.toBeNull();
       expect(opened.map(path)).toEqual(['/exec-jobs/j1/console']);
     });
 

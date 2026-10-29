@@ -7,19 +7,19 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, OnChanges, SimpleChanges, inject, input, signal } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { Subscription, catchError, interval, of, startWith, switchMap, takeWhile } from 'rxjs';
-import { BadgeComponent } from '@gradient/ui/ui';
+import { BadgeComponent, IconComponent, MenuComponent, type MenuItem } from '@gradient/ui/ui';
 import { StatusIconComponent } from '@shared/ui';
 import type { ExecJobSummary } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
-import { deviceLabel, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
+import { deviceLabel, execJobMenu, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 
 const POLL_MS = 4000;
 
 @Component({
   selector: 'app-exec-job-list',
   standalone: true,
-  imports: [RouterModule, BadgeComponent, StatusIconComponent],
+  imports: [RouterModule, BadgeComponent, IconComponent, MenuComponent, StatusIconComponent],
   templateUrl: './exec-job-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './exec-job-list.component.scss',
@@ -31,8 +31,10 @@ export class ExecJobListComponent implements OnChanges {
   evaluationRunning = input(false);
   project = input.required<string>();
   task = input.required<string>();
+  canTrigger = input(false);
 
   jobs = signal<ExecJobSummary[]>([]);
+  menuModel = signal<MenuItem[]>([]);
   private poll?: Subscription;
 
   protected readonly phase = execJobPhase;
@@ -64,6 +66,37 @@ export class ExecJobListComponent implements OnChanges {
     ).subscribe((jobs) => {
       if (Array.isArray(jobs)) this.jobs.set(jobs);
     });
+  }
+
+  link(job: ExecJobSummary): unknown[] {
+    return ['/project', this.project(), 'task', this.task(), 'exec', job.id];
+  }
+
+  openMenu(event: Event, job: ExecJobSummary, menu: { toggle: (e: Event) => void }): void {
+    event.stopPropagation();
+    this.menuModel.set(this.jobMenu(job));
+    menu.toggle(event);
+  }
+
+  openContextMenu(event: MouseEvent, job: ExecJobSummary, menu: { openAt: (e: MouseEvent) => void }): void {
+    if (!this.hasActions(job)) return;
+    this.menuModel.set(this.jobMenu(job));
+    menu.openAt(event);
+  }
+
+  hasActions(job: ExecJobSummary): boolean {
+    return this.jobMenu(job).length > 0;
+  }
+
+  private jobMenu(job: ExecJobSummary): MenuItem[] {
+    return execJobMenu(job.status, this.canTrigger(), {
+      terminal: { routerLink: this.link(job), queryParams: { view: 'terminal' } },
+      abort: () => this.abort(job),
+    });
+  }
+
+  private abort(job: ExecJobSummary): void {
+    this.execJobs.abort(job.id).subscribe(() => this.watch());
   }
 
   detail(job: ExecJobSummary): string {

@@ -10,8 +10,9 @@
 .job-list { display: flex; flex-direction: column; gap: $space-pair; }
 
 .job {
+  position: relative;
   display: grid;
-  grid-template-columns: 24px minmax(0, 400px) minmax(0, 1fr) auto;
+  grid-template-columns: 24px minmax(0, 400px) minmax(0, 1fr) auto auto;
   align-items: center;
   gap: $spacing-sm;
   padding: $spacing-sm $spacing-md;
@@ -47,20 +48,41 @@
   }
 
   .job-needs { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: $spacing-xs; }
+
+  .job-link {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+
+    &:focus-visible { outline-offset: -$focus-ring-width; }
+  }
+
+  .kebab {
+    position: relative;
+    padding-left: $spacing-sm;
+    border: none;
+    border-left: 1px solid var(--gr-border-subtle);
+    background: none;
+    color: var(--gr-text-muted);
+    cursor: pointer;
+
+    &:hover { color: var(--gr-text-primary); }
+  }
 }
 
 @media (max-width: $breakpoint-sm) {
   .job {
     grid-template-areas:
-      'icon name'
-      'icon detail'
-      'icon needs';
-    grid-template-columns: auto minmax(0, 1fr);
+      'icon name kebab'
+      'icon detail kebab'
+      'icon needs kebab';
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: $spacing-xs $spacing-sm;
 
     .si { grid-area: icon; }
     .job-name { grid-area: name; }
     .job-detail { grid-area: detail; }
     .job-needs { grid-area: needs; justify-content: flex-start; }
+    .kebab { grid-area: kebab; align-self: stretch; }
   }
 }

@@ -32,11 +32,19 @@
         @for (option of views(); track option.value) {
           <div class="sidebar-item" role="button" tabindex="0" [class.selected]="view() === option.value"
                [attr.aria-pressed]="view() === option.value"
-               (click)="showView(option.value)" (keydown.enter)="showView(option.value)">
+               (click)="showView(option.value)" (keydown.enter)="showView(option.value)"
+               (contextmenu)="option.value === 'log' && jobMenu().length > 0 && jobActions.openAt($event)">
             <gr-icon [name]="option.icon" size="sm" />
             <span class="sidebar-item-label">{{ option.label }}</span>
+            @if (option.value === 'log' && jobMenu().length > 0) {
+              <button type="button" class="sidebar-kebab" aria-label="Exec job actions" tabindex="-1"
+                      (click)="$event.stopPropagation(); jobActions.toggle($event)">
+                <gr-icon name="more_vert" size="sm" />
+              </button>
+            }
           </div>
         }
+        <gr-menu #jobActions [model]="jobMenu()" />
 
         @if (phaseLines().length > 0) {
           <div class="sidebar-group-header">

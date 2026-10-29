@@ -463,7 +463,7 @@ describe('EvaluationLogComponent', () => {
       fixture.detectChanges();
       const select = vi.spyOn(cmp, 'selectBuild');
 
-      const kebabs = fixture.nativeElement.querySelectorAll('.build-item .build-kebab') as NodeListOf<HTMLButtonElement>;
+      const kebabs = fixture.nativeElement.querySelectorAll('.build-item .sidebar-kebab') as NodeListOf<HTMLButtonElement>;
       expect(kebabs).toHaveLength(2);
       kebabs[1].click();
       fixture.detectChanges();
