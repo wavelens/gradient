@@ -27,7 +27,7 @@ flowchart LR
 | `gradient-pool` | Matching (`WorkerCaps::fits_exec`) and device holds |
 | `gradient-scheduler` | Loading, placement, dispatch, wait reasons and pre-warm counts |
 | `gradient-proto` | Phases, program start, logs and the inventory on the session |
-| `gradient-web` | `/exec-jobs` endpoints, browser terminals and the project switch |
+| `gradient-web` | `/exec-jobs` endpoints, browser terminals and the project and task switches |
 | `gradient-ssh` | SSH logins into exec jobs |
 
 ## Entry Points
@@ -42,6 +42,7 @@ flowchart LR
 |---|---|
 | `exec jobs are disabled on this instance` | `exec.enable` off, checked first |
 | `exec jobs are disabled for this project` | `project.exec_enabled` off |
+| `exec jobs are disabled for this task` | `task.exec_enabled` off, checked last |
 
 - Refused programs also lose the image entry point, even in a later batch.
 - Restarts copy `entry_point.exec` along with the entry point.
