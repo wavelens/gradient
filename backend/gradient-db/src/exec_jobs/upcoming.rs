@@ -27,6 +27,7 @@ static WITHOUT_IMAGE_SQL: LazyLock<String> = LazyLock::new(|| {
          JOIN task t ON t.id = e.task \
          JOIN derivation d ON d.id = e.derivation \
          WHERE e.exec IS NOT NULL AND e.exec->>'image' IS NULL \
+         AND e.exec->'manual_start' IS DISTINCT FROM 'true'::jsonb \
          AND ev.status NOT IN ({terminal}) \
          AND NOT EXISTS (SELECT 1 FROM exec_job r WHERE r.entry_point = e.id) \
          UNION ALL \
@@ -34,7 +35,8 @@ static WITHOUT_IMAGE_SQL: LazyLock<String> = LazyLock::new(|| {
          JOIN entry_point e ON e.id = r.entry_point \
          JOIN task t ON t.id = e.task \
          JOIN derivation d ON d.id = r.program_derivation \
-         WHERE r.status IN ({waiting}) AND r.image_derivation IS NULL",
+         WHERE r.status IN ({waiting}) AND r.image_derivation IS NULL \
+         AND NOT r.waits_for_manual_start",
         terminal = eval_in(&EvaluationStatus::TERMINAL),
         waiting = exec_in(&[ExecJobStatus::Created, ExecJobStatus::Queued]),
     )

@@ -331,6 +331,9 @@ pub struct ExecSpec {
     #[proto(51, default)]
     #[serde(default = "GuestSize::default_request")]
     pub guest: GuestSize,
+    #[proto(52, default)]
+    #[serde(default)]
+    pub manual_start: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

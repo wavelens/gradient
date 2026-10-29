@@ -80,6 +80,7 @@ pub struct Model {
     pub node_index: i16,
     pub keep_vm_running: bool,
     pub program_exit_code: Option<i32>,
+    pub waits_for_manual_start: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

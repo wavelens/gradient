@@ -36,8 +36,8 @@ pub fn log_key(attempt: ExecJobAttemptId) -> BuildAttemptId {
 
 static HAS_OPEN_EXEC_JOBS_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "SELECT EXISTS (SELECT 1 FROM exec_job WHERE evaluation = $1 AND status IN ({open})) \
-         AS open",
+        "SELECT EXISTS (SELECT 1 FROM exec_job WHERE evaluation = $1 AND status IN ({open}) \
+         AND NOT waits_for_manual_start) AS open",
         open = exec_in(&ExecJobStatus::OPEN),
     )
 });

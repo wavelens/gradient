@@ -64,7 +64,8 @@ fn wedged_building_evals_sql() -> String {
         "SELECT count(*) AS n FROM evaluation ev \
          WHERE ev.status = {building} AND ev.active_shared_builds = 0 \
          AND NOT EXISTS (SELECT 1 FROM exec_job ej \
-                         WHERE ej.evaluation = ev.id AND ej.status IN ({open_exec})) \
+                         WHERE ej.evaluation = ev.id AND ej.status IN ({open_exec}) \
+                         AND NOT ej.waits_for_manual_start) \
          AND NOT EXISTS (SELECT 1 FROM exec_job_continuation c \
                          WHERE c.evaluation = ev.id AND c.status = {queued})",
         building = crate::sql::status::eval(EvaluationStatus::Building),

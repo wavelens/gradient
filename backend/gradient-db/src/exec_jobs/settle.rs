@@ -31,7 +31,7 @@ pub(crate) fn build_in_state(derivation: &str, statuses: &[BuildStatus]) -> Stri
 static QUEUE_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE exec_job r SET status = {queued}, waiting_reason = NULL \
-         WHERE r.status = {created} AND {program_done} \
+         WHERE r.status = {created} AND NOT r.waits_for_manual_start AND {program_done} \
          AND (r.image_derivation IS NULL OR {image_done}) \
          RETURNING r.*",
         queued = exec(ExecJobStatus::Queued),

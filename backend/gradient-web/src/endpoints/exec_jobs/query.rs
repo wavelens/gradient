@@ -87,6 +87,7 @@ pub struct ExecJobResponse {
     pub waiting_reason: Option<WaitingReason>,
     pub message: Option<String>,
     pub retries_left: i32,
+    pub autostart: bool,
     pub keep_vm_running: bool,
     pub program_exit_code: Option<i32>,
     pub created_at: NaiveDateTime,
@@ -113,6 +114,7 @@ pub struct ExecJobSummary {
     pub nodes: u32,
     pub labels: Vec<String>,
     pub devices: Vec<DeviceRequest>,
+    pub autostart: bool,
     pub keep_vm_running: bool,
     pub program_exit_code: Option<i32>,
     pub started_at: Option<NaiveDateTime>,
@@ -124,6 +126,9 @@ fn spec_of(job: &MExecJob) -> ExecSpec {
 }
 
 fn waiting_reason_of(job: &MExecJob) -> Option<WaitingReason> {
+    if job.waits_for_manual_start && job.status == ExecJobStatus::Created {
+        return Some(WaitingReason::ManualStart);
+    }
     job.waiting_reason
         .as_ref()
         .and_then(WaitingReason::from_json)
@@ -245,6 +250,7 @@ fn response(
         waiting_reason: waiting_reason_of(&job),
         message: job.message,
         retries_left: job.retries_left,
+        autostart: !spec.manual_start,
         keep_vm_running: job.keep_vm_running,
         program_exit_code: job.program_exit_code,
         created_at: job.created_at,
@@ -276,6 +282,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
         nodes: spec.nodes,
         labels: spec.labels,
         devices: spec.devices,
+        autostart: !spec.manual_start,
         keep_vm_running: row.job.keep_vm_running,
         program_exit_code: row.job.program_exit_code,
         started_at: row.job.started_at,

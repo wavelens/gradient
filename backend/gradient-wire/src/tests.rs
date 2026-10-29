@@ -419,6 +419,25 @@ fn a_requirement_from_the_previous_version_has_no_guest_size() {
 }
 
 #[test]
+fn a_spec_from_before_version_52_starts_by_itself() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::types::ExecSpec;
+
+    let spec = ExecSpec {
+        program: "/nix/store/aaaa-train/bin/train".into(),
+        manual_start: true,
+        ..ExecSpec::default()
+    };
+    assert_eq!(
+        from_bytes::<ExecSpec>(to_bytes(&spec, 52).unwrap(), 52).unwrap(),
+        spec
+    );
+    let older: ExecSpec = from_bytes(to_bytes(&spec, 51).unwrap(), 51).unwrap();
+    assert_eq!(older.program, spec.program);
+    assert!(!older.manual_start);
+}
+
+#[test]
 fn abort_requests_and_program_exits_cross_the_wire_since_version_52() {
     use crate::codec::{EncodeError, from_bytes, to_bytes};
     use crate::messages::{

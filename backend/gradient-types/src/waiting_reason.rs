@@ -49,6 +49,7 @@ pub enum WaitingReason {
         connected_workers: u32,
         matching_workers: u32,
     },
+    ManualStart,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]

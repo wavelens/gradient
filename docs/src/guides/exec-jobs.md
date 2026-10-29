@@ -149,6 +149,7 @@ passthru.gradient = {
 | `timeout` | none | Total seconds, capped by the worker |
 | `maxSilent` | worker default | Seconds without output, capped by the worker |
 | `retries` | `0` | Restarts after a non-zero exit or a timeout, capped by the worker |
+| `autostart` | `true` | Start after the program build. `false` waits for **Run**, see [Start by Hand](#manual-start) |
 
 - Workers report the labels, devices and limits they allow. Requests outside those limits rule out that worker. Downgrades of a request never happen.
 - Lost workers lead to a restart without using a retry. Ten losses in a row fail the job.
@@ -169,6 +170,16 @@ Workers provide a budget for guest CPUs, memory and disk. Both running guests an
 - Only jobs with exactly that CPU count and memory take a warm guest. Other sizes boot a new guest.
 - `/work` is a disk of `diskMb` with the checkout. Checkouts larger than the disk fail the job with `the checkout does not fit in diskMb = <n>`.
 - The full option list is in [Configuration](../reference/configuration.md).
+
+### Start by Hand { #manual-start }
+
+Apps with `autostart = false` get a job without a start after the build.
+
+- Jobs with no start stay in `created` and show the wait reason "waits for a manual start".
+- Click **Run** on the job page to start the job. Clicks during the program build wait for the build, then start the job.
+- Waiting jobs hold no evaluation in `Building`. An evaluation can complete without waiting jobs.
+- Git hosts get no status check for a job without a start.
+- One click can start every node of a multi-node job.
 
 ## 5. Read the Job Context
 
