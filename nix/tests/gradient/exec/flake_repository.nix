@@ -37,6 +37,7 @@
       outputs = app "outputs" { labels = [ "stop" ]; network = true; };
       sized = app "sized" { labels = [ "stop" ]; cpus = 2; memoryMb = 768; diskMb = 256; };
       toolarge = app "toolarge" { labels = [ "stop" ]; cpus = 64; };
+      manual = app "manual" { labels = [ "stop" ]; autostart = false; };
       pair = app "pair" {
         nodes = 2;
         labels = [ "pair" ];
