@@ -5,7 +5,7 @@
  */
 
 use gradient_types::events::evaluation;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use anyhow::{Context, Result, anyhow};
 use gradient_db::{
@@ -1220,6 +1220,19 @@ struct Substitutable {
     unneeded: Vec<(DerivationId, String)>,
 }
 
+impl Substitutable {
+    fn partly_only(mut self) -> Self {
+        let partly: BTreeSet<DerivationId> = self.unneeded.iter().map(|(d, _)| *d).collect();
+        self.shared_builds.retain(|d| partly.contains(d));
+        self
+    }
+}
+
+enum Found<'a> {
+    UpstreamHits(&'a HashMap<String, UpstreamHit>),
+    HeldBeforeTheProbe,
+}
+
 fn substitutable(
     outputs: &[MDerivationOutput],
     available: impl Fn(&MDerivationOutput) -> bool,
@@ -1312,10 +1325,6 @@ pub(crate) async fn apply_upstream_hits(
     }
 
     let db = &ctx.worker_db;
-    let txn = db.as_transaction().context(
-        "UpstreamHits must run inside a transaction: the complete-closure seed takes shared build locks",
-    )?;
-
     let stored =
         gradient_db::cached_paths::stored_by_hash(db, &hits.keys().cloned().collect::<Vec<_>>())
             .await
@@ -1343,41 +1352,8 @@ pub(crate) async fn apply_upstream_hits(
 
     persist_narinfo(db, &hit_rows, hits).await?;
 
-    let outputs = gradient_db::fetch_in_chunks(&touched, |chunk| async move {
-        EDerivationOutput::find()
-            .filter(CDerivationOutput::Derivation.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await
-    .context("load every output of the shared builds an upstream hit names")?;
-    let cached = gradient_db::derivation_outputs::cached_anywhere(db, &outputs)
-        .await
-        .context("find the outputs some cache already holds")?;
-    let available = |o: &MDerivationOutput| {
-        o.hash.as_ref().is_some_and(|h| hits.contains_key(h)) || cached.contains(&o.id)
-    };
-    let mut partial: Vec<DerivationId> = outputs
-        .iter()
-        .filter(|o| !available(o))
-        .map(|o| o.derivation)
-        .collect();
-    partial.sort_unstable();
-    partial.dedup();
-    let needed = gradient_db::graph::needed_outputs::needed_outputs(db, &partial)
-        .await
-        .context("find the outputs a wanted parent needs")?;
-    let flipped = flip_cache_available(db, substitutable(&outputs, available, &needed)).await?;
-    let newly_cache_available = flipped.all;
-
-    let seeded =
-        gradient_db::graph::runtime_can_start::seed_runtime_deps(txn, &flipped.partly, &touched)
-            .await?;
-    if !seeded.complete.is_empty() {
-        let lock = gradient_db::graph::can_start::lock_shared_builds(txn, &seeded.complete).await?;
-        let changes = gradient_db::graph::can_start::became_fetchable(&lock).await?;
-        gradient_db::status::emit_transition_effects(ctx, &changes).await?;
-    }
+    let newly_cache_available =
+        substitute_available(ctx, &touched, Found::UpstreamHits(hits)).await?;
 
     let mut roots = touched;
     roots.extend_from_slice(&newly_cache_available);
@@ -1398,6 +1374,65 @@ pub(crate) async fn apply_upstream_hits(
     gradient_db::status::emit_transition_effects(ctx, &changes).await?;
 
     Ok(gained_need)
+}
+
+/// Outputs our cache held before the probe never come back as hits and a shared build missing
+/// only unneeded outputs besides them is fetched instead of built.
+async fn substitute_available(
+    ctx: &DbContext,
+    shared_builds: &[DerivationId],
+    found: Found<'_>,
+) -> Result<Vec<DerivationId>> {
+    let db = &ctx.worker_db;
+    let txn = db.as_transaction().context(
+        "substitution must run inside a transaction: the complete-closure seed takes shared build locks",
+    )?;
+
+    let outputs = gradient_db::fetch_in_chunks(shared_builds, |chunk| async move {
+        EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
+    .context("load every output of the shared builds")?;
+    let cached = gradient_db::derivation_outputs::cached_anywhere(db, &outputs)
+        .await
+        .context("find the outputs some cache already holds")?;
+    let hit = |o: &MDerivationOutput| match found {
+        Found::UpstreamHits(hits) => o.hash.as_ref().is_some_and(|h| hits.contains_key(h)),
+        Found::HeldBeforeTheProbe => false,
+    };
+    let available = |o: &MDerivationOutput| hit(o) || cached.contains(&o.id);
+    let mut partial: Vec<DerivationId> = outputs
+        .iter()
+        .filter(|o| !available(o))
+        .map(|o| o.derivation)
+        .collect();
+    partial.sort_unstable();
+    partial.dedup();
+    let needed = gradient_db::graph::needed_outputs::needed_outputs(db, &partial)
+        .await
+        .context("find the outputs a wanted parent needs")?;
+    let mut found_builds = substitutable(&outputs, available, &needed);
+    if matches!(found, Found::HeldBeforeTheProbe) {
+        found_builds = found_builds.partly_only();
+    }
+    let flipped = flip_cache_available(db, found_builds).await?;
+
+    let seeded = gradient_db::graph::runtime_can_start::seed_runtime_deps(
+        txn,
+        &flipped.partly,
+        shared_builds,
+    )
+    .await?;
+    if !seeded.complete.is_empty() {
+        let lock = gradient_db::graph::can_start::lock_shared_builds(txn, &seeded.complete).await?;
+        let changes = gradient_db::graph::can_start::became_fetchable(&lock).await?;
+        gradient_db::status::emit_transition_effects(ctx, &changes).await?;
+    }
+
+    Ok(flipped.all)
 }
 
 pub(crate) async fn mark_probed(
@@ -1423,6 +1458,9 @@ pub(crate) async fn mark_probed(
         );
     }
 
+    let newly_cache_available =
+        substitute_available(ctx, &answered, Found::HeldBeforeTheProbe).await?;
+
     let mut changes = Vec::new();
     let mut gained_need = Vec::new();
     for chunk in answered.chunks(gradient_db::IN_CHUNK_SIZE) {
@@ -1437,6 +1475,8 @@ pub(crate) async fn mark_probed(
                 .context("queue the shared builds the answer made promotable")?,
         );
     }
+    changes
+        .extend(gradient_db::graph::can_start::settle_created(db, &newly_cache_available).await?);
     gradient_db::status::emit_transition_effects(ctx, &changes).await?;
 
     Ok(gained_need)
