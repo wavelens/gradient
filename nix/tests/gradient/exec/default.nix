@@ -67,7 +67,7 @@
         '';
       in {
         gradient.guest = {
-          cpus = 2;
+          cpus = 1;
           memoryMb = 500;
           preScript = ''
             ${pkgs.systemd}/bin/systemd-run --unit=gradient-test-agent-restart \
