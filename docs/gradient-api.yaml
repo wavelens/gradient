@@ -5419,7 +5419,7 @@ paths:
       security:
       - {}
       - bearerAuth: []
-  /api/v1/evals/{evaluation}/exec-jobs:
+  /api/v1/evals/{evaluation}/exec:
     get:
       tags:
       - exec-jobs
@@ -5806,7 +5806,7 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/exec-jobs/{job}:
+  /api/v1/exec/{job}:
     get:
       tags:
       - exec-jobs
@@ -5842,7 +5842,7 @@ paths:
       security:
       - {}
       - bearerAuth: []
-  /api/v1/exec-jobs/{job}/abort:
+  /api/v1/exec/{job}/abort:
     post:
       tags:
       - exec-jobs
@@ -5874,7 +5874,7 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/exec-jobs/{job}/console:
+  /api/v1/exec/{job}/console:
     get:
       tags:
       - exec-jobs
@@ -5910,7 +5910,7 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/exec-jobs/{job}/log:
+  /api/v1/exec/{job}/log:
     get:
       tags:
       - exec-jobs
@@ -5959,7 +5959,7 @@ paths:
       security:
       - {}
       - bearerAuth: []
-  /api/v1/exec-jobs/{job}/outputs:
+  /api/v1/exec/{job}/outputs:
     get:
       tags:
       - exec-jobs
@@ -6004,7 +6004,7 @@ paths:
       security:
       - {}
       - bearerAuth: []
-  /api/v1/exec-jobs/{job}/outputs/{path}:
+  /api/v1/exec/{job}/outputs/{path}:
     get:
       tags:
       - exec-jobs
@@ -6052,7 +6052,7 @@ paths:
       security:
       - {}
       - bearerAuth: []
-  /api/v1/exec-jobs/{job}/pull-requests:
+  /api/v1/exec/{job}/pull-requests:
     get:
       tags:
       - exec-jobs
@@ -6090,7 +6090,7 @@ paths:
       security:
       - {}
       - bearerAuth: []
-  /api/v1/exec-jobs/{job}/run:
+  /api/v1/exec/{job}/run:
     post:
       tags:
       - exec-jobs
@@ -6122,7 +6122,7 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/exec-jobs/{job}/shell:
+  /api/v1/exec/{job}/shell:
     get:
       tags:
       - exec-jobs

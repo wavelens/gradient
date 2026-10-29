@@ -186,7 +186,7 @@ export class ExecJobPageComponent implements OnInit {
 
   openTerminal(mode: TerminalMode): void {
     this.terminalMode.set(mode);
-    this.terminal.set(terminalSocket(`/exec-jobs/${this.jobId}/${TERMINAL_PATHS[mode](this.node())}`));
+    this.terminal.set(terminalSocket(`/exec/${this.jobId}/${TERMINAL_PATHS[mode](this.node())}`));
   }
 
   confirmAbort(): void {

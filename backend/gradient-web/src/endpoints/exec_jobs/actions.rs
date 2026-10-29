@@ -20,7 +20,7 @@ use super::{ExecJobAccessContext, ExecJobRefusal};
 
 #[utoipa::path(
     post,
-    path = "/exec-jobs/{job}/abort",
+    path = "/exec/{job}/abort",
     operation_id = "abortExecJob",
     tag = "exec-jobs",
     summary = "Abort exec job",
@@ -45,7 +45,7 @@ pub async fn post_exec_job_abort(
 
 #[utoipa::path(
     post,
-    path = "/exec-jobs/{job}/run",
+    path = "/exec/{job}/run",
     operation_id = "runExecJob",
     tag = "exec-jobs",
     summary = "Run exec job again",

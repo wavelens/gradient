@@ -277,7 +277,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
 
 #[utoipa::path(
     get,
-    path = "/exec-jobs/{job}",
+    path = "/exec/{job}",
     operation_id = "getExecJob",
     tag = "exec-jobs",
     summary = "Get exec job",
@@ -302,7 +302,7 @@ pub async fn get_exec_job(
 
 #[utoipa::path(
     get,
-    path = "/evals/{evaluation}/exec-jobs",
+    path = "/evals/{evaluation}/exec",
     operation_id = "listEvaluationExecJobs",
     tag = "exec-jobs",
     summary = "List exec jobs of an evaluation",

@@ -29,7 +29,7 @@ pub struct ExecJobPullRequestView {
 
 #[utoipa::path(
     get,
-    path = "/exec-jobs/{job}/pull-requests",
+    path = "/exec/{job}/pull-requests",
     operation_id = "listExecJobPullRequests",
     tag = "exec-jobs",
     summary = "List pull requests of an exec job",

@@ -106,7 +106,7 @@ async fn an_exec_job_shows_its_wait_reason_and_attempts() {
         .append_query_results([Vec::<exec_job_output::Model>::new()]);
 
     let res = make_test_server(db.into_connection())
-        .get(&format!("/api/v1/exec-jobs/{}", job_id()))
+        .get(&format!("/api/v1/exec/{}", job_id()))
         .await;
 
     res.assert_status_ok();
@@ -131,7 +131,7 @@ async fn a_started_exec_job_names_the_worker_of_its_attempt() {
         .append_query_results([Vec::<exec_job_output::Model>::new()]);
 
     let res = make_test_server(db.into_connection())
-        .get(&format!("/api/v1/exec-jobs/{}", job_id()))
+        .get(&format!("/api/v1/exec/{}", job_id()))
         .await;
 
     res.assert_status_ok();
@@ -147,7 +147,7 @@ async fn an_outsider_cannot_read_a_private_exec_job() {
         .append_query_results([Vec::<project_access::Model>::new()]);
 
     let res = make_test_server(db.into_connection())
-        .get(&format!("/api/v1/exec-jobs/{}", job_id()))
+        .get(&format!("/api/v1/exec/{}", job_id()))
         .add_header("authorization", auth)
         .await;
 
@@ -160,7 +160,7 @@ async fn a_finished_exec_job_cannot_be_aborted() {
     let db = with_job(db, ExecJobStatus::Completed).append_query_results([vec![project()]]);
 
     let res = make_test_server(db.into_connection())
-        .post(&format!("/api/v1/exec-jobs/{}/abort", job_id()))
+        .post(&format!("/api/v1/exec/{}/abort", job_id()))
         .add_header("authorization", auth)
         .await;
 
@@ -180,7 +180,7 @@ async fn a_member_without_task_write_cannot_open_a_shell() {
         .append_query_results([vec![view_role()]]);
 
     let res = make_test_server(db.into_connection())
-        .get(&format!("/api/v1/exec-jobs/{}/shell", job_id()))
+        .get(&format!("/api/v1/exec/{}/shell", job_id()))
         .add_header("authorization", auth)
         .await;
 
@@ -195,7 +195,7 @@ async fn an_outsider_cannot_open_a_console() {
         .append_query_results([Vec::<project_access::Model>::new()]);
 
     let res = make_test_server(db.into_connection())
-        .get(&format!("/api/v1/exec-jobs/{}/console", job_id()))
+        .get(&format!("/api/v1/exec/{}/console", job_id()))
         .add_header("authorization", auth)
         .await;
 
@@ -252,7 +252,7 @@ async fn a_two_node_job_lists_both_nodes() {
     let db = with_two_nodes(mock_db()).append_query_results([Vec::<exec_job_output::Model>::new()]);
 
     let res = make_test_server(db.into_connection())
-        .get(&format!("/api/v1/exec-jobs/{}", node_id(0)))
+        .get(&format!("/api/v1/exec/{}", node_id(0)))
         .await;
 
     res.assert_status_ok();
@@ -274,7 +274,7 @@ async fn a_node_row_id_answers_the_same_job() {
     let db = with_two_nodes(mock_db()).append_query_results([Vec::<exec_job_output::Model>::new()]);
 
     let res = make_test_server(db.into_connection())
-        .get(&format!("/api/v1/exec-jobs/{}", node_id(1)))
+        .get(&format!("/api/v1/exec/{}", node_id(1)))
         .await;
 
     res.assert_status_ok();
@@ -287,7 +287,7 @@ async fn the_log_of_an_unknown_node_is_404() {
     let db = with_two_nodes(mock_db());
 
     let res = make_test_server(db.into_connection())
-        .get(&format!("/api/v1/exec-jobs/{}/log?node=2", node_id(0)))
+        .get(&format!("/api/v1/exec/{}/log?node=2", node_id(0)))
         .await;
 
     assert_eq!(res.status_code(), StatusCode::NOT_FOUND);

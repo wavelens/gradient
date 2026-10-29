@@ -27,7 +27,7 @@ flowchart LR
 | `gradient-pool` | Matching (`WorkerCaps::fits_exec`) and device holds |
 | `gradient-scheduler` | Loading, placement, dispatch, wait reasons and pre-warm counts |
 | `gradient-proto` | Phases, program start, logs and the inventory on the session |
-| `gradient-web` | `/exec-jobs` endpoints, browser terminals and the project and task switches |
+| `gradient-web` | `/exec` endpoints, browser terminals and the project and task switches |
 | `gradient-ssh` | SSH logins into exec jobs |
 
 ## Entry Points

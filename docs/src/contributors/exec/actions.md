@@ -39,7 +39,7 @@ flowchart LR
 
 | List | Routes |
 |---|---|
-| `JOB_READ_PREFIXES` | `GET` and `HEAD` under `/projects/{project}`, `/tasks/{project}`, `/evals/{evaluation}`, `/builds/{build}`, `/exec-jobs/{job}` |
+| `JOB_READ_PREFIXES` | `GET` and `HEAD` under `/projects/{project}`, `/tasks/{project}`, `/evals/{evaluation}`, `/builds/{build}`, `/exec/{job}` |
 | `JOB_WRITE_ROUTES` | The `/build-requests/*` upload and dispatch routes, `POST /evals/{evaluation}/builds`, `/builds/{build}/log`, `/tasks/{project}/{task}/evaluate`, `/tasks/{project}/{task}/pull-requests` |
 
 - `project` path parameters match the job's project name or ID only. `task` parameters match its task name or ID only.

@@ -85,13 +85,13 @@ def api(method, path, body=None):
 
 
 def job(name):
-    return api("GET", f"exec-jobs/{JOBS[name]}")
+    return api("GET", f"exec/{JOBS[name]}")
 
 
 def job_log(name, attempt=None, node=None):
     params = [f"{key}={value}" for key, value in [("attempt", attempt), ("node", node)] if value is not None]
     query = f"?{'&'.join(params)}" if params else ""
-    return api("GET", f"exec-jobs/{JOBS[name]}/log{query}")
+    return api("GET", f"exec/{JOBS[name]}/log{query}")
 
 
 def sql(query):
@@ -256,13 +256,13 @@ eval_id = wait_for(
 def recorded_jobs(evaluation, names):
     status = api("GET", f"evals/{evaluation}")["status"]
     assert status not in ("Failed", "Aborted"), f"evaluation {evaluation} ended {status}"
-    jobs = api("GET", f"evals/{evaluation}/exec-jobs")
+    jobs = api("GET", f"evals/{evaluation}/exec")
     by_name = {entry["entry_point"].rsplit(".", 1)[-1]: entry["id"] for entry in jobs}
     return by_name if set(names) <= by_name.keys() else None
 
 
 JOBS = wait_for("the evaluation records every exec job", lambda: recorded_jobs(eval_id, NAMES), timeout=900)
-pairs = [entry for entry in api("GET", f"evals/{eval_id}/exec-jobs") if entry["entry_point"] == "apps.x86_64-linux.pair"]
+pairs = [entry for entry in api("GET", f"evals/{eval_id}/exec") if entry["entry_point"] == "apps.x86_64-linux.pair"]
 assert [entry["nodes"] for entry in pairs] == [2], f"the two-node job is not listed once: {json.dumps(pairs)}"
 
 banner("Phase 6: upcoming exec jobs raise the warm target up to maxPreWarm")
@@ -287,16 +287,16 @@ assert "GRJ_" not in json.dumps(produced), "the job page shows a token value"
 assert len(produced["started_evaluations"]) == 1, json.dumps(produced)
 assert "::gradient-phase:: epoch-1" in job_log("outputs"), job_log("outputs")
 
-outputs = {entry["path"]: entry for entry in api("GET", f"exec-jobs/{JOBS['outputs']}/outputs")}
+outputs = {entry["path"]: entry for entry in api("GET", f"exec/{JOBS['outputs']}/outputs")}
 assert outputs.keys() == {"model/w.bin", "gradient/tree.patch"}, json.dumps(outputs)
 assert outputs["model/w.bin"]["size"] == OUTPUT_BYTES, json.dumps(outputs)
 
-status, headers = download(f"exec-jobs/{JOBS['outputs']}/outputs/model/w.bin", "/tmp/w.part", "-H 'Range: bytes=0-9'")
+status, headers = download(f"exec/{JOBS['outputs']}/outputs/model/w.bin", "/tmp/w.part", "-H 'Range: bytes=0-9'")
 assert status == "206", f"range download answered {status}:\n{headers}"
 assert f"bytes 0-9/{OUTPUT_BYTES}" in headers, headers
 assert server.succeed("stat -c %s /tmp/w.part").strip() == "10"
 
-status, headers = download(f"exec-jobs/{JOBS['outputs']}/outputs/gradient/tree.patch", "/tmp/tree.patch")
+status, headers = download(f"exec/{JOBS['outputs']}/outputs/gradient/tree.patch", "/tmp/tree.patch")
 assert status == "200", f"tree patch download answered {status}:\n{headers}"
 patch = server.succeed("cat /tmp/tree.patch")
 assert "+++ b/README" in patch and "+++ b/new.txt" in patch, patch
@@ -346,7 +346,7 @@ def unmet_guest(name):
 unmet = wait_for("toolarge waits for its guest size", lambda: unmet_guest("toolarge"))
 assert unmet == {"cpus": 64, "memory_mb": 0, "disk_mb": 0}, f"toolarge waits for {unmet}"
 assert job("toolarge")["attempts"] == [], json.dumps(job("toolarge"))
-api("POST", f"exec-jobs/{JOBS['toolarge']}/abort")
+api("POST", f"exec/{JOBS['toolarge']}/abort")
 wait_status("toolarge", "aborted", timeout=120)
 
 banner("Phase 8: a silent program times out")
@@ -356,7 +356,7 @@ assert "program produced no output for 5s (maxSilent exceeded)" in job_log("sile
 
 banner("Phase 9: an aborted job stops")
 wait_running("abort", 3)
-api("POST", f"exec-jobs/{JOBS['abort']}/abort")
+api("POST", f"exec/{JOBS['abort']}/abort")
 aborted = wait_status("abort", "aborted", timeout=120)
 assert end_reasons(aborted) == ["aborted"], json.dumps(aborted)
 
@@ -432,7 +432,7 @@ server.succeed("pkill -x ssh")
 refused = server.fail(f"{SSH} '{job_login}' true 2>&1")
 assert "only the command shell is supported" in refused, refused
 
-api("POST", f"exec-jobs/{JOBS['interactive']}/abort")
+api("POST", f"exec/{JOBS['interactive']}/abort")
 assert end_reasons(wait_status("interactive", "aborted", timeout=120)) == ["aborted"]
 
 wait_started("terminal")
