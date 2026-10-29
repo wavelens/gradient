@@ -40,6 +40,8 @@ Exec apps fail with a message on the task page while the instance, project or ta
 | `exec jobs are disabled for this project` | The project switch is off |
 | `exec jobs are disabled for this task` | The task switch is off |
 
+A finished job can start again with `runExecJob` from the [API reference](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/main/docs/gradient-api.yaml) once every switch is on. An app refused during evaluation has no job and needs a new evaluation.
+
 ## 2. Set Up an Exec Worker
 
 Exec workers start every job in a fresh cloud-hypervisor guest. The host needs `/dev/kvm`.

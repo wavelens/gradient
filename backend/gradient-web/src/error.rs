@@ -199,6 +199,12 @@ impl From<gradient_db::status::BuildRefusal> for WebError {
     }
 }
 
+impl From<gradient_db::exec_jobs::run_again::RunRefusal> for WebError {
+    fn from(refusal: gradient_db::exec_jobs::run_again::RunRefusal) -> Self {
+        Self::Conflict(ErrorCode::CONFLICT, refusal.to_string())
+    }
+}
+
 impl From<gradient_types::MappingError> for WebError {
     fn from(err: gradient_types::MappingError) -> Self {
         Self::ServiceUnavailable(

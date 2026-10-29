@@ -264,6 +264,10 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             exec::attempt_ended(ctx, attempt, reason, message).await?;
             Ok(TransitionReport::default())
         }
+        Transition::RunExecJob { exec_job } => Ok(TransitionReport {
+            exec_run_refusal: exec::run_again(ctx, exec_job).await?,
+            ..Default::default()
+        }),
         Transition::AbortExecJob { exec_job } => Ok(TransitionReport {
             aborted_exec_jobs: exec::abort(ctx, exec_job).await?,
             ..Default::default()

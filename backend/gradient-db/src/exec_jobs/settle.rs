@@ -20,7 +20,7 @@ pub struct Settled {
     pub failed: Vec<MExecJob>,
 }
 
-fn build_in_state(derivation: &str, statuses: &[BuildStatus]) -> String {
+pub(crate) fn build_in_state(derivation: &str, statuses: &[BuildStatus]) -> String {
     format!(
         "EXISTS (SELECT 1 FROM derivation_build b WHERE b.derivation = {derivation} \
          AND b.status IN ({}))",

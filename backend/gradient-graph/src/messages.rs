@@ -5,6 +5,7 @@
  */
 
 use chrono::NaiveDateTime;
+use gradient_db::exec_jobs::run_again::RunRefusal;
 use gradient_db::graph::consistency::ConsistencyReport;
 use gradient_db::graph::repair::RepairScope;
 use gradient_db::status::BuildRefusal;
@@ -221,6 +222,9 @@ pub enum Transition {
         reason: AttemptEndReason,
         message: Option<String>,
     },
+    RunExecJob {
+        exec_job: ExecJobId,
+    },
     AbortExecJob {
         exec_job: ExecJobId,
     },
@@ -260,6 +264,7 @@ pub struct TransitionReport {
     pub aborted_continuations: Vec<ExecJobId>,
     pub substitute_log: Option<SubstituteLog>,
     pub refusal: Option<BuildRefusal>,
+    pub exec_run_refusal: Option<RunRefusal>,
     pub consistency: Option<ConsistencyReport>,
 }
 

@@ -9,6 +9,7 @@ use std::collections::{BTreeSet, HashMap};
 use anyhow::Result;
 use chrono::NaiveDateTime;
 use gradient_db::DbContext;
+use gradient_db::exec_jobs::run_again::{self, RunRefusal};
 use gradient_db::exec_jobs::{attempts, continuations, nodes, phases, reads, settle, tokens};
 use gradient_db::status::check_evaluation_done;
 use gradient_entity::exec_job::ExecJobStatus;
@@ -300,6 +301,17 @@ async fn abort_node(ctx: &DbContext, exec_job: ExecJobId) -> Result<bool> {
     };
 
     end(ctx, exec_job, ExecJobStatus::Aborted, None, attempt).await
+}
+
+pub(crate) async fn run_again(ctx: &DbContext, exec_job: ExecJobId) -> Result<Option<RunRefusal>> {
+    match run_again::requeue(&ctx.worker_db, exec_job, ctx.config.exec.enable).await? {
+        Ok(nodes) => {
+            info!(%exec_job, nodes = nodes.len(), "exec job runs again");
+            settle(ctx).await?;
+            Ok(None)
+        }
+        Err(refusal) => Ok(Some(refusal)),
+    }
 }
 
 pub(crate) async fn fail_before_start(

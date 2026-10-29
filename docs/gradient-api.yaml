@@ -6090,6 +6090,38 @@ paths:
       security:
       - {}
       - bearerAuth: []
+  /api/v1/exec-jobs/{job}/run:
+    post:
+      tags:
+      - exec-jobs
+      summary: Run exec job again
+      description: Queues a finished exec job again, every node of a multi-node job included. The next attempt gets the next number; earlier attempts, logs, phases and outputs stay. Requires project membership or a superuser. Answers 409 while the job is open, while exec jobs are disabled on the instance, project or task (the message names the switch), when the program is no longer built or when the exec spec cannot be read.
+      operationId: runExecJob
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/exec-jobs/{job}/shell:
     get:
       tags:
@@ -21261,7 +21293,7 @@ tags:
 - name: builds
   description: Build details, logs, artefact downloads, and dependency graph
 - name: exec-jobs
-  description: Exec jobs - status, wait reason, attempts, phases, logs and abort
+  description: Exec jobs - status, wait reason, attempts, phases, logs, abort and run again
 - name: build-requests
   description: Ad-hoc build requests from `gradient build` - CLI-uploaded source evaluated under a per-project build-request task. Flake inputs served over `git+ssh://` are fetched using the project's SSH key, and `input_overrides` can override remote flake inputs for the run.
 - name: workers

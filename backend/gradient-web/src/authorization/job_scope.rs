@@ -187,6 +187,11 @@ mod tests {
                 "/api/v1/evals/{evaluation}",
                 vec![("evaluation", "e")],
             ),
+            (
+                Method::POST,
+                "/api/v1/exec-jobs/{job}/run",
+                vec![("job", "j")],
+            ),
         ] {
             assert!(
                 matches!(

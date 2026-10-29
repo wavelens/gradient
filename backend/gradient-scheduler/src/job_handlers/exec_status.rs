@@ -7,6 +7,7 @@
 use anyhow::Result;
 use gradient_db::DbContext;
 use gradient_db::exec_jobs::attempts;
+use gradient_db::exec_jobs::run_again::RunRefusal;
 use gradient_db::scheduling::assignment_record::exec_job_of_key;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_graph::{Graph, Transition};
@@ -155,6 +156,14 @@ impl Scheduler {
             .collect();
         self.cancel_jobs(row.evaluation, keys).await;
         Ok(true)
+    }
+
+    pub async fn run_exec_job(&self, job: ExecJobId) -> Result<Result<(), RunRefusal>> {
+        let report = self
+            .graph
+            .transition(Transition::RunExecJob { exec_job: job })
+            .await?;
+        Ok(report.exec_run_refusal.map_or(Ok(()), Err))
     }
 
     pub async fn fail_exec_dispatch(

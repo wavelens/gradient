@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::exec_jobs::run_again::RunRefusal;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::dispatched_job::{self, DispatchedJobKind};
 use gradient_entity::evaluation::EvaluationStatus;
@@ -15,7 +16,7 @@ use gradient_entity::ids::{DispatchedJobId, EvaluationId, ProjectId};
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::WaitingReason;
-use gradient_types::exec::{ExecInventory, ExecSpec, Phase, SopsFile};
+use gradient_types::exec::{DISABLED_FOR_TASK, ExecInventory, ExecSpec, Phase, SopsFile};
 use gradient_wire::types::BuildFailureKind;
 use gradient_wire::types::{DiscoveredDerivation, FlakeSource, Job, JobKind};
 
@@ -305,6 +306,93 @@ async fn an_abort_sends_abort_job_and_ends_aborted() {
             .iter()
             .any(|s| matches!(s, SessionSignal::Abort { job_id, .. } if *job_id == key)),
         "after 1: the worker was told to abort {key}"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_refused_job_runs_again_once_its_task_switch_is_on() {
+    let e1 = EvaluationId::now_v7();
+    let retried = ExecSpec {
+        retries: 2,
+        ..spec()
+    };
+    let case = with_queued_job(e1, retried).await;
+    case.db
+        .execute("UPDATE task SET exec_enabled = false")
+        .await;
+    case.assign_exec_jobs().await;
+    let job = the_job(&case).await;
+    assert_eq!(
+        (job.status, job.message.as_deref()),
+        (ExecJobStatus::Failed, Some(DISABLED_FOR_TASK)),
+        "after 1: refused"
+    );
+
+    let still_off = case.scheduler.run_exec_job(job.id).await.expect("the run");
+    assert_eq!(
+        still_off,
+        Err(RunRefusal::Disabled(DISABLED_FOR_TASK)),
+        "after 2: the switch is named"
+    );
+    assert_eq!(
+        the_job(&case).await.status,
+        ExecJobStatus::Failed,
+        "after 2: the job"
+    );
+
+    case.db.execute("UPDATE task SET exec_enabled = true").await;
+    let ran = case.scheduler.run_exec_job(job.id).await.expect("the run");
+    assert_eq!(ran, Ok(()), "after 3: accepted");
+    let queued = the_job(&case).await;
+    assert_eq!(
+        (
+            queued.status,
+            queued.message,
+            queued.finished_at,
+            queued.retries_left
+        ),
+        (ExecJobStatus::Queued, None, None, 2),
+        "after 3: queued like a new job"
+    );
+
+    dispatched(&case).await;
+    assert_eq!(the_attempt(&case).await.number, 1, "after 4: the attempt");
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_failed_job_runs_again_as_its_next_attempt() {
+    let e1 = EvaluationId::now_v7();
+    let case = with_queued_job(e1, spec()).await;
+    let (key, assignment) = dispatched(&case).await;
+    let job = the_job(&case).await;
+    let open = case.scheduler.run_exec_job(job.id).await.expect("the run");
+    assert_eq!(open, Err(RunRefusal::Open), "after 1: an open job");
+
+    case.fail(W1, &key, assignment, failure(BuildFailureKind::Permanent))
+        .await;
+    assert_eq!(
+        the_job(&case).await.status,
+        ExecJobStatus::Failed,
+        "after 2: no retry left"
+    );
+
+    let ran = case.scheduler.run_exec_job(job.id).await.expect("the run");
+    assert_eq!(ran, Ok(()), "after 3: accepted");
+    case.assign_exec_jobs().await;
+    case.request_job(W1, JobKind::Exec)
+        .await
+        .expect("after 4: the job again");
+    let mut attempts = case.db.rows::<exec_job_attempt::Entity>().await;
+    attempts.sort_by_key(|attempt| attempt.number);
+    assert_eq!(
+        attempts
+            .iter()
+            .map(|attempt| (attempt.number, attempt.end_reason))
+            .collect::<Vec<_>>(),
+        vec![(1, Some(AttemptEndReason::Failed)), (2, None)],
+        "after 4: the first attempt stays as history"
     );
     case.finish().await;
 }
