@@ -993,6 +993,8 @@ export interface ExecJobResponse {
   waiting_reason?: WaitingReason | null;
   message?: string | null;
   retries_left: number;
+  keep_vm_running: boolean;
+  program_exit_code?: number | null;
   created_at: string;
   started_at?: string | null;
   finished_at?: string | null;
@@ -1018,6 +1020,8 @@ export interface ExecJobSummary {
   nodes: number;
   labels: string[];
   devices: DeviceRequest[];
+  keep_vm_running: boolean;
+  program_exit_code?: number | null;
   started_at?: string | null;
   last_phase?: string | null;
 }

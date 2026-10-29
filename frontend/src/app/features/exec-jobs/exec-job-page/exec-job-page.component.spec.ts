@@ -60,6 +60,7 @@ function job(status: ExecJobStatus, sshCommand: string | null = SSH): ExecJobRes
     devices: [],
     guest: { cpus: 2, memory_mb: 500, disk_mb: 2048 },
     retries_left: 0,
+    keep_vm_running: false,
     created_at: '2026-01-01T00:00:00',
     worker: 'w1',
     attempts: [{ number: 1, worker: 'w1', started_at: '2026-01-01T00:00:01' }],
@@ -94,11 +95,17 @@ function routeTo(query: Record<string, string> = {}): ActivatedRoute {
   } as unknown as ActivatedRoute;
 }
 
+function keptJob(exitCode: number | null): ExecJobResponse {
+  return { ...job('running'), keep_vm_running: true, program_exit_code: exitCode };
+}
+
 interface Setup {
   fixture: ComponentFixture<ExecJobPageComponent>;
   abort: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
   log: ReturnType<typeof vi.fn>;
+  keepVmRunning: ReturnType<typeof vi.fn>;
+  letVmStop: ReturnType<typeof vi.fn>;
   navigate: ReturnType<typeof vi.spyOn>;
 }
 
@@ -106,6 +113,8 @@ function setup(status: ExecJobStatus, sshCommand: string | null = SSH, response?
   const abort = vi.fn(() => of('Success'));
   const run = vi.fn(() => of('Success'));
   const log = vi.fn(() => of(LOG));
+  const keepVmRunning = vi.fn(() => of('Success'));
+  const letVmStop = vi.fn(() => of('Success'));
   TestBed.configureTestingModule({
     imports: [ExecJobPageComponent],
     providers: [
@@ -120,6 +129,8 @@ function setup(status: ExecJobStatus, sshCommand: string | null = SSH, response?
           outputs: () => of([]),
           abort,
           run,
+          keepVmRunning,
+          letVmStop,
         },
       },
     ],
@@ -127,7 +138,7 @@ function setup(status: ExecJobStatus, sshCommand: string | null = SSH, response?
   const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
   const fixture = TestBed.createComponent(ExecJobPageComponent);
   fixture.detectChanges();
-  return { fixture, abort, run, log, navigate };
+  return { fixture, abort, run, log, keepVmRunning, letVmStop, navigate };
 }
 
 function pickNode(fixture: ComponentFixture<ExecJobPageComponent>, label: string): void {
@@ -143,10 +154,54 @@ function abortButton(root: HTMLElement): HTMLButtonElement | undefined {
   return Array.from(root.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('Abort'));
 }
 
+function keepButton(root: HTMLElement): HTMLButtonElement | undefined {
+  return Array.from(root.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('Keep VM running'));
+}
+
 describe('ExecJobPageComponent', () => {
-  it('offers no abort for a finished job', () => {
+  it('offers no abort and no keep VM running for a finished job', () => {
     const { fixture } = setup('completed');
     expect(abortButton(fixture.nativeElement)).toBeUndefined();
+    expect(keepButton(fixture.nativeElement)).toBeUndefined();
+  });
+
+  describe('keep VM running', () => {
+    it('switches on from the page actions', () => {
+      const { fixture, keepVmRunning } = setup('running');
+      const button = keepButton(fixture.nativeElement);
+      expect(button?.getAttribute('aria-pressed')).toBe('false');
+      button?.click();
+      expect(keepVmRunning).toHaveBeenCalledWith('j1');
+    });
+
+    it('switches off again while the program runs, without a notice', () => {
+      const { fixture, letVmStop } = setup('running', SSH, keptJob(null));
+      const root = fixture.nativeElement as HTMLElement;
+      expect(root.querySelector('.kept-vm')).toBeNull();
+      const button = keepButton(root);
+      expect(button?.getAttribute('aria-pressed')).toBe('true');
+      button?.click();
+      expect(letVmStop).toHaveBeenCalledWith('j1');
+    });
+
+    it('shows the exit code of a kept VM and lets the VM stop', () => {
+      const { fixture, letVmStop } = setup('running', SSH, keptJob(0));
+      const notice = (fixture.nativeElement as HTMLElement).querySelector('.kept-vm');
+      expect(notice?.textContent).toContain('Program exited with code 0. The VM keeps running.');
+      Array.from(notice?.querySelectorAll('button') ?? [])
+        .find((b) => (b.textContent ?? '').includes('Let VM stop'))
+        ?.click();
+      expect(letVmStop).toHaveBeenCalledWith('j1');
+    });
+
+    it('shows a refused switch', () => {
+      const { fixture, keepVmRunning } = setup('running');
+      keepVmRunning.mockReturnValue(throwError(() => new Error('the exec job has already finished')));
+      keepButton(fixture.nativeElement)?.click();
+      fixture.detectChanges();
+      expect((fixture.nativeElement as HTMLElement).querySelector('.error')?.textContent)
+        .toContain('the exec job has already finished');
+    });
   });
 
   it('runs a finished job again and shows a refusal', () => {

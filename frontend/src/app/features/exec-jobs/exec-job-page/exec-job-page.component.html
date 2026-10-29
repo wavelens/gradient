@@ -6,6 +6,11 @@
 
 <gr-page-layout [breadcrumb]="breadcrumb()" [title]="job()?.entry_point ?? 'Exec job'">
   @if (open()) {
+    <button *appWritable="triggerAccess()" slot="actions" grButton label="Keep VM running" icon="push_pin"
+            [severity]="keepVmRunning() ? 'primary' : 'secondary'" [attr.aria-pressed]="keepVmRunning()"
+            [loading]="switchingKeep()" [disabled]="switchingKeep()" (click)="toggleKeepVmRunning()"></button>
+  }
+  @if (open()) {
     <button *appWritable="triggerAccess()" slot="actions" grButton label="Abort" icon="close" severity="danger"
             [loading]="aborting()" [disabled]="aborting()" (click)="abortOpen.set(true)"></button>
   } @else if (job()) {
@@ -32,6 +37,14 @@
         @for (d of job.devices; track d.name) { <gr-badge severity="info">{{ device(d) }}</gr-badge> }
       </span>
     </div>
+
+    @if (keptExitCode() !== null) {
+      <gr-message-banner class="kept-vm">
+        Program exited with code {{ keptExitCode() }}. The VM keeps running.
+        <button *appWritable="triggerAccess()" grButton label="Let VM stop" size="small" severity="secondary"
+                [loading]="switchingKeep()" [disabled]="switchingKeep()" (click)="letVmStop()"></button>
+      </gr-message-banner>
+    }
 
     @if (job.nodes > 1) {
       <h3>Nodes</h3>

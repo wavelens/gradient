@@ -51,4 +51,12 @@ export class ExecJobsService {
   run(job: string): Observable<string> {
     return this.api.post<string>(`exec/${job}/run`);
   }
+
+  keepVmRunning(job: string): Observable<string> {
+    return this.api.post<string>(`exec/${job}/keep-vm-running`);
+  }
+
+  letVmStop(job: string): Observable<string> {
+    return this.api.delete<string>(`exec/${job}/keep-vm-running`);
+  }
 }
