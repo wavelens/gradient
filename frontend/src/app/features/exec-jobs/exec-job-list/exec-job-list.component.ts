@@ -79,17 +79,12 @@ export class ExecJobListComponent implements OnChanges {
   }
 
   openContextMenu(event: MouseEvent, job: ExecJobSummary, menu: { openAt: (e: MouseEvent) => void }): void {
-    if (!this.hasActions(job)) return;
     this.menuModel.set(this.jobMenu(job));
     menu.openAt(event);
   }
 
-  hasActions(job: ExecJobSummary): boolean {
-    return this.jobMenu(job).length > 0;
-  }
-
   private jobMenu(job: ExecJobSummary): MenuItem[] {
-    return execJobMenu(job.status, this.canTrigger(), {
+    return execJobMenu(job, this.canTrigger(), {
       terminal: { routerLink: this.link(job), queryParams: { view: 'terminal' } },
       abort: () => this.abort(job),
     });

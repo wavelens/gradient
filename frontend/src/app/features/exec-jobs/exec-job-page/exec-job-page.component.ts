@@ -134,7 +134,7 @@ export class ExecJobPageComponent implements OnInit {
   jobMenu = computed<MenuItem[]>(() => {
     const job = this.job();
     if (!job) return [];
-    return execJobMenu(job.status, this.triggerAccess().canEdit, {
+    return execJobMenu(job, this.triggerAccess().canEdit, {
       terminal: { command: () => this.showView('terminal') },
       abort: () => this.abortOpen.set(true),
     });

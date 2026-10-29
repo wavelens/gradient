@@ -19,11 +19,9 @@
             @for (label of job.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
             @for (d of job.devices; track d.name) { <gr-badge severity="info">{{ device(d) }}</gr-badge> }
           </span>
-          @if (hasActions(job)) {
-            <button type="button" class="entry-kebab" aria-label="Exec job actions" (click)="openMenu($event, job, jobMenu)">
-              <gr-icon name="more_vert" />
-            </button>
-          }
+          <button type="button" class="entry-kebab" aria-label="Exec job actions" (click)="openMenu($event, job, jobMenu)">
+            <gr-icon name="more_vert" />
+          </button>
         </div>
       }
     </div>

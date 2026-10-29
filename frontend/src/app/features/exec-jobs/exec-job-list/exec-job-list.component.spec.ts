@@ -150,13 +150,14 @@ describe('ExecJobListComponent', () => {
   });
 
   describe('job actions', () => {
-    function renderJob(status: ExecJobSummary['status'], canTrigger: boolean) {
+    function renderJob(status: ExecJobSummary['status'], canTrigger: boolean, dispatchedJob: string | null = null) {
       const abort = vi.fn(() => of('Success'));
+      const job: ExecJobSummary = { ...queuedJob(), status, dispatched_job: dispatchedJob };
       TestBed.configureTestingModule({
         imports: [ExecJobListComponent],
         providers: [
           provideRouter([]),
-          { provide: ExecJobsService, useValue: { forEvaluation: () => of([{ ...queuedJob(), status }]), abort } },
+          { provide: ExecJobsService, useValue: { forEvaluation: () => of([job]), abort } },
         ],
       });
       const fixture = TestBed.createComponent(ExecJobListComponent);
@@ -179,14 +180,23 @@ describe('ExecJobListComponent', () => {
     const labels = (items: HTMLElement[]) => items.map((item) =>
       (item.textContent ?? '').replace(item.querySelector('.gr-menu__icon')?.textContent ?? '', '').trim());
 
-    it.each(['kebab', 'contextmenu'] as const)('offers the terminal and abort for a running job via %s', (via) => {
+    it.each(['kebab', 'contextmenu'] as const)('offers the job, terminal and abort for a running job via %s', (via) => {
       const { fixture } = renderJob('running', true);
-      expect(labels(openMenu(fixture, via))).toEqual(['Terminal', 'Abort']);
+      expect(labels(openMenu(fixture, via))).toEqual(['Show job', 'Terminal', 'Abort']);
     });
 
-    it('offers no menu for a finished job', () => {
-      const { fixture } = renderJob('completed', true);
-      expect((fixture.nativeElement as HTMLElement).querySelector('.job .entry-kebab')).toBeNull();
+    it('links a finished job to its assignment on the Job Board', () => {
+      const { fixture } = renderJob('completed', true, 'dj1');
+      expect(labels(openMenu(fixture, 'kebab'))).toEqual(['Show job']);
+      const item = fixture.componentInstance.menuModel().find((i) => i.label === 'Show job');
+      expect(item?.routerLink).toEqual(['/board', 'jobs', 'dj1']);
+      expect(item?.disabled).toBe(false);
+    });
+
+    it('disables Show job until a worker picked the job up', () => {
+      const { fixture } = renderJob('queued', true);
+      openMenu(fixture, 'kebab');
+      expect(fixture.componentInstance.menuModel().find((i) => i.label === 'Show job')?.disabled).toBe(true);
     });
 
     it('hides abort from a visitor who may not trigger', () => {

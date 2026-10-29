@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { DeviceRequest, ExecJobStatus, ExecUnmet, GuestSize, WaitingReason } from '@core/models';
+import type { DeviceRequest, ExecJobStatus, ExecJobSummary, ExecUnmet, GuestSize, WaitingReason } from '@core/models';
 import type { StatusPhase } from '@shared/evaluation';
 import type { MenuItem } from '@gradient/ui/ui';
 
@@ -33,8 +33,13 @@ export interface ExecJobMenuActions {
   abort: () => void;
 }
 
-export function execJobMenu(status: ExecJobStatus, canTrigger: boolean, actions: ExecJobMenuActions): MenuItem[] {
+export function execJobMenu(
+  { status, dispatched_job: job }: Pick<ExecJobSummary, 'status' | 'dispatched_job'>,
+  canTrigger: boolean,
+  actions: ExecJobMenuActions,
+): MenuItem[] {
   return [
+    { label: 'Show job', icon: 'work', disabled: !job, routerLink: job ? ['/board', 'jobs', job] : undefined },
     ...(hasExecTerminal(status) ? [{ label: 'Terminal', icon: 'terminal', ...actions.terminal }] : []),
     ...(isOpenExecJob(status) && canTrigger ? [{ label: 'Abort', icon: 'stop_circle', command: actions.abort }] : []),
   ];

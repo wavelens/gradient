@@ -190,7 +190,7 @@ describe('ExecJobPageComponent', () => {
     fixture.detectChanges();
     const items = () => Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item'))
       .map((item) => (item.textContent ?? '').replace(item.querySelector('.gr-menu__icon')?.textContent ?? '', '').trim());
-    expect(items()).toEqual(['Terminal', 'Abort']);
+    expect(items()).toEqual(['Show job', 'Terminal', 'Abort']);
     expect(log.querySelector('.sidebar-kebab')).not.toBeNull();
 
     Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item')).find((item) => item.textContent?.includes('Abort'))!.click();
@@ -198,9 +198,11 @@ describe('ExecJobPageComponent', () => {
     expect(document.querySelector('.gr-dialog')?.textContent).toContain('abort this exec job');
   });
 
-  it('offers no job menu on a finished job', () => {
-    const { fixture } = setup('completed');
-    expect((fixture.nativeElement as HTMLElement).querySelector('.log-sidebar .sidebar-kebab')).toBeNull();
+  it('links a finished job to its assignment on the Job Board', () => {
+    const { fixture } = setup('completed', SSH, {}, { ...job('completed'), dispatched_job: 'dj1' });
+    const item = fixture.componentInstance.jobMenu().find((i) => i.label === 'Show job');
+    expect(fixture.componentInstance.jobMenu().map((i) => i.label)).toEqual(['Show job']);
+    expect(item?.routerLink).toEqual(['/board', 'jobs', 'dj1']);
   });
 
   it('asks in the dialog before it aborts', () => {
