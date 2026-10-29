@@ -39,6 +39,7 @@ mod m20261102_000000_project_secrets;
 mod m20261103_000000_exec_job_outputs_tokens;
 mod m20261104_000000_exec_clusters;
 mod m20261105_000000_partial_substitution;
+mod m20261106_000000_task_exec_enabled;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -103,6 +104,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261103_000000_exec_job_outputs_tokens::Migration),
             Box::new(m20261104_000000_exec_clusters::Migration),
             Box::new(m20261105_000000_partial_substitution::Migration),
+            Box::new(m20261106_000000_task_exec_enabled::Migration),
         ]
     }
 }

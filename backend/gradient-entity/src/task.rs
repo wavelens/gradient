@@ -69,6 +69,7 @@ pub struct Model {
     pub wait_for_workers: bool,
     pub retry_failed_builds: bool,
     pub multi_node_evaluation: bool,
+    pub exec_enabled: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -60,6 +60,7 @@ impl<'a> StateApplicator<'a> {
                 proj.wait_for_workers = Set(state_task.wait_for_workers);
                 proj.retry_failed_builds = Set(state_task.retry_failed_builds);
                 proj.multi_node_evaluation = Set(state_task.multi_node_evaluation);
+                proj.exec_enabled = Set(state_task.exec_enabled);
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
                 tracing::info!(name = %state_task.name, "Updated managed task");
@@ -86,6 +87,7 @@ impl<'a> StateApplicator<'a> {
                     wait_for_workers: state_task.wait_for_workers,
                     retry_failed_builds: state_task.retry_failed_builds,
                     multi_node_evaluation: state_task.multi_node_evaluation,
+                    exec_enabled: state_task.exec_enabled,
                     ..Default::default()
                 }
                 .into_active_model();

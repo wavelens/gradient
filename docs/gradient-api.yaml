@@ -18554,6 +18554,10 @@ components:
           type:
           - boolean
           - 'null'
+        exec_enabled:
+          type:
+          - boolean
+          - 'null'
     PatchTeamRequest:
       type: object
       properties:
@@ -19919,6 +19923,7 @@ components:
       - wait_for_workers
       - retry_failed_builds
       - multi_node_evaluation
+      - exec_enabled
       - can_edit
       - can_trigger
       properties:
@@ -19967,6 +19972,8 @@ components:
         retry_failed_builds:
           type: boolean
         multi_node_evaluation:
+          type: boolean
+        exec_enabled:
           type: boolean
         can_edit:
           type: boolean

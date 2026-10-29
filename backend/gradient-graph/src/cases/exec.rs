@@ -56,6 +56,7 @@ fn image_root() -> DiscoveredDerivation {
 
 async fn switch_exec_jobs_on(case: &Case) {
     case.sql("UPDATE project SET exec_enabled = true").await;
+    case.sql("UPDATE task SET exec_enabled = true").await;
 }
 
 async fn messages(case: &Case, evaluation: EvaluationId) -> Vec<(String, Option<String>)> {
@@ -100,6 +101,29 @@ async fn a_project_without_exec_jobs_fails_the_attribute_with_its_message() {
         messages(&case, e1).await,
         vec![(
             "exec jobs are disabled for this project".to_owned(),
+            Some(format!("nix-eval:{ATTR}"))
+        )],
+        "after 1: the refusal"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_task_without_exec_jobs_fails_the_attribute_with_its_message() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(shape().evaluation(e1)).await;
+    case.sql("UPDATE project SET exec_enabled = true").await;
+
+    case.walk(case.tasked(e1, vec![exec_root()]).await).await;
+
+    assert!(
+        case.entry_points(e1).await.is_empty(),
+        "after 1: no entry point"
+    );
+    assert_eq!(
+        messages(&case, e1).await,
+        vec![(
+            "exec jobs are disabled for this task".to_owned(),
             Some(format!("nix-eval:{ATTR}"))
         )],
         "after 1: the refusal"
@@ -372,6 +396,30 @@ async fn a_job_whose_project_switched_exec_jobs_off_fails_at_settle() {
         (
             ExecJobStatus::Failed,
             Some("exec jobs are disabled for this project")
+        ),
+        "after 1: the job"
+    );
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Failed,
+        "after 1: the evaluation"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_job_whose_task_switched_exec_jobs_off_fails_at_settle() {
+    let (case, e1) = exec_case(spec()).await;
+    case.sql("UPDATE task SET exec_enabled = false").await;
+
+    case.transition(Transition::SettleExecJobs).await;
+
+    let job = job(&case, e1).await;
+    assert_eq!(
+        (job.status, job.message.as_deref()),
+        (
+            ExecJobStatus::Failed,
+            Some("exec jobs are disabled for this task")
         ),
         "after 1: the job"
     );

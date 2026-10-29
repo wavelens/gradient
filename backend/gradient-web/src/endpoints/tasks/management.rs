@@ -81,6 +81,7 @@ pub struct PatchTaskRequest {
     pub wait_for_workers: Option<bool>,
     pub retry_failed_builds: Option<bool>,
     pub multi_node_evaluation: Option<bool>,
+    pub exec_enabled: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -402,6 +403,7 @@ pub async fn patch_task(
             "multi_node_evaluation",
             body.multi_node_evaluation.is_some(),
         ),
+        ("exec_enabled", body.exec_enabled.is_some()),
     ]);
     let mut atask: ATask = task.into();
     let mut patcher = TaskPatcher::new(&state, &mut atask);
@@ -438,6 +440,9 @@ pub async fn patch_task(
     }
     if let Some(multi_node_evaluation) = body.multi_node_evaluation {
         patcher.atask.multi_node_evaluation = Set(multi_node_evaluation);
+    }
+    if let Some(exec_enabled) = body.exec_enabled {
+        patcher.atask.exec_enabled = Set(exec_enabled);
     }
 
     atask.force_evaluation = Set(true);

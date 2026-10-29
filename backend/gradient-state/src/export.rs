@@ -182,28 +182,11 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 )
             })
             .collect();
-        config.tasks.insert(
-            p.name.clone(),
-            StateTask {
-                name: p.name.clone(),
-                project: name_or_blank(&project_name, p.project),
-                display_name: p.display_name.clone(),
-                description: opt(&p.description),
-                repository: p.repository.clone(),
-                wildcard: p.wildcard.clone(),
-                active: p.active,
-                created_by: name_or_blank(&username, p.created_by),
-                keep_evaluations: p.keep_evaluations,
-                triggers: (!task_triggers.is_empty()).then_some(task_triggers),
-                concurrency: p.concurrency,
-                sign_cache: p.sign_cache,
-                wait_for_workers: p.wait_for_workers,
-                retry_failed_builds: p.retry_failed_builds,
-                multi_node_evaluation: p.multi_node_evaluation,
-                flake_input_overrides,
-                actions: task_actions,
-            },
-        );
+        let mut task = export_task(p, &project_name, &username);
+        task.triggers = (!task_triggers.is_empty()).then_some(task_triggers);
+        task.flake_input_overrides = flake_input_overrides;
+        task.actions = task_actions;
+        config.tasks.insert(p.name.clone(), task);
     }
 
     for c in &caches {
@@ -407,6 +390,33 @@ fn export_project(
         created_by: name_or_blank(username, project.created_by),
         members,
         teams,
+    }
+}
+
+fn export_task(
+    task: &gradient_entity::task::Model,
+    project_name: &HashMap<ProjectId, String>,
+    username: &HashMap<UserId, String>,
+) -> StateTask {
+    StateTask {
+        name: task.name.clone(),
+        project: name_or_blank(project_name, task.project),
+        display_name: task.display_name.clone(),
+        description: opt(&task.description),
+        repository: task.repository.clone(),
+        wildcard: task.wildcard.clone(),
+        active: task.active,
+        created_by: name_or_blank(username, task.created_by),
+        keep_evaluations: task.keep_evaluations,
+        triggers: None,
+        concurrency: task.concurrency,
+        sign_cache: task.sign_cache,
+        wait_for_workers: task.wait_for_workers,
+        retry_failed_builds: task.retry_failed_builds,
+        multi_node_evaluation: task.multi_node_evaluation,
+        exec_enabled: task.exec_enabled,
+        flake_input_overrides: HashMap::new(),
+        actions: Vec::new(),
     }
 }
 
@@ -819,6 +829,20 @@ mod tests {
 
         let exported = export_project(&project, &HashMap::new(), Vec::new(), Vec::new());
         let reread: StateProject =
+            serde_json::from_value(serde_json::to_value(&exported).unwrap()).unwrap();
+        assert!(reread.exec_enabled);
+    }
+
+    #[test]
+    fn exec_enabled_of_a_task_survives_export_round_trip() {
+        let task = gradient_entity::task::Model {
+            name: "web".into(),
+            exec_enabled: true,
+            ..Default::default()
+        };
+
+        let exported = export_task(&task, &HashMap::new(), &HashMap::new());
+        let reread: StateTask =
             serde_json::from_value(serde_json::to_value(&exported).unwrap()).unwrap();
         assert!(reread.exec_enabled);
     }

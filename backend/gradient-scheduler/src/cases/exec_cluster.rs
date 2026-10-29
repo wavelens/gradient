@@ -50,6 +50,7 @@ async fn seed_queued_cluster(case: &SchedulerCase, spec: &ExecSpec, cluster: Clu
     case.db
         .execute("UPDATE project SET exec_enabled = true")
         .await;
+    case.db.execute("UPDATE task SET exec_enabled = true").await;
     case.db
         .execute(&format!(
             "UPDATE entry_point SET exec = '{spec}'::jsonb WHERE eval = '{}'",

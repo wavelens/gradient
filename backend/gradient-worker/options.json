@@ -256,7 +256,7 @@
     "flag": "capabilities-exec",
     "env": "GRADIENT_WORKER_CAPABILITIES_EXEC",
     "type": "bool",
-    "description": "Whether this worker takes exec jobs. Exec jobs also need the server option `exec.enable`,\nthe project switch `exec_enabled` and `enable_exec` on the worker registration.",
+    "description": "Whether this worker takes exec jobs. Exec jobs also need the server option `exec.enable`,\n`exec_enabled` on the project and the task, and `enable_exec` on the worker registration.",
     "default": "false",
     "values": [
       "true",

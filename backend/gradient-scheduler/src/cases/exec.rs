@@ -67,6 +67,7 @@ async fn seed_queued_job(case: &SchedulerCase, spec: &ExecSpec) {
     case.db
         .execute("UPDATE project SET exec_enabled = true")
         .await;
+    case.db.execute("UPDATE task SET exec_enabled = true").await;
     case.db
         .execute(&format!(
             "UPDATE entry_point SET exec = '{spec}'::jsonb WHERE eval = '{ATTR}'"
@@ -347,6 +348,7 @@ async fn exec_recorded_mid_stream(
     case.db
         .execute("UPDATE project SET exec_enabled = true")
         .await;
+    case.db.execute("UPDATE task SET exec_enabled = true").await;
     case.connect(W1, w_exec(inventory()), &[]).await;
     case.connect(EVALUATOR, w_all(), &[]).await;
     let assignment = case.evalrun(EVALUATOR, evaluation).await;
