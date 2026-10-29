@@ -117,7 +117,11 @@ def end_reasons(state):
 def unbuilt_image_derivations(state):
     if "image build failed" not in json.dumps(state):
         return ""
-    return "--- derivations of the image evaluation no cache holds ---\n" + sql(
+    return unbuilt_derivations(images_eval)
+
+
+def unbuilt_derivations(evaluation):
+    return f"--- derivations of evaluation {evaluation} no cache holds ---\n" + sql(
         "SELECT db.status, d.name, db.unneeded_outputs, left(coalesce(("
         "  SELECT string_agg(DISTINCT pd.name || '[' || coalesce(array_to_string(e.dependency_outputs, ','), 'every') "
         "         || ']', ' ') FROM derivation_dependency e "
@@ -125,7 +129,7 @@ def unbuilt_image_derivations(state):
         "  WHERE e.dependency = d.id AND p.wanted), ''), 300) "
         "FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build "
         "JOIN derivation d ON d.id = bj.derivation "
-        f"WHERE bj.evaluation = '{images_eval}' AND db.wanted AND NOT db.cache_available "
+        f"WHERE bj.evaluation = '{evaluation}' AND db.wanted AND NOT db.cache_available "
         "AND db.status NOT IN (3, 7) ORDER BY db.status = 4 DESC, d.name LIMIT 40"
     )
 
@@ -255,7 +259,7 @@ eval_id = wait_for(
 
 def recorded_jobs(evaluation, names):
     status = api("GET", f"evals/{evaluation}")["status"]
-    assert status not in ("Failed", "Aborted"), f"evaluation {evaluation} ended {status}"
+    assert status not in ("Failed", "Aborted"), f"evaluation {evaluation} ended {status}\n{unbuilt_derivations(evaluation)}"
     jobs = api("GET", f"evals/{evaluation}/exec")
     by_name = {entry["entry_point"].rsplit(".", 1)[-1]: entry["id"] for entry in jobs}
     return by_name if set(names) <= by_name.keys() else None

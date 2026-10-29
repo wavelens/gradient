@@ -237,6 +237,7 @@ in {
                 repository = "git://server/images?dir=nix";
                 wildcard = "apps.x86_64-linux.*";
                 created_by = "admin";
+                exec_enabled = true;
                 triggers = [{
                   type = "polling";
                   config.interval_secs = 10;
