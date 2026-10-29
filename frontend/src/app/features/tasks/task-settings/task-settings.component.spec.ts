@@ -14,6 +14,7 @@ import { TaskSettingsComponent } from './task-settings.component';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { AccessState } from '@core/models/access.model';
+import { ConfigService } from '@core/services/config.service';
 
 type AccessCase = { managed: boolean; canEdit: boolean; canTrigger?: boolean };
 
@@ -38,6 +39,7 @@ function taskFor(c: AccessCase) {
     wait_for_workers: false,
     retry_failed_builds: true,
     multi_node_evaluation: false,
+    exec_enabled: false,
     managed: c.managed,
     can_edit: c.canEdit,
     can_trigger: c.canTrigger ?? c.canEdit,
@@ -63,6 +65,7 @@ function setup(
   c: AccessCase,
   checkRepository: (...args: unknown[]) => Observable<string> = () => of('abc1234def5678'),
   updateTask: (...args: unknown[]) => Observable<string> = () => of('ok'),
+  execEnabled = false,
 ): ComponentFixture<TaskSettingsComponent> {
   TestBed.configureTestingModule({
     imports: [TaskSettingsComponent],
@@ -84,6 +87,7 @@ function setup(
       },
     ],
   });
+  TestBed.inject(ConfigService).execEnabled = execEnabled;
   const fixture = TestBed.createComponent(TaskSettingsComponent);
   fixture.detectChanges();
   return fixture;
@@ -205,6 +209,31 @@ describe('TaskSettingsComponent - retrying failed builds', () => {
       'demo',
       expect.objectContaining({ retry_failed_builds: false }),
     );
+  });
+});
+
+describe('TaskSettingsComponent - exec switch', () => {
+  const editor = { managed: false, canEdit: true };
+
+  it('hides the exec switch while the instance has exec jobs off', () => {
+    const fixture = setup(editor);
+    expect((fixture.nativeElement as HTMLElement).querySelector('#task-exec-enabled')).toBeNull();
+  });
+
+  it('shows the exec switch once the instance allows exec jobs', () => {
+    const fixture = setup(editor, undefined, undefined, true);
+    expect((fixture.nativeElement as HTMLElement).querySelector('#task-exec-enabled')).not.toBeNull();
+  });
+
+  it('saves the opt-in to run exec jobs', () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup(editor, undefined, updateTask, true);
+    expect(fixture.componentInstance.formData.exec_enabled).toBe(false);
+
+    fixture.componentInstance.formData.exec_enabled = true;
+    fixture.componentInstance.saveSettings();
+
+    expect(updateTask).toHaveBeenCalledWith('acme', 'demo', expect.objectContaining({ exec_enabled: true }));
   });
 });
 

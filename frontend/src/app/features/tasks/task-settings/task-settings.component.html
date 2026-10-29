@@ -113,6 +113,18 @@
       />
     </gr-form-field>
 
+    @if (config.execEnabled) {
+      <gr-form-field>
+        <gr-checkbox
+          inputId="task-exec-enabled"
+          [(ngModel)]="formData.exec_enabled"
+          [binary]="true"
+          [appManagedDisable]="access()"
+          label="Run exec jobs"
+        />
+      </gr-form-field>
+    }
+
     <div class="form-actions">
       <button
         *appWritable="access()"
