@@ -78,7 +78,7 @@ impl HypervisorApi {
     }
 
     pub async fn vm_add_disk(&self, path: &Path, id: &str) -> Result<PciDeviceInfo> {
-        let body = json!({ "path": path, "id": id, "serial": id });
+        let body = disk_config(path, id);
         parse(self.put("vm.add-disk", Some(&body)).await?)
     }
 
@@ -240,6 +240,10 @@ impl GuestImage {
     }
 }
 
+fn disk_config(path: &Path, id: &str) -> serde_json::Value {
+    json!({ "path": path, "id": id, "serial": id, "image_type": "Raw" })
+}
+
 pub fn vm_config(image: &GuestImage, dir: &Path, cid: u32) -> serde_json::Value {
     json!({
         "payload": {
@@ -316,6 +320,15 @@ mod tests {
         assert_eq!(config["memory"]["size"], 768_u64 * 1024 * 1024);
         assert_eq!(config["payload"]["kernel"], "/nix/store/x-guest/kernel");
         assert_eq!(image().sized(&GuestSize::default()), image());
+    }
+
+    #[test]
+    fn a_work_disk_is_added_as_a_raw_image() {
+        let config = disk_config(Path::new("/var/lib/gradient-worker/work.img"), "work");
+
+        assert_eq!(config["image_type"], "Raw");
+        assert_eq!(config["path"], "/var/lib/gradient-worker/work.img");
+        assert_eq!(config["serial"], "work");
     }
 
     #[tokio::test]
