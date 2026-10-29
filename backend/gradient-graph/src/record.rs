@@ -89,7 +89,7 @@ WHERE db.derivation = l.derivation
     MARK_PROBED = r#"
 UPDATE derivation_build db
 SET probed = true, probed_at = (now() AT TIME ZONE 'UTC'), updated_at = (now() AT TIME ZONE 'UTC')
-WHERE db.derivation = ANY($1::uuid[]) AND NOT db.probed
+WHERE db.derivation = ANY($1::uuid[]) AND NOT db.probed AND db.wanted
   AND EXISTS (SELECT 1 FROM derivation w WHERE w.id = db.derivation AND w.walked)
   AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)
 RETURNING db.derivation
@@ -799,6 +799,30 @@ impl BatchWriter<'_> {
         Ok(settled.moved.gained)
     }
 
+    /// A probe miss stays with the evaluation that asked. An upstream cache can gain the outputs
+    /// before a later evaluation names the same shared build.
+    async fn earlier_misses(
+        &self,
+        ids: &HashMap<String, DerivationId>,
+    ) -> Result<Vec<DerivationId>> {
+        let named: Vec<DerivationId> = ids.values().copied().collect();
+        let mut missed = Vec::new();
+        for chunk in named.chunks(gradient_db::IN_CHUNK_SIZE) {
+            let chunk: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
+            let rows = self
+                .db()
+                .query_all_raw(EARLIER_MISSES.bind([chunk.into()]))
+                .await
+                .context("find the shared builds an earlier probe missed")?;
+            missed.extend(
+                rows.iter()
+                    .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+                    .map(DerivationId::new),
+            );
+        }
+        Ok(missed)
+    }
+
     async fn settle_created(&self, ids: &HashMap<String, DerivationId>) -> Result<()> {
         let mut derivations: Vec<DerivationId> = ids.values().copied().collect();
         derivations.sort_unstable();
@@ -1202,11 +1226,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
                 .iter()
                 .filter_map(|h| resolved.by_hash.get(h).copied()),
         );
-        let named: Vec<DerivationId> = ids.values().copied().collect();
-        report
-            .to_probe
-            .extend(earlier_misses(writer.db(), &named).await?);
-        fetch_held_misses(ctx, &report.to_probe).await?;
+        report.to_probe.extend(writer.earlier_misses(ids).await?);
 
         gradient_db::task_board::dep_counts::bump_graph_version(writer.db(), &[evaluation_id])
             .await
@@ -1390,57 +1410,8 @@ pub(crate) async fn apply_upstream_hits(
     changes
         .extend(gradient_db::graph::can_start::settle_created(db, &newly_cache_available).await?);
     gradient_db::status::emit_transition_effects(ctx, &changes).await?;
-    fetch_held_misses(ctx, &gained_need).await?;
 
     Ok(gained_need)
-}
-
-async fn earlier_misses<C: ConnectionTrait>(
-    db: &C,
-    derivations: &[DerivationId],
-) -> Result<Vec<DerivationId>> {
-    let mut missed = Vec::new();
-    for chunk in derivations.chunks(gradient_db::IN_CHUNK_SIZE) {
-        let chunk: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
-        let rows = db
-            .query_all_raw(EARLIER_MISSES.bind([chunk.into()]))
-            .await
-            .context("find the wanted shared builds an earlier probe missed")?;
-        missed.extend(
-            rows.iter()
-                .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
-                .map(DerivationId::new),
-        );
-    }
-    Ok(missed)
-}
-
-/// A miss answered while a parent was going to build it stays a real build after that parent
-/// stops, so a new need decides again from the outputs our caches already hold.
-async fn fetch_held_misses(ctx: &DbContext, gained: &[DerivationId]) -> Result<()> {
-    let db = &ctx.worker_db;
-    let mut misses = earlier_misses(db, gained).await?;
-    while !misses.is_empty() {
-        let available = substitute_with_inputs(ctx, &misses, Found::HeldBeforeTheProbe).await?;
-        if available.is_empty() {
-            break;
-        }
-
-        let mut changes = Vec::new();
-        let mut regained = Vec::new();
-        for chunk in available.chunks(gradient_db::IN_CHUNK_SIZE) {
-            let settled = gradient_db::graph::can_start::update_and_settle_need(db, chunk)
-                .await
-                .context("settle what a held miss no longer needs built")?;
-            changes.extend(settled.changes);
-            regained.extend_from_slice(&settled.moved.gained);
-        }
-        changes.extend(gradient_db::graph::can_start::settle_created(db, &available).await?);
-        gradient_db::status::emit_transition_effects(ctx, &changes).await?;
-        misses = earlier_misses(db, &regained).await?;
-    }
-
-    Ok(())
 }
 
 /// A parent that counted as built here while unanswered can block an input it no longer needs
@@ -1589,7 +1560,6 @@ pub(crate) async fn mark_probed(
     changes
         .extend(gradient_db::graph::can_start::settle_created(db, &newly_cache_available).await?);
     gradient_db::status::emit_transition_effects(ctx, &changes).await?;
-    fetch_held_misses(ctx, &gained_need).await?;
 
     Ok(gained_need)
 }

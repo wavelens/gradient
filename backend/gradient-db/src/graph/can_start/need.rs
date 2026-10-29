@@ -21,7 +21,9 @@ const IN_CANDIDATES: &str = "db.derivation = ANY($1::uuid[]) AND ";
 
 fn skip_unwanted_sql(scope: &str) -> String {
     format!(
-        "UPDATE derivation_build db SET status = {to}, updated_at = (now() AT TIME ZONE 'UTC') \
+        "UPDATE derivation_build db SET status = {to}, probed = db.probed AND db.cache_available, \
+         probed_at = CASE WHEN db.cache_available THEN db.probed_at END, \
+         updated_at = (now() AT TIME ZONE 'UTC') \
          WHERE {scope}db.status = {from} AND NOT db.wanted \
            AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = db.derivation) \
          RETURNING db.derivation, {from} AS from_status, {to} AS to_status",
