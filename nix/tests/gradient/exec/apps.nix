@@ -97,7 +97,7 @@ in {
   hello = pkgs.writeText "exec-hello" "hello\n";
 
   trainer = pkgs.writeShellScript "exec-trainer" ''
-    ${pkgs.coreutils}/bin/cat /etc/gradient-image
+    echo "$(${pkgs.coreutils}/bin/cat /etc/gradient-image)"
     echo "cwd $PWD"
   '';
 
