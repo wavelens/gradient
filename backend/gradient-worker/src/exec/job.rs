@@ -375,6 +375,7 @@ pub async fn follow<R: ExecReport>(
 ) -> Followed {
     loop {
         let watched = tokio::select! {
+            biased;
             () = leave_running.cancelled() => return Followed::LeftRunning,
             event = channels.next_event() => {
                 channels.handle(event, agent, reporter).await;
@@ -398,6 +399,7 @@ pub async fn follow<R: ExecReport>(
             }
             Watched::Silent(after) => return Followed::Stopped(Stop::Silent(after)),
             Watched::TotalExceeded(after) => return Followed::Stopped(Stop::Total(after)),
+            Watched::Aborted if leave_running.is_cancelled() => return Followed::LeftRunning,
             Watched::Aborted => return Followed::Stopped(Stop::Aborted),
         };
         let message = match message {
@@ -1132,6 +1134,30 @@ mod tests {
         .await;
 
         assert!(matches!(followed, Followed::LeftRunning), "{followed:?}");
+    }
+
+    #[tokio::test]
+    async fn the_dropped_job_registration_of_a_stopping_worker_leaves_the_program_running() {
+        let (mut agent, _guest) = connected().await;
+        let stopping = CancellationToken::new();
+        stopping.cancel();
+        let (registration, mut abort) = AbortSignal::channel();
+        drop(registration);
+
+        for _ in 0..32 {
+            let followed = follow(
+                &mut agent,
+                &mut Recorder::default(),
+                &mut Watchdog::new(Instant::now(), None, None),
+                &mut abort,
+                &stopping,
+                &mut no_channels(),
+                &mut no_uploads(),
+            )
+            .await;
+
+            assert!(matches!(followed, Followed::LeftRunning), "{followed:?}");
+        }
     }
 
     #[tokio::test(start_paused = true)]
