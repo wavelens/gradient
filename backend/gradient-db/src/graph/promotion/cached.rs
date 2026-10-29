@@ -93,9 +93,10 @@ crate::sql_fn! {
     REPAIR_CACHED_SHARED_BUILDS_FOR_EVAL = repair_cached_shared_builds_for_eval_sql,
         params = [EvaluationId],
         tier = Walk,
-        budget = crate::sql::Budget::walk().buffers(500_000)
+        budget = crate::sql::Budget::walk().buffers(750_000)
             .because("the same whole-closure walk PROMOTE_CLOSURE_QUERY pays for, plus \
-                      one output-and-path anti-join per shared build the closure names"),
+                      one output-and-path anti-join per unfinished shared build the closure \
+                      names; partly substituted producers stay unfinished, observed 567_380"),
         flags = [Walk],
         status_write = StatusWrite::build(BuildStatus::COMPLETE_CACHED);
 }
