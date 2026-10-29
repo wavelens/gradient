@@ -96,7 +96,15 @@ RETURNING db.derivation
 "#,
         params = [DerivationIds(64)];
 
-    MARK_IFD = "UPDATE derivation SET ifd = true WHERE hash = ANY($1::text[]) AND NOT ifd",
+    WAITING_INPUTS = "SELECT DISTINCT e.dependency AS derivation FROM derivation_dependency e \
+         JOIN derivation_build db ON db.derivation = e.dependency \
+         WHERE e.derivation = ANY($1::uuid[]) AND e.kind IN (0, 2) \
+           AND db.wanted AND db.probed AND NOT db.cache_available \
+         ORDER BY 1",
+        params = [DerivationIds(64)],
+        tier = Bulk;
+
+    MARK_IFD ="UPDATE derivation SET ifd = true WHERE hash = ANY($1::text[]) AND NOT ifd",
         params = [DerivationHashes(64)];
 }
 
@@ -1353,7 +1361,7 @@ pub(crate) async fn apply_upstream_hits(
     persist_narinfo(db, &hit_rows, hits).await?;
 
     let newly_cache_available =
-        substitute_available(ctx, &touched, Found::UpstreamHits(hits)).await?;
+        substitute_with_inputs(ctx, &touched, Found::UpstreamHits(hits)).await?;
 
     let mut roots = touched;
     roots.extend_from_slice(&newly_cache_available);
@@ -1374,6 +1382,47 @@ pub(crate) async fn apply_upstream_hits(
     gradient_db::status::emit_transition_effects(ctx, &changes).await?;
 
     Ok(gained_need)
+}
+
+/// A parent that counted as built here while unanswered can block an input it no longer needs
+/// once it turns available, so every newly available shared build has its inputs checked again.
+async fn substitute_with_inputs(
+    ctx: &DbContext,
+    shared_builds: &[DerivationId],
+    found: Found<'_>,
+) -> Result<Vec<DerivationId>> {
+    let mut available = substitute_available(ctx, shared_builds, found).await?;
+    let mut parents = available.clone();
+    while !parents.is_empty() {
+        let inputs = waiting_inputs(&ctx.worker_db, &parents).await?;
+        parents = substitute_available(ctx, &inputs, Found::HeldBeforeTheProbe).await?;
+        available.extend_from_slice(&parents);
+    }
+    available.sort_unstable();
+    available.dedup();
+    Ok(available)
+}
+
+async fn waiting_inputs<C: ConnectionTrait>(
+    db: &C,
+    parents: &[DerivationId],
+) -> Result<Vec<DerivationId>> {
+    let mut inputs = Vec::new();
+    for chunk in parents.chunks(gradient_db::IN_CHUNK_SIZE) {
+        let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
+        let rows = db
+            .query_all_raw(WAITING_INPUTS.bind([ids.into()]))
+            .await
+            .context("find the wanted inputs of shared builds that turned available")?;
+        inputs.extend(
+            rows.iter()
+                .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+                .map(DerivationId::new),
+        );
+    }
+    inputs.sort_unstable();
+    inputs.dedup();
+    Ok(inputs)
 }
 
 /// Outputs our cache held before the probe never come back as hits and a shared build missing
@@ -1459,7 +1508,7 @@ pub(crate) async fn mark_probed(
     }
 
     let newly_cache_available =
-        substitute_available(ctx, shared_builds, Found::HeldBeforeTheProbe).await?;
+        substitute_with_inputs(ctx, shared_builds, Found::HeldBeforeTheProbe).await?;
     answered.extend_from_slice(&newly_cache_available);
     answered.sort_unstable();
     answered.dedup();

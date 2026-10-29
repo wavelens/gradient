@@ -347,3 +347,41 @@ async fn s08_a_producer_probed_before_our_cache_held_its_needed_output_is_not_bu
     case.zero_drift("step 1").await;
     case.finish().await;
 }
+
+#[tokio::test]
+async fn s09_a_parent_turning_available_frees_the_partly_held_input_it_blocked() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        a_builds_with(e1, &["out"])
+            .cached_output(B)
+            .derivation(B)
+            .probed()
+            .derivation(C)
+            .build_status(BuildStatus::Created)
+            .derivation(D)
+            .walked()
+            .entry_point("pkg.d")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(D_OUT)
+            .depends_on_outputs(B, &["dev"]),
+    )
+    .await;
+
+    case.upstream_hits(&[(D_OUT, narinfo(&[(D_OUT, "d")]))])
+        .await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.cache_available, b.unneeded_outputs),
+        (true, vec!["dev".to_owned()]),
+        "after 1: sb(B) cache_available, unneeded_outputs"
+    );
+    assert!(
+        case.sb(D).await.cache_available,
+        "after 1: sb(D).cache_available"
+    );
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
