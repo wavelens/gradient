@@ -567,30 +567,54 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   pkgMenuModel = signal<MenuItem[]>([]);
 
-  // Report generation is authenticated server-side, so an anonymous visitor
-  // browsing a public task is not offered an action that can only 403.
-  panelMenuModel = computed<MenuItem[]>(() => {
+  retryEvaluationItem = computed<MenuItem | null>(() => {
     const selected = this.selected();
-    const job = selected?.dispatched_job;
+    if (!selected || !this.canRetryEvaluation(selected)) return null;
+    return {
+      label: 'Retry', icon: 'replay',
+      disabled: this.starting() || this.evaluationInProgress(),
+      command: () => this.runAction(this.evaluationsService.retryEvaluation(selected.id),
+        'Evaluation retried', 'Failed to retry evaluation.'),
+    };
+  });
+
+  private evaluationPageItems = computed<MenuItem[]>(() => {
+    const selected = this.selected();
     return [
       { label: 'Logs', icon: 'article', disabled: !selected,
-        routerLink: selected
-          ? ['/project', this.projectName, 'log', selected.id]
-          : undefined },
+        routerLink: selected ? ['/project', this.projectName, 'log', selected.id] : undefined },
       { label: 'Summary', icon: 'summarize', disabled: !selected,
-        routerLink: selected
-          ? ['/project', this.projectName, 'summary', selected.id]
-          : undefined },
+        routerLink: selected ? ['/project', this.projectName, 'summary', selected.id] : undefined },
+    ];
+  });
+
+  private evaluationLinkItems = computed<MenuItem[]>(() => {
+    const job = this.selected()?.dispatched_job;
+    return [
       { label: 'Show job', icon: 'work', disabled: !job,
         routerLink: job ? ['/board', 'jobs', job] : undefined },
       { label: 'Metrics', icon: 'show_chart',
         routerLink: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
-      ...(selected && this.canRetryEvaluation(selected)
-        ? [{ label: 'Retry', icon: 'replay',
-             disabled: this.starting() || this.evaluationInProgress(),
-             command: () => this.runAction(this.evaluationsService.retryEvaluation(selected.id),
-               'Evaluation retried', 'Failed to retry evaluation.') }]
-        : []),
+    ];
+  });
+
+  panelMenuModel = computed<MenuItem[]>(() => [...this.evaluationLinkItems(), ...this.evaluationActionItems()]);
+
+  evalMenuModel = computed<MenuItem[]>(() => {
+    const retry = this.retryEvaluationItem();
+    return [
+      ...this.evaluationPageItems(),
+      ...this.evaluationLinkItems(),
+      ...(retry ? [retry] : []),
+      ...this.evaluationActionItems(),
+    ];
+  });
+
+  // Report generation is authenticated server-side, so an anonymous visitor
+  // browsing a public task is not offered an action that can only 403.
+  private evaluationActionItems = computed<MenuItem[]>(() => {
+    const selected = this.selected();
+    return [
       ...(selected && this.canPrioritizeEvaluation(selected)
         ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up',
              command: () => this.runAction(this.evaluationsService.prioritizeEvaluation(selected.id),
@@ -608,7 +632,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     ];
   });
 
-  private canTrigger(): boolean {
+  protected canTrigger(): boolean {
     return this.authService.isAuthenticated() && this.triggerAccess().canEdit;
   }
 
