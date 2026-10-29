@@ -14,9 +14,10 @@ import { BoardLiveService } from '@core/services/board-live.service';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
+import { JobKindName, jobKindName, jobSubjectLabel } from '../job-kind';
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
 
-type KindFilter = 'all' | 'eval' | 'build';
+type KindFilter = 'all' | JobKindName;
 type StatusFilter = 'all' | 'pending' | 'assigned';
 type ScoreScope = 'current' | 'all';
 
@@ -25,7 +26,7 @@ interface DecisionRow {
   at: string;
   worker: string;
   kind: number;
-  subject?: string | null;
+  subject: string;
   score: number;
   won: boolean;
 }
@@ -65,6 +66,7 @@ interface DecisionRow {
               <option value="all">all</option>
               <option value="eval">eval</option>
               <option value="build">build</option>
+              <option value="exec">exec</option>
             </select>
           </label>
           <label>Status
@@ -85,14 +87,15 @@ interface DecisionRow {
         @if (!showDecisions()) {
           <gr-table class="jobs">
             <thead>
-              <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation</th><th>Score</th><th>Assigned</th><th></th></tr>
+              <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th><th>Score</th><th>Assigned</th><th></th></tr>
             </thead>
             <tbody>
               @for (j of filteredJobs(); track j.id) {
                 <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
-                  <td>{{ j.kind === 1 ? 'build' : 'eval' }}</td>
+                  @let subject = jobSubjectLabel(j.subject, j.exec_job);
+                  <td>{{ jobKindName(j.kind) }}</td>
                   <td class="mono">{{ j.worker_name ?? j.worker_id }}</td>
-                  <td class="mono subject" [title]="j.subject ?? ''">{{ j.subject ?? '-' }}</td>
+                  <td class="mono subject" [title]="subject">{{ subject }}</td>
                   <td>{{ j.score | number: '1.1-1' }}</td>
                   <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
                   <td>{{ canInspect(j) ? '›' : '' }}</td>
@@ -105,15 +108,15 @@ interface DecisionRow {
         } @else {
           <gr-table class="jobs">
             <thead>
-              <tr><th>Outcome</th><th>Kind</th><th>Worker</th><th>Derivation / Evaluation</th><th>Score</th><th>When</th><th></th></tr>
+              <tr><th>Outcome</th><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th><th>Score</th><th>When</th><th></th></tr>
             </thead>
             <tbody>
               @for (r of decisionRows(); track r.id) {
                 <tr [class.negative]="r.score < 0" class="clickable" (click)="inspectDecision(r)">
                   <td>{{ r.won ? 'assigned' : 'passed over' }}</td>
-                  <td>{{ r.kind === 1 ? 'build' : 'eval' }}</td>
+                  <td>{{ jobKindName(r.kind) }}</td>
                   <td class="mono">{{ r.worker }}</td>
-                  <td class="mono subject" [title]="r.subject ?? ''">{{ r.subject ?? '-' }}</td>
+                  <td class="mono subject" [title]="r.subject">{{ r.subject }}</td>
                   <td>{{ r.score | number: '1.1-1' }}</td>
                   <td>{{ r.at | date: 'HH:mm:ss' }}</td>
                   <td>›</td>
@@ -132,12 +135,13 @@ interface DecisionRow {
           @if (otherPending() > 0) { <span class="muted">+ {{ otherPending() }} hidden.</span> }
         </div>
         <gr-table class="jobs">
-          <thead><tr><th>Kind</th><th>Derivation / Evaluation</th><th>Deps</th><th>Queued</th></tr></thead>
+          <thead><tr><th>Kind</th><th>Derivation / Evaluation / Exec</th><th>Deps</th><th>Queued</th></tr></thead>
           <tbody>
-            @for (p of pendingJobs(); track p.evaluation_id + (p.build_id ?? '')) {
-              <tr class="clickable" [routerLink]="['/board/jobs', p.evaluation_id]">
-                <td>{{ p.kind === 1 ? 'build' : 'eval' }}</td>
-                <td class="mono subject" [title]="p.subject ?? ''">{{ p.subject ?? '-' }}</td>
+            @for (p of pendingJobs(); track p.evaluation_id + (p.build_id ?? '') + (p.exec_job?.id ?? '')) {
+              @let subject = jobSubjectLabel(p.subject, p.exec_job);
+              <tr class="clickable" [routerLink]="['/board/jobs', p.exec_job?.id ?? p.evaluation_id]">
+                <td>{{ jobKindName(p.kind) }}</td>
+                <td class="mono subject" [title]="subject">{{ subject }}</td>
                 <td>{{ p.dependency_count }}</td>
                 <td>{{ p.queued_at | date: 'HH:mm:ss' }}</td>
               </tr>
@@ -165,6 +169,8 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   private sub?: Subscription;
   private refreshTimer?: ReturnType<typeof setTimeout>;
   protected first = firstLoad();
+  protected readonly jobKindName = jobKindName;
+  protected readonly jobSubjectLabel = jobSubjectLabel;
 
   jobs = signal<DispatchedJobSummary[]>([]);
   otherRunning = signal(0);
@@ -208,8 +214,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     const min = this.scoreMin();
     const max = this.scoreMax();
     return this.jobs().filter((j) => {
-      if (kind === 'eval' && j.kind !== 0) return false;
-      if (kind === 'build' && j.kind !== 1) return false;
+      if (kind !== 'all' && jobKindName(j.kind) !== kind) return false;
       if (status === 'pending' && !this.isLive(j)) return false;
       if (status === 'assigned' && this.isLive(j)) return false;
       if (min !== null && j.score < min) return false;
@@ -228,8 +233,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     const rows: DecisionRow[] = [];
     for (const d of this.decisions()) {
       for (const c of d.candidates) {
-        if (kind === 'eval' && c.kind !== 0) continue;
-        if (kind === 'build' && c.kind !== 1) continue;
+        if (kind !== 'all' && jobKindName(c.kind) !== kind) continue;
         if (min !== null && c.score < min) continue;
         if (max !== null && c.score > max) continue;
         rows.push({
@@ -237,7 +241,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
           at: d.at,
           worker: d.worker_name ?? d.worker_id,
           kind: c.kind,
-          subject: c.subject,
+          subject: jobSubjectLabel(c.subject, c.exec_job),
           score: c.score,
           won: c.won,
         });

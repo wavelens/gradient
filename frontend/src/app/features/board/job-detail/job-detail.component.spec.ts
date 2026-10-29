@@ -11,7 +11,9 @@ import { EMPTY, of, throwError } from 'rxjs';
 import { BoardJobDetailComponent } from './job-detail.component';
 import { BoardService, AssignedJobDetail } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
-import { PendingJobSummary } from '@core/models';
+import { ExecJobsService } from '@core/services/exec-jobs.service';
+import { AuthService } from '@core/services/auth.service';
+import { BoardExecJob, PendingJobSummary } from '@core/models';
 
 const DETAIL: AssignedJobDetail = {
   id: 'job-1',
@@ -160,6 +162,7 @@ function setup(board: Partial<BoardService> = {}, id = 'job-1'): ComponentFixtur
         },
       },
       { provide: EvaluationsService, useValue: { getBuild: () => EMPTY } },
+      { provide: ExecJobsService, useValue: { abort: () => EMPTY } },
     ],
   });
   const fixture = TestBed.createComponent(BoardJobDetailComponent);
@@ -408,6 +411,84 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
     const el = setup({ getJob: () => of(WITH_ATTEMPTS) }).nativeElement as HTMLElement;
     const section = el.querySelector('section.attempts') as HTMLElement;
     expect(section.textContent).toContain('builder for ... failed with exit code 1');
+  });
+});
+
+describe('BoardJobDetailComponent - exec jobs', () => {
+  const EXEC_JOB: BoardExecJob = {
+    id: 'x1',
+    project: 'project-one',
+    task: 'nightly',
+    entry_point: 'apps.x86_64-linux.train',
+    node_index: 1,
+    nodes: 2,
+  };
+  const EXEC_DETAIL: AssignedJobDetail = {
+    ...EVAL_DETAIL,
+    kind: 2,
+    evaluation: null,
+    score: 3.75,
+    finished_at: '2026-06-08T00:05:00Z',
+    outcome: 'completed',
+    exec_job: EXEC_JOB,
+    exec_attempt: {
+      number: 2,
+      worker: 'w1',
+      started_at: '2026-06-08T00:01:30',
+      ended_at: '2026-06-08T00:05:00',
+      end_reason: 'completed',
+      message: null,
+    },
+    job_context: { ...EVAL_DETAIL.job_context, kind: 'Exec', architecture: 'x86_64-linux', missing_count: 4 },
+  };
+
+  it('names the kind, its score and the exec job it ran with a link to its page', () => {
+    const fixture = setup({ getJob: () => of(EXEC_DETAIL) });
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('.head .kind')?.textContent?.trim()).toBe('exec');
+    expect(el.querySelector('.head .total .value')?.textContent?.trim()).toBe('3.75');
+    const section = el.querySelector('section.exec') as HTMLElement;
+    expect(section.textContent).toContain('nightly');
+    expect(section.textContent).toContain('1 of 2 nodes');
+    expect(section.textContent).toContain('completed');
+    const link = fixture.debugElement.query(By.css('section.exec a.exec-link'));
+    expect(link.injector.get(RouterLink).urlTree?.toString()).toBe('/project/project-one/task/nightly/exec-jobs/x1');
+  });
+
+  it('shows when the attempt started next to the assignment and the finish', () => {
+    const el = setup({ getJob: () => of(EXEC_DETAIL) }).nativeElement as HTMLElement;
+    const labels = Array.from(el.querySelectorAll('section.timeline .step .label')).map((s) => s.textContent?.trim());
+    expect(labels).toEqual(expect.arrayContaining(['Queued', 'Assigned', 'Started', 'Finished']));
+    expect(labels.indexOf('Started')).toBe(labels.indexOf('Assigned') + 1);
+    expect(el.querySelector('section.timeline')?.textContent).toContain('completed');
+  });
+
+  it('shows the architecture of the exec job but no flake fetch', () => {
+    const job = (setup({ getJob: () => of(EXEC_DETAIL) }).nativeElement as HTMLElement).querySelector('section.ctx.job') as HTMLElement;
+    expect(job.textContent).toContain('Architecture');
+    expect(job.textContent).not.toContain('Fetch flake');
+  });
+
+  it('aborts the exec job, not its evaluation', () => {
+    const aborted: string[] = [];
+    TestBed.overrideProvider(ExecJobsService, { useValue: { abort: (id: string) => { aborted.push(id); return EMPTY; } } });
+    TestBed.overrideProvider(AuthService, { useValue: { user: () => ({ superuser: true }) } });
+    const fixture = setup({ getJob: () => of({ ...EXEC_DETAIL, finished_at: null, outcome: null }) });
+    const cmp = fixture.componentInstance;
+    expect(cmp.canAbort()).toBe(true);
+    expect(cmp.abortTarget()).toBe('exec job');
+    cmp.abortJob();
+    expect(aborted).toEqual(['x1']);
+  });
+
+  it('finds a pending exec job by its exec job id', () => {
+    const pending: PendingJobSummary = { ...PENDING, kind: 2, build_id: null, subject: EXEC_JOB.entry_point, exec_job: EXEC_JOB };
+    const el = setup(
+      { getJob: () => throwError(() => new Error('404')), getPendingJobs: () => of({ jobs: [PENDING, pending], other_pending: 0 }) },
+      'x1',
+    ).nativeElement as HTMLElement;
+    expect(el.querySelector('.head .kind')?.textContent?.trim()).toBe('exec');
+    expect(el.textContent).toContain('nightly: apps.x86_64-linux.train (node 1)');
   });
 });
 
