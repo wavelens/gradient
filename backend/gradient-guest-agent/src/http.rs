@@ -16,7 +16,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use bytes::Bytes;
 use gradient_redact::SecretRedactor;
-use gradient_wire::guest::AgentToWorker;
+use gradient_wire::guest::{AgentToWorker, GUEST_SHUTDOWN_SINCE};
 use gradient_wire::types::{CONTINUE_OUTPUT, MAX_CONTINUE_FILE_BYTES};
 use http_body_util::{BodyExt, Full};
 use hyper::Request;
@@ -30,6 +30,7 @@ use crate::upload::{UploadFailure, UploadSender, WorkerLink, output_refusal};
 
 const LOCAL_ADDRESS: &str = "127.0.0.1:7777";
 const NO_JOB: &str = "no job runs in this guest yet";
+const WORKER_TOO_OLD_FOR_SHUTDOWN: &str = "the worker does not end the job on a guest shutdown";
 
 pub struct HttpState {
     pub link: WorkerLink,
@@ -76,6 +77,7 @@ fn router(state: Arc<HttpState>) -> Router {
         .route("/phases", post(post_phase))
         .route("/outputs/{*path}", post(post_output))
         .route("/redact", post(post_redact))
+        .route("/shutdown", post(post_shutdown))
         .with_state(state)
 }
 
@@ -180,6 +182,22 @@ async fn post_redact(State(state): State<Arc<HttpState>>, body: Bytes) -> Respon
     match state.redactor() {
         Some(redactor) => (StatusCode::OK, redactor.redact(&body)).into_response(),
         None => refusal(StatusCode::SERVICE_UNAVAILABLE, NO_JOB),
+    }
+}
+
+async fn post_shutdown(State(state): State<Arc<HttpState>>) -> Response {
+    if state.redactor().is_none() {
+        return refusal(StatusCode::SERVICE_UNAVAILABLE, NO_JOB);
+    }
+    let Some(worker) = state.link.current() else {
+        return refusal(StatusCode::SERVICE_UNAVAILABLE, UploadFailure::Lost);
+    };
+    if worker.version < GUEST_SHUTDOWN_SINCE {
+        return refusal(StatusCode::SERVICE_UNAVAILABLE, WORKER_TOO_OLD_FOR_SHUTDOWN);
+    }
+    match worker.outgoing.send(AgentToWorker::GuestShutdown).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => refusal(StatusCode::SERVICE_UNAVAILABLE, UploadFailure::Lost),
     }
 }
 
@@ -309,6 +327,49 @@ mod tests {
             .await
             .unwrap();
         assert!(log.ends_with(b"::gradient-phase:: epoch-3\n"));
+    }
+
+    #[tokio::test]
+    async fn a_shutdown_without_a_job_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = OutputLog::create(&dir.path().join("output.log"), 1024)
+            .await
+            .unwrap();
+        let state = Arc::new(HttpState::new(output));
+        let (outgoing, mut sent) = mpsc::channel(4);
+        state.link.connect(outgoing, GUEST_SHUTDOWN_SINCE);
+
+        let (status, body) = answer(state, "/shutdown", b"").await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(&body[..], NO_JOB.as_bytes());
+        assert!(sent.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn a_shutdown_during_a_job_reaches_the_worker() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = job_state(&dir).await;
+        let (outgoing, mut sent) = mpsc::channel(4);
+        state.link.connect(outgoing, GUEST_SHUTDOWN_SINCE);
+
+        let (status, _) = answer(state, "/shutdown", b"").await;
+
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(sent.recv().await, Some(AgentToWorker::GuestShutdown));
+    }
+
+    #[tokio::test]
+    async fn an_older_worker_gets_no_shutdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = job_state(&dir).await;
+        let (outgoing, mut sent) = mpsc::channel(4);
+        state.link.connect(outgoing, GUEST_SHUTDOWN_SINCE - 1);
+
+        let (status, _) = answer(state, "/shutdown", b"").await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(sent.try_recv().is_err());
     }
 
     #[tokio::test]

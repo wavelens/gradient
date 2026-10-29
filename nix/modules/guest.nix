@@ -143,6 +143,31 @@ in {
       };
     };
 
+    systemd.services.gradient-guest-shutdown = {
+      description = "Terminate the Gradient Exec Job on Guest shutdown.";
+      after = [ "gradient-guest-agent.service" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = "${pkgs.coreutils}/bin/true";
+        ExecStop = "-${lib.getExe' cfg.package "gradient-guest-agent"} shutdown";
+        TimeoutStopSec = 5;
+      };
+    };
+
+    security.polkit = {
+      enable = true;
+      extraConfig = ''
+        polkit.addRule(function (action, subject) {
+          if (subject.user == "gradient" &&
+              /^org\.freedesktop\.login1\.(power-off|reboot|halt)(-multiple-sessions|-ignore-inhibit)?$/.test(action.id)) {
+            return polkit.Result.YES;
+          }
+        });
+      '';
+    };
+
     system.build.gradientGuest = pkgs.runCommand "gradient-guest" { } ''
       mkdir $out
       ln -s ${kernelImage} $out/kernel

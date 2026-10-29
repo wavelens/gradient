@@ -22,8 +22,9 @@ mod upload;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use gradient_util::shutdown::Shutdown;
 
@@ -32,6 +33,7 @@ use output::OutputLog;
 
 const OUTPUT_FILE: &str = "/run/gradient/output.log";
 const OUTPUT_KEPT: u64 = 64 * 1024 * 1024;
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Parser)]
 #[command(name = "gradient-guest-agent", version)]
@@ -44,6 +46,7 @@ struct Cli {
 enum Command {
     Phase { name: String, file: Option<PathBuf> },
     Upload { file: PathBuf, path: Option<String> },
+    Shutdown,
 }
 
 #[tokio::main]
@@ -57,6 +60,9 @@ async fn main() -> Result<ExitCode> {
             let path = path.unwrap_or_else(|| file_name(&file));
             post(&http::output_route(&path), Some(&file)).await
         }
+        Some(Command::Shutdown) => tokio::time::timeout(SHUTDOWN_TIMEOUT, post("/shutdown", None))
+            .await
+            .context("the guest agent did not answer the shutdown in time")?,
     }
 }
 

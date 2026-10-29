@@ -518,6 +518,7 @@ async fn forward<R: ExecReport>(
             debug!(channel_id, "guest channel frame dropped");
         }
         AgentToWorker::JobSecrets { .. } => debug!("job secrets from the guest agent dropped"),
+        AgentToWorker::GuestShutdown => debug!("guest shutdown dropped"),
         AgentToWorker::UploadStart { upload_id, .. }
         | AgentToWorker::UploadChunk { upload_id, .. }
         | AgentToWorker::UploadEnd { upload_id } => {
