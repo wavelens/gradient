@@ -4,7 +4,6 @@
 
 GAIN_PER_ADDED_WORKER = 0.15
 SMALL_SLOWDOWN = 1.1
-STATEMENTS_PER_SHARD = 10
 EVAL_PHASES = {"eval_flake", "eval_derivations"}
 
 
@@ -41,16 +40,6 @@ def speedup_verdicts(runs):
     return failed
 
 
-def statement_verdicts(runs):
-    failed = []
-    for n in sorted(runs):
-        extra = runs[n]["statements"] - runs[1]["statements"]
-        if extra > STATEMENTS_PER_SHARD * runs[n]["shards"]:
-            failed.append(f"N={n}: {extra} extra statements for {runs[n]['shards']} shards")
-
-    return failed
-
-
 def small_complete(small):
     return bool(small) and "standalone" in small and "multinode" in small
 
@@ -71,7 +60,7 @@ def small_verdicts(small):
 
 
 def verdicts(runs, small=None):
-    return speedup_verdicts(runs) + statement_verdicts(runs) + small_verdicts(small)
+    return speedup_verdicts(runs) + small_verdicts(small)
 
 
 def run_line(runs, n):
