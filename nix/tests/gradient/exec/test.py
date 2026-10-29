@@ -31,7 +31,7 @@ GUEST_UNIT = re.compile(r"gradient-guest-[0-9a-f]{32}\.service")
 WORKERS = [stopper, keeper]
 NAMES = [
     "fetch", "silent", "abort", "long-stop", "fail", "long-keep", "lost", "interactive", "terminal",
-    "secrets", "clash", "outputs", "pair", "sized", "toolarge",
+    "secrets", "clash", "outputs", "pair", "sized", "toolarge", "manual",
 ]
 GUEST_SUBNETS = [ipaddress.ip_network("10.233.0.0/16"), ipaddress.ip_network("10.234.0.0/16")]
 IMAGE_NAMES = ["trainer", "noagent"]
@@ -358,6 +358,15 @@ assert unmet == {"cpus": 64, "memory_mb": 0, "disk_mb": 0}, f"toolarge waits for
 assert job("toolarge")["attempts"] == [], json.dumps(job("toolarge"))
 api("POST", f"exec/{JOBS['toolarge']}/abort")
 wait_status("toolarge", "aborted", timeout=120)
+
+banner("Phase 7f: a job without autostart waits for its run")
+waiting = job("manual")
+assert waiting["status"] == "created" and not waiting["autostart"], json.dumps(waiting)
+assert waiting["waiting_reason"] == {"kind": "manual_start"}, json.dumps(waiting)
+assert waiting["attempts"] == [], json.dumps(waiting)
+api("POST", f"exec/{JOBS['manual']}/run")
+wait_status("manual", "completed")
+assert "started by hand" in job_log("manual"), job_log("manual")
 
 banner("Phase 8: a silent program times out")
 silent = wait_status("silent", "failed")

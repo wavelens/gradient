@@ -54,6 +54,10 @@ in {
     echo "clash started"
   '';
 
+  manual = pkgs.writeShellScript "exec-manual" ''
+    echo "started by hand"
+  '';
+
   outputs = pkgs.writeShellScript "exec-outputs" ''
     set -euo pipefail
     gradient-phase epoch-1 <(echo state-1)
