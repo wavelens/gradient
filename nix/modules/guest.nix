@@ -96,6 +96,7 @@ in {
       };
     };
 
+    networking.hostName = lib.mkDefault "gradient";
     networking.useDHCP = false;
     networking.usePredictableInterfaceNames = false;
     networking.firewall.enable = lib.mkDefault false;
@@ -114,6 +115,7 @@ in {
     };
 
     services.getty.autologinUser = lib.mkDefault "gradient";
+    systemd.services."serial-getty@ttyS0".environment.TERM = "xterm-256color";
 
     services.udev.extraRules = ''
       SUBSYSTEM=="usb", MODE="0660", GROUP="dialout"
