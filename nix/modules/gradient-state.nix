@@ -340,6 +340,12 @@
         '';
       };
 
+      exec_enabled = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Whether to run exec jobs of this task. Exec entry points of a task with this option off fail with a message, even when the project runs exec jobs.";
+      };
+
       concurrency = mkOption {
         type = types.enum [ "auto" "hard_abort" "soft_abort" "skip" "all" ];
         default = "auto";
