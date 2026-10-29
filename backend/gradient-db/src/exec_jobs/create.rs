@@ -173,6 +173,7 @@ fn created_jobs(evaluation: EvaluationId, candidate: Candidate) -> Vec<MExecJob>
                 .unwrap_or_default(),
                 retries_left: retries_of(&spec),
                 status: ExecJobStatus::Created,
+                waits_for_manual_start: spec.manual_start,
                 spec: candidate.exec,
                 ..job
             };
@@ -275,6 +276,27 @@ mod tests {
                 .map(|job| (job.status, job.retries_left, job.node_index))
                 .collect::<Vec<_>>(),
             vec![(ExecJobStatus::Created, 2, 0)]
+        );
+    }
+
+    #[test]
+    fn every_node_of_a_manual_spec_waits_for_a_manual_start() {
+        let jobs = created_jobs(
+            EvaluationId::now_v7(),
+            candidate(
+                serde_json::to_value(ExecSpec {
+                    nodes: 2,
+                    manual_start: true,
+                    ..ExecSpec::default()
+                })
+                .unwrap(),
+            ),
+        );
+        assert_eq!(
+            jobs.iter()
+                .map(|job| (job.status, job.waits_for_manual_start))
+                .collect::<Vec<_>>(),
+            vec![(ExecJobStatus::Created, true); 2]
         );
     }
 

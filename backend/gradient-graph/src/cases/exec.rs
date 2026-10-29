@@ -1351,3 +1351,119 @@ async fn the_continue_file_of_node_0_is_activated_when_every_node_completes() {
     );
     case.finish().await;
 }
+
+fn manual(nodes: u32) -> ExecSpec {
+    ExecSpec {
+        nodes,
+        manual_start: true,
+        ..spec()
+    }
+}
+
+async fn run(case: &Case, exec_job: ExecJobId) {
+    let report = case.transition(Transition::RunExecJob { exec_job }).await;
+    assert_eq!(report.exec_run_refusal, None, "the run is accepted");
+}
+
+fn statuses(rows: &[exec_job::Model]) -> Vec<(ExecJobStatus, bool)> {
+    rows.iter()
+        .map(|row| (row.status, row.waits_for_manual_start))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_manual_job_stays_unqueued_after_its_build_and_lets_the_evaluation_finish() {
+    let (case, e1) = queued_case(manual(1)).await;
+
+    assert_eq!(
+        statuses(&[job(&case, e1).await]),
+        vec![(ExecJobStatus::Created, true)],
+        "after 1: the job waits for its manual start"
+    );
+    assert!(exec_events(&case).await.is_empty(), "after 1: no event");
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Completed,
+        "after 1: the evaluation"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_run_queues_a_built_manual_job() {
+    let (case, e1) = queued_case(manual(1)).await;
+
+    run(&case, job(&case, e1).await.id).await;
+
+    assert_eq!(
+        statuses(&[job(&case, e1).await]),
+        vec![(ExecJobStatus::Queued, false)],
+        "after 1: the job is queued"
+    );
+    let events = exec_events(&case).await;
+    assert_eq!(
+        (events.len(), count_status(&events, ExecJobStatus::Queued)),
+        (1, 1),
+        "after 1: one queued event: {events:?}"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_run_before_the_build_queues_the_job_once_the_build_completes() {
+    let (case, e1) = walked_exec(manual(1)).await;
+
+    run(&case, job(&case, e1).await.id).await;
+    assert_eq!(
+        statuses(&[job(&case, e1).await]),
+        vec![(ExecJobStatus::Created, false)],
+        "after 1: the job waits for its build"
+    );
+
+    case.build_started(A).await;
+    case.commit_nar(with_references(nar(A_OUT, "a"), &[(A_OUT, "a")]))
+        .await;
+    case.build_completed(A).await;
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Building,
+        "after 2: the started job keeps the evaluation building"
+    );
+    case.transition(Transition::SettleExecJobs).await;
+
+    assert_eq!(
+        job(&case, e1).await.status,
+        ExecJobStatus::Queued,
+        "after 3: the job is queued"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn one_run_starts_every_node_of_a_manual_job() {
+    let (case, e1) = queued_case(manual(2)).await;
+    let rows = node_rows(&case, e1).await;
+    assert_eq!(
+        statuses(&rows),
+        vec![(ExecJobStatus::Created, true); 2],
+        "after 1: both nodes wait for the manual start"
+    );
+
+    run(&case, rows[1].id).await;
+
+    assert_eq!(
+        statuses(&node_rows(&case, e1).await),
+        vec![(ExecJobStatus::Queued, false); 2],
+        "after 2: both nodes are queued"
+    );
+    let events = exec_events(&case).await;
+    assert_eq!(
+        (
+            count_status(&events, ExecJobStatus::Queued),
+            events_of(&events, rows[0].id)
+        ),
+        (1, 1),
+        "after 2: one queued event under node 0: {events:?}"
+    );
+    case.finish().await;
+}

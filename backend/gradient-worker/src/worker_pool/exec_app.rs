@@ -39,10 +39,16 @@ struct NixBlock {
     cpus: Option<u32>,
     memory_mb: Option<u64>,
     disk_mb: Option<u64>,
+    #[serde(default = "starts_by_itself")]
+    autostart: bool,
 }
 
 fn one_node() -> u32 {
     1
+}
+
+fn starts_by_itself() -> bool {
+    true
 }
 
 impl NixBlock {
@@ -110,6 +116,7 @@ fn spec_of(app: ExecApp) -> Result<ExecSpec, String> {
         max_silent_secs: block.max_silent,
         retries: block.retries,
         guest,
+        manual_start: !block.autostart,
     })
 }
 
@@ -211,6 +218,21 @@ mod tests {
         );
         assert_eq!(spec.program, "/nix/store/aaaa-train/bin/train");
         assert_eq!(spec.network, None);
+    }
+
+    #[test]
+    fn an_app_starts_by_itself_unless_autostart_is_off() {
+        assert!(!exec_spec(app("{}")).unwrap().manual_start);
+        assert!(
+            exec_spec(app(r#"{"autostart":false}"#))
+                .unwrap()
+                .manual_start
+        );
+        assert!(
+            exec_spec(app(r#"{"autostart":"no"}"#))
+                .unwrap_err()
+                .contains("autostart")
+        );
     }
 
     #[test]

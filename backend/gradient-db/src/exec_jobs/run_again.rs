@@ -42,8 +42,15 @@ struct RunState {
     spec: serde_json::Value,
     finished: bool,
     built: bool,
+    waits_for_manual_start: bool,
     project_enabled: bool,
     task_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Run {
+    FirstStart,
+    Again { retries: i32 },
 }
 
 static RUN_STATE_SQL: LazyLock<String> = LazyLock::new(|| {
@@ -54,11 +61,14 @@ static RUN_STATE_SQL: LazyLock<String> = LazyLock::new(|| {
          AND NOT EXISTS (SELECT 1 FROM cluster_member m \
               JOIN cluster_job c ON c.id = m.cluster_job JOIN exec_job o ON o.id = m.exec_job \
               WHERE o.entry_point = r.entry_point AND c.status = {cluster_running}) AS finished, \
+         EXISTS (SELECT 1 FROM exec_job o WHERE o.entry_point = r.entry_point \
+              AND o.status = {created} AND o.waits_for_manual_start) AS waits_for_manual_start, \
          {program_done} AND (r.image_derivation IS NULL OR {image_done}) AS built \
          FROM exec_job r JOIN evaluation ev ON ev.id = r.evaluation \
          JOIN task t ON t.id = ev.task JOIN project p ON p.id = t.project \
          WHERE r.id = $1",
         open = exec_in(&ExecJobStatus::OPEN),
+        created = exec(ExecJobStatus::Created),
         cluster_running = i16::from(ClusterJobStatus::Running),
         program_done = build_in_state("r.program_derivation", &BuildStatus::TERMINAL_SUCCESS),
         image_done = build_in_state("r.image_derivation", &BuildStatus::TERMINAL_SUCCESS),
@@ -68,11 +78,21 @@ static RUN_STATE_SQL: LazyLock<String> = LazyLock::new(|| {
 static REQUEUE_FINISHED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE exec_job SET status = {created}, retries_left = $2, message = NULL, \
-         waiting_reason = NULL, started_at = NULL, finished_at = NULL \
+         waiting_reason = NULL, started_at = NULL, finished_at = NULL, \
+         waits_for_manual_start = false \
          WHERE entry_point = (SELECT entry_point FROM exec_job WHERE id = $1) \
          AND status IN ({finished}) RETURNING *",
         created = exec(ExecJobStatus::Created),
         finished = exec_in(&FINISHED),
+    )
+});
+
+static START_WAITING_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE exec_job SET waits_for_manual_start = false \
+         WHERE entry_point = (SELECT entry_point FROM exec_job WHERE id = $1) \
+         AND status = {created} AND waits_for_manual_start RETURNING *",
+        created = exec(ExecJobStatus::Created),
     )
 });
 
@@ -82,6 +102,8 @@ crate::sql_lazy! {
     REQUEUE_FINISHED_EXEC_JOB = || REQUEUE_FINISHED_SQL.as_str(),
         params = [NewUuid, Int(3)],
         status_write = StatusWrite::exec_job(ExecJobStatus::Created);
+    START_EXEC_JOB_WAITING_FOR_MANUAL_START = || START_WAITING_SQL.as_str(),
+        params = [NewUuid];
 }
 
 crate::sql! {
@@ -106,11 +128,23 @@ where
     else {
         return Ok(Ok(Vec::new()));
     };
-    let retries = match fresh_retries(&state, instance_enabled) {
-        Ok(retries) => retries,
-        Err(refusal) => return Ok(Err(refusal)),
-    };
+    match next_run(&state, instance_enabled) {
+        Ok(Run::FirstStart) => start_waiting(db, id).await.map(Ok),
+        Ok(Run::Again { retries }) => requeue_finished(db, id, retries).await.map(Ok),
+        Err(refusal) => Ok(Err(refusal)),
+    }
+}
 
+async fn start_waiting<C: ConnectionTrait>(db: &C, id: Value) -> Result<Vec<MExecJob>, DbErr> {
+    MExecJob::find_by_statement(START_EXEC_JOB_WAITING_FOR_MANUAL_START.bind([id]))
+        .all(db)
+        .await
+}
+
+async fn requeue_finished<C>(db: &C, id: Value, retries: i32) -> Result<Vec<MExecJob>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let txn = db.begin().await?;
     let rows = MExecJob::find_by_statement(
         REQUEUE_FINISHED_EXEC_JOB.bind([id.clone(), Value::Int(Some(retries))]),
@@ -121,23 +155,32 @@ where
         .await?;
     insert_clusters(&txn, &rows).await?;
     txn.commit().await?;
-    Ok(Ok(rows))
+    Ok(rows)
 }
 
-fn fresh_retries(state: &RunState, instance_enabled: bool) -> Result<i32, RunRefusal> {
+fn next_run(state: &RunState, instance_enabled: bool) -> Result<Run, RunRefusal> {
+    if state.waits_for_manual_start {
+        return switches_on(state, instance_enabled).map(|()| Run::FirstStart);
+    }
     if !state.finished {
         return Err(RunRefusal::Open);
     }
-    if let Some(message) = exec_refusal(instance_enabled, state.project_enabled, state.task_enabled)
-    {
-        return Err(RunRefusal::Disabled(message));
-    }
+    switches_on(state, instance_enabled)?;
     if !state.built {
         return Err(RunRefusal::ProgramGone);
     }
     serde_json::from_value::<ExecSpec>(state.spec.clone())
-        .map(|spec| retries_of(&spec))
+        .map(|spec| Run::Again {
+            retries: retries_of(&spec),
+        })
         .map_err(|_| RunRefusal::UnreadableSpec)
+}
+
+fn switches_on(state: &RunState, instance_enabled: bool) -> Result<(), RunRefusal> {
+    match exec_refusal(instance_enabled, state.project_enabled, state.task_enabled) {
+        Some(message) => Err(RunRefusal::Disabled(message)),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -153,14 +196,47 @@ mod tests {
             .unwrap(),
             finished: true,
             built: true,
+            waits_for_manual_start: false,
             project_enabled: true,
             task_enabled: true,
         }
     }
 
+    fn job_waiting_for_its_start() -> RunState {
+        RunState {
+            finished: false,
+            built: false,
+            waits_for_manual_start: true,
+            ..finished_job()
+        }
+    }
+
     #[test]
     fn a_finished_job_runs_again_with_the_retries_of_its_spec() {
-        assert_eq!(fresh_retries(&finished_job(), true), Ok(2));
+        assert_eq!(
+            next_run(&finished_job(), true),
+            Ok(Run::Again { retries: 2 })
+        );
+    }
+
+    #[test]
+    fn a_job_waiting_for_its_manual_start_starts_even_before_its_build() {
+        assert_eq!(
+            next_run(&job_waiting_for_its_start(), true),
+            Ok(Run::FirstStart)
+        );
+    }
+
+    #[test]
+    fn a_job_waiting_for_its_manual_start_still_needs_its_switches() {
+        let state = RunState {
+            project_enabled: false,
+            ..job_waiting_for_its_start()
+        };
+        assert_eq!(
+            next_run(&state, true).map_err(|refusal| refusal.to_string()),
+            Err("exec jobs are disabled for this project".to_owned())
+        );
     }
 
     #[test]
@@ -170,7 +246,7 @@ mod tests {
             task_enabled: false,
             ..finished_job()
         };
-        assert_eq!(fresh_retries(&state, true), Err(RunRefusal::Open));
+        assert_eq!(next_run(&state, true), Err(RunRefusal::Open));
     }
 
     #[test]
@@ -180,11 +256,11 @@ mod tests {
             ..finished_job()
         };
         assert_eq!(
-            fresh_retries(&state, true).map_err(|refusal| refusal.to_string()),
+            next_run(&state, true).map_err(|refusal| refusal.to_string()),
             Err("exec jobs are disabled for this task".to_owned())
         );
         assert_eq!(
-            fresh_retries(&finished_job(), false).map_err(|refusal| refusal.to_string()),
+            next_run(&finished_job(), false).map_err(|refusal| refusal.to_string()),
             Err("exec jobs are disabled on this instance".to_owned())
         );
     }
@@ -195,14 +271,11 @@ mod tests {
             built: false,
             ..finished_job()
         };
-        assert_eq!(fresh_retries(&unbuilt, true), Err(RunRefusal::ProgramGone));
+        assert_eq!(next_run(&unbuilt, true), Err(RunRefusal::ProgramGone));
         let unreadable = RunState {
             spec: serde_json::json!({ "nodes": "two" }),
             ..finished_job()
         };
-        assert_eq!(
-            fresh_retries(&unreadable, true),
-            Err(RunRefusal::UnreadableSpec)
-        );
+        assert_eq!(next_run(&unreadable, true), Err(RunRefusal::UnreadableSpec));
     }
 }

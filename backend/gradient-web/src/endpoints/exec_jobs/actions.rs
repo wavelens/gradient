@@ -48,8 +48,8 @@ pub async fn post_exec_job_abort(
     path = "/exec/{job}/run",
     operation_id = "runExecJob",
     tag = "exec-jobs",
-    summary = "Run exec job again",
-    description = "Queues a finished exec job again, every node of a multi-node job included. The next attempt gets the next number; earlier attempts, logs, phases and outputs stay. Requires project membership or a superuser. Answers 409 while the job is open, while exec jobs are disabled on the instance, project or task (the message names the switch), when the program is no longer built or when the exec spec cannot be read.",
+    summary = "Run exec job",
+    description = "Starts an exec job, every node of a multi-node job included. A job without `autostart` that waits for its manual start is queued once its program and image are built, at once when they already are. A finished job is queued again; the next attempt gets the next number and earlier attempts, logs, phases and outputs stay. Requires project membership or a superuser. Answers 409 while the job is open and not waiting for its manual start, while exec jobs are disabled on the instance, project or task (the message names the switch), when the program is no longer built or when the exec spec cannot be read.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
 )]

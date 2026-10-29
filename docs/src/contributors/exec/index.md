@@ -86,8 +86,8 @@ Apps with `nodes > 1` turn into one `exec_job` row per node and a single [cluste
 
 Workers get `ServerMessage::PreWarmVms { count }` as an absolute target of guests to boot ahead.
 
-- Upcoming jobs are exec entry points of a running evaluation without a job yet, plus jobs in `Created` or `Queued`.
-- Jobs with a custom image never count.
+- Exec entry points from a running evaluation without a job join the upcoming set. Jobs in `Created` or `Queued` belong to the same set.
+- Custom images keep their jobs out of the count. Jobs waiting for a manual start stay out of the count too.
 - Upcoming jobs add `nodes` to every worker without draining, with a fit against device totals and with access to the job's project.
 - The scheduler can refresh the counts after new capabilities, an exec pass, a recorded eval result and an abort.
 - Counts go out only on change. New connections start at 0.
@@ -96,7 +96,7 @@ Workers get `ServerMessage::PreWarmVms { count }` as an absolute target of guest
 
 | Status | Meaning |
 |---|---|
-| `Created` | Waiting for the program (and image) build |
+| `Created` | Waiting for the program (and image) build, or for a manual start |
 | `Queued` | Builds cached, waiting for a worker |
 | `Starting` | Attempt open, program not started yet |
 | `Running` | The worker reported `ProgramStarted` |
@@ -105,7 +105,11 @@ Workers get `ServerMessage::PreWarmVms { count }` as an absolute target of guest
 - Dispatches open an attempt in `exec_job_attempt`. Attempt end reasons are `Completed`, `Failed`, `Timeout`, `Lost` and `Aborted`.
 - `Failed` and `Timeout` lead to a restart while `retries_left > 0`, one retry per restart.
 - `Lost` attempts never use a retry. Ten losses in a row fail the job.
-- Aborted jobs never restart. Late reports for a closed attempt change nothing.
+- Late reports for a closed attempt change nothing. Aborted jobs don't restart.
+- Specs with `manual_start` (Nix `autostart = false`) create rows with `waits_for_manual_start`. Those rows stay `Created` and don't queue.
+- Waiting rows stay out of `has_open_exec_jobs` and the consistency check. Evaluation can finish without them.
+- `run_again::requeue` can clear the flag on every node. The next settle pass can queue those nodes once builds finish.
+- Waiting rows carry the wait reason `manual_start` in the job JSON.
 - Status changes emit `exec_job.queued`, `started`, `phase`, `completed`, `failed` or `aborted`, see [Events and Webhooks](../../reference/events.md).
 - Logs share the build log storage per attempt ID. The deep GC can keep the log of every exec attempt.
 
