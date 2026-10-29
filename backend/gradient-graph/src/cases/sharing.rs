@@ -251,8 +251,7 @@ async fn x05_a_later_evaluation_asks_the_probe_again_about_an_earlier_miss() {
             .drv_cached()
             .output(B_OUT)
             .build_status(BuildStatus::Queued)
-            .evaluation(e2)
-            .evaluation_status(EvaluationStatus::Building),
+            .evaluation(e2),
     )
     .await;
 
