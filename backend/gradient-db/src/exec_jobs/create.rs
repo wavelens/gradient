@@ -85,7 +85,14 @@ where
     Ok(created)
 }
 
-async fn insert_clusters<C: ConnectionTrait>(db: &C, created: &[MExecJob]) -> Result<(), DbErr> {
+pub(crate) fn retries_of(spec: &ExecSpec) -> i32 {
+    i32::try_from(spec.retries).unwrap_or(i32::MAX)
+}
+
+pub(crate) async fn insert_clusters<C: ConnectionTrait>(
+    db: &C,
+    created: &[MExecJob],
+) -> Result<(), DbErr> {
     let now = gradient_types::now();
     for nodes in nodes_by_entry_point(created).values() {
         let Some((cluster, members)) = cluster_rows(nodes, now) else {
@@ -164,7 +171,7 @@ fn created_jobs(evaluation: EvaluationId, candidate: Candidate) -> Vec<MExecJob>
                     spec.requirement_on(&candidate.architecture, &ExecDefaults::default()),
                 )
                 .unwrap_or_default(),
-                retries_left: i32::try_from(spec.retries).unwrap_or(i32::MAX),
+                retries_left: retries_of(&spec),
                 status: ExecJobStatus::Created,
                 spec: candidate.exec,
                 ..job

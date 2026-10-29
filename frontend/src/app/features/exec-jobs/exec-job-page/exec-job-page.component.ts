@@ -94,6 +94,7 @@ export class ExecJobPageComponent implements OnInit {
   pullRequests = signal<ExecJobPullRequestView[]>([]);
   abortOpen = signal(false);
   aborting = signal(false);
+  starting = signal(false);
   errorMessage = signal<string | null>(null);
 
   protected readonly views = [
@@ -199,6 +200,21 @@ export class ExecJobPageComponent implements OnInit {
       error: (error: Error) => {
         this.aborting.set(false);
         this.abortOpen.set(false);
+        this.errorMessage.set(error.message);
+      },
+    });
+  }
+
+  runAgain(): void {
+    this.starting.set(true);
+    this.execJobs.run(this.jobId).subscribe({
+      next: () => {
+        this.starting.set(false);
+        this.errorMessage.set(null);
+        this.watch();
+      },
+      error: (error: Error) => {
+        this.starting.set(false);
         this.errorMessage.set(error.message);
       },
     });

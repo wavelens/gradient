@@ -97,12 +97,14 @@ function routeTo(query: Record<string, string> = {}): ActivatedRoute {
 interface Setup {
   fixture: ComponentFixture<ExecJobPageComponent>;
   abort: ReturnType<typeof vi.fn>;
+  run: ReturnType<typeof vi.fn>;
   log: ReturnType<typeof vi.fn>;
   navigate: ReturnType<typeof vi.spyOn>;
 }
 
 function setup(status: ExecJobStatus, sshCommand: string | null = SSH, response?: ExecJobResponse): Setup {
   const abort = vi.fn(() => of('Success'));
+  const run = vi.fn(() => of('Success'));
   const log = vi.fn(() => of(LOG));
   TestBed.configureTestingModule({
     imports: [ExecJobPageComponent],
@@ -117,6 +119,7 @@ function setup(status: ExecJobStatus, sshCommand: string | null = SSH, response?
           pullRequests: () => of([PULL_REQUEST]),
           outputs: () => of([]),
           abort,
+          run,
         },
       },
     ],
@@ -124,7 +127,7 @@ function setup(status: ExecJobStatus, sshCommand: string | null = SSH, response?
   const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
   const fixture = TestBed.createComponent(ExecJobPageComponent);
   fixture.detectChanges();
-  return { fixture, abort, log, navigate };
+  return { fixture, abort, run, log, navigate };
 }
 
 function pickNode(fixture: ComponentFixture<ExecJobPageComponent>, label: string): void {
@@ -144,6 +147,18 @@ describe('ExecJobPageComponent', () => {
   it('offers no abort for a finished job', () => {
     const { fixture } = setup('completed');
     expect(abortButton(fixture.nativeElement)).toBeUndefined();
+  });
+
+  it('runs a finished job again and shows a refusal', () => {
+    const { fixture, run } = setup('failed');
+    run.mockReturnValue(throwError(() => new Error('exec jobs are disabled for this task')));
+    const button = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button'))
+      .find((b) => (b.textContent ?? '').includes('Run again'));
+    button?.click();
+    fixture.detectChanges();
+    expect(run).toHaveBeenCalledWith('j1');
+    expect((fixture.nativeElement as HTMLElement).querySelector('.error')?.textContent)
+      .toContain('exec jobs are disabled for this task');
   });
 
   it('puts abort among the page actions, which phones show icon-only', () => {

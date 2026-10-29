@@ -47,4 +47,8 @@ export class ExecJobsService {
   abort(job: string): Observable<string> {
     return this.api.post<string>(`exec-jobs/${job}/abort`);
   }
+
+  run(job: string): Observable<string> {
+    return this.api.post<string>(`exec-jobs/${job}/run`);
+  }
 }

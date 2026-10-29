@@ -8,7 +8,7 @@ use gradient_db::exec_jobs::reads::latest_running_of_task;
 use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::exec_job::{self, ExecJobStatus};
 use gradient_entity::ids::{ClusterJobId, DispatchedJobId, EvaluationId};
-use gradient_entity::{dispatched_job, exec_job_attempt, exec_job_token};
+use gradient_entity::{cluster_job, dispatched_job, exec_job_attempt, exec_job_token};
 use gradient_pool::guest_channels::GuestChannelSignal;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::WaitingReason;
@@ -396,6 +396,51 @@ async fn aborting_a_running_cluster_aborts_both_nodes() {
             .all(|(status, _)| *status == ExecJobStatus::Aborted),
         "after 2: no restart"
     );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn an_aborted_pair_runs_again_in_a_fresh_cluster_job() {
+    let (case, cluster) = with_queued_cluster(pair_spec(1, false)).await;
+    let first = node_rows(&case).await;
+    let aborted = case
+        .scheduler
+        .abort_exec_job(first[0].id)
+        .await
+        .expect("the abort runs");
+    assert!(aborted, "after 1: aborted before placement");
+
+    let ran = case
+        .scheduler
+        .run_exec_job(first[1].id)
+        .await
+        .expect("the run");
+    assert_eq!(ran, Ok(()), "after 2: a node id is accepted");
+    assert_eq!(
+        statuses(&case).await,
+        vec![(ExecJobStatus::Queued, 1), (ExecJobStatus::Queued, 1)],
+        "after 2: both nodes"
+    );
+    let clusters = case.db.rows::<cluster_job::Entity>().await;
+    assert_eq!(
+        clusters
+            .iter()
+            .map(|c| (
+                c.id == cluster,
+                c.status,
+                c.attempts,
+                c.attempts_outside_budget
+            ))
+            .collect::<Vec<_>>(),
+        vec![(false, ClusterJobStatus::Queued, 0, 0)],
+        "after 2: one fresh cluster job"
+    );
+
+    connect_pair(&case).await;
+    place_pair(&case).await;
+    for worker in [W1, W2] {
+        assigned_key(&case, worker);
+    }
     case.finish().await;
 }
 

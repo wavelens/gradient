@@ -8,6 +8,9 @@
   @if (open()) {
     <button *appWritable="triggerAccess()" slot="actions" grButton label="Abort" icon="close" severity="danger"
             [loading]="aborting()" [disabled]="aborting()" (click)="abortOpen.set(true)"></button>
+  } @else if (job()) {
+    <button *appWritable="triggerAccess()" slot="actions" grButton label="Run again" icon="refresh"
+            [loading]="starting()" [disabled]="starting()" (click)="runAgain()"></button>
   }
 
   @if (errorMessage(); as message) {
