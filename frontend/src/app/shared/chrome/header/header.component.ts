@@ -11,6 +11,7 @@ import { Brand, HeaderComponent, NavLink } from '@gradient/ui/chrome';
 import { AuthService } from '@core/services/auth.service';
 import { CommandPaletteService } from '../command-palette/command-palette.service';
 import { ConfigService } from '@core/services/config.service';
+import { WhatsNewService } from '@core/whats-new/whats-new.service';
 
 const BRAND: Brand = { label: 'Gradient', href: '/' };
 const NAV: (NavLink & { signedIn?: true })[] = [
@@ -34,6 +35,7 @@ export class AppHeaderComponent {
   protected palette = inject(CommandPaletteService);
   protected router = inject(Router);
   private config = inject(ConfigService);
+  private whatsNew = inject(WhatsNewService);
 
   protected readonly brand = BRAND;
   protected nav = computed(() => {
@@ -43,6 +45,7 @@ export class AppHeaderComponent {
 
   protected readonly userMenuItems: MenuItem[] = [
     { label: 'Settings', icon: 'settings', routerLink: '/settings/profile' },
+    ...(this.whatsNew.hasNotes ? [{ label: "What's New", icon: 'new_releases', command: () => this.whatsNew.showAll() }] : []),
     { separator: true },
     { label: 'Log out', icon: 'logout', command: () => this.logout() },
   ];

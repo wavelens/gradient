@@ -291,6 +291,7 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(user::delete_session))
                 .routes(routes!(user::get_audit_log))
                 .routes(routes!(user::get_settings, user::patch_settings))
+                .routes(routes!(user::put_seen_version))
                 .routes(routes!(auth::get_cli_device_info))
                 .routes(routes!(auth::post_cli_device_authorize))
                 .routes(routes!(auth::post_cli_device_deny))
