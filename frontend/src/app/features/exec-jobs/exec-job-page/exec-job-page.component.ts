@@ -132,6 +132,7 @@ export class ExecJobPageComponent implements OnInit {
     return this.open() && job?.keep_vm_running ? job.program_exit_code ?? null : null;
   });
   waiting = computed(() => waitingReasonText(this.job()?.waiting_reason));
+  waitsForManualStart = computed(() => this.job()?.waiting_reason?.kind === 'manual_start');
   breadcrumb = computed(() => this.crumbs.task(this.projectName, this.taskName, { label: this.job()?.entry_point ?? 'Exec job' }));
 
   protected readonly phase = execJobPhase;
@@ -238,7 +239,7 @@ export class ExecJobPageComponent implements OnInit {
     });
   }
 
-  runAgain(): void {
+  run(): void {
     this.starting.set(true);
     this.execJobs.run(this.jobId).subscribe({
       next: () => {

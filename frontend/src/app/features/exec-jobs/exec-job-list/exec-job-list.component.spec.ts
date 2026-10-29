@@ -27,6 +27,7 @@ function queuedJob(): ExecJobSummary {
     nodes: 1,
     labels: ['lab-a'],
     devices: [{ name: 'gpu:h100', count: 8 }],
+    autostart: true,
     keep_vm_running: false,
   };
 }
@@ -51,6 +52,30 @@ describe('ExecJobListComponent', () => {
     expect(host.textContent).toContain('waiting for free devices on 1 worker');
     expect(host.textContent).toContain('lab-a');
     expect(host.textContent).toContain('gpu:h100:8');
+  });
+
+  it('shows a job that waits for its manual start by its wait reason', () => {
+    const waiting: ExecJobSummary = {
+      ...queuedJob(),
+      status: 'created',
+      autostart: false,
+      waiting_reason: { kind: 'manual_start' },
+    };
+    TestBed.configureTestingModule({
+      imports: [ExecJobListComponent],
+      providers: [
+        provideRouter([]),
+        { provide: ExecJobsService, useValue: { forEvaluation: () => of([waiting]) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(ExecJobListComponent);
+    fixture.componentRef.setInput('evaluation', 'e1');
+    fixture.componentRef.setInput('project', 'acme');
+    fixture.componentRef.setInput('task', 'demo');
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('.job-detail')?.textContent)
+      .toBe('waits for a manual start');
   });
 
   it('keeps polling a running evaluation until its exec jobs appear', () => {

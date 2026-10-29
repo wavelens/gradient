@@ -60,6 +60,7 @@ function job(status: ExecJobStatus, sshCommand: string | null = SSH): ExecJobRes
     devices: [],
     guest: { cpus: 2, memory_mb: 500, disk_mb: 2048 },
     retries_left: 0,
+    autostart: true,
     keep_vm_running: false,
     created_at: '2026-01-01T00:00:00',
     worker: 'w1',
@@ -214,6 +215,24 @@ describe('ExecJobPageComponent', () => {
     expect(run).toHaveBeenCalledWith('j1');
     expect((fixture.nativeElement as HTMLElement).querySelector('.error')?.textContent)
       .toContain('exec jobs are disabled for this task');
+  });
+
+  it('starts a job that waits for its manual start', () => {
+    const waiting: ExecJobResponse = {
+      ...job('created'),
+      autostart: false,
+      worker: null,
+      attempts: [],
+      waiting_reason: { kind: 'manual_start' },
+    };
+    const { fixture, run } = setup('created', SSH, waiting);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.summary')?.textContent).toContain('waits for a manual start');
+    expect(abortButton(root)).toBeTruthy();
+    Array.from(root.querySelectorAll('button'))
+      .find((b) => (b.textContent ?? '').includes('Run'))
+      ?.click();
+    expect(run).toHaveBeenCalledWith('j1');
   });
 
   it('puts abort among the page actions, which phones show icon-only', () => {

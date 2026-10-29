@@ -69,7 +69,7 @@ export class ExecJobListComponent implements OnChanges {
   detail(job: ExecJobSummary): string {
     const reason = waitingReasonText(job.waiting_reason);
     switch (job.status) {
-      case 'created': return 'waiting for its builds';
+      case 'created': return reason ?? 'waiting for its builds';
       case 'queued': return reason ?? 'queued';
       case 'starting': return 'starting';
       case 'running': return job.last_phase ? `running, phase ${job.last_phase}` : 'running';
