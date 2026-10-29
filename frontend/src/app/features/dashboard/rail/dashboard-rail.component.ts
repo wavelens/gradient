@@ -5,8 +5,11 @@
  */
 
 import { ChangeDetectionStrategy, Component, OnInit, inject, output, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
+import { filter } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
+import { StarsService } from '@core/services/stars.service';
 import { Rail } from '@core/models';
 import { ButtonComponent, SkeletonComponent } from '@gradient/ui/ui';
 import { StarButtonComponent } from '@shared/ui';
@@ -28,6 +31,12 @@ export class DashboardRailComponent implements OnInit {
   empty = output<boolean>();
 
   readonly count = formatCount;
+
+  constructor() {
+    inject(StarsService).changed$
+      .pipe(filter((target) => target.kind !== 'task'), takeUntilDestroyed())
+      .subscribe(() => this.load());
+  }
 
   ngOnInit(): void {
     this.load();

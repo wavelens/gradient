@@ -5,8 +5,8 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { Observable, of } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
+import { Observable, Subject, of } from 'rxjs';
+import { catchError, map, switchMap, tap } from 'rxjs/operators';
 import { ApiService } from './api.service';
 import { AuthService } from './auth.service';
 import { StarTarget, StarredNames } from '@core/models';
@@ -37,6 +37,8 @@ export function isStarred(stars: StarredNames, t: StarTarget): boolean {
 export class StarsService {
   private api = inject(ApiService);
   private auth = inject(AuthService);
+  private changes = new Subject<StarTarget>();
+  readonly changed$ = this.changes.asObservable();
 
   list(): Observable<StarredNames> {
     return this.api.get<StarredNames>('user/stars');
@@ -52,8 +54,9 @@ export class StarsService {
   }
 
   set(target: StarTarget, starred: boolean): Observable<boolean> {
-    return starred
+    const request = starred
       ? this.api.put<boolean>(starPath(target), {})
       : this.api.delete<boolean>(starPath(target));
+    return request.pipe(tap(() => this.changes.next(target)));
   }
 }

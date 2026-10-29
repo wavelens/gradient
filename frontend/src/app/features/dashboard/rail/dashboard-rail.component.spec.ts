@@ -6,19 +6,23 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { NEVER, Observable, of, throwError } from 'rxjs';
+import { NEVER, Observable, Subject, of, tap, throwError } from 'rxjs';
 import { DashboardRailComponent } from './dashboard-rail.component';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
-import { Rail } from '@core/models';
+import { Rail, StarTarget } from '@core/models';
 
 function mount(rail: () => Observable<Rail>) {
+  const changed = new Subject<StarTarget>();
   TestBed.configureTestingModule({
     imports: [DashboardRailComponent],
     providers: [
       provideRouter([]),
       { provide: DashboardService, useValue: { rail: vi.fn(rail) } },
-      { provide: StarsService, useValue: { set: () => of(true) } },
+      { provide: StarsService, useValue: {
+        changed$: changed,
+        set: (target: StarTarget) => of(true).pipe(tap(() => changed.next(target))),
+      } },
     ],
   });
   const f = TestBed.createComponent(DashboardRailComponent);
@@ -58,6 +62,25 @@ describe('DashboardRailComponent', () => {
     expect(names).toEqual(['B', 'A']);
     expect(root.textContent).toContain('1 task');
     expect(root.textContent).toContain('3 tasks');
+  });
+
+  it('loads again after a star, which moves the project into its new place', () => {
+    const before: Rail = {
+      projects: [
+        { name: 'a', display_name: 'A', starred: false, tier: 'member', status: null, task_count: 1 },
+        { name: 'b', display_name: 'B', starred: false, tier: 'member', status: null, task_count: 1 },
+      ],
+      caches: [],
+    };
+    const after: Rail = { ...before, projects: [{ ...before.projects[1], starred: true, tier: 'starred' }, before.projects[0]] };
+    let calls = 0;
+    const { f, root } = mount(() => of(++calls === 1 ? before : after));
+    const names = () => Array.from(root.querySelectorAll('section:first-child > ul > li > .row .n')).map((n) => n.textContent!.trim());
+
+    (root.querySelectorAll('gr-star-button button')[1] as HTMLElement).click();
+    f.detectChanges();
+
+    expect(names()).toEqual(['B', 'A']);
   });
 
   it('holds both sections with placeholder rows until the rail arrives', () => {
