@@ -416,3 +416,21 @@ fn a_requirement_from_the_previous_version_has_no_guest_size() {
     let older: ExecRequirement = from_bytes(to_bytes(&requirement, 50).unwrap(), 50).unwrap();
     assert_eq!(older.guest, GuestSize::default());
 }
+
+#[test]
+fn a_guest_shutdown_needs_the_sixth_guest_version() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::guest::{AgentToWorker, GUEST_PROTO_VERSIONS, GUEST_SHUTDOWN_SINCE};
+
+    let since = GUEST_SHUTDOWN_SINCE;
+    assert!(GUEST_PROTO_VERSIONS.contains(&since));
+    assert_eq!(
+        from_bytes::<AgentToWorker>(
+            to_bytes(&AgentToWorker::GuestShutdown, since).unwrap(),
+            since
+        )
+        .unwrap(),
+        AgentToWorker::GuestShutdown
+    );
+    assert!(to_bytes(&AgentToWorker::GuestShutdown, since - 1).is_err());
+}
