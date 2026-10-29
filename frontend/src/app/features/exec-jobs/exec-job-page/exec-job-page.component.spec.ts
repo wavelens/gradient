@@ -178,7 +178,7 @@ describe('ExecJobPageComponent', () => {
 
   it('shows the guest size of the job', () => {
     const { fixture } = setup('completed');
-    const guest = (fixture.nativeElement as HTMLElement).querySelector('.info-bar .guest')?.textContent ?? '';
+    const guest = (fixture.nativeElement as HTMLElement).querySelector('.info-bar')?.textContent ?? '';
     expect(guest).toContain('2 CPUs · 500 MB memory · 2048 MB disk');
   });
 

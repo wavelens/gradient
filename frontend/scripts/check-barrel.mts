@@ -131,7 +131,7 @@ const inlined = inlineStyles();
 // Rule 6: a class in markup with no rule anywhere is either a typo or the
 // remains of a deleted stylesheet. Pure structural hooks are named here.
 const STRUCTURAL = new Set([
-  'build-group', 'log-lines', 'page-layout__body', 'row-text', 'settings-section__body',
+  'build-group', 'log-lines', 'page-layout__body', 'phase-item', 'row-text', 'settings-section__body',
 ]);
 
 function scssClasses(text: string): Set<string> {
@@ -195,7 +195,7 @@ function orphanClasses(): string[] {
       }
     }
   };
-  LAYERS.forEach(collectUi);
+  [...LAYERS, join(root, 'src/app/shared/terminal')].forEach(collectUi);
   const hits: string[] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir)) {
@@ -209,7 +209,11 @@ function orphanClasses(): string[] {
       const styles = new Set(globals);
       for (const sibling of readdirSync(dir)) {
         if (sibling.startsWith(stem) && (sibling.endsWith('.scss') || sibling.endsWith('.ts'))) {
-          scssClasses(readFileSync(join(dir, sibling), 'utf8')).forEach((c) => styles.add(c));
+          const text = readFileSync(join(dir, sibling), 'utf8');
+          scssClasses(text).forEach((c) => styles.add(c));
+          for (const shared of text.matchAll(/'(\.\.\/[^']+\.scss)'/g)) {
+            scssClasses(readFileSync(join(dir, shared[1]), 'utf8')).forEach((c) => styles.add(c));
+          }
         }
       }
       for (const cls of htmlClasses(readFileSync(path, 'utf8'))) {

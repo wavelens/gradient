@@ -133,7 +133,7 @@
           @if (guestSize(job.guest); as guest) {
             <div class="info-metric">
               <span class="metric-label">Guest</span>
-              <span class="metric-value guest">{{ guest }}</span>
+              <span class="metric-value">{{ guest }}</span>
             </div>
           }
           @if (job.nodes > 1 || job.labels.length > 0 || job.devices.length > 0) {
