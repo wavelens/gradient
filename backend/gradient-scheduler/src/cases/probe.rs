@@ -732,7 +732,7 @@ async fn p15_a_new_need_asks_again_after_an_earlier_miss() {
         .job()
         .output(A_OUT)
         .probed()
-        .build_status(BuildStatus::Queued)
+        .build_status(BuildStatus::Created)
         .into_cache(CacheId::now_v7())
         .http_upstream(&u1, CacheSubscriptionMode::ReadWrite, true);
     let case = SchedulerCase::start(given).await;
