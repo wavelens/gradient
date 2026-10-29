@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import type { ExecJobResponse, ExecJobStatus } from '@core/models';
@@ -57,6 +57,7 @@ function job(status: ExecJobStatus, sshCommand: string | null = SSH): ExecJobRes
     nodes: 1,
     labels: [],
     devices: [],
+    guest: { cpus: 2, memory_mb: 500, disk_mb: 2048 },
     retries_left: 0,
     created_at: '2026-01-01T00:00:00',
     worker: 'w1',
@@ -67,15 +68,38 @@ function job(status: ExecJobStatus, sshCommand: string | null = SSH): ExecJobRes
     tokens: [{ attempt: 1, created_at: '2026-01-01T00:00:01', expires_at: '2026-01-01T02:00:01', revoked: true }],
     started_evaluations: [{ evaluation: 'e2', task: 'deploy', status: 'Completed', created_at: '2026-01-01T00:00:03' }],
     outputs_size: 0,
+    node_jobs: [{ node: 0, id: 'j1', status, worker: 'w1', attempts: [] }],
   };
+}
+
+function twoNodeJob(status: ExecJobStatus): ExecJobResponse {
+  return {
+    ...job(status),
+    nodes: 2,
+    node_jobs: [
+      { node: 0, id: 'j1', status, worker: 'w1', guest_address: '10.233.0.2', master_port: 29500, attempts: [] },
+      { node: 1, id: 'j1n1', status, worker: 'w2', guest_address: '10.234.0.2', master_port: 29500, attempts: [] },
+    ],
+  };
+}
+
+interface Setup {
+  fixture: ComponentFixture<ExecJobPageComponent>;
+  abort: ReturnType<typeof vi.fn>;
+  run: ReturnType<typeof vi.fn>;
+  log: ReturnType<typeof vi.fn>;
+  navigate: ReturnType<typeof vi.spyOn>;
 }
 
 function setup(
   status: ExecJobStatus,
   sshCommand: string | null = SSH,
   query: Record<string, string> = {},
-): { fixture: ComponentFixture<ExecJobPageComponent>; abort: ReturnType<typeof vi.fn> } {
+  response?: ExecJobResponse,
+): Setup {
   const abort = vi.fn(() => of('Success'));
+  const run = vi.fn(() => of('Success'));
+  const log = vi.fn(() => of(LOG));
   const route = {
     snapshot: {
       paramMap: convertToParamMap({ project: 'acme', task: 'demo', job: 'j1' }),
@@ -91,18 +115,25 @@ function setup(
       {
         provide: ExecJobsService,
         useValue: {
-          get: () => of(job(status, sshCommand)),
-          log: () => of(LOG),
+          get: () => of(response ?? job(status, sshCommand)),
+          log,
           pullRequests: () => of([PULL_REQUEST]),
           outputs: () => of([]),
           abort,
+          run,
         },
       },
     ],
   });
+  const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
   const fixture = TestBed.createComponent(ExecJobPageComponent);
   fixture.detectChanges();
-  return { fixture, abort };
+  return { fixture, abort, run, log, navigate };
+}
+
+function nodeItem(root: HTMLElement, node: number): HTMLElement | undefined {
+  return Array.from(root.querySelectorAll<HTMLElement>('.log-sidebar .node-item'))
+    .find((item) => item.querySelector('.sidebar-item-label')?.textContent?.trim().startsWith(`Node ${node}`));
 }
 
 async function settle(fixture: ComponentFixture<ExecJobPageComponent>): Promise<void> {
@@ -124,6 +155,24 @@ describe('ExecJobPageComponent', () => {
     const { fixture } = setup('running');
     const actions = (fixture.nativeElement as HTMLElement).querySelector('.info-bar-right');
     expect(actions ? abortButton(actions as HTMLElement) : undefined).toBeTruthy();
+  });
+
+  it('runs a finished job again and shows a refusal', () => {
+    const { fixture, run } = setup('failed');
+    run.mockReturnValue(throwError(() => new Error('exec jobs are disabled for this task')));
+    const root = fixture.nativeElement as HTMLElement;
+    Array.from(root.querySelectorAll('.info-bar-right button'))
+      .find((b) => (b.textContent ?? '').includes('Run again'))
+      ?.dispatchEvent(new MouseEvent('click'));
+    fixture.detectChanges();
+    expect(run).toHaveBeenCalledWith('j1');
+    expect(root.querySelector('gr-message-banner')?.textContent).toContain('exec jobs are disabled for this task');
+  });
+
+  it('shows the guest size of the job', () => {
+    const { fixture } = setup('completed');
+    const guest = (fixture.nativeElement as HTMLElement).querySelector('.info-bar .guest')?.textContent ?? '';
+    expect(guest).toContain('2 CPUs · 500 MB memory · 2048 MB disk');
   });
 
   it('opens the job menu of the task page from the log entry, by right click or its dots', () => {
@@ -192,6 +241,7 @@ describe('ExecJobPageComponent', () => {
   });
 
   it('lists the phases of the log in the sidebar and jumps to one on click', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
     const { fixture } = setup('completed');
     await settle(fixture);
     const root = fixture.nativeElement as HTMLElement;
@@ -270,6 +320,31 @@ describe('ExecJobPageComponent', () => {
     expect(log?.textContent).toContain('bye');
   });
 
+  describe('nodes', () => {
+    it('lists no nodes for a single node job', () => {
+      const { fixture } = setup('running');
+      expect((fixture.nativeElement as HTMLElement).querySelector('.node-item')).toBeNull();
+    });
+
+    it('lists each node with its guest address', () => {
+      const { fixture } = setup('running', SSH, {}, twoNodeJob('running'));
+      const items = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.log-sidebar .node-item'));
+      expect(items.map((item) => item.querySelector('.item-meta')?.textContent?.trim())).toEqual(['10.233.0.2', '10.234.0.2']);
+      expect(items[1].querySelector('gr-status-icon')).toBeTruthy();
+      expect(items[1].getAttribute('title')).toBe('w2');
+    });
+
+    it('loads the log of a picked node and sets ?node=1', () => {
+      const { fixture, log, navigate } = setup('completed', SSH, {}, twoNodeJob('completed'));
+      expect(log).toHaveBeenLastCalledWith('j1', undefined, 0);
+      nodeItem(fixture.nativeElement, 1)?.click();
+      fixture.detectChanges();
+      expect(log).toHaveBeenLastCalledWith('j1', undefined, 1);
+      expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { node: 1 } }));
+      expect(nodeItem(fixture.nativeElement, 1)?.classList).toContain('selected');
+    });
+  });
+
   describe('terminal', () => {
     const realWs = globalThis.WebSocket;
     let opened: string[];
@@ -308,7 +383,7 @@ describe('ExecJobPageComponent', () => {
       return root;
     }
 
-    const path = (url: string): string => url.slice(url.indexOf('/exec-jobs/'));
+    const path = (url: string): string => url.slice(url.indexOf('/exec/'));
 
     it('offers the console, attach, a new shell and the ssh commands for a running job', () => {
       const { fixture } = setup('running');
@@ -318,14 +393,14 @@ describe('ExecJobPageComponent', () => {
       expect(buttonNamed(root, 'New shell')).toBeTruthy();
       const copied = Array.from(root.querySelectorAll('gr-copy-field input')).map((i) => (i as HTMLInputElement).value);
       expect(copied).toEqual([SSH, FORWARD]);
-      expect(opened.map(path)).toEqual(['/exec-jobs/j1/console']);
+      expect(opened.map(path)).toEqual(['/exec/j1/console?node=0']);
     });
 
     it('opens straight into the terminal from a link with view=terminal', () => {
       const { fixture } = setup('running', SSH, { view: 'terminal' });
       fixture.detectChanges();
       expect((fixture.nativeElement as HTMLElement).querySelector('gr-terminal')).not.toBeNull();
-      expect(opened.map(path)).toEqual(['/exec-jobs/j1/console']);
+      expect(opened.map(path)).toEqual(['/exec/j1/console?node=0']);
     });
 
     it('attaches to the program or opens a new shell', () => {
@@ -336,10 +411,20 @@ describe('ExecJobPageComponent', () => {
       buttonNamed(root, 'New shell')?.click();
       fixture.detectChanges();
       expect(opened.map(path)).toEqual([
-        '/exec-jobs/j1/console',
-        '/exec-jobs/j1/shell?attach=true',
-        '/exec-jobs/j1/shell',
+        '/exec/j1/console?node=0',
+        '/exec/j1/shell?node=0&attach=true',
+        '/exec/j1/shell?node=0',
       ]);
+    });
+
+    it('follows the picked node', () => {
+      const { fixture } = setup('running', SSH, {}, twoNodeJob('running'));
+      nodeItem(fixture.nativeElement, 1)?.click();
+      fixture.detectChanges();
+      const root = openTerminalTab(fixture);
+      buttonNamed(root, 'Attach to program')?.click();
+      fixture.detectChanges();
+      expect(opened.map(path)).toEqual(['/exec/j1/console?node=1', '/exec/j1/shell?node=1&attach=true']);
     });
 
     it('offers no terminal for a completed job', () => {
@@ -352,7 +437,7 @@ describe('ExecJobPageComponent', () => {
     it('opens the console without a mode switch when there is no ssh', () => {
       const { fixture } = setup('running', null);
       const root = openTerminalTab(fixture);
-      expect(opened.map(path)).toEqual(['/exec-jobs/j1/console']);
+      expect(opened.map(path)).toEqual(['/exec/j1/console?node=0']);
       expect(root.querySelector('gr-select-button')).toBeNull();
       expect(buttonNamed(root, 'New shell')).toBeUndefined();
       expect(root.querySelector('gr-copy-field')).toBeNull();
