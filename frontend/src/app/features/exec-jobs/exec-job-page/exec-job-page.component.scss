@@ -34,6 +34,8 @@ a.sidebar-item { text-decoration: none; }
   margin: $spacing-sm $spacing-md 0;
 }
 
+.kept-vm button { margin-left: $spacing-sm; }
+
 gr-terminal.terminal {
   flex: 1;
   height: auto;

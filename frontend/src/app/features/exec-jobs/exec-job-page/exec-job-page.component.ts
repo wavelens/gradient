@@ -101,6 +101,7 @@ export class ExecJobPageComponent implements OnInit {
   abortOpen = signal(false);
   aborting = signal(false);
   starting = signal(false);
+  switchingKeep = signal(false);
   errorMessage = signal<string | null>(null);
   sidebarOpen = signal(false);
 
@@ -117,7 +118,8 @@ export class ExecJobPageComponent implements OnInit {
     const job = this.job();
     const modes: { label: string; value: TerminalMode }[] = [{ label: 'Console', value: 'console' }];
     if (job?.status === 'running' && job.ssh_command) {
-      modes.push({ label: 'Attach to program', value: 'attach' }, { label: 'New shell', value: 'shell' });
+      if (job.program_exit_code == null) modes.push({ label: 'Attach to program', value: 'attach' });
+      modes.push({ label: 'New shell', value: 'shell' });
     }
     return modes;
   });
@@ -130,7 +132,13 @@ export class ExecJobPageComponent implements OnInit {
     const job = this.job();
     return job ? isOpenExecJob(job.status) : false;
   });
+  keepVmRunning = computed(() => this.job()?.keep_vm_running ?? false);
+  keptExitCode = computed(() => {
+    const job = this.job();
+    return this.open() && job?.keep_vm_running ? job.program_exit_code ?? null : null;
+  });
   waiting = computed(() => waitingReasonText(this.job()?.waiting_reason));
+  waitsForManualStart = computed(() => this.job()?.waiting_reason?.kind === 'manual_start');
   jobMenu = computed<MenuItem[]>(() => {
     const job = this.job();
     if (!job) return [];
@@ -248,7 +256,31 @@ export class ExecJobPageComponent implements OnInit {
     });
   }
 
-  runAgain(): void {
+  toggleKeepVmRunning(): void {
+    this.switchKeepVmRunning(!this.keepVmRunning());
+  }
+
+  letVmStop(): void {
+    this.switchKeepVmRunning(false);
+  }
+
+  private switchKeepVmRunning(keep: boolean): void {
+    this.switchingKeep.set(true);
+    const request = keep ? this.execJobs.keepVmRunning(this.jobId) : this.execJobs.letVmStop(this.jobId);
+    request.subscribe({
+      next: () => {
+        this.switchingKeep.set(false);
+        this.errorMessage.set(null);
+        this.watch();
+      },
+      error: (error: Error) => {
+        this.switchingKeep.set(false);
+        this.errorMessage.set(error.message);
+      },
+    });
+  }
+
+  run(): void {
     this.starting.set(true);
     this.execJobs.run(this.jobId).subscribe({
       next: () => {
