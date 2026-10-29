@@ -189,7 +189,7 @@ function setup(
 
 const failedBuilds = { builds: { ...zeroCounts(), failed: 2 } };
 const menuLabels = (fixture: ComponentFixture<TaskDetailComponent>) =>
-  fixture.componentInstance.panelMenuModel().map(i => i.label);
+  fixture.componentInstance.evalMenuModel().map(i => i.label);
 
 describe('TaskDetailComponent - older evaluations', () => {
   const access = { managed: false, canEdit: true, canTrigger: true };
@@ -299,13 +299,38 @@ describe('TaskDetailComponent evaluation menu', () => {
   const trigger = { managed: false, canEdit: true, canTrigger: true };
 
   const retryItem = (fixture: ComponentFixture<TaskDetailComponent>) =>
-    fixture.componentInstance.panelMenuModel().find(i => i.label === 'Retry');
+    fixture.componentInstance.evalMenuModel().find(i => i.label === 'Retry');
+
+  const panelActions = (fixture: ComponentFixture<TaskDetailComponent>) =>
+    Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('.panel-actions > a, .panel-actions > button'));
+  const actionLabels = (fixture: ComponentFixture<TaskDetailComponent>) =>
+    panelActions(fixture).map((el) => el.getAttribute('aria-label') ?? el.querySelector('.gr-button__label')?.textContent?.trim());
+
+  it('puts logs, summary and abort before the dots of a running evaluation', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Building' });
+    expect(actionLabels(fixture)).toEqual(['Logs', 'Summary', 'Abort', 'More']);
+    expect(panelActions(fixture)[0].getAttribute('href')).toBe('/project/acme/log/e1');
+    expect(panelActions(fixture)[1].getAttribute('href')).toBe('/project/acme/summary/e1');
+  });
+
+  it('shows retry in place of abort once a failed evaluation stopped and runs it', () => {
+    const { fixture, evaluationsService } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds });
+    const spy = vi.spyOn(evaluationsService, 'retryEvaluation');
+    expect(actionLabels(fixture)).toEqual(['Logs', 'Summary', 'Retry', 'More']);
+    panelActions(fixture)[2].click();
+    expect(spy).toHaveBeenCalledWith('e1');
+  });
+
+  it('keeps logs, summary and retry out of the dots menu', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds });
+    const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
+    for (const label of ['Logs', 'Summary', 'Retry']) expect(labels).not.toContain(label);
+  });
 
   it('retries the selected evaluation from the menu, then refreshes', () => {
     const { fixture, tasksService, evaluationsService } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds });
     const spy = vi.spyOn(evaluationsService, 'retryEvaluation');
     const reload = vi.spyOn(tasksService, 'getTask');
-    expect(findByText(fixture.nativeElement, 'retry')).toBeNull();
     retryItem(fixture)!.command!();
     expect(spy).toHaveBeenCalledWith('e1');
     expect(reload).toHaveBeenCalled();
@@ -943,12 +968,12 @@ describe('TaskDetailComponent diagnostic report', () => {
 
   it('offers the logs first, then metrics and the diagnostic report', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'superuser');
-    const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
+    const labels = fixture.componentInstance.evalMenuModel().map(i => i.label);
     expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics', 'Prioritize', 'Full rewalk', 'Diagnostic report']);
   });
 
   it('points the logs entry at the selected evaluation', () => {
-    const item = component().panelMenuModel().find(i => i.label === 'Logs');
+    const item = component().evalMenuModel().find(i => i.label === 'Logs');
     expect(item?.routerLink).toEqual(['/project', 'acme', 'log', 'e1']);
   });
 
@@ -959,7 +984,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   });
 
   it('points the summary entry at the selected evaluation', () => {
-    const item = component().panelMenuModel().find(i => i.label === 'Summary');
+    const item = component().evalMenuModel().find(i => i.label === 'Summary');
     expect(item?.routerLink).toEqual(['/project', 'acme', 'summary', 'e1']);
   });
 
@@ -967,7 +992,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   /// gone rather than present and guaranteed to fail.
   it('hides the diagnostic report from anonymous visitors', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'anonymous');
-    const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
+    const labels = fixture.componentInstance.evalMenuModel().map(i => i.label);
     expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics']);
   });
 

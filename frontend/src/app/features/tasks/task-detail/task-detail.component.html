@@ -96,7 +96,7 @@
           <div class="strip-more" aria-hidden="true" (grInView)="loadOlderEvaluations()" [grInViewKey]="evaluations().length"></div>
         }
       </div>
-      <gr-menu #evalMenu [model]="panelMenuModel()" />
+      <gr-menu #evalMenu [model]="evalMenuModel()" />
     </div>
 
     <div class="panel pad">
@@ -140,15 +140,22 @@
               }
             </div>
           </div>
-          <div class="panel-actions">
-            <button grButton size="small" icon="more_vert" severity="secondary"
-                    (click)="panelMenu.toggle($event)" aria-label="More"></button>
-            <gr-menu #panelMenu [model]="panelMenuModel()" />
+          <div class="panel-actions phone-icon-buttons">
+            <a grButton size="small" label="Logs" icon="article" severity="secondary"
+               [routerLink]="['/project', projectName, 'log', sel.id]"></a>
+            <a grButton size="small" label="Summary" icon="summarize" severity="secondary"
+               [routerLink]="['/project', projectName, 'summary', sel.id]"></a>
             @if (isRunning(sel.status)) {
               <button *appWritable="triggerAccess()" grButton size="small" label="Abort" icon="close"
                       severity="danger" [loading]="aborting()" [disabled]="aborting()"
                       (click)="requestAbort($event, sel.id)"></button>
+            } @else if (retryEvaluationItem(); as retry) {
+              <button grButton size="small" label="Retry" icon="replay" severity="secondary"
+                      [disabled]="retry.disabled" (click)="retry.command?.()"></button>
             }
+            <button grButton size="small" icon="more_vert" severity="secondary"
+                    (click)="panelMenu.toggle($event)" aria-label="More"></button>
+            <gr-menu #panelMenu [model]="panelMenuModel()" />
           </div>
         </div>
       }
@@ -254,7 +261,7 @@
             <gr-empty-state flat icon="package_2" title="No packages"
               message="This evaluation produced no entry-point builds." />
           }
-          <app-exec-job-list [evaluation]="sel.id" [evaluationRunning]="isRunning(sel.status)" [project]="projectName" [task]="taskName" />
+          <app-exec-job-list [evaluation]="sel.id" [evaluationRunning]="isRunning(sel.status)" [project]="projectName" [task]="taskName" [canTrigger]="canTrigger()" />
           <gr-menu #pkgMenu [model]="pkgMenuModel()" />
         </div>
       }
