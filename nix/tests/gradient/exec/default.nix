@@ -225,6 +225,7 @@ in {
                 repository = "git://server/test";
                 wildcard = "apps.x86_64-linux.*";
                 created_by = "admin";
+                exec_enabled = true;
                 triggers = [{
                   type = "polling";
                   config.interval_secs = 10;
