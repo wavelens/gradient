@@ -121,7 +121,7 @@ def unbuilt_image_derivations(state):
 
 
 def unbuilt_derivations(evaluation):
-    held = "cp.file_hash IS NOT NULL OR o.external_url IS NOT NULL"
+    held = "(cp.file_hash IS NOT NULL OR o.external_url IS NOT NULL)"
     outputs = ("(SELECT string_agg(o.name, ',' ORDER BY o.name) FROM derivation_output o "
                "LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = d.id AND {})")
     return f"--- partly held shared builds of evaluation {evaluation} no cache made available ---\n" + sql(
