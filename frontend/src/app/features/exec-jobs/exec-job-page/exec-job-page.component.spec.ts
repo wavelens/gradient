@@ -58,7 +58,7 @@ function job(status: ExecJobStatus, sshCommand: string | null = SSH): ExecJobRes
     nodes: 1,
     labels: [],
     devices: [],
-    guest: { cpus: 2, memory_mb: 500, disk_mb: 10240 },
+    guest: { cpus: 2, memory_mb: 500, disk_mb: 2048 },
     retries_left: 0,
     created_at: '2026-01-01T00:00:00',
     worker: 'w1',
@@ -196,7 +196,7 @@ describe('ExecJobPageComponent', () => {
   it('shows the guest size of the job', () => {
     const { fixture } = setup('completed');
     const summary = (fixture.nativeElement as HTMLElement).querySelector('.summary')?.textContent ?? '';
-    expect(summary).toContain('2 CPUs · 500 MB memory · 10240 MB disk');
+    expect(summary).toContain('2 CPUs · 500 MB memory · 2048 MB disk');
   });
 
   it('shows the phases and the log', () => {

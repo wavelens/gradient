@@ -113,7 +113,7 @@ describe('waitingReasonText', () => {
 
 describe('guestSizeLabel', () => {
   it('lists CPUs, memory and disk', () => {
-    expect(guestSizeLabel({ cpus: 2, memory_mb: 500, disk_mb: 10240 })).toBe('2 CPUs · 500 MB memory · 10240 MB disk');
+    expect(guestSizeLabel({ cpus: 2, memory_mb: 500, disk_mb: 2048 })).toBe('2 CPUs · 500 MB memory · 2048 MB disk');
     expect(guestSizeLabel({ cpus: 1, memory_mb: 768, disk_mb: 256 })).toBe('1 CPU · 768 MB memory · 256 MB disk');
   });
 });

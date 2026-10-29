@@ -133,7 +133,7 @@ passthru.gradient = {
 |---|---|---|
 | `cpus` | `2` | Virtual CPUs of the guest, 1 to 255, see [Guest Size](#guest-size) |
 | `memoryMb` | `500` | Guest memory in MB, at least 128 |
-| `diskMb` | `10240` | Size of the `/work` disk in MB, at least 64 |
+| `diskMb` | `2048` | Size of the `/work` disk in MB, at least 64 |
 | `nodes` | `1` | Guests on separate workers of one zone, see [Spread a Job over Workers](#multi-node-jobs) |
 | `labels` | `[ ]` | The worker must report every label |
 | `devices` | `[ ]` | Device classes and counts, held until the job ends |

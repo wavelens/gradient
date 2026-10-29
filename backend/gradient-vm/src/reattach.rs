@@ -162,7 +162,7 @@ mod tests {
         let budget = GuestBudget::new(GuestSize {
             cpus: 4,
             memory_mb: 1000,
-            disk_mb: 20_480,
+            disk_mb: 4_096,
         });
         let mut busy = state(&GuestId::new(), Some(serde_json::json!({ "job_id": "j1" })));
         busy.size = GuestSize::default_request();
@@ -180,7 +180,7 @@ mod tests {
                 capacity.memory_mb.free,
                 capacity.disk_mb.free
             ),
-            (0, 0, 10_240)
+            (0, 0, 2_048)
         );
         assert!(
             budget.hold(GuestSize::default_request()).is_none(),
