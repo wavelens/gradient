@@ -171,6 +171,15 @@ export interface BoardCacheStats {
   storage: SeriesPoint[];
 }
 
+export interface BoardExecJob {
+  id: string;
+  project: string;
+  entry_point: string;
+  task: string;
+  node_index: number;
+  nodes: number;
+}
+
 export interface BoardFleetPoint {
   bucket_start: string;
   connected: number;
@@ -610,6 +619,7 @@ export interface DecisionCandidateView {
   build_id?: string | null;
   evaluation_id: string;
   subject?: string | null;
+  exec_job?: BoardExecJob | null;
   score: number;
   won: boolean;
 }
@@ -724,6 +734,8 @@ export type DispatchedJobDetail = ReportGap & {
   derivations: JobDerivationView[];
   evaluation_id: string;
   evaluation?: JobEvaluationView | null;
+  exec_job?: BoardExecJob | null;
+  exec_attempt?: ExecJobAttemptView | null;
   pname?: string | null;
   score_breakdown: unknown;
   worker_context: unknown;
@@ -747,6 +759,7 @@ export interface DispatchedJobSummary {
   build_id?: string | null;
   evaluation_id: string;
   subject?: string | null;
+  exec_job?: BoardExecJob | null;
 }
 
 export interface DispatchedJobsResponse {
@@ -1813,6 +1826,7 @@ export interface PendingJobSummary {
   queued_at: string;
   dependency_count: number;
   subject?: string | null;
+  exec_job?: BoardExecJob | null;
 }
 
 export interface PendingJobsResponse {

@@ -142,7 +142,7 @@ fn ssh_access(
     }
 }
 
-fn attempt_view(attempt: &MExecJobAttempt) -> ExecJobAttemptView {
+pub(crate) fn attempt_view(attempt: &MExecJobAttempt) -> ExecJobAttemptView {
     ExecJobAttemptView {
         number: attempt.number,
         worker: attempt.worker.clone(),
