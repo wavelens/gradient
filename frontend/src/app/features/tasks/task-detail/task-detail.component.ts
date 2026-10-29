@@ -65,6 +65,7 @@ import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commit
   templateUrl: './task-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
+    '../../../shared/evaluation/entry-rows.scss',
     './task-detail.component.scss',
     './task-detail.evaluations.scss',
     './task-detail.packages.scss',

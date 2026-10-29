@@ -706,7 +706,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const failed = root.querySelector('.pkg[data-phase="failure"]');
     expect(failed?.querySelector('.pkg-name')?.textContent?.trim()).toBe('b');
     expect(failed?.querySelector('.pkg-error')?.textContent?.trim()).toBe('Failed to evaluate');
-    expect(failed?.querySelector('.pkg-link')?.getAttribute('href')).toMatch(/\/log\/[^?]+\?eval=1$/);
+    expect(failed?.querySelector('.entry-link')?.getAttribute('href')).toMatch(/\/log\/[^?]+\?eval=1$/);
   });
 
   it('shows why a waiting evaluation has no packages yet', () => {
@@ -1144,7 +1144,7 @@ describe('TaskDetailComponent - #636 eval page', () => {
       getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1, failed_attributes: [] }),
     });
     fixture.detectChanges();
-    const link = fixture.nativeElement.querySelector('.pkg a.pkg-link') as HTMLAnchorElement;
+    const link = fixture.nativeElement.querySelector('.pkg a.entry-link') as HTMLAnchorElement;
     expect(link.getAttribute('href')).toBe('/project/acme/log/e1?build=b-hello');
   });
 
@@ -1196,7 +1196,7 @@ describe('TaskDetailComponent - status phases', () => {
     const { fixture } = setup(access, { primaryStatus: 'Building' });
     const card: HTMLElement = fixture.nativeElement.querySelector('.eval-card');
     expect(card.dataset['phase']).toBe('running');
-    expect(card.querySelector('gr-status-icon.si')?.getAttribute('data-phase')).toBe('running');
+    expect(card.querySelector('gr-status-icon.phase-swatch')?.getAttribute('data-phase')).toBe('running');
   });
 
   it('marks a package row and its icon with the build phase', () => {
@@ -1205,7 +1205,7 @@ describe('TaskDetailComponent - status phases', () => {
     fixture.detectChanges();
     const pkg: HTMLElement = fixture.nativeElement.querySelector('.pkg');
     expect(pkg.dataset['phase']).toBe('aborted');
-    expect(pkg.querySelector('gr-status-icon.si')?.getAttribute('data-phase')).toBe('aborted');
+    expect(pkg.querySelector('gr-status-icon.phase-swatch')?.getAttribute('data-phase')).toBe('aborted');
   });
 });
 

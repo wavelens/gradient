@@ -7,12 +7,12 @@
 @if (jobs().length > 0) {
   <section class="exec-jobs">
     <h3>Exec Jobs</h3>
-    <div class="job-list">
+    <div class="entry-list">
       @for (job of jobs(); track job.id) {
-        <div class="job" [attr.data-phase]="phase(job.status)" (contextmenu)="openContextMenu($event, job, jobMenu)">
-          <a class="job-link" [routerLink]="link(job)" [attr.aria-label]="job.entry_point"></a>
-          <gr-status-icon class="si" [phase]="phase(job.status)" [label]="job.status" size="sm" />
-          <span class="job-name">{{ job.entry_point }}</span>
+        <div class="entry-row job" [attr.data-phase]="phase(job.status)" (contextmenu)="openContextMenu($event, job, jobMenu)">
+          <a class="entry-link" [routerLink]="link(job)" [attr.aria-label]="job.entry_point"></a>
+          <gr-status-icon class="phase-swatch" [phase]="phase(job.status)" [label]="job.status" size="sm" />
+          <span class="entry-name">{{ job.entry_point }}</span>
           <span class="job-detail">{{ detail(job) }}</span>
           <span class="job-needs">
             @if (job.nodes > 1) { <gr-badge>{{ job.nodes }} nodes</gr-badge> }
@@ -20,7 +20,7 @@
             @for (d of job.devices; track d.name) { <gr-badge severity="info">{{ device(d) }}</gr-badge> }
           </span>
           @if (hasActions(job)) {
-            <button type="button" class="kebab" aria-label="Exec job actions" (click)="openMenu($event, job, jobMenu)">
+            <button type="button" class="entry-kebab" aria-label="Exec job actions" (click)="openMenu($event, job, jobMenu)">
               <gr-icon name="more_vert" />
             </button>
           }

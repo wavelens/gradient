@@ -22,7 +22,7 @@ const POLL_MS = 4000;
   imports: [RouterModule, BadgeComponent, IconComponent, MenuComponent, StatusIconComponent],
   templateUrl: './exec-job-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './exec-job-list.component.scss',
+  styleUrls: ['../../../shared/evaluation/entry-rows.scss', './exec-job-list.component.scss'],
 })
 export class ExecJobListComponent implements OnChanges {
   private execJobs = inject(ExecJobsService);

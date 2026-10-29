@@ -52,7 +52,7 @@ describe('ExecJobListComponent', () => {
     expect(host.textContent).toContain('waiting for free devices on 1 worker');
     expect(host.textContent).toContain('lab-a');
     expect(host.textContent).toContain('gpu:h100:8');
-    expect(host.querySelector('a.job-link')?.getAttribute('href')).toBe('/project/acme/task/demo/exec/j1');
+    expect(host.querySelector('a.entry-link')?.getAttribute('href')).toBe('/project/acme/task/demo/exec/j1');
   });
 
   it('shows a job that waits for its manual start by its wait reason', () => {
@@ -170,7 +170,7 @@ describe('ExecJobListComponent', () => {
 
     function openMenu(fixture: ReturnType<typeof renderJob>['fixture'], via: 'kebab' | 'contextmenu'): HTMLElement[] {
       const root = fixture.nativeElement as HTMLElement;
-      if (via === 'kebab') (root.querySelector('.job .kebab') as HTMLElement).click();
+      if (via === 'kebab') (root.querySelector('.job .entry-kebab') as HTMLElement).click();
       else root.querySelector('.job')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       fixture.detectChanges();
       return Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item'));
@@ -186,7 +186,7 @@ describe('ExecJobListComponent', () => {
 
     it('offers no menu for a finished job', () => {
       const { fixture } = renderJob('completed', true);
-      expect((fixture.nativeElement as HTMLElement).querySelector('.job .kebab')).toBeNull();
+      expect((fixture.nativeElement as HTMLElement).querySelector('.job .entry-kebab')).toBeNull();
     });
 
     it('hides abort from a visitor who may not trigger', () => {
