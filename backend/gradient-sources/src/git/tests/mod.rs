@@ -287,7 +287,7 @@ fn the_head_commit_is_the_tip_of_the_ref_asked_for() {
 
     let head = fetch_commit(&url, None, &head_refspec(None)).unwrap();
     assert_eq!(head.hash, main.as_bytes());
-    assert_eq!(head.message, "second");
+    assert_eq!(head.message, "second\n\nbody");
     assert_eq!(head.author_name, "Ada");
     assert_eq!(head.author_email.as_deref(), Some("ada@example.com"));
 
@@ -321,7 +321,7 @@ fn a_pinned_commit_below_the_tip_is_fetched_by_its_hash() {
 
     let commit = fetch_commit(&url, None, &pinned.to_string()).unwrap();
     assert_eq!(commit.hash, pinned.as_bytes());
-    assert_eq!(commit.message, "pinned");
+    assert_eq!(commit.message, "pinned\n\nbody");
 }
 
 fn commit_file(repo: &git2::Repository, refname: &str, contents: &str) -> git2::Oid {

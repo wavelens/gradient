@@ -52,7 +52,7 @@ fn fetch_commit_into_temp_repo(url: &str, refspec: &str) -> Result<HeadCommit, S
 
     Ok(HeadCommit {
         hash: commit.id().as_bytes().to_vec(),
-        message: commit.summary().ok().flatten().unwrap_or("").to_string(),
+        message: commit.message().unwrap_or("").trim().to_string(),
         author_email: commit.author().email().ok().map(|s| s.to_string()),
         author_name: commit.author().name().unwrap_or("").to_string(),
     })
