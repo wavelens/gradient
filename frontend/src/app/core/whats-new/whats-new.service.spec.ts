@@ -18,9 +18,9 @@ import { RELEASE_NOTES_SOURCE, WhatsNewService } from './whats-new.service';
 const CURRENT = environment.version;
 const LINE = releaseLine(CURRENT);
 const NOTES = [
-  { version: '1.9', html: '<p>old</p>' },
-  { version: '99.0', html: '<p>future</p>' },
-  { version: LINE, html: '<p>current</p>' },
+  { version: '1.9', pages: [{ title: 'Old', html: '<p>old</p>' }] },
+  { version: '99.0', pages: [{ title: 'Future', html: '<p>future</p>' }] },
+  { version: LINE, pages: [{ title: 'Current', html: '<p>current</p>' }] },
 ];
 
 function setup(lastSeen: string | null) {
