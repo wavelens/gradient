@@ -89,17 +89,33 @@ export class DialogComponent implements OnDestroy {
 
   private open(): void {
     if (this.ref?.hasAttached()) return;
-    this.ref ??= this.overlay.create({
+    this.ref ??= this.createOverlay();
+    this.ref.attach(new TemplatePortal(this.panel(), this.vcr));
+  }
+
+  private createOverlay(): OverlayRef {
+    const ref = this.overlay.create({
       hasBackdrop: true,
       backdropClass: 'gr-dialog-backdrop',
       panelClass: 'gr-dialog-panel',
       scrollStrategy: this.overlay.scrollStrategies.block(),
       positionStrategy: this.overlay.position().global().centerHorizontally().centerVertically(),
     });
-    this.ref.keydownEvents().subscribe((e) => {
+    ref.keydownEvents().subscribe((e) => {
       if (e.keyCode === ESCAPE && this.closable()) this.close();
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) this.submit(ref, e);
     });
-    this.ref.attach(new TemplatePortal(this.panel(), this.vcr));
+    return ref;
+  }
+
+  private submit(ref: OverlayRef, event: KeyboardEvent): void {
+    const actions = ref.overlayElement.querySelectorAll<HTMLButtonElement>(
+      '.gr-dialog__footer button:not(.gr-button--secondary):not(:disabled)',
+    );
+    const primary = actions[actions.length - 1];
+    if (!primary) return;
+    event.preventDefault();
+    primary.click();
   }
 
   private detach(): void {

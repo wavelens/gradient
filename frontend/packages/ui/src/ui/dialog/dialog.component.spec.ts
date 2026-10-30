@@ -20,7 +20,10 @@ import { DialogComponent } from './dialog.component';
       (hide)="hidden.set(hidden() + 1)"
     >
       <p class="body">Are you sure?</p>
-      <div grDialogFooter><button class="confirm">Delete</button></div>
+      <div grDialogFooter>
+        <button class="gr-button--secondary cancel" (click)="clicks.push('cancel')">Cancel</button>
+        <button class="confirm" [disabled]="confirmDisabled()" (click)="clicks.push('confirm')">Delete</button>
+      </div>
     </gr-dialog>
   `,
 })
@@ -29,7 +32,12 @@ class HostComponent {
   header = signal('Delete project');
   closable = signal(true);
   hidden = signal(0);
+  confirmDisabled = signal(false);
+  clicks: string[] = [];
 }
+
+const ctrlEnter = () =>
+  panel()!.querySelector('.body')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
 
 function render() {
   TestBed.configureTestingModule({ imports: [HostComponent] });
@@ -95,6 +103,23 @@ describe('DialogComponent', () => {
     fixture.componentInstance.open.set(true);
     fixture.detectChanges();
     expect(panel()!.querySelector('.gr-dialog__close')).toBeNull();
+  });
+
+  it('submits through the primary footer action on Ctrl+Enter', () => {
+    const fixture = render();
+    fixture.componentInstance.open.set(true);
+    fixture.detectChanges();
+    ctrlEnter();
+    expect(fixture.componentInstance.clicks).toEqual(['confirm']);
+  });
+
+  it('ignores Ctrl+Enter while the primary action is disabled', () => {
+    const fixture = render();
+    fixture.componentInstance.confirmDisabled.set(true);
+    fixture.componentInstance.open.set(true);
+    fixture.detectChanges();
+    ctrlEnter();
+    expect(fixture.componentInstance.clicks).toEqual([]);
   });
 
   it('applies the requested width and marks itself a modal dialog', () => {
