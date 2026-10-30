@@ -13,6 +13,7 @@ import { AppHeaderComponent } from './header.component';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { CommandPaletteService } from '../command-palette/command-palette.service';
+import { RELEASE_NOTES_SOURCE } from '@core/whats-new/whats-new.service';
 
 const logout = vi.fn(() => ({ subscribe: () => undefined }));
 
@@ -33,6 +34,7 @@ function setup(registrationDisabled: boolean, signedIn = false): ComponentFixtur
         },
       },
       { provide: ConfigService, useValue: { registrationDisabled } },
+      { provide: RELEASE_NOTES_SOURCE, useValue: [] },
     ],
   });
   const fixture = TestBed.createComponent(AppHeaderComponent);
@@ -67,12 +69,13 @@ describe('AppHeaderComponent - user menu', () => {
     return { root, items: Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item')) };
   }
 
-  it('folds the user name, settings and logout into one dropdown', () => {
+  it('folds the user name, settings, invites and logout into one dropdown', () => {
     const { root, items } = openMenu();
     expect(root.querySelector('.header-user')?.textContent).toContain('Alice');
     expect(root.querySelector('.header-user a, .header-user .logout-btn')).toBeNull();
     expect(items.map((item) => item.textContent?.trim())).toEqual([
       expect.stringContaining('Settings'),
+      expect.stringContaining('My Invites'),
       expect.stringContaining('Log out'),
     ]);
   });
