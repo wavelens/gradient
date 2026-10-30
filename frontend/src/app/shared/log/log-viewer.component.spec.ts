@@ -113,6 +113,14 @@ describe('LogViewerComponent', () => {
       expect(viewer.searchOpen()).toBe(true);
     });
 
+    it('follows the tail when only the last line grew', async () => {
+      const { fixture, internals } = setup();
+      await show(fixture, ['a', 'epoch 1']);
+      const scroll = vi.spyOn(internals, 'scrollToBottom');
+      await show(fixture, ['a', 'epoch 1, epoch 2']);
+      expect(scroll).toHaveBeenCalled();
+    });
+
     it('starts over when the lines are replaced by another log', async () => {
       const { fixture, viewer } = setup();
       await show(fixture, ['a', 'b', 'c']);

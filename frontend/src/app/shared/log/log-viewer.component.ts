@@ -133,6 +133,7 @@ export class LogViewerComponent implements OnDestroy {
     }
     if (next[kept - 1] !== shown[kept - 1]) this.rerenderLine(kept);
     if (next.length > kept) this.appendStreamedLines(kept);
+    else this.scrollToBottomIfAuto(true);
   }
 
   private reset(): void {
