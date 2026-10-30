@@ -78,6 +78,8 @@ Workers provide a budget for guest CPUs, memory and disk. Both running guests an
 - Jobs take a warm guest only with exactly its CPU count and memory. Other sizes boot a new guest.
 - Matching jobs go to a worker with a warm guest first. Other workers start such a job after about 10 seconds.
 - `/work` is a disk of `diskMb` with the checkout. Checkouts larger than the disk fail the job with `the checkout does not fit in diskMb = <n>`.
+- Guests boot with a writable `/nix/store` disk of `exec.guestStoreMb`, 20480 by default. Workers copy the program closure onto that disk.
+- Writable store disks are sparse and take only the space the guest writes. They stay outside of `exec.guestDiskMb`.
 
 ## Verify Deployment
 

@@ -69,6 +69,10 @@
           echo restarted
         '';
       in {
+        services.journald.settings.Journal = {
+          ForwardToConsole = true;
+          TTYPath = "/dev/ttyS0";
+        };
         gradient.guest = {
           cpus = 1;
           memoryMb = 500;

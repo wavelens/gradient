@@ -594,6 +594,16 @@
   },
   {
     "group": "exec",
+    "field": "guest_store_mb",
+    "flag": "exec-guest-store-mb",
+    "env": "GRADIENT_WORKER_EXEC_GUEST_STORE_MB",
+    "type": "u64",
+    "description": "Size in MB of the writable {file}`/nix/store` disk each guest boots with. It holds the\npaths an exec job copies into the guest store or builds there. The disk image is sparse\nand takes only the space the guest writes, outside of\n{option}`services.gradient.worker.exec.guestDiskMb`.",
+    "default": "20480",
+    "values": []
+  },
+  {
+    "group": "exec",
     "field": "allow_custom_images",
     "flag": "exec-allow-custom-images",
     "env": "GRADIENT_WORKER_EXEC_ALLOW_CUSTOM_IMAGES",

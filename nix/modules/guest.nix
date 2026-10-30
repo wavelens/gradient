@@ -32,6 +32,7 @@
 
   nix = config.nix.package.out;
   storeLabel = "nix-store";
+  writableStoreLabel = "writable-store";
   storeVsockPort = 7001;
   lowerStore = lib.escapeURL "local?root=/nix/.ro-store&read-only=true";
   guestStore = "local-overlay://?lower-store=${lowerStore}&upper-layer=/nix/.rw-store/upper&check-mount=true";
@@ -123,8 +124,9 @@ in {
       };
 
       "/nix/.rw-store" = {
-        fsType = "tmpfs";
-        options = [ "mode=0755" ];
+        device = "/dev/disk/by-label/${writableStoreLabel}";
+        fsType = "ext4";
+        options = [ "noinit_itable" ];
         neededForBoot = true;
       };
 
@@ -196,6 +198,7 @@ in {
           serviceConfig = {
             ExecStart = "${nix}/bin/nix-daemon --stdio";
             StandardInput = "socket";
+            StandardError = "journal";
           };
         };
 

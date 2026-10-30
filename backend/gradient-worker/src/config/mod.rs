@@ -215,6 +215,7 @@ impl ExecArgs {
             image: self.image.clone().unwrap_or_default(),
             pre_warm: self.pre_warm,
             max_pre_warm: self.max_pre_warm,
+            guest_store_mb: self.guest_store_mb,
             devices: self.devices.clone(),
             mounts: self.mounts.clone(),
             bridge: self.bridge.clone(),

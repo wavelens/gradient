@@ -61,6 +61,8 @@ def fleet_tail():
             f"ls -ln {GUESTS}/*/; for s in {GUESTS}/*/api.sock; do "
             "curl -s --max-time 5 --unix-socket $s http://localhost/api/v1/vm.info | jq -c .state; done; "
             "journalctl -u 'gradient-guest-*' --no-pager -n 60")[1])
+        parts.append(f"--- {node.name} guest journals at failed store imports ---\n" + node.execute(
+            "journalctl -u gradient-worker --no-pager | grep -A 120 'guest store import failed' | tail -n 400")[1])
     return "\n".join(parts)
 
 
@@ -179,7 +181,8 @@ def wait_running(name, tick):
     def check():
         state = job(name)
         if state["status"] in TERMINAL:
-            raise Exception(f"{name} ended {state['status']} before tick {tick}: {json.dumps(state)}")
+            raise Exception(
+                f"{name} ended {state['status']} before tick {tick}: {json.dumps(state)}\n{fleet_tail()}")
         return state["status"] == "running" and f"tick {tick}" in job_log(name).splitlines()
 
     wait_for(f"{name} runs and prints tick {tick}", check)
@@ -189,7 +192,8 @@ def wait_started(name):
     def check():
         state = job(name)
         if state["status"] in TERMINAL:
-            raise Exception(f"{name} ended {state['status']} before a login: {json.dumps(state)}")
+            raise Exception(
+                f"{name} ended {state['status']} before a login: {json.dumps(state)}\n{fleet_tail()}")
         return state if state["status"] == "running" else None
 
     return wait_for(f"{name} runs", check)

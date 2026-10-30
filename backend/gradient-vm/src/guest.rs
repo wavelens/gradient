@@ -22,11 +22,13 @@ use tracing::{debug, info, warn};
 
 use crate::agent::{GUEST_BOOT_TIMEOUT, GuestBootError, wait_ready};
 use crate::config::{MountConfig, VmConfig};
+use crate::console::{CONSOLE_LOG, console_tail};
 use crate::devices::DeviceUnit;
 use crate::hypervisor::{GuestImage, HypervisorApi, vm_config};
 use crate::state::{GuestId, GuestState, HeldDevice, StoredRelay, write_state};
 use crate::supervisor::{SHARED_SOCKET_MODE, TAP_PREFIX};
 use crate::unit::{GuestUnits, unit_name};
+use crate::writable_store::create_writable_store;
 
 pub const WORK_MOUNT_TAG: &str = "work";
 const SOCKET_WAIT: Duration = Duration::from_secs(30);
@@ -100,7 +102,7 @@ impl Guest {
         let mut guest = Guest::from_state(config, state);
         let started = match guest.start_unit(units, config).await {
             Ok(()) => tokio::select! {
-                started = guest.start_vm(image) => started,
+                started = guest.start_vm(image, config.guest_store_mb) => started,
                 () = stop.cancelled() => Err(anyhow!("the guest pool stopped during the boot")),
             },
             Err(e) => Err(e),
@@ -129,6 +131,12 @@ impl Guest {
 
     pub fn vsock_socket(&self) -> PathBuf {
         self.dir.join("vsock.sock")
+    }
+
+    pub fn console_tail(&self, max: u64) -> String {
+        console_tail(&self.dir.join(CONSOLE_LOG), max)
+            .map(|tail| String::from_utf8_lossy(&tail).into_owned())
+            .unwrap_or_default()
     }
 
     pub async fn resume(&mut self) -> Result<()> {
@@ -219,7 +227,7 @@ impl Guest {
         units.start(&self.state.guest_id, argv, group).await
     }
 
-    async fn start_vm(&mut self, image: &GuestImage) -> Result<()> {
+    async fn start_vm(&mut self, image: &GuestImage, store_mb: u64) -> Result<()> {
         let group = std::fs::metadata(&self.dir)
             .with_context(|| format!("read the group of {}", self.dir.display()))?
             .gid();
@@ -227,6 +235,7 @@ impl Guest {
             m.gid() == group && m.mode() & SHARED_SOCKET_MODE == SHARED_SOCKET_MODE
         })
         .await?;
+        create_writable_store(&self.dir, store_mb).await?;
 
         let guest = &self.state.guest_id;
         self.api

@@ -21,6 +21,7 @@ pub mod supervisor;
 pub mod unit;
 pub mod vm_states;
 pub mod vsock;
+pub mod writable_store;
 
 pub use addresses::{AddressLease, GuestAddresses};
 pub use agent::{GUEST_BOOT_TIMEOUT, GuestBootError, ReadyAgent, wait_ready};
