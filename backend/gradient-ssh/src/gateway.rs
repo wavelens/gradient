@@ -9,7 +9,7 @@ use crate::session::Session;
 use gradient_db::exec_jobs::reads;
 use gradient_db::lookup::by_id;
 use gradient_pool::guest_channels::GuestChannelEvent;
-use gradient_scheduler::GuestChannelOpened;
+use gradient_scheduler::{GuestChannelOpened, GuestChannelRefusal};
 use gradient_types::permissions::Permission;
 use gradient_types::*;
 use gradient_wire::types::GuestChannelKind;
@@ -17,9 +17,15 @@ use russh::server::{ChannelOpenHandle, Msg};
 use russh::{Channel, ChannelMsg, ChannelOpenFailure};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::watch;
+use tokio::time::Instant;
 
 const STDERR: u32 = 1;
+const VM_STARTUP_POLL: Duration = Duration::from_secs(2);
+const VM_STARTUP_LIMIT: Duration = Duration::from_secs(30 * 60);
+const WAITING_FOR_VM: &str = "waiting for vm startup";
+const VM_STARTUP_TIMED_OUT: &str = "the vm did not start within 30 minutes";
 const NO_EXIT_CODE: u32 = 255;
 const OPEN_FAILED: &str = "the terminal could not be opened";
 const NOT_ALLOWED: &str = "this login needs the TriggerEvaluation permission on the project";
@@ -91,23 +97,89 @@ async fn running_job_of_task(
     reads::latest_running_of_task(db, task.id).await
 }
 
-async fn open_channel(
+#[derive(Debug)]
+enum Startup {
+    Opened(GuestChannelOpened),
+    Refused(String),
+    ClientLeft,
+}
+
+struct EarlyClient<'a> {
+    channel: &'a mut Channel<Msg>,
+    input: Vec<u8>,
+}
+
+impl EarlyClient<'_> {
+    async fn announce_wait(&self) {
+        let _ = self
+            .channel
+            .extended_data_bytes(STDERR, format!("{WAITING_FOR_VM}\r\n"))
+            .await;
+    }
+
+    async fn still_there(&mut self) -> bool {
+        match self.channel.wait().await {
+            Some(ChannelMsg::Data { data }) => {
+                self.input.extend_from_slice(&data);
+                true
+            }
+            Some(ChannelMsg::Close) | None => false,
+            Some(_) => true,
+        }
+    }
+}
+
+async fn client_still_there(client: &mut Option<&mut EarlyClient<'_>>) -> bool {
+    match client {
+        Some(client) => client.still_there().await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn open_once_started(
     session: &Session,
     target: &GatewayTarget,
     kind: GuestChannelKind,
-) -> Result<GuestChannelOpened, String> {
-    let (job, node) = resolve_target(session, target).await?;
-    match session
-        .handles
-        .scheduler
-        .open_guest_channel(job, node, kind)
-        .await
-    {
-        Ok(Ok(opened)) => Ok(opened),
-        Ok(Err(refusal)) => Err(refusal.to_string()),
-        Err(e) => {
-            tracing::warn!(exec_job = %job, error = %e, "opening a guest channel failed");
-            Err(OPEN_FAILED.into())
+    mut client: Option<&mut EarlyClient<'_>>,
+) -> Startup {
+    let (job, node) = match resolve_target(session, target).await {
+        Ok(found) => found,
+        Err(message) => return Startup::Refused(message),
+    };
+    let deadline = Instant::now() + VM_STARTUP_LIMIT;
+    let mut announced = false;
+    loop {
+        match session
+            .handles
+            .scheduler
+            .open_guest_channel(job, node, kind.clone())
+            .await
+        {
+            Ok(Ok(opened)) => return Startup::Opened(opened),
+            Ok(Err(GuestChannelRefusal::NotStarted)) => {}
+            Ok(Err(refusal)) => return Startup::Refused(refusal.to_string()),
+            Err(e) => {
+                tracing::warn!(exec_job = %job, error = %e, "opening a guest channel failed");
+                return Startup::Refused(OPEN_FAILED.into());
+            }
+        }
+        if Instant::now() >= deadline {
+            return Startup::Refused(VM_STARTUP_TIMED_OUT.into());
+        }
+        if let (Some(client), false) = (&client, announced) {
+            client.announce_wait().await;
+            announced = true;
+        }
+        let next_check = tokio::time::sleep(VM_STARTUP_POLL);
+        tokio::pin!(next_check);
+        loop {
+            tokio::select! {
+                () = session.closed.cancelled() => return Startup::ClientLeft,
+                () = &mut next_check => break,
+                there = client_still_there(&mut client) => if !there {
+                    return Startup::ClientLeft;
+                },
+            }
         }
     }
 }
@@ -119,12 +191,24 @@ pub async fn run_shell(
     kind: GuestChannelKind,
     sizes: Option<TerminalSize>,
 ) {
-    let closed = match open_channel(&session, &target, kind).await {
-        Ok(opened) => pump(&mut channel, opened, sizes, &session).await,
-        Err(message) => Some(GuestChannelEvent::Closed {
+    let mut client = EarlyClient {
+        channel: &mut channel,
+        input: Vec::new(),
+    };
+    let startup = open_once_started(&session, &target, kind, Some(&mut client)).await;
+    let early_input = client.input;
+    let closed = match startup {
+        Startup::Opened(opened) => {
+            if !early_input.is_empty() {
+                opened.handle.send(&early_input);
+            }
+            pump(&mut channel, opened, sizes, &session).await
+        }
+        Startup::Refused(message) => Some(GuestChannelEvent::Closed {
             exit_code: Some(1),
             message: Some(message),
         }),
+        Startup::ClientLeft => None,
     };
     if let Some(GuestChannelEvent::Closed { exit_code, message }) = closed {
         finish_shell(&channel, exit_code, message).await;
@@ -152,13 +236,15 @@ pub async fn run_forward(
     target: GatewayTarget,
     port: u16,
 ) {
-    let opened = match open_channel(&session, &target, GuestChannelKind::Forward { port }).await {
-        Ok(opened) => opened,
-        Err(message) => {
+    let kind = GuestChannelKind::Forward { port };
+    let opened = match open_once_started(&session, &target, kind, None).await {
+        Startup::Opened(opened) => opened,
+        Startup::Refused(message) => {
             tracing::debug!(%port, %message, "refused a port forward");
             reply.reject(ChannelOpenFailure::ConnectFailed).await;
             return;
         }
+        Startup::ClientLeft => return,
     };
     reply.accept().await;
     if pump(&mut channel, opened, None, &session).await.is_some() {
@@ -213,6 +299,7 @@ async fn next_size(sizes: &mut Option<TerminalSize>) -> Option<(u16, u16)> {
 mod tests {
     use super::*;
     use crate::session::SshHandles;
+    use gradient_entity::exec_job::ExecJobStatus;
     use gradient_fixtures::mock::mock_db;
     use gradient_fixtures::rows::{project, user};
     use gradient_test_support::state::TestState;
@@ -279,6 +366,59 @@ mod tests {
 
         assert_eq!(elsewhere, Err(unknown_job(job_id())));
         assert_eq!(elsewhere, missing);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_login_waits_through_the_vm_startup_until_the_job_ends() {
+        let task = MTask {
+            project: project().id,
+            ..Default::default()
+        };
+        let evaluation = MEvaluation {
+            task: Some(task.id),
+            ..Default::default()
+        };
+        let job = MExecJob {
+            id: job_id(),
+            evaluation: evaluation.id,
+            ..Default::default()
+        };
+        let at = |status| MExecJob {
+            status,
+            ..job.clone()
+        };
+        let web = mock_db()
+            .append_query_results([vec![job.clone()]])
+            .append_query_results([vec![evaluation]])
+            .append_query_results([vec![task]]);
+        let worker = mock_db()
+            .append_query_results([vec![at(ExecJobStatus::Queued)]])
+            .append_query_results([vec![at(ExecJobStatus::Starting)]])
+            .append_query_results([vec![at(ExecJobStatus::Failed)]]);
+        let state = TestState::new()
+            .web_db(web.into_connection())
+            .worker_db(worker.into_connection())
+            .build();
+        let session = Session::open(
+            SshHandles::for_tests(&state),
+            user(),
+            project(),
+            mask_from(&[Permission::TriggerEvaluation]),
+            vec![],
+        )
+        .await
+        .expect("session");
+        let shell = GuestChannelKind::Shell {
+            pty: false,
+            attach: false,
+        };
+
+        let startup = open_once_started(&session, &job_target(), shell, None).await;
+
+        assert!(
+            matches!(&startup, Startup::Refused(message) if message == "the exec job is not running"),
+            "{startup:?}"
+        );
     }
 
     #[tokio::test]

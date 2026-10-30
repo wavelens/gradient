@@ -59,9 +59,11 @@ ssh -p 2222 -N -L 8888:127.0.0.1:8888 myproject/<job-id>@ci.example.com # (3)!
 2.  Open a new shell next to the program.
 3.  Forward the local port 8888 to port 8888 inside the guest.
 
-- Job pages show the `ssh` command and an `ssh -N -L` command per port, ready to copy.
+- Job pages show the `ssh` command and an `ssh -N -L` command per port once the job is `running`, ready to copy.
 - Forwards reach only ports listed in `ports`.
 - Logins accept no command except `shell`.
+- Logins and forwards into a job before its start wait up to 30 minutes for the guest.
+- Waiting logins print `waiting for vm startup`. Sessions close on a job end during the wait.
 - Sessions close on a worker disconnect. Programs keep going.
 
 ## 4. Keep the VM Running { #keep-vm-running }
