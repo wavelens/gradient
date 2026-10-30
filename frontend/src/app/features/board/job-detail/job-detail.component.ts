@@ -45,9 +45,15 @@ interface RuleRow {
   standalone: true,
   imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LabelHelpComponent],
   template: `
-    <a routerLink="/board/live" class="back" (click)="goBack($event)">
-      <gr-icon name="arrow_back" size="sm" />{{ cameFromApp ? 'Back' : 'Live Jobs' }}
-    </a>
+    <div class="top-row phone-icon-buttons">
+      <a routerLink="/board/live" class="back" (click)="goBack($event)">
+        <gr-icon name="arrow_back" size="sm" />{{ cameFromApp ? 'Back' : 'Live Jobs' }}
+      </a>
+      @if (canAbort()) {
+        <button grButton label="Abort" icon="close" severity="danger" size="small"
+                [loading]="aborting()" [disabled]="aborting()" (click)="abortOpen.set(true)"></button>
+      }
+    </div>
 
     @if (job(); as j) {
       <header class="head">
@@ -55,11 +61,7 @@ interface RuleRow {
           <span class="kind" [class.build]="j.kind === 1">{{ jobKindName(j.kind) }}</span>
           <h1>{{ j.passed_over ? 'Passed over' : 'Assigned job' }}</h1>
         </div>
-        <div class="head-actions phone-icon-buttons">
-          @if (canAbort()) {
-            <button grButton label="Abort" icon="close" severity="danger" size="small"
-                    [loading]="aborting()" [disabled]="aborting()" (click)="abortOpen.set(true)"></button>
-          }
+        <div class="head-actions">
           <div class="total">
             <span class="label">Total score</span>
             <span class="value">{{ j.score | number: '1.2-2' }}</span>
