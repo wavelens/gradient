@@ -146,15 +146,17 @@ in {
     system = {
       stateVersion = lib.mkDefault lib.trivial.release;
 
-      build.gradientGuestStore = storeImage;
-      build.gradientGuest = pkgs.runCommand "gradient-guest" { } ''
-        mkdir $out
-        ln -s ${kernelImage} $out/kernel
-        ln -s ${initrd} $out/initrd
-        ln -s ${toplevel} $out/toplevel
-        ln -s ${storeImage} $out/store.img
-        cp ${guestJson} $out/guest.json
-      '';
+      build = {
+        gradientGuestStore = storeImage;
+        gradientGuest = pkgs.runCommand "gradient-guest" { } ''
+          mkdir $out
+          ln -s ${kernelImage} $out/kernel
+          ln -s ${initrd} $out/initrd
+          ln -s ${toplevel} $out/toplevel
+          ln -s ${storeImage} $out/store.img
+          cp ${guestJson} $out/guest.json
+        '';
+      };
     };
 
     users = {
@@ -175,47 +177,49 @@ in {
         SUBSYSTEM=="usb", MODE="0660", GROUP="dialout"
       '';
     };
-    systemd.sockets.gradient-guest-store = {
-      description = "Guest Store from Gradient";
-      wantedBy = [ "sockets.target" ];
-      listenStreams = [ "vsock::${toString storeVsockPort}" ];
-      socketConfig.Accept = true;
-    };
 
-    systemd.services = {
-      "serial-getty@ttyS0".environment.TERM = "xterm-256color";
-
-      nix-daemon.environment.NIX_REMOTE = guestStore;
-
-      "gradient-guest-store@" = {
-        description = "Guest Store Connection from Gradient";
-        environment.NIX_REMOTE = "daemon";
-        serviceConfig = {
-          ExecStart = "${nix}/bin/nix-daemon --stdio";
-          StandardInput = "socket";
-        };
+    systemd = {
+      sockets.gradient-guest-store = {
+        description = "Guest Store from Gradient";
+        wantedBy = [ "sockets.target" ];
+        listenStreams = [ "vsock::${toString storeVsockPort}" ];
+        socketConfig.Accept = true;
       };
+      services = {
+        "serial-getty@ttyS0".environment.TERM = "xterm-256color";
 
-      gradient-guest-agent = {
-        description = "Guest Agent from Gradient";
-        wantedBy = [ "multi-user.target" ];
-        path = [ pkgs.git pkgs.iproute2 pkgs.util-linux usbip ];
-        serviceConfig = {
-          ExecStart = lib.getExe' cfg.package "gradient-guest-agent";
-          Restart = "always";
+        nix-daemon.environment.NIX_REMOTE = guestStore;
+
+        "gradient-guest-store@" = {
+          description = "Guest Store Connection from Gradient";
+          environment.NIX_REMOTE = "daemon";
+          serviceConfig = {
+            ExecStart = "${nix}/bin/nix-daemon --stdio";
+            StandardInput = "socket";
+          };
         };
-      };
 
-      gradient-guest-shutdown = {
-        description = "Terminate the Gradient Exec Job on Guest shutdown.";
-        after = [ "gradient-guest-agent.service" ];
-        wantedBy = [ "multi-user.target" ];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          ExecStart = "${pkgs.coreutils}/bin/true";
-          ExecStop = "-${lib.getExe' cfg.package "gradient-guest-agent"} shutdown";
-          TimeoutStopSec = 5;
+        gradient-guest-agent = {
+          description = "Guest Agent from Gradient";
+          wantedBy = [ "multi-user.target" ];
+          path = [ pkgs.git pkgs.iproute2 pkgs.util-linux usbip ];
+          serviceConfig = {
+            ExecStart = lib.getExe' cfg.package "gradient-guest-agent";
+            Restart = "always";
+          };
+        };
+
+        gradient-guest-shutdown = {
+          description = "Terminate the Gradient Exec Job on Guest shutdown.";
+          after = [ "gradient-guest-agent.service" ];
+          wantedBy = [ "multi-user.target" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            ExecStart = "${pkgs.coreutils}/bin/true";
+            ExecStop = "-${lib.getExe' cfg.package "gradient-guest-agent"} shutdown";
+            TimeoutStopSec = 5;
+          };
         };
       };
     };
