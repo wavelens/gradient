@@ -142,6 +142,9 @@ craneLib.buildPackage (commonArgs // lib.optionalAttrs (gitRev != null) { GRADIE
     mv $out/bin/gradient-api-spec $gate/bin/
     mv $out/bin/gradient-daemon $daemon/bin/
     mv $out/bin/gradient-guest-agent $guest/bin/
+    for output in $gate $daemon $guest; do
+      removeReferencesToVendoredSources $output
+    done
   '';
 
   passthru.clippy = craneLib.cargoClippy (commonArgs // {
