@@ -254,9 +254,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     document.body.style.overflow = 'hidden';
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') || '';
-    this.initialBuildId = this.route.snapshot.queryParamMap.get('build');
-    this.scopeBuildId.set(this.initialBuildId);
-    this.initialShowEval = this.route.snapshot.queryParamMap.get('eval') !== null;
+    const query = this.route.snapshot.queryParamMap;
+    this.scopeBuildId.set(query.get('build'));
+    this.initialShowEval = query.get('eval') !== null;
+    this.initialBuildId = this.initialShowEval ? null : query.get('selected') ?? query.get('build');
     this.deepLinkLine.set(parseLineFragment(this.route.snapshot.fragment));
     if (!this.evaluationId) {
       this.loading.set(false);
@@ -648,7 +649,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.resetLogState();
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { build: null, eval: 1 },
+      queryParams: { selected: null, eval: 1 },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
@@ -712,9 +713,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.resetLogState();
     this.selectedBuildId.set(build.id);
 
+    const scope = this.scopeBuildId();
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { build: build.id, eval: null },
+      queryParams: { build: scope ?? build.id, selected: scope && scope !== build.id ? build.id : null, eval: null },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });

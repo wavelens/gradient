@@ -6,7 +6,7 @@
 
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { HttpHeaders, HttpResponse, provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EvaluationLogComponent } from './evaluation-log.component';
@@ -698,6 +698,56 @@ describe('EvaluationLogComponent', () => {
       expect(getBuild.mock.invocationCallOrder[0]).toBeLessThan(getBuilds.mock.invocationCallOrder[0]);
       expect(fixture.componentInstance.builds().find(b => b.id === 'b1')?.prioritized).toBe(true);
       expect(fixture.componentInstance.builds().find(b => b.id === 'b1')?.ifd).toBe(true);
+      fixture.destroy();
+    });
+
+    function setupScoped(query: Record<string, string>) {
+      const getBuild = vi.fn((id: string) => of({
+        id, evaluation: 'eval-1', status: 'Completed', derivation_path: `hash-${id}.drv`,
+        architecture: 'x86_64-linux', worker: null, dispatched_job: null, output: {}, prioritized: false, ifd: false, created_at: '', updated_at: '',
+      }));
+      const getBuilds = vi.fn((..._args: unknown[]) => of({ builds: [], total: 0, active_count: 0 }));
+      TestBed.configureTestingModule({
+        imports: [EvaluationLogComponent],
+        providers: [
+          provideRouter([]), provideHttpClient(), provideHttpClientTesting(),
+          { provide: ActivatedRoute, useValue: {
+            snapshot: {
+              paramMap: convertToParamMap({ project: 'proj', evaluationId: 'eval-1' }),
+              queryParamMap: convertToParamMap(query),
+              fragment: null,
+            },
+          } },
+          { provide: EvaluationsService, useValue: {
+            getEvaluation: () => of({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: null, finished_at: null, trigger: null }),
+            getBuild,
+            getBuilds,
+            getEvaluationMessages: () => of([]),
+          } },
+        ],
+      });
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
+      const fixture = TestBed.createComponent(EvaluationLogComponent);
+      fixture.componentInstance.ngOnInit();
+      return { cmp: fixture.componentInstance, fixture, getBuild, getBuilds, navigate };
+    }
+
+    it('restores the picked dependency inside the package scope', () => {
+      const { cmp, fixture, getBuild, getBuilds } = setupScoped({ build: 'pkg', selected: 'dep' });
+      expect(getBuild).toHaveBeenCalledWith('dep');
+      expect(getBuilds.mock.calls[0][3]).toBe('pkg');
+      expect(cmp.selectedBuildId()).toBe('dep');
+      fixture.destroy();
+    });
+
+    it('keeps the package in the URL when a dependency is picked', () => {
+      const { cmp, fixture, navigate } = setupScoped({ build: 'pkg' });
+      const dep = { ...cmp.builds()[0], id: 'dep' };
+      cmp.selectBuild(dep, true);
+      expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({
+        queryParams: { build: 'pkg', selected: 'dep', eval: null },
+      }));
       fixture.destroy();
     });
   });
