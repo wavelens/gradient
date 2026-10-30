@@ -104,6 +104,7 @@ function setup(
   sshCommand: string | null = SSH,
   query: Record<string, string> = {},
   response?: ExecJobResponse,
+  canTrigger = true,
 ): Setup {
   const abort = vi.fn(() => of('Success'));
   const run = vi.fn(() => of('Success'));
@@ -115,7 +116,7 @@ function setup(
       paramMap: convertToParamMap({ project: 'acme', task: 'demo', job: 'j1' }),
       queryParamMap: convertToParamMap(query),
     },
-    parent: { data: of({ taskAccess: { access: { managed: false, canEdit: true, canTrigger: true } } }) },
+    parent: { data: of({ taskAccess: { access: { managed: false, canEdit: canTrigger, canTrigger } } }) },
   } as unknown as ActivatedRoute;
   TestBed.configureTestingModule({
     imports: [ExecJobPageComponent],
@@ -477,6 +478,12 @@ describe('ExecJobPageComponent', () => {
       const copied = Array.from(root.querySelectorAll('gr-copy-field input')).map((i) => (i as HTMLInputElement).value);
       expect(copied).toEqual([SSH, FORWARD]);
       expect(opened.map(path)).toEqual(['/exec/j1/console?node=0']);
+    });
+
+    it('hides the ssh commands from a viewer who may not log in', () => {
+      const { fixture } = setup('running', SSH, {}, undefined, false);
+      const root = openTerminalTab(fixture);
+      expect(root.querySelector('gr-copy-field')).toBeNull();
     });
 
     it('opens straight into the terminal from a link with view=terminal', () => {

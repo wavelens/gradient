@@ -143,14 +143,15 @@ fn waiting_reason_of(job: &MExecJob) -> Option<WaitingReason> {
 fn ssh_access(
     config: &RuntimeConfig,
     project: &str,
-    job: ExecJobId,
+    job: &MExecJob,
     spec: &ExecSpec,
 ) -> (Option<String>, Vec<String>) {
-    let host =
-        ssh_host(&config.server.serve_url).filter(|_| config.ssh.enable && spec.ssh != Some(false));
-    match host {
+    let usable =
+        config.ssh.enable && spec.ssh != Some(false) && job.status == ExecJobStatus::Running;
+    match ssh_host(&config.server.serve_url).filter(|_| usable) {
         Some(host) => {
-            let (shell, forwards) = ssh_commands(&host, config.ssh.port, project, job, &spec.ports);
+            let (shell, forwards) =
+                ssh_commands(&host, config.ssh.port, project, job.id, &spec.ports);
             (Some(shell), forwards)
         }
         None => (None, Vec::new()),
@@ -236,7 +237,7 @@ fn response(
         ..
     } = ctx.detail;
     let spec = spec_of(&job);
-    let (ssh_command, forward_commands) = ssh_access(config, &ctx.project.name, job.id, &spec);
+    let (ssh_command, forward_commands) = ssh_access(config, &ctx.project.name, &job, &spec);
     let worker = placed_attempt(&job, &attempts).map(|a| a.worker);
     let number_of = |attempt: ExecJobAttemptId| {
         attempts
@@ -315,7 +316,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
     operation_id = "getExecJob",
     tag = "exec-jobs",
     summary = "Get exec job",
-    description = "Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start and `worker_name` its display name when the caller can see the worker. `dispatched_job` is the job board assignment of the latest attempt. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` tells whether the guest stays up after the program exits, `program_exit_code` holds the exit code of a program whose guest is kept running.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start and `worker_name` its display name when the caller can see the worker. `dispatched_job` is the job board assignment of the latest attempt. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the job is `running`, the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` tells whether the guest stays up after the program exits, `program_exit_code` holds the exit code of a program whose guest is kept running.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Exec job", body = ExecJobResponse), WebError)
 )]
@@ -356,4 +357,37 @@ pub async fn list_evaluation_exec_jobs(
         EvalAccessContext::load(&state.web_db, evaluation, &maybe_user, api_key.as_ref()).await?;
     let rows = reads::of_evaluation(&state.web_db, ctx.evaluation.id).await?;
     Ok(ok_json(rows.into_iter().map(summary).collect()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_test_support::state::TestState;
+
+    fn login_of(status: ExecJobStatus, ssh: Option<bool>) -> Option<String> {
+        let state = TestState::new().cli(|cli| cli.ssh.enable = true).build();
+        let job = MExecJob {
+            status,
+            ..Default::default()
+        };
+        let spec = ExecSpec {
+            ssh,
+            ..Default::default()
+        };
+        ssh_access(&state.config, "infra", &job, &spec).0
+    }
+
+    #[test]
+    fn the_ssh_login_shows_only_while_the_guest_runs_with_ssh() {
+        assert!(login_of(ExecJobStatus::Running, None).is_some());
+        assert_eq!(login_of(ExecJobStatus::Running, Some(false)), None);
+        for status in [
+            ExecJobStatus::Created,
+            ExecJobStatus::Queued,
+            ExecJobStatus::Starting,
+            ExecJobStatus::Completed,
+        ] {
+            assert_eq!(login_of(status, None), None, "{status:?}");
+        }
+    }
 }

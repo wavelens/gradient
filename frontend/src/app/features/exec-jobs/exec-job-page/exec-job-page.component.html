@@ -194,7 +194,7 @@
           @if (terminal(); as source) {
             <gr-terminal class="terminal flush" [source]="source" />
           }
-          @if (job.ssh_command; as sshCommand) {
+          @if (triggerAccess().canEdit && job.ssh_command; as sshCommand) {
             <div class="ssh-commands">
               <gr-form-field label="SSH login">
                 <gr-copy-field [value]="sshCommand" />
