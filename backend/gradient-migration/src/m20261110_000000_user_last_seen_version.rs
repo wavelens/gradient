@@ -7,9 +7,8 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
-// Existing accounts start before every release note, new accounts start empty and skip the notes once.
 const UP: &str = "ALTER TABLE public.\"user\" ADD COLUMN last_seen_version text; \
-                  UPDATE public.\"user\" SET last_seen_version = '0.0.0';";
+                  UPDATE public.\"user\" SET last_seen_version = '2.0.0';";
 
 const DOWN: &str = "ALTER TABLE public.\"user\" DROP COLUMN last_seen_version;";
 
