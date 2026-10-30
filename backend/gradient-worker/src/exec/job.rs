@@ -14,8 +14,9 @@ use gradient_redact::SecretRedactor;
 use gradient_types::RepositoryLocation;
 use gradient_types::secret::SecretString;
 use gradient_vm::{
-    AddressLease, BudgetHold, DeviceHold, GUEST_BOOT_TIMEOUT, Guest, GuestBootError, MountConfig,
-    NO_GUEST_BUDGET, PlugPlan, PluggedDevices, WORK_MOUNT_TAG, WorkVolume, wait_ready,
+    AddressLease, BudgetHold, DeviceHold, GUEST_BOOT_TIMEOUT, Guest, GuestBootError,
+    GuestStorePassthrough, MountConfig, NO_GUEST_BUDGET, PlugPlan, PluggedDevices, WORK_MOUNT_TAG,
+    WorkVolume, wait_ready,
 };
 use gradient_wire::guest::{
     AgentToWorker, GUEST_WORK_DISK_SINCE, GuestMount, GuestNetwork, GuestSecret, RunJob,
@@ -56,6 +57,7 @@ const WORK_DISK_IMAGE: &str = "work.img";
 const SHUTDOWN_ABORT_WAIT: Duration = Duration::from_secs(30);
 const GUEST_SHUT_DOWN: &str = "the guest was shut down";
 const GUEST_SHUTDOWN_NOTE: &str = "the guest shuts down, the job ends as aborted";
+const GUEST_STORE_CONNECTIONS: usize = 4;
 
 #[async_trait]
 pub trait ExecReport: Send {
@@ -219,7 +221,7 @@ pub async fn execute(
         cluster,
     };
     let source = guest_source(&run.job, host.config.allow_custom_images)?;
-    run.ensure_program(nix.store).await?;
+    program_store_path(&run.job.program)?;
     let devices = run.reserve_devices()?;
     let address = match held_address {
         Some(address) => Some(address),
@@ -636,10 +638,17 @@ struct ExecRun<'a> {
 }
 
 impl ExecRun<'_> {
-    async fn ensure_program(&mut self, store: &LocalNixStore) -> Result<()> {
+    async fn substitute_program(&mut self, guest: &Guest) -> Result<()> {
         let program = program_store_path(&self.job.program)?.to_owned();
+        let passthrough = GuestStorePassthrough::open(guest.dir(), guest.vsock_socket())
+            .map_err(BuildError::transient)?;
+        let store = LocalNixStore::connect_at(
+            &passthrough.socket().to_string_lossy(),
+            GUEST_STORE_CONNECTIONS,
+        )
+        .map_err(BuildError::transient)?;
         let abort = self.abort.clone();
-        let fetch = crate::proto::prefetch::ensure_path(store, &program, self.updater);
+        let fetch = crate::proto::prefetch::ensure_path(&store, &program, self.updater);
         unless_aborted(&abort, fetch)
             .await?
             .map_err(BuildError::transient)?;
@@ -749,6 +758,7 @@ impl ExecRun<'_> {
             agent_version = agent.agent_version(),
             "guest agent ready for the job"
         );
+        self.substitute_program(guest).await?;
         let disk_mb = self.job.requirement.guest.disk_mb;
         let work = work_volume(guest.dir(), disk_mb, agent.version());
         fill_work(&staging, &work, disk_mb).await?;

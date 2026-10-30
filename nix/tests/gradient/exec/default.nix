@@ -34,6 +34,9 @@
     c = hostTrainer;
     agentDependent = [
       c.system.build.toplevel
+      c.system.build.gradientGuest
+      c.system.build.gradientGuestStore
+      c.system.build.gradientGuestStore.closure
       c.system.path
       c.system.build.etc
       c.environment.etc."systemd/system".source

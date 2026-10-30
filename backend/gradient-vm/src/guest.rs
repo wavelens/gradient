@@ -227,7 +227,6 @@ impl Guest {
             m.gid() == group && m.mode() & SHARED_SOCKET_MODE == SHARED_SOCKET_MODE
         })
         .await?;
-        wait_for_file(&self.dir.join("store.sock"), |_| true).await?;
 
         let guest = &self.state.guest_id;
         self.api

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::{Method, Request};
@@ -188,10 +188,13 @@ fn parse<T: DeserializeOwned>(body: Bytes) -> Result<T> {
 pub struct GuestImage {
     pub kernel: PathBuf,
     pub initrd: PathBuf,
+    pub store: PathBuf,
     pub cmdline: String,
     pub cpus: u8,
     pub memory_mb: u64,
 }
+
+const STORE_DISK_ID: &str = "nix-store";
 
 #[derive(Deserialize)]
 struct GuestJson {
@@ -206,9 +209,16 @@ impl GuestImage {
         let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
         let guest: GuestJson =
             serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
+        let store = image.join("store.img");
+        ensure!(
+            store.exists(),
+            "guest image {} has no store.img, build it with the current gradient.guest module",
+            image.display()
+        );
         Ok(GuestImage {
             kernel: image.join("kernel"),
             initrd: image.join("initrd"),
+            store,
             cmdline: guest.cmdline,
             cpus: guest.cpus,
             memory_mb: guest.memory_mb,
@@ -244,6 +254,12 @@ fn disk_config(path: &Path, id: &str) -> serde_json::Value {
     json!({ "path": path, "id": id, "serial": id, "image_type": "Raw" })
 }
 
+fn store_disk_config(store: &Path) -> serde_json::Value {
+    let mut disk = disk_config(store, STORE_DISK_ID);
+    disk["readonly"] = json!(true);
+    disk
+}
+
 pub fn vm_config(image: &GuestImage, dir: &Path, cid: u32) -> serde_json::Value {
     json!({
         "payload": {
@@ -253,12 +269,7 @@ pub fn vm_config(image: &GuestImage, dir: &Path, cid: u32) -> serde_json::Value 
         },
         "cpus": { "boot_vcpus": image.cpus, "max_vcpus": image.cpus },
         "memory": { "size": image.memory_mb * 1024 * 1024, "shared": true },
-        "fs": [{
-            "tag": "nix-store",
-            "socket": dir.join("store.sock"),
-            "num_queues": 1,
-            "queue_size": 1024,
-        }],
+        "disks": [store_disk_config(&image.store)],
         "vsock": { "cid": cid, "socket": dir.join("vsock.sock") },
         "serial": { "mode": "Socket", "socket": dir.join(SERIAL_SOCKET) },
         "console": { "mode": "Off" },
@@ -276,6 +287,7 @@ mod tests {
         GuestImage {
             kernel: "/nix/store/x-guest/kernel".into(),
             initrd: "/nix/store/x-guest/initrd".into(),
+            store: "/nix/store/x-guest/store.img".into(),
             cmdline: "console=ttyS0".into(),
             cpus: 2,
             memory_mb: 2048,
@@ -283,17 +295,17 @@ mod tests {
     }
 
     #[test]
-    fn guest_memory_is_shared_for_virtiofs() {
+    fn the_guest_store_is_a_read_only_disk_and_no_host_share() {
         let dir = Path::new("/var/lib/gradient-worker/guests/g");
         let config = vm_config(&image(), dir, 7);
 
         assert_eq!(config["memory"]["shared"], true);
         assert_eq!(config["memory"]["size"], 2048_u64 * 1024 * 1024);
-        assert_eq!(config["fs"][0]["tag"], "nix-store");
-        assert_eq!(
-            config["fs"][0]["socket"],
-            "/var/lib/gradient-worker/guests/g/store.sock"
-        );
+        assert!(config.get("fs").is_none(), "{config}");
+        assert_eq!(config["disks"].as_array().map(Vec::len), Some(1));
+        assert_eq!(config["disks"][0]["path"], "/nix/store/x-guest/store.img");
+        assert_eq!(config["disks"][0]["readonly"], true);
+        assert_eq!(config["disks"][0]["serial"], STORE_DISK_ID);
         assert_eq!(
             config["vsock"]["socket"],
             "/var/lib/gradient-worker/guests/g/vsock.sock"
@@ -320,6 +332,22 @@ mod tests {
         assert_eq!(config["memory"]["size"], 768_u64 * 1024 * 1024);
         assert_eq!(config["payload"]["kernel"], "/nix/store/x-guest/kernel");
         assert_eq!(image().sized(&GuestSize::default()), image());
+    }
+
+    #[test]
+    fn an_image_without_a_store_image_is_refused() {
+        let image = tempfile::tempdir().unwrap();
+        std::fs::write(
+            image.path().join("guest.json"),
+            r#"{"cpus":2,"memory_mb":500,"cmdline":"console=ttyS0"}"#,
+        )
+        .unwrap();
+        let error = GuestImage::load(image.path()).unwrap_err().to_string();
+        assert!(error.contains("no store.img"), "{error}");
+
+        std::fs::write(image.path().join("store.img"), b"").unwrap();
+        let loaded = GuestImage::load(image.path()).unwrap();
+        assert_eq!(loaded.store, image.path().join("store.img"));
     }
 
     #[test]

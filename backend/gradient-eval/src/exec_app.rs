@@ -17,8 +17,8 @@ pub const EXEC_APP_EXPR: &str = r#"app: let
   ctx = builtins.getContext app.program;
   problem =
     if !builtins.isAttrs g then "must be an attribute set, not a ${builtins.typeOf g}"
-    else if g ? image && !(builtins.isAttrs g.image && g.image ? config.system.build.toplevel)
-    then "image has no config.system.build.toplevel"
+    else if g ? image && !(builtins.isAttrs g.image && g.image ? config.system.build.gradientGuest)
+    then "image has no config.system.build.gradientGuest, import the gradient.guest module"
     else null;
 in builtins.unsafeDiscardStringContext (builtins.toJSON (if problem != null then { inherit problem; } else {
   block = removeAttrs g [ "image" "sops" ];
@@ -32,7 +32,7 @@ in builtins.unsafeDiscardStringContext (builtins.toJSON (if problem != null then
 
 pub const MAX_SOPS_FILE_BYTES: usize = 1 << 20;
 
-const IMAGE_TOPLEVEL: [&str; 4] = ["config", "system", "build", "toplevel"];
+const IMAGE_GUEST: [&str; 4] = ["config", "system", "build", "gradientGuest"];
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -97,10 +97,10 @@ fn image_drv(cursor: &AttrCursor, state: &EvalState) -> Result<Option<String>> {
     else {
         return Ok(None);
     };
-    for name in IMAGE_TOPLEVEL {
+    for name in IMAGE_GUEST {
         at = at
             .maybe_get_attr(name)?
-            .ok_or_else(|| anyhow!("has no {}", IMAGE_TOPLEVEL.join(".")))?;
+            .ok_or_else(|| anyhow!("has no {}", IMAGE_GUEST.join(".")))?;
     }
 
     Ok(Some(at.drv_path(state)?))

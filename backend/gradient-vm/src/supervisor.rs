@@ -43,13 +43,6 @@ async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
     let group = std::fs::metadata(dir)
         .with_context(|| format!("read the group of {}", dir.display()))?
         .gid();
-    let store = spawn_virtiofsd(
-        &config.virtiofsd_bin,
-        &dir.join("store.sock"),
-        Path::new("/nix/store"),
-        true,
-        &[],
-    )?;
     let cloud_hypervisor = &config.cloud_hypervisor_bin;
     let mut hypervisor = Command::new(cloud_hypervisor)
         .arg("--api-socket")
@@ -100,7 +93,6 @@ async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
 
     sessions.abort_all();
     host.release().await;
-    drop(store);
     if !status.success() {
         bail!("cloud-hypervisor exited with {status}");
     }

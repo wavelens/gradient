@@ -29,6 +29,31 @@
   agentCommand = name: command: pkgs.writeShellScriptBin name ''
     exec ${cfg.package}/bin/gradient-guest-agent ${command} "$@"
   '';
+
+  nix = config.nix.package.out;
+  storeLabel = "nix-store";
+  storeVsockPort = 7001;
+  lowerStore = lib.escapeURL "local?root=/nix/.ro-store&read-only=true";
+  guestStore = "local-overlay://?lower-store=${lowerStore}&upper-layer=/nix/.rw-store/upper&check-mount=true";
+
+  storeImage = pkgs.runCommand "gradient-guest-store.img" {
+    nativeBuildInputs = [ pkgs.erofs-utils pkgs.gnutar nix ];
+    closure = pkgs.closureInfo { rootPaths = [ toplevel ]; };
+  } ''
+    export HOME=$TMPDIR
+    nix-store --store "local?root=$TMPDIR/lower" --option build-users-group "" \
+      --option use-sqlite-wal false --option gc-reserved-space 0 \
+      --load-db < $closure/registration
+    rm -f $TMPDIR/lower/nix/var/nix/db/{reserved,db.sqlite-journal}
+    { echo "$TMPDIR/lower/nix"; cat $closure/store-paths; } > members
+    tar --create --absolute-names --verbatim-files-from \
+      --transform "flags=rSh;s|^$TMPDIR/lower/||" \
+      --transform 'flags=rSh;s|^/nix/store/|nix/store/|' \
+      --transform 'flags=rSh;s|~nix~case~hack~[[:digit:]]\+||g' \
+      --files-from members \
+      | mkfs.erofs --quiet --force-uid=0 --force-gid=0 -L ${storeLabel} \
+        -U 00000000-0000-0000-0000-000000000000 -T 0 --hard-dereference --tar=f $out
+  '';
 in {
   options.gradient.guest = {
     enable = lib.mkEnableOption "the guest system of a Gradient exec worker image, with the guest agent";
@@ -78,8 +103,9 @@ in {
     boot = {
       loader.grub.enable = false;
       kernelParams = [ "console=ttyS0" ];
-      kernelModules = [ "vhci-hcd" "virtio_blk" "ext4" ];
-      initrd.kernelModules = [ "virtio_pci" "virtiofs" "vsock" "vmw_vsock_virtio_transport" ];
+      kernelModules = [ "vhci-hcd" "ext4" ];
+      blacklistedKernelModules = [ "vsock_loopback" ];
+      initrd.kernelModules = [ "virtio_pci" "virtio_blk" "erofs" "virtiofs" "vsock" "vmw_vsock_virtio_transport" ];
     };
 
     fileSystems = {
@@ -89,11 +115,23 @@ in {
         options = [ "mode=0755" ];
       };
 
-      "/nix/store" = {
-        device = "nix-store";
-        fsType = "virtiofs";
+      "/nix/.ro-store" = {
+        device = "/dev/disk/by-label/${storeLabel}";
+        fsType = "erofs";
         options = [ "ro" ];
         neededForBoot = true;
+      };
+
+      "/nix/.rw-store" = {
+        fsType = "tmpfs";
+        options = [ "mode=0755" ];
+        neededForBoot = true;
+      };
+
+      "/nix/store".overlay = {
+        lowerdir = [ "/nix/.ro-store/nix/store" ];
+        upperdir = "/nix/.rw-store/upper";
+        workdir = "/nix/.rw-store/work";
       };
     };
 
@@ -104,15 +142,17 @@ in {
       firewall.enable = lib.mkDefault false;
     };
     documentation.enable = false;
-    nix.settings.experimental-features = [ "nix-command" "flakes" ];
+    nix.settings.experimental-features = [ "nix-command" "flakes" "local-overlay-store" "read-only-local-store" ];
     system = {
       stateVersion = lib.mkDefault lib.trivial.release;
 
+      build.gradientGuestStore = storeImage;
       build.gradientGuest = pkgs.runCommand "gradient-guest" { } ''
         mkdir $out
         ln -s ${kernelImage} $out/kernel
         ln -s ${initrd} $out/initrd
         ln -s ${toplevel} $out/toplevel
+        ln -s ${storeImage} $out/store.img
         cp ${guestJson} $out/guest.json
       '';
     };
@@ -135,8 +175,26 @@ in {
         SUBSYSTEM=="usb", MODE="0660", GROUP="dialout"
       '';
     };
+    systemd.sockets.gradient-guest-store = {
+      description = "Guest Store from Gradient";
+      wantedBy = [ "sockets.target" ];
+      listenStreams = [ "vsock::${toString storeVsockPort}" ];
+      socketConfig.Accept = true;
+    };
+
     systemd.services = {
       "serial-getty@ttyS0".environment.TERM = "xterm-256color";
+
+      nix-daemon.environment.NIX_REMOTE = guestStore;
+
+      "gradient-guest-store@" = {
+        description = "Guest Store Connection from Gradient";
+        environment.NIX_REMOTE = "daemon";
+        serviceConfig = {
+          ExecStart = "${nix}/bin/nix-daemon --stdio";
+          StandardInput = "socket";
+        };
+      };
 
       gradient-guest-agent = {
         description = "Guest Agent from Gradient";
@@ -163,6 +221,7 @@ in {
     };
 
     environment = {
+      variables.NIX_REMOTE = "daemon";
       etc = {
         "gradient/pre-script" = script cfg.preScript;
         "gradient/post-script" = script cfg.postScript;

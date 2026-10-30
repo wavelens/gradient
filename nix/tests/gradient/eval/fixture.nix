@@ -12,8 +12,8 @@
         builder = "/bin/sh";
       };
 
-      toplevel = derivation {
-        name = "nixos-system";
+      guest = derivation {
+        name = "gradient-guest";
         system = "x86_64-linux";
         builder = "/bin/sh";
       };
@@ -44,7 +44,7 @@
         trainer = {
           type = "app";
           program = "${check}/bin/check";
-          passthru.gradient.image = { config.system.build.toplevel = toplevel; };
+          passthru.gradient.image = { config.system.build.gradientGuest = guest; };
         };
       };
 

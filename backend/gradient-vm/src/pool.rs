@@ -22,7 +22,7 @@ use tracing::{info, warn};
 use crate::agent::GuestBootError;
 use crate::budget::{BudgetHold, GuestBudget};
 use crate::config::VmConfig;
-use crate::custom_image::{custom_boot_error, image_from_toplevel};
+use crate::custom_image::custom_boot_error;
 use crate::guest::{Guest, remove_guest_dirs};
 use crate::hypervisor::GuestImage;
 use crate::reattach::adopt_size;
@@ -384,18 +384,17 @@ impl GuestPool {
 
     pub async fn boot_custom(
         self: &Arc<Self>,
-        toplevel: &Path,
+        custom: &Path,
         job_id: String,
         size: GuestSize,
     ) -> Taken {
-        let worker_image = self.worker_image()?;
-        let size = job_size(size, &worker_image);
-        let image = image_from_toplevel(toplevel, &worker_image.sized(&size))?;
+        let size = job_size(size, &self.worker_image()?);
+        let image = load_image(custom)?.sized(&size);
         let hold = self.make_room(|| self.budget.hold(size)).await?;
         let guest = self
             .boot_image(&image)
             .await
-            .map_err(|e| custom_boot_error(e, toplevel))?;
+            .map_err(|e| custom_boot_error(e, custom))?;
         self.running(guest, hold, size, job_id)
     }
 
@@ -409,7 +408,7 @@ impl GuestPool {
     }
 
     fn worker_image(&self) -> Result<GuestImage, GuestBootError> {
-        GuestImage::load(&self.config.image).map_err(|e| GuestBootError(format!("{e:#}")))
+        load_image(&self.config.image)
     }
 
     fn warm_size(&self) -> Result<GuestSize, GuestBootError> {
@@ -530,6 +529,10 @@ impl GuestPool {
     fn draining(&self) -> bool {
         self.draining.load(Ordering::SeqCst)
     }
+}
+
+fn load_image(image: &Path) -> Result<GuestImage, GuestBootError> {
+    GuestImage::load(image).map_err(|e| GuestBootError(format!("{e:#}")))
 }
 
 fn job_size(size: GuestSize, image: &GuestImage) -> GuestSize {
