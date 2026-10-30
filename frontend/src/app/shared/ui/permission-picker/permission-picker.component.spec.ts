@@ -28,16 +28,16 @@ describe('PermissionPickerComponent', () => {
     return { fixture, root: fixture.nativeElement as HTMLElement };
   }
 
-  it('labels each permission and marks whether it changes anything', () => {
+  it('splits the permissions into a read and a write group', () => {
     const { root } = render();
-    const rows = Array.from(root.querySelectorAll('.permission-row')).map((r) => r.textContent?.replace(/\s+/g, ' ').trim());
-    expect(rows).toEqual(['view project read-only', 'delete project mutating']);
+    const groups = Array.from(root.querySelectorAll('fieldset')).map((r) => r.textContent?.replace(/\s+/g, ' ').trim());
+    expect(groups).toEqual(['Read view project', 'Write delete project']);
   });
 
   it('hands back a new selection when a permission is ticked', async () => {
     const { fixture, root } = render();
     const before = fixture.componentInstance.selection();
-    (root.querySelector('#perm-deleteProject') as HTMLInputElement).click();
+    root.querySelectorAll<HTMLInputElement>('input[type=checkbox]')[1].click();
     fixture.detectChanges();
     await fixture.whenStable();
     expect(fixture.componentInstance.selection()).toEqual({ viewProject: true, deleteProject: true });

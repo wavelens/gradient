@@ -31,6 +31,7 @@ import {
 } from '@gradient/ui/ui';
 import {
   AllowedCapabilitiesComponent,
+  CheckGroupsComponent,
   EvalStatusBadgeComponent,
   type BarSegment,
   MetricChartComponent,
@@ -61,6 +62,7 @@ function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
     LogoComponent, StarButtonComponent, StatusIconComponent, SegmentedBarComponent, ThunkProgressComponent,
     AllowedCapabilitiesComponent,
     PermissionPickerComponent,
+    CheckGroupsComponent,
   ],
   // The demo star toggles locally instead of writing the viewer's real stars.
   providers: [MessageService, { provide: StarsService, useValue: { set: () => of(true) } }],
@@ -75,6 +77,11 @@ export class ElementsComponent {
     { id: 'deleteProject', mutating: true },
   ];
   demoSelection: Record<string, boolean> = { viewProject: true };
+  readonly demoGroups = [
+    { label: 'Build', items: [{ value: 'build.failed', label: 'failed' }, { value: 'build.completed', label: 'completed' }] },
+    { label: 'Evaluation', items: [{ value: 'evaluation.failed', label: 'failed' }] },
+  ];
+  demoChecked = signal<string[]>(['build.failed']);
 
   private messages = inject(MessageService);
 

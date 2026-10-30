@@ -152,8 +152,12 @@
 <gr-allowed-capabilities [value]="{ enable_network: true, enable_secrets: false, enable_exec: false, enable_eval: true, enable_build: true }" />
 <gr-allowed-capabilities editable [(value)]="allowed" />
 
+<h2>Check groups</h2>
+<p>Checkboxes in titled boxes, for webhook and action events.</p>
+<app-check-groups [groups]="demoGroups" [selected]="demoChecked()" (selectedChange)="demoChecked.set($event)" />
+
 <h2>Permission picker</h2>
-<p>Role and API key dialogs. Each permission says whether it can change anything.</p>
+<p>Role and API key dialogs. Check groups split into permissions that only read and those that change anything.</p>
 <app-permission-picker [permissions]="demoPermissions" [(selection)]="demoSelection" />
 
 <h2>Status icon</h2>
