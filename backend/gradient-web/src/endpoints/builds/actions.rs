@@ -52,7 +52,7 @@ async fn load_abortable_build(
     operation_id = "abortBuild",
     tag = "builds",
     summary = "Abort build",
-    description = "Stops a created, queued or running build of a running evaluation. The build becomes `Aborted` and its dependents in the evaluation become `DependencyFailed`. The evaluation no longer waits for them, and no heal of the evaluation queues them again. A later evaluation builds them again. Requires project membership or a superuser. Answers 409 when the evaluation has finished, the build has another status, or another running evaluation still needs the build.",
+    description = "Stops a created, queued or running build of a running evaluation. The build becomes `Aborted` and its dependents in the evaluation become `DependencyFailed`. The evaluation no longer waits for them, and no heal of the evaluation queues them again. A later evaluation builds them again. Requires project membership or a superuser. Answers 409 when the evaluation has finished, the build has another status, or another evaluation still needs the build.",
     params(("build" = BuildJobId, Path)),
     responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
 )]

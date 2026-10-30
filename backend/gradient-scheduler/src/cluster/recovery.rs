@@ -199,7 +199,7 @@ impl Scheduler {
     }
 
     /// A survivor's build is aborted for its own evaluation, as the build abort of the API does,
-    /// and goes back to the queue while another live evaluation still wants it.
+    /// and goes back to the queue while another evaluation still wants it.
     async fn abort_survivor(
         &self,
         job: PendingJob,

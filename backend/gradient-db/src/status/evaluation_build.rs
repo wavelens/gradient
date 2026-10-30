@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::abort::{abort_shared_builds, ids_shared_with_other_evaluations};
+use super::abort::{abort_shared_builds, wanted_by_other_evaluations};
 use super::emit_transition_effects;
 use super::eval_finalize::check_evaluation_done;
 use super::evaluation_status::reopen_evaluation;
@@ -21,7 +21,7 @@ pub enum BuildRefusal {
     EvaluationFinished,
     #[error("The build is {0:?}")]
     WrongStatus(BuildStatus),
-    #[error("Another running evaluation still needs this build")]
+    #[error("Another evaluation still needs this build")]
     NeededByOtherEvaluation,
     #[error("The worker has not confirmed the abort yet, try again shortly")]
     WorkerStillStopping,
@@ -41,7 +41,7 @@ pub async fn abort_evaluation_build(
         return Ok(Err(refusal));
     }
 
-    if !ids_shared_with_other_evaluations(ctx, evaluation.id, &[shared_build.id])
+    if !wanted_by_other_evaluations(ctx, evaluation.id, &[shared_build.id])
         .await?
         .is_empty()
     {
@@ -235,19 +235,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_abort_leaves_a_build_another_running_evaluation_needs() {
+    async fn an_abort_leaves_a_build_a_failed_evaluation_still_wants() {
         let aborting = evaluation(EvaluationStatus::Building);
-        let other = evaluation(EvaluationStatus::Waiting);
+        let other = evaluation(EvaluationStatus::Failed);
         let build = shared_build(BuildStatus::Building);
         let db = mock_db()
-            .append_query_results([vec![MBuildJob {
-                id: BuildJobId::now_v7(),
-                evaluation: other.id,
-                derivation: build.derivation,
-                derivation_build: build.id,
-                ..Default::default()
-            }]])
-            .append_query_results([vec![other]])
+            .append_query_results([[super::super::abort::wanting_row(&other, build.id)]])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
