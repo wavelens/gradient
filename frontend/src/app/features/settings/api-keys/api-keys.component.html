@@ -145,8 +145,8 @@
     </gr-form-field>
   }
 
-  <gr-form-field label="Allowed source IPs / CIDRs" for="key-allowed-ips">
-    <span slot="label" class="text-secondary">(one per line; leave blank to allow any source)</span>
+  <gr-form-field label="Allowed source IPs / CIDRs" for="key-allowed-ips" hint="One per line. Blank allows any source."
+                 [invalid]="invalidIps().length > 0" [error]="'Not an IP address or CIDR: ' + invalidIps().join(', ')">
     <textarea
       id="key-allowed-ips"
       grInput
@@ -176,7 +176,7 @@
       [icon]="editingKey() ? 'check' : 'add'"
       (click)="saveKey()"
       [loading]="creating() || saving()"
-      [disabled]="creating() || saving() || !formName.trim()"
+      [disabled]="creating() || saving() || !formName.trim() || invalidIps().length > 0"
     ></button>
   </div>
 </gr-dialog>
