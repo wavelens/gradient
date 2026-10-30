@@ -33,18 +33,20 @@ describe('ActionEventsComponent', () => {
   });
 
   it('groups durable catalog events by namespace', () => {
-    expect(component.grouped().map(g => g.group)).toEqual(['Evaluation', 'Build', 'Task']);
+    expect(component.grouped().map(g => g.label)).toEqual(['Evaluation', 'Build', 'Task']);
   });
 
   it('limits the groups to the requested families', () => {
     fixture.componentRef.setInput('families', ['build']);
-    expect(component.grouped().map(g => g.group)).toEqual(['Build']);
+    expect(component.grouped().map(g => g.label)).toEqual(['Build']);
   });
 
-  it('toggling emits updated selection', () => {
+  it('passes a ticked event on as the new selection', () => {
     let emitted: string[] = [];
     component.selectedChange.subscribe((v: string[]) => { emitted = v; });
-    component.toggle('build.failed', true);
+    fixture.detectChanges();
+    const box = (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLInputElement>('input[type=checkbox]')[1];
+    box.click();
     expect(emitted).toEqual(['build.failed']);
   });
 });

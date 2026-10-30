@@ -5,18 +5,17 @@
  */
 
 import { Component, computed, inject, input, output, ChangeDetectionStrategy } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { groupCatalog } from '@core/models';
 import { EventsService } from '@core/services/events.service';
+import { CheckGroupsComponent, type CheckGroup } from '@shared/ui';
 
 @Component({
   selector: 'app-action-events',
   standalone: true,
-  imports: [CommonModule],
-  templateUrl: './action-events.component.html',
+  imports: [CheckGroupsComponent],
+  template: `<app-check-groups [groups]="grouped()" [selected]="selected()" [disabled]="disabled()" (selectedChange)="selectedChange.emit($event)" />`,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './action-events.component.scss',
 })
 export class ActionEventsComponent {
   selected = input.required<string[]>();
@@ -26,11 +25,7 @@ export class ActionEventsComponent {
 
   private readonly catalog = toSignal(inject(EventsService).catalog$, { initialValue: [] });
 
-  readonly grouped = computed(() => groupCatalog(this.catalog(), this.families()));
-
-  toggle(value: string, checked: boolean) {
-    const set = new Set(this.selected());
-    if (checked) set.add(value); else set.delete(value);
-    this.selectedChange.emit(Array.from(set));
-  }
+  readonly grouped = computed<CheckGroup[]>(() =>
+    groupCatalog(this.catalog(), this.families()).map(({ group, items }) => ({ label: group, items })),
+  );
 }

@@ -4,44 +4,34 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, input, model } from '@angular/core';
-import { FormsModule } from '@angular/forms';
-import { BadgeComponent, CheckboxComponent } from '@gradient/ui/ui';
+import { ChangeDetectionStrategy, Component, computed, input, model } from '@angular/core';
 import { permissionLabel } from '@shared/text';
 import { PermissionEntry } from '@core/models';
+import { CheckGroupsComponent, type CheckGroup } from '../check-groups/check-groups.component';
 
 @Component({
   selector: 'app-permission-picker',
   standalone: true,
-  imports: [FormsModule, BadgeComponent, CheckboxComponent],
-  template: `
-    <div class="permissions-list">
-      @for (perm of permissions(); track perm.id) {
-        <div class="permission-row">
-          <gr-checkbox
-            [inputId]="'perm-' + perm.id"
-            [label]="label(perm.id)"
-            [binary]="true"
-            [ngModel]="!!selection()[perm.id]"
-            (ngModelChange)="set(perm.id, $event)"
-          />
-          <gr-badge [severity]="perm.mutating ? 'warning' : 'success'">
-            {{ perm.mutating ? 'mutating' : 'read-only' }}
-          </gr-badge>
-        </div>
-      }
-    </div>
-  `,
+  imports: [CheckGroupsComponent],
+  template: `<app-check-groups [groups]="groups()" [selected]="selected()" (selectedChange)="select($event)" />`,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './permission-picker.component.scss',
 })
 export class PermissionPickerComponent {
   permissions = input.required<readonly PermissionEntry[]>();
   selection = model<Record<string, boolean>>({});
 
-  protected readonly label = permissionLabel;
+  protected groups = computed<CheckGroup[]>(() => {
+    const group = (label: string, mutating: boolean): CheckGroup => ({
+      label,
+      items: this.permissions()
+        .filter((p) => p.mutating === mutating)
+        .map((p) => ({ value: p.id, label: permissionLabel(p.id) })),
+    });
+    return [group('Read', false), group('Write', true)].filter((g) => g.items.length > 0);
+  });
+  protected selected = computed(() => Object.keys(this.selection()).filter((id) => this.selection()[id]));
 
-  protected set(id: string, on: boolean): void {
-    this.selection.set({ ...this.selection(), [id]: on });
+  protected select(ids: string[]): void {
+    this.selection.set(Object.fromEntries(this.permissions().map((p) => [p.id, ids.includes(p.id)])));
   }
 }
