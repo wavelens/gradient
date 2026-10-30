@@ -148,7 +148,8 @@ async fn an_outsider_cannot_read_a_private_jobs_outputs() {
 #[tokio::test]
 async fn the_job_page_lists_tokens_without_their_value() {
     let db = with_job(mock_db(), vec![token_row(true)], public_project())
-        .append_query_results([vec![output("a.txt", 3), output("b.txt", 4)]]);
+        .append_query_results([vec![output("a.txt", 3), output("b.txt", 4)]])
+        .append_query_results([Vec::<Row>::new(), Vec::<Row>::new(), Vec::<Row>::new()]);
 
     let res = make_test_server(db.into_connection())
         .get(&format!("/api/v1/exec/{}", job_id()))

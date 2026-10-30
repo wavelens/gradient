@@ -99,11 +99,17 @@ fn with_job(db: MockDatabase, status: ExecJobStatus) -> MockDatabase {
         .append_query_results([vec![task()]])
 }
 
+fn without_worker_names(db: MockDatabase) -> MockDatabase {
+    let empty = Vec::<BTreeMap<String, sea_orm::Value>>::new;
+    db.append_query_results([empty(), empty(), empty()])
+}
+
 #[tokio::test]
 async fn an_exec_job_shows_its_wait_reason_and_attempts() {
     let db = with_job(mock_db(), ExecJobStatus::Queued)
         .append_query_results([vec![public_project()]])
         .append_query_results([Vec::<exec_job_output::Model>::new()]);
+    let db = without_worker_names(db);
 
     let res = make_test_server(db.into_connection())
         .get(&format!("/api/v1/exec/{}", job_id()))
@@ -129,6 +135,7 @@ async fn a_started_exec_job_names_the_worker_of_its_attempt() {
     let db = with_job(mock_db(), ExecJobStatus::Running)
         .append_query_results([vec![public_project()]])
         .append_query_results([Vec::<exec_job_output::Model>::new()]);
+    let db = without_worker_names(db);
 
     let res = make_test_server(db.into_connection())
         .get(&format!("/api/v1/exec/{}", job_id()))
@@ -249,7 +256,9 @@ fn with_two_nodes(db: MockDatabase) -> MockDatabase {
 
 #[tokio::test]
 async fn a_two_node_job_lists_both_nodes() {
-    let db = with_two_nodes(mock_db()).append_query_results([Vec::<exec_job_output::Model>::new()]);
+    let db = without_worker_names(
+        with_two_nodes(mock_db()).append_query_results([Vec::<exec_job_output::Model>::new()]),
+    );
 
     let res = make_test_server(db.into_connection())
         .get(&format!("/api/v1/exec/{}", node_id(0)))
@@ -271,7 +280,9 @@ async fn a_two_node_job_lists_both_nodes() {
 
 #[tokio::test]
 async fn a_node_row_id_answers_the_same_job() {
-    let db = with_two_nodes(mock_db()).append_query_results([Vec::<exec_job_output::Model>::new()]);
+    let db = without_worker_names(
+        with_two_nodes(mock_db()).append_query_results([Vec::<exec_job_output::Model>::new()]),
+    );
 
     let res = make_test_server(db.into_connection())
         .get(&format!("/api/v1/exec/{}", node_id(1)))
