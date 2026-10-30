@@ -12,7 +12,7 @@ use rusqlite::Connection;
 /// Bump this whenever an exported table's shape or scope changes. `report-inspector` is pinning the
 /// one version it reads and refusing other files. Its derivation is reading both constants and
 /// failing evaluation when they disagree.
-pub const SCHEMA_VERSION: i64 = 21;
+pub const SCHEMA_VERSION: i64 = 22;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReportOptions {
@@ -20,6 +20,7 @@ pub struct ReportOptions {
     pub anonymize_packages: bool,
     pub include_logs: bool,
     pub include_instance: bool,
+    pub include_exec: bool,
 }
 
 pub struct ManifestRow {
@@ -47,7 +48,8 @@ pub fn open_report(path: &Path) -> Result<Connection> {
             anonymize_identities INTEGER NOT NULL,
             anonymize_packages INTEGER NOT NULL,
             include_logs INTEGER NOT NULL,
-            include_instance INTEGER NOT NULL
+            include_instance INTEGER NOT NULL,
+            include_exec INTEGER NOT NULL
         );
         CREATE TABLE report_manifest (
             "table" TEXT NOT NULL PRIMARY KEY,
@@ -65,7 +67,7 @@ pub fn open_report(path: &Path) -> Result<Connection> {
 
 pub fn write_meta(conn: &Connection, evaluation: &str, opts: &ReportOptions) -> Result<()> {
     conn.execute(
-        "INSERT INTO report_meta VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO report_meta VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         rusqlite::params![
             SCHEMA_VERSION,
             env!("CARGO_PKG_VERSION"),
@@ -75,6 +77,7 @@ pub fn write_meta(conn: &Connection, evaluation: &str, opts: &ReportOptions) -> 
             opts.anonymize_packages as i64,
             opts.include_logs as i64,
             opts.include_instance as i64,
+            opts.include_exec as i64,
         ],
     )
     .context("write report_meta")?;
@@ -110,6 +113,7 @@ mod tests {
             anonymize_packages: false,
             include_logs: true,
             include_instance: true,
+            include_exec: true,
         }
     }
 

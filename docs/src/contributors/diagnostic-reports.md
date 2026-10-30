@@ -31,14 +31,18 @@ flowchart LR
 | `anonymize_packages` | `false` |
 | `include_logs` | `true` |
 | `include_instance` | `true`, requiring `manageWorkers` |
+| `include_exec` | `false` |
 
-All four values get sent explicitly by the dialog on every call.
+Dialog calls always carry every value explicitly.
 
 ## Never Exported
 
 - No export contains API keys, sessions, device-authorization records, worker token hashes, upstream cache keys, password hashes or Git host credentials. These fields stay absent from the output rather than redacted.
 - The extractor names every exported column. A secret column added to a table later cannot appear in exports, because the extractor never picks it up.
 - The `cached_path_signature` export holds only a flag that a signature exists. The signature value itself cannot appear.
+- Job specs in the `exec_job` export come without `env` and `args`.
+- Only the payload size of an exec phase is part of `exec_job_phase`.
+- Tokens for exec jobs stay out entirely.
 
 ## Scope
 
@@ -47,6 +51,8 @@ The `report_manifest` table records, for each table, how many rows existed and h
 | Scope | Tables |
 |---|---|
 | This evaluation only | The evaluation's own rows in `dispatched_job` and `dispatched_job_phase` |
+| Cluster jobs of this evaluation | `cluster_job`, `cluster_member` and `cluster_attempt` for every cluster job holding the evaluation, a shared build or an exec job. Members from other evaluations are part of the export |
+| This evaluation's exec jobs, with `include_exec` | `exec_job`, `exec_job_attempt`, `exec_job_phase`, `exec_job_continuation`, `exec_job_output`, `exec_job_pull_request` |
 | Shared builds | `build_attempt`, `phase_event`, `derivation`, `derivation_build`, `derivation_output`, `derivation_dependency`. Rows created for other evaluations of the same derivation, including older attempts |
 | Whole instance | `worker_registration`, `team_worker`, `upstream_metric` |
 | This project | `team_project` |

@@ -681,6 +681,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     include_packages: true,
     include_logs: false,
     include_instance: true,
+    include_exec: false,
   });
 
   // The instance section needs ManageWorkers, which the task access payload
