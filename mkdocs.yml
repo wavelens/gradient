@@ -67,8 +67,6 @@ nav:
       - Pull Deployment: guides/pull-deployment.md
       - Notify with Actions: guides/actions.md
       - Update Flake Inputs: guides/flake-updates.md
-      - Run Exec Jobs: guides/exec-jobs.md
-      - Use Exec Job Results: guides/exec-job-results.md
       - Set Up Single Sign-On: guides/sso.md
       - Manage Gradient with Nix: guides/manage-with-nix.md
       - Connect an AI Assistant: guides/mcp.md
@@ -79,6 +77,18 @@ nav:
       - Export an SBOM: guides/sbom.md
       - Use Dynamic Derivations: guides/dynamic-derivations.md
       - Report a Bug: guides/diagnostic-report.md
+  - Exec:
+      - exec/index.md
+      - Turn On Exec Jobs: exec/enable.md
+      - Set Up an Exec Worker: exec/worker.md
+      - Declare an Exec App: exec/apps.md
+      - Pass Secrets: exec/secrets.md
+      - Open a Terminal: exec/terminals.md
+      - Boot a Custom Image: exec/custom-images.md
+      - Spread a Job over Workers: exec/multi-node.md
+      - Report Phases and Upload Outputs: exec/phases-and-outputs.md
+      - Open Pull Requests: exec/pull-requests.md
+      - Chain Evaluations: exec/chain-evaluations.md
   - Using the UI:
       - Dashboard: ui/dashboard.md
       - Job Board: ui/job-board.md

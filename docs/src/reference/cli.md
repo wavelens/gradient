@@ -108,7 +108,7 @@ gradient login https://gradient.example.com
 | `gradient pr open [PATH]...` | `--title <TITLE>`, `--body <FILE>`, `--branch <NAME>`, `--base <REF>` | Open or update a pull request from the working tree changes of the listed paths, all paths by default |
 
 - Start commit: `GRADIENT_COMMIT` inside an exec job, else the merge base of `HEAD` and `origin/<base>`.
-- The pull request can use the integration of the selected task's `open_pr` action, see [Use Exec Job Results](../guides/exec-job-results.md#4-open-pull-requests).
+- The pull request can use the integration of the selected task's `open_pr` action, see [Open Pull Requests](../exec/pull-requests.md).
 
 ## Caches
 

@@ -15,7 +15,7 @@ Workers declare their capabilities at the handshake. Capabilities cover the jobs
 |---|---|---|
 | `network` | on | Internet access. Needed to clone the repository, download missing inputs, substitute from upstream caches and run fixed-output builds |
 | `secrets` | on | The server can send the project SSH key and exec job secrets. Needed for an SSH repository URL and for exec secrets from the server |
-| `exec` | off | Start [exec jobs](../guides/exec-jobs.md) on the worker |
+| `exec` | off | Start [exec jobs](../exec/index.md) on the worker |
 | `eval` | on | Walk the flake and report derivations |
 | `build` | on | Build derivations and upload the outputs |
 
@@ -66,7 +66,7 @@ A worker ID can point to a team worker or to a set of project registrations. Nev
 
 ## Exec Secrets
 
-Exec workers decrypt their own sops files. [Exec jobs](../guides/exec-jobs.md#secrets) fetch the values by name. The server can't see them.
+Exec workers decrypt their own sops files. [Exec jobs](../exec/secrets.md) fetch the values by name. The server can't see them.
 
 ```nix
 # configuration.nix
