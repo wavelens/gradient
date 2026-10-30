@@ -12,7 +12,6 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
-import { ProjectSecretsService } from '@core/services/project-secrets.service';
 import {
   ButtonComponent,
   CheckboxComponent,
@@ -30,7 +29,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
-import { AccessState, ProjectResponse, SopsRecipientResponse } from '@core/models';
+import { AccessState, ProjectResponse } from '@core/models';
 
 @Component({
   selector: 'app-project-settings',
@@ -71,7 +70,6 @@ export class ProjectSettingsComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   private projectAccess = inject(ProjectAccessService);
   private crumbs = inject(BreadcrumbsService);
-  private secretsService = inject(ProjectSecretsService);
   protected config = inject(ConfigService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
@@ -84,7 +82,6 @@ export class ProjectSettingsComponent implements OnInit {
 
   project = signal<ProjectResponse | null>(null);
   sshKey = signal<string>('');
-  sopsRecipient = signal<SopsRecipientResponse | null>(null);
 
   showDeleteDialog = signal(false);
   showRegenerateKeyDialog = signal(false);
@@ -107,15 +104,6 @@ export class ProjectSettingsComponent implements OnInit {
     this.projectAccess.forProject(this.projectName).then((s) => this.access.set(s));
     this.loadProject();
     this.loadSSHKey();
-    this.loadSopsRecipient();
-  }
-
-  loadSopsRecipient(): void {
-    if (!this.config.execEnabled) return;
-    this.secretsService.sopsRecipient(this.projectName).subscribe({
-      next: (recipient) => this.sopsRecipient.set(recipient),
-      error: () => this.sopsRecipient.set(null),
-    });
   }
 
   loadProject(): void {
@@ -216,7 +204,6 @@ export class ProjectSettingsComponent implements OnInit {
       next: (key) => {
         this.sshKey.set(key);
         this.generatingSSH.set(false);
-        this.loadSopsRecipient();
       },
       error: (error) => {
         console.error('Failed to generate SSH key:', error);

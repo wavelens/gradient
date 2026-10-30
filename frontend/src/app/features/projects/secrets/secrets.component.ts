@@ -10,10 +10,12 @@ import { ActivatedRoute } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { ProjectSecretsService } from '@core/services/project-secrets.service';
-import { AccessState, ProjectSecretSummary } from '@core/models';
+import { AccessState, ProjectSecretSummary, SopsRecipientResponse } from '@core/models';
+import { docsUrl } from '@core/docs';
 import {
   BadgeComponent,
   ButtonComponent,
+  CopyFieldComponent,
   DialogComponent,
   EmptyStateComponent,
   FormFieldComponent,
@@ -23,8 +25,10 @@ import {
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
+  SettingsSectionComponent,
 } from '@gradient/ui/ui';
 import { WritableDirective } from '@shared/access';
+import { LabelHelpComponent } from '@shared/ui';
 import { relativeTime } from '@shared/text';
 
 const SECRET_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -36,15 +40,18 @@ const SECRET_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
     FormsModule,
     BadgeComponent,
     ButtonComponent,
+    CopyFieldComponent,
     DialogComponent,
     EmptyStateComponent,
     FormFieldComponent,
     InputDirective,
+    LabelHelpComponent,
     LoadingSpinnerComponent,
     MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
+    SettingsSectionComponent,
     WritableDirective,
   ],
   templateUrl: './secrets.component.html',
@@ -58,11 +65,13 @@ export class SecretsComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
 
   protected readonly relativeTime = relativeTime;
+  protected readonly docsUrl = docsUrl('exec/secrets/');
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
   loading = signal(true);
   secrets = signal<ProjectSecretSummary[]>([]);
   pageError = signal<string | null>(null);
+  sopsRecipient = signal<SopsRecipientResponse | null>(null);
 
   formOpen = signal(false);
   replacing = signal(false);
@@ -83,6 +92,14 @@ export class SecretsComponent implements OnInit {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.projectAccess.forProject(this.projectName).then((state) => this.access.set(state));
     this.loadSecrets();
+    this.loadSopsRecipient();
+  }
+
+  loadSopsRecipient(): void {
+    this.secretsService.sopsRecipient(this.projectName).subscribe({
+      next: (recipient) => this.sopsRecipient.set(recipient),
+      error: () => this.sopsRecipient.set(null),
+    });
   }
 
   loadSecrets(): void {
