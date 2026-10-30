@@ -42,8 +42,8 @@
 }
 
 .pkg {
-  // Each row is its own grid: only fixed-width columns line up across rows.
-  grid-template-columns: 24px minmax(0, 400px) 8rem minmax(0, 360px) 9rem 1fr auto;
+  // Each row is its own grid, so no track may size by content or the columns drift between rows.
+  grid-template-columns: 24px minmax(0, 4fr) 8rem minmax(0, 4fr) 9rem minmax(0, 1fr) 2.5rem;
   animation: pkg-in $transition-base ease backwards;
   content-visibility: auto;
   contain-intrinsic-size: auto 42px;
