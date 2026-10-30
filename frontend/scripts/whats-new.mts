@@ -36,9 +36,9 @@ function toHtml(markdown: string): string {
     if (line.startsWith('<!--')) continue;
     if (line === '') {
       flush();
-    } else if (line.startsWith('## ')) {
+    } else if (/^#{1,6} /.test(line)) {
       flush();
-      html.push(`<h4>${inline(line.slice(3))}</h4>`);
+      html.push(`<h4>${inline(line.replace(/^#+ /, ''))}</h4>`);
     } else if (line.startsWith('- ')) {
       if (paragraph.length) flush();
       list.push(inline(line.slice(2)));
