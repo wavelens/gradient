@@ -559,7 +559,7 @@
     "env": "GRADIENT_WORKER_EXEC_MAX_PRE_WARM",
     "type": "u32",
     "description": "Most guests kept warm for upcoming exec jobs the server reports. The worker keeps the\nlarger of {option}`services.gradient.worker.exec.preWarm` and the reported count, capped\nat this value. `0` ignores the server count.",
-    "default": "0",
+    "default": "3",
     "values": []
   },
   {

@@ -354,7 +354,7 @@ pub struct ExecArgs {
     /// Most guests kept warm for upcoming exec jobs the server reports. The worker keeps the
     /// larger of {option}`services.gradient.worker.exec.preWarm` and the reported count, capped
     /// at this value. `0` ignores the server count.
-    #[arg(default_value_t = 0)]
+    #[arg(default_value_t = 3)]
     pub max_pre_warm: u32,
 
     /// CPUs the running and warm guests of this worker share. An exec job waits until its
