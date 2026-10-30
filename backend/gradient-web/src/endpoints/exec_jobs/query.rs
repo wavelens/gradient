@@ -26,6 +26,8 @@ use std::sync::Arc;
 
 use super::ExecJobAccessContext;
 use super::terminal::{ssh_commands, ssh_host};
+use super::timeline::worker_timeline;
+use crate::endpoints::board::JobPhaseView;
 use crate::endpoints::board_subjects::WorkerNames;
 use crate::endpoints::evals::EvalAccessContext;
 use crate::metrics_scope::MetricsScope;
@@ -102,6 +104,7 @@ pub struct ExecJobResponse {
     pub attempts: Vec<ExecJobAttemptView>,
     pub node_jobs: Vec<ExecJobNode>,
     pub phases: Vec<ExecJobPhaseView>,
+    pub timeline: Vec<JobPhaseView>,
     pub tokens: Vec<ExecJobTokenView>,
     pub started_evaluations: Vec<StartedEvaluationView>,
     pub outputs_size: i64,
@@ -221,6 +224,7 @@ fn attempt_workers(detail: &ExecJobDetail) -> impl Iterator<Item = String> + '_ 
 
 fn response(
     ctx: ExecJobAccessContext,
+    timeline: Vec<JobPhaseView>,
     outputs_size: i64,
     names: &WorkerNames,
     config: &RuntimeConfig,
@@ -279,6 +283,7 @@ fn response(
         attempts: attempts.iter().map(attempt_view).collect(),
         node_jobs: nodes.iter().map(|node| node_view(node, names)).collect(),
         phases,
+        timeline,
         tokens: tokens.into_iter().map(token_view).collect(),
         started_evaluations: started_evaluations
             .into_iter()
@@ -316,7 +321,7 @@ fn summary(row: ExecJobRow) -> ExecJobSummary {
     operation_id = "getExecJob",
     tag = "exec-jobs",
     summary = "Get exec job",
-    description = "Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start and `worker_name` its display name when the caller can see the worker. `dispatched_job` is the job board assignment of the latest attempt. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the job is `running`, the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` tells whether the guest stays up after the program exits, `program_exit_code` holds the exit code of a program whose guest is kept running.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start and `worker_name` its display name when the caller can see the worker. `dispatched_job` is the job board assignment of the latest attempt. `timeline` holds the worker timeline of the latest attempt, each reported phase as a span lasting until the next phase or the end of the attempt. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the job is `running`, the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` tells whether the guest stays up after the program exits, `program_exit_code` holds the exit code of a program whose guest is kept running.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Exec job", body = ExecJobResponse), WebError)
 )]
@@ -334,7 +339,17 @@ pub async fn get_exec_job(
         .sum();
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
     let names = WorkerNames::load(&state.web_db, &scope, attempt_workers(&ctx.detail)).await?;
-    Ok(ok_json(response(ctx, outputs_size, &names, &state.config)))
+    let timeline = match ctx.detail.attempts.last() {
+        Some(attempt) => worker_timeline(&state.web_db, attempt, &ctx.detail.phases).await,
+        None => Vec::new(),
+    };
+    Ok(ok_json(response(
+        ctx,
+        timeline,
+        outputs_size,
+        &names,
+        &state.config,
+    )))
 }
 
 #[utoipa::path(

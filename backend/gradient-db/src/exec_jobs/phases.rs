@@ -9,7 +9,11 @@ use gradient_types::{
     CExecJobAttempt, CExecJobPhase, EExecJob, EExecJobAttempt, EExecJobPhase, ExecJobAttemptId,
     ExecJobId, ExecJobPhaseId, MExecJob, MExecJobPhase,
 };
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+};
+
+use super::reads::ExecJobPhaseRow;
 
 pub async fn record<C: ConnectionTrait>(
     db: &C,
@@ -37,6 +41,23 @@ pub async fn record<C: ConnectionTrait>(
     )
     .await?;
     EExecJob::find_by_id(open.exec_job).one(db).await
+}
+
+pub async fn of_attempt<C: ConnectionTrait>(
+    db: &C,
+    attempt: ExecJobAttemptId,
+) -> Result<Vec<ExecJobPhaseRow>, DbErr> {
+    EExecJobPhase::find()
+        .select_only()
+        .column(CExecJobPhase::Attempt)
+        .column(CExecJobPhase::Name)
+        .column(CExecJobPhase::CreatedAt)
+        .filter(CExecJobPhase::Attempt.eq(attempt))
+        .order_by_asc(CExecJobPhase::CreatedAt)
+        .order_by_asc(CExecJobPhase::Id)
+        .into_model::<ExecJobPhaseRow>()
+        .all(db)
+        .await
 }
 
 pub async fn latest<C: ConnectionTrait>(db: &C, job: ExecJobId) -> Result<Option<Phase>, DbErr> {

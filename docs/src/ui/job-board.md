@@ -63,7 +63,7 @@ Open a job from **Live Jobs** to see five sections.
 - The server's marks: **Queued**, **Ready**, **Assigned**, **Finished**. Exec jobs add **Started**, the start of the attempt on the worker.
 - **Worker tail**: for finished jobs, the time the worker spent after its last phase.
 - **Transit**: for finished jobs, the remaining time between **Assigned** and **Finished**, consumed by the network and by queues on both ends.
-- The worker timeline: nested phases (fetch, evaluate, build, compress, upload wait, NAR push) with duration, share and bytes moved.
+- The worker timeline: nested phases (fetch, evaluate, build, compress, upload wait, NAR push) with duration, share and bytes moved. Exec jobs add their [reported phases](../exec/phases-and-outputs.md).
 - The score breakdown: each scoring rule's contribution to the winning worker.
 
 A slow job's timeline shows where the time went. The score explains why the server picked that worker.

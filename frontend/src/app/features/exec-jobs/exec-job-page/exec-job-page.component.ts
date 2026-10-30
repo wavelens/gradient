@@ -23,7 +23,8 @@ import {
   MessageBannerComponent,
   SelectButtonComponent,
 } from '@gradient/ui/ui';
-import { StatusBadgeComponent, StatusIconComponent } from '@shared/ui';
+import { LabelHelpComponent, StatusBadgeComponent, StatusIconComponent } from '@shared/ui';
+import { JobTimelineComponent } from '@features/board/job-detail/job-timeline.component';
 import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/terminal';
 import { LogViewerComponent, parseLineFragment, splitLogLines } from '@shared/log';
 import { WritableDirective, AccessService } from '@shared/access';
@@ -39,7 +40,7 @@ import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.co
 
 const POLL_MS = 2000;
 
-type JobView = 'log' | 'terminal';
+type JobView = 'log' | 'timeline' | 'terminal';
 type TerminalMode = 'console' | 'attach' | 'shell';
 
 const TERMINAL_PATHS: Record<TerminalMode, (node: number) => string> = {
@@ -54,6 +55,7 @@ function nodeFromQuery(value: string | null | undefined): number {
 }
 
 const LOG_VIEW = { label: 'Log', value: 'log', icon: 'article' } as const;
+const TIMELINE_VIEW = { label: 'Timeline', value: 'timeline', icon: 'schedule' } as const;
 const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' } as const;
 
 @Component({
@@ -63,7 +65,7 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
     RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent, DialogComponent,
     EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MenuComponent, MessageBannerComponent,
     SelectButtonComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
-    LogViewerComponent,
+    LogViewerComponent, JobTimelineComponent, LabelHelpComponent,
   ],
   templateUrl: './exec-job-page.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -113,7 +115,7 @@ export class ExecJobPageComponent implements OnInit {
     const job = this.job();
     return job ? hasExecTerminal(job.status) : false;
   });
-  views = computed(() => this.terminalReachable() ? [LOG_VIEW, TERMINAL_VIEW] : [LOG_VIEW]);
+  views = computed(() => [LOG_VIEW, TIMELINE_VIEW, ...(this.terminalReachable() ? [TERMINAL_VIEW] : [])]);
   terminalModes = computed(() => {
     const job = this.job();
     const modes: { label: string; value: TerminalMode }[] = [{ label: 'Console', value: 'console' }];

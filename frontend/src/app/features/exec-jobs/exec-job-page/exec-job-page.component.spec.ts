@@ -65,6 +65,7 @@ function job(status: ExecJobStatus, sshCommand: string | null = SSH): ExecJobRes
     worker: 'w1',
     attempts: [{ number: 1, worker: 'w1', started_at: '2026-01-01T00:00:01' }],
     phases: [{ name: 'epoch-3', attempt: 1, created_at: '2026-01-01T00:00:02' }],
+    timeline: [{ seq: 0, parent_seq: null, phase: 'epoch-3', start_ms: 1000, end_ms: 4000, paths: 0, bytes: 0 }],
     ssh_command: sshCommand,
     forward_commands: sshCommand ? [FORWARD] : [],
     tokens: [{ attempt: 1, created_at: '2026-01-01T00:00:01', expires_at: '2026-01-01T02:00:01', revoked: true }],
@@ -249,6 +250,17 @@ describe('ExecJobPageComponent', () => {
     const worker = (fixture.nativeElement as HTMLElement).querySelector('.info-bar .worker');
     expect(worker?.textContent?.trim()).toBe('gpu-box');
     expect(worker?.getAttribute('title')).toBe('w1');
+  });
+
+  it('shows the worker timeline with the reported phases from the sidebar', () => {
+    const { fixture } = setup('completed');
+    const root = fixture.nativeElement as HTMLElement;
+    Array.from(root.querySelectorAll<HTMLElement>('.log-sidebar .sidebar-item'))
+      .find((item) => item.textContent?.includes('Timeline'))
+      ?.click();
+    fixture.detectChanges();
+    expect(root.querySelector('gr-log-viewer')).toBeNull();
+    expect(root.querySelector('gr-job-timeline .phases')?.textContent).toContain('epoch-3');
   });
 
   it('shows the guest size of the job', () => {

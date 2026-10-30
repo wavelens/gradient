@@ -56,6 +56,7 @@ gradient-upload model.bin model/weights.bin
 ## Verify Deployment
 
 - Job logs show the phase boundaries.
+- Phases appear in the **Timeline** of the job page, each one lasting until the next.
 - Outputs appear on the job page with their size.
 
 ## Next Steps

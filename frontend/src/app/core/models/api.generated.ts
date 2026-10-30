@@ -1014,6 +1014,7 @@ export interface ExecJobResponse {
   attempts: ExecJobAttemptView[];
   node_jobs: ExecJobNode[];
   phases: ExecJobPhaseView[];
+  timeline: JobPhaseView[];
   tokens: ExecJobTokenView[];
   started_evaluations: StartedEvaluationView[];
   outputs_size: number;

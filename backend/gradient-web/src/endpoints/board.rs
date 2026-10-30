@@ -9,6 +9,7 @@ use super::board_subjects::{
     board_projects, job_evaluation,
 };
 use super::exec_jobs::query::{ExecJobAttemptView, attempt_view};
+use super::exec_jobs::timeline::with_reported_phases;
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult, require_superuser};
@@ -322,7 +323,7 @@ impl From<build_attempt::Model> for AttemptSummary {
     }
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct JobPhaseView {
     pub seq: i32,
     pub parent_seq: Option<i32>,
@@ -347,7 +348,10 @@ impl From<dispatched_job_phase::Model> for JobPhaseView {
     }
 }
 
-async fn job_phases<C: ConnectionTrait>(db: &C, job: DispatchedJobId) -> Vec<JobPhaseView> {
+pub(crate) async fn job_phases<C: ConnectionTrait>(
+    db: &C,
+    job: DispatchedJobId,
+) -> Vec<JobPhaseView> {
     gradient_db::worker_registrations::phases_of_dispatched_job(db, job)
         .await
         .unwrap_or_default()
@@ -516,7 +520,7 @@ pub struct DispatchedJobDetail {
     operation_id = "getBoardJob",
     tag = "board",
     summary = "Assigned job detail",
-    description = "Full assignment record incl. per-rule scoring breakdown, job/worker/instance contexts. Runner-up candidates are superuser-only.",
+    description = "Full assignment record incl. per-rule scoring breakdown, job/worker/instance contexts. The `phases` of an exec job also hold its reported phases as spans. Runner-up candidates are superuser-only.",
     params(("id" = Uuid, Path)),
     responses((status = OK, description = "Job detail", body = DispatchedJobDetail), WebError)
 )]
@@ -626,15 +630,30 @@ pub async fn get_dispatched_job(
         None => None,
     };
     let derivations = job_derivations(&state.web_db, j.evaluation_id, &j.job_context).await;
-    let phases = job_phases(&state.web_db, j.id).await;
+    let worker_spans = job_phases(&state.web_db, j.id).await;
+    let gap = report_gap(
+        j.worker_elapsed_ms,
+        &worker_spans,
+        j.dispatched_at,
+        j.finished_at,
+    );
     let exec_job = exec_job_of(&state.web_db, subject_of(&j)).await?;
-    let exec_attempt = match exec_job {
-        Some(_) => gradient_db::exec_jobs::labels::attempt_of_assignment(&state.web_db, j.id)
-            .await?
-            .as_ref()
-            .map(attempt_view),
+    let attempt = match exec_job {
+        Some(_) => {
+            gradient_db::exec_jobs::labels::attempt_of_assignment(&state.web_db, j.id).await?
+        }
         None => None,
     };
+    let phases = match &attempt {
+        Some(attempt) => {
+            let reported = gradient_db::exec_jobs::phases::of_attempt(&state.web_db, attempt.id)
+                .await
+                .unwrap_or_default();
+            with_reported_phases(worker_spans, attempt, &reported)
+        }
+        None => worker_spans,
+    };
+    let exec_attempt = attempt.as_ref().map(attempt_view);
 
     let pname = match shared_build_id {
         Some(aid) => {
@@ -687,7 +706,7 @@ pub async fn get_dispatched_job(
             DispatchedJobOutcome::Failed => "failed".to_string(),
             DispatchedJobOutcome::Abandoned => "abandoned".to_string(),
         }),
-        report_gap: report_gap(j.worker_elapsed_ms, &phases, j.dispatched_at, j.finished_at),
+        report_gap: gap,
         phases,
         build_id,
         derivation_build_id: shared_build_id.map(Into::into),

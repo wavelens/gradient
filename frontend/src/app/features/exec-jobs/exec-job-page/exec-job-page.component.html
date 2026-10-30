@@ -206,6 +206,14 @@
               }
             </div>
           }
+        } @else if (view() === 'timeline') {
+          <div class="log-header">
+            <span class="log-header-title">Worker timeline</span>
+            <gr-label-help doc="ui/job-board/#job-inspection" title="About the worker timeline" />
+          </div>
+          <div class="timeline">
+            <gr-job-timeline [phases]="job.timeline" />
+          </div>
         } @else {
           <gr-log-viewer [lines]="logLines()" [marker]="phaseMarker" [initialLine]="initialLine">
             <div class="log-header">
