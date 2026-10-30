@@ -53,11 +53,26 @@ flowchart LR
 - `ExecInventory.allow` can restrict every field. Requirements outside `allow` make the worker unfit, without a downgrade.
 - `ExecSpec::limits_on` can clamp `timeout`, `maxSilent` and `retries` to the caps of `allow` at dispatch.
 - Placed jobs hold their devices and guest size until the end of the attempt, see [Guest Sizes](#guest-sizes). Held parts are never free, even before the next `WorkerMetrics`.
-- Exec jobs skip the RAM fit rule. Queue age orders the matching workers.
+- Exec jobs skip the build scoring rules, see [Scoring](#scoring).
 - Exec jobs count as `RamNeed::Predicted(memory_mb)` for builds placed on the same worker.
 - Only workers without draining and with access to the job's project count, for placement and for wait reasons.
 - `WaitingReason::ExecWorkers` can name the unmet labels, devices, mounts, guest size, node count or custom image.
 - `ExecUnmet` can hold only the architecture when zero exec workers of the job's architecture connect.
+
+### Scoring
+
+`gradient_pool::score::exec` can rank the exec jobs for a worker asking for one. The terms add up, and the highest total wins.
+
+| Term | Points |
+|---|---|
+| `ExecWarmGuest` | `30` for a worker with a usable warm guest |
+| `ExecProgramCached` | `300` minus the download seconds of the missing program closure at 100 MB/s, `0` without a measurement |
+| `ExecDeviceFit` | `600` times the share of the idle worker devices in the request, `600` on a worker without idle devices |
+| `ExecWaitTime` | One point per second in the queue, at most `3600` |
+
+- Usable warm guests need a job without a custom image and the same `cpus` and `memory_mb` as `ExecInventory.warm_guest_size`.
+- `ExecWarmGuestElsewhere` can veto a worker without a usable warm guest. The veto needs another worker with free capacity and a usable warm guest for the job.
+- Vetoes end after 2 dispatch rounds, and the cold worker can start the job then.
 
 ### Multi-Node Jobs
 

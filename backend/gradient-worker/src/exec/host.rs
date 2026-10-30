@@ -106,6 +106,7 @@ impl ExecHost {
             &self.config,
             &self.worker_id,
             self.pool.warm_count(),
+            self.pool.warm_guest_size(),
             self.secrets.names(),
             self.pool.capacity(),
         )

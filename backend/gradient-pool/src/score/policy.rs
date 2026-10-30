@@ -162,6 +162,7 @@ pub fn rule_catalog() -> Vec<(&'static str, &'static str)> {
     let mut catalog: Vec<(&'static str, &'static str)> = resource_aware_table()
         .iter()
         .map(|s| (s.rule.name(), s.rule.description()))
+        .chain(crate::score::exec::CATALOG)
         .collect();
     catalog.sort_by_key(|(name, _)| *name);
     catalog.dedup_by_key(|(name, _)| *name);
@@ -217,8 +218,8 @@ mod tests {
 
         assert_eq!(
             catalog.len(),
-            rules.len(),
-            "catalog must list every rule once"
+            rules.len() + crate::score::exec::CATALOG.len(),
+            "catalog must list every rule and exec term once"
         );
         for (name, description) in &catalog {
             assert!(!name.is_empty(), "rule name must not be empty");
@@ -303,11 +304,11 @@ mod tests {
         let with_cores = |cpu_core_score| WorkerContext {
             architectures: &archs,
             system_features: &feats,
-            fetches_flakes: false,
             metrics: Some(WorkerMetricsView {
                 cpu_core_score,
                 ..Default::default()
             }),
+            ..Default::default()
         };
         let inst = InstanceContext {
             cpu_core_score_mean: Some(4_000.0),
@@ -349,13 +350,13 @@ mod tests {
         let with_cores = |cpu_core_score, ram_free_mb| WorkerContext {
             architectures: &archs,
             system_features: &feats,
-            fetches_flakes: false,
             metrics: Some(WorkerMetricsView {
                 cpu_core_score,
                 ram_total_mb: 128_000,
                 ram_free_mb: Some(ram_free_mb),
                 ..Default::default()
             }),
+            ..Default::default()
         };
         let inst = InstanceContext {
             cpu_core_score_mean: Some(10_000.0),

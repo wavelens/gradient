@@ -139,7 +139,7 @@ impl GuestPool {
     pub async fn take(self: &Arc<Self>, job_id: String, size: GuestSize) -> Taken {
         let image = self.worker_image()?;
         let size = job_size(size, &image);
-        let warm = lock(&self.slots).take(|warm| serves(warm.hold.size(), size));
+        let warm = lock(&self.slots).take(|warm| warm.hold.size().warm_guest_takes(size));
         let taken = match warm {
             Some(warm) => self.claim_warm(warm, size).await,
             None => self.cold_boot(image.sized(&size), size).await,
@@ -299,6 +299,14 @@ impl GuestPool {
         count(lock(&self.slots).warm.len())
     }
 
+    pub fn warm_guest_size(&self) -> GuestSize {
+        lock(&self.slots)
+            .warm
+            .first()
+            .map(|warm| warm.hold.size())
+            .unwrap_or_default()
+    }
+
     pub async fn stop_warm(&self) {
         self.set_draining();
         let warm = std::mem::take(&mut lock(&self.slots).warm);
@@ -436,7 +444,7 @@ impl GuestPool {
     async fn keep_or_stop(&self, guest: Guest, mut hold: BudgetHold) {
         let fits_warm = self
             .warm_size()
-            .is_ok_and(|size| serves(hold.size(), size) && hold.resize(size));
+            .is_ok_and(|size| hold.size().warm_guest_takes(size) && hold.resize(size));
         let warm = WarmGuest { guest, hold };
         if !fits_warm {
             return self.teardown_warm(warm).await;
@@ -493,10 +501,6 @@ fn job_size(size: GuestSize, image: &GuestImage) -> GuestSize {
         true => image.size(),
         false => size,
     }
-}
-
-fn serves(warm: GuestSize, job: GuestSize) -> bool {
-    warm.cpus == job.cpus && warm.memory_mb == job.memory_mb
 }
 
 pub fn warm_boot_holds(budget: &GuestBudget, size: GuestSize, wanted: u32) -> Vec<BudgetHold> {
@@ -630,9 +634,12 @@ mod tests {
         let warm = size(2, 500, 0);
         let mut slots = Slots::<GuestSize>::new();
         assert_eq!(slots.offer(warm, 1, false), None);
-        assert_eq!(slots.take(|warm| serves(*warm, size(4, 768, 256))), None);
         assert_eq!(
-            slots.take(|warm| serves(*warm, size(2, 500, 10_240))),
+            slots.take(|warm| warm.warm_guest_takes(size(4, 768, 256))),
+            None
+        );
+        assert_eq!(
+            slots.take(|warm| warm.warm_guest_takes(size(2, 500, 10_240))),
             Some(warm)
         );
     }

@@ -527,6 +527,23 @@ impl SchedulerCore {
         }
     }
 
+    fn warm_exec_peers(&self, worker: &str, kind: &JobKind) -> Vec<crate::jobs::ExecPeer> {
+        if !matches!(kind, JobKind::Exec) {
+            return Vec::new();
+        }
+
+        self.pool
+            .all_workers()
+            .into_iter()
+            .filter(|peer| peer.id != worker && self.pool.has_capacity(&peer.id, kind))
+            .filter_map(|peer| {
+                let (authorized, caps) = self.auth_and_caps(&peer.id);
+                caps.filter(|caps| caps.exec.as_ref().is_some_and(|exec| exec.warm_guests > 0))
+                    .map(|caps| crate::jobs::ExecPeer { authorized, caps })
+            })
+            .collect()
+    }
+
     fn auth_and_caps(&self, worker: &str) -> (Option<HashSet<ProjectId>>, Option<WorkerCaps>) {
         let authorized = self
             .pool
@@ -597,6 +614,7 @@ impl SchedulerCore {
         let policy = Arc::clone(&self.policy);
         let instance = self.with_live_transfers(instance);
         self.unmeasured_build_ram_mb = instance.unmeasured_build_ram_mb();
+        let exec_peers = self.warm_exec_peers(worker, kind);
         match self.tracker.take_best_of_kind(
             worker,
             authorized.as_ref(),
@@ -604,6 +622,7 @@ impl SchedulerCore {
             kind,
             &*policy,
             &instance,
+            &exec_peers,
         ) {
             Some(assignment) => {
                 self.idle.clear(worker, slot);

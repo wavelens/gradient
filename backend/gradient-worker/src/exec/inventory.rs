@@ -5,7 +5,7 @@
  */
 
 use gradient_vm::DeviceInventory;
-use gradient_wire::types::{DeviceClass, DeviceRequest, ExecInventory, GuestCapacity};
+use gradient_wire::types::{DeviceClass, DeviceRequest, ExecInventory, GuestCapacity, GuestSize};
 
 use crate::config::ExecArgs;
 
@@ -14,6 +14,7 @@ pub fn advertised(
     config: &ExecArgs,
     worker_id: &str,
     warm_guests: u32,
+    warm_guest_size: GuestSize,
     secrets: Vec<String>,
     guest_capacity: GuestCapacity,
 ) -> ExecInventory {
@@ -42,6 +43,7 @@ pub fn advertised(
         defaults: config.defaults(),
         warm_guests,
         guest_capacity,
+        warm_guest_size,
     }
 }
 
@@ -70,10 +72,14 @@ mod tests {
             &config,
             "worker-7",
             1,
+            GuestSize::default_request(),
             Vec::new(),
             GuestCapacity::default(),
         );
         assert_eq!(inventory.labels, ["gpu", "worker-7"]);
-        assert_eq!(inventory.warm_guests, 1);
+        assert_eq!(
+            (inventory.warm_guests, inventory.warm_guest_size),
+            (1, GuestSize::default_request())
+        );
     }
 }
