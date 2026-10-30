@@ -5,6 +5,8 @@
 -->
 
 <gr-page-layout [breadcrumb]="breadcrumb()" title="Actions" subtitle="Side effects triggered by evaluation and build events">
+  <a slot="actions" grButton label="Integrations" icon="account_tree" severity="secondary"
+     [routerLink]="['/project', projectName, 'integrations']"></a>
   <button slot="actions"
       *appWritable="access()"
       grButton

@@ -95,6 +95,12 @@ describe('TaskActionsComponent', () => {
     expect(findByText(fixture.nativeElement, 'test')).toBeNull();
   });
 
+  it('links to the project integrations', () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
+    const link = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).find((a) => a.textContent?.includes('Integrations'));
+    expect(link?.getAttribute('href')).toBe('/project/acme/integrations');
+  });
+
   it('shows but disables write buttons under state-managed access', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     const newBtn = findByText(fixture.nativeElement, 'new action') as HTMLButtonElement | null;
