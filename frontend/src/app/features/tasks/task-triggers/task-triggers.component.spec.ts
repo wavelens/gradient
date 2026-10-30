@@ -71,6 +71,12 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'fire now')).toBeNull();
   });
 
+  it('links to the project integrations even under read-only', () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
+    const link = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).find((a) => a.textContent?.includes('Integrations'));
+    expect(link?.getAttribute('href')).toBe('/project/acme/integrations');
+  });
+
   it('renders reporter trigger using inlined integration display_name (not raw UUID)', () => {
     const reporterTrigger = {
       id: 't2',
