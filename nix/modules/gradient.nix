@@ -681,16 +681,18 @@ in {
 
     services = {
       gradient = lib.mkIf localWorker {
-        state.teams.server = {
-          display_name = "Server";
-          new_projects.workers = true;
-        };
+        state = {
+          teams.server = {
+            display_name = "Server";
+            new_projects.workers = true;
+          };
 
-        state.workers.local = {
-          display_name = "Local Worker";
-          worker_id = localIdentity;
-          token_file = localTokenFile;
-          team = "server";
+          workers.local = {
+            display_name = "Local Worker";
+            worker_id = localIdentity;
+            token_file = localTokenFile;
+            team = "server";
+          };
         };
 
         worker = {

@@ -45,11 +45,13 @@
       ../../modules/gradient.nix
     ];
 
-    networking.hosts = {
-      "127.0.0.1" = [ "gradient.local" ];
-    };
+    networking = {
+      hosts = {
+        "127.0.0.1" = [ "gradient.local" ];
+      };
 
-    networking.firewall.enable = false;
+      firewall.enable = false;
+    };
     documentation.enable = false;
     nix.settings.substituters = lib.mkForce [ ];
     virtualisation.forwardPorts = [

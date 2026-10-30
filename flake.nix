@@ -53,6 +53,7 @@
       cli-static-clippy = self.packages.${system}.gradient-cli-static.clippy;
       store-spec = import ./nix/tests/store-spec/check.nix { inherit pkgs; inherit (pkgs) lib; };
       whats-new = import ./nix/tests/whats-new/check.nix { inherit pkgs; inherit (pkgs) lib; };
+      repeated-keys = import ./nix/tests/repeated-keys/check.nix { inherit pkgs; inherit (pkgs) lib; };
       test-topologies = import ./nix/tests/harness/check.nix { inherit pkgs; inherit (pkgs) lib; };
       evalbench-summarize = import ./nix/tests/bench/evalbench/check.nix { inherit pkgs; };
       evalbench-multinode-report = import ./nix/tests/bench/evalbench-multinode/check.nix { inherit pkgs; };
@@ -148,18 +149,20 @@
       GRADIENT_SENTRY_ENABLE = "false";
     };
   }) // {
-    lib.mkWorkerImage = import ./nix/worker-image.nix { inherit self nixpkgs; };
+    lib = {
+      mkWorkerImage = import ./nix/worker-image.nix { inherit self nixpkgs; };
 
-    lib.tests = {
-      topologies.direct = import ./nix/tests/harness/topologies/direct.nix;
-      contract = import ./nix/tests/harness/contract.nix;
-      scheduler = { system, topology }: import ./nix/tests/gradient/scheduler/mk.nix {
-        inherit self topology;
-        pkgs = pkgsFor system;
-      };
-      e2e = { system, topology }: import ./nix/tests/gradient/e2e/mk.nix {
-        inherit self topology;
-        pkgs = pkgsFor system;
+      tests = {
+        topologies.direct = import ./nix/tests/harness/topologies/direct.nix;
+        contract = import ./nix/tests/harness/contract.nix;
+        scheduler = { system, topology }: import ./nix/tests/gradient/scheduler/mk.nix {
+          inherit self topology;
+          pkgs = pkgsFor system;
+        };
+        e2e = { system, topology }: import ./nix/tests/gradient/e2e/mk.nix {
+          inherit self topology;
+          pkgs = pkgsFor system;
+        };
       };
     };
 

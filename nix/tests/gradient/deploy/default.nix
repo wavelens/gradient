@@ -16,35 +16,41 @@
     };
     nix.settings.substituters = lib.mkForce [ ];
 
-    # The test framework is pinning the label to `test`.
-    # The deploy module's `nixos-system-<host>-<version>` match is rejecting that version.
-    # The override is naming both system closures like a real one.
-    system.nixos.label = lib.mkOverride 10 "25.05.20260907.abcdef1";
+    system = {
+      # The test framework is pinning the label to `test`.
+      # The deploy module's `nixos-system-<host>-<version>` match is rejecting that version.
+      # The override is naming both system closures like a real one.
+      nixos.label = lib.mkOverride 10 "25.05.20260907.abcdef1";
+
+      gradient-deploy = {
+        enable = true;
+        server = "http://127.0.0.1:8090";
+        apiKeyFile = "/etc/gradient-deploy-api-key";
+        task = "wavelens/dotfiles";
+      };
+    };
 
     specialisation.deployed.configuration = {
       environment.etc."gradient-deployed".text = "deployed";
     };
 
-    environment.systemPackages = with pkgs; [ curl jq ];
-    environment.etc."gradient-deploy-api-key".text = "stub-api-key";
+    environment = {
+      systemPackages = with pkgs; [ curl jq ];
+      etc."gradient-deploy-api-key".text = "stub-api-key";
+    };
 
-    systemd.services.gradient-stub-api = {
-      description = "Scripted Gradient API for the deploy test";
-      wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
-        ExecStart = "${pkgs.python3}/bin/python3 ${./stub_api.py} 8090";
-        Restart = "always";
+    systemd.services = {
+      gradient-stub-api = {
+        description = "Scripted Gradient API for the deploy test";
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = {
+          ExecStart = "${pkgs.python3}/bin/python3 ${./stub_api.py} 8090";
+          Restart = "always";
+        };
       };
-    };
 
-    system.gradient-deploy = {
-      enable = true;
-      server = "http://127.0.0.1:8090";
-      apiKeyFile = "/etc/gradient-deploy-api-key";
-      task = "wavelens/dotfiles";
+      gradient-deploy.serviceConfig.Restart = lib.mkForce "no";
     };
-
-    systemd.services.gradient-deploy.serviceConfig.Restart = lib.mkForce "no";
   };
 
   microvmRunner = name: pkgs.runCommand "microvm-runner-${name}" { } ''
@@ -71,32 +77,34 @@
       microvm.hostnames = [ "guest" "second-guest" ];
     };
 
-    systemd.tmpfiles.rules = [
-      "d /nix/var/nix/gcroots/microvm 0755 root root -"
-      "L+ /nix/var/nix/gcroots/microvm/guest - - - - /var/lib/microvms/guest/current"
-      "L+ /nix/var/nix/gcroots/microvm/second-guest - - - - /var/lib/microvms/second-guest/current"
-      "d /var/lib/microvms/guest 0775 root root -"
-      "L+ /var/lib/microvms/guest/current - - - - ${microvmRunners.old}"
-      "L+ /var/lib/microvms/guest/booted - - - - ${microvmRunners.old}"
-      "d /var/lib/microvms/second-guest 0775 root root -"
-      "L+ /var/lib/microvms/second-guest/current - - - - ${microvmRunners.old}"
-      "L+ /var/lib/microvms/second-guest/booted - - - - ${microvmRunners.old}"
-    ];
+    systemd = {
+      tmpfiles.rules = [
+        "d /nix/var/nix/gcroots/microvm 0755 root root -"
+        "L+ /nix/var/nix/gcroots/microvm/guest - - - - /var/lib/microvms/guest/current"
+        "L+ /nix/var/nix/gcroots/microvm/second-guest - - - - /var/lib/microvms/second-guest/current"
+        "d /var/lib/microvms/guest 0775 root root -"
+        "L+ /var/lib/microvms/guest/current - - - - ${microvmRunners.old}"
+        "L+ /var/lib/microvms/guest/booted - - - - ${microvmRunners.old}"
+        "d /var/lib/microvms/second-guest 0775 root root -"
+        "L+ /var/lib/microvms/second-guest/current - - - - ${microvmRunners.old}"
+        "L+ /var/lib/microvms/second-guest/booted - - - - ${microvmRunners.old}"
+      ];
 
-    systemd.services."microvm@" = {
-      description = "Mock MicroVM service for the deployment test";
-      scriptArgs = "%i";
-      script = ''
-        if [[ -e /run/fail-microvm-restart ]]; then
-          exit 1
-        fi
-        runner=$(readlink -f "/var/lib/microvms/$1/current")
-        ln -sfnT "$runner" "/var/lib/microvms/$1/booted"
-        echo "$runner" >> /run/microvm-runs
-      '';
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
+      services."microvm@" = {
+        description = "Mock MicroVM service for the deployment test";
+        scriptArgs = "%i";
+        script = ''
+          if [[ -e /run/fail-microvm-restart ]]; then
+            exit 1
+          fi
+          runner=$(readlink -f "/var/lib/microvms/$1/current")
+          ln -sfnT "$runner" "/var/lib/microvms/$1/booted"
+          echo "$runner" >> /run/microvm-runs
+        '';
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
       };
     };
   };

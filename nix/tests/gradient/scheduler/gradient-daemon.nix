@@ -19,29 +19,38 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    systemd.services.nix-daemon.enable = lib.mkForce false;
-    systemd.sockets.nix-daemon.enable = lib.mkForce false;
-    environment.variables.NIX_REMOTE = "daemon";
-    environment.systemPackages = [ cfg.package ];
+    systemd = {
+      services = {
+        nix-daemon.enable = lib.mkForce false;
 
-    systemd.sockets.gradient-daemon = {
-      wantedBy = [ "sockets.target" ];
-      before = [ "gradient-worker.service" ];
-      requiredBy = [ "gradient-worker.service" ];
-      socketConfig = {
-        ListenStream = "/nix/var/nix/daemon-socket/socket";
-        SocketMode = "0666";
+        gradient-daemon = {
+          wantedBy = [ "multi-user.target" ];
+          requires = [ "gradient-daemon.socket" ];
+          environment.RUST_LOG = "info";
+          serviceConfig = {
+            Type = "notify";
+            ExecStart = "${lib.getExe' cfg.package "gradient-daemon"} serve --backend mock --spec ${cfg.config}";
+          };
+        };
+      };
+
+      sockets = {
+        nix-daemon.enable = lib.mkForce false;
+
+        gradient-daemon = {
+          wantedBy = [ "sockets.target" ];
+          before = [ "gradient-worker.service" ];
+          requiredBy = [ "gradient-worker.service" ];
+          socketConfig = {
+            ListenStream = "/nix/var/nix/daemon-socket/socket";
+            SocketMode = "0666";
+          };
+        };
       };
     };
-
-    systemd.services.gradient-daemon = {
-      wantedBy = [ "multi-user.target" ];
-      requires = [ "gradient-daemon.socket" ];
-      environment.RUST_LOG = "info";
-      serviceConfig = {
-        Type = "notify";
-        ExecStart = "${lib.getExe' cfg.package "gradient-daemon"} serve --backend mock --spec ${cfg.config}";
-      };
+    environment = {
+      variables.NIX_REMOTE = "daemon";
+      systemPackages = [ cfg.package ];
     };
   };
 }

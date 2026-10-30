@@ -96,12 +96,24 @@ in {
       };
     };
 
-    networking.hostName = lib.mkDefault "gradient";
-    networking.useDHCP = false;
-    networking.usePredictableInterfaceNames = false;
-    networking.firewall.enable = lib.mkDefault false;
+    networking = {
+      hostName = lib.mkDefault "gradient";
+      useDHCP = false;
+      usePredictableInterfaceNames = false;
+      firewall.enable = lib.mkDefault false;
+    };
     documentation.enable = false;
-    system.stateVersion = lib.mkDefault lib.trivial.release;
+    system = {
+      stateVersion = lib.mkDefault lib.trivial.release;
+
+      build.gradientGuest = pkgs.runCommand "gradient-guest" { } ''
+        mkdir $out
+        ln -s ${kernelImage} $out/kernel
+        ln -s ${initrd} $out/initrd
+        ln -s ${toplevel} $out/toplevel
+        cp ${guestJson} $out/guest.json
+      '';
+    };
 
     users = {
       groups = { gradient.gid = 1000; kvm = { }; dialout = { }; video = { }; render = { }; };
@@ -114,16 +126,45 @@ in {
       };
     };
 
-    services.getty.autologinUser = lib.mkDefault "gradient";
-    systemd.services."serial-getty@ttyS0".environment.TERM = "xterm-256color";
+    services = {
+      getty.autologinUser = lib.mkDefault "gradient";
 
-    services.udev.extraRules = ''
-      SUBSYSTEM=="usb", MODE="0660", GROUP="dialout"
-    '';
+      udev.extraRules = ''
+        SUBSYSTEM=="usb", MODE="0660", GROUP="dialout"
+      '';
+    };
+    systemd.services = {
+      "serial-getty@ttyS0".environment.TERM = "xterm-256color";
+
+      gradient-guest-agent = {
+        description = "Guest Agent from Gradient";
+        wantedBy = [ "multi-user.target" ];
+        path = [ pkgs.git pkgs.iproute2 pkgs.util-linux usbip ];
+        serviceConfig = {
+          ExecStart = lib.getExe' cfg.package "gradient-guest-agent";
+          Restart = "always";
+        };
+      };
+
+      gradient-guest-shutdown = {
+        description = "Terminate the Gradient Exec Job on Guest shutdown.";
+        after = [ "gradient-guest-agent.service" ];
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          ExecStart = "${pkgs.coreutils}/bin/true";
+          ExecStop = "-${lib.getExe' cfg.package "gradient-guest-agent"} shutdown";
+          TimeoutStopSec = 5;
+        };
+      };
+    };
 
     environment = {
-      etc."gradient/pre-script" = script cfg.preScript;
-      etc."gradient/post-script" = script cfg.postScript;
+      etc = {
+        "gradient/pre-script" = script cfg.preScript;
+        "gradient/post-script" = script cfg.postScript;
+      };
       systemPackages = [
         usbip
         pkgs.git
@@ -131,29 +172,6 @@ in {
         (agentCommand "gradient-phase" "phase")
         (agentCommand "gradient-upload" "upload")
       ];
-    };
-
-    systemd.services.gradient-guest-agent = {
-      description = "Guest Agent from Gradient";
-      wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.git pkgs.iproute2 pkgs.util-linux usbip ];
-      serviceConfig = {
-        ExecStart = lib.getExe' cfg.package "gradient-guest-agent";
-        Restart = "always";
-      };
-    };
-
-    systemd.services.gradient-guest-shutdown = {
-      description = "Terminate the Gradient Exec Job on Guest shutdown.";
-      after = [ "gradient-guest-agent.service" ];
-      wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        ExecStart = "${pkgs.coreutils}/bin/true";
-        ExecStop = "-${lib.getExe' cfg.package "gradient-guest-agent"} shutdown";
-        TimeoutStopSec = 5;
-      };
     };
 
     security.polkit = {
@@ -167,13 +185,5 @@ in {
         });
       '';
     };
-
-    system.build.gradientGuest = pkgs.runCommand "gradient-guest" { } ''
-      mkdir $out
-      ln -s ${kernelImage} $out/kernel
-      ln -s ${initrd} $out/initrd
-      ln -s ${toplevel} $out/toplevel
-      cp ${guestJson} $out/guest.json
-    '';
   };
 }
