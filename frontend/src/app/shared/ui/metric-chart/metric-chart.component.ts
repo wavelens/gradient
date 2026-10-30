@@ -117,8 +117,9 @@ export class MetricChartComponent implements OnDestroy {
   constructor() {
     afterRenderEffect(() => {
       const option = this.option();
+      const first = !this.chart;
       this.chart ??= this.createChart();
-      this.chart.setOption(option, { notMerge: true });
+      this.chart.setOption(option, first ? { notMerge: true } : { replaceMerge: ['series', 'xAxis', 'yAxis', 'legend'] });
     });
   }
 
