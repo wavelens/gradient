@@ -32,6 +32,7 @@ pub struct VmConfig {
     pub image: PathBuf,
     pub pre_warm: u32,
     pub max_pre_warm: u32,
+    pub guest_store_mb: u64,
     pub devices: Vec<DeviceConfig>,
     pub mounts: Vec<MountConfig>,
     pub bridge: String,

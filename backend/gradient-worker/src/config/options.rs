@@ -370,6 +370,13 @@ pub struct ExecArgs {
     /// {file}`<services.gradient.worker.baseDir>/guests` when the worker starts.
     pub guest_disk_mb: Option<u64>,
 
+    /// Size in MB of the writable {file}`/nix/store` disk each guest boots with. It holds the
+    /// paths an exec job copies into the guest store or builds there. The disk image is sparse
+    /// and takes only the space the guest writes, outside of
+    /// {option}`services.gradient.worker.exec.guestDiskMb`.
+    #[arg(default_value_t = 20480)]
+    pub guest_store_mb: u64,
+
     /// Whether exec jobs may boot their own guest image instead of
     /// {option}`services.gradient.worker.exec.image`.
     #[arg(default_value = "false")]

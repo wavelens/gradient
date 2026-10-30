@@ -222,7 +222,7 @@ flowchart LR
 | Guest unit | Transient `gradient-guest-<id>.service` in `gradient-guests.slice`, started over D-Bus |
 | Supervisor | Main process of the unit, `gradient-worker --guest-supervisor <dir>` as root with the worker's group |
 | Guest directory | `/var/lib/gradient-worker/guests/<id>/`, mode `0770` |
-| Files | `state.json`, `console.log`, `serial.sock`, `console.sock`, `api.sock`, `vsock.sock`, `control.sock`, `guest-store.sock`, `work.img`, `mounts/<name>.sock` |
+| Files | `state.json`, `console.log`, `serial.sock`, `console.sock`, `api.sock`, `vsock.sock`, `control.sock`, `guest-store.sock`, `writable-store.img`, `work.img`, `mounts/<name>.sock` |
 
 - Supervisors own cloud-hypervisor, every virtiofsd, the taps and the USB/IP bindings. Guests never belong to the worker process.
 - Workers drive the cloud-hypervisor API, the supervisor control socket and the agent over hybrid vsock.
@@ -236,10 +236,12 @@ Guests never see the host store. Images bring the closure of their own system as
 | Layer | Guest path | Source |
 |---|---|---|
 | Lower | `/nix/.ro-store` | `store.img` of the image, an erofs disk with serial `nix-store` |
-| Upper | `/nix/.rw-store/upper` | tmpfs, gone at guest shutdown |
+| Upper | `/nix/.rw-store/upper` | `writable-store.img` of the guest, an ext4 disk with label `writable-store` |
 | Store | `/nix/store` | overlayfs of both layers |
 
 - `nixosModules.guest` can build `store.img` from `closureInfo` of the toplevel. Disks also hold a Nix database for exactly that closure.
+- Workers create `writable-store.img` with `mkfs.ext4` before `vm.create`. Images are sparse and `exec.guestStoreMb` in size.
+- Writable store disks belong to the guest directory and go away with the guest.
 - The guest `nix-daemon` can open a `local-overlay://` store over a `read-only` local lower store.
 - `gradient-guest-store.socket` can start `nix-daemon --stdio` per vsock connection on port `GUEST_STORE_VSOCK_PORT` (7001).
 - `GuestStorePassthrough` can pass `guest-store.sock` through to that port. Workers open a `LocalNixStore` on the socket.
@@ -265,7 +267,7 @@ Guests never see the host store. Images bring the closure of their own system as
 
 | Call | Use |
 |---|---|
-| `vm.create`, `vm.boot` | Boot from `kernel`, `initrd` and `guest.json` of the image, `store.img` as a read-only disk |
+| `vm.create`, `vm.boot` | Boot from `kernel`, `initrd` and `guest.json` of the image, `store.img` as a read-only disk, `writable-store.img` as a writable disk |
 | `vm.pause`, `vm.resume` | Warm guests |
 | `vm.add-device` | VFIO devices |
 | `vm.add-disk` | `work.img` as `/work`, serial `work` |

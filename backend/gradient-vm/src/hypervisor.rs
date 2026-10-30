@@ -21,6 +21,7 @@ use tokio::net::UnixStream;
 use gradient_wire::types::GuestSize;
 
 use crate::console::SERIAL_SOCKET;
+use crate::writable_store::{WRITABLE_STORE_IMAGE, WRITABLE_STORE_LABEL};
 
 const API_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -269,7 +270,10 @@ pub fn vm_config(image: &GuestImage, dir: &Path, cid: u32) -> serde_json::Value 
         },
         "cpus": { "boot_vcpus": image.cpus, "max_vcpus": image.cpus },
         "memory": { "size": image.memory_mb * 1024 * 1024, "shared": true },
-        "disks": [store_disk_config(&image.store)],
+        "disks": [
+            store_disk_config(&image.store),
+            disk_config(&dir.join(WRITABLE_STORE_IMAGE), WRITABLE_STORE_LABEL),
+        ],
         "vsock": { "cid": cid, "socket": dir.join("vsock.sock") },
         "serial": { "mode": "Socket", "socket": dir.join(SERIAL_SOCKET) },
         "console": { "mode": "Off" },
@@ -295,17 +299,22 @@ mod tests {
     }
 
     #[test]
-    fn the_guest_store_is_a_read_only_disk_and_no_host_share() {
+    fn the_guest_store_is_a_read_only_disk_over_a_writable_guest_disk() {
         let dir = Path::new("/var/lib/gradient-worker/guests/g");
         let config = vm_config(&image(), dir, 7);
 
         assert_eq!(config["memory"]["shared"], true);
         assert_eq!(config["memory"]["size"], 2048_u64 * 1024 * 1024);
         assert!(config.get("fs").is_none(), "{config}");
-        assert_eq!(config["disks"].as_array().map(Vec::len), Some(1));
+        assert_eq!(config["disks"].as_array().map(Vec::len), Some(2));
         assert_eq!(config["disks"][0]["path"], "/nix/store/x-guest/store.img");
         assert_eq!(config["disks"][0]["readonly"], true);
         assert_eq!(config["disks"][0]["serial"], STORE_DISK_ID);
+        assert_eq!(
+            config["disks"][1]["path"],
+            "/var/lib/gradient-worker/guests/g/writable-store.img"
+        );
+        assert!(config["disks"][1].get("readonly").is_none(), "{config}");
         assert_eq!(
             config["vsock"]["socket"],
             "/var/lib/gradient-worker/guests/g/vsock.sock"

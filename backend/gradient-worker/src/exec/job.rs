@@ -58,6 +58,7 @@ const SHUTDOWN_ABORT_WAIT: Duration = Duration::from_secs(30);
 const GUEST_SHUT_DOWN: &str = "the guest was shut down";
 const GUEST_SHUTDOWN_NOTE: &str = "the guest shuts down, the job ends as aborted";
 const GUEST_STORE_CONNECTIONS: usize = 4;
+const STORE_FAILURE_CONSOLE_BYTES: u64 = 16 * 1024;
 
 #[async_trait]
 pub trait ExecReport: Send {
@@ -649,9 +650,15 @@ impl ExecRun<'_> {
         .map_err(BuildError::transient)?;
         let abort = self.abort.clone();
         let fetch = crate::proto::prefetch::ensure_path(&store, &program, self.updater);
-        unless_aborted(&abort, fetch)
-            .await?
-            .map_err(BuildError::transient)?;
+        unless_aborted(&abort, fetch).await?.map_err(|e| {
+            warn!(
+                guest = %guest.id(),
+                error = %format!("{e:#}"),
+                console = %guest.console_tail(STORE_FAILURE_CONSOLE_BYTES),
+                "guest store import failed"
+            );
+            BuildError::transient(e)
+        })?;
         Ok(())
     }
 
