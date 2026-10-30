@@ -147,33 +147,35 @@ craneLib.buildPackage (commonArgs // lib.optionalAttrs (gitRev != null) { GRADIE
     done
   '';
 
-  passthru.clippy = craneLib.cargoClippy (commonArgs // {
-    inherit cargoArtifacts;
-    cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
-    doInstallCargoArtifacts = false;
-  });
+  passthru = {
+    clippy = craneLib.cargoClippy (commonArgs // {
+      inherit cargoArtifacts;
+      cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
+      doInstallCargoArtifacts = false;
+    });
 
-  passthru.tests = craneLib.cargoNextest (commonArgs // {
-    inherit version;
-    cargoArtifacts = testArtifacts;
-    CARGO_PROFILE = "test";
-    cargoNextestExtraArgs = "--no-fail-fast";
-    doInstallCargoArtifacts = false;
+    tests = craneLib.cargoNextest (commonArgs // {
+      inherit version;
+      cargoArtifacts = testArtifacts;
+      CARGO_PROFILE = "test";
+      cargoNextestExtraArgs = "--no-fail-fast";
+      doInstallCargoArtifacts = false;
 
-    nativeCheckInputs = [ cacert e2fsprogs git postgresql_18 postgresqlTestHook ];
-    postgresqlTestUserOptions = "LOGIN CREATEDB";
-    postgresqlExtraSettings = ''
-      fsync = off
-      max_connections = 500
-    '';
-    preCheck = ''
-      ln -s ${testStore} ./test-store
-    '';
+      nativeCheckInputs = [ cacert e2fsprogs git postgresql_18 postgresqlTestHook ];
+      postgresqlTestUserOptions = "LOGIN CREATEDB";
+      postgresqlExtraSettings = ''
+        fsync = off
+        max_connections = 500
+      '';
+      preCheck = ''
+        ln -s ${testStore} ./test-store
+      '';
 
-    postCheck = ''
-      cargoWithProfile test --doc $cargoExtraArgs
-    '';
-  });
+      postCheck = ''
+        cargoWithProfile test --doc $cargoExtraArgs
+      '';
+    });
+  };
 
   meta = {
     description = "Nix-CI for Teams (backend)";

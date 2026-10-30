@@ -45,44 +45,48 @@
 
     users.users.gradient-worker.extraGroups = [ "kvm" ];
 
-    systemd.tmpfiles.rules = map (mount: "d ${mount.path} 0770 gradient-worker gradient-worker -")
-      (lib.filter (mount: mount.perJob) exec.mounts);
+    systemd = {
+      tmpfiles.rules = map (mount: "d ${mount.path} 0770 gradient-worker gradient-worker -")
+        (lib.filter (mount: mount.perJob) exec.mounts);
+
+      services = {
+        usbipd = lib.mkIf (hasDevice "usb") {
+          description = "USB/IP server for Gradient exec job devices";
+          wantedBy = [ "multi-user.target" ];
+          after = [ "network.target" ];
+          serviceConfig = {
+            ExecStart = "${lib.getExe' cfg.packages.usbip "usbipd"} -4";
+            IPAddressAllow = "localhost";
+            IPAddressDeny = "any";
+          };
+        };
+
+        gradient-guest-dns = lib.mkIf guestDnsForwarder {
+          description = "Forwarder for DNS queries from Gradient guests.";
+          wantedBy = [ "multi-user.target" ];
+          after = [ "network.target" ];
+          serviceConfig = {
+            ExecStart = lib.concatStringsSep " " [
+              (lib.getExe' pkgs.dnsmasq "dnsmasq")
+              "--keep-in-foreground"
+              "--conf-file=/dev/null"
+              "--pid-file"
+              "--no-hosts"
+              "--bind-dynamic"
+              "--interface=${exec.bridge}"
+              "--except-interface=lo"
+            ];
+            Restart = "on-failure";
+          };
+        };
+      };
+    };
 
     services.udev.extraRules = lib.mkIf (hasDevice "vfio") ''
       SUBSYSTEM=="vfio", GROUP="gradient-worker", MODE="0660"
     '';
 
     boot.kernelModules = lib.mkIf (hasDevice "usb") [ "usbip-host" ];
-
-    systemd.services.usbipd = lib.mkIf (hasDevice "usb") {
-      description = "USB/IP server for Gradient exec job devices";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" ];
-      serviceConfig = {
-        ExecStart = "${lib.getExe' cfg.packages.usbip "usbipd"} -4";
-        IPAddressAllow = "localhost";
-        IPAddressDeny = "any";
-      };
-    };
-
-    systemd.services.gradient-guest-dns = lib.mkIf guestDnsForwarder {
-      description = "Forwarder for DNS queries from Gradient guests.";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" ];
-      serviceConfig = {
-        ExecStart = lib.concatStringsSep " " [
-          (lib.getExe' pkgs.dnsmasq "dnsmasq")
-          "--keep-in-foreground"
-          "--conf-file=/dev/null"
-          "--pid-file"
-          "--no-hosts"
-          "--bind-dynamic"
-          "--interface=${exec.bridge}"
-          "--except-interface=lo"
-        ];
-        Restart = "on-failure";
-      };
-    };
 
     networking = {
       bridges.${exec.bridge}.interfaces = [ ];

@@ -111,17 +111,19 @@ craneLib.buildPackage (commonArgs // rec {
 
   doCheck = false;
 
-  passthru.clippy = craneLib.cargoClippy (commonArgs // {
-    inherit cargoArtifacts;
-    cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
-    doInstallCargoArtifacts = false;
-  });
+  passthru = {
+    clippy = craneLib.cargoClippy (commonArgs // {
+      inherit cargoArtifacts;
+      cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
+      doInstallCargoArtifacts = false;
+    });
 
-  passthru.tests = craneLib.cargoNextest (commonArgs // {
-    inherit cargoArtifacts version;
-    doInstallCargoArtifacts = false;
-    nativeCheckInputs = [ cacert ];
-  });
+    tests = craneLib.cargoNextest (commonArgs // {
+      inherit cargoArtifacts version;
+      doInstallCargoArtifacts = false;
+      nativeCheckInputs = [ cacert ];
+    });
+  };
 
   postInstall = lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
     installShellCompletion --cmd gradient \

@@ -13,67 +13,71 @@ in {
   networking.hostName = "gradient";
   system.stateVersion = "26.05";
 
-  services.gradient = {
-    enable = true;
-    domain = "localhost";
-    serveUrl = url;
-    useTls = false;
-    postgres.enable = true;
-    registration.enable = false;
-    secrets = {
-      jwtFile = "${stateDir}/jwt";
-      cryptFile = "${stateDir}/crypt";
-    };
-
-    worker = {
+  services = {
+    gradient = {
       enable = true;
-      capabilities = { network = true; secrets = true; eval = true; build = true; };
+      domain = "localhost";
+      serveUrl = url;
+      useTls = false;
+      postgres.enable = true;
+      registration.enable = false;
+      secrets = {
+        jwtFile = "${stateDir}/jwt";
+        cryptFile = "${stateDir}/crypt";
+      };
+
+      worker = {
+        enable = true;
+        capabilities = { network = true; secrets = true; eval = true; build = true; };
+      };
+
+      state.users.admin = {
+        email = "admin@localhost";
+        password_file = "${stateDir}/admin-password-hash";
+        superuser = true;
+      };
     };
 
-    state.users.admin = {
-      email = "admin@localhost";
-      password_file = "${stateDir}/admin-password-hash";
-      superuser = true;
-    };
+    postgresql.package = pkgs.postgresql_18;
   };
-
-  services.postgresql.package = pkgs.postgresql_18;
   nix.settings.sandbox = true;
 
-  systemd.services.gradient-standalone-secrets = {
-    wantedBy = [ "multi-user.target" ];
-    requiredBy = [ "gradient-server.service" ];
-    before = [ "gradient-server.service" ];
-    path = [ pkgs.openssl pkgs.libargon2 ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-      StateDirectory = "gradient-standalone";
-      StateDirectoryMode = "0700";
-      UMask = "0077";
+  systemd.services = {
+    gradient-standalone-secrets = {
+      wantedBy = [ "multi-user.target" ];
+      requiredBy = [ "gradient-server.service" ];
+      before = [ "gradient-server.service" ];
+      path = [ pkgs.openssl pkgs.libargon2 ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        StateDirectory = "gradient-standalone";
+        StateDirectoryMode = "0700";
+        UMask = "0077";
+      };
+      script = ''
+        cd ${stateDir}
+        [ -e jwt ] || openssl rand -base64 48 > jwt
+        [ -e crypt ] || openssl rand -base64 48 > crypt
+        if [ ! -e admin-password-hash ]; then
+          openssl rand -base64 18 > admin-password
+          tr -d '\n' < admin-password | argon2 "$(openssl rand -hex 16)" -id -e > admin-password-hash
+        fi
+      '';
     };
-    script = ''
-      cd ${stateDir}
-      [ -e jwt ] || openssl rand -base64 48 > jwt
-      [ -e crypt ] || openssl rand -base64 48 > crypt
-      if [ ! -e admin-password-hash ]; then
-        openssl rand -base64 18 > admin-password
-        tr -d '\n' < admin-password | argon2 "$(openssl rand -hex 16)" -id -e > admin-password-hash
-      fi
-    '';
-  };
 
-  systemd.services.gradient-standalone-login = {
-    wantedBy = [ "multi-user.target" ];
-    after = [ "gradient-server.service" "nginx.service" ];
-    requires = [ "gradient-standalone-secrets.service" ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-      StandardOutput = "journal+console";
+    gradient-standalone-login = {
+      wantedBy = [ "multi-user.target" ];
+      after = [ "gradient-server.service" "nginx.service" ];
+      requires = [ "gradient-standalone-secrets.service" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        StandardOutput = "journal+console";
+      };
+      script = ''
+        echo "Gradient is running at ${url} - log in with admin / $(cat ${stateDir}/admin-password)"
+      '';
     };
-    script = ''
-      echo "Gradient is running at ${url} - log in with admin / $(cat ${stateDir}/admin-password)"
-    '';
   };
 }

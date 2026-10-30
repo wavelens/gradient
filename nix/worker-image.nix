@@ -14,8 +14,10 @@
         enable = true;
         inherit preScript postScript;
       };
-      nixpkgs.hostPlatform = system;
-      nixpkgs.overlays = [ self.overlays.default ];
+      nixpkgs = {
+        hostPlatform = system;
+        overlays = [ self.overlays.default ];
+      };
     }
   ] ++ modules;
 }).config.system.build.gradientGuest

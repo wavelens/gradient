@@ -63,13 +63,17 @@ in
     gradient = {
       enable = true;
       reverseProxy.nginx.enable = true;
-      postgres.enable = true;
-      postgres.sharedBuffers = "128MB";
+      postgres = {
+        enable = true;
+        sharedBuffers = "128MB";
+      };
       database.url = "postgresql://gradient@127.0.0.1/gradient";
       domain = "gradient.local";
       proto.public = true;
-      secrets.jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4");
-      secrets.cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
+      secrets = {
+        jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4");
+        cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
+      };
       log.traceDir = "/var/lib/gradient/trace";
       state = {
         users.admin = {

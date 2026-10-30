@@ -36,23 +36,25 @@ let
       ../scheduler/gradient-daemon.nix
     ];
 
-    services.gradient-daemon-mock = {
-      enable = true;
-      package = daemon;
-      config = storeSpec.toDaemonConfig specs name;
+    services = {
+      gradient-daemon-mock = {
+        enable = true;
+        package = daemon;
+        config = storeSpec.toDaemonConfig specs name;
+      };
+
+      gradient.worker = {
+        enable = true;
+        zone = zones.${name};
+        system.features = features.${name};
+        capabilities = {
+          eval = true;
+          build = true;
+        };
+      };
     };
 
     nix.settings.system-features = features.${name};
-
-    services.gradient.worker = {
-      enable = true;
-      zone = zones.${name};
-      system.features = features.${name};
-      capabilities = {
-        eval = true;
-        build = true;
-      };
-    };
   };
 
   topo = topology {

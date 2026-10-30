@@ -120,11 +120,13 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
         })
       ];
 
-      services.gradient.postgres.sharedBuffers = lib.mkForce "2GB";
-      services.postgresql.settings = {
-        log_min_duration_statement = 5000;
-        "auto_explain.log_min_duration" = lib.mkForce 5000;
-        "auto_explain.log_analyze" = true;
+      services = {
+        gradient.postgres.sharedBuffers = lib.mkForce "2GB";
+        postgresql.settings = {
+          log_min_duration_statement = 5000;
+          "auto_explain.log_min_duration" = lib.mkForce 5000;
+          "auto_explain.log_analyze" = true;
+        };
       };
 
       virtualisation = {

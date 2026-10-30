@@ -80,11 +80,13 @@ in {
       ../../modules/gradient-worker.nix
     ];
 
-    networking.hosts = {
-      "127.0.0.1" = [ "gradient.local" ];
-    };
+    networking = {
+      hosts = {
+        "127.0.0.1" = [ "gradient.local" ];
+      };
 
-    networking.firewall.enable = false;
+      firewall.enable = false;
+    };
     documentation.enable = false;
     virtualisation = {
       cores = 4;
@@ -123,11 +125,19 @@ in {
       "f /var/lib/gradient-worker/worker-id 0644 gradient-worker gradient-worker - a0000000-0000-0000-0000-000000000001"
     ];
 
-    environment.etc."gradient/secrets/worker_peers" = {
-      mode = "0600";
-      user = "gradient-worker";
-      group = "gradient-worker";
-      text = "*:C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
+    environment.etc = {
+      "gradient/secrets/worker_peers" = {
+        mode = "0600";
+        user = "gradient-worker";
+        group = "gradient-worker";
+        text = "*:C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
+      };
+
+      # git-daemon is running as nobody and must read repos owned by other users.
+      "gitconfig".text = ''
+        [safe]
+          directory = *
+      '';
     };
 
     security.pam.services.sshd.allowNullPassword = true;
@@ -141,138 +151,150 @@ in {
         domain = "gradient.local";
         frontend.enable = false;
         proto.public = true;
-        secrets.jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
-        secrets.cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
+        secrets = {
+          jwtFile =toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
+          cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
+        };
 
         state = {
-          users.admin = {
-            email = "admin@gradient.local";
-            password_file = toString adminPwHash;
-            email_verified = true;
-            superuser = true;
-          };
+          users = {
+            admin = {
+              email = "admin@gradient.local";
+              password_file = toString adminPwHash;
+              email_verified = true;
+              superuser = true;
+            };
 
-          users.alice = {
-            name = "Alice Example";
-            email = "alice@gradient.local";
-            password_file = toString adminPwHash;
-            email_verified = true;
-          };
-
-          teams.testteam = {
-            display_name = "MyTeam";
-            members = [
-              { user = "admin"; role = "Admin"; }
-              { user = "alice"; role = "Member"; }
-            ];
-            new_projects = {
-              users = true;
-              workers = true;
-              role = "Admin";
+            alice = {
+              name = "Alice Example";
+              email = "alice@gradient.local";
+              password_file = toString adminPwHash;
+              email_verified = true;
             };
           };
 
-          teams.research = {
-            display_name = "Research";
-            members = [
-              { user = "alice"; role = "Admin"; }
-              { user = "admin"; role = "Member"; }
-            ];
+          teams = {
+            testteam = {
+              display_name = "MyTeam";
+              members = [
+                { user = "admin"; role = "Admin"; }
+                { user = "alice"; role = "Member"; }
+              ];
+              new_projects = {
+                users = true;
+                workers = true;
+                role = "Admin";
+              };
+            };
+
+            research = {
+              display_name = "Research";
+              members = [
+                { user = "alice"; role = "Admin"; }
+                { user = "admin"; role = "Member"; }
+              ];
+            };
           };
 
-          projects.testproject = {
-            display_name = "MyProject";
-            description = "My Test Project";
-            private_key_file = toString projectSshKey;
-            public = true;
-            exec_enabled = true;
-            created_by = "admin";
-            teams = [ { team = "testteam"; role = "Admin"; } ];
+          projects = {
+            testproject = {
+              display_name = "MyProject";
+              description = "My Test Project";
+              private_key_file = toString projectSshKey;
+              public = true;
+              exec_enabled = true;
+              created_by = "admin";
+              teams = [ { team = "testteam"; role = "Admin"; } ];
+            };
+
+            researchproject = {
+              display_name = "Research Project";
+              description = "Members of the Research team own this private project.";
+              private_key_file = toString projectSshKey;
+              created_by = "alice";
+              teams = [
+                { team = "research"; role = "Admin"; }
+                { team = "testteam"; role = "View"; }
+              ];
+            };
           };
 
-          projects.researchproject = {
-            display_name = "Research Project";
-            description = "Members of the Research team own this private project.";
-            private_key_file = toString projectSshKey;
-            created_by = "alice";
-            teams = [
-              { team = "research"; role = "Admin"; }
-              { team = "testteam"; role = "View"; }
-            ];
+          tasks = {
+            failingtask = {
+              project = "researchproject";
+              display_name = "Failing Task";
+              description = "One build failed in this task.";
+              repository = "git://gradient.local/test";
+              wildcard = "packages.**.buildFail,packages.**.lib1";
+              created_by = "alice";
+              triggers = [
+                {
+                  type = "polling";
+                  config = { interval_secs = 300; };
+                }
+              ];
+            };
+
+            exectask = {
+              project = "testproject";
+              display_name = "Exec Task";
+              description = "One exec job per task.";
+              repository = "git://gradient.local/exec";
+              wildcard = "apps.x86_64-linux.*";
+              exec_enabled = true;
+              created_by = "admin";
+              triggers = [
+                {
+                  type = "polling";
+                  config = { interval_secs = 600; };
+                }
+              ];
+            };
+
+            testtask = {
+              project = "testproject";
+              display_name = "MyTask";
+              description = "My Test Task";
+              repository = "git://gradient.local/test";
+              wildcard = "packages.**.buildWait5Sec,packages.**.deployment";
+              keep_evaluations = 10;
+              created_by = "admin";
+              triggers = [
+                {
+                  type = "polling";
+                  config = { interval_secs = 30; };
+                }
+              ];
+            };
           };
 
-          tasks.failingtask = {
-            project = "researchproject";
-            display_name = "Failing Task";
-            description = "One build failed in this task.";
-            repository = "git://gradient.local/test";
-            wildcard = "packages.**.buildFail,packages.**.lib1";
-            created_by = "alice";
-            triggers = [
-              {
-                type = "polling";
-                config = { interval_secs = 300; };
-              }
-            ];
-          };
+          caches = {
+            testcache = {
+              display_name = "MyCache";
+              signing_key_file = toString cacheSigningKey;
+              projects = [ "testproject" ];
+              public = true;
+              created_by = "admin";
+              upstream_caches = [{
+                type = "external";
+                display_name = "file-upstream";
+                url = "http://gradient.local/upstream";
+                public_key = "file-upstream-1:CF7rch65Q3JWRsHM8viCggLfNh5Cqw7TNervR0fbs5E=";
+              }];
+            };
 
-          tasks.exectask = {
-            project = "testproject";
-            display_name = "Exec Task";
-            description = "One exec job per task.";
-            repository = "git://gradient.local/exec";
-            wildcard = "apps.x86_64-linux.*";
-            exec_enabled = true;
-            created_by = "admin";
-            triggers = [
-              {
-                type = "polling";
-                config = { interval_secs = 600; };
-              }
-            ];
-          };
-
-          tasks.testtask = {
-            project = "testproject";
-            display_name = "MyTask";
-            description = "My Test Task";
-            repository = "git://gradient.local/test";
-            wildcard = "packages.**.buildWait5Sec,packages.**.deployment";
-            keep_evaluations = 10;
-            created_by = "admin";
-            triggers = [
-              {
-                type = "polling";
-                config = { interval_secs = 30; };
-              }
-            ];
-          };
-
-          caches.testcache = {
-            display_name = "MyCache";
-            signing_key_file = toString cacheSigningKey;
-            projects = [ "testproject" ];
-            public = true;
-            created_by = "admin";
-            upstream_caches = [{
-              type = "external";
-              display_name = "file-upstream";
-              url = "http://gradient.local/upstream";
-              public_key = "file-upstream-1:CF7rch65Q3JWRsHM8viCggLfNh5Cqw7TNervR0fbs5E=";
-            }];
-          };
-
-          caches.researchcache = {
-            display_name = "Research Cache";
-            description = "A private cache can use MyCache as upstream cache.";
-            signing_key_file = toString cacheSigningKey;
-            projects = [ "researchproject" ];
-            created_by = "alice";
-            teams = [ { team = "research"; role = "Admin"; } ];
-            upstream_caches = [{
-              type = "internal";
-              cache_name = "testcache";
-            }];
+            researchcache = {
+              display_name = "Research Cache";
+              description = "A private cache can use MyCache as upstream cache.";
+              signing_key_file = toString cacheSigningKey;
+              projects = [ "researchproject" ];
+              created_by = "alice";
+              teams = [ { team = "research"; role = "Admin"; } ];
+              upstream_caches = [{
+                type = "internal";
+                cache_name = "testcache";
+              }];
+            };
           };
 
           workers.devworker = {
@@ -337,11 +359,5 @@ in {
         };
       };
     };
-
-    # git-daemon is running as nobody and must read repos owned by other users.
-    environment.etc."gitconfig".text = ''
-      [safe]
-        directory = *
-    '';
   };
 }

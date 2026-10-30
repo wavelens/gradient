@@ -114,13 +114,15 @@
       }];
     };
     nix.settings.substituters = lib.mkForce [ ];
-    environment.systemPackages = [ pkgs.curl pkgs.jq pkgs.socat ];
+    environment = {
+      systemPackages = [ pkgs.curl pkgs.jq pkgs.socat ];
 
-    environment.etc."gradient/secrets/worker_peers" = {
-      mode = "0600";
-      user = "gradient-worker";
-      group = "gradient-worker";
-      text = "*:${workerToken}";
+      etc."gradient/secrets/worker_peers" = {
+        mode = "0600";
+        user = "gradient-worker";
+        group = "gradient-worker";
+        text = "*:${workerToken}";
+      };
     };
 
     services.gradient.worker = {
@@ -177,22 +179,24 @@ in {
         };
 
         nix.settings.substituters = lib.mkForce [ ];
-        environment.systemPackages = [ pkgs.git pkgs.curl pkgs.jq pkgs.openssh ];
+        environment = {
+          systemPackages = [ pkgs.git pkgs.curl pkgs.jq pkgs.openssh ];
 
-        environment.etc = {
-          "gradient/secrets/admin_password" = secretFile "$argon2id$v=19$m=4096,t=3,p=1$c29tZXNhbHQxMjM0NQ$hIKBEy9SOWlnAlcwUv2PLPBdsMkKhVlCyjTxaWIK+v4";
-          "gradient/secrets/worker_token" = secretFile workerToken;
-          "gradient/secrets/main_cache_key" = secretFile "22yRW7p/hxuPRWJh9pcfGH0oXPk2MFUuG0wIA1rfq1BvDbvMqzMZS+er/BE8ucbxNSG5KZ8B0ELO4TJal8mZlw==";
-          "gradient/secrets/project_ssh_key" = secretFile (builtins.readFile "${sopsFixtures}/ed25519");
-          "gradient/secrets/api_token" = secretFile "api-token-value-1";
-          "gradient/secrets/upstream_key" = {
-            mode = "0600";
-            text = "file-upstream-1:eZPukjHYgRpJ+hLlnUgG+qpi/k4QMTr3bd4ftngZJwkIXutyHrlDclZGwczy+IKCAt82HkKrDtM16u9HR9uzkQ==";
+          etc = {
+            "gradient/secrets/admin_password" = secretFile "$argon2id$v=19$m=4096,t=3,p=1$c29tZXNhbHQxMjM0NQ$hIKBEy9SOWlnAlcwUv2PLPBdsMkKhVlCyjTxaWIK+v4";
+            "gradient/secrets/worker_token" = secretFile workerToken;
+            "gradient/secrets/main_cache_key" = secretFile "22yRW7p/hxuPRWJh9pcfGH0oXPk2MFUuG0wIA1rfq1BvDbvMqzMZS+er/BE8ucbxNSG5KZ8B0ELO4TJal8mZlw==";
+            "gradient/secrets/project_ssh_key" = secretFile (builtins.readFile "${sopsFixtures}/ed25519");
+            "gradient/secrets/api_token" = secretFile "api-token-value-1";
+            "gradient/secrets/upstream_key" = {
+              mode = "0600";
+              text = "file-upstream-1:eZPukjHYgRpJ+hLlnUgG+qpi/k4QMTr3bd4ftngZJwkIXutyHrlDclZGwczy+IKCAt82HkKrDtM16u9HR9uzkQ==";
+            };
+            "gitconfig".text = ''
+              [safe]
+                directory = *
+            '';
           };
-          "gitconfig".text = ''
-            [safe]
-              directory = *
-          '';
         };
 
         services = {
@@ -204,8 +208,10 @@ in {
             useTls = false;
             proto.public = true;
             ssh.enable = true;
-            secrets.jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4");
-            secrets.cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
+            secrets = {
+              jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4");
+              cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
+            };
 
             state = {
               users.admin = {
@@ -221,28 +227,30 @@ in {
                 secret_files.api-token = "/etc/gradient/secrets/api_token";
               };
 
-              tasks.task = {
-                project = "project";
-                repository = "git://server/test";
-                wildcard = "apps.x86_64-linux.*";
-                created_by = "admin";
-                exec_enabled = true;
-                triggers = [{
-                  type = "polling";
-                  config.interval_secs = 10;
-                }];
-              };
+              tasks = {
+                task = {
+                  project = "project";
+                  repository = "git://server/test";
+                  wildcard = "apps.x86_64-linux.*";
+                  created_by = "admin";
+                  exec_enabled = true;
+                  triggers = [{
+                    type = "polling";
+                    config.interval_secs = 10;
+                  }];
+                };
 
-              tasks.images = {
-                project = "project";
-                repository = "git://server/images?dir=nix";
-                wildcard = "apps.x86_64-linux.*";
-                created_by = "admin";
-                exec_enabled = true;
-                triggers = [{
-                  type = "polling";
-                  config.interval_secs = 10;
-                }];
+                images = {
+                  project = "project";
+                  repository = "git://server/images?dir=nix";
+                  wildcard = "apps.x86_64-linux.*";
+                  created_by = "admin";
+                  exec_enabled = true;
+                  triggers = [{
+                    type = "polling";
+                    config.interval_secs = 10;
+                  }];
+                };
               };
 
               caches.main = {
@@ -272,13 +280,15 @@ in {
             "gradient.local" = {
               enableACME = lib.mkForce false;
               forceSSL = lib.mkForce false;
-              locations."/upstream/" = {
-                alias = "/srv/upstream/";
-                extraConfig = "autoindex off;";
+              locations = {
+                "/upstream/" = {
+                  alias = "/srv/upstream/";
+                  extraConfig = "autoindex off;";
+                };
+                "= /nixpkgs.tar.gz".alias = nixpkgsTarball;
+                "= /gradient-guest.tar.gz".alias = tarball "gradient-guest" gradientPackages.gradient.guest;
+                "= /gradient-cli.tar.gz".alias = tarball "gradient-cli" gradientPackages.gradient-cli;
               };
-              locations."= /nixpkgs.tar.gz".alias = nixpkgsTarball;
-              locations."= /gradient-guest.tar.gz".alias = tarball "gradient-guest" gradientPackages.gradient.guest;
-              locations."= /gradient-cli.tar.gz".alias = tarball "gradient-cli" gradientPackages.gradient-cli;
             };
 
             "web.exec.test" = {

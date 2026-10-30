@@ -23,8 +23,10 @@ in {
           useTls = false;
           postgres.enable = true;
           domain = "gradient.local";
-          secrets.jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4");
-          secrets.cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
+          secrets = {
+            jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4");
+            cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
+          };
           log.level.default = "debug";
 
           state.users.admin = {
@@ -33,11 +35,11 @@ in {
             email_verified = true;
             superuser = true;
           };
-        };
 
-        # Enabling the worker is the entire configuration under test.
-        # No worker id, token, peers file or UI step is needed.
-        services.gradient.worker.enable = true;
+          # Enabling the worker is the entire configuration under test.
+          # No worker id, token, peers file or UI step is needed.
+          worker.enable = true;
+        };
       };
     };
 

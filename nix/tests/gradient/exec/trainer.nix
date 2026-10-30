@@ -6,9 +6,13 @@
 
 { lib, ... }: {
   gradient.guest.enable = true;
-  system.stateVersion = "26.05";
-  # The version suffix follows the nixpkgs revision, which the tarball in the test repository lacks.
-  system.nixos.versionSuffix = lib.mkForce "";
-  system.nixos.revision = lib.mkForce null;
+  system = {
+    stateVersion = "26.05";
+    # The version suffix follows the nixpkgs revision, which the tarball in the test repository lacks.
+    nixos = {
+      versionSuffix = lib.mkForce "";
+      revision = lib.mkForce null;
+    };
+  };
   environment.etc."gradient-image".text = "trainer";
 }

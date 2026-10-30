@@ -20,8 +20,10 @@ in {
         docker.enable = true;
       };
       networking.firewall.trustedInterfaces = [ "docker0" ];
-      environment.systemPackages = [ pkgs.curl pkgs.git ];
-      environment.etc."gradient-standalone.tar.gz".source = image;
+      environment = {
+        systemPackages = [ pkgs.curl pkgs.git ];
+        etc."gradient-standalone.tar.gz".source = image;
+      };
 
       services.gitDaemon = { enable = true; basePath = "/srv/git"; exportAll = true; };
       systemd.tmpfiles.rules = [ "d /srv/git 0755 git git" "L+ /srv/flake.nix - - - - ${flake}" ];
