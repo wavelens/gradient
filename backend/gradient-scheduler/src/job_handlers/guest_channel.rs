@@ -20,6 +20,7 @@ use crate::jobs::exec_job_key;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestChannelRefusal {
+    NotStarted,
     NotRunning,
     SshDisabled,
     NoProgramTerminal,
@@ -31,6 +32,7 @@ pub enum GuestChannelRefusal {
 impl fmt::Display for GuestChannelRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::NotStarted => f.write_str("the exec job has not started yet"),
             Self::NotRunning => f.write_str("the exec job is not running"),
             Self::SshDisabled => f.write_str("the exec job was started with ssh = false"),
             Self::NoProgramTerminal => f.write_str("program has no terminal, set ssh = true"),
@@ -62,10 +64,18 @@ pub(crate) fn check_guest_channel(
     }
 }
 
+fn not_open(status: ExecJobStatus) -> GuestChannelRefusal {
+    if status.is_terminal() {
+        GuestChannelRefusal::NotRunning
+    } else {
+        GuestChannelRefusal::NotStarted
+    }
+}
+
 fn check_console(status: ExecJobStatus) -> Result<(), GuestChannelRefusal> {
     match status {
         ExecJobStatus::Starting | ExecJobStatus::Running => Ok(()),
-        _ => Err(GuestChannelRefusal::NotRunning),
+        _ => Err(not_open(status)),
     }
 }
 
@@ -74,14 +84,12 @@ fn check_shell(
     spec_ssh: Option<bool>,
     attach: bool,
 ) -> Result<(), GuestChannelRefusal> {
-    if status != ExecJobStatus::Running {
-        return Err(GuestChannelRefusal::NotRunning);
-    }
     match (spec_ssh, attach) {
-        (Some(false), true) => Err(GuestChannelRefusal::NoProgramTerminal),
-        (Some(false), false) => Err(GuestChannelRefusal::SshDisabled),
-        _ => Ok(()),
+        (Some(false), true) => return Err(GuestChannelRefusal::NoProgramTerminal),
+        (Some(false), false) => return Err(GuestChannelRefusal::SshDisabled),
+        _ => {}
     }
+    check_running(status)
 }
 
 fn check_forward(
@@ -90,11 +98,20 @@ fn check_forward(
     ports: &[u16],
     port: u16,
 ) -> Result<(), GuestChannelRefusal> {
-    check_shell(status, spec_ssh, false)?;
+    if spec_ssh == Some(false) {
+        return Err(GuestChannelRefusal::SshDisabled);
+    }
     if !ports.contains(&port) {
         return Err(GuestChannelRefusal::PortNotDeclared(port));
     }
-    Ok(())
+    check_running(status)
+}
+
+fn check_running(status: ExecJobStatus) -> Result<(), GuestChannelRefusal> {
+    match status {
+        ExecJobStatus::Running => Ok(()),
+        _ => Err(not_open(status)),
+    }
 }
 
 fn spec_of(job: &MExecJob) -> ExecSpec {
@@ -147,7 +164,24 @@ mod tests {
         assert_eq!(check_guest_channel(Running, None, &[], &shell), Ok(()));
         assert_eq!(
             check_guest_channel(Starting, None, &[], &shell),
+            Err(GuestChannelRefusal::NotStarted)
+        );
+        assert_eq!(
+            check_guest_channel(Failed, None, &[], &shell),
             Err(GuestChannelRefusal::NotRunning)
+        );
+        assert_eq!(
+            check_guest_channel(Queued, Some(false), &[], &shell),
+            Err(GuestChannelRefusal::SshDisabled)
+        );
+        assert_eq!(
+            check_guest_channel(
+                Starting,
+                None,
+                &[6006],
+                &GuestChannelKind::Forward { port: 8080 }
+            ),
+            Err(GuestChannelRefusal::PortNotDeclared(8080))
         );
         assert_eq!(
             check_guest_channel(Running, Some(false), &[], &shell),
@@ -178,6 +212,10 @@ mod tests {
                 &GuestChannelKind::Console
             ),
             Ok(())
+        );
+        assert_eq!(
+            check_guest_channel(ExecJobStatus::Queued, None, &[], &GuestChannelKind::Console),
+            Err(GuestChannelRefusal::NotStarted)
         );
         assert_eq!(
             check_guest_channel(
