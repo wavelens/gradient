@@ -84,6 +84,26 @@ pub async fn access_of_user<C: ConnectionTrait>(
         .await
 }
 
+pub async fn among_matching<C: ConnectionTrait>(
+    db: &C,
+    ids: &[CacheId],
+    condition: Condition,
+) -> Result<Vec<MCache>, DbErr> {
+    ECache::find()
+        .filter(CCache::Id.is_in(ids.iter().copied()))
+        .filter(condition)
+        .all(db)
+        .await
+}
+
+pub fn public_or(visible: Option<Condition>) -> Condition {
+    let public = Condition::any().add(CCache::Public.eq(true));
+    match visible {
+        Some(visible) => public.add(visible),
+        None => public,
+    }
+}
+
 pub fn created_by_or_among(creator: UserId, caches: Vec<CacheId>) -> Condition {
     Condition::any()
         .add(CCache::CreatedBy.eq(creator))

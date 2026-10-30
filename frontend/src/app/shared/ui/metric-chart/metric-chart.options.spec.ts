@@ -77,6 +77,13 @@ describe('buildMetricChartOption cartesian types', () => {
     expect((opt.yAxis as any).data).toEqual(cats);
   });
 
+  it('lists the first category of a horizontal bar at the top, as a ranking reads', () => {
+    const horizontal = buildMetricChartOption({ type: 'bar', series: one, categories: cats, horizontal: true }, THEME);
+    const vertical = buildMetricChartOption({ type: 'bar', series: one, categories: cats }, THEME);
+    expect((horizontal.yAxis as any).inverse).toBe(true);
+    expect((vertical.xAxis as any).inverse).toBeFalsy();
+  });
+
   it('keeps null gaps in the data instead of coercing them to zero', () => {
     const opt = buildMetricChartOption({ type: 'line', series: [{ name: 'a', data: [1, null, 3] }], categories: cats }, THEME);
     expect((opt.series as any[])[0].data).toEqual([1, null, 3]);
