@@ -457,6 +457,12 @@ describe('TaskDetailComponent evaluation menu', () => {
     expect(item?.disabled).toBe(false);
   });
 
+  it('links Show job of a split evaluation to its cluster job', () => {
+    const { fixture } = setup(trigger, { primary: { dispatched_job: 'job-1', cluster_job: 'cluster-1' } });
+    const item = fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job');
+    expect(item?.routerLink).toEqual(['/board', 'clusters', 'cluster-1']);
+  });
+
   it('disables Show job until an eval worker picked the evaluation up', () => {
     const { fixture } = setup(trigger);
     expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job')?.disabled).toBe(true);

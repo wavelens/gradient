@@ -387,6 +387,7 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(board::get_expensive_by_resource))
                 .routes(routes!(board::get_expensive_evals_by_resource))
                 .routes(routes!(board::get_dispatched_job))
+                .routes(routes!(board_clusters::get_cluster_job))
                 .routes(routes!(board::get_scoring_summary))
                 .routes(routes!(board::get_scoring_rules))
                 .routes(routes!(board_cache::get_board_cache))

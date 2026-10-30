@@ -29,12 +29,13 @@ use gradient_db::metrics::build_times::{self, ExpensiveBuild, TopProjectBuildTim
 use gradient_db::metrics::resource_usage::{
     self, ExpensiveEval, ExpensiveResource, ResourceMetric,
 };
+use gradient_db::scheduling::cluster::clusters_of_assignments;
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::{build_attempt, dispatched_job, dispatched_job_phase, flake_output_node};
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::jobs::PendingJobInfo;
 use gradient_types::events::{Envelope, Event, EventRx, names, worker};
-use gradient_types::ids::DispatchedJobId;
+use gradient_types::ids::{ClusterJobId, DispatchedJobId};
 use gradient_types::*;
 use gradient_util::shutdown::CancellationToken;
 use sea_orm::ConnectionTrait;
@@ -56,6 +57,7 @@ pub struct DispatchedJobSummary {
     pub evaluation_id: Uuid,
     pub subject: Option<String>,
     pub exec_job: Option<BoardExecJob>,
+    pub cluster_job: Option<Uuid>,
 }
 
 impl DispatchedJobSummary {
@@ -63,9 +65,11 @@ impl DispatchedJobSummary {
         job: dispatched_job::Model,
         worker_name: Option<String>,
         subjects: &JobSubjects,
+        clusters: &HashMap<DispatchedJobId, ClusterJobId>,
     ) -> Self {
         let subject = subject_of(&job);
         Self {
+            cluster_job: clusters.get(&job.id).copied().map(Into::into),
             id: job.id.into(),
             kind: i16::from(job.kind),
             project: job.project.into(),
@@ -114,6 +118,7 @@ pub struct PendingJobSummary {
     pub dependency_count: u32,
     pub subject: Option<String>,
     pub exec_job: Option<BoardExecJob>,
+    pub cluster_job: Option<Uuid>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -128,7 +133,7 @@ pub struct PendingJobsResponse {
     operation_id = "getBoardPendingJobs",
     tag = "board",
     summary = "Pending (unassigned) jobs",
-    description = "Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count.",
+    description = "Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job.",
     responses((status = OK, description = "Pending jobs plus other_pending count", body = PendingJobsResponse), WebError)
 )]
 pub async fn get_pending_jobs(
@@ -158,6 +163,7 @@ pub async fn get_pending_jobs(
                 dependency_count: j.dependency_count,
                 subject: subjects.subject(subject),
                 exec_job: subjects.exec_job(subject),
+                cluster_job: j.cluster_job.map(Into::into),
             }
         })
         .collect();
@@ -174,7 +180,7 @@ pub async fn get_pending_jobs(
     operation_id = "getBoardDispatchedJobs",
     tag = "board",
     summary = "Live assigned jobs",
-    description = "In-flight assigned jobs visible to the caller; out-of-scope jobs collapse to an aggregate `other_running` count.",
+    description = "In-flight assigned jobs visible to the caller; out-of-scope jobs collapse to an aggregate `other_running` count. `cluster_job` names the cluster job of a sub job.",
     responses((status = OK, description = "Assigned jobs plus other_running count", body = DispatchedJobsResponse), WebError)
 )]
 pub async fn get_dispatched_jobs(
@@ -190,6 +196,8 @@ pub async fn get_dispatched_jobs(
     let other_running = other_running.len() as u64;
 
     let subjects = JobSubjects::load(&state.web_db, visible.iter().filter_map(subject_of)).await?;
+    let ids: Vec<DispatchedJobId> = visible.iter().map(|j| j.id).collect();
+    let clusters = clusters_of_assignments(&state.web_db, &ids).await?;
     let worker_names = WorkerNames::load(
         &state.web_db,
         &scope,
@@ -201,7 +209,7 @@ pub async fn get_dispatched_jobs(
         .into_iter()
         .map(|j| {
             let worker_name = worker_names.name(&j.worker_id);
-            DispatchedJobSummary::new(j, worker_name, &subjects)
+            DispatchedJobSummary::new(j, worker_name, &subjects, &clusters)
         })
         .collect();
 
@@ -504,6 +512,7 @@ pub struct DispatchedJobDetail {
     pub evaluation: Option<JobEvaluationView>,
     pub exec_job: Option<BoardExecJob>,
     pub exec_attempt: Option<ExecJobAttemptView>,
+    pub cluster_job: Option<Uuid>,
     pub pname: Option<String>,
     pub score_breakdown: serde_json::Value,
     pub worker_context: serde_json::Value,
@@ -590,6 +599,7 @@ pub async fn get_dispatched_job(
             .await?,
             exec_job,
             exec_attempt: None,
+            cluster_job: None,
             pname: c.pname,
             score_breakdown: c.score_breakdown,
             worker_context: c.worker_context,
@@ -716,6 +726,11 @@ pub async fn get_dispatched_job(
             .await?,
         exec_job,
         exec_attempt,
+        cluster_job: clusters_of_assignments(&state.web_db, &[j.id])
+            .await?
+            .get(&j.id)
+            .copied()
+            .map(Into::into),
         pname,
         score_breakdown: j.score_breakdown,
         worker_context: j.worker_context,
@@ -1758,6 +1773,7 @@ mod tests {
             evaluation_id: EvaluationId::nil(),
             derivation_build,
             exec_job,
+            cluster_job: None,
             project: ProjectId::now_v7(),
             queued_at: now(),
             dependency_count: 0,

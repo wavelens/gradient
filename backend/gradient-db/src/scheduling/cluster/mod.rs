@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod board;
 mod claim;
 mod membership;
 mod recovery;
 #[cfg(test)]
 mod test_rows;
 
+pub use board::{ClusterJobView, cluster_job_view, clusters_of_assignments};
 pub use claim::{
     ClusterClaim, claim_cluster, close_cluster_attempt, fail_prepare_attempt,
     resolve_cluster_attempt, start_cluster_attempt,

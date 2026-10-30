@@ -30,6 +30,7 @@ import {
   FlakeGraphNode,
   MetricPoint,
   DispatchedJobDetail,
+  ClusterJobDetail,
 } from '@core/models';
 
 export interface Windowed { w5m: number | null; w1h: number | null; w24h: number | null; }
@@ -128,6 +129,10 @@ export class BoardService {
 
   getJob(id: string): Observable<AssignedJobDetail> {
     return this.api.get<AssignedJobDetail>(`board/jobs/${id}`);
+  }
+
+  getClusterJob(id: string): Observable<ClusterJobDetail> {
+    return this.api.get<ClusterJobDetail>(`board/clusters/${id}`);
   }
 
   abortJob(id: string): Observable<string> {

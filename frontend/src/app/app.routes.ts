@@ -317,6 +317,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'board/clusters/:id',
+        title: 'Cluster Job',
+        loadComponent: () =>
+          import('./features/board/cluster-detail/cluster-detail.component').then(
+            (m) => m.BoardClusterDetailComponent
+          ),
+      },
+      {
         path: 'board',
         title: 'Job Board',
         loadComponent: () =>

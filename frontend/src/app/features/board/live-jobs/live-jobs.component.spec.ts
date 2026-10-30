@@ -139,6 +139,22 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     expect(workers).toEqual(['Builder One', 'worker-1']);
   });
 
+  it('lists the nodes of a multi-node job as one cluster job that opens the cluster page', () => {
+    const node = (index: number) => ({ id: `x${index}`, project: 'infra', task: 'nightly', entry_point: 'apps.x86_64-linux.train', node_index: index, nodes: 2 });
+    const fixture = setupWithAssigned([
+      { ...ASSIGNED, id: 'j0', kind: 2, build_id: null, exec_job: node(0), cluster_job: 'c1' },
+      { ...ASSIGNED, id: 'j1', kind: 2, build_id: null, exec_job: node(1), cluster_job: 'c1' },
+    ]);
+    fixture.detectChanges();
+    const rows = (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('tbody tr');
+    expect(rows.length).toBe(1);
+    expect(Array.from(rows[0].querySelectorAll('td')).slice(1, 3).map((cell) => cell.textContent?.trim()))
+      .toEqual(['2 sub jobs', 'nightly: apps.x86_64-linux.train (cluster, 2 sub jobs)']);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    rows[0].click();
+    expect(navigate).toHaveBeenCalledWith(['/board', 'clusters', 'c1']);
+  });
+
   it('renders - when the subject is unknown', () => {
     const fixture = setupWithAssigned([{ ...ASSIGNED, subject: null }]);
     fixture.detectChanges();

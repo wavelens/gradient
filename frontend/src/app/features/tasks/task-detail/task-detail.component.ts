@@ -38,6 +38,7 @@ import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
+import { boardJobLink } from '@features/board/job-kind';
 import {
   StarTarget,
   TaskDetailsResponse,
@@ -590,10 +591,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   });
 
   private evaluationLinkItems = computed<MenuItem[]>(() => {
-    const job = this.selected()?.dispatched_job;
+    const selected = this.selected();
+    const job = boardJobLink(selected?.dispatched_job, selected?.cluster_job);
     return [
-      { label: 'Show job', icon: 'work', disabled: !job,
-        routerLink: job ? ['/board', 'jobs', job] : undefined },
+      { label: 'Show job', icon: 'work', disabled: !job, routerLink: job },
       { label: 'Metrics', icon: 'show_chart',
         routerLink: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
     ];

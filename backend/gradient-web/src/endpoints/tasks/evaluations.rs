@@ -95,6 +95,9 @@ pub(super) async fn evaluations_to_summaries(
     let message_counts = gradient_db::task_board::evaluation_message_counts(db, &eval_ids).await?;
     let eval_jobs =
         gradient_db::scheduling::assignment_record::latest_eval_jobs(db, &eval_ids).await?;
+    let eval_job_ids: Vec<DispatchedJobId> = eval_jobs.values().copied().collect();
+    let clusters =
+        gradient_db::scheduling::cluster::clusters_of_assignments(db, &eval_job_ids).await?;
     let with_qos = gradient_db::scheduling::priority::evaluations_with_qos(db, &eval_ids).await?;
     let expected_thunks = match evaluations
         .iter()
@@ -163,6 +166,10 @@ pub(super) async fn evaluations_to_summaries(
             errors,
             warnings,
             dispatched_job: eval_jobs.get(&evaluation.id).copied(),
+            cluster_job: eval_jobs
+                .get(&evaluation.id)
+                .and_then(|job| clusters.get(job))
+                .copied(),
             prioritized: with_qos.contains(&evaluation.id),
             created_at: evaluation.created_at,
             started_at: evaluation.fetch_started_at,

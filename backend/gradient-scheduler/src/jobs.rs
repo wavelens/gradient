@@ -617,6 +617,7 @@ pub struct PendingJobInfo {
     pub evaluation_id: EvaluationId,
     pub derivation_build: Option<DerivationBuildId>,
     pub exec_job: Option<ExecJobId>,
+    pub cluster_job: Option<ClusterJobId>,
     pub project: ProjectId,
     pub queued_at: chrono::NaiveDateTime,
     pub dependency_count: u32,
@@ -1921,11 +1922,16 @@ impl JobTracker {
     }
 
     pub fn pending_snapshot(&self) -> Vec<PendingJobInfo> {
-        let members = self.clusters.jobs().map(|(_, job)| job);
+        let members = self
+            .clusters
+            .member_jobs()
+            .map(|(cluster, job)| (job, Some(cluster)));
         self.pending
             .values()
+            .map(|job| (job, None))
             .chain(members)
-            .map(|job| PendingJobInfo {
+            .map(|(job, cluster_job)| PendingJobInfo {
+                cluster_job,
                 kind: job.kind_disc(),
                 evaluation_id: job.evaluation_id(),
                 derivation_build: job.derivation_build(),
@@ -3562,7 +3568,7 @@ mod tests {
     }
 
     #[test]
-    fn the_pending_snapshot_names_exec_jobs_and_waiting_cluster_nodes() {
+    fn the_pending_snapshot_names_exec_jobs_and_the_cluster_of_waiting_nodes() {
         use gradient_types::exec::ExecSpec;
         let single = crate::test_jobs::exec_job(ExecSpec::default());
         let node = crate::test_jobs::exec_job(ExecSpec {
@@ -3570,26 +3576,24 @@ mod tests {
             ..ExecSpec::default()
         });
         let (single_id, node_id) = (single.exec_job, node.exec_job);
+        let cluster = ClusterJobId::now_v7();
         let mut tracker = JobTracker::new();
         tracker.add_pending(exec_job_key(single_id), PendingJob::Exec(Box::new(single)));
         tracker.add_member(
-            member(ClusterJobId::now_v7(), 2),
+            member(cluster, 2),
             exec_job_key(node_id),
             PendingJob::Exec(Box::new(node)),
         );
 
-        let mut snap: Vec<(DispatchedJobKind, Option<ExecJobId>)> = tracker
+        let mut snap: Vec<(Option<ExecJobId>, Option<ClusterJobId>)> = tracker
             .pending_snapshot()
             .into_iter()
-            .map(|info| (info.kind, info.exec_job))
+            .map(|info| (info.exec_job, info.cluster_job))
             .collect();
-        snap.sort_by_key(|(_, id)| *id);
+        snap.sort_by_key(|(id, _)| *id);
 
-        let mut expected = vec![
-            (DispatchedJobKind::Exec, Some(single_id)),
-            (DispatchedJobKind::Exec, Some(node_id)),
-        ];
-        expected.sort_by_key(|(_, id)| *id);
+        let mut expected = vec![(Some(single_id), None), (Some(node_id), Some(cluster))];
+        expected.sort_by_key(|(id, _)| *id);
         assert_eq!(snap, expected);
     }
 

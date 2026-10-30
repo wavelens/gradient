@@ -7,6 +7,7 @@
 import type { DeviceRequest, ExecJobStatus, ExecJobSummary, ExecUnmet, GuestSize, WaitingReason } from '@core/models';
 import type { StatusPhase } from '@shared/evaluation';
 import type { MenuItem } from '@gradient/ui/ui';
+import { boardJobLink } from '@features/board/job-kind';
 
 export function execJobPhase(status: ExecJobStatus): StatusPhase {
   switch (status) {
@@ -34,12 +35,13 @@ export interface ExecJobMenuActions {
 }
 
 export function execJobMenu(
-  { status, dispatched_job: job }: Pick<ExecJobSummary, 'status' | 'dispatched_job'>,
+  { status, dispatched_job: job, cluster_job: cluster }: Pick<ExecJobSummary, 'status' | 'dispatched_job' | 'cluster_job'>,
   canTrigger: boolean,
   actions: ExecJobMenuActions,
 ): MenuItem[] {
+  const link = boardJobLink(job, cluster);
   return [
-    { label: 'Show job', icon: 'work', disabled: !job, routerLink: job ? ['/board', 'jobs', job] : undefined },
+    { label: 'Show job', icon: 'work', disabled: !link, routerLink: link },
     ...(hasExecTerminal(status) ? [{ label: 'Terminal', icon: 'terminal', ...actions.terminal }] : []),
     ...(isOpenExecJob(status) && canTrigger ? [{ label: 'Abort', icon: 'stop_circle', command: actions.abort }] : []),
   ];

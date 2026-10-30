@@ -194,6 +194,13 @@ impl ClusterBook {
             .filter_map(|m| m.job.as_mut())
     }
 
+    pub fn member_jobs(&self) -> impl Iterator<Item = (ClusterJobId, &PendingJob)> {
+        self.waiting
+            .values()
+            .flat_map(|c| c.members.iter().map(move |m| (c.id, m)))
+            .filter_map(|(id, m)| m.job.as_ref().map(|j| (id, j)))
+    }
+
     pub fn jobs(&self) -> impl Iterator<Item = (&String, &PendingJob)> {
         self.waiting
             .values()

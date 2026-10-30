@@ -70,6 +70,15 @@ A slow job's timeline shows where the time went. The score explains why the serv
 
 **Abort** can halt a running job in any project for a superuser.
 
+### Cluster Jobs
+
+[Multi-node exec jobs](../exec/multi-node.md) and [split evaluations](../guides/multi-node-evaluations.md) form cluster jobs. Cluster jobs hold one sub job per node or part.
+
+- **Live Jobs** and every **Show job** button open the cluster job, never a single sub job.
+- Cluster job pages list every member with its sub jobs, newest attempt first.
+- Members without a worker show **Waiting for a worker**.
+- Sub jobs open the inspection page above, with a link back to the cluster job.
+
 ??? note "Timeline Phases"
     | Phase | Meaning |
     |---|---|

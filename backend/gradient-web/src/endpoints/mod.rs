@@ -10,6 +10,7 @@ pub mod badges;
 pub mod board;
 pub mod board_abort;
 pub mod board_cache;
+pub mod board_clusters;
 pub mod board_metrics;
 pub mod board_storage;
 pub mod board_subjects;
