@@ -940,7 +940,10 @@ mod tests {
         assert_eq!(ev.commit_hash, hex::decode(VALID_SHA).unwrap());
         assert_eq!(ev.queue_branch, "gh-readonly-queue/main/pr-7-0123");
         assert_eq!(ev.base_branch, "main");
-        assert_eq!(ev.commit_message.as_deref(), Some("Merge pull request #7"));
+        assert_eq!(
+            ev.commit_message.as_deref(),
+            Some("Merge pull request #7\n\nbody")
+        );
         assert_eq!(ev.author_name.as_deref(), Some("octocat"));
     }
 
