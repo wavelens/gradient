@@ -1,6 +1,6 @@
 # Exec Jobs
 
-Exec jobs start a flake app on a worker once the program is in the cache. Apps turn into entry points during evaluation. Jobs wait for the program build and then go to a matching worker. The user side is in [Run Exec Jobs](../../guides/exec-jobs.md).
+Exec jobs start a flake app on a worker once the program is in the cache. Apps turn into entry points during evaluation. Jobs wait for the program build and then go to a matching worker. The user side is in [Gradient Exec](../../exec/index.md).
 
 ```mermaid
 flowchart LR

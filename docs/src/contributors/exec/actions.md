@@ -1,6 +1,6 @@
 # Exec Actions
 
-Exec jobs talk back to Gradient in two ways. Programs call the API with a job token. Finished jobs fire task actions, open pull requests and add entry points to their evaluation. The user side is in [Use Exec Job Results](../../guides/exec-job-results.md).
+Exec jobs talk back to Gradient in two ways. Programs call the API with a job token. Finished jobs fire task actions, open pull requests and add entry points to their evaluation. The user side is in [Open Pull Requests](../../exec/pull-requests.md) and [Chain Evaluations](../../exec/chain-evaluations.md).
 
 ```mermaid
 flowchart LR

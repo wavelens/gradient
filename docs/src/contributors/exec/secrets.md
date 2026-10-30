@@ -1,6 +1,6 @@
 # Exec Secrets
 
-Exec jobs list secret names. Values can come from exactly one of three sources. Guests get each value as a file, a variable and a placeholder. The guest agent and the worker mask every value in text output. The user side is in [Run Exec Jobs](../../guides/exec-jobs.md#secrets).
+Exec jobs list secret names. Values can come from exactly one of three sources. Guests get each value as a file, a variable and a placeholder. The guest agent and the worker mask every value in text output. The user side is in [Pass Secrets](../../exec/secrets.md).
 
 ```mermaid
 flowchart LR

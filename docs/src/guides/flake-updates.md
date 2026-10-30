@@ -71,7 +71,7 @@ flowchart LR
 
 ## Update in an Exec Job
 
-The update can run as a script in an [exec job](exec-jobs.md). Any check can happen before the pull request. The PR action in Step 2 can handle the integration. Step 1 can stay unused.
+The update can run as a script in an [exec job](../exec/index.md). Any check can happen before the pull request. The PR action in Step 2 can handle the integration. Step 1 can stay unused.
 
 ```nix
 # flake.nix
@@ -99,7 +99,7 @@ done
 ```
 
 - Choose the exec job for custom checks or one pull request per input. Use the PR action for a plain lock bump.
-- Find details on `gradient pr open` and the job token in [Use Exec Job Results](exec-job-results.md).
+- `gradient pr open` and job token: [Open Pull Requests](../exec/pull-requests.md).
 
 ## Verify Deployment
 
@@ -109,5 +109,5 @@ done
 ## Next Steps
 
 - [Notify with Actions](actions.md): update failures trigger mail and web requests
-- [Use Exec Job Results](exec-job-results.md): exec jobs open pull requests
+- [Open Pull Requests](../exec/pull-requests.md): pull requests from exec jobs
 - [Projects and Tasks](../concepts/projects-and-tasks.md): how triggers and actions work together
