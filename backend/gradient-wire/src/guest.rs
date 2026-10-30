@@ -26,6 +26,7 @@ pub const GUEST_UPLOADS_SINCE: u16 = 3;
 pub const GUEST_WORK_DISK_SINCE: u16 = 5;
 pub const GUEST_SHUTDOWN_SINCE: u16 = 6;
 pub const AGENT_VSOCK_PORT: u32 = 7000;
+pub const GUEST_STORE_VSOCK_PORT: u32 = 7001;
 pub const AGENT_RELAY_PORT_BASE: u32 = 7100;
 
 const MAX_GUEST_FRAME: usize = 16 * 1024 * 1024;

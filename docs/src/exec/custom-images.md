@@ -54,13 +54,14 @@ Jobs with `image` wait for a worker with [`exec.allow.customImages`](../referenc
 }
 ```
 
-1.  Guest agents come from the `gradient.guest` module. Images that lack that module fail with `guest image has no gradient agent, import the gradient.guest module`.
+1.  Guest agents and the guest store image come from the `gradient.guest` module. Images without that module fail evaluation with `image has no config.system.build.gradientGuest, import the gradient.guest module`.
 
 ## 3. Keep the Image in Step
 
 - Workers build the image the same way they build the program.
 - Jobs with an image run on a fresh guest, booted cold from the image.
 - Warm guests stay untouched.
+- Guests see the store paths of the image and the program closure only. Paths of the worker store remain out of reach.
 - `cpus` and `memoryMb` come from the worker image. The custom image settings don't count.
 - Guest agents in the image come from the `gradient` input. Keep that input at the server version.
 - Agents from older releases start the program in `/work`. Those agents can refuse shells.

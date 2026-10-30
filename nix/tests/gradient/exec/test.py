@@ -4,7 +4,8 @@
 
 # Exec jobs in cloud-hypervisor guests on two workers: `stopper` stops its guests with the
 # worker, `keeper` keeps them. Covers guest units, pre-warm and pause, the PreWarmVms clamp
-# and the surplus stop, the virtiofs store and work shares, tap networking with NAT and the
+# and the surplus stop, the guest store image with the program substituted into it and no
+# host store, the virtiofs work share, tap networking with NAT and the
 # guest DNS forwarder, the agent protocol, exit codes, retries, maxSilent, abort, both restart
 # modes with log replay and JobLost from a restarted agent and the SSH gateway after a
 # resume: attach to the program terminal, a new shell, the task login, a forward to a
@@ -456,6 +457,11 @@ new_shell = "printf 'echo gateway-$((6*7)); whoami; pwd\\nexit\\n' | {ssh} -T '{
 for login in [job_login, "project/task@localhost"]:
     lines = server.succeed(new_shell.format(ssh=SSH, login=login)).splitlines()
     assert lines[-3:] == ["gateway-42", "gradient", "/work"], f"{login}: {lines}"
+
+worker_systems = [node.succeed("readlink -f /run/current-system").strip() for node in WORKERS]
+probe = "; ".join(f"test -e {system} && echo visible || echo hidden" for system in worker_systems)
+lines = server.succeed(f"printf '{probe}\\nexit\\n' | {SSH} -T '{job_login}' shell").splitlines()
+assert lines[-2:] == ["hidden", "hidden"], f"the guest sees the host store: {lines}"
 
 forward = f"{SSH} -o ExitOnForwardFailure=yes -N -f -L {{local}}:127.0.0.1:{{port}} '{job_login}' >/dev/null 2>&1"
 server.succeed(forward.format(local=18080, port=8080))

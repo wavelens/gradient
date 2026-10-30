@@ -34,7 +34,7 @@ flowchart LR
 
 - Attrsets with `type = "app"` and `passthru.gradient` are walk leaves. Other apps stay opaque.
 - `EXEC_APP_EXPR` can read the block. Apps without exactly one derivation output in the string context of `program` fail with a message.
-- The eval cache can resolve `image` to `config.system.build.toplevel`. Images get a second entry point, `<attr>.passthru.gradient.image`.
+- The eval cache can resolve `image` to `config.system.build.gradientGuest`. Images get a second entry point, `<attr>.passthru.gradient.image`.
 - Specs live as JSON in `entry_point.exec`. Exec entry points reference the program derivation in `entry_point.derivation`.
 - The graph writer can refuse an entry point before insertion, with a message.
 
@@ -222,16 +222,34 @@ flowchart LR
 | Guest unit | Transient `gradient-guest-<id>.service` in `gradient-guests.slice`, started over D-Bus |
 | Supervisor | Main process of the unit, `gradient-worker --guest-supervisor <dir>` as root with the worker's group |
 | Guest directory | `/var/lib/gradient-worker/guests/<id>/`, mode `0770` |
-| Files | `state.json`, `console.log`, `serial.sock`, `console.sock`, `api.sock`, `vsock.sock`, `control.sock`, `store.sock`, `work.img`, `mounts/<name>.sock` |
+| Files | `state.json`, `console.log`, `serial.sock`, `console.sock`, `api.sock`, `vsock.sock`, `control.sock`, `guest-store.sock`, `work.img`, `mounts/<name>.sock` |
 
 - Supervisors own cloud-hypervisor, every virtiofsd, the taps and the USB/IP bindings. Guests never belong to the worker process.
 - Workers drive the cloud-hypervisor API, the supervisor control socket and the agent over hybrid vsock.
 - Supervisors check every request against the configured devices, mounts and bridge.
 - State files hold the unit, the vsock CID, held devices, mounts and a job record without the token.
 
+### Guest Store
+
+Guests never see the host store. Images bring the closure of their own system as a read-only disk.
+
+| Layer | Guest path | Source |
+|---|---|---|
+| Lower | `/nix/.ro-store` | `store.img` of the image, an erofs disk with serial `nix-store` |
+| Upper | `/nix/.rw-store/upper` | tmpfs, gone at guest shutdown |
+| Store | `/nix/store` | overlayfs of both layers |
+
+- `nixosModules.guest` can build `store.img` from `closureInfo` of the toplevel. Disks also hold a Nix database for exactly that closure.
+- The guest `nix-daemon` can open a `local-overlay://` store over a `read-only` local lower store.
+- `gradient-guest-store.socket` can start `nix-daemon --stdio` per vsock connection on port `GUEST_STORE_VSOCK_PORT` (7001).
+- `GuestStorePassthrough` can pass `guest-store.sock` through to that port. Workers open a `LocalNixStore` on the socket.
+- `ensure_path` can fetch the program closure from the Gradient cache into the guest store. Paths of the image stay untouched.
+- Fetches start after the first agent answer of the job. Warm guests need no job data before then.
+- `vsock_loopback` stays unloaded in the guest. Job processes can't reach port 7001 from inside.
+
 ### Pre-Warm
 
-- Guests boot with `/nix/store` shared read-only over virtiofs. Workers pause a guest after the first agent answer.
+- Workers pause a guest after the first agent answer.
 - Warm guests belong to a size, by `cpus` and `memory_mb`. `warm_targets` in `gradient-vm/src/pool.rs` can turn the last `PreWarmVms` into a target per size.
 - `preWarm` guests of the image size come first. Upcoming jobs of the image size count against them.
 - The other asked guests share `maxPreWarm` minus `preWarm`. Asked sizes receive one guest each before a second round starts.
@@ -247,7 +265,7 @@ flowchart LR
 
 | Call | Use |
 |---|---|
-| `vm.create`, `vm.boot` | Boot from `kernel`, `initrd` and `guest.json` of the image |
+| `vm.create`, `vm.boot` | Boot from `kernel`, `initrd` and `guest.json` of the image, `store.img` as a read-only disk |
 | `vm.pause`, `vm.resume` | Warm guests |
 | `vm.add-device` | VFIO devices |
 | `vm.add-disk` | `work.img` as `/work`, serial `work` |
@@ -320,26 +338,18 @@ Reattach can sort guest units and state files into four groups.
 
 ### Custom Images
 
-Jobs with `passthru.gradient.image` boot a NixOS toplevel of their own. Placement can pick only workers with `ExecAllow.custom_images` (`exec.allow.customImages`).
+Jobs with `passthru.gradient.image` boot a guest image of their own. The image is the `gradientGuest` output of a NixOS system with `nixosModules.guest`. Placement can pick only workers with `ExecAllow.custom_images` (`exec.allow.customImages`).
 
-1. `guest_source` in `gradient-worker/src/exec/job.rs` can return `Warm` or `Custom(<toplevel>)`. Workers without custom images fail the job with `custom images are not allowed on this worker`.
-2. `ensure_path` can realise the toplevel. A GC root can keep the toplevel alive until teardown.
-3. `image_from_toplevel` in `gradient-vm/src/custom_image.rs` can build the boot description. Toplevels without `kernel` or `initrd` fail with `image <path> is not a NixOS system: no <file>`.
+1. `guest_source` in `gradient-worker/src/exec/job.rs` can return `Warm` or `Custom(<image>)`. Workers without custom images fail the job with `custom images are not allowed on this worker`.
+2. `ensure_path` can realise the image on the host. A GC root can keep the image alive until teardown.
+3. `GuestImage::load` can read `kernel`, `initrd`, `store.img` and `guest.json` like the worker image. Images without `store.img` fail with `guest image <path> has no store.img`.
 4. `GuestPool::boot_custom` can take a CID from `next_cid` for `Guest::boot`. Warm guests, the warm target and `PreWarmVms` stay untouched.
 5. Checkout, plug, `RunJob`, follow and teardown match a warm guest job. Custom guests never go back to the pool.
 
-| `vm.create` field | Value |
-|---|---|
-| `payload.kernel` | Canonical `<toplevel>/kernel`, a bzImage on x86_64 or an `Image` on aarch64 |
-| `payload.initramfs` | Canonical `<toplevel>/initrd` |
-| `payload.cmdline` | `init=<toplevel>/init` and the trimmed `<toplevel>/kernel-params` |
-| `cpus`, `memory.size` | The job size, through `GuestImage::sized` of the worker image |
-| `memory.shared`, `fs`, `vsock`, `serial`, `console` | Same as a warm guest |
-
-- A boot wait can take up to `GUEST_BOOT_TIMEOUT` (120 s). Toplevels with no `etc/systemd/system/gradient-guest-agent.service` then fail with `guest image has no gradient agent, import the gradient.guest module`.
+- `cpus` and `memory.size` follow the job size, through `GuestImage::sized` of the worker image.
+- A boot wait can take up to `GUEST_BOOT_TIMEOUT` (120 s). Images with no `toplevel/etc/systemd/system/gradient-guest-agent.service` then fail with `guest image has no gradient agent, import the gradient.guest module`.
 - `attempt_end_reason` can move `GuestBoot` to `Failed` when a job has an image.
 - These attempts consume one retry. Warm guest boot failures stay `Lost`.
-- `nixosModules.guest` can build the `guest.json` cmdline by the same rule as `payload.cmdline`.
 
 ## Guest Agent
 
