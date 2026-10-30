@@ -33,6 +33,7 @@ import { ManagedDisableDirective } from '@shared/access';
 import { AccessState, ApiKeyInfo, PermissionEntry } from '@core/models';
 import { permissionLabel } from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
+import { isIpNetwork, splitLines } from '@shared/forms';
 
 type ScopeType = 'none' | 'project' | 'cache';
 
@@ -180,11 +181,8 @@ export class ApiKeysComponent implements OnInit {
     this.showDialog.set(true);
   }
 
-  private parseAllowedIps(): string[] {
-    return this.formAllowedIps
-      .split('\n')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+  invalidIps(): string[] {
+    return splitLines(this.formAllowedIps).filter((entry) => !isIpNetwork(entry));
   }
 
   onScopeChange(): void {
@@ -227,7 +225,8 @@ export class ApiKeysComponent implements OnInit {
     }
     const project = this.formScope === 'project' ? this.formProject : null;
     const cache = this.formScope === 'cache' ? this.formCache : null;
-    const allowedIps = this.parseAllowedIps();
+    if (this.invalidIps().length > 0) return;
+    const allowedIps = splitLines(this.formAllowedIps);
     const editing = this.editingKey();
     if (editing) {
       this.saving.set(true);

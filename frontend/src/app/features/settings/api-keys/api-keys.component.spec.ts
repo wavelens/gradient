@@ -106,6 +106,24 @@ describe('ApiKeysComponent - managed-key gating', () => {
   });
 });
 
+describe('ApiKeysComponent - allowed sources', () => {
+  it('refuses to send entries that are not IP addresses or CIDRs', () => {
+    const createApiKey = vi.fn(() => of('key'));
+    const fixture = setup([], { createApiKey });
+    const component = fixture.componentInstance;
+    component.formName = 'deploy';
+    component.formPermissions = { viewProject: true };
+    component.formAllowedIps = '10.0.0.0/8\nci.example.com\n';
+    expect(component.invalidIps()).toEqual(['ci.example.com']);
+    component.saveKey();
+    expect(createApiKey).not.toHaveBeenCalled();
+
+    component.formAllowedIps = '10.0.0.0/8\n 2001:db8::/32 ';
+    component.saveKey();
+    expect(createApiKey).toHaveBeenCalledWith('deploy', null, ['viewProject'], null, null, ['10.0.0.0/8', '2001:db8::/32']);
+  });
+});
+
 describe('ApiKeysComponent - create errors', () => {
   it('shows the reason the server gave for refusing the key', () => {
     const reason = 'Permission manageProject exceeds your own permissions';
