@@ -21,6 +21,8 @@ type LoadRange = 'now' | '24h' | '7d' | '30d';
 
 const LOAD_RANGE_HOURS: Record<Exclude<LoadRange, 'now'>, number> = { '24h': 24, '7d': 24 * 7, '30d': 24 * 30 };
 
+const busyPercent = (busy: number, capacity: number) => Math.round((busy / capacity) * 1000) / 10;
+
 @Component({
   selector: 'app-board-workers',
   standalone: true,
@@ -103,7 +105,7 @@ const LOAD_RANGE_HOURS: Record<Exclude<LoadRange, 'now'>, number> = { '24h': 24,
 
       <gr-table class="workers">
         <thead>
-          <tr><th>Worker</th><th>Projects</th><th>State</th><th>Load</th><th>CPU</th><th>RAM free</th><th>Arch</th><th>Exec</th></tr>
+          <tr><th>Worker</th><th>Projects</th><th>State</th><th>Jobs</th><th>CPU load</th><th>Free RAM</th><th>Arch</th><th>Exec</th></tr>
         </thead>
         <tbody>
           @for (w of workers(); track $index) {
@@ -181,7 +183,7 @@ export class BoardWorkersComponent implements OnInit {
         {
           name: 'busy %',
           data: buckets.map((b) =>
-            b.capacity > 0 ? Math.round((b.in_flight / b.capacity) * 100) : 0
+            b.capacity > 0 ? busyPercent(b.in_flight, b.capacity) : 0
           ),
         },
       ],
@@ -202,7 +204,7 @@ export class BoardWorkersComponent implements OnInit {
         .filter((w) => w.id !== null)
         .map((w) =>
           w.max_concurrent_builds > 0
-            ? Math.round((w.assigned_jobs / w.max_concurrent_builds) * 100)
+            ? busyPercent(w.assigned_jobs, w.max_concurrent_builds)
             : 0
         ),
     },
