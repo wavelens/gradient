@@ -10,6 +10,7 @@ pub mod outputs;
 pub mod pull_requests;
 pub mod query;
 pub mod terminal;
+pub(crate) mod timeline;
 
 pub use self::actions::{
     delete_exec_job_keep_vm_running, post_exec_job_abort, post_exec_job_keep_vm_running,

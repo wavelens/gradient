@@ -36,6 +36,13 @@ a.sidebar-item { text-decoration: none; }
 
 .kept-vm button { margin-left: $spacing-sm; }
 
+.timeline {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: $spacing-sm $spacing-md $spacing-md;
+}
+
 gr-terminal.terminal {
   flex: 1;
   height: auto;
