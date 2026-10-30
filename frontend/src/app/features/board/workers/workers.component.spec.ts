@@ -53,6 +53,12 @@ describe('BoardWorkersComponent - load range', () => {
     expect(cmp.capLoad().series[0].data).toEqual([0, 0, 100]);
   });
 
+  it('keeps a tenth of a percent so a light load does not read as zero', () => {
+    const { cmp } = setup();
+    cmp.load.set({ ...NOW, by_capability: [bucket('build', 1, 300)] });
+    expect(cmp.capLoad().series[0].data).toEqual([0.3]);
+  });
+
   it('averages both radar charts over the picked range', () => {
     const { cmp, getWorkerLoadAverage } = setup();
     cmp.setLoadRange('7d');
