@@ -6,25 +6,99 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-.release + .release {
-  margin-top: $space-section;
-  padding-top: $space-section;
-  border-top: 1px solid var(--gr-border-subtle);
+.slides {
+  overflow: hidden;
+  outline: none;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.slide {
+  animation: slide-in 220ms ease-out;
+  &.back { animation-name: slide-back; }
+}
+
+@keyframes slide-in { from { opacity: 0; transform: translateX(2rem); } }
+@keyframes slide-back { from { opacity: 0; transform: translateX(-2rem); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .slide { animation: none; }
+}
+
+.visual {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  max-width: 100%;
+  margin-bottom: $space-block;
+  overflow: hidden;
+  border: 1px solid var(--gr-border-subtle);
+  border-radius: $border-radius-md;
+  background: color-mix(in srgb, var(--gr-accent) 8%, var(--gr-surface-raised));
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: top left;
+  }
+
+  gr-icon {
+    color: var(--gr-accent);
+    transform: scale(3);
+  }
+}
+
+.version {
+  color: var(--gr-text-muted);
+  font-size: $font-size-xs;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 h3 {
-  margin: 0 0 $spacing-sm;
-  font-size: $font-size-md;
+  margin: $spacing-xs 0 $spacing-sm;
+  font-size: $font-size-xl;
 }
 
 .notes {
+  min-height: 4.5em;
   color: var(--gr-text-secondary);
-  font-size: $font-size-sm;
+  font-size: $font-size-md;
   line-height: 1.5;
 
-  :is(h4, p, ul) { margin: 0 0 $spacing-sm; }
-  h4 { color: var(--gr-text-primary); font-size: $font-size-sm; }
+  :is(p, ul) { margin: 0 0 $spacing-sm; }
   ul { padding-left: $spacing-lg; }
   li + li { margin-top: $spacing-xs; }
-  code { font-family: $font-family-mono; font-size: $font-size-xs; }
+  code { font-family: $font-family-mono; font-size: $font-size-sm; }
+}
+
+.footer {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.dots {
+  display: flex;
+  flex: 1;
+  gap: $spacing-xs;
+}
+
+.dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--gr-border);
+  cursor: pointer;
+  transition: width 200ms ease, background 200ms ease;
+
+  &.active {
+    width: 1.5rem;
+    background: var(--gr-accent);
+  }
 }
