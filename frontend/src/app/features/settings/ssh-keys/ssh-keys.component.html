@@ -67,7 +67,8 @@
       grInput
       id="ssh-key-public"
       rows="4"
-      [(ngModel)]="formPublicKey"
+      [ngModel]="formPublicKey"
+      (ngModelChange)="onPublicKeyChange($event)"
       placeholder="ssh-ed25519 AAAA... user@host"
     ></textarea>
   </gr-form-field>
