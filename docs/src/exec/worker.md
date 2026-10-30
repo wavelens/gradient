@@ -40,8 +40,8 @@ services.gradient.worker = {
 ```
 
 1.  A NixOS system for the guests. `gradient.guest.preScript` and `gradient.guest.postScript` tune every guest. `gradient.guest.cpus` and `gradient.guest.memoryMb` size the warm guests, see [Guest Size](#guest-size). Workers without `image` boot a plain guest image.
-2.  Guests booted and paused ahead, waiting for a job.
-3.  Upper bound for warm guests for upcoming exec jobs on the server. Leave at `0` for a fixed `preWarm`.
+2.  Guests booted and paused ahead, waiting for a job. `0` by default.
+3.  Upper bound for warm guests for upcoming exec jobs on the server. `3` by default. Set `0` for a fixed `preWarm`.
 4.  Set exactly `vfio`, `dev` or `usb` per device. Bind each VFIO device to `vfio-pci` first.
 5.  Guests find a mount at `/mnt/<name>`. `perJob` mounts give every job a fresh directory below `path`.
 6.  Workers send `allow` and `defaults` to the server. The server can apply both at placement.

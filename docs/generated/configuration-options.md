@@ -390,7 +390,7 @@
 | `worker.exec.guestMemoryMb` | null or (unsigned int) | `null` | `GRADIENT_WORKER_EXEC_GUEST_MEMORY_MB` | Memory in MB the running and warm guests of this worker share. An exec job waits until its `memoryMb` fits. `null` uses 80 % of the host memory. |
 | `worker.exec.image` | package | derived | `GRADIENT_WORKER_EXEC_IMAGE` | Guest image for exec jobs, built with `gradient.lib.mkWorkerImage`. |
 | `worker.exec.labels` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_LABELS` | Labels an exec job can ask for. The worker ID is always a label too. |
-| `worker.exec.maxPreWarm` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_MAX_PRE_WARM` | Most guests kept warm for upcoming exec jobs the server reports. The worker keeps the larger of `worker.exec.preWarm` and the reported count, capped at this value. `0` ignores the server count. |
+| `worker.exec.maxPreWarm` | unsigned int | `3` | `GRADIENT_WORKER_EXEC_MAX_PRE_WARM` | Most guests kept warm for upcoming exec jobs the server reports. The worker keeps the larger of `worker.exec.preWarm` and the reported count, capped at this value. `0` ignores the server count. |
 | `worker.exec.mounts` | list of (submodule) | `[ ]` | `GRADIENT_WORKER_EXEC_MOUNTS` | Host directories that exec jobs can ask for. |
 | `worker.exec.mounts.*.name` | string | - | - | Mount name that exec jobs ask for. Guests find the mount at `/mnt/<name>`. |
 | `worker.exec.mounts.*.path` | path | - | - | Host directory for the guest, shared over virtiofs. |
