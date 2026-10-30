@@ -24,6 +24,10 @@ import {
   RowListComponent,
 } from '@gradient/ui/ui';
 
+function sshKeyComment(publicKey: string): string {
+  return publicKey.trim().split(/\s+/).slice(2).join(' ');
+}
+
 @Component({
   selector: 'app-ssh-keys',
   standalone: true,
@@ -57,6 +61,7 @@ export class SshKeysComponent implements OnInit {
   showDialog = signal(false);
   formName = '';
   formPublicKey = '';
+  private nameFromKey = '';
 
   readonly storeUrl = `ssh-ng://<project>@${location.hostname}`;
   readonly buildHostCommand = `nixos-rebuild switch --build-host ${this.storeUrl}`;
@@ -80,8 +85,19 @@ export class SshKeysComponent implements OnInit {
   openDialog(): void {
     this.formName = '';
     this.formPublicKey = '';
+    this.nameFromKey = '';
     this.errorMessage.set(null);
     this.showDialog.set(true);
+  }
+
+  onPublicKeyChange(publicKey: string): void {
+    this.formPublicKey = publicKey;
+    const comment = sshKeyComment(publicKey);
+    const nameUntouched = this.formName === '' || this.formName === this.nameFromKey;
+    if (comment && nameUntouched) {
+      this.formName = comment;
+      this.nameFromKey = comment;
+    }
   }
 
   addKey(): void {

@@ -74,4 +74,54 @@ describe('SshKeysComponent', () => {
     buttonsByText(fixture.nativeElement, 'delete')[0].click();
     expect(deleteSshKey).toHaveBeenCalledWith('k1');
   });
+
+  describe('Add SSH Key dialog', () => {
+    async function openDialog(): Promise<ComponentFixture<SshKeysComponent>> {
+      const fixture = setup([]);
+      buttonsByText(fixture.nativeElement, 'add ssh key')[0].click();
+      fixture.detectChanges();
+      await fixture.whenStable();
+      return fixture;
+    }
+
+    async function type(
+      fixture: ComponentFixture<SshKeysComponent>,
+      id: string,
+      value: string,
+    ): Promise<void> {
+      const el = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement;
+      el.value = value;
+      el.dispatchEvent(new Event('input'));
+      fixture.detectChanges();
+      await fixture.whenStable();
+    }
+
+    const nameValue = () => (document.getElementById('ssh-key-name') as HTMLInputElement).value;
+
+    it('fills the name from the comment of a pasted key', async () => {
+      const fixture = await openDialog();
+      await type(fixture, 'ssh-key-public', 'ssh-ed25519 AAAAC3Nza dennis@laptop\n');
+      expect(nameValue()).toBe('dennis@laptop');
+    });
+
+    it('keeps a name the user typed', async () => {
+      const fixture = await openDialog();
+      await type(fixture, 'ssh-key-name', 'Work');
+      await type(fixture, 'ssh-key-public', 'ssh-ed25519 AAAAC3Nza dennis@laptop');
+      expect(nameValue()).toBe('Work');
+    });
+
+    it('leaves the name empty for a key without a comment', async () => {
+      const fixture = await openDialog();
+      await type(fixture, 'ssh-key-public', 'ssh-ed25519 AAAAC3Nza');
+      expect(nameValue()).toBe('');
+    });
+
+    it('updates an auto-filled name when the key changes', async () => {
+      const fixture = await openDialog();
+      await type(fixture, 'ssh-key-public', 'ssh-ed25519 AAAAC3Nza dennis@laptop');
+      await type(fixture, 'ssh-key-public', 'ssh-ed25519 AAAAC3Nza dennis@desktop');
+      expect(nameValue()).toBe('dennis@desktop');
+    });
+  });
 });
