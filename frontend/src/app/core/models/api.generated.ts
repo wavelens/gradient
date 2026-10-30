@@ -156,6 +156,13 @@ export interface AuditLogEntry {
   created_at: string;
 }
 
+export interface AverageLoadBucket {
+  key: string;
+  in_flight: number;
+  capacity: number;
+  workers: number;
+}
+
 export type BadgeStyle = "flat" | "flat-square";
 
 export type Binary = string;
@@ -2702,6 +2709,11 @@ export interface WorkerLoad {
   by_capability: LoadBucket[];
   by_architecture: LoadBucket[];
   by_feature: LoadBucket[];
+}
+
+export interface WorkerLoadAverage {
+  by_capability: AverageLoadBucket[];
+  by_architecture: AverageLoadBucket[];
 }
 
 export interface WorkerMetricsResponse {

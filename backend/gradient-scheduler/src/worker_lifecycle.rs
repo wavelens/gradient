@@ -49,6 +49,7 @@ pub(crate) async fn record_worker_sample(
         max_concurrent_builds: info.max_concurrent_builds as i32,
         state: info.draining.into(),
         capabilities: serde_json::to_value(&info.capabilities).unwrap_or(serde_json::Value::Null),
+        architectures: info.architectures.clone(),
     }
     .into_active_model();
 

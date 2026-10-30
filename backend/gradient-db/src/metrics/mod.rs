@@ -11,4 +11,5 @@ pub mod observations;
 pub mod resource_usage;
 pub mod rollup;
 pub mod series;
+pub mod worker_load;
 pub mod worker_samples;

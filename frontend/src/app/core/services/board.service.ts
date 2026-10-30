@@ -15,6 +15,7 @@ import {
   AssignDecisionView,
   BoardWorker,
   WorkerLoad,
+  WorkerLoadAverage,
   ExpensiveBuild,
   MetricMeta,
   ScoringSummary,
@@ -138,6 +139,10 @@ export class BoardService {
 
   getWorkerLoad(): Observable<WorkerLoad> {
     return this.api.get<WorkerLoad>('board/workers/load');
+  }
+
+  getWorkerLoadAverage(windowHours: number): Observable<WorkerLoadAverage> {
+    return this.api.get<WorkerLoadAverage>(`board/workers/load/average?window_hours=${windowHours}`);
   }
 
   getExpensive(windowDays = 30): Observable<ExpensiveBuild[]> {

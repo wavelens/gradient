@@ -1894,6 +1894,40 @@ paths:
       security:
       - {}
       - bearerAuth: []
+  /api/v1/board/workers/load/average:
+    get:
+      tags:
+      - board
+      summary: Average fleet load by capability and architecture
+      description: 'Average load over the window for each capability (eval/network/build) and architecture: `in_flight` is the mean number of running jobs from dispatched-job times, `capacity` the mean summed slot count of the workers that served it from worker samples. Busy % = in_flight / capacity. Scoped to the caller''s projects.'
+      operationId: getBoardWorkerLoadAverage
+      parameters:
+      - name: window_hours
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Average fleet load
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/WorkerLoadAverage'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
   /api/v1/build-requests/manifest:
     post:
       tags:
@@ -13983,6 +14017,25 @@ components:
         metadata: {}
         created_at:
           type: string
+    AverageLoadBucket:
+      type: object
+      required:
+      - key
+      - in_flight
+      - capacity
+      - workers
+      properties:
+        key:
+          type: string
+        in_flight:
+          type: number
+          format: double
+        capacity:
+          type: number
+          format: double
+        workers:
+          type: integer
+          format: int64
     BadgeStyle:
       type: string
       enum:
@@ -21286,6 +21339,20 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/LoadBucket'
+    WorkerLoadAverage:
+      type: object
+      required:
+      - by_capability
+      - by_architecture
+      properties:
+        by_capability:
+          type: array
+          items:
+            $ref: '#/components/schemas/AverageLoadBucket'
+        by_architecture:
+          type: array
+          items:
+            $ref: '#/components/schemas/AverageLoadBucket'
     WorkerMetricsResponse:
       type: object
       required:
