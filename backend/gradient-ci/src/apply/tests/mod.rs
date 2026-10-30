@@ -413,6 +413,7 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
         commit_message: None,
         author_name: None,
         manual: false,
+        honors_skip_marker: false,
         gate_approval: Some(ApprovalInfo {
             pr_number: 42,
             pr_author: "external-contrib".into(),
@@ -602,4 +603,70 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
         }
         other => panic!("expected Workers, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn a_head_commit_asking_to_skip_creates_no_evaluation() {
+    let task = make_task_with_last_eval(None);
+    let applied = ApplyInput {
+        commit_message: Some("docs: fix typo [skip ci]".into()),
+        honors_skip_marker: true,
+        ..input(
+            TaskTriggerId::now_v7(),
+            TriggerType::ReporterPush,
+            vec![3u8; 20],
+            false,
+        )
+    };
+
+    let res = apply_trigger(&empty_db(), &task, applied).await.unwrap();
+    assert!(
+        matches!(res, ApplyOutcome::SkippedByCommitMessage),
+        "expected SkippedByCommitMessage, got {res:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_trigger_not_honoring_the_skip_marker_still_creates_the_evaluation() {
+    let prev_eval_id = EvaluationId::now_v7();
+    let task = make_task_with_last_eval(Some(prev_eval_id));
+    let hash = vec![4u8; 20];
+    let new_eval_id = EvaluationId::now_v7();
+    let new_commit_id = CommitId::now_v7();
+    let trig = TaskTriggerId::now_v7();
+
+    let db = mock_db()
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([vec![make_eval(
+            prev_eval_id,
+            task.id,
+            CommitId::nil(),
+            EvaluationStatus::Completed,
+        )]])
+        .append_query_results([vec![make_commit(new_commit_id, hash.clone())]])
+        .append_query_results([vec![make_eval(
+            new_eval_id,
+            task.id,
+            new_commit_id,
+            EvaluationStatus::Queued,
+        )]])
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        .append_query_results([vec![task.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
+    let db = with_eval_worker(with_storage_not_full(with_writable_cache(db))).into_connection();
+
+    let applied = ApplyInput {
+        commit_message: Some("docs: fix typo [skip ci]".into()),
+        honors_skip_marker: false,
+        ..input(trig, TriggerType::Polling, hash, true)
+    };
+    let res = apply_trigger(&db, &task, applied).await.unwrap();
+    assert!(
+        matches!(res, ApplyOutcome::Created { .. }),
+        "expected Created, got {res:?}"
+    );
 }

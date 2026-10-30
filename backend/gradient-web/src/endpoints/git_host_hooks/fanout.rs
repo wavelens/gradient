@@ -85,6 +85,7 @@ pub(super) async fn trigger_push_for_integration(
         None,
         None,
         false,
+        true,
         None,
         None,
     )
@@ -123,6 +124,7 @@ pub(super) async fn trigger_merge_group_for_integration(
         },
         None,
         None,
+        false,
         false,
         None,
         None,
@@ -192,6 +194,7 @@ pub(super) async fn trigger_pr_for_integration(
         Some(approval_ctx),
         head_repo_clone_url,
         manual,
+        false,
         wildcard_override,
         source_comment,
     )
@@ -246,6 +249,7 @@ pub(super) async fn trigger_release_for_integration(
         None,
         None,
         false,
+        false,
         None,
         None,
     )
@@ -277,6 +281,7 @@ async fn fan_out_triggers<F>(
     approval_ctx: Option<PullRequestApprovalContext>,
     repository_override: Option<String>,
     manual: bool,
+    honors_skip_marker: bool,
     wildcard_override: Option<String>,
     source_comment: Option<serde_json::Value>,
 ) -> WebhookTriggerOutcome
@@ -351,6 +356,7 @@ where
             commit_message: commit_message.clone(),
             author_name: author_name.clone(),
             manual,
+            honors_skip_marker,
             gate_approval,
             repository_override: repository_override.clone(),
             wildcard_override: wildcard_override.clone(),
@@ -435,6 +441,9 @@ async fn apply_and_record(
         }
         Ok(ApplyOutcome::SkippedConcurrency) => {
             push_skipped(outcome, task, project_name, "concurrency")
+        }
+        Ok(ApplyOutcome::SkippedByCommitMessage) => {
+            push_skipped(outcome, task, project_name, "commit_message")
         }
         Err(e) => {
             warn!(error = %e, task_id = %task.id, "apply_trigger failed in webhook fan-out");

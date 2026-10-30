@@ -58,6 +58,20 @@ Exactly one trigger per task is the default trigger. The "Start Evaluation" butt
 - **Deletion**: Locked until "Make Default" on another trigger.
 - **New Tasks**: New tasks start with a polling trigger as the default.
 
+## Skip a Commit
+
+Pushes and polls start no evaluation for a head commit with a skip marker in its message.
+
+| Marker | Example |
+|---|---|
+| `[skip ci]`, `[ci skip]`, `[no ci]` | `docs: fix typo [skip ci]` |
+| `[skip gradient]`, `[gradient skip]` | `docs: fix typo [skip gradient]`, for other CI systems to still build |
+| `skip-checks: true` trailer | A line in the last paragraph of the message |
+
+- **Letter Case**: Markers match in any letter case and anywhere in the message.
+- **Multiple Commits**: Markers on earlier commits of a push have no effect, only the head commit can skip.
+- **Exempt**: Pull requests, merge queues, releases, cron schedules, manual starts and API starts ignore markers.
+
 ## Concurrency
 
 Each task allows one active evaluation per branch. A trigger that fires while the same branch already has an evaluation in progress follows the task's concurrency policy. Evaluations on other branches continue unaffected.

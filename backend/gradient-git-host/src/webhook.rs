@@ -33,9 +33,9 @@ pub struct WebhookCommitAuthor {
     pub name: Option<String>,
 }
 
-fn commit_subject(commit: &WebhookCommit) -> Option<String> {
-    let subject = commit.message.as_deref()?.lines().next()?.trim();
-    (!subject.is_empty()).then(|| subject.to_string())
+fn commit_message(commit: &WebhookCommit) -> Option<String> {
+    let message = commit.message.as_deref()?.trim();
+    (!message.is_empty()).then(|| message.to_string())
 }
 
 /// `after` is the tag object for an annotated tag, and no fetch can resolve it as a commit. The Git
@@ -526,7 +526,7 @@ impl ParsedPushEvent {
         Some(PushOutcome::Build(Self {
             commit_hash: pc.hash,
             repository_urls: vec![payload.repository.clone_url, payload.repository.ssh_url],
-            commit_message: head.and_then(commit_subject),
+            commit_message: head.and_then(commit_message),
             author_name: head
                 .and_then(|c| c.author.as_ref())
                 .and_then(|a| a.name.clone()),
@@ -556,7 +556,7 @@ impl ParsedPushEvent {
         Some(PushOutcome::Build(Self {
             commit_hash: pc.hash,
             repository_urls: urls,
-            commit_message: head.and_then(commit_subject),
+            commit_message: head.and_then(commit_message),
             author_name: head
                 .and_then(|c| c.author.as_ref())
                 .and_then(|a| a.name.clone()),
@@ -590,7 +590,7 @@ impl ParsedPushEvent {
         Some(PushOutcome::Build(Self {
             commit_hash: pc.hash,
             repository_urls: urls,
-            commit_message: head.and_then(commit_subject),
+            commit_message: head.and_then(commit_message),
             author_name: head
                 .and_then(|c| c.author.as_ref())
                 .and_then(|a| a.name.clone()),
@@ -843,7 +843,7 @@ impl ParsedMergeGroupEvent {
         Some(MergeGroupOutcome::Build(Self {
             commit_hash,
             repository_urls: vec![payload.repository.clone_url, payload.repository.ssh_url],
-            commit_message: head.and_then(commit_subject),
+            commit_message: head.and_then(commit_message),
             author_name: head
                 .and_then(|c| c.author.as_ref())
                 .and_then(|a| a.name.clone()),
@@ -1512,7 +1512,7 @@ mod tests {
     }
 
     #[test]
-    fn github_push_extracts_commit_subject_and_author() {
+    fn github_push_keeps_the_whole_commit_message_and_author() {
         let body = format!(
             r#"{{
                 "ref": "refs/heads/main",
@@ -1522,7 +1522,10 @@ mod tests {
             }}"#
         );
         let ev = build(ParsedPushEvent::from_github(body.as_bytes()));
-        assert_eq!(ev.commit_message.as_deref(), Some("feat: add thing"));
+        assert_eq!(
+            ev.commit_message.as_deref(),
+            Some("feat: add thing\n\nlong body")
+        );
         assert_eq!(ev.author_name.as_deref(), Some("Octo Cat"));
     }
 
@@ -1554,7 +1557,10 @@ mod tests {
             }}"#
         );
         let ev = build(ParsedPushEvent::from_gitlab(body.as_bytes()));
-        assert_eq!(ev.commit_message.as_deref(), Some("fix: the bug"));
+        assert_eq!(
+            ev.commit_message.as_deref(),
+            Some("fix: the bug\nwith detail")
+        );
         assert_eq!(ev.author_name.as_deref(), Some("Dev"));
     }
 

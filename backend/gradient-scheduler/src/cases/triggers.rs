@@ -1218,6 +1218,40 @@ async fn t21_a_flake_update_task_fires_only_its_input_update() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn t22_a_poll_onto_a_head_commit_asking_to_skip_creates_no_evaluation() {
+    let (e0, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let repo = GitRepo::new();
+    let c0 = repo.commit("c0");
+    let c1 = repo.commit("docs: fix typo\n\nskip-checks: true");
+    repo.push("main", &c1);
+    let case = SchedulerCase::start(polled(
+        e0,
+        t1,
+        &repo,
+        &c0,
+        EvaluationStatus::Completed,
+        ConcurrencyPolicy::SoftAbort,
+    ))
+    .await;
+
+    case.fire_once().await;
+    case.deliver_trigger_fires().await;
+
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    assert!(
+        fresh.is_empty(),
+        "after 1: no new evaluation, got {fresh:?}"
+    );
+    assert!(
+        case.trigger(t1).await.last_fired_at.is_some_and(is_recent),
+        "after 1: task_trigger(T1).last_fired_at ~now"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
 fn due_polling(e0: EvaluationId, t1: TaskTriggerId, repo: &GitRepo) -> Shape {
     shape()
         .evaluation(e0)

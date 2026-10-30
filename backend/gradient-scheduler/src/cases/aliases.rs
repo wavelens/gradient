@@ -78,6 +78,7 @@ pub(super) fn trigger_input(
         commit_message: None,
         author_name: None,
         manual: false,
+        honors_skip_marker: true,
         gate_approval: None,
         repository_override: None,
         wildcard_override: None,
