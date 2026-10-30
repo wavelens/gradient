@@ -154,7 +154,8 @@ fn wanting_evaluations_sql() -> String {
 
 crate::sql_fn! {
     WANTING_EVALUATIONS = wanting_evaluations_sql,
-        params = [SharedBuildIds(64)];
+        params = [SharedBuildIds(64)],
+        tier = Bulk;
 }
 
 #[derive(Debug, FromQueryResult)]
