@@ -13,6 +13,11 @@ describe('splitLogLines', () => {
     expect(splitLogLines('a\npartial')).toEqual(['a', 'partial']);
     expect(splitLogLines('')).toEqual([]);
   });
+
+  it('shows a line rewritten by carriage returns as the terminal ends up showing it', () => {
+    expect(splitLogLines('a\r\nb\r\n')).toEqual(['a', 'b']);
+    expect(splitLogLines('\x1b[M\rpkg 1\x1b[M\rpkg 2\ndone\r')).toEqual(['pkg 2', 'done']);
+  });
 });
 
 describe('parseLineFragment', () => {

@@ -6,10 +6,16 @@
 
 import type { LogSearchHit } from '@core/models';
 
+// Nix strips carriage returns from build logs; exec jobs pass the guest output through untouched.
+function lastRewrite(line: string): string {
+  const text = line.replace(/\r+$/, '');
+  return text.slice(text.lastIndexOf('\r') + 1);
+}
+
 export function splitLogLines(text: string): string[] {
   const lines = text.split('\n');
   if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
-  return lines;
+  return lines.map(lastRewrite);
 }
 
 export function parseLineFragment(fragment: string | null | undefined): number | null {
