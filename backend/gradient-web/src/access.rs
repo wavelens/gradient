@@ -296,6 +296,16 @@ pub async fn visible_cache_condition(db: &WebDb, user_id: UserId) -> WebResult<C
     ))
 }
 
+pub async fn board_cache_condition(db: &WebDb, user: &Option<MUser>) -> WebResult<Condition> {
+    Ok(match user {
+        Some(user) if user.superuser => Condition::all(),
+        Some(user) => {
+            gradient_db::caches::public_or(Some(visible_cache_condition(db, user.id).await?))
+        }
+        None => gradient_db::caches::public_or(None),
+    })
+}
+
 pub async fn load_integration_in_project(
     db: &WebDb,
     project_id: ProjectId,

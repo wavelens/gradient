@@ -66,6 +66,25 @@ describe('BoardCacheComponent', () => {
     expect(root.textContent).toContain('nix-community.cachix.org');
   });
 
+  it('charts the busiest caches in the pushed order, by display name', () => {
+    const { fixture, sockets, root } = render();
+    const frame = snapshot('cache.nixos.org');
+    frame.content.stats = {
+      ...frame.content.stats,
+      caches: [
+        { name: 'main', display_name: 'Main', bytes: 900, requests: 9 },
+        { name: 'dev', display_name: '', bytes: 100, requests: 1 },
+      ],
+    } as typeof frame.content.stats;
+    sockets[0].frames.next(frame);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    expect(component.busiestCats()).toEqual(['Main', 'dev']);
+    expect(component.busiestSeries()[0].data).toEqual([900, 100]);
+    expect(root.querySelector('.busiest-caches')).not.toBeNull();
+  });
+
   it('subscribes to total traffic first and resubscribes for external traffic once picked', () => {
     const { fixture, sockets, root } = render();
     expect(sockets.map((s) => s.path)).toEqual(['/board/cache/live?window_hours=24&traffic=total']);

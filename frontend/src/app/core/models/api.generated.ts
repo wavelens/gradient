@@ -181,6 +181,14 @@ export interface BoardCacheStats {
   totals: CacheTotals;
   traffic: SeriesPoint[];
   storage: SeriesPoint[];
+  caches: BoardCacheTraffic[];
+}
+
+export interface BoardCacheTraffic {
+  name: string;
+  display_name: string;
+  bytes: number;
+  requests: number;
 }
 
 export interface BoardExecJob {

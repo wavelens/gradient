@@ -50,6 +50,52 @@ pub async fn hourly_totals<C: ConnectionTrait>(
         .collect())
 }
 
+fn traffic_per_cache_sql(window_hours: i64) -> String {
+    format!(
+        "SELECT scope->>'cache' AS cache, sum(count)::bigint AS c, sum(sum) AS s \
+         FROM metric_rollup WHERE metric = $1 AND granularity = {gran} \
+           AND bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours' \
+           AND scope->>'cache' IS NOT NULL \
+         GROUP BY 1",
+        gran = i16::from(RollupGranularity::Hour),
+    )
+}
+
+crate::sql_fn! {
+    TRAFFIC_PER_CACHE = || traffic_per_cache_sql(24),
+        params = [Text(metric::CACHE_BYTES_SENT)];
+}
+
+pub struct CacheTrafficTotal {
+    pub cache: CacheId,
+    pub requests: i64,
+    pub bytes: f64,
+}
+
+pub async fn traffic_per_cache<C: ConnectionTrait>(
+    db: &C,
+    metric: &str,
+    window_hours: i64,
+) -> Result<Vec<CacheTrafficTotal>, DbErr> {
+    let rows = db
+        .query_all_raw(
+            TRAFFIC_PER_CACHE.bind_built(traffic_per_cache_sql(window_hours), [metric.into()]),
+        )
+        .await?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| {
+            let cache: String = r.try_get("", "cache").ok()?;
+            Some(CacheTrafficTotal {
+                cache: CacheId::new(cache.parse().ok()?),
+                requests: r.try_get("", "c").unwrap_or(0),
+                bytes: r.try_get("", "s").unwrap_or(0.0),
+            })
+        })
+        .collect())
+}
+
 fn board_upstream_caches_sql(window_hours: i64) -> String {
     format!(
         "SELECT mr.scope->>'upstream_url' AS upstream_url, mr.metric AS metric, \

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::board_cache_condition;
 use crate::authorization::MaybeUser;
 use crate::endpoints::board_metrics::{SeriesPoint, WindowParams, infra_series, window_clause};
 use crate::endpoints::metrics::{Observations, collect};
@@ -25,6 +26,7 @@ use gradient_types::events::{Event, EventRx};
 use gradient_types::*;
 use gradient_util::shutdown::CancellationToken;
 use gradient_util::telemetry::metric;
+use sea_orm::Condition;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -33,6 +35,7 @@ use std::time::Duration;
 
 const SNAPSHOT_EVENT: &str = "board.cache";
 const MIN_SNAPSHOT_GAP: Duration = Duration::from_secs(2);
+const BUSIEST_CACHES: usize = 10;
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct CacheTotals {
@@ -55,11 +58,20 @@ impl From<&Observations> for CacheTotals {
     }
 }
 
+#[derive(Serialize, Debug, PartialEq, utoipa::ToSchema)]
+pub struct BoardCacheTraffic {
+    pub name: String,
+    pub display_name: String,
+    pub bytes: i64,
+    pub requests: i64,
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct BoardCacheStats {
     pub totals: CacheTotals,
     pub traffic: Vec<SeriesPoint>,
     pub storage: Vec<SeriesPoint>,
+    pub caches: Vec<BoardCacheTraffic>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -91,12 +103,13 @@ pub struct BoardCacheSnapshot {
     operation_id = "getBoardCache",
     tag = "board",
     summary = "Cache statistics",
-    description = "Cache totals plus hourly traffic and storage-growth series, aggregated across caches (anonymized infra view).",
+    description = "Cache totals plus hourly traffic and storage-growth series, aggregated across caches (anonymized infra view). `caches` lists the 10 caches with the most bytes served in the window, largest first, limited to public caches and the caches the caller can see (all caches for superusers).",
     params(WindowParams, TrafficParams),
     responses((status = OK, description = "Cache statistics", body = BoardCacheStats), WebError)
 )]
 pub async fn get_board_cache(
     State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Query(params): Query<WindowParams>,
     Query(TrafficParams { traffic }): Query<TrafficParams>,
@@ -108,7 +121,15 @@ pub async fn get_board_cache(
         &scheduler,
     )
     .await?;
-    let stats = cache_stats(&state.web_db, &obs, window_clause(&params), traffic).await?;
+    let visible = board_cache_condition(&state.web_db, &maybe_user).await?;
+    let stats = cache_stats(
+        &state.web_db,
+        &obs,
+        window_clause(&params),
+        traffic,
+        &visible,
+    )
+    .await?;
     Ok(ok_json(stats))
 }
 
@@ -156,6 +177,7 @@ pub async fn cache_live_ws(
         admission: state.memory.upload_admission.clone(),
         scheduler,
         scope: MetricsScope::resolve(&state.web_db, &maybe_user).await?,
+        visible: board_cache_condition(&state.web_db, &maybe_user).await?,
         window: window_clause(&params),
         traffic,
     };
@@ -174,12 +196,52 @@ async fn cache_stats(
     obs: &Observations,
     window: i64,
     traffic: TrafficKind,
+    visible: &Condition,
 ) -> WebResult<BoardCacheStats> {
     Ok(BoardCacheStats {
         totals: CacheTotals::from(obs),
         traffic: infra_series(db, traffic.metric(), window).await?,
         storage: infra_series(db, metric::CACHE_BYTES_ADDED, window).await?,
+        caches: busiest_caches(db, window, traffic, visible).await?,
     })
+}
+
+async fn busiest_caches(
+    db: &WebDb,
+    window: i64,
+    traffic: TrafficKind,
+    visible: &Condition,
+) -> WebResult<Vec<BoardCacheTraffic>> {
+    let totals = series::traffic_per_cache(db, traffic.metric(), window).await?;
+    let ids: Vec<CacheId> = totals.iter().map(|t| t.cache).collect();
+    let caches = gradient_db::caches::among_matching(db, &ids, visible.clone()).await?;
+    Ok(rank_caches(totals, caches))
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "byte sums are whole numbers"
+)]
+fn rank_caches(
+    totals: Vec<series::CacheTrafficTotal>,
+    caches: Vec<MCache>,
+) -> Vec<BoardCacheTraffic> {
+    let caches: HashMap<CacheId, MCache> = caches.into_iter().map(|c| (c.id, c)).collect();
+    let mut ranked: Vec<BoardCacheTraffic> = totals
+        .into_iter()
+        .filter_map(|t| {
+            let cache = caches.get(&t.cache)?;
+            Some(BoardCacheTraffic {
+                name: cache.name.clone(),
+                display_name: cache.display_name.clone(),
+                bytes: t.bytes.round() as i64,
+                requests: t.requests,
+            })
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.name.cmp(&b.name)));
+    ranked.truncate(BUSIEST_CACHES);
+    ranked
 }
 
 #[derive(Default)]
@@ -307,6 +369,7 @@ struct CacheFeed {
     admission: Arc<UploadAdmission>,
     scheduler: Arc<Scheduler>,
     scope: MetricsScope,
+    visible: Condition,
     window: i64,
     traffic: TrafficKind,
 }
@@ -314,8 +377,9 @@ struct CacheFeed {
 impl CacheFeed {
     async fn snapshot(&self) -> WebResult<Value> {
         let obs = collect(&self.db, self.started_at, &self.admission, &self.scheduler).await?;
+        let stats = cache_stats(&self.db, &obs, self.window, self.traffic, &self.visible).await?;
         let snapshot = BoardCacheSnapshot {
-            stats: cache_stats(&self.db, &obs, self.window, self.traffic).await?,
+            stats,
             upstream: upstream_caches(&self.db, &self.scope, self.window).await?,
         };
         Ok(serde_json::to_value(snapshot).unwrap_or_default())
@@ -389,6 +453,36 @@ mod tests {
         );
         assert_eq!(upstream_host("http://10.0.0.1:5000/"), "10.0.0.1:5000");
         assert_eq!(upstream_host("cache.example.com"), "cache.example.com");
+    }
+
+    #[test]
+    fn busiest_caches_rank_largest_first_and_drop_caches_the_viewer_cannot_see() {
+        use gradient_fixtures::rows::cache_with_id;
+        let id = |n| CacheId::new(uuid::Uuid::from_u128(n));
+        let owner = UserId::new(uuid::Uuid::from_u128(99));
+        let total = |n, bytes| series::CacheTrafficTotal {
+            cache: id(n),
+            requests: 3,
+            bytes,
+        };
+        let totals = (1..=12)
+            .map(|n| total(n, n as f64 * 100.0))
+            .chain([total(13, 1e9)])
+            .collect();
+        let visible = (1..=12)
+            .map(|n| cache_with_id(id(n), &format!("c{n:02}"), owner))
+            .collect();
+
+        let ranked = rank_caches(totals, visible);
+
+        let names: Vec<&str> = ranked.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "c12", "c11", "c10", "c09", "c08", "c07", "c06", "c05", "c04", "c03"
+            ]
+        );
+        assert_eq!(ranked[0].bytes, 1200);
     }
 
     #[test]

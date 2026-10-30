@@ -101,7 +101,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
   const hasBars = cfg.series.some((s) => kindOf(s) === 'bar') || cfg.type === 'bar';
   const inset = cfg.horizontal ? undefined : cfg.inset;
   const edgeLabels = cfg.compact ? { alignMinLabel: 'left' as const, alignMaxLabel: 'right' as const, hideOverlap: true } : {};
-  const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], boundaryGap: hasBars || !!inset, axisLabel: { ...axisLabel(theme), ...edgeLabels }, axisLine: axisLine(theme) };
+  const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], inverse: !!cfg.horizontal, boundaryGap: hasBars || !!inset, axisLabel: { ...axisLabel(theme), ...edgeLabels }, axisLine: axisLine(theme) };
   // Two value axes tick independently, so each draws its own grid: one set of
   // lines, and a shared tick count so the right-hand labels land on them.
   const valueAxis = (title: string | undefined, fmt: (v: number) => string, opposite = false, max?: number) => ({

@@ -1230,7 +1230,7 @@ paths:
       tags:
       - board
       summary: Cache statistics
-      description: Cache totals plus hourly traffic and storage-growth series, aggregated across caches (anonymized infra view).
+      description: Cache totals plus hourly traffic and storage-growth series, aggregated across caches (anonymized infra view). `caches` lists the 10 caches with the most bytes served in the window, largest first, limited to public caches and the caches the caller can see (all caches for superusers).
       operationId: getBoardCache
       parameters:
       - name: window_hours
@@ -14120,6 +14120,7 @@ components:
       - totals
       - traffic
       - storage
+      - caches
       properties:
         totals:
           $ref: '#/components/schemas/CacheTotals'
@@ -14131,6 +14132,28 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SeriesPoint'
+        caches:
+          type: array
+          items:
+            $ref: '#/components/schemas/BoardCacheTraffic'
+    BoardCacheTraffic:
+      type: object
+      required:
+      - name
+      - display_name
+      - bytes
+      - requests
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        bytes:
+          type: integer
+          format: int64
+        requests:
+          type: integer
+          format: int64
     BoardExecJob:
       type: object
       required:

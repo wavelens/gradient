@@ -47,6 +47,20 @@ const WINDOW_HOURS = 24;
                        [ngModel]="traffic()" (ngModelChange)="traffic.set($event)" />
       </gr-metric-chart>
 
+      @if (busiestCats().length) {
+        <gr-metric-chart
+          class="busiest-caches"
+          title="Busiest caches (served in 24h)"
+          doc="ui/job-board/"
+          type="bar"
+          [horizontal]="true"
+          [series]="busiestSeries()"
+          [categories]="busiestCats()"
+          [colors]="['#17a2b8']"
+          [valueFormatter]="bytes"
+        ></gr-metric-chart>
+      }
+
       <gr-metric-chart
         title="NAR requests per hour"
         doc="ui/job-board/"
@@ -99,6 +113,10 @@ export class BoardCacheComponent {
   ]);
   requestSeries = computed(() => [
     { name: 'requests', data: (this.stats()?.traffic ?? []).map((p) => p.count) },
+  ]);
+  busiestCats = computed(() => (this.stats()?.caches ?? []).map((c) => c.display_name || c.name));
+  busiestSeries = computed(() => [
+    { name: 'served', data: (this.stats()?.caches ?? []).map((c) => c.bytes) },
   ]);
   storageCats = computed(() => (this.stats()?.storage ?? []).map((p) => clockTime(p.bucket_start)));
   storageSeries = computed(() => [
