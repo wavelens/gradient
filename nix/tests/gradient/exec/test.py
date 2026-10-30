@@ -118,7 +118,7 @@ def unbuilt_image_derivations(state):
     if "image build failed" not in json.dumps(state):
         return ""
     _, roots = server.execute("cat /tmp/wanted-roots.txt")
-    return f"--- wanted uncached builds from the image system down to the first wanted bootstrap source ---\n{roots}"
+    return f"--- builds wanting the first wanted bootstrap source that nothing else wants ---\n{roots}"
 
 
 def watch_wanted_roots():
@@ -127,28 +127,26 @@ def watch_wanted_roots():
                "LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = d.id AND {})")
     bootstrap = ("SELECT db.derivation FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
                  "WHERE d.name LIKE 'stage0-posix%' AND db.wanted")
+    wants = ("p.wanted AND NOT p.fetchable AND (e.kind IN (1, 2) OR "
+             "(pw.walked AND p.probed AND NOT p.cache_available))")
     roots = (
-        f"WITH RECURSIVE up(derivation) AS ({bootstrap} UNION "
-        "  SELECT e.derivation FROM up JOIN derivation_dependency e ON e.dependency = up.derivation "
-        "  JOIN derivation_build p ON p.derivation = e.derivation WHERE p.wanted AND NOT p.cache_available), "
-        "down(derivation, depth) AS (SELECT ep.derivation, 0 FROM entry_point ep "
-        "  JOIN derivation d ON d.id = ep.derivation WHERE d.name LIKE 'nixos-system%' UNION "
-        "  SELECT e.dependency, down.depth + 1 FROM down JOIN derivation_dependency e ON e.derivation = down.derivation "
-        "  JOIN derivation_build c ON c.derivation = e.dependency "
-        "  WHERE c.wanted AND NOT c.cache_available AND down.depth < 12), "
-        "bridge AS (SELECT derivation, min(depth) AS depth FROM down "
-        "  WHERE derivation IN (SELECT derivation FROM up) GROUP BY derivation) "
-        "SELECT bridge.depth, d.name, db.status, db.probed, db.fetchable, db.unneeded_outputs, "
+        f"WITH RECURSIVE chain(derivation) AS ({bootstrap} UNION "
+        "  SELECT e.derivation FROM chain JOIN derivation_dependency e ON e.dependency = chain.derivation "
+        "  JOIN derivation_build p ON p.derivation = e.derivation JOIN derivation pw ON pw.id = p.derivation "
+        f"  WHERE {wants}) "
+        "SELECT d.name, db.status, db.probed, db.cache_available, db.fetchable, db.unneeded_outputs, "
         f"{outputs.format(held)} AS held, {outputs.format(f'NOT ({held})')} AS missing, "
         "EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = d.id) AS entry_point, left(coalesce(("
         "  SELECT string_agg(DISTINCT pd.name || '{' || e.kind || ',' || p.status || ',' || p.cache_available "
         "         || ',' || p.probed || ',' || p.fetchable || '}[' "
         "         || coalesce(array_to_string(e.dependency_outputs, ','), 'every') || ']', ' ') "
         "  FROM derivation_dependency e JOIN derivation_build p ON p.derivation = e.derivation "
-        "  JOIN derivation pd ON pd.id = e.derivation WHERE e.dependency = d.id AND p.wanted "
-        "  AND NOT p.cache_available AND p.probed), ''), 3000) "
-        "FROM bridge JOIN derivation d ON d.id = bridge.derivation "
-        "JOIN derivation_build db ON db.derivation = bridge.derivation ORDER BY bridge.depth, d.name LIMIT 40"
+        "  JOIN derivation pd ON pd.id = e.derivation WHERE e.dependency = d.id AND p.wanted), ''), 3000) "
+        "FROM chain JOIN derivation d ON d.id = chain.derivation "
+        "JOIN derivation_build db ON db.derivation = chain.derivation "
+        "WHERE NOT EXISTS (SELECT 1 FROM derivation_dependency e JOIN derivation_build p ON p.derivation = e.derivation "
+        f"  JOIN derivation pw ON pw.id = p.derivation WHERE e.dependency = d.id AND {wants}) "
+        "ORDER BY d.name LIMIT 40"
     )
     psql = "runuser -u postgres -- psql -d gradient -At"
     server.succeed(f"printf %s {shlex.quote(bootstrap)} > /tmp/bootstrap-wanted.sql")
