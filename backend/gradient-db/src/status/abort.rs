@@ -10,7 +10,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptOutcome, Column as CAttempt, Entity as EAttempt};
 use gradient_types::*;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, EntityTrait, FromQueryResult, QueryFilter, QuerySelect};
 use std::collections::HashSet;
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -42,7 +42,7 @@ pub async fn abort_eval_shared_builds(
     }
 
     let active_ids: Vec<DerivationBuildId> = active.iter().map(|a| a.id).collect();
-    let shared = ids_shared_with_other_evaluations(ctx, evaluation.id, &active_ids).await?;
+    let shared = wanted_by_other_evaluations(ctx, evaluation.id, &active_ids).await?;
 
     let to_abort: Vec<&MDerivationBuild> =
         active.iter().filter(|a| !shared.contains(&a.id)).collect();
@@ -143,48 +143,64 @@ pub(super) async fn abort_shared_builds(
     Ok(abort_ids)
 }
 
+fn wanting_evaluations_sql() -> String {
+    format!(
+        "SELECT ob.derivation_build, ob.evaluation \
+         FROM build_job ob {wanted} WHERE ob.derivation_build = ANY($1::uuid[])",
+        wanted = crate::graph::can_start::wanted_by_its_evaluation("ob"),
+    )
+}
+
+crate::sql_fn! {
+    WANTING_EVALUATIONS = wanting_evaluations_sql,
+        params = [SharedBuildIds(64)];
+}
+
+#[derive(Debug, FromQueryResult)]
+pub(super) struct Wanting {
+    pub derivation_build: uuid::Uuid,
+    pub evaluation: uuid::Uuid,
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) async fn ids_shared_with_other_evaluations(
+pub(super) async fn wanting_evaluations(
+    ctx: &DbContext,
+    shared_build_ids: &[DerivationBuildId],
+) -> Result<Vec<Wanting>, sea_orm::DbErr> {
+    fetch_in_chunks(shared_build_ids, |chunk| async move {
+        let ids: Vec<uuid::Uuid> = chunk.iter().map(|id| id.into_inner()).collect();
+        Wanting::find_by_statement(WANTING_EVALUATIONS.bind([ids.into()]))
+            .all(&ctx.worker_db)
+            .await
+    })
+    .await
+}
+
+pub(super) async fn wanted_by_other_evaluations(
     ctx: &DbContext,
     this_eval: EvaluationId,
     shared_build_ids: &[DerivationBuildId],
 ) -> Result<HashSet<DerivationBuildId>, sea_orm::DbErr> {
-    let other_jobs = fetch_in_chunks(shared_build_ids, |chunk| async move {
-        EBuildJob::find()
-            .filter(CBuildJob::DerivationBuild.is_in(chunk))
-            .filter(CBuildJob::Evaluation.ne(this_eval))
-            .all(&ctx.worker_db)
-            .await
-    })
-    .await?;
-    if other_jobs.is_empty() {
-        return Ok(HashSet::new());
-    }
-
-    let other_eval_ids: Vec<EvaluationId> = other_jobs
-        .iter()
-        .map(|j| j.evaluation)
-        .collect::<HashSet<_>>()
+    Ok(wanting_evaluations(ctx, shared_build_ids)
+        .await?
         .into_iter()
-        .collect();
-    let evals = fetch_in_chunks(&other_eval_ids, |chunk| async move {
-        EEvaluation::find()
-            .filter(CEvaluation::Id.is_in(chunk))
-            .all(&ctx.worker_db)
-            .await
-    })
-    .await?;
-    let live: HashSet<EvaluationId> = evals
-        .into_iter()
-        .filter(|e| !e.status.is_terminal())
-        .map(|e| e.id)
-        .collect();
-
-    Ok(other_jobs
-        .into_iter()
-        .filter(|j| live.contains(&j.evaluation))
-        .map(|j| j.derivation_build)
+        .filter(|w| w.evaluation != this_eval.into_inner())
+        .map(|w| DerivationBuildId::from(w.derivation_build))
         .collect())
+}
+
+#[cfg(test)]
+pub(super) fn wanting_row(
+    evaluation: &MEvaluation,
+    shared_build: DerivationBuildId,
+) -> std::collections::BTreeMap<String, sea_orm::Value> {
+    std::collections::BTreeMap::from([
+        (
+            "derivation_build".to_owned(),
+            shared_build.into_inner().into(),
+        ),
+        ("evaluation".to_owned(), evaluation.id.into_inner().into()),
+    ])
 }
 
 #[cfg(test)]
@@ -218,31 +234,15 @@ mod tests {
         BTreeMap::from([("derivation_build".to_owned(), Value::from(id.into_inner()))])
     }
 
-    fn job_row(
-        evaluation: EvaluationId,
-        shared_build: DerivationBuildId,
-        derivation: DerivationId,
-    ) -> MBuildJob {
-        MBuildJob {
-            id: BuildJobId::now_v7(),
-            evaluation,
-            derivation,
-            derivation_build: shared_build,
-            ..Default::default()
-        }
-    }
-
     fn scripted_db(
         shared_builds: Vec<BTreeMap<String, Value>>,
         active: Vec<MDerivationBuild>,
-        other_jobs: Vec<MBuildJob>,
-        other_evals: Vec<MEvaluation>,
+        wanting: Vec<BTreeMap<String, Value>>,
     ) -> DatabaseConnection {
         mock_db()
             .append_query_results([shared_builds])
             .append_query_results([active])
-            .append_query_results([other_jobs])
-            .append_query_results([other_evals])
+            .append_query_results([wanting])
             .append_query_results(vec![Vec::<MBuildJob>::new(); 4])
             .append_query_results([crate::test_ctx::inserted_phase_event()])
             .append_exec_results(vec![
@@ -264,9 +264,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_abort_spares_a_shared_build_another_live_evaluation_needs() {
-        let aborting = eval_row(EvaluationStatus::Building);
-        let other = eval_row(EvaluationStatus::Building);
+    async fn an_abort_spares_a_shared_build_another_evaluation_wants() {
+        let aborting = eval_row(EvaluationStatus::Aborted);
+        let other = eval_row(EvaluationStatus::Failed);
         let (shared, shared_drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
         let (mine, mine_drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
 
@@ -276,8 +276,7 @@ mod tests {
                 shared_build_row(shared, shared_drv),
                 shared_build_row(mine, mine_drv),
             ],
-            vec![job_row(other.id, shared, shared_drv)],
-            vec![other],
+            vec![wanting_row(&other, shared)],
         ))
         .await;
 
@@ -304,9 +303,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_abort_stops_a_shared_build_once_the_other_evaluation_is_terminal() {
+    async fn the_aborting_evaluation_holds_none_of_its_own_builds_back() {
         let aborting = eval_row(EvaluationStatus::Building);
-        let other = eval_row(EvaluationStatus::Completed);
         let (shared, shared_drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
         let (mine, mine_drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
 
@@ -316,8 +314,7 @@ mod tests {
                 shared_build_row(shared, shared_drv),
                 shared_build_row(mine, mine_drv),
             ],
-            vec![job_row(other.id, shared, shared_drv)],
-            vec![other],
+            vec![wanting_row(&aborting, shared)],
         ))
         .await;
 
@@ -330,7 +327,7 @@ mod tests {
         expected.sort();
         assert_eq!(
             aborted, expected,
-            "a terminal evaluation holds nothing back"
+            "only another evaluation's want spares a build"
         );
     }
 }

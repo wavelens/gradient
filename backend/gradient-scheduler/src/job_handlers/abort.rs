@@ -29,7 +29,7 @@ fn aborted(evaluation_id: EvaluationId, marked: Result<MEvaluation, sea_orm::DbE
 
 impl Scheduler {
     /// The abort button must not wait on the graph writer's queue. Only the shared builds the
-    /// database abort moved are stopped. Shared builds still wanted by another live evaluation keep
+    /// database abort moved are stopped. Shared builds still wanted by another evaluation keep
     /// running.
     pub async fn abort_evaluation(self: &Arc<Self>, evaluation: MEvaluation) {
         let evaluation_id = evaluation.id;

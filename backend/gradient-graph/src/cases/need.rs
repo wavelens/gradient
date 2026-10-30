@@ -783,3 +783,69 @@ async fn d12_a_chain_of_three_probed_skipped_builds_thaws_to_its_end() {
     case.zero_drift("step 1").await;
     case.finish().await;
 }
+
+fn failed_and_running_evaluation_share_s(failed: EvaluationId, running: EvaluationId) -> Shape {
+    shape()
+        .evaluation(failed)
+        .evaluation_status(EvaluationStatus::Failed)
+        .derivation(A1)
+        .walked()
+        .entry_point("pkg.a1")
+        .job()
+        .probed()
+        .drv_cached()
+        .output(A1_OUT)
+        .depends_on(S)
+        .derivation(S)
+        .walked()
+        .job()
+        .probed()
+        .drv_cached()
+        .output(S_OUT)
+        .build_status(BuildStatus::Building)
+        .attempt(AttemptOutcome::Running, None)
+        .open_assignment()
+        .evaluation(running)
+        .evaluation_status(EvaluationStatus::Building)
+        .derivation(A2)
+        .walked()
+        .entry_point("pkg.a2")
+        .job()
+        .probed()
+        .drv_cached()
+        .output(A2_OUT)
+        .depends_on(S)
+        .derivation(S)
+        .job()
+}
+
+#[tokio::test]
+async fn d13_aborting_an_evaluation_leaves_a_build_a_failed_evaluation_still_wants() {
+    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = Case::start(failed_and_running_evaluation_share_s(e1, e2)).await;
+    case.set_evaluation_status(e2, EvaluationStatus::Aborted)
+        .await;
+
+    let report = case
+        .transition(Transition::AbortEvaluationSharedBuilds {
+            evaluation: e2,
+            hard: true,
+        })
+        .await;
+
+    let s = case.sb(S).await;
+    assert_eq!(
+        (s.status, s.wanted),
+        (BuildStatus::Building, true),
+        "after 1: sb(S) keeps building for E1"
+    );
+    let a2 = case.sb(A2).await;
+    assert_eq!(
+        report.aborted_shared_builds,
+        vec![a2.id],
+        "after 1: only A2 is aborted"
+    );
+    assert_eq!(a2.status, BuildStatus::Aborted, "after 1: sb(A2)");
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}

@@ -184,7 +184,7 @@ Two endpoints, `POST /builds/{id}/abort` and `POST /builds/{id}/retry`, act on a
 Rules for aborts:
 
 - The evaluation need to run.
-- A shared build that other live evaluations still name can not be aborted.
+- Shared builds wanted by another evaluation are not abortable. `Completed` and `Failed` evaluations count, as in the need recount (`wanted_by_its_evaluation`).
 
 Rules for retries:
 

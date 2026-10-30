@@ -197,8 +197,8 @@ A cluster member with the role `split-evaluation-primary` or `split-evaluation-c
 ## Abort and Lost Workers
 
 - **API Abort:** The evaluation receive the status `Aborted`. Pending jobs of the evaluation leave the queue.
-    - `AbortJob` messages go to the evaluation job and to running builds that no other live evaluation want.
-    - The decision count all live evaluations that want a build, not the evaluation that dispatched the build.
+- `AbortJob` messages arrive at the evaluation job. A running build with no other evaluation behind it can also get one.
+- All evaluations that wanted the build take part in the decision, `Completed` and `Failed` ones included. Dispatching evaluations don't take part.
 - **Newer Evaluation:** A task with `hard_abort` concurrency abort the older evaluation of the branch in the same way as an API abort. A task with `soft_abort` cancel only its eval job.
     - A task with `auto` concurrency act like `hard_abort`. The abort take place after the newer evaluation moved to `Building`.
 - **Unbuildable Evaluation:** An evaluation with no worker for its systems also finish `Aborted`.
