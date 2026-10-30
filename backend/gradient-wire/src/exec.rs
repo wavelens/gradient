@@ -96,6 +96,10 @@ impl GuestSize {
     pub fn is_unset(&self) -> bool {
         *self == GuestSize::default()
     }
+
+    pub fn warm_guest_takes(&self, job: GuestSize) -> bool {
+        self.cpus == job.cpus && self.memory_mb == job.memory_mb
+    }
 }
 
 #[derive(
@@ -214,6 +218,9 @@ pub struct ExecInventory {
     #[proto(51, default)]
     #[serde(default)]
     pub guest_capacity: GuestCapacity,
+    #[proto(53, default)]
+    #[serde(default)]
+    pub warm_guest_size: GuestSize,
 }
 
 #[derive(

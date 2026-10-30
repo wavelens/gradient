@@ -419,6 +419,27 @@ fn a_requirement_from_the_previous_version_has_no_guest_size() {
 }
 
 #[test]
+fn an_inventory_from_before_version_53_has_no_warm_guest_size() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::types::{ExecInventory, GuestSize};
+
+    let inventory = ExecInventory {
+        warm_guests: 2,
+        warm_guest_size: GuestSize::default_request(),
+        ..ExecInventory::default()
+    };
+    assert_eq!(
+        from_bytes::<ExecInventory>(to_bytes(&inventory, 53).unwrap(), 53).unwrap(),
+        inventory
+    );
+    let older: ExecInventory = from_bytes(to_bytes(&inventory, 52).unwrap(), 52).unwrap();
+    assert_eq!(
+        (older.warm_guests, older.warm_guest_size),
+        (2, GuestSize::default())
+    );
+}
+
+#[test]
 fn a_spec_from_before_version_52_starts_by_itself() {
     use crate::codec::{from_bytes, to_bytes};
     use crate::types::ExecSpec;

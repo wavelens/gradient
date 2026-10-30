@@ -4,11 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::HashSet;
+
 use gradient_db::scheduling::assignment_record::EXEC_KEY_PREFIX;
 use gradient_pool::WorkerCaps;
+use gradient_pool::score::ScoreBreakdown;
+use gradient_pool::score::exec::{self, ExecCandidate};
 use gradient_types::exec::{
-    ExecDefaults, ExecRequirement, ExecSpec, Phase, hash_job_token, job_token_expiry,
-    mint_job_token,
+    ExecDefaults, ExecInventory, ExecRequirement, ExecSpec, Phase, hash_job_token,
+    job_token_expiry, mint_job_token,
 };
 use gradient_types::ids::{EvaluationId, ExecJobAttemptId, ExecJobId, ProjectId, TaskId};
 use gradient_wire::types::{ExecJob, RequiredPath};
@@ -147,4 +151,44 @@ impl PendingExecJob {
             keep_vm_running: self.keep_vm_running,
         }
     }
+
+    pub fn score_on(
+        &self,
+        worker: Option<&ExecInventory>,
+        missing_nar_size: Option<u64>,
+        peers: &[ExecPeer],
+        now: chrono::NaiveDateTime,
+    ) -> ScoreBreakdown {
+        let no_inventory = ExecInventory::default();
+        let inventory = worker.unwrap_or(&no_inventory);
+        let requirement = self.requirement_with(&inventory.defaults);
+        let candidate = ExecCandidate {
+            requirement: &requirement,
+            missing_nar_size,
+            waited_secs: (now - self.ready_at).num_seconds(),
+            rescore_count: self.rescore_count,
+            warm_guest_elsewhere: peers.iter().any(|peer| self.has_warm_guest_on(peer)),
+        };
+        exec::score(&candidate, inventory)
+    }
+
+    fn has_warm_guest_on(&self, peer: &ExecPeer) -> bool {
+        let Some(inventory) = peer.caps.exec.as_ref() else {
+            return false;
+        };
+        let authorized = peer
+            .authorized
+            .as_ref()
+            .is_none_or(|projects| projects.contains(&self.project_id));
+        let requirement = self.requirement_with(&inventory.defaults);
+        authorized
+            && peer.caps.can_run_exec(&requirement)
+            && exec::has_usable_warm_guest(&requirement, inventory)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExecPeer {
+    pub authorized: Option<HashSet<ProjectId>>,
+    pub caps: WorkerCaps,
 }

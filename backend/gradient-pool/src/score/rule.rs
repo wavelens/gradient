@@ -85,6 +85,7 @@ pub struct WorkerContext<'a> {
     pub system_features: &'a [String],
     pub fetches_flakes: bool,
     pub metrics: Option<WorkerMetricsView>,
+    pub exec: Option<&'a gradient_wire::types::ExecInventory>,
 }
 
 pub trait ScoreRule: Send + Sync + std::fmt::Debug {

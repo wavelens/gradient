@@ -75,6 +75,7 @@ Workers provide a budget for guest CPUs, memory and disk. Both running guests an
 - Sizes beyond the budget of every worker show in the wait reason, for example `needs 64 CPUs`.
 - Warm guests boot with `gradient.guest.cpus` and `gradient.guest.memoryMb` of the image, `2` and `500` by default.
 - Only jobs with exactly that CPU count and memory take a warm guest. Other sizes boot a new guest.
+- Matching jobs go to a worker with a warm guest first. Other workers start such a job after about 10 seconds.
 - `/work` is a disk of `diskMb` with the checkout. Checkouts larger than the disk fail the job with `the checkout does not fit in diskMb = <n>`.
 
 ## Verify Deployment

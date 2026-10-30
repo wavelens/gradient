@@ -21,7 +21,7 @@ use gradient_wire::types::{
 
 use crate::cluster::{ClusterBook, PendingCluster};
 use crate::count::clamp_to_u32;
-pub use crate::exec_job::{ExecAssignment, PendingExecJob, exec_job_key};
+pub use crate::exec_job::{ExecAssignment, ExecPeer, PendingExecJob, exec_job_key};
 use gradient_graph::RamShortage;
 use gradient_pool::WorkerCaps;
 use gradient_pool::score::weights::REFERENCE_CORES;
@@ -510,13 +510,39 @@ fn worker_context_of(caps: Option<&WorkerCaps>) -> WorkerContext<'_> {
             system_features: &c.system_features,
             fetches_flakes: c.capabilities.network,
             metrics: c.metrics,
+            exec: c.exec.as_ref(),
         },
-        None => WorkerContext {
-            architectures: &[],
-            system_features: &[],
-            fetches_flakes: false,
-            metrics: None,
-        },
+        None => WorkerContext::default(),
+    }
+}
+
+fn exec_candidate(
+    job: &PendingJob,
+    exec: &PendingExecJob,
+    score: Option<&WorkerJobScore>,
+    worker: &WorkerContext<'_>,
+    peers: &[ExecPeer],
+    now: chrono::NaiveDateTime,
+) -> ScoredCandidate {
+    let missing_nar_size = score.map(|s| s.missing_nar_size);
+    let breakdown = exec.score_on(worker.exec, missing_nar_size, peers, now);
+    let ctx = JobContext {
+        missing_count: score.map(|s| s.missing_count),
+        missing_nar_size,
+        queued_at: exec.queued_at,
+        ready_at: exec.ready_at,
+        rescore_count: exec.rescore_count,
+        now,
+        ..JobContext::default()
+    };
+    ScoredCandidate {
+        total: breakdown.total,
+        choice: None,
+        vetoed: !breakdown.vetoes.is_empty(),
+        held_for_ram: false,
+        score_breakdown: serde_json::to_value(&breakdown).unwrap_or(serde_json::Value::Null),
+        job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job, None))
+            .unwrap_or(serde_json::Value::Null),
     }
 }
 
@@ -870,6 +896,10 @@ impl JobTracker {
         None
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "arg-heavy; refactor tracked in #503"
+    )]
     pub fn take_best_of_kind(
         &mut self,
         worker_id: &str,
@@ -878,6 +908,7 @@ impl JobTracker {
         kind: &JobKind,
         policy: &dyn ScoringPolicy,
         instance: &gradient_pool::score::InstanceContext,
+        exec_peers: &[ExecPeer],
     ) -> Option<Assignment> {
         let builds = matches!(kind, JobKind::Build);
         let alone = worker_context_of(caps);
@@ -895,6 +926,7 @@ impl JobTracker {
             policy,
             instance,
             &worker_ctx,
+            exec_peers,
         );
         let waiting_wins = waiting
             .as_ref()
@@ -966,7 +998,17 @@ impl JobTracker {
                 let score = self.scores.get(worker_id).and_then(|ws| ws.get(&job_id));
                 let shares = self.project_work_shares(policy, instance);
                 let now = gradient_types::now();
-                self.score_job(&job_id, job, score, &shares, policy, instance, alone, now)
+                self.score_job(
+                    &job_id,
+                    job,
+                    score,
+                    &shares,
+                    policy,
+                    instance,
+                    alone,
+                    &[],
+                    now,
+                )
             })
             .filter(|sc| sc.held_for_ram || wins(sc));
         if rescored.is_none() {
@@ -1041,6 +1083,7 @@ impl JobTracker {
         policy: &dyn ScoringPolicy,
         instance: &gradient_pool::score::InstanceContext,
         worker_ctx: &WorkerContext<'_>,
+        exec_peers: &[ExecPeer],
     ) -> Vec<(String, ScoredCandidate)> {
         let worker_scores = self.scores.get(worker_id);
         let shares = self.project_work_shares(policy, instance);
@@ -1058,8 +1101,9 @@ impl JobTracker {
             })
             .map(|(id, job)| {
                 let score = worker_scores.and_then(|ws| ws.get(id));
-                let candidate =
-                    self.score_job(id, job, score, &shares, policy, instance, worker_ctx, now);
+                let candidate = self.score_job(
+                    id, job, score, &shares, policy, instance, worker_ctx, exec_peers, now,
+                );
                 (id.clone(), candidate)
             })
             .collect();
@@ -1085,11 +1129,13 @@ impl JobTracker {
         policy: &dyn ScoringPolicy,
         instance: &gradient_pool::score::InstanceContext,
         worker_ctx: &WorkerContext<'_>,
+        exec_peers: &[ExecPeer],
         now: chrono::NaiveDateTime,
     ) -> ScoredCandidate {
-        let no_estimate = BuildEstimate::default();
         let scored_job = match job {
-            PendingJob::Exec(_) => ScoredJob::new_eval(id, job.project_id(), false, &no_estimate),
+            PendingJob::Exec(exec) => {
+                return exec_candidate(job, exec, score, worker_ctx, exec_peers, now);
+            }
             PendingJob::Eval(e) => ScoredJob::new_eval(
                 id,
                 job.project_id(),
@@ -1161,6 +1207,7 @@ impl JobTracker {
             policy,
             instance,
             &worker_ctx,
+            &[],
             gradient_types::now(),
         );
         let worker_context = serde_json::to_value(crate::views::WorkerContextView::new(
@@ -1943,10 +1990,19 @@ mod tests {
     use super::*;
     use gradient_wire::types::{
         BuildJob, BuildRequirement, BuildSpec, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep,
-        GradientCapabilities,
+        GradientCapabilities, GuestSize,
     };
 
     fn take_exec(tracker: &mut JobTracker, worker: &str, caps: &WorkerCaps) -> Option<Assignment> {
+        take_exec_beside(tracker, worker, caps, &[])
+    }
+
+    fn take_exec_beside(
+        tracker: &mut JobTracker,
+        worker: &str,
+        caps: &WorkerCaps,
+        peers: &[ExecPeer],
+    ) -> Option<Assignment> {
         let policy = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let instance = gradient_pool::score::InstanceContext::default();
         tracker.take_best_of_kind(
@@ -1956,7 +2012,84 @@ mod tests {
             &JobKind::Exec,
             &*policy,
             &instance,
+            peers,
         )
+    }
+
+    fn exec_caps_with_warm_guests(count: u32, size: GuestSize) -> WorkerCaps {
+        use crate::test_jobs::{allow_all, exec_caps};
+
+        let mut caps = exec_caps(allow_all(), gradient_types::exec::ExecDefaults::default());
+        if let Some(inventory) = caps.exec.as_mut() {
+            inventory.warm_guests = count;
+            inventory.warm_guest_size = size;
+        }
+        caps
+    }
+
+    fn peer(caps: WorkerCaps) -> ExecPeer {
+        ExecPeer {
+            authorized: None,
+            caps,
+        }
+    }
+
+    fn pending_exec(tracker: &mut JobTracker, guest: GuestSize) -> String {
+        let job = crate::test_jobs::exec_job(gradient_types::exec::ExecSpec {
+            guest,
+            ..Default::default()
+        });
+        let key = exec_job_key(job.exec_job);
+        tracker.add_pending(key.clone(), PendingJob::Exec(Box::new(job)));
+        key
+    }
+
+    fn sized(cpus: u32) -> GuestSize {
+        GuestSize {
+            cpus,
+            ..GuestSize::default_request()
+        }
+    }
+
+    #[test]
+    fn a_cold_worker_leaves_an_exec_job_to_a_peer_with_a_usable_warm_guest_for_a_few_rounds() {
+        let mut tracker = JobTracker::new();
+        let key = pending_exec(&mut tracker, sized(2));
+        let cold = exec_caps_with_warm_guests(0, sized(2));
+        let warm = [peer(exec_caps_with_warm_guests(1, sized(2)))];
+
+        assert!(take_exec_beside(&mut tracker, "cold", &cold, &warm).is_none());
+        for _ in 0..gradient_pool::score::weights::EXEC_WARM_GUEST_HOLD_ROUNDS {
+            tracker.bump_rescore_counts();
+        }
+
+        let assignment = take_exec_beside(&mut tracker, "cold", &cold, &warm);
+        assert_eq!(assignment.map(|a| a.job_id().to_owned()), Some(key));
+    }
+
+    #[test]
+    fn a_warm_guest_elsewhere_holds_nothing_when_it_cannot_take_the_job() {
+        let mut tracker = JobTracker::new();
+        let unauthorized = ExecPeer {
+            authorized: Some(HashSet::new()),
+            ..peer(exec_caps_with_warm_guests(1, sized(2)))
+        };
+        pending_exec(&mut tracker, sized(2));
+        let peers = [peer(exec_caps_with_warm_guests(1, sized(8))), unauthorized];
+
+        let cold = exec_caps_with_warm_guests(0, sized(2));
+        assert!(take_exec_beside(&mut tracker, "cold", &cold, &peers).is_some());
+    }
+
+    #[test]
+    fn a_warm_worker_takes_the_job_its_warm_guest_fits_first() {
+        let mut tracker = JobTracker::new();
+        pending_exec(&mut tracker, sized(8));
+        let fitting = pending_exec(&mut tracker, sized(2));
+        let warm = exec_caps_with_warm_guests(1, sized(2));
+
+        let assignment = take_exec(&mut tracker, "warm", &warm);
+        assert_eq!(assignment.map(|a| a.job_id().to_owned()), Some(fitting));
     }
 
     #[test]
@@ -2764,7 +2897,15 @@ mod tests {
         let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
-                .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &*p, &inst)
+                .take_best_of_kind(
+                    "w1",
+                    None,
+                    Some(&no_fetch),
+                    &JobKind::Flake,
+                    &*p,
+                    &inst,
+                    &[]
+                )
                 .is_none(),
             "worker without network and secrets must not receive a fetch flake job"
         );
@@ -2783,7 +2924,15 @@ mod tests {
         };
         assert!(
             tracker
-                .take_best_of_kind("w2", None, Some(&with_fetch), &JobKind::Flake, &*p, &inst)
+                .take_best_of_kind(
+                    "w2",
+                    None,
+                    Some(&with_fetch),
+                    &JobKind::Flake,
+                    &*p,
+                    &inst,
+                    &[]
+                )
                 .is_some(),
             "worker with network, secrets and eval must receive the bundled flake job"
         );
@@ -2814,7 +2963,8 @@ mod tests {
                     Some(&eval_no_fetch),
                     &JobKind::Flake,
                     &*p,
-                    &inst
+                    &inst,
+                    &[]
                 )
                 .is_some(),
             "cached eval job must run on an eval-capable worker without network"
@@ -2842,7 +2992,15 @@ mod tests {
         let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
-                .take_best_of_kind("w1", None, Some(&fetch_build), &JobKind::Flake, &*p, &inst)
+                .take_best_of_kind(
+                    "w1",
+                    None,
+                    Some(&fetch_build),
+                    &JobKind::Flake,
+                    &*p,
+                    &inst,
+                    &[]
+                )
                 .is_none(),
             "worker without eval must not receive a bundled eval job"
         );
@@ -2860,8 +3018,15 @@ mod tests {
         let x86_caps = build_caps(&["x86_64-linux"], &[]);
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
-        let assignment =
-            tracker.take_best_of_kind("w1", None, Some(&x86_caps), &JobKind::Build, &*p, &inst);
+        let assignment = tracker.take_best_of_kind(
+            "w1",
+            None,
+            Some(&x86_caps),
+            &JobKind::Build,
+            &*p,
+            &inst,
+            &[],
+        );
         assert!(assignment.is_none());
         assert_eq!(tracker.pending_count(), 1);
     }
@@ -2891,12 +3056,20 @@ mod tests {
         let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
-                .take_best_of_kind("w1", None, Some(&no_kvm), &JobKind::Build, &*p, &inst)
+                .take_best_of_kind("w1", None, Some(&no_kvm), &JobKind::Build, &*p, &inst, &[])
                 .is_none()
         );
         assert!(
             tracker
-                .take_best_of_kind("w2", None, Some(&with_kvm), &JobKind::Build, &*p, &inst)
+                .take_best_of_kind(
+                    "w2",
+                    None,
+                    Some(&with_kvm),
+                    &JobKind::Build,
+                    &*p,
+                    &inst,
+                    &[]
+                )
                 .is_some()
         );
     }
@@ -2911,7 +3084,7 @@ mod tests {
 
         assert!(
             tracker
-                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
+                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst, &[])
                 .is_none()
         );
         let decisions = tracker.recent_decisions();
@@ -2940,7 +3113,7 @@ mod tests {
         );
         assert!(
             tracker
-                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
+                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst, &[])
                 .is_some()
         );
         let decisions = tracker.recent_decisions();
@@ -2956,7 +3129,7 @@ mod tests {
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
 
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
+        tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst, &[]);
 
         let decisions = tracker.recent_decisions();
         let cand = &decisions[0].candidates[0];
@@ -3003,7 +3176,7 @@ mod tests {
                 }],
             );
         }
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
+        tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst, &[]);
 
         tracker.remove_active("build:j1");
         assert!(
@@ -3100,7 +3273,7 @@ mod tests {
 
         assert!(
             tracker
-                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
+                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst, &[])
                 .is_none()
         );
         assert_eq!(tracker.pending_count(), 1);
@@ -3114,7 +3287,8 @@ mod tests {
                 outputs_present: false,
             }],
         );
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
+        let assignment =
+            tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst, &[]);
         assert_eq!(assignment.unwrap().job_id(), "j1");
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
@@ -3161,7 +3335,8 @@ mod tests {
         let p = gradient_pool::score::RulePolicy::new("test", vec![Box::new(PreferAndVeto)], false);
         let inst = gradient_pool::score::InstanceContext::default();
 
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &p, &inst);
+        let assignment =
+            tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &p, &inst, &[]);
 
         assert_eq!(
             assignment.map(|a| a.job_id().to_owned()).as_deref(),
@@ -3182,7 +3357,8 @@ mod tests {
 
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
+        let assignment =
+            tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst, &[]);
         assert!(assignment.is_some());
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
@@ -3209,6 +3385,7 @@ mod tests {
             &JobKind::Flake,
             &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
+            &[],
         );
         tracker.take_best_of_kind(
             "w1",
@@ -3217,6 +3394,7 @@ mod tests {
             &JobKind::Flake,
             &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
+            &[],
         );
         assert_eq!(tracker.active_count(), 2);
         assert_eq!(tracker.pending_count(), 0);
@@ -3248,7 +3426,8 @@ mod tests {
 
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
+        let assignment =
+            tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst, &[]);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id(), "j2");
     }
@@ -3269,6 +3448,7 @@ mod tests {
             &JobKind::Flake,
             &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
+            &[],
         );
         tracker.take_best_of_kind(
             "w1",
@@ -3277,6 +3457,7 @@ mod tests {
             &JobKind::Flake,
             &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
+            &[],
         );
         tracker.take_best_of_kind(
             "w1",
@@ -3285,6 +3466,7 @@ mod tests {
             &JobKind::Flake,
             &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
+            &[],
         );
         assert_eq!(tracker.active_jobs().count(), 3);
 
@@ -3310,6 +3492,7 @@ mod tests {
             &JobKind::Flake,
             &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
+            &[],
         );
 
         let aborted = tracker.peer_jobs_on_worker("w1", &HashSet::new());
@@ -3332,6 +3515,7 @@ mod tests {
             &JobKind::Flake,
             &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
+            &[],
         );
         assert!(tracker.contains_job("j1"));
     }
@@ -3358,6 +3542,7 @@ mod tests {
             &JobKind::Flake,
             &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
+            &[],
         );
         assert!(tracker.contains_job("j1"));
         tracker.remove_job("j1");
@@ -3558,7 +3743,7 @@ mod tests {
         let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
-                .take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst)
+                .take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst, &[])
                 .is_none()
         );
     }
@@ -3734,7 +3919,7 @@ mod tests {
         tracker.add_pending("single".into(), eval_job(peer));
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
+        tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst, &[]);
         tracker.activate_members(
             attempt,
             vec![(
@@ -3851,7 +4036,7 @@ mod tests {
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         let claimed = tracker
-            .take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst)
+            .take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst, &[])
             .expect("w1 claims eval:x")
             .assignment_id();
         let reattached = DispatchedJobId::now_v7();
