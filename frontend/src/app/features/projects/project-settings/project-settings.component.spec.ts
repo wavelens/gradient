@@ -12,7 +12,6 @@ import { of } from 'rxjs';
 import { ProjectSettingsComponent } from './project-settings.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
-import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
 import { ProjectResponse } from '@core/models';
 
@@ -24,7 +23,6 @@ function projectFor(access: AccessState): ProjectResponse {
     description: '',
     public: false,
     hide_build_requests: false,
-    exec_enabled: false,
     managed: access.managed,
     created_by: 'u1',
     created_at: '2026-01-01T00:00:00',
@@ -40,7 +38,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-function setup(access: AccessState, execEnabled = false): ComponentFixture<ProjectSettingsComponent> {
+function setup(access: AccessState):ComponentFixture<ProjectSettingsComponent> {
   TestBed.configureTestingModule({
     imports: [ProjectSettingsComponent],
     providers: [
@@ -61,7 +59,6 @@ function setup(access: AccessState, execEnabled = false): ComponentFixture<Proje
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
     ],
   });
-  TestBed.inject(ConfigService).execEnabled = execEnabled;
   const fixture = TestBed.createComponent(ProjectSettingsComponent);
   fixture.detectChanges();
   return fixture;
@@ -89,21 +86,5 @@ describe('ProjectSettingsComponent - access gating', () => {
     expect(save!.disabled).toBe(true);
     expect(del).not.toBeNull();
     expect(del!.disabled).toBe(true);
-  });
-});
-
-describe('ProjectSettingsComponent - exec switch', () => {
-  const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
-
-  it('hides the exec switch while the instance has exec jobs off', async () => {
-    const fixture = setup(admin);
-    await settled(fixture);
-    expect((fixture.nativeElement as HTMLElement).querySelector('#exec-enabled')).toBeNull();
-  });
-
-  it('shows the exec switch once the instance allows exec jobs', async () => {
-    const fixture = setup(admin, true);
-    await settled(fixture);
-    expect((fixture.nativeElement as HTMLElement).querySelector('#exec-enabled')).not.toBeNull();
   });
 });

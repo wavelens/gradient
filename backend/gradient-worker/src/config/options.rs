@@ -191,7 +191,7 @@ pub struct CapabilitiesArgs {
     pub secrets: bool,
 
     /// Whether this worker takes exec jobs. Exec jobs also need the server option `exec.enable`,
-    /// `exec_enabled` on the project and the task, and `enable_exec` on the worker registration.
+    /// `exec_enabled` on the task and `enable_exec` on the worker registration.
     #[arg(default_value = "false")]
     pub exec: bool,
 }

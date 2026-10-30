@@ -46,6 +46,7 @@ mod m20261109_000000_cache_metric_external_traffic;
 mod m20261110_000000_user_last_seen_version;
 mod m20261111_000000_worker_sample_architectures;
 mod m20261112_000952_cached_path_file_hash_index;
+mod m20261113_000000_drop_project_exec_enabled;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -117,6 +118,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261110_000000_user_last_seen_version::Migration),
             Box::new(m20261111_000000_worker_sample_architectures::Migration),
             Box::new(m20261112_000952_cached_path_file_hash_index::Migration),
+            Box::new(m20261113_000000_drop_project_exec_enabled::Migration),
         ]
     }
 }

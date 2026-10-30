@@ -223,7 +223,6 @@ in {
               projects.project = {
                 private_key_file = "/etc/gradient/secrets/project_ssh_key";
                 created_by = "admin";
-                exec_enabled = true;
                 secret_files.api-token = "/etc/gradient/secrets/api_token";
               };
 

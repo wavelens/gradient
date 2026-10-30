@@ -1768,7 +1768,6 @@ export interface PatchProjectRequest {
   display_name?: string | null;
   description?: string | null;
   hide_build_requests?: boolean | null;
-  exec_enabled?: boolean | null;
 }
 
 export interface PatchRequest {
@@ -1887,7 +1886,6 @@ export interface Project {
   private_key: string;
   public: boolean;
   hide_build_requests: boolean;
-  exec_enabled: boolean;
   created_by: UserId;
   created_at: string;
   managed: boolean;
@@ -1903,7 +1901,6 @@ export interface ProjectResponse {
   public_key?: string | null;
   public: boolean;
   hide_build_requests: boolean;
-  exec_enabled: boolean;
   managed: boolean;
   created_by: UserId;
   created_at: string;

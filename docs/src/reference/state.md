@@ -45,7 +45,6 @@ services.gradient.state = {
 | `created_by` | string | - | Name of the user who created the project. |
 | `description` | null or string | `null` | Free-text description of the project. |
 | `display_name` | string | `name` | Name shown for the project in the UI. |
-| `exec_enabled` | bool | `false` | Set to `true` to start exec jobs of the project. Exec entry points of a project without it fail with a message. |
 | `hide_build_requests` | bool | `false` | Set to `true` to keep the project's automatic `build-request` task out of task listings in the web UI. |
 | `id` | null or string | `null` | UUID of the project. |
 | `members` | list of submodule | `[ ]` | Users that hold a role on the project. |
@@ -76,7 +75,7 @@ services.gradient.state = {
 | `created_by` | string | - | User name of the task's creator. |
 | `description` | null or string | `null` | Description of the task. |
 | `display_name` | string | `name` | Name of the task shown in the UI. |
-| `exec_enabled` | bool | `false` | Set to `true` to start exec jobs of the task. Exec entry points of a task without it fail with a message, even in a project with `exec_enabled`. |
+| `exec_enabled` | bool | `false` | Set to `true` to start exec jobs of the task. Exec entry points of a task without it fail with a message. |
 | `flake_input_overrides` | attrs of submodule | `{ }` | Overrides applied when fetching flake inputs, with one entry per input name. |
 | `flake_input_overrides.<name>.keep_url` | bool | `false` | Whether to force-update this input from its flake-declared URL. |
 | `flake_input_overrides.<name>.url` | null or string | `null` | Flake reference that replaces this input. |

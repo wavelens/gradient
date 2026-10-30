@@ -180,12 +180,6 @@
         '';
       };
 
-      exec_enabled = mkOption {
-        type = types.bool;
-        default = false;
-        description = "Whether to run exec jobs of this project. Exec entry points of a project with this option off fail with a message.";
-      };
-
       created_by = mkOption {
         type = types.str;
         description = "User name of the project's creator.";
@@ -343,7 +337,7 @@
       exec_enabled = mkOption {
         type = types.bool;
         default = false;
-        description = "Whether to run exec jobs of this task. Exec entry points of a task with this option off fail with a message, even when the project runs exec jobs.";
+        description = "Whether to run exec jobs of this task. Exec entry points of a task with this option off fail with a message.";
       };
 
       concurrency = mkOption {

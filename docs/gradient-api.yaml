@@ -18766,10 +18766,6 @@ components:
           type:
           - boolean
           - 'null'
-        exec_enabled:
-          type:
-          - boolean
-          - 'null'
     PatchRequest:
       type: object
       required:
@@ -19094,7 +19090,6 @@ components:
       - private_key
       - public
       - hide_build_requests
-      - exec_enabled
       - created_by
       - created_at
       - managed
@@ -19115,8 +19110,6 @@ components:
           type: boolean
         hide_build_requests:
           type: boolean
-        exec_enabled:
-          type: boolean
         created_by:
           $ref: '#/components/schemas/UserId'
         created_at:
@@ -19136,7 +19129,6 @@ components:
       - description
       - public
       - hide_build_requests
-      - exec_enabled
       - managed
       - created_by
       - created_at
@@ -19157,8 +19149,6 @@ components:
         public:
           type: boolean
         hide_build_requests:
-          type: boolean
-        exec_enabled:
           type: boolean
         managed:
           type: boolean

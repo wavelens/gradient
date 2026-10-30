@@ -41,8 +41,7 @@ flowchart LR
 | Message | Check |
 |---|---|
 | `exec jobs are disabled on this instance` | `exec.enable` off, checked first |
-| `exec jobs are disabled for this project` | `project.exec_enabled` off |
-| `exec jobs are disabled for this task` | `task.exec_enabled` off, checked last |
+| `exec jobs are disabled for this task` | `task.exec_enabled` off |
 
 - Refused programs also lose the image entry point, even in a later batch.
 - Restarts copy `entry_point.exec` along with the entry point.
