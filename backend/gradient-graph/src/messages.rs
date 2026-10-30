@@ -177,6 +177,10 @@ pub enum Transition {
         evaluation: EvaluationId,
         shared_build: DerivationBuildId,
     },
+    AbortBuildForAllEvaluations {
+        evaluation: EvaluationId,
+        shared_build: DerivationBuildId,
+    },
     RetryBuild {
         evaluation: EvaluationId,
         shared_build: DerivationBuildId,

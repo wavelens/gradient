@@ -185,6 +185,8 @@ Rules for aborts:
 
 - The evaluation need to run.
 - Shared builds wanted by another evaluation are not abortable. `Completed` and `Failed` evaluations count, as in the need recount (`wanted_by_its_evaluation`).
+- A superuser can abort a build from the board without any evaluation running. The abort can set `build_job.aborted` on each finished evaluation wanting the build.
+- Such builds stay `Aborted`. The need recount and the consistency check leave them `Aborted`.
 
 Rules for retries:
 

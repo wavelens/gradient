@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::abort::{abort_shared_builds, wanted_by_other_evaluations};
+use super::abort::{abort_shared_builds, wanted_by_other_evaluations, wanting_evaluations};
 use super::emit_transition_effects;
 use super::eval_finalize::check_evaluation_done;
 use super::evaluation_status::reopen_evaluation;
@@ -48,13 +48,51 @@ pub async fn abort_evaluation_build(
         return Ok(Err(BuildRefusal::NeededByOtherEvaluation));
     }
 
-    mark_aborted(ctx, evaluation.id, &[shared_build.derivation], true).await?;
-    abort_shared_builds(ctx, evaluation, &[shared_build]).await?;
-    let failed =
-        crate::graph::promotion::repair_dependency_failed(&ctx.worker_db, evaluation.id).await?;
-    emit_transition_effects(ctx, &failed).await?;
-
+    abort_build_for(ctx, evaluation, &[evaluation.id], shared_build).await?;
     Ok(Ok(()))
+}
+
+/// Ends the want of every finished evaluation and neither the need recount nor the consistency
+/// check thaws the build again.
+pub async fn abort_build_for_all_evaluations(
+    ctx: &DbContext,
+    evaluation: &MEvaluation,
+    shared_build: &MDerivationBuild,
+) -> Result<Result<(), BuildRefusal>, DbErr> {
+    if let Err(refusal) = check(true, shared_build, &BuildStatus::ABORTABLE) {
+        return Ok(Err(refusal));
+    }
+
+    let wanting = wanting_evaluations(ctx, &[shared_build.id]).await?;
+    if wanting.iter().any(|w| !w.status.is_terminal()) {
+        return Ok(Err(BuildRefusal::NeededByOtherEvaluation));
+    }
+
+    let evaluations: Vec<EvaluationId> = wanting
+        .into_iter()
+        .map(|w| EvaluationId::from(w.evaluation))
+        .collect();
+    abort_build_for(ctx, evaluation, &evaluations, shared_build).await?;
+    Ok(Ok(()))
+}
+
+async fn abort_build_for(
+    ctx: &DbContext,
+    evaluation: &MEvaluation,
+    evaluations: &[EvaluationId],
+    shared_build: &MDerivationBuild,
+) -> Result<(), DbErr> {
+    for wanting in evaluations {
+        mark_aborted(ctx, *wanting, &[shared_build.derivation], true).await?;
+    }
+    abort_shared_builds(ctx, evaluation, &[shared_build]).await?;
+    for wanting in evaluations {
+        let failed =
+            crate::graph::promotion::repair_dependency_failed(&ctx.worker_db, *wanting).await?;
+        emit_transition_effects(ctx, &failed).await?;
+    }
+
+    Ok(())
 }
 
 pub async fn retry_evaluation_build(

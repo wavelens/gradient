@@ -54,6 +54,7 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(board_storage::get_board_storage))
                 .routes(routes!(board::get_top_projects_by_buildtime))
                 .routes(routes!(board::get_assign_decisions))
+                .routes(routes!(board_abort::post_board_job_abort))
                 .routes(routes!(
                     projects::management::patch_project,
                     projects::management::delete_project

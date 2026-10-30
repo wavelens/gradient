@@ -1682,6 +1682,39 @@ paths:
       security:
       - {}
       - bearerAuth: []
+  /api/v1/board/jobs/{id}/abort:
+    post:
+      tags:
+      - board
+      summary: Abort assigned job
+      description: Stops a running build or eval job. Under a running evaluation, an eval job aborts the evaluation and a build job aborts the build as `POST /builds/{build}/abort` does. Without one, a build job aborts the build for every finished evaluation that still wants it and stays aborted and an eval job is stopped on its worker. Superuser-only. Answers 409 when the job has finished, is an exec job, or another evaluation still needs the build.
+      operationId: abortBoardJob
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/board/live:
     get:
       tags:

@@ -22,7 +22,8 @@ pub use derivation_build_status::{
 pub use effects::{TransitionChange, collapse_transitions, emit_transition_effects};
 pub use eval_finalize::{check_evaluation_done, finalize_evals_for_derivations};
 pub use evaluation_build::{
-    BuildRefusal, abort_evaluation_build, retry_evaluation_build, wanted_again,
+    BuildRefusal, abort_build_for_all_evaluations, abort_evaluation_build, retry_evaluation_build,
+    wanted_again,
 };
 pub use evaluation_message::{EvaluationFailure, EvaluationWarning};
 pub use evaluation_status::{

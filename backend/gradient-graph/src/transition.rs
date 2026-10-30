@@ -185,6 +185,26 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 },
             )
         }
+        Transition::AbortBuildForAllEvaluations {
+            evaluation,
+            shared_build,
+        } => {
+            let Some((eval, row)) = load_evaluation_build(ctx, evaluation, shared_build).await?
+            else {
+                return Ok(TransitionReport::default());
+            };
+
+            Ok(
+                match gradient_db::status::abort_build_for_all_evaluations(ctx, &eval, &row).await?
+                {
+                    Ok(()) => TransitionReport {
+                        aborted_shared_builds: vec![row.id],
+                        ..Default::default()
+                    },
+                    Err(refusal) => TransitionReport::from(refusal),
+                },
+            )
+        }
         Transition::RetryBuild {
             evaluation,
             shared_build,

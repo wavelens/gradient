@@ -68,19 +68,37 @@ impl Scheduler {
             .await;
     }
 
-    /// Stop the worker only after the graph writer moved the shared build.
     pub async fn abort_build(
         &self,
         evaluation: EvaluationId,
         shared_build: DerivationBuildId,
     ) -> anyhow::Result<Result<(), BuildRefusal>> {
-        let report = self
-            .graph
-            .transition(Transition::AbortBuild {
-                evaluation,
-                shared_build,
-            })
-            .await?;
+        let abort = Transition::AbortBuild {
+            evaluation,
+            shared_build,
+        };
+        self.abort_then_stop_worker(evaluation, abort).await
+    }
+
+    pub async fn abort_build_for_all_evaluations(
+        &self,
+        evaluation: EvaluationId,
+        shared_build: DerivationBuildId,
+    ) -> anyhow::Result<Result<(), BuildRefusal>> {
+        let abort = Transition::AbortBuildForAllEvaluations {
+            evaluation,
+            shared_build,
+        };
+        self.abort_then_stop_worker(evaluation, abort).await
+    }
+
+    /// Stop the worker only after the graph writer moved the shared build.
+    async fn abort_then_stop_worker(
+        &self,
+        evaluation: EvaluationId,
+        abort: Transition,
+    ) -> anyhow::Result<Result<(), BuildRefusal>> {
+        let report = self.graph.transition(abort).await?;
         if let Some(refusal) = report.refusal {
             return Ok(Err(refusal));
         }
@@ -92,6 +110,26 @@ impl Scheduler {
             .collect();
         self.cancel_jobs(evaluation, job_ids).await;
         Ok(Ok(()))
+    }
+
+    pub async fn stop_job(&self, job_id: String) -> anyhow::Result<()> {
+        let running = self
+            .call(|reply| SchedulerMsg::CancelJobs {
+                job_ids: vec![job_id.clone()],
+                reply,
+            })
+            .await?;
+        if let Some((worker_id, job_id)) = running.first() {
+            info!(%worker_id, %job_id, "sent AbortJob to worker");
+            return Ok(());
+        }
+
+        gradient_db::scheduling::assignment_record::abandon_open_assignments_for_jobs(
+            &self.db.worker_db,
+            &[job_id],
+        )
+        .await?;
+        Ok(())
     }
 
     pub async fn retry_build(
