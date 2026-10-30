@@ -202,7 +202,6 @@ in {
               description = "My Test Project";
               private_key_file = toString projectSshKey;
               public = true;
-              exec_enabled = true;
               created_by = "admin";
               teams = [ { team = "testteam"; role = "Admin"; } ];
             };

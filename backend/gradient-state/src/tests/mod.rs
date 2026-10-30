@@ -77,32 +77,6 @@ fn secret_files_default_to_empty() {
 }
 
 #[test]
-fn a_project_without_exec_enabled_keeps_exec_jobs_off() {
-    let json = r#"{
-        "users": {
-            "alice": {
-                "username": "alice",
-                "name": "Alice",
-                "email": "alice@example.com",
-                "password_file": "/dev/null"
-            }
-        },
-        "projects": {
-            "acme": {
-                "name": "acme",
-                "display_name": "ACME",
-                "description": null,
-                "private_key_file": "/dev/null",
-                "public": false,
-                "created_by": "alice"
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert!(!cfg.projects["acme"].exec_enabled);
-}
-
-#[test]
 fn a_task_without_exec_enabled_keeps_exec_jobs_off() {
     let cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
     assert!(!cfg.tasks["web"].exec_enabled);

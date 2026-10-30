@@ -43,7 +43,6 @@ struct RunState {
     finished: bool,
     built: bool,
     waits_for_manual_start: bool,
-    project_enabled: bool,
     task_enabled: bool,
 }
 
@@ -55,7 +54,7 @@ enum Run {
 
 static RUN_STATE_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "SELECT r.spec, p.exec_enabled AS project_enabled, t.exec_enabled AS task_enabled, \
+        "SELECT r.spec, t.exec_enabled AS task_enabled, \
          NOT EXISTS (SELECT 1 FROM exec_job o \
               WHERE o.entry_point = r.entry_point AND o.status IN ({open})) \
          AND NOT EXISTS (SELECT 1 FROM cluster_member m \
@@ -65,7 +64,7 @@ static RUN_STATE_SQL: LazyLock<String> = LazyLock::new(|| {
               AND o.status = {created} AND o.waits_for_manual_start) AS waits_for_manual_start, \
          {program_done} AND (r.image_derivation IS NULL OR {image_done}) AS built \
          FROM exec_job r JOIN evaluation ev ON ev.id = r.evaluation \
-         JOIN task t ON t.id = ev.task JOIN project p ON p.id = t.project \
+         JOIN task t ON t.id = ev.task \
          WHERE r.id = $1",
         open = exec_in(&ExecJobStatus::OPEN),
         created = exec(ExecJobStatus::Created),
@@ -177,7 +176,7 @@ fn next_run(state: &RunState, instance_enabled: bool) -> Result<Run, RunRefusal>
 }
 
 fn switches_on(state: &RunState, instance_enabled: bool) -> Result<(), RunRefusal> {
-    match exec_refusal(instance_enabled, state.project_enabled, state.task_enabled) {
+    match exec_refusal(instance_enabled, state.task_enabled) {
         Some(message) => Err(RunRefusal::Disabled(message)),
         None => Ok(()),
     }
@@ -197,7 +196,6 @@ mod tests {
             finished: true,
             built: true,
             waits_for_manual_start: false,
-            project_enabled: true,
             task_enabled: true,
         }
     }
@@ -230,12 +228,12 @@ mod tests {
     #[test]
     fn a_job_waiting_for_its_manual_start_still_needs_its_switches() {
         let state = RunState {
-            project_enabled: false,
+            task_enabled: false,
             ..job_waiting_for_its_start()
         };
         assert_eq!(
             next_run(&state, true).map_err(|refusal| refusal.to_string()),
-            Err("exec jobs are disabled for this project".to_owned())
+            Err("exec jobs are disabled for this task".to_owned())
         );
     }
 

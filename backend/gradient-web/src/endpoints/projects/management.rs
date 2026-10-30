@@ -45,7 +45,6 @@ pub struct PatchProjectRequest {
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub hide_build_requests: Option<bool>,
-    pub exec_enabled: Option<bool>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -92,7 +91,6 @@ pub struct ProjectResponse {
     pub public_key: Option<String>,
     pub public: bool,
     pub hide_build_requests: bool,
-    pub exec_enabled: bool,
     pub managed: bool,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
@@ -116,7 +114,6 @@ impl ProjectResponse {
             public_key: Some(project.public_key),
             public: project.public,
             hide_build_requests: project.hide_build_requests,
-            exec_enabled: project.exec_enabled,
             managed: project.managed,
             created_by: project.created_by,
             created_at: project.created_at,
@@ -389,7 +386,6 @@ pub async fn patch_project(
         ("display_name", body.display_name.is_some()),
         ("description", body.description.is_some()),
         ("hide_build_requests", body.hide_build_requests.is_some()),
-        ("exec_enabled", body.exec_enabled.is_some()),
     ]);
     let mut aproject: AProject = project.into();
 
@@ -413,7 +409,6 @@ pub async fn patch_project(
         .to_string());
 
     crate::patch_field!(aproject, body, hide_build_requests);
-    crate::patch_field!(aproject, body, exec_enabled);
 
     let project = gradient_db::rows::update::<EProject, _>(&db.web_db, aproject)
         .await

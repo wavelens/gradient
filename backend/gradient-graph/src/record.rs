@@ -1044,14 +1044,14 @@ impl BatchWriter<'_> {
         }
 
         let instance_enabled = self.ctx.config.exec.enable;
-        let (project_enabled, task_enabled) = self.exec_switches(task_id).await?;
+        let task_enabled = self.task_exec_enabled(task_id).await?;
         let mut refused = HashSet::new();
         let mut accepted = HashSet::new();
         for d in derivations {
             if d.exec.is_none() {
                 continue;
             }
-            match exec_refusal(instance_enabled, project_enabled, task_enabled) {
+            match exec_refusal(instance_enabled, task_enabled) {
                 Some(message) => {
                     self.refuse_exec(&d.attr, message).await;
                     refused.insert(d.attr.clone());
@@ -1096,18 +1096,13 @@ impl BatchWriter<'_> {
         Ok(stored.into_iter().collect())
     }
 
-    async fn exec_switches(&self, task_id: TaskId) -> Result<(bool, bool)> {
+    async fn task_exec_enabled(&self, task_id: TaskId) -> Result<bool> {
         let task = ETask::find_by_id(task_id)
             .one(self.db())
             .await
             .context("fetch the task of an exec entry point")?
             .with_context(|| format!("task {task_id} not found"))?;
-        let project = EProject::find_by_id(task.project)
-            .one(self.db())
-            .await
-            .context("fetch the project of an exec entry point")?
-            .with_context(|| format!("project {} not found", task.project))?;
-        Ok((project.exec_enabled, task.exec_enabled))
+        Ok(task.exec_enabled)
     }
 
     async fn refuse_exec(&self, attr: &str, message: &str) {

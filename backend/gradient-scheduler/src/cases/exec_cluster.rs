@@ -47,9 +47,6 @@ fn pair_inventory() -> ExecInventory {
 async fn seed_queued_cluster(case: &SchedulerCase, spec: &ExecSpec, cluster: ClusterJobId) {
     let (retries, last) = (spec.retries, spec.nodes - 1);
     let spec = serde_json::to_string(spec).expect("the spec encodes");
-    case.db
-        .execute("UPDATE project SET exec_enabled = true")
-        .await;
     case.db.execute("UPDATE task SET exec_enabled = true").await;
     case.db
         .execute(&format!(

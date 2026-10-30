@@ -65,9 +65,6 @@ pub(super) fn inventory() -> ExecInventory {
 async fn seed_queued_job(case: &SchedulerCase, spec: &ExecSpec) {
     let retries = spec.retries;
     let spec = serde_json::to_string(spec).expect("the spec encodes");
-    case.db
-        .execute("UPDATE project SET exec_enabled = true")
-        .await;
     case.db.execute("UPDATE task SET exec_enabled = true").await;
     case.db
         .execute(&format!(
@@ -518,9 +515,6 @@ async fn exec_recorded_mid_stream(
     case: &SchedulerCase,
     evaluation: EvaluationId,
 ) -> (String, DispatchedJobId) {
-    case.db
-        .execute("UPDATE project SET exec_enabled = true")
-        .await;
     case.db.execute("UPDATE task SET exec_enabled = true").await;
     case.connect(W1, w_exec(inventory()), &[]).await;
     case.connect(EVALUATOR, w_all(), &[]).await;
