@@ -14,7 +14,7 @@ import { BoardLiveService } from '@core/services/board-live.service';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
-import { JobKindName, jobKindName, jobSubjectLabel } from '../job-kind';
+import { BoardRow, JobKindName, boardJobLink, collapseClusters, jobKindName, jobSubjectLabel } from '../job-kind';
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
 
 type KindFilter = 'all' | JobKindName;
@@ -46,7 +46,7 @@ interface DecisionRow {
 
       @if (view() === 'assigned') {
         <div class="banner">
-          Showing {{ filteredJobs().length }} of {{ jobs().length }} assigned job(s) visible to this account.
+          Showing {{ assignedRows().length }} of {{ collapseClusters(jobs()).length }} assigned job(s) visible to this account.
           @if (otherRunning() > 0) {
             <span class="muted">+ {{ otherRunning() }} other running (hidden).</span>
           }
@@ -90,11 +90,12 @@ interface DecisionRow {
               <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th><th>Score</th><th>Assigned</th><th></th></tr>
             </thead>
             <tbody>
-              @for (j of filteredJobs(); track j.id) {
+              @for (row of assignedRows(); track row.job.id) {
+                @let j = row.job;
                 <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
-                  @let subject = jobSubjectLabel(j.subject, j.exec_job);
+                  @let subject = rowSubject(row);
                   <td>{{ jobKindName(j.kind) }}</td>
-                  <td class="mono">{{ j.worker_name ?? j.worker_id }}</td>
+                  <td class="mono">{{ j.cluster_job ? subJobLabel(row.subJobs) : (j.worker_name ?? j.worker_id) }}</td>
                   <td class="mono subject" [title]="subject">{{ subject }}</td>
                   <td>{{ j.score | number: '1.1-1' }}</td>
                   <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
@@ -131,15 +132,16 @@ interface DecisionRow {
 
       @if (view() === 'pending') {
         <div class="banner">
-          {{ pendingJobs().length }} pending job(s) visible to this account.
+          {{ pendingRows().length }} pending job(s) visible to this account.
           @if (otherPending() > 0) { <span class="muted">+ {{ otherPending() }} hidden.</span> }
         </div>
         <gr-table class="jobs">
           <thead><tr><th>Kind</th><th>Derivation / Evaluation / Exec</th><th>Deps</th><th>Queued</th></tr></thead>
           <tbody>
-            @for (p of pendingJobs(); track p.evaluation_id + (p.build_id ?? '') + (p.exec_job?.id ?? '')) {
-              @let subject = jobSubjectLabel(p.subject, p.exec_job);
-              <tr class="clickable" [routerLink]="['/board/jobs', p.exec_job?.id ?? p.evaluation_id]">
+            @for (row of pendingRows(); track pendingKey(row.job)) {
+              @let p = row.job;
+              @let subject = rowSubject(row);
+              <tr class="clickable" [routerLink]="p.cluster_job ? ['/board/clusters', p.cluster_job] : ['/board/jobs', p.exec_job?.id ?? p.evaluation_id]">
                 <td>{{ jobKindName(p.kind) }}</td>
                 <td class="mono subject" [title]="subject">{{ subject }}</td>
                 <td>{{ p.dependency_count }}</td>
@@ -171,6 +173,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   protected first = firstLoad();
   protected readonly jobKindName = jobKindName;
   protected readonly jobSubjectLabel = jobSubjectLabel;
+  protected readonly collapseClusters = collapseClusters;
 
   jobs = signal<DispatchedJobSummary[]>([]);
   otherRunning = signal(0);
@@ -223,6 +226,23 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
       return true;
     });
   });
+
+  assignedRows = computed(() => collapseClusters(this.filteredJobs()));
+  pendingRows = computed(() => collapseClusters(this.pendingJobs()));
+
+  rowSubject({ job, subJobs }: BoardRow<DispatchedJobSummary | PendingJobSummary>): string {
+    if (!job.cluster_job) return jobSubjectLabel(job.subject, job.exec_job);
+    const exec = job.exec_job ? { ...job.exec_job, nodes: 1 } : job.exec_job;
+    return `${jobSubjectLabel(job.subject, exec)} (cluster, ${this.subJobLabel(subJobs)})`;
+  }
+
+  subJobLabel(count: number): string {
+    return count === 1 ? '1 sub job' : `${count} sub jobs`;
+  }
+
+  pendingKey(p: PendingJobSummary): string {
+    return p.cluster_job ?? p.evaluation_id + (p.build_id ?? '') + (p.exec_job?.id ?? '');
+  }
 
   /// Recent decisions flattened to one row per candidate (incl. rejected and
   /// negative scores), honoring the type/score filters above.
@@ -355,7 +375,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
 
   inspect(j: DispatchedJobSummary): void {
     if (this.isLive(j)) return;
-    this.router.navigate(['/board/jobs', j.id]);
+    this.router.navigate(boardJobLink(j.id, j.cluster_job) ?? ['/board/jobs', j.id]);
   }
 
   inspectDecision(r: DecisionRow): void {

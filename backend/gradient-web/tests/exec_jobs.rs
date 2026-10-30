@@ -8,7 +8,8 @@ use axum::http::StatusCode;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_entity::ids::{
-    DerivationId, DispatchedJobId, EntryPointId, EvaluationId, ExecJobAttemptId, ExecJobId,
+    ClusterJobId, DerivationId, DispatchedJobId, EntryPointId, EvaluationId, ExecJobAttemptId,
+    ExecJobId,
 };
 use gradient_entity::{
     entry_point, exec_job, exec_job_attempt, exec_job_output, exec_job_phase, project_access,
@@ -104,12 +105,36 @@ fn without_worker_names(db: MockDatabase) -> MockDatabase {
     db.append_query_results([empty(), empty(), empty()])
 }
 
+fn without_timeline_or_cluster(db: MockDatabase) -> MockDatabase {
+    let empty = Vec::<BTreeMap<String, sea_orm::Value>>::new;
+    without_worker_names(db).append_query_results([empty(), empty()])
+}
+
+fn id_pair(first: (&str, Uuid), second: (&str, Uuid)) -> BTreeMap<String, sea_orm::Value> {
+    BTreeMap::from([first, second].map(|(key, id)| (key.to_owned(), sea_orm::Value::from(id))))
+}
+
+fn in_cluster(db: MockDatabase, cluster: ClusterJobId) -> MockDatabase {
+    let attempt = Uuid::from_u128(0xca);
+    // A tuple query reads a mock row by position, so the keys sort in column order.
+    without_worker_names(db)
+        .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()])
+        .append_query_results([vec![id_pair(
+            ("assignment", Uuid::from_u128(0xd5)),
+            ("cluster_attempt", attempt),
+        )]])
+        .append_query_results([vec![id_pair(
+            ("attempt", attempt),
+            ("cluster_job", cluster.into_inner()),
+        )]])
+}
+
 #[tokio::test]
 async fn an_exec_job_shows_its_wait_reason_and_attempts() {
     let db = with_job(mock_db(), ExecJobStatus::Queued)
         .append_query_results([vec![public_project()]])
         .append_query_results([Vec::<exec_job_output::Model>::new()]);
-    let db = without_worker_names(db);
+    let db = without_timeline_or_cluster(db);
 
     let res = make_test_server(db.into_connection())
         .get(&format!("/api/v1/exec/{}", job_id()))
@@ -135,7 +160,7 @@ async fn a_started_exec_job_names_the_worker_of_its_attempt() {
     let db = with_job(mock_db(), ExecJobStatus::Running)
         .append_query_results([vec![public_project()]])
         .append_query_results([Vec::<exec_job_output::Model>::new()]);
-    let db = without_worker_names(db);
+    let db = without_timeline_or_cluster(db);
 
     let res = make_test_server(db.into_connection())
         .get(&format!("/api/v1/exec/{}", job_id()))
@@ -256,7 +281,7 @@ fn with_two_nodes(db: MockDatabase) -> MockDatabase {
 
 #[tokio::test]
 async fn a_two_node_job_lists_both_nodes() {
-    let db = without_worker_names(
+    let db = without_timeline_or_cluster(
         with_two_nodes(mock_db()).append_query_results([Vec::<exec_job_output::Model>::new()]),
     );
 
@@ -280,7 +305,7 @@ async fn a_two_node_job_lists_both_nodes() {
 
 #[tokio::test]
 async fn a_node_row_id_answers_the_same_job() {
-    let db = without_worker_names(
+    let db = without_timeline_or_cluster(
         with_two_nodes(mock_db()).append_query_results([Vec::<exec_job_output::Model>::new()]),
     );
 
@@ -291,6 +316,23 @@ async fn a_node_row_id_answers_the_same_job() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert_eq!(body["message"]["id"], node_id(0).to_string());
+}
+
+#[tokio::test]
+async fn a_two_node_job_names_its_cluster_job() {
+    let cluster = ClusterJobId::new(Uuid::from_u128(0xc1));
+    let db = in_cluster(
+        with_two_nodes(mock_db()).append_query_results([Vec::<exec_job_output::Model>::new()]),
+        cluster,
+    );
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec/{}", node_id(0)))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"]["cluster_job"], cluster.to_string());
 }
 
 #[tokio::test]

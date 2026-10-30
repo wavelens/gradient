@@ -82,6 +82,12 @@ interface RuleRow {
           <span class="label">Evaluation</span>
           <a class="mono" [routerLink]="['/project', j.project_name, 'log', j.evaluation_id]">{{ j.evaluation_id }}</a>
         </div>
+        @if (j.cluster_job) {
+          <div>
+            <span class="label">Cluster job</span>
+            <a class="mono cluster-link" [routerLink]="['/board/clusters', j.cluster_job]">{{ j.cluster_job }}</a>
+          </div>
+        }
       </section>
 
       @if (j.evaluation; as ev) {

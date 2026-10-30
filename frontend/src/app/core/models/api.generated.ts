@@ -496,6 +496,45 @@ export interface ClosureNode {
   nar_size?: number | null;
 }
 
+export interface ClusterJobDetail {
+  id: string;
+  kind: number;
+  status: string;
+  same_zone: boolean;
+  attempts: number;
+  retry_budget: number;
+  created_at: string;
+  updated_at: string;
+  project: string;
+  project_name: string;
+  project_display_name: string;
+  evaluation_id?: string | null;
+  subject?: string | null;
+  members: ClusterMemberView[];
+  sub_jobs: ClusterSubJobView[];
+}
+
+export type ClusterJobId = string;
+
+export interface ClusterMemberView {
+  id: string;
+  role: string;
+  primary: boolean;
+  eval_index?: number | null;
+  exec_job?: BoardExecJob | null;
+}
+
+export interface ClusterSubJobView {
+  id: string;
+  member?: string | null;
+  attempt: number;
+  worker_id: string;
+  worker_name?: string | null;
+  dispatched_at: string;
+  finished_at?: string | null;
+  outcome?: string | null;
+}
+
 export interface Commit {
   id: CommitId;
   message: string;
@@ -756,6 +795,7 @@ export type DispatchedJobDetail = ReportGap & {
   evaluation?: JobEvaluationView | null;
   exec_job?: BoardExecJob | null;
   exec_attempt?: ExecJobAttemptView | null;
+  cluster_job?: string | null;
   pname?: string | null;
   score_breakdown: unknown;
   worker_context: unknown;
@@ -780,6 +820,7 @@ export interface DispatchedJobSummary {
   evaluation_id: string;
   subject?: string | null;
   exec_job?: BoardExecJob | null;
+  cluster_job?: string | null;
 }
 
 export interface DispatchedJobsResponse {
@@ -942,6 +983,7 @@ export interface EvaluationSummary {
   errors: number;
   warnings: number;
   dispatched_job?: DispatchedJobId | null;
+  cluster_job?: ClusterJobId | null;
   prioritized: boolean;
   created_at: string;
   started_at?: string | null;
@@ -1024,6 +1066,7 @@ export interface ExecJobResponse {
   worker?: string | null;
   worker_name?: string | null;
   dispatched_job?: DispatchedJobId | null;
+  cluster_job?: ClusterJobId | null;
   attempts: ExecJobAttemptView[];
   node_jobs: ExecJobNode[];
   phases: ExecJobPhaseView[];
@@ -1052,6 +1095,7 @@ export interface ExecJobSummary {
   started_at?: string | null;
   last_phase?: string | null;
   dispatched_job?: DispatchedJobId | null;
+  cluster_job?: ClusterJobId | null;
 }
 
 export interface ExecJobTokenView {
@@ -1858,6 +1902,7 @@ export interface PendingJobSummary {
   dependency_count: number;
   subject?: string | null;
   exec_job?: BoardExecJob | null;
+  cluster_job?: string | null;
 }
 
 export interface PendingJobsResponse {
