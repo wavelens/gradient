@@ -14,7 +14,7 @@ The page has three areas:
 
 ## Invitations
 
-- Use **Add Member** to send an invitation. The invitee got no access until the invitation got accepted on the **My Invites** page in the user settings.
+- Use **Add Member** to send an invitation. The invitee got no access until the invitation got accepted on the **My Invites** page in the user menu of the header.
 - Each invitation expired after 7 days. One user could hold at most one open invitation per project or cache.
 - With [email](../reference/configuration.md#email) configured, the invitee also got the invitation link by mail.
 - A superuser with the permission could add members directly.

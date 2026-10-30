@@ -16,7 +16,7 @@ flowchart LR
 | Admin | Change settings, members, invitations, workers and grants. Approve requests. Delete the team |
 | Member | See the team page |
 
-- **Invitations**: An Admin can invite a user by name. To join, the user can accept the invitation under `Settings -> My Invites`. A superuser can add members directly.
+- **Invitations**: An Admin can invite a user by name. To join, the user can accept the invitation under **My Invites** in the user menu of the header. A superuser can add members directly.
 - **Last Admin**: Every team must have at least one Admin. Removing or demoting the last Admin is refused.
 - **Creation**: `permissions.createTeam` controls who can create teams. The creator is the first Admin.
 
