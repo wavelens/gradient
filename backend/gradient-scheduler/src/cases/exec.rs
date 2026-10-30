@@ -489,7 +489,7 @@ fn pre_warms(signals: &[SessionSignal]) -> Vec<u32> {
     signals
         .iter()
         .filter_map(|signal| match signal {
-            SessionSignal::PreWarmVms { count } => Some(*count),
+            SessionSignal::PreWarmVms { count, .. } => Some(*count),
             _ => None,
         })
         .collect()

@@ -28,11 +28,12 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use gradient_util::sync::Mutex;
+use gradient_vm::wanted_warm_guests;
 use gradient_wire::messages::{
     BuildJob, BuildOutput, BuildProgressPhase, BuildSpec, BuildSpecKind, BuildStage, FlakeJob,
     FlakeStep,
 };
-use gradient_wire::types::{ExecInventory, ExecJob};
+use gradient_wire::types::{ExecInventory, ExecJob, WarmGuests};
 use tracing::instrument;
 
 use gradient_wire::messages::JobPhase;
@@ -319,9 +320,9 @@ impl JobExecutor {
         self.exec.as_deref().map(ExecHost::inventory)
     }
 
-    pub fn set_upcoming_exec_jobs(&self, count: u32) {
+    pub fn pre_warm(&self, count: u32, sizes: Vec<WarmGuests>) {
         match &self.exec {
-            Some(exec) => exec.pool.set_upcoming_exec_jobs(count),
+            Some(exec) => exec.pool.want_warm_guests(wanted_warm_guests(count, sizes)),
             None => tracing::debug!(
                 count,
                 "pre-warm request ignored, this worker runs no guests"

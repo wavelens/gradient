@@ -10,6 +10,7 @@ use std::sync::Arc;
 use gradient_db::exec_jobs::upcoming::{UpcomingExecJob, without_image};
 use gradient_pool::session_port::SessionSignal;
 use gradient_pool::{DeviceCount, WorkerInfo};
+use gradient_types::exec::{WarmGuests, count_warm_guests};
 use gradient_util::sync::Mutex;
 use tracing::warn;
 
@@ -18,16 +19,23 @@ use crate::loops::{caps_of, serves_project};
 
 #[derive(Clone, Default)]
 pub(crate) struct PreWarmCounts {
-    sent: Arc<Mutex<HashMap<String, u32>>>,
+    sent: Arc<Mutex<HashMap<String, Vec<WarmGuests>>>>,
     turn: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl PreWarmCounts {
-    pub(crate) async fn changed(&self, counts: BTreeMap<String, u32>) -> Vec<(String, u32)> {
+    pub(crate) async fn changed(
+        &self,
+        wanted: BTreeMap<String, Vec<WarmGuests>>,
+    ) -> Vec<(String, Vec<WarmGuests>)> {
         let mut sent = self.sent.lock();
-        counts
+        wanted
             .into_iter()
-            .filter(|(worker, count)| sent.insert(worker.clone(), *count).unwrap_or(0) != *count)
+            .filter(|(worker, sizes)| {
+                sent.insert(worker.clone(), sizes.clone())
+                    .unwrap_or_default()
+                    != *sizes
+            })
             .collect()
     }
 
@@ -39,27 +47,33 @@ impl PreWarmCounts {
 pub(crate) fn pre_warm_counts(
     upcoming: &[UpcomingExecJob],
     workers: &[WorkerInfo],
-) -> BTreeMap<String, u32> {
+) -> BTreeMap<String, Vec<WarmGuests>> {
     workers
         .iter()
         .filter_map(|worker| {
             let caps = caps_of(worker);
             let inventory = caps.exec.as_ref()?;
-            let count = upcoming
+            let sizes = upcoming
                 .iter()
                 .filter(|exec| exec.spec.image.is_none())
                 .filter(|exec| serves_project(worker, exec.project))
-                .filter(|exec| {
+                .filter_map(|exec| {
                     let requirement = exec
                         .spec
                         .requirement_on(&exec.architecture, &inventory.defaults);
                     caps.fits_exec(&requirement, DeviceCount::Total)
-                })
-                .map(|exec| exec.spec.nodes.max(1))
-                .sum();
-            Some((worker.id.clone(), count))
+                        .then(|| (requirement.guest, exec.spec.nodes.max(1)))
+                });
+            Some((worker.id.clone(), count_warm_guests(sizes)))
         })
         .collect()
+}
+
+fn pre_warm_signal(sizes: Vec<WarmGuests>) -> SessionSignal {
+    SessionSignal::PreWarmVms {
+        count: sizes.iter().map(|warm| warm.count).sum(),
+        sizes,
+    }
 }
 
 impl Scheduler {
@@ -83,7 +97,7 @@ impl Scheduler {
 
         let signals = changed
             .into_iter()
-            .map(|(worker, count)| (worker, SessionSignal::PreWarmVms { count }))
+            .map(|(worker, sizes)| (worker, pre_warm_signal(sizes)))
             .collect();
         self.signal_workers(signals).await;
     }
@@ -96,7 +110,7 @@ mod tests {
         build_only_caps, eight_gpu_exec_caps_with_free, exec_caps_labelled, worker_info,
     };
     use gradient_types::ProjectId;
-    use gradient_types::exec::{DeviceRequest, ExecSpec};
+    use gradient_types::exec::{DeviceRequest, ExecSpec, GuestSize};
     use std::collections::HashSet;
 
     fn upcoming(spec: ExecSpec) -> UpcomingExecJob {
@@ -109,6 +123,50 @@ mod tests {
             architecture: "x86_64-linux".into(),
             project,
         }
+    }
+
+    fn totals(wanted: BTreeMap<String, Vec<WarmGuests>>) -> BTreeMap<String, u32> {
+        wanted
+            .into_iter()
+            .map(|(worker, sizes)| (worker, sizes.iter().map(|warm| warm.count).sum()))
+            .collect()
+    }
+
+    fn want(count: u32) -> Vec<WarmGuests> {
+        count_warm_guests([(GuestSize::default_request(), count)])
+    }
+
+    #[test]
+    fn upcoming_jobs_count_per_guest_size() {
+        let sized = |cpus, nodes| {
+            upcoming(ExecSpec {
+                nodes,
+                guest: GuestSize {
+                    cpus,
+                    ..GuestSize::default_request()
+                },
+                ..ExecSpec::default()
+            })
+        };
+        let mut caps = exec_caps_labelled("lab-a");
+        if let Some(inventory) = caps.exec.as_mut() {
+            inventory.allow.nodes = 2;
+        }
+        let workers = [worker_info("w1", caps)];
+        let wanted = pre_warm_counts(&[sized(2, 1), sized(8, 2), sized(2, 1)], &workers);
+        let warm = |cpus| GuestSize {
+            cpus,
+            ..GuestSize::default_request()
+        };
+        assert_eq!(
+            wanted["w1"],
+            count_warm_guests([(warm(2), 2), (warm(8), 2)])
+        );
+        let SessionSignal::PreWarmVms { count, sizes } = pre_warm_signal(wanted["w1"].clone())
+        else {
+            panic!("expected a pre-warm signal");
+        };
+        assert_eq!((count, sizes.len()), (4, 2));
     }
 
     #[test]
@@ -132,7 +190,7 @@ mod tests {
             worker_info("b1", build_only_caps()),
         ];
         assert_eq!(
-            pre_warm_counts(&upcoming, &workers),
+            totals(pre_warm_counts(&upcoming, &workers)),
             BTreeMap::from([("w1".into(), 2), ("w2".into(), 2), ("w3".into(), 0)])
         );
     }
@@ -152,7 +210,10 @@ mod tests {
         };
         let workers = [worker_info("w1", eight_gpu_exec_caps_with_free(0))];
         assert_eq!(
-            pre_warm_counts(&[upcoming(gpus), upcoming(image)], &workers),
+            totals(pre_warm_counts(
+                &[upcoming(gpus), upcoming(image)],
+                &workers
+            )),
             BTreeMap::from([("w1".into(), 1)])
         );
     }
@@ -180,7 +241,7 @@ mod tests {
             },
         ];
         assert_eq!(
-            pre_warm_counts(&upcoming, &workers),
+            totals(pre_warm_counts(&upcoming, &workers)),
             BTreeMap::from([
                 ("draining".into(), 0),
                 ("open".into(), 2),
@@ -194,25 +255,34 @@ mod tests {
         let counts = PreWarmCounts::default();
         assert_eq!(
             counts
-                .changed(BTreeMap::from([("w1".into(), 2), ("w2".into(), 0)]))
+                .changed(BTreeMap::from([
+                    ("w1".into(), want(2)),
+                    ("w2".into(), want(0))
+                ]))
                 .await,
-            vec![("w1".into(), 2)]
+            vec![("w1".into(), want(2))]
         );
         assert!(
             counts
-                .changed(BTreeMap::from([("w1".into(), 2)]))
+                .changed(BTreeMap::from([("w1".into(), want(2))]))
                 .await
                 .is_empty()
         );
         assert_eq!(
-            counts.changed(BTreeMap::from([("w1".into(), 0)])).await,
-            vec![("w1".into(), 0)]
+            counts
+                .changed(BTreeMap::from([("w1".into(), want(0))]))
+                .await,
+            vec![("w1".into(), want(0))]
         );
-        counts.changed(BTreeMap::from([("w1".into(), 3)])).await;
+        counts
+            .changed(BTreeMap::from([("w1".into(), want(3))]))
+            .await;
         counts.forget("w1");
         assert_eq!(
-            counts.changed(BTreeMap::from([("w1".into(), 3)])).await,
-            vec![("w1".into(), 3)]
+            counts
+                .changed(BTreeMap::from([("w1".into(), want(3))]))
+                .await,
+            vec![("w1".into(), want(3))]
         );
     }
 }

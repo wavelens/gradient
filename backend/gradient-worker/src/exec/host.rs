@@ -105,15 +105,14 @@ impl ExecHost {
             &self.devices,
             &self.config,
             &self.worker_id,
-            self.pool.warm_count(),
-            self.pool.warm_guest_size(),
+            self.pool.warm_guests(),
             self.secrets.names(),
             self.pool.capacity(),
         )
     }
 
     pub fn start_session(&self) {
-        self.pool.set_upcoming_exec_jobs(0);
+        self.pool.want_warm_guests(Vec::new());
         self.pool.reopen();
     }
 

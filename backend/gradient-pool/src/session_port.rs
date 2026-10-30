@@ -5,7 +5,7 @@
  */
 
 use gradient_types::ids::ProjectId;
-use gradient_wire::types::{ClusterAddress, ClusterPeer, ImportOutcome, InputOutcome};
+use gradient_wire::types::{ClusterAddress, ClusterPeer, ImportOutcome, InputOutcome, WarmGuests};
 
 use crate::guest_channels::GuestChannelSignal;
 
@@ -61,6 +61,7 @@ pub enum SessionSignal {
     },
     PreWarmVms {
         count: u32,
+        sizes: Vec<WarmGuests>,
     },
     GuestChannel(GuestChannelSignal),
     ExecKeepVmRunning {

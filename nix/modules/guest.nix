@@ -62,7 +62,8 @@ in {
       type = lib.types.ints.between 1 255;
       default = 2;
       description = ''
-        Warm guests boot from this image with this many virtual CPUs. Exec jobs only take a warm guest when the job's `cpus` and `memoryMb` equal these values.
+        Number of virtual CPUs of the warm guests from {option}`services.gradient.worker.exec.preWarm`.
+        Exec jobs take a warm guest only when the job's `cpus` and `memoryMb` equal the size of that guest.
       '';
     };
 
