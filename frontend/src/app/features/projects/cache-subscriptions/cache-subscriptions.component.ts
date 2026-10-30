@@ -12,6 +12,8 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
+import { AuthService } from '@core/services/auth.service';
+import { ConfigService } from '@core/services/config.service';
 import {
   AutoCompleteComponent,
   BadgeComponent,
@@ -28,6 +30,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { CreateCacheDialogComponent } from '@shared/forms';
 import { AccessState, CacheSubscriptionItem } from '@core/models';
 
 @Component({
@@ -52,6 +55,7 @@ import { AccessState, CacheSubscriptionItem } from '@core/models';
     RowListComponent,
     RowComponent,
     TooltipDirective,
+    CreateCacheDialogComponent,
   ],
   templateUrl: './cache-subscriptions.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -63,8 +67,12 @@ export class CacheSubscriptionsComponent implements OnInit {
   private cachesService = inject(CachesService);
   private projectAccess = inject(ProjectAccessService);
   private crumbs = inject(BreadcrumbsService);
+  private auth = inject(AuthService);
+  private config = inject(ConfigService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
+  canCreateCache = computed(() => this.config.canCreate(this.config.createCache, this.auth.user()?.superuser === true));
+  showCreateDialog = signal(false);
 
   loading = signal(true);
   subscribing = signal(false);
@@ -134,6 +142,11 @@ export class CacheSubscriptionsComponent implements OnInit {
     );
   }
 
+  subscribeCreated(name: string): void {
+    this.newCacheName = name;
+    this.subscribeCache();
+  }
+
   subscribeCache(): void {
     const name = this.newCacheName.trim();
     if (!name) return;
@@ -148,6 +161,7 @@ export class CacheSubscriptionsComponent implements OnInit {
       error: (err) => {
         this.errorMessage.set(err?.message || 'Cache not found or already subscribed.');
         this.subscribing.set(false);
+        this.showSubscribeDialog.set(true);
       },
     });
   }

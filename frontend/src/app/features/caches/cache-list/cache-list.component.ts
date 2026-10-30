@@ -7,7 +7,6 @@
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { FormsModule } from '@angular/forms';
 import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
@@ -15,17 +14,13 @@ import {
   BadgeComponent,
   ButtonComponent,
   CardGridComponent,
-  DialogComponent,
   EmptyStateComponent,
-  FormFieldComponent,
   IconComponent,
-  InputDirective,
   LoadingSpinnerComponent,
   NavCardComponent,
   PageLayoutComponent,
-  SelectComponent,
 } from '@gradient/ui/ui';
-import { NameFieldsComponent, nameAvailability } from '@shared/forms';
+import { CreateCacheDialogComponent } from '@shared/forms';
 import { Cache } from '@core/models';
 
 @Component({
@@ -34,36 +29,24 @@ import { Cache } from '@core/models';
   imports: [
     CommonModule,
     RouterModule,
-    FormsModule,
-    DialogComponent,
     ButtonComponent,
-    InputDirective,
-    InputDirective,
     LoadingSpinnerComponent,
     EmptyStateComponent,
     IconComponent,
     PageLayoutComponent,
-    FormFieldComponent,
     NavCardComponent,
     CardGridComponent,
     BadgeComponent,
-    SelectComponent,
-    NameFieldsComponent,
+    CreateCacheDialogComponent,
   ],
   templateUrl: './cache-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cache-list.component.scss',
 })
 export class CacheListComponent implements OnInit {
-  readonly visibilityOptions = [
-    { label: 'Private', value: false },
-    { label: 'Public', value: true },
-  ];
-
   private cachesService = inject(CachesService);
   protected authService = inject(AuthService);
   private config = inject(ConfigService);
-  protected names = nameAvailability((name) => this.cachesService.checkCacheNameAvailable(name));
 
   get canCreateCache(): boolean {
     if (!this.authService.isAuthenticated()) return false;
@@ -73,24 +56,6 @@ export class CacheListComponent implements OnInit {
   loading = signal(true);
   caches = signal<Cache[]>([]);
   showCreateDialog = signal(false);
-  creating = signal(false);
-  createError = signal<string | null>(null);
-
-  newCache: {
-    name: string;
-    display_name: string;
-    description: string;
-    priority: number;
-    local_priority: number | null;
-    public: boolean;
-  } = {
-    name: '',
-    display_name: '',
-    description: '',
-    priority: 50,
-    local_priority: null,
-    public: false,
-  };
 
   publicCaches = signal<Cache[]>([]);
   publicLoading = signal(false);
@@ -130,30 +95,7 @@ export class CacheListComponent implements OnInit {
   }
 
   openCreateDialog(): void {
-    this.newCache = { name: '', display_name: '', description: '', priority: 50, local_priority: null, public: false };
-    this.names.reset();
-    this.createError.set(null);
     this.showCreateDialog.set(true);
-  }
-
-  createCache(): void {
-    if (!this.newCache.name || !this.newCache.display_name) {
-      return;
-    }
-
-    this.creating.set(true);
-    this.createError.set(null);
-    this.cachesService.createCache(this.newCache).subscribe({
-      next: () => {
-        this.creating.set(false);
-        this.showCreateDialog.set(false);
-        this.loadCaches();
-      },
-      error: (error) => {
-        this.createError.set(error?.message || 'Failed to create cache.');
-        this.creating.set(false);
-      },
-    });
   }
 
   get activeCaches() {

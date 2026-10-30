@@ -13,7 +13,10 @@ import { CacheSubscriptionsComponent } from './cache-subscriptions.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
+import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
+import { By } from '@angular/platform-browser';
+import { CreateCacheDialogComponent } from '@shared/forms';
 
 function activatedRouteStub() {
   return { snapshot: { paramMap: convertToParamMap({ project: 'acme' }) } } as Partial<ActivatedRoute>;
@@ -26,7 +29,10 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
+const subscribeCache = vi.fn(() => of(undefined));
+
 function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponent> {
+  subscribeCache.mockClear();
   TestBed.configureTestingModule({
     imports: [CacheSubscriptionsComponent],
     providers: [
@@ -43,9 +49,11 @@ function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponen
               { id: 'c', name: 'shared', mode: 'ReadWrite', status: 'active' },
               { id: 'c2', name: 'staging', mode: 'ReadWrite', status: 'pending' },
             ]),
+          subscribeCache,
         },
       },
       { provide: CachesService, useValue: {} },
+      { provide: ConfigService, useValue: { createCache: 'all', canCreate: () => true } },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
     ],
   });
@@ -84,6 +92,25 @@ describe('CacheSubscriptionsComponent - row actions', () => {
     const open = root.querySelector('.row-actions a') as HTMLAnchorElement | null;
     expect(open?.getAttribute('href')).toBe('/caches/shared');
     expect(findByText(root, 'unsubscribe')).not.toBeNull();
+  });
+});
+
+describe('CacheSubscriptionsComponent - create cache', () => {
+  it('subscribes the project to a cache created on this page', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    findByText(fixture.nativeElement, 'create cache')!.click();
+    await settled(fixture);
+    const dialog = fixture.debugElement.query(By.directive(CreateCacheDialogComponent)).componentInstance as CreateCacheDialogComponent;
+    expect(dialog.visible()).toBe(true);
+    dialog.created.emit('fresh');
+    expect(subscribeCache).toHaveBeenCalledWith('acme', 'fresh');
+  });
+
+  it('hides Create Cache under read-only access', async () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
+    await settled(fixture);
+    expect(findByText(fixture.nativeElement, 'create cache')).toBeNull();
   });
 });
 
