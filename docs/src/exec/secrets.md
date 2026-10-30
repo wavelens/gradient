@@ -48,7 +48,7 @@ Open project **Settings -> Secrets** and click **Set secret**. Values remain wri
 
 ## 3. Encrypt Repository Sops Files
 
-The project **Settings** can display the **Sops recipient** derived from the SSH key of the project.
+Project **Settings -> Secrets** can display the **Sops recipient** derived from the SSH key of the project.
 
 ```yaml
 # .sops.yaml
@@ -57,7 +57,7 @@ creation_rules:
     age: age1... # (1)!
 ```
 
-1. The recipient from the **Settings** page.
+1. The recipient from the **Secrets** page.
 
 ```sh
 sops encrypt --in-place secrets/train.yaml

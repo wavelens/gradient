@@ -17,6 +17,8 @@ export type DocLink =
   | 'concepts/projects-and-tasks/#concurrency'
   | 'concepts/projects-and-tasks/#repository-url'
   | 'concepts/workers/#capabilities'
+  | 'exec/secrets/'
+  | 'exec/secrets/#3-encrypt-repository-sops-files'
   | 'guides/actions/'
   | 'guides/flake-updates/#1-track-the-inputs'
   | 'guides/flake-updates/#2-add-the-open-pr-action'

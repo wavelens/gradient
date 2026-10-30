@@ -133,15 +133,6 @@
           <gr-label-help slot="label" doc="concepts/projects-and-tasks/#project" title="Project SSH key" />
           <gr-copy-field multiline [rows]="4" [value]="sshKey()" />
         </gr-form-field>
-        @if (sopsRecipient(); as recipient) {
-          <gr-form-field
-            label="Sops recipient"
-            for="sops-recipient"
-            [hint]="recipient.age ? undefined : 'Use this SSH key as the age recipient (sops 3.10 or newer)'"
-          >
-            <gr-copy-field inputId="sops-recipient" [value]="recipient.age ?? recipient.ssh" />
-          </gr-form-field>
-        }
       } @else {
         <p class="text-secondary">No SSH key generated yet.</p>
         <button

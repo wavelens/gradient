@@ -14,7 +14,8 @@ import { SecretsComponent } from './secrets.component';
 import { ProjectSecretsService } from '@core/services/project-secrets.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { AccessState } from '@core/models/access.model';
-import { ProjectSecretSummary } from '@core/models';
+import { ProjectSecretSummary, SopsRecipientResponse } from '@core/models';
+import { docsUrl } from '@core/docs';
 
 const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
 
@@ -35,8 +36,18 @@ function rowOf(fixture: ComponentFixture<SecretsComponent>, name: string): HTMLE
   return rows.find((row) => row.textContent?.includes(name))!;
 }
 
+const ed25519Recipient: SopsRecipientResponse = {
+  age: 'age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs3290gq',
+  ssh: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEd25519 acme',
+};
+
+function recipientField(fixture: ComponentFixture<SecretsComponent>): HTMLInputElement {
+  return (fixture.nativeElement as HTMLElement).querySelector('gr-copy-field #sops-recipient') as HTMLInputElement;
+}
+
 function setup(access: AccessState = admin) {
   const service = {
+    sopsRecipient: vi.fn(() => of<SopsRecipientResponse>(ed25519Recipient)),
     list: vi.fn(() => of<ProjectSecretSummary[]>(listed)),
     put: vi.fn(() => of(listed[0])),
     remove: vi.fn(() => of(undefined)),
@@ -117,5 +128,27 @@ describe('SecretsComponent', () => {
     const { fixture } = setup({ managed: false, canEdit: false, canTrigger: false });
     await settled(fixture);
     expect(buttonIn(fixture.nativeElement, 'Set secret')).toBeNull();
+  });
+
+  it('shows the age recipient of an ed25519 key in a copy field', async () => {
+    const { fixture } = setup();
+    await settled(fixture);
+    expect(recipientField(fixture).value).toBe(ed25519Recipient.age);
+    expect(fixture.nativeElement.textContent).not.toContain('sops 3.10 or newer');
+  });
+
+  it('falls back to the SSH key with a hint when there is no age recipient', async () => {
+    const { fixture, service } = setup();
+    service.sopsRecipient.mockReturnValue(of({ age: null, ssh: 'ssh-rsa AAAAB3NzaC1yc2E acme' }));
+    await settled(fixture);
+    expect(recipientField(fixture).value).toBe('ssh-rsa AAAAB3NzaC1yc2E acme');
+    expect(fixture.nativeElement.textContent).toContain('Use this SSH key as the age recipient (sops 3.10 or newer)');
+  });
+
+  it('links the secrets docs page', async () => {
+    const { fixture } = setup();
+    await settled(fixture);
+    const links = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'));
+    expect(links.map((link) => link.getAttribute('href'))).toContain(docsUrl('exec/secrets/'));
   });
 });
