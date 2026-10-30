@@ -267,6 +267,7 @@ async fn apply_to_task(
             commit_message: Some(msg),
             author_name: Some(author),
             manual: false,
+            honors_skip_marker: matches!(cfg, TriggerConfig::Polling { .. }),
             gate_approval: None,
             repository_override: None,
             wildcard_override: None,

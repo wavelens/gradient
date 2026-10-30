@@ -433,6 +433,7 @@ pub(super) async fn fire(
                 commit_message: Some(head.message),
                 author_name: Some(head.author_name),
                 manual: true,
+                honors_skip_marker: false,
                 gate_approval: None,
                 repository_override: None,
                 wildcard_override: request.wildcard_override,
@@ -483,6 +484,9 @@ async fn apply_now(
         }
         ApplyOutcome::SkippedSameCommit => FireOutcome::SkippedSameCommit,
         ApplyOutcome::SkippedConcurrency => FireOutcome::SkippedConcurrency,
+        ApplyOutcome::SkippedByCommitMessage => {
+            unreachable!("a manual fire does not honor the skip marker")
+        }
     })
 }
 

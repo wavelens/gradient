@@ -7,6 +7,7 @@
 mod concurrency;
 mod dedup;
 mod gates;
+mod skip_marker;
 
 use super::trigger::{TriggerError, trigger_evaluation};
 use gradient_entity::evaluation::WalkMode;
@@ -32,6 +33,7 @@ pub enum ApplyOutcome {
     },
     SkippedSameCommit,
     SkippedConcurrency,
+    SkippedByCommitMessage,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +52,7 @@ pub struct ApplyInput {
     pub commit_message: Option<String>,
     pub author_name: Option<String>,
     pub manual: bool,
+    pub honors_skip_marker: bool,
     pub gate_approval: Option<ApprovalInfo>,
     pub repository_override: Option<String>,
     pub wildcard_override: Option<String>,
@@ -70,6 +73,10 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     task: &MTask,
     input: ApplyInput,
 ) -> Result<ApplyOutcome, ApplyError> {
+    if head_commit_asks_to_skip(&input) {
+        return Ok(ApplyOutcome::SkippedByCommitMessage);
+    }
+
     let in_flight =
         gradient_db::evaluations::branch::in_flight_on_branch(db, task.id, &input.branch).await?;
 
@@ -117,6 +124,14 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         aborted_evaluation: decision.aborted_evaluation,
         hard_abort: decision.hard_abort,
     })
+}
+
+fn head_commit_asks_to_skip(input: &ApplyInput) -> bool {
+    input.honors_skip_marker
+        && input
+            .commit_message
+            .as_deref()
+            .is_some_and(skip_marker::commit_requests_skip)
 }
 
 #[cfg(test)]
