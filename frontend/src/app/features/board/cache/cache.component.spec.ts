@@ -6,52 +6,81 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { NEVER, of } from 'rxjs';
+import { Observable, Subject, finalize } from 'rxjs';
 import { BoardCacheComponent } from './cache.component';
-import { BoardService } from '@core/services/board.service';
 import { LiveService } from '@core/services/live.service';
 
-function render(upstreamCaches: unknown[] = []) {
-  const board = {
-    getCache: vi.fn(() => of({ totals: {}, traffic: [], storage: [] })),
-    getUpstreamCacheStats: () => of({ upstream_caches: upstreamCaches }),
+function snapshot(displayName: string) {
+  return {
+    event: 'board.cache',
+    at: '2026-10-30T12:00:00Z',
+    content: {
+      stats: { totals: {}, traffic: [], storage: [] },
+      upstream: {
+        upstream_caches: [
+          {
+            upstream_id: displayName,
+            display_name: displayName,
+            url: `https://${displayName}`,
+            avg_latency_ms: 42,
+            hit_rate: 0.87,
+            requests_total: 10,
+            latency: [],
+            hit_rate_series: [],
+          },
+        ],
+      },
+    },
   };
+}
+
+function render() {
+  const sockets: { path: string; frames: Subject<unknown>; closed: boolean }[] = [];
+  const connect = vi.fn((path: string) => {
+    const socket = { path, frames: new Subject<unknown>(), closed: false };
+    sockets.push(socket);
+    return socket.frames.pipe(finalize(() => (socket.closed = true))) as Observable<unknown>;
+  });
   TestBed.configureTestingModule({
     imports: [BoardCacheComponent],
-    providers: [
-      provideRouter([]),
-      { provide: BoardService, useValue: board },
-      { provide: LiveService, useValue: { connect: () => NEVER } },
-    ],
+    providers: [provideRouter([]), { provide: LiveService, useValue: { connect } }],
   });
   const fixture = TestBed.createComponent(BoardCacheComponent);
   fixture.detectChanges();
-  return { fixture, board, root: fixture.nativeElement as HTMLElement };
+  return { fixture, sockets, root: fixture.nativeElement as HTMLElement };
 }
 
 describe('BoardCacheComponent', () => {
-  it('renders an upstream cache row from getUpstreamCacheStats', () => {
-    const { root } = render([
-      {
-        upstream_id: 'u1',
-        display_name: 'cache.nixos.org',
-        url: 'https://cache.nixos.org',
-        avg_latency_ms: 42,
-        hit_rate: 0.87,
-        requests_total: 10,
-        latency: [],
-        hit_rate_series: [],
-      },
-    ]);
+  it('shows the spinner only until the first pushed snapshot, then swaps data in place', () => {
+    const { fixture, sockets, root } = render();
+    expect(root.querySelector('gr-loading-spinner')).not.toBeNull();
+
+    sockets[0].frames.next(snapshot('cache.nixos.org'));
+    fixture.detectChanges();
+    expect(root.querySelector('gr-loading-spinner')).toBeNull();
     expect(root.textContent).toContain('cache.nixos.org');
+
+    sockets[0].frames.next(snapshot('nix-community.cachix.org'));
+    fixture.detectChanges();
+    expect(root.querySelector('gr-loading-spinner')).toBeNull();
+    expect(root.textContent).toContain('nix-community.cachix.org');
   });
 
-  it('loads total traffic first and external traffic once picked', () => {
-    const { fixture, board, root } = render();
-    expect(board.getCache).toHaveBeenLastCalledWith(24, 'total');
+  it('subscribes to total traffic first and resubscribes for external traffic once picked', () => {
+    const { fixture, sockets, root } = render();
+    expect(sockets.map((s) => s.path)).toEqual(['/board/cache/live?window_hours=24&traffic=total']);
+    sockets[0].frames.next(snapshot('cache.nixos.org'));
+    fixture.detectChanges();
+
     const external = [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'External');
     external!.click();
     fixture.detectChanges();
-    expect(board.getCache).toHaveBeenLastCalledWith(24, 'external');
+
+    expect(sockets.map((s) => s.path)).toEqual([
+      '/board/cache/live?window_hours=24&traffic=total',
+      '/board/cache/live?window_hours=24&traffic=external',
+    ]);
+    expect(sockets[0].closed).toBe(true);
+    expect(root.querySelector('gr-loading-spinner')).toBeNull();
   });
 });

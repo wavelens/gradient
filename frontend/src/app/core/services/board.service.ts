@@ -19,9 +19,6 @@ import {
   ExpensiveBuild,
   MetricMeta,
   ScoringSummary,
-  BoardCacheStats,
-  TrafficKind,
-  BoardUpstreamCacheStats,
   BoardNetworkStats,
   BoardFleetPoint,
   BoardHealth,
@@ -167,14 +164,6 @@ export class BoardService {
       .pipe(shareReplay({ bufferSize: 1, refCount: false }));
 
     return this.scoringRules$;
-  }
-
-  getCache(windowHours = 24, traffic: TrafficKind = 'total'): Observable<BoardCacheStats> {
-    return this.api.get<BoardCacheStats>(`board/cache?window_hours=${windowHours}&traffic=${traffic}`);
-  }
-
-  getUpstreamCacheStats(windowHours = 24): Observable<BoardUpstreamCacheStats> {
-    return this.api.get<BoardUpstreamCacheStats>(`board/cache/upstream-caches?window_hours=${windowHours}`);
   }
 
   getNetwork(windowHours = 24): Observable<BoardNetworkStats> {

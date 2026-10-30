@@ -172,6 +172,11 @@ export interface BlobsResponse {
   remaining: number;
 }
 
+export interface BoardCacheSnapshot {
+  stats: BoardCacheStats;
+  upstream: BoardUpstreamCacheStats;
+}
+
 export interface BoardCacheStats {
   totals: CacheTotals;
   traffic: SeriesPoint[];

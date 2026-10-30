@@ -70,7 +70,7 @@ Each path below upgrades to a WebSocket. On every resource change, the server pu
 | `/evals/{evaluation}/live` | The same set, scoped to one evaluation |
 | `/builds/{build}/live` | `evaluation.<phase>`, `evaluation.progress` and `build.status_changed` for the build's evaluation, plus `build.progress` with the phase, bytes and paths of the build's transfers |
 | `/board/live` | `worker.queue_depth`, `worker.job_dispatched`, `worker.connected` and `worker.disconnected`, restricted to superusers |
-| `/board/cache/live` | `cache.changed`, a ping that triggers a refetch of `/board/cache` |
+| `/board/cache/live` | `board.cache` with the full cache statistics and upstream caches, at most one frame per 2 seconds and only after a change |
 
 ## Binary Cache
 

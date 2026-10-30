@@ -234,38 +234,6 @@ fn eval_frame(env: &Envelope, eval_id: EvaluationId) -> Option<String> {
     belongs.then(|| env.to_line())
 }
 
-#[utoipa::path(
-    get,
-    path = "/board/cache/live",
-    operation_id = "boardCacheLive",
-    tag = "board",
-    summary = "Cache change pings (WebSocket)",
-    description = "Upgrades to a WebSocket emitting a content-free `{\"type\":\"cache_changed\"}`\nping whenever cache contents or stats change. Subscribers refetch their\nown scope-filtered `GET /board/cache` view.",
-    responses((status = SWITCHING_PROTOCOLS, description = "Switching Protocols - WebSocket upgrade successful"), WebError)
-)]
-pub async fn cache_live_ws(
-    State(state): State<Arc<ServerState>>,
-    ws: WebSocketUpgrade,
-) -> Response {
-    let rx = state.events.subscribe();
-    let cancel = state.shutdown.token();
-    let shutdown = state.shutdown.clone();
-    ws.on_upgrade(move |socket| async move {
-        let _ = shutdown
-            .spawn(live_stream(
-                socket,
-                rx,
-                |env| match env.event {
-                    Event::CacheChanged(_) => frame(env),
-                    _ => None,
-                },
-                skip_lag,
-                cancel,
-            ))
-            .await;
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -6,9 +6,8 @@
 
 use crate::authorization::MaybeUser;
 use crate::endpoints::metrics::{
-    HttpRouteStat, Observations, ProcessStat, collect, http_snapshot, process_snapshot,
+    HttpRouteStat, ProcessStat, collect, http_snapshot, process_snapshot,
 };
-use crate::endpoints::stats::TrafficParams;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
@@ -31,7 +30,7 @@ pub struct WindowParams {
     pub window_hours: Option<i64>,
 }
 
-fn window_clause(p: &WindowParams) -> i64 {
+pub(crate) fn window_clause(p: &WindowParams) -> i64 {
     p.window_hours.unwrap_or(24).clamp(1, 24 * 90)
 }
 
@@ -52,7 +51,7 @@ impl From<series::BucketTotal> for SeriesPoint {
     }
 }
 
-async fn infra_series(
+pub(crate) async fn infra_series(
     db: &impl ConnectionTrait,
     metric: &str,
     window_hours: i64,
@@ -60,233 +59,6 @@ async fn infra_series(
     let rows = series::hourly_totals(db, metric, window_hours).await?;
 
     Ok(rows.into_iter().map(SeriesPoint::from).collect())
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct CacheTotals {
-    pub bytes: i64,
-    pub nar_bytes: i64,
-    pub packages: i64,
-    pub bytes_sent_total: i64,
-    pub requests_total: i64,
-}
-
-impl From<&Observations> for CacheTotals {
-    fn from(obs: &Observations) -> Self {
-        Self {
-            bytes: obs.cache_bytes,
-            nar_bytes: obs.cache_nar_bytes,
-            packages: obs.cache_packages,
-            bytes_sent_total: obs.cache_nar_bytes_sent_total,
-            requests_total: obs.cache_nar_requests_total,
-        }
-    }
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct BoardCacheStats {
-    pub totals: CacheTotals,
-    pub traffic: Vec<SeriesPoint>,
-    pub storage: Vec<SeriesPoint>,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct BoardUpstreamCache {
-    pub upstream_id: String,
-    pub display_name: String,
-    pub url: String,
-    pub avg_latency_ms: Option<f64>,
-    pub hit_rate: Option<f64>,
-    pub requests_total: i64,
-    pub latency: Vec<SeriesPoint>,
-    pub hit_rate_series: Vec<SeriesPoint>,
-}
-
-#[derive(Serialize, Default, utoipa::ToSchema)]
-pub struct BoardUpstreamCacheStats {
-    pub upstream_caches: Vec<BoardUpstreamCache>,
-}
-
-#[utoipa::path(
-    get,
-    path = "/board/cache",
-    operation_id = "getBoardCache",
-    tag = "board",
-    summary = "Cache statistics",
-    description = "Cache totals plus hourly traffic and storage-growth series, aggregated across caches (anonymized infra view).",
-    params(WindowParams, TrafficParams),
-    responses((status = OK, description = "Cache statistics", body = BoardCacheStats), WebError)
-)]
-pub async fn get_board_cache(
-    State(state): State<Arc<ServerState>>,
-    Extension(scheduler): Extension<Arc<Scheduler>>,
-    Query(params): Query<WindowParams>,
-    Query(TrafficParams { traffic }): Query<TrafficParams>,
-) -> WebResult<Json<BaseResponse<BoardCacheStats>>> {
-    let window = window_clause(&params);
-    let obs = collect(
-        &state.web_db,
-        state.started_at,
-        &state.memory.upload_admission,
-        &scheduler,
-    )
-    .await?;
-    let traffic = infra_series(&state.web_db, traffic.metric(), window).await?;
-    let storage = infra_series(&state.web_db, metric::CACHE_BYTES_ADDED, window).await?;
-    Ok(ok_json(BoardCacheStats {
-        totals: CacheTotals::from(&obs),
-        traffic,
-        storage,
-    }))
-}
-
-fn upstream_host(url: &str) -> String {
-    let after_scheme = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
-    let host = after_scheme.split('/').next().unwrap_or(after_scheme);
-    if host.is_empty() {
-        url.to_string()
-    } else {
-        host.to_string()
-    }
-}
-
-#[utoipa::path(
-    get,
-    path = "/board/cache/upstream-caches",
-    operation_id = "getBoardUpstreamCaches",
-    tag = "board",
-    summary = "Per-URL cache latency and narinfo hit-rate",
-    description = "Per-upstream-URL trailing latency, narinfo hit-rate, and request counts with hourly series. Metrics are per URL: the same URL registered under several caches/projects contributes to one series; `display_name` is the URL host. Project-scoped: superusers see all URLs; members see the URLs used by their projects plus public projects. Each series' `url` is the caller's own upstream, so it is returned unmasked. The entries are returned as `upstream_caches`.",
-    params(WindowParams),
-    responses((status = OK, description = "Per-upstream cache performance", body = BoardUpstreamCacheStats), WebError)
-)]
-pub async fn get_board_upstream_caches(
-    State(state): State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Query(params): Query<WindowParams>,
-) -> WebResult<Json<BaseResponse<BoardUpstreamCacheStats>>> {
-    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
-    let window = window_clause(&params);
-
-    let rows = series::upstream_cache_buckets(&state.web_db, window).await?;
-
-    use std::collections::HashMap;
-    struct Agg {
-        latency: Vec<SeriesPoint>,
-        hits: HashMap<String, f64>,
-        misses: HashMap<String, f64>,
-        buckets: Vec<String>,
-        latency_sum: f64,
-        latency_count: i64,
-        hits_total: i64,
-        misses_total: i64,
-    }
-
-    let mut by_upstream: HashMap<String, Agg> = HashMap::new();
-    for r in rows {
-        let Some(uid) = r.upstream_url else {
-            continue;
-        };
-        let metric = r.metric;
-        let bucket_s = r.bucket_start.and_utc().to_rfc3339();
-        let c = r.count;
-        let s = r.sum;
-
-        let agg = by_upstream.entry(uid).or_insert_with(|| Agg {
-            latency: Vec::new(),
-            hits: HashMap::new(),
-            misses: HashMap::new(),
-            buckets: Vec::new(),
-            latency_sum: 0.0,
-            latency_count: 0,
-            hits_total: 0,
-            misses_total: 0,
-        });
-
-        match metric.as_str() {
-            metric::UPSTREAM_LATENCY_MS => {
-                let avg = if c > 0 { s / c as f64 } else { 0.0 };
-                agg.latency.push(SeriesPoint {
-                    bucket_start: bucket_s.clone(),
-                    count: c,
-                    sum: avg,
-                });
-                if !agg.buckets.contains(&bucket_s) {
-                    agg.buckets.push(bucket_s);
-                }
-
-                agg.latency_sum += s;
-                agg.latency_count += c;
-            }
-            #[expect(clippy::cast_possible_truncation, reason = "counts are whole numbers")]
-            metric::UPSTREAM_NARINFO_HITS => {
-                agg.hits.insert(bucket_s, s);
-                agg.hits_total += s.round() as i64;
-            }
-            #[expect(clippy::cast_possible_truncation, reason = "counts are whole numbers")]
-            metric::UPSTREAM_NARINFO_MISSES => {
-                agg.misses.insert(bucket_s, s);
-                agg.misses_total += s.round() as i64;
-            }
-            _ => {}
-        }
-    }
-
-    if let Some(list) = scope.project_in_list() {
-        if list.is_empty() {
-            return Ok(ok_json(BoardUpstreamCacheStats::default()));
-        }
-
-        let allowed =
-            gradient_db::caches::upstream::upstream_urls_for_projects(&state.web_db, &list).await?;
-        by_upstream.retain(|url, _| allowed.contains(url));
-    }
-
-    let mut upstream_caches = Vec::new();
-    for (uid, agg) in by_upstream {
-        let hit_rate_series = agg
-            .buckets
-            .iter()
-            .map(|b| {
-                let h = *agg.hits.get(b).unwrap_or(&0.0);
-                let m = *agg.misses.get(b).unwrap_or(&0.0);
-                let denom = h + m;
-                SeriesPoint {
-                    bucket_start: b.clone(),
-                    count: 0,
-                    sum: if denom > 0.0 { h / denom } else { 0.0 },
-                }
-            })
-            .collect();
-
-        let avg_latency_ms = if agg.latency_count > 0 {
-            Some(agg.latency_sum / agg.latency_count as f64)
-        } else {
-            None
-        };
-        let denom = (agg.hits_total + agg.misses_total) as f64;
-        let hit_rate = if denom > 0.0 {
-            Some(agg.hits_total as f64 / denom)
-        } else {
-            None
-        };
-        let display_name = upstream_host(&uid);
-
-        upstream_caches.push(BoardUpstreamCache {
-            upstream_id: uid.clone(),
-            display_name,
-            url: uid,
-            avg_latency_ms,
-            hit_rate,
-            requests_total: agg.latency_count,
-            latency: agg.latency,
-            hit_rate_series,
-        });
-    }
-
-    upstream_caches.sort_by(|a, b| a.display_name.cmp(&b.display_name));
-
-    Ok(ok_json(BoardUpstreamCacheStats { upstream_caches }))
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -698,18 +470,6 @@ pub async fn get_board_health(
 
 #[cfg(test)]
 mod tests {
-    use super::upstream_host;
-
-    #[test]
-    fn upstream_host_strips_scheme_and_path() {
-        assert_eq!(
-            upstream_host("https://cache.nixos.org/foo?x=1"),
-            "cache.nixos.org"
-        );
-        assert_eq!(upstream_host("http://10.0.0.1:5000/"), "10.0.0.1:5000");
-        assert_eq!(upstream_host("cache.example.com"), "cache.example.com");
-    }
-
     #[test]
     fn loops_view_reports_age_of_last_ok_pass() {
         use gradient_util::supervision::LoopHealth;
