@@ -77,6 +77,7 @@ pub(crate) async fn push_paths(
         return Ok(());
     }
 
+    let updater = &updater.concurrent();
     let mut guard = updater.phase(JobPhase::DrvClosurePush);
     guard.record(clamp_to_u32(paths.len()), 0);
     let (paths, sizes): (Vec<String>, Vec<Option<u64>>) = paths.iter().cloned().unzip();
