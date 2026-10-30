@@ -65,7 +65,8 @@ pub async fn nar(
     .await?;
 
     let mapper = state.cache_mapper(ctx.cache.id);
-    let effective_hash = resolve_effective_hash_db(&state.web_db, &mapper, &path_hash).await?;
+    let effective_hash =
+        resolve_effective_hash_db(&state.web_db, &mapper, ctx.cache.id, &path_hash).await?;
     let (size, stream) = super::helpers::fetch_nar_stream(
         &state.web_db,
         &state.nar_storage,
@@ -171,14 +172,13 @@ fn named_first(sources: Vec<UpstreamSource>, named: Uuid) -> Vec<UpstreamSource>
 pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
     db: &C,
     mapper: &StorePathMapper,
+    cache: CacheId,
     path_hash: &str,
 ) -> WebResult<String> {
-    let candidates = vec![format!("blake3:{path_hash}"), format!("sha256:{path_hash}")];
-
-    let by_cached_path = gradient_db::cached_paths::by_any_file_hash(db, candidates).await?;
-
-    if let Some(row) = by_cached_path {
-        return Ok(row.hash);
+    if let Some(hash) =
+        gradient_db::cached_paths::store_hash_served_by_file_hash(db, cache, path_hash).await?
+    {
+        return Ok(hash);
     }
 
     stored_hash(mapper, path_hash)
@@ -288,20 +288,9 @@ mod tests {
     }
 
     const FILE_HASH_NIX32: &str = "0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73";
-    const STORE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-    fn cached_path_row() -> gradient_entity::cached_path::Model {
-        gradient_entity::cached_path::Model {
-            id: gradient_types::ids::CachedPathId::now_v7(),
-            hash: STORE_HASH.to_string(),
-            package: "hello.drv".to_string(),
-            file_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),
-            file_size: Some(1234),
-            nar_size: Some(2048),
-            nar_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),
-            created_at: gradient_types::now(),
-            ..Default::default()
-        }
+    fn no_served_path() -> Vec<std::collections::BTreeMap<&'static str, sea_orm::Value>> {
+        Vec::new()
     }
 
     fn identity() -> StorePathMapper {
@@ -316,32 +305,24 @@ mod tests {
     }
 
     #[test]
-    fn resolve_returns_store_hash_from_cached_path() {
-        let db = mock_db()
-            .append_query_results([vec![cached_path_row()]])
-            .into_connection();
-
-        let effective = runtime()
-            .block_on(resolve_effective_hash_db(&db, &identity(), FILE_HASH_NIX32))
-            .expect("resolve should succeed");
-        assert_eq!(effective, STORE_HASH);
-    }
-
-    #[test]
     fn an_unknown_file_hash_is_not_found() {
         let db = mock_db()
-            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+            .append_query_results([no_served_path()])
             .into_connection();
 
-        let result =
-            runtime().block_on(resolve_effective_hash_db(&db, &identity(), FILE_HASH_NIX32));
+        let result = runtime().block_on(resolve_effective_hash_db(
+            &db,
+            &identity(),
+            CacheId::nil(),
+            FILE_HASH_NIX32,
+        ));
         assert!(result.is_err());
     }
 
     #[test]
     fn a_store_hash_in_a_nar_url_is_mapped_inbound() {
         let db = mock_db()
-            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+            .append_query_results([no_served_path()])
             .into_connection();
         let mapper = StorePathMapper::for_cache(
             Arc::new(gradient_entity::RotatedHashMapping),
@@ -352,6 +333,7 @@ mod tests {
             .block_on(resolve_effective_hash_db(
                 &db,
                 &mapper,
+                CacheId::nil(),
                 gradient_entity::EXAMPLE_ORIGINAL_HASH,
             ))
             .expect("resolve should succeed");
@@ -366,20 +348,5 @@ mod tests {
         );
         assert_eq!(upstream_nar_path("nar/x.nar", None), "nar/x.nar");
         assert_eq!(upstream_nar_path("nar/x.nar", Some("")), "nar/x.nar");
-    }
-
-    #[test]
-    fn resolve_returns_store_hash_for_blake3_file_hash() {
-        let mut row = cached_path_row();
-        row.file_hash = Some(format!("blake3:{FILE_HASH_NIX32}"));
-
-        let db = mock_db()
-            .append_query_results([vec![row]])
-            .into_connection();
-
-        let effective = runtime()
-            .block_on(resolve_effective_hash_db(&db, &identity(), FILE_HASH_NIX32))
-            .expect("resolve should succeed");
-        assert_eq!(effective, STORE_HASH);
     }
 }

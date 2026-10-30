@@ -61,16 +61,6 @@ pub async fn stored_by_hash<C: ConnectionTrait>(
         .collect())
 }
 
-pub async fn by_any_file_hash<C: ConnectionTrait>(
-    db: &C,
-    file_hashes: Vec<String>,
-) -> Result<Option<MCachedPath>, DbErr> {
-    ECachedPath::find()
-        .filter(CCachedPath::FileHash.is_in(file_hashes))
-        .one(db)
-        .await
-}
-
 pub async fn signature_in_cache<C: ConnectionTrait>(
     db: &C,
     cached_path: CachedPathId,
@@ -93,6 +83,14 @@ crate::sql! {
          WHERE cp.hash = $1 AND s.cache = $2 \
            AND s.signature IS NOT NULL AND cp.file_hash IS NOT NULL",
         params = [CachedPathHash, CacheId];
+
+    CACHE_SERVED_FILE_HASH = "SELECT cp.hash AS hash \
+         FROM cached_path cp \
+         JOIN cached_path_signature s ON s.cached_path = cp.id \
+         WHERE cp.file_hash IN ($1, $2) AND s.cache = $3 \
+           AND s.signature IS NOT NULL \
+         LIMIT 1",
+        params = [Text("sha256:abc"), Text("blake3:abc"), CacheId];
 
     CACHE_SERVED_DERIVATION = "SELECT d.id AS id \
          FROM derivation d \
@@ -133,6 +131,23 @@ pub async fn signed_in_cache<C: ConnectionTrait>(
         .query_one_raw(CACHE_SERVES_PATH.bind([store_hash.into(), cache.into_inner().into()]))
         .await?
         .is_some())
+}
+
+/// Identical store path contents compress to one file hash, so a file hash alone names no single
+/// path: an empty directory output shares it with thousands of others.
+pub async fn store_hash_served_by_file_hash<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+    file_hash_nix32: &str,
+) -> Result<Option<String>, DbErr> {
+    let row = db
+        .query_one_raw(CACHE_SERVED_FILE_HASH.bind([
+            format!("sha256:{file_hash_nix32}").into(),
+            format!("blake3:{file_hash_nix32}").into(),
+            cache.into_inner().into(),
+        ]))
+        .await?;
+    row.map(|r| r.try_get::<String>("", "hash")).transpose()
 }
 
 pub async fn derivation_signed_in_cache<C: ConnectionTrait>(
