@@ -437,8 +437,7 @@ export class BoardJobDetailComponent implements OnInit {
   canAbort = computed(() => {
     const j = this.job();
     if (!j || j.passed_over || j.finished_at || this.auth.user()?.superuser !== true) return false;
-    if (j.kind === EXEC_KIND) return !!j.exec_job;
-    return j.kind !== 1 || !!j.build_id;
+    return j.kind !== EXEC_KIND || !!j.exec_job;
   });
 
   abortTarget = computed(() => {
@@ -549,8 +548,7 @@ export class BoardJobDetailComponent implements OnInit {
 
   private abortRequest(j: AssignedJobDetail): Observable<unknown> {
     if (j.kind === EXEC_KIND && j.exec_job) return this.execJobs.abort(j.exec_job.id);
-    if (j.kind === 1 && j.build_id) return this.evaluations.abortBuild(j.build_id);
-    return this.evaluations.abortEvaluation(j.evaluation_id);
+    return this.board.abortJob(j.id);
   }
 
   abortJob(): void {

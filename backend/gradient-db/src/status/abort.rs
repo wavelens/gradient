@@ -8,6 +8,7 @@ use super::logging::{PhaseSubjectKind, record_phase_events};
 use crate::{DbContext, fetch_in_chunks, for_each_chunk};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptOutcome, Column as CAttempt, Entity as EAttempt};
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, FromQueryResult, QueryFilter, QuerySelect};
@@ -145,7 +146,7 @@ pub(super) async fn abort_shared_builds(
 
 fn wanting_evaluations_sql() -> String {
     format!(
-        "SELECT ob.derivation_build, ob.evaluation \
+        "SELECT ob.derivation_build, ob.evaluation, ev.status \
          FROM build_job ob {wanted} WHERE ob.derivation_build = ANY($1::uuid[])",
         wanted = crate::graph::can_start::wanted_by_its_evaluation("ob"),
     )
@@ -160,6 +161,7 @@ crate::sql_fn! {
 pub(super) struct Wanting {
     pub derivation_build: uuid::Uuid,
     pub evaluation: uuid::Uuid,
+    pub status: EvaluationStatus,
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -200,6 +202,7 @@ pub(super) fn wanting_row(
             shared_build.into_inner().into(),
         ),
         ("evaluation".to_owned(), evaluation.id.into_inner().into()),
+        ("status".to_owned(), (evaluation.status as i32).into()),
     ])
 }
 
@@ -208,7 +211,6 @@ mod tests {
     use super::*;
     use crate::WorkerDb;
     use crate::test_ctx::ctx;
-    use gradient_entity::evaluation::EvaluationStatus;
     use gradient_fixtures::mock::mock_db;
     use sea_orm::{DatabaseConnection, MockExecResult, Value};
     use std::collections::BTreeMap;

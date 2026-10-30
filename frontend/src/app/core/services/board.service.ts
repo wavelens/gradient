@@ -133,6 +133,10 @@ export class BoardService {
     return this.api.get<AssignedJobDetail>(`board/jobs/${id}`);
   }
 
+  abortJob(id: string): Observable<string> {
+    return this.api.post<string>(`board/jobs/${id}/abort`);
+  }
+
   getWorkers(): Observable<BoardWorker[]> {
     return this.api.get<BoardWorker[]>('board/workers');
   }

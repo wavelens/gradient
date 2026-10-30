@@ -481,6 +481,19 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     expect(aborted).toEqual(['x1']);
   });
 
+  it('aborts a running build or eval job on the board, with or without its build', () => {
+    const aborted: string[] = [];
+    TestBed.overrideProvider(AuthService, { useValue: { user: () => ({ superuser: true }) } });
+    const abortJob = (id: string) => { aborted.push(id); return EMPTY; };
+    const fixture = setup({ getJob: () => of({ ...DETAIL, build_id: null }), abortJob });
+    const cmp = fixture.componentInstance;
+    expect(cmp.canAbort()).toBe(true);
+    cmp.abortJob();
+    cmp.job.set({ ...EVAL_DETAIL, id: 'job-2', finished_at: null });
+    cmp.abortJob();
+    expect(aborted).toEqual(['job-1', 'job-2']);
+  });
+
   it('finds a pending exec job by its exec job id', () => {
     const pending: PendingJobSummary = { ...PENDING, kind: 2, build_id: null, subject: EXEC_JOB.entry_point, exec_job: EXEC_JOB };
     const el = setup(

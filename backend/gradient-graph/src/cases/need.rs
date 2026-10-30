@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::status::BuildRefusal;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
@@ -847,5 +848,73 @@ async fn d13_aborting_an_evaluation_leaves_a_build_a_failed_evaluation_still_wan
     );
     assert_eq!(a2.status, BuildStatus::Aborted, "after 1: sb(A2)");
     case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn d14_an_abort_for_all_evaluations_sticks_once_no_running_evaluation_wants_the_build() {
+    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = Case::start(failed_and_running_evaluation_share_s(e1, e2)).await;
+    let s = case.sb(S).await.id;
+
+    let report = case
+        .transition(Transition::AbortBuildForAllEvaluations {
+            evaluation: e1,
+            shared_build: s,
+        })
+        .await;
+
+    assert_eq!(
+        report.refusal,
+        Some(BuildRefusal::NeededByOtherEvaluation),
+        "after 1: E2 still runs"
+    );
+    assert_eq!(
+        case.sb(S).await.status,
+        BuildStatus::Building,
+        "after 1: sb(S)"
+    );
+    case.zero_drift("step 1").await;
+
+    case.set_evaluation_status(e2, EvaluationStatus::Aborted)
+        .await;
+    case.transition(Transition::AbortEvaluationSharedBuilds {
+        evaluation: e2,
+        hard: true,
+    })
+    .await;
+    let report = case
+        .transition(Transition::AbortBuildForAllEvaluations {
+            evaluation: e2,
+            shared_build: s,
+        })
+        .await;
+
+    assert_eq!(report.refusal, None, "after 2: refusal");
+    assert_eq!(report.aborted_shared_builds, vec![s], "after 2: stopped");
+    let stopped = case.sb(S).await;
+    assert_eq!(
+        (stopped.status, stopped.wanted),
+        (BuildStatus::Aborted, false),
+        "after 2: sb(S)"
+    );
+    assert!(
+        case.job(e1, S).await.is_some_and(|job| job.aborted),
+        "after 2: build_job(E1, S).aborted"
+    );
+    assert_eq!(
+        case.sb(A1).await.status,
+        BuildStatus::DependencyFailed,
+        "after 2: sb(A1)"
+    );
+    case.zero_drift("step 2").await;
+
+    case.transition(Transition::ConsistencyCheck).await;
+
+    assert_eq!(
+        case.sb(S).await.status,
+        BuildStatus::Aborted,
+        "after 3: no recount thaws sb(S)"
+    );
     case.finish().await;
 }
