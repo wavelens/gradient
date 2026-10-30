@@ -37,7 +37,8 @@ table.phases td {
   border-bottom: 1px solid var(--gr-border);
 }
 
-.num { text-align: right; }
+.num { text-align: right; white-space: nowrap; }
+.name { white-space: nowrap; }
 .mono { font-family: $font-family-mono; }
 .bar-cell { width: 30%; }
 
