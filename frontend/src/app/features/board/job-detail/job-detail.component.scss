@@ -13,7 +13,8 @@ h1 { color: var(--gr-text-primary); font-size: $font-size-xl; margin: 0.25rem 0 
 h2 { color: var(--gr-text-primary); font-size: $font-size-lg; margin: 1.75rem 0 0.75rem; }
 .kind { display: inline-block; font-size: $font-size-xs; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gr-status-info); background: color-mix(in srgb, var(--gr-status-info) 13%, transparent); padding: 0.15rem 0.5rem; border-radius: $border-radius-sm; }
 .kind.build { color: var(--gr-status-warning); background: color-mix(in srgb, var(--gr-status-warning) 13%, transparent); }
-.head-actions { display: flex; align-items: center; gap: 1.5rem; }
+.top-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; min-height: 2rem; }
+.top-row > button { translate: 0 0.5rem; }
 .total { text-align: right; }
 .total .value { display: block; color: var(--gr-text-primary); font-size: $font-size-xxl; font-weight: 600; }
 .label { color: var(--gr-text-muted); font-size: $font-size-xs; display: block; }
