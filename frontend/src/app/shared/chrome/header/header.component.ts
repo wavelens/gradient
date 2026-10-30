@@ -45,6 +45,7 @@ export class AppHeaderComponent {
 
   protected readonly userMenuItems: MenuItem[] = [
     { label: 'Settings', icon: 'settings', routerLink: '/settings/profile' },
+    { label: 'My Invites', icon: 'mail', routerLink: '/settings/invites' },
     ...(this.whatsNew.hasNotes ? [{ label: "What's New", icon: 'new_releases', command: () => this.whatsNew.showAll() }] : []),
     { separator: true },
     { label: 'Log out', icon: 'logout', command: () => this.logout() },
