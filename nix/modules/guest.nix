@@ -103,6 +103,7 @@ in {
       firewall.enable = lib.mkDefault false;
     };
     documentation.enable = false;
+    nix.settings.experimental-features = [ "nix-command" "flakes" ];
     system = {
       stateVersion = lib.mkDefault lib.trivial.release;
 
