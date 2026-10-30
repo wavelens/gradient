@@ -43,11 +43,13 @@ describe('TasksService.downloadReport', () => {
       include_packages: true,
       include_logs: true,
       include_instance: true,
+      include_exec: true,
     });
     expect(params.get('anonymize_identities')).toBe('false');
     expect(params.get('anonymize_packages')).toBe('false');
     expect(params.get('include_logs')).toBe('true');
     expect(params.get('include_instance')).toBe('true');
+    expect(params.get('include_exec')).toBe('true');
   });
 
   it('anonymises what the caller left unticked', () => {
@@ -56,11 +58,13 @@ describe('TasksService.downloadReport', () => {
       include_packages: false,
       include_logs: false,
       include_instance: false,
+      include_exec: false,
     });
     expect(params.get('anonymize_identities')).toBe('true');
     expect(params.get('anonymize_packages')).toBe('true');
     expect(params.get('include_logs')).toBe('false');
     expect(params.get('include_instance')).toBe('false');
+    expect(params.get('include_exec')).toBe('false');
   });
 });
 

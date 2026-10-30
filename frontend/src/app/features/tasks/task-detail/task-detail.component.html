@@ -318,6 +318,10 @@
                    [ngModel]="reportOptions().include_instance"
                    (ngModelChange)="setReportOption('include_instance', $event)"
                    grTooltip="Worker fleet, upstream caches and the resolved server config. Requires the ManageWorkers permission."></gr-checkbox>
+      <gr-checkbox label="Include exec jobs"
+                   [ngModel]="reportOptions().include_exec"
+                   (ngModelChange)="setReportOption('include_exec', $event)"
+                   grTooltip="Off by default: exec jobs, their attempts, phases, outputs and pull requests. Environment variables and arguments stay out."></gr-checkbox>
     </div>
     <div grDialogFooter>
       <button grButton label="Cancel" severity="secondary" (click)="reportDialogOpen.set(false)"></button>

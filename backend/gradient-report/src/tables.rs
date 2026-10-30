@@ -52,6 +52,11 @@ pub fn redact_value(
             r.identity(&v, "url")
         }
         ("upstream_metric", "upstream_url") => r.identity(&v, "url"),
+        ("cluster_member", "pin") | ("exec_job_attempt", "worker") => r.identity(&v, "worker"),
+        ("exec_job_attempt", "guest_address") | ("exec_job_pull_request", "url") => {
+            r.identity(&v, "url")
+        }
+        ("exec_job_pull_request", "branch") => r.text(&v),
         ("worker_registration", "created_by") | ("team_worker", "created_by") => {
             r.identity(&v, "user")
         }
@@ -116,6 +121,25 @@ macro_rules! output_hashes {
 macro_rules! cached_path_scope {
     () => {
         output_hashes!()
+    };
+}
+
+macro_rules! own_exec_jobs {
+    () => {
+        "SELECT id FROM exec_job WHERE evaluation = $1"
+    };
+}
+
+macro_rules! cluster_job_scope {
+    () => {
+        concat!(
+            "SELECT m.cluster_job FROM cluster_member m WHERE m.evaluation = $1",
+            " UNION SELECT m.cluster_job FROM cluster_member m WHERE m.derivation_build IN (",
+            own_shared_builds!(),
+            ") UNION SELECT m.cluster_job FROM cluster_member m WHERE m.exec_job IN (",
+            own_exec_jobs!(),
+            ")"
+        )
     };
 }
 
@@ -335,8 +359,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "dispatched_job",
-            "CREATE TABLE dispatched_job (id TEXT, kind INTEGER, evaluation_id TEXT, project TEXT, task TEXT, worker_id TEXT, score REAL, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, finished_at TEXT, outcome INTEGER, score_breakdown TEXT, worker_context TEXT, job_context TEXT, candidates TEXT, created_at TEXT, instance_context TEXT, worker_elapsed_ms INTEGER)",
-            "SELECT id::text, kind::text, evaluation_id::text, project::text, task::text, worker_id::text, score::text, queued_at::text, ready_at::text, dispatched_at::text, finished_at::text, outcome::text, score_breakdown::text, worker_context::text, job_context::text, candidates::text, created_at::text, instance_context::text, worker_elapsed_ms::text FROM dispatched_job WHERE evaluation_id = $1",
+            "CREATE TABLE dispatched_job (id TEXT, kind INTEGER, evaluation_id TEXT, project TEXT, task TEXT, worker_id TEXT, score REAL, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, finished_at TEXT, outcome INTEGER, score_breakdown TEXT, worker_context TEXT, job_context TEXT, candidates TEXT, created_at TEXT, instance_context TEXT, worker_elapsed_ms INTEGER, cluster_attempt TEXT)",
+            "SELECT id::text, kind::text, evaluation_id::text, project::text, task::text, worker_id::text, score::text, queued_at::text, ready_at::text, dispatched_at::text, finished_at::text, outcome::text, score_breakdown::text, worker_context::text, job_context::text, candidates::text, created_at::text, instance_context::text, worker_elapsed_ms::text, cluster_attempt::text FROM dispatched_job WHERE evaluation_id = $1",
             "the evaluation",
             [
                 "id",
@@ -357,7 +381,69 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "candidates",
                 "created_at",
                 "instance_context",
-                "worker_elapsed_ms"
+                "worker_elapsed_ms",
+                "cluster_attempt"
+            ]
+        ),
+        spec!(
+            "cluster_job",
+            "CREATE TABLE cluster_job (id TEXT, status INTEGER, same_zone INTEGER, attempts INTEGER, retry_budget INTEGER, attempts_outside_budget INTEGER, created_at TEXT, updated_at TEXT, dissolve_after TEXT)",
+            concat!(
+                "SELECT c.id::text, c.status::text, c.same_zone::int::text, c.attempts::text, c.retry_budget::text, c.attempts_outside_budget::text, c.created_at::text, c.updated_at::text, c.dissolve_after::text FROM cluster_job c WHERE c.id IN (",
+                cluster_job_scope!(),
+                ")"
+            ),
+            "every cluster job holding the evaluation, its shared builds or its exec jobs",
+            [
+                "id",
+                "status",
+                "same_zone",
+                "attempts",
+                "retry_budget",
+                "attempts_outside_budget",
+                "created_at",
+                "updated_at",
+                "dissolve_after"
+            ]
+        ),
+        spec!(
+            "cluster_member",
+            "CREATE TABLE cluster_member (id TEXT, cluster_job TEXT, evaluation TEXT, derivation_build TEXT, exec_job TEXT, role TEXT, \"primary\" INTEGER, pin TEXT, eval_index INTEGER, min_free_ram_mb INTEGER)",
+            concat!(
+                "SELECT m.id::text, m.cluster_job::text, m.evaluation::text, m.derivation_build::text, m.exec_job::text, m.role::text, m.\"primary\"::int::text, m.pin::text, m.eval_index::text, m.min_free_ram_mb::text FROM cluster_member m WHERE m.cluster_job IN (",
+                cluster_job_scope!(),
+                ")"
+            ),
+            "every sub job of the exported cluster jobs, so members from other evaluations are included",
+            [
+                "id",
+                "cluster_job",
+                "evaluation",
+                "derivation_build",
+                "exec_job",
+                "role",
+                "primary",
+                "pin",
+                "eval_index",
+                "min_free_ram_mb"
+            ]
+        ),
+        spec!(
+            "cluster_attempt",
+            "CREATE TABLE cluster_attempt (id TEXT, cluster_job TEXT, created_at TEXT, started_at TEXT, finished_at TEXT, outcome INTEGER)",
+            concat!(
+                "SELECT a.id::text, a.cluster_job::text, a.created_at::text, a.started_at::text, a.finished_at::text, a.outcome::text FROM cluster_attempt a WHERE a.cluster_job IN (",
+                cluster_job_scope!(),
+                ")"
+            ),
+            "the exported cluster jobs",
+            [
+                "id",
+                "cluster_job",
+                "created_at",
+                "started_at",
+                "finished_at",
+                "outcome"
             ]
         ),
         spec!(
@@ -630,6 +716,138 @@ pub fn instance_tables() -> &'static [TableSpec] {
     SPECS
 }
 
+/// `spec` drops `env` and `args`, and a phase payload stays opaque. A job puts its own values in
+/// both.
+pub fn exec_tables() -> &'static [TableSpec] {
+    const SPECS: &[TableSpec] = &[
+        spec!(
+            "exec_job",
+            "CREATE TABLE exec_job (id TEXT, evaluation TEXT, entry_point TEXT, program_derivation TEXT, image_derivation TEXT, node_index INTEGER, requirement TEXT, spec TEXT, retries_left INTEGER, status INTEGER, waiting_reason TEXT, message TEXT, keep_vm_running INTEGER, waits_for_manual_start INTEGER, program_exit_code INTEGER, created_at TEXT, started_at TEXT, finished_at TEXT)",
+            "SELECT e.id::text, e.evaluation::text, e.entry_point::text, e.program_derivation::text, e.image_derivation::text, e.node_index::text, e.requirement::text, (e.spec - 'env' - 'args')::text, e.retries_left::text, e.status::text, e.waiting_reason::text, e.message::text, e.keep_vm_running::int::text, e.waits_for_manual_start::int::text, e.program_exit_code::text, e.created_at::text, e.started_at::text, e.finished_at::text FROM exec_job e WHERE e.evaluation = $1",
+            "the evaluation, without each job's environment and arguments",
+            [
+                "id",
+                "evaluation",
+                "entry_point",
+                "program_derivation",
+                "image_derivation",
+                "node_index",
+                "requirement",
+                "spec",
+                "retries_left",
+                "status",
+                "waiting_reason",
+                "message",
+                "keep_vm_running",
+                "waits_for_manual_start",
+                "program_exit_code",
+                "created_at",
+                "started_at",
+                "finished_at"
+            ]
+        ),
+        spec!(
+            "exec_job_attempt",
+            "CREATE TABLE exec_job_attempt (id TEXT, exec_job TEXT, assignment_id TEXT, worker TEXT, number INTEGER, started_at TEXT, ended_at TEXT, end_reason INTEGER, message TEXT, master_port INTEGER, guest_address TEXT)",
+            concat!(
+                "SELECT a.id::text, a.exec_job::text, a.assignment_id::text, a.worker::text, a.number::text, a.started_at::text, a.ended_at::text, a.end_reason::text, a.message::text, a.master_port::text, a.guest_address::text FROM exec_job_attempt a WHERE a.exec_job IN (",
+                own_exec_jobs!(),
+                ")"
+            ),
+            "the evaluation's exec jobs",
+            [
+                "id",
+                "exec_job",
+                "assignment_id",
+                "worker",
+                "number",
+                "started_at",
+                "ended_at",
+                "end_reason",
+                "message",
+                "master_port",
+                "guest_address"
+            ]
+        ),
+        spec!(
+            "exec_job_phase",
+            "CREATE TABLE exec_job_phase (id TEXT, exec_job TEXT, attempt TEXT, name TEXT, payload_bytes INTEGER, created_at TEXT)",
+            concat!(
+                "SELECT p.id::text, p.exec_job::text, p.attempt::text, p.name::text, octet_length(p.payload)::text, p.created_at::text FROM exec_job_phase p WHERE p.exec_job IN (",
+                own_exec_jobs!(),
+                ")"
+            ),
+            "the evaluation's exec jobs, with each payload's size instead of its content",
+            [
+                "id",
+                "exec_job",
+                "attempt",
+                "name",
+                "payload_bytes",
+                "created_at"
+            ]
+        ),
+        spec!(
+            "exec_job_continuation",
+            "CREATE TABLE exec_job_continuation (exec_job TEXT, evaluation TEXT, attributes TEXT, status INTEGER, message TEXT, created_at TEXT, updated_at TEXT)",
+            concat!(
+                "SELECT c.exec_job::text, c.evaluation::text, c.attributes::text, c.status::text, c.message::text, c.created_at::text, c.updated_at::text FROM exec_job_continuation c WHERE c.exec_job IN (",
+                own_exec_jobs!(),
+                ")"
+            ),
+            "the evaluation's exec jobs",
+            [
+                "exec_job",
+                "evaluation",
+                "attributes",
+                "status",
+                "message",
+                "created_at",
+                "updated_at"
+            ]
+        ),
+        spec!(
+            "exec_job_output",
+            "CREATE TABLE exec_job_output (exec_job TEXT, path TEXT, size INTEGER, content_type TEXT, created_at TEXT, updated_at TEXT)",
+            concat!(
+                "SELECT o.exec_job::text, o.path::text, o.size::text, o.content_type::text, o.created_at::text, o.updated_at::text FROM exec_job_output o WHERE o.exec_job IN (",
+                own_exec_jobs!(),
+                ")"
+            ),
+            "the evaluation's exec jobs, listing each output file without its content",
+            [
+                "exec_job",
+                "path",
+                "size",
+                "content_type",
+                "created_at",
+                "updated_at"
+            ]
+        ),
+        spec!(
+            "exec_job_pull_request",
+            "CREATE TABLE exec_job_pull_request (id TEXT, exec_job TEXT, integration TEXT, url TEXT, branch TEXT, number INTEGER, created_at TEXT)",
+            concat!(
+                "SELECT r.id::text, r.exec_job::text, r.integration::text, r.url::text, r.branch::text, r.number::text, r.created_at::text FROM exec_job_pull_request r WHERE r.exec_job IN (",
+                own_exec_jobs!(),
+                ")"
+            ),
+            "the evaluation's exec jobs",
+            [
+                "id",
+                "exec_job",
+                "integration",
+                "url",
+                "branch",
+                "number",
+                "created_at"
+            ]
+        ),
+    ];
+
+    SPECS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -645,8 +863,9 @@ mod tests {
             "from api",
             "from session",
             "github_installation",
+            "exec_job_token",
         ];
-        for spec in eval_scope_tables().iter().chain(instance_tables()) {
+        for spec in all_tables() {
             let sql = spec.sql.to_ascii_lowercase();
             assert!(
                 !sql.contains('*'),
@@ -704,7 +923,7 @@ mod tests {
 
     #[test]
     fn every_spec_is_scoped_and_internally_consistent() {
-        for spec in eval_scope_tables().iter().chain(instance_tables()) {
+        for spec in all_tables() {
             assert!(
                 spec.ddl.contains(spec.name),
                 "{}: ddl names another table",
@@ -729,12 +948,40 @@ mod tests {
         }
     }
 
-    fn spec_named(name: &str) -> &'static TableSpec {
+    fn all_tables() -> impl Iterator<Item = &'static TableSpec> {
         eval_scope_tables()
             .iter()
             .chain(instance_tables())
-            .find(|s| s.name == name)
-            .expect("spec exists")
+            .chain(exec_tables())
+    }
+
+    fn spec_named(name: &str) -> &'static TableSpec {
+        all_tables().find(|s| s.name == name).expect("spec exists")
+    }
+
+    #[test]
+    fn every_cluster_table_follows_each_member_kind_of_the_evaluation() {
+        for name in ["cluster_job", "cluster_member", "cluster_attempt"] {
+            let sql = spec_named(name).sql;
+            for member in [
+                "m.evaluation = $1",
+                "m.derivation_build IN (SELECT derivation_build FROM build_job WHERE evaluation = $1)",
+                "m.exec_job IN (SELECT id FROM exec_job WHERE evaluation = $1)",
+            ] {
+                assert!(sql.contains(member), "{name} misses {member}: {sql}");
+            }
+        }
+    }
+
+    #[test]
+    fn exec_exports_leave_out_what_a_job_supplies_itself() {
+        let job = spec_named("exec_job").sql;
+        assert!(job.contains("(e.spec - 'env' - 'args')::text"), "{job}");
+        assert!(!job.contains("e.spec::text"), "{job}");
+
+        let phase = spec_named("exec_job_phase").sql;
+        assert!(phase.contains("octet_length(p.payload)"), "{phase}");
+        assert!(!phase.contains("p.payload::"), "{phase}");
     }
 
     #[test]
@@ -862,6 +1109,7 @@ mod tests {
             anonymize_packages: packages,
             include_logs: true,
             include_instance: true,
+            include_exec: true,
         })
     }
 
@@ -886,6 +1134,18 @@ mod tests {
             ),
             Some("builder-1".into())
         );
+    }
+
+    #[test]
+    fn a_worker_named_by_a_cluster_pin_or_an_exec_attempt_gets_one_pseudonym() {
+        let r = redactor(true, false);
+        let fleet = redact_value(&r, "worker_sample", "worker_id", Some("gpu-1".into()));
+        let pin = redact_value(&r, "cluster_member", "pin", Some("gpu-1".into()));
+        let attempt = redact_value(&r, "exec_job_attempt", "worker", Some("gpu-1".into()));
+
+        assert_ne!(pin, Some("gpu-1".into()));
+        assert_eq!(pin, fleet, "a pin has to join against the fleet tables");
+        assert_eq!(attempt, fleet);
     }
 
     #[test]

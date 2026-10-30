@@ -123,6 +123,7 @@ export class TasksService {
       anonymize_packages: String(!options.include_packages),
       include_logs: String(options.include_logs),
       include_instance: String(options.include_instance),
+      include_exec: String(options.include_exec),
     });
     return this.api.getBlob(`evals/${evaluationId}/report?${query}`);
   }
@@ -133,5 +134,6 @@ export interface ReportOptions {
   include_packages: boolean;
   include_logs: boolean;
   include_instance: boolean;
+  include_exec: boolean;
 }
 

@@ -166,6 +166,7 @@ mod tests {
             anonymize_packages: packages,
             include_logs: true,
             include_instance: true,
+            include_exec: true,
         })
     }
 

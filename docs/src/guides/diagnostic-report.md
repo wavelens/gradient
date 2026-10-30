@@ -29,8 +29,9 @@ A diagnostic report is a single SQLite file that describes a stuck or failed eva
 | Include package names | on | Off: package names in store paths and attributes become tokens |
 | Include build logs | off | On: the full log of every failed or aborted attempt |
 | Include instance context | on | Workers, upstream caches and the server settings. The `manageWorkers` permission is required |
+| Include exec jobs | off | On: the evaluation's exec jobs with attempts, phases, output file names and pull requests. Environment variables and arguments stay out |
 
-- The options work as query parameters in the API: `anonymize_identities`, `anonymize_packages`, `include_logs`, `include_instance`.
+- The options work as query parameters in the API: `anonymize_identities`, `anonymize_packages`, `include_logs`, `include_instance`, `include_exec`.
 - In the API, `include_logs` defaults to on.
 - Within one report, one name always produces the same token.
 - Dependencies remain readable.
