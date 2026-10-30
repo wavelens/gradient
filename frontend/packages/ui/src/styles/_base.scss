@@ -66,18 +66,12 @@ body::before {
 a {
   color: var(--gr-text-primary);
   text-decoration: none;
-  padding: $spacing-sm;
+  text-underline-offset: 2px;
   transition: $transition-fast;
-
-  &:hover {
-    background-color: var(--gr-surface-hover);
-    border-radius: $border-radius-sm;
-  }
 }
 
-// One breadcrumb recipe for both shells: gr-page-layout and the full-bleed
-// evaluation header. Links opt out of the global anchor padding so they align
-// with the separator and current-page spans beside them.
+:where(a:hover) { text-decoration: underline; }
+
 .breadcrumb {
   display: flex;
   flex-wrap: wrap;
