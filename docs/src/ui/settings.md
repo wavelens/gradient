@@ -13,9 +13,10 @@ Open **Settings** from the header.
 | Profile | Username, full name, email | Edit fields. Choose a theme under **Appearance**. **Delete Account** |
 | API Keys | Keys, each with scope and permissions | **New API Key**, edit, revoke, delete |
 | Sessions | All devices currently signed in | **Revoke** a single session |
-| My Invites | Pending invitations to projects and caches | Accept or decline |
 
 The theme choice (**System**, **Light**, **Dark**) lives in the browser, not in the account.
+
+Find **My Invites** in the header user menu. Pending invitations to projects, caches and teams show there. Accept or decline each invitation from that list.
 
 ![API Keys](../assets/screenshots/api_keys.png)
 

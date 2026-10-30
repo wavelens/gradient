@@ -72,7 +72,7 @@ Roles on a cache belong to members of the cache itself. Project roles do not car
 
 === "UI"
 
-    On the cache page, open **Members & Roles -> Add Member**. Enter a user name and a role. The invited user accepts the invite on the **My Invites** page under **Settings**. Cache access only begins after acceptance.
+    On the cache page, open **Members & Roles -> Add Member**. Enter a user name and a role. The invited user accepts the invite on the **My Invites** page in the user menu of the header. Cache access only begins after acceptance.
 
     - Invites expire after 7 days.
     - With [mail](../reference/configuration.md#email) configured, the invitee also gets an email with a link.
