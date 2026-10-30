@@ -44,6 +44,7 @@ mod m20261107_000000_exec_keep_vm_running;
 mod m20261108_000000_exec_manual_start;
 mod m20261109_000000_cache_metric_external_traffic;
 mod m20261110_000000_user_last_seen_version;
+mod m20261111_000000_worker_sample_architectures;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -113,6 +114,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261108_000000_exec_manual_start::Migration),
             Box::new(m20261109_000000_cache_metric_external_traffic::Migration),
             Box::new(m20261110_000000_user_last_seen_version::Migration),
+            Box::new(m20261111_000000_worker_sample_architectures::Migration),
         ]
     }
 }

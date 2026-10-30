@@ -32,7 +32,7 @@ impl From<QueryResult> for WorkerNet {
 
 /// Worker telemetry is carrying no project. It is attributed to every project the worker is
 /// registered in, or that grants the worker's team its workers.
-fn workers_serving(project_list: &str) -> String {
+pub(crate) fn workers_serving(project_list: &str) -> String {
     format!(
         " AND worker_id IN (\
          SELECT worker_id FROM worker_registration WHERE peer_id IN ({project_list}) \

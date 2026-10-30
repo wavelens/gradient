@@ -63,6 +63,7 @@ pub struct Model {
     pub max_concurrent_builds: i32,
     pub state: WorkerSampleState,
     pub capabilities: Json,
+    pub architectures: Vec<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

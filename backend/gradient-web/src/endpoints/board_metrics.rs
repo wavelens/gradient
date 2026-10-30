@@ -15,6 +15,7 @@ use crate::metrics_scope::MetricsScope;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::metrics::worker_load::{self, LoadHours};
 use gradient_db::metrics::worker_samples::{self, WorkerNet};
 use gradient_db::metrics::{build_times, series};
 use gradient_scheduler::Scheduler;
@@ -389,6 +390,98 @@ pub async fn get_board_fleet(
     Ok(ok_json(out))
 }
 
+#[derive(Serialize, Debug, PartialEq, utoipa::ToSchema)]
+pub struct AverageLoadBucket {
+    pub key: String,
+    pub in_flight: f64,
+    pub capacity: f64,
+    pub workers: i64,
+}
+
+#[derive(Serialize, Debug, Default, PartialEq, utoipa::ToSchema)]
+pub struct WorkerLoadAverage {
+    pub by_capability: Vec<AverageLoadBucket>,
+    pub by_architecture: Vec<AverageLoadBucket>,
+}
+
+fn average_load(
+    busy: Vec<LoadHours>,
+    capacity: Vec<LoadHours>,
+    window_hours: i64,
+) -> WorkerLoadAverage {
+    let mut acc: std::collections::BTreeMap<(String, String), (f64, f64, i64)> = Default::default();
+    for (row, is_busy) in busy
+        .into_iter()
+        .map(|r| (r, true))
+        .chain(capacity.into_iter().map(|r| (r, false)))
+    {
+        let entry = acc.entry((row.dimension, row.key)).or_default();
+        if is_busy {
+            entry.0 += row.hours;
+        } else {
+            entry.1 += row.hours;
+            entry.2 = row.workers;
+        }
+    }
+    let hours = window_hours as f64;
+    let bucket = |key: String, (busy, capacity, workers): (f64, f64, i64)| AverageLoadBucket {
+        key,
+        in_flight: busy / hours,
+        capacity: capacity / hours,
+        workers,
+    };
+    let by_capability = ["eval", "network", "build"]
+        .into_iter()
+        .map(|k| {
+            let totals = acc
+                .get(&("capability".into(), k.into()))
+                .copied()
+                .unwrap_or_default();
+            bucket(k.into(), totals)
+        })
+        .collect();
+    let by_architecture = acc
+        .into_iter()
+        .filter(|((dimension, _), _)| dimension == "architecture")
+        .map(|((_, key), totals)| bucket(key, totals))
+        .collect();
+    WorkerLoadAverage {
+        by_capability,
+        by_architecture,
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/board/workers/load/average",
+    operation_id = "getBoardWorkerLoadAverage",
+    tag = "board",
+    summary = "Average fleet load by capability and architecture",
+    description = "Average load over the window for each capability (eval/network/build) and architecture: `in_flight` is the mean number of running jobs from dispatched-job times, `capacity` the mean summed slot count of the workers that served it from worker samples. Busy % = in_flight / capacity. Scoped to the caller's projects.",
+    params(WindowParams),
+    responses((status = OK, description = "Average fleet load", body = WorkerLoadAverage), WebError)
+)]
+pub async fn get_board_worker_load_average(
+    State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Query(params): Query<WindowParams>,
+) -> WebResult<Json<BaseResponse<WorkerLoadAverage>>> {
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+    let window = window_clause(&params);
+
+    let project_filter = scope.project_in_list();
+    if let Some(list) = &project_filter
+        && list.is_empty()
+    {
+        return Ok(ok_json(WorkerLoadAverage::default()));
+    }
+
+    let filter = project_filter.as_deref();
+    let busy = worker_load::busy_hours(&state.web_db, window, filter).await?;
+    let capacity = worker_load::capacity_hours(&state.web_db, window, filter).await?;
+    Ok(ok_json(average_load(busy, capacity, window)))
+}
+
 const DURATION_BANDS: &[&str] = &[
     "<10s", "10-30s", "30-60s", "1-3m", "3-10m", "10-30m", ">30m",
 ];
@@ -637,5 +730,47 @@ mod tests {
         assert_eq!(view[0].restarts, 1);
         assert_eq!(view[0].last_ok_seconds_ago, Some(5.0));
         assert_eq!(view[0].last_error.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn average_load_divides_job_and_slot_hours_by_the_window() {
+        use gradient_db::metrics::worker_load::LoadHours;
+        let row = |dimension: &str, key: &str, hours: f64, workers: i64| LoadHours {
+            dimension: dimension.into(),
+            key: key.into(),
+            hours,
+            workers,
+        };
+        let busy = vec![
+            row("capability", "build", 12.0, 2),
+            row("architecture", "aarch64-linux", 6.0, 1),
+        ];
+        let capacity = vec![
+            row("capability", "build", 48.0, 2),
+            row("capability", "eval", 24.0, 1),
+            row("architecture", "aarch64-linux", 24.0, 1),
+            row("architecture", "x86_64-linux", 24.0, 1),
+        ];
+        let load = super::average_load(busy, capacity, 24);
+
+        let keys: Vec<_> = load.by_capability.iter().map(|b| b.key.as_str()).collect();
+        assert_eq!(keys, ["eval", "network", "build"]);
+        let build = &load.by_capability[2];
+        assert_eq!(
+            (build.in_flight, build.capacity, build.workers),
+            (0.5, 2.0, 2)
+        );
+        let network = &load.by_capability[1];
+        assert_eq!((network.in_flight, network.capacity), (0.0, 0.0));
+
+        let arch: Vec<_> = load
+            .by_architecture
+            .iter()
+            .map(|b| (b.key.as_str(), b.in_flight, b.capacity))
+            .collect();
+        assert_eq!(
+            arch,
+            [("aarch64-linux", 0.25, 1.0), ("x86_64-linux", 0.0, 1.0)]
+        );
     }
 }

@@ -395,6 +395,7 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(board_metrics::get_board_durations_heatmap))
                 .routes(routes!(board::get_board_workers))
                 .routes(routes!(board::get_board_worker_load))
+                .routes(routes!(board_metrics::get_board_worker_load_average))
                 .routes(routes!(board::board_live_ws))
                 .routes(routes!(live::cache_live_ws))
                 .routes(routes!(live::task_live_ws))
