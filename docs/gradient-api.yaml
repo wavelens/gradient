@@ -1269,12 +1269,22 @@ paths:
     get:
       tags:
       - board
-      summary: Cache change pings (WebSocket)
-      description: |-
-        Upgrades to a WebSocket emitting a content-free `{"type":"cache_changed"}`
-        ping whenever cache contents or stats change. Subscribers refetch their
-        own scope-filtered `GET /board/cache` view.
+      summary: Cache statistics live updates (WebSocket)
+      description: 'Upgrades to a WebSocket that pushes a `board.cache` event whose `content` is a `BoardCacheSnapshot`: the `GET /board/cache` view as `stats` and the `GET /board/cache/upstream-caches` view as `upstream`, scoped like those endpoints. The first frame follows the upgrade. Later frames follow cache changes, at most one per 2 seconds, and only when the snapshot differs from the last one sent.'
       operationId: boardCacheLive
+      parameters:
+      - name: window_hours
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: traffic
+        in: query
+        description: '`total` counts every NAR transfer of the cache. `external` counts only NARs sent over the HTTP binary cache and the `/proto` cache session.'
+        required: false
+        schema:
+          $ref: '#/components/schemas/TrafficKind'
       responses:
         '101':
           description: Switching Protocols - WebSocket upgrade successful
@@ -14094,6 +14104,16 @@ components:
         remaining:
           type: integer
           minimum: 0
+    BoardCacheSnapshot:
+      type: object
+      required:
+      - stats
+      - upstream
+      properties:
+        stats:
+          $ref: '#/components/schemas/BoardCacheStats'
+        upstream:
+          $ref: '#/components/schemas/BoardUpstreamCacheStats'
     BoardCacheStats:
       type: object
       required:
