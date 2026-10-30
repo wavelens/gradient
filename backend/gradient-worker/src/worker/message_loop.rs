@@ -364,8 +364,8 @@ impl MessageLoopState {
                 }
                 self.stop_warm_guests_once_idle();
             }
-            ServerMessage::PreWarmVms { count } => {
-                self.executor.set_upcoming_exec_jobs(count);
+            ServerMessage::PreWarmVms { count, sizes } => {
+                self.executor.pre_warm(count, sizes);
             }
             ServerMessage::Error { code, message } => {
                 error!(code, %message, "protocol error from server");

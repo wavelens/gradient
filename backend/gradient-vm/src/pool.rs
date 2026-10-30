@@ -4,13 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use gradient_wire::types::{GuestCapacity, GuestSize, ResourceAmount};
+use gradient_wire::types::{
+    GuestCapacity, GuestSize, ResourceAmount, WarmGuests, count_warm_guests,
+};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -34,6 +37,8 @@ const BOOT_RETRY: Duration = Duration::from_secs(30);
 
 type Taken = Result<(Guest, BudgetHold), GuestBootError>;
 
+type SizeKey = (u32, u64);
+
 struct WarmGuest {
     guest: Guest,
     hold: BudgetHold,
@@ -42,6 +47,7 @@ struct WarmGuest {
 struct WarmBootTicket {
     id: u64,
     stop: CancellationToken,
+    size: GuestSize,
 }
 
 struct WarmBoots<H> {
@@ -57,11 +63,16 @@ impl<H> WarmBoots<H> {
         }
     }
 
-    fn reserve(&mut self, hold: H, pool_stop: &CancellationToken) -> WarmBootTicket {
+    fn reserve(
+        &mut self,
+        hold: H,
+        size: GuestSize,
+        pool_stop: &CancellationToken,
+    ) -> WarmBootTicket {
         let (id, stop) = (self.next, pool_stop.child_token());
         self.next += 1;
         self.reserved.insert(id, (stop.clone(), hold));
-        WarmBootTicket { id, stop }
+        WarmBootTicket { id, stop, size }
     }
 
     fn finish(&mut self, id: u64) -> Option<H> {
@@ -83,9 +94,9 @@ pub struct GuestPool {
     config: VmConfig,
     units: GuestUnits,
     budget: GuestBudget,
-    slots: Mutex<Slots<WarmGuest>>,
+    slots: Mutex<BTreeMap<SizeKey, Slots<WarmGuest>>>,
     warm_boots: Mutex<WarmBoots<BudgetHold>>,
-    upcoming_exec_jobs: AtomicU32,
+    wanted: Mutex<Vec<WarmGuests>>,
     draining: AtomicBool,
     reserved_cids: Mutex<BTreeSet<u32>>,
     stopping: CancellationToken,
@@ -99,9 +110,9 @@ impl GuestPool {
             config,
             units,
             budget,
-            slots: Mutex::new(Slots::new()),
+            slots: Mutex::default(),
             warm_boots: Mutex::new(WarmBoots::new()),
-            upcoming_exec_jobs: AtomicU32::new(0),
+            wanted: Mutex::default(),
             draining: AtomicBool::new(false),
             reserved_cids: Mutex::default(),
             stopping: CancellationToken::new(),
@@ -124,9 +135,8 @@ impl GuestPool {
 
     pub fn capacity(&self) -> GuestCapacity {
         let mut warm: Vec<GuestSize> = lock(&self.slots)
-            .warm
-            .iter()
-            .map(|warm| warm.hold.size())
+            .values()
+            .flat_map(|slots| slots.warm.iter().map(|warm| warm.hold.size()))
             .collect();
         warm.extend(lock(&self.warm_boots).holds().map(BudgetHold::size));
         with_warm_guests_free(self.budget.capacity(), &warm)
@@ -139,7 +149,9 @@ impl GuestPool {
     pub async fn take(self: &Arc<Self>, job_id: String, size: GuestSize) -> Taken {
         let image = self.worker_image()?;
         let size = job_size(size, &image);
-        let warm = lock(&self.slots).take(|warm| warm.hold.size().warm_guest_takes(size));
+        let warm = lock(&self.slots)
+            .get_mut(&size_key(size))
+            .and_then(|slots| slots.take(|warm| warm.hold.size().warm_guest_takes(size)));
         let taken = match warm {
             Some(warm) => self.claim_warm(warm, size).await,
             None => self.cold_boot(image.sized(&size), size).await,
@@ -183,7 +195,9 @@ impl GuestPool {
             if let Some(done) = attempt() {
                 return Ok(done);
             }
-            let evicted = lock(&self.slots).take(|_| true);
+            let evicted = lock(&self.slots)
+                .values_mut()
+                .find_map(|slots| slots.take(|_| true));
             if let Some(warm) = evicted {
                 info!(guest = %warm.guest.id(), "stopping a warm guest to make room for a job");
                 self.teardown_warm(warm).await;
@@ -213,30 +227,29 @@ impl GuestPool {
     }
 
     pub fn refill(self: &Arc<Self>) {
-        let wanted = lock(&self.slots).start_boots(self.target(), self.draining());
-        if wanted == 0 {
-            return;
-        }
-        let holds = match self.warm_size() {
-            Ok(size) => warm_boot_holds(&self.budget, size, wanted),
-            Err(e) => {
-                warn!(error = %e, "warm guests not booted");
-                Vec::new()
+        let draining = self.draining();
+        for (key, target) in self.targets() {
+            let wanted = slots_of(&mut lock(&self.slots), key).start_boots(target, draining);
+            if wanted == 0 {
+                continue;
             }
-        };
-        lock(&self.slots).cancel_boots(wanted - count(holds.len()));
-        for hold in holds {
-            let boot = lock(&self.warm_boots).reserve(hold, &self.stopping);
-            let pool = Arc::clone(self);
-            self.tasks
-                .spawn(async move { pool.boot_into_pool(boot).await });
+            let size = warm_size(key);
+            let holds = warm_boot_holds(&self.budget, size, wanted);
+            slots_of(&mut lock(&self.slots), key).cancel_boots(wanted - count(holds.len()));
+            for hold in holds {
+                let boot = lock(&self.warm_boots).reserve(hold, size, &self.stopping);
+                let pool = Arc::clone(self);
+                self.tasks
+                    .spawn(async move { pool.boot_into_pool(boot).await });
+            }
         }
     }
 
     pub fn adopt_warm(self: &Arc<Self>, guest: Guest) {
         let hold = self.adopt_size(guest.state());
-        let (target, draining) = (self.target(), self.draining());
-        let surplus = self.park(WarmGuest { guest, hold }, |slots, warm| {
+        let key = size_key(hold.size());
+        let (target, draining) = (self.target_of(key), self.draining());
+        let surplus = self.park(key, WarmGuest { guest, hold }, |slots, warm| {
             slots.offer(warm, target, draining)
         });
         if let Some(warm) = surplus {
@@ -258,19 +271,24 @@ impl GuestPool {
         self.tasks.spawn(async move { pool.stop_warm().await });
     }
 
-    pub fn set_upcoming_exec_jobs(self: &Arc<Self>, count: u32) {
-        let before = self.target();
-        self.upcoming_exec_jobs.store(count, Ordering::SeqCst);
-        let target = self.target();
-        if target != before {
-            info!(target, "warm guest target changed");
+    pub fn want_warm_guests(self: &Arc<Self>, wanted: Vec<WarmGuests>) {
+        let before = self.targets();
+        *lock(&self.wanted) = wanted;
+        let targets = self.targets();
+        if targets != before {
+            let target: u32 = targets.values().sum();
+            info!(target, ?targets, "warm guest target changed");
         }
         self.refill();
         self.trim();
     }
 
     pub fn trim(self: &Arc<Self>) {
-        let doomed = lock(&self.slots).surplus(self.target());
+        let targets = self.targets();
+        let doomed: Vec<WarmGuest> = lock(&self.slots)
+            .iter_mut()
+            .flat_map(|(key, slots)| slots.surplus(targets.get(key).copied().unwrap_or(0)))
+            .collect();
         for warm in doomed {
             let pool = Arc::clone(self);
             self.tasks
@@ -278,12 +296,17 @@ impl GuestPool {
         }
     }
 
-    pub fn target(&self) -> u32 {
-        warm_target(
+    fn targets(&self) -> BTreeMap<SizeKey, u32> {
+        warm_targets(
             self.config.pre_warm,
             self.config.max_pre_warm,
-            self.upcoming_exec_jobs.load(Ordering::SeqCst),
+            self.warm_size().ok(),
+            &lock(&self.wanted),
         )
+    }
+
+    fn target_of(&self, key: SizeKey) -> u32 {
+        self.targets().get(&key).copied().unwrap_or(0)
     }
 
     pub fn set_draining(&self) {
@@ -295,21 +318,20 @@ impl GuestPool {
         self.refill();
     }
 
-    pub fn warm_count(&self) -> u32 {
-        count(lock(&self.slots).warm.len())
-    }
-
-    pub fn warm_guest_size(&self) -> GuestSize {
-        lock(&self.slots)
-            .warm
-            .first()
-            .map(|warm| warm.hold.size())
-            .unwrap_or_default()
+    pub fn warm_guests(&self) -> Vec<WarmGuests> {
+        count_warm_guests(
+            lock(&self.slots)
+                .iter()
+                .map(|(key, slots)| (warm_size(*key), count(slots.warm.len()))),
+        )
     }
 
     pub async fn stop_warm(&self) {
         self.set_draining();
-        let warm = std::mem::take(&mut lock(&self.slots).warm);
+        let warm: Vec<WarmGuest> = lock(&self.slots)
+            .values_mut()
+            .flat_map(|slots| std::mem::take(&mut slots.warm))
+            .collect();
         for warm in warm {
             self.teardown_warm(warm).await;
         }
@@ -317,7 +339,7 @@ impl GuestPool {
 
     pub async fn stop_all_units(&self) {
         self.stop_boots().await;
-        lock(&self.slots).warm.clear();
+        lock(&self.slots).clear();
         self.stop_every_unit().await;
     }
 
@@ -377,8 +399,13 @@ impl GuestPool {
         self.running(guest, hold, size, job_id)
     }
 
-    async fn boot_warm(&self, stop: &CancellationToken) -> Result<Guest, GuestBootError> {
-        self.boot_image_until(&self.worker_image()?, stop).await
+    async fn boot_warm(
+        &self,
+        stop: &CancellationToken,
+        size: GuestSize,
+    ) -> Result<Guest, GuestBootError> {
+        self.boot_image_until(&self.worker_image()?.sized(&size), stop)
+            .await
     }
 
     fn worker_image(&self) -> Result<GuestImage, GuestBootError> {
@@ -405,8 +432,9 @@ impl GuestPool {
     }
 
     async fn boot_into_pool(self: Arc<Self>, boot: WarmBootTicket) {
+        let key = size_key(boot.size);
         loop {
-            match self.boot_warm(&boot.stop).await {
+            match self.boot_warm(&boot.stop, boot.size).await {
                 Ok(guest) => return self.park_warm_boot(&boot, guest).await,
                 Err(e) if !boot.stop.is_cancelled() => {
                     warn!(error = %e, "warm guest boot failed, retrying in 30s");
@@ -417,11 +445,12 @@ impl GuestPool {
                 () = tokio::time::sleep(BOOT_RETRY) => {}
                 () = boot.stop.cancelled() => {}
             }
+            let (target, draining) = (self.target_of(key), self.draining());
             let retry = !boot.stop.is_cancelled()
-                && lock(&self.slots).retry_boot(self.target(), self.draining());
+                && slots_of(&mut lock(&self.slots), key).retry_boot(target, draining);
             if !retry {
                 if boot.stop.is_cancelled() {
-                    lock(&self.slots).cancel_boots(1);
+                    slots_of(&mut lock(&self.slots), key).cancel_boots(1);
                 }
                 drop(lock(&self.warm_boots).finish(boot.id));
                 return;
@@ -429,28 +458,35 @@ impl GuestPool {
         }
     }
 
-    async fn park_warm_boot(&self, boot: &WarmBootTicket, guest: Guest) {
-        let Some(hold) = lock(&self.warm_boots).finish(boot.id) else {
-            lock(&self.slots).cancel_boots(1);
+    async fn park_warm_boot(&self, boot: &WarmBootTicket, mut guest: Guest) {
+        let key = size_key(boot.size);
+        let hold = lock(&self.warm_boots).finish(boot.id);
+        let recorded = guest.record_size(boot.size);
+        let Some(hold) = hold.filter(|_| recorded.is_ok()) else {
+            if let Err(e) = recorded {
+                warn!(error = %format!("{e:#}"), "warm guest size not recorded");
+            }
+            slots_of(&mut lock(&self.slots), key).cancel_boots(1);
             return self.teardown(guest).await;
         };
-        let (target, draining) = (self.target(), self.draining());
-        let surplus = self.park(WarmGuest { guest, hold }, |slots, warm| {
+        let (target, draining) = (self.target_of(key), self.draining());
+        let surplus = self.park(key, WarmGuest { guest, hold }, |slots, warm| {
             slots.finish_boot(warm, target, draining)
         });
         self.stop_surplus(surplus).await;
     }
 
-    async fn keep_or_stop(&self, guest: Guest, mut hold: BudgetHold) {
-        let fits_warm = self
-            .warm_size()
-            .is_ok_and(|size| hold.size().warm_guest_takes(size) && hold.resize(size));
+    async fn keep_or_stop(&self, mut guest: Guest, mut hold: BudgetHold) {
+        let key = size_key(hold.size());
+        let target = self.target_of(key);
+        let size = warm_size(key);
+        let fits_warm = target > 0 && hold.resize(size) && guest.record_size(size).is_ok();
         let warm = WarmGuest { guest, hold };
         if !fits_warm {
             return self.teardown_warm(warm).await;
         }
-        let (target, draining) = (self.target(), self.draining());
-        let surplus = self.park(warm, |slots, warm| slots.offer(warm, target, draining));
+        let draining = self.draining();
+        let surplus = self.park(key, warm, |slots, warm| slots.offer(warm, target, draining));
         self.stop_surplus(surplus).await;
     }
 
@@ -462,12 +498,12 @@ impl GuestPool {
 
     fn park(
         &self,
+        key: SizeKey,
         warm: WarmGuest,
         place: impl FnOnce(&mut Slots<WarmGuest>, WarmGuest) -> Option<WarmGuest>,
     ) -> Option<WarmGuest> {
         let id = warm.guest.id().clone();
-        let mut slots = lock(&self.slots);
-        let surplus = place(&mut slots, warm);
+        let surplus = place(slots_of(&mut lock(&self.slots), key), warm);
         if surplus.is_none() {
             self.states.warm(&id);
         }
@@ -503,7 +539,7 @@ fn job_size(size: GuestSize, image: &GuestImage) -> GuestSize {
     }
 }
 
-pub fn warm_boot_holds(budget: &GuestBudget, size: GuestSize, wanted: u32) -> Vec<BudgetHold> {
+fn warm_boot_holds(budget: &GuestBudget, size: GuestSize, wanted: u32) -> Vec<BudgetHold> {
     (0..wanted).map_while(|_| budget.hold(size)).collect()
 }
 
@@ -576,18 +612,101 @@ impl<T> Slots<T> {
     }
 }
 
-pub fn warm_target(pre_warm: u32, max_pre_warm: u32, upcoming_exec_jobs: u32) -> u32 {
-    pre_warm.max(upcoming_exec_jobs.min(max_pre_warm))
+pub fn wanted_warm_guests(count: u32, sizes: Vec<WarmGuests>) -> Vec<WarmGuests> {
+    match sizes.is_empty() {
+        true => vec![WarmGuests {
+            size: GuestSize::default(),
+            count,
+        }],
+        false => sizes,
+    }
 }
 
-pub fn wanted_boots(warm: u32, booting: u32, target: u32, draining: bool) -> u32 {
+fn warm_targets(
+    pre_warm: u32,
+    max_pre_warm: u32,
+    image_size: Option<GuestSize>,
+    wanted: &[WarmGuests],
+) -> BTreeMap<SizeKey, u32> {
+    let Some(image) = image_size.map(size_key) else {
+        return BTreeMap::new();
+    };
+    let asked = asked_beyond_pre_warm(image, pre_warm, wanted);
+    let mut targets = share_out(max_pre_warm.saturating_sub(pre_warm), &asked);
+    if pre_warm > 0 {
+        *targets.entry(image).or_default() += pre_warm;
+    }
+    targets
+}
+
+fn asked_beyond_pre_warm(
+    image: SizeKey,
+    pre_warm: u32,
+    wanted: &[WarmGuests],
+) -> Vec<(SizeKey, u32)> {
+    let mut asked: BTreeMap<SizeKey, u32> = BTreeMap::new();
+    for warm in wanted {
+        let key = match warm.size.is_unset() {
+            true => image,
+            false => size_key(warm.size),
+        };
+        *asked.entry(key).or_default() += warm.count;
+    }
+    if let Some(at_image) = asked.get_mut(&image) {
+        *at_image = at_image.saturating_sub(pre_warm);
+    }
+    let mut asked: Vec<(SizeKey, u32)> = asked.into_iter().filter(|(_, n)| *n > 0).collect();
+    asked.sort_by_key(|(key, n)| (Reverse(*n), *key != image, *key));
+    asked
+}
+
+fn share_out(max_pre_warm: u32, asked: &[(SizeKey, u32)]) -> BTreeMap<SizeKey, u32> {
+    let mut targets = BTreeMap::new();
+    let mut left = max_pre_warm;
+    for round in 0.. {
+        let open: Vec<SizeKey> = asked
+            .iter()
+            .filter(|(_, n)| *n > round)
+            .map(|(key, _)| *key)
+            .collect();
+        if open.is_empty() || left == 0 {
+            break;
+        }
+        for key in open
+            .into_iter()
+            .take(usize::try_from(left).unwrap_or(usize::MAX))
+        {
+            *targets.entry(key).or_default() += 1;
+            left -= 1;
+        }
+    }
+    targets
+}
+
+fn size_key(size: GuestSize) -> SizeKey {
+    (size.cpus, size.memory_mb)
+}
+
+fn warm_size((cpus, memory_mb): SizeKey) -> GuestSize {
+    GuestSize {
+        cpus,
+        memory_mb,
+        disk_mb: 0,
+    }
+}
+
+fn slots_of<T>(slots: &mut BTreeMap<SizeKey, Slots<T>>, key: SizeKey) -> &mut Slots<T> {
+    slots.entry(key).or_insert_with(Slots::new)
+}
+
+fn wanted_boots(warm: u32, booting: u32, target: u32, draining: bool) -> u32 {
     if draining {
         return 0;
     }
     target.saturating_sub(warm.saturating_add(booting))
 }
 
-pub fn surplus(warm: u32, target: u32) -> u32 {
+fn surplus(warm: u32, target: u32) -> u32 {
     warm.saturating_sub(target)
 }
 
@@ -668,7 +787,7 @@ mod tests {
         let budget = GuestBudget::new(size(2, 500, 10_240));
         let pool_stop = CancellationToken::new();
         let mut boots = WarmBoots::new();
-        let boot = boots.reserve(budget.hold(warm_size).unwrap(), &pool_stop);
+        let boot = boots.reserve(budget.hold(warm_size).unwrap(), warm_size, &pool_stop);
         assert_eq!(
             with_warm_guests_free(
                 budget.capacity(),
@@ -716,13 +835,72 @@ mod tests {
         assert_eq!(slots.booting, 1);
     }
 
+    fn wanted(sizes: &[(GuestSize, u32)]) -> Vec<WarmGuests> {
+        sizes
+            .iter()
+            .map(|&(size, count)| WarmGuests { size, count })
+            .collect()
+    }
+
     #[test]
-    fn the_warm_target_is_clamped_by_max_pre_warm() {
-        assert_eq!(warm_target(1, 4, 10), 4);
-        assert_eq!(warm_target(1, 0, 10), 1);
-        assert_eq!(warm_target(3, 8, 2), 3);
-        assert_eq!(warm_target(0, 8, 5), 5);
-        assert_eq!(warm_target(2, 8, 0), 2);
+    fn the_image_size_target_is_clamped_by_max_pre_warm() {
+        let image = size(2, 500, 0);
+        let target = |pre_warm, max_pre_warm, upcoming| {
+            let wanted = wanted_warm_guests(upcoming, Vec::new());
+            warm_targets(pre_warm, max_pre_warm, Some(image), &wanted)
+                .get(&size_key(image))
+                .copied()
+                .unwrap_or(0)
+        };
+        assert_eq!(target(1, 4, 10), 4);
+        assert_eq!(target(1, 0, 10), 1);
+        assert_eq!(target(3, 8, 2), 3);
+        assert_eq!(target(0, 8, 5), 5);
+        assert_eq!(target(2, 8, 0), 2);
+        assert_eq!(target(0, 8, 0), 0);
+    }
+
+    #[test]
+    fn every_asked_size_gets_a_warm_guest_before_any_gets_a_second() {
+        let image = size(2, 500, 0);
+        let large = size(16, 65_536, 0);
+        let medium = size(8, 16_384, 0);
+        let asked = wanted(&[(large, 5), (GuestSize::default(), 1), (medium, 1)]);
+
+        assert_eq!(
+            warm_targets(0, 3, Some(image), &asked),
+            BTreeMap::from([
+                (size_key(image), 1),
+                (size_key(medium), 1),
+                (size_key(large), 1)
+            ])
+        );
+        assert_eq!(
+            warm_targets(0, 2, Some(image), &asked),
+            BTreeMap::from([(size_key(image), 1), (size_key(large), 1)]),
+            "the most asked size goes first, then the image size"
+        );
+        assert_eq!(warm_targets(0, 5, Some(image), &asked)[&size_key(large)], 3);
+    }
+
+    #[test]
+    fn pre_warm_guests_of_the_image_size_count_against_max_pre_warm() {
+        let image = size(2, 500, 0);
+        let large = size(16, 65_536, 0);
+        assert_eq!(
+            warm_targets(1, 3, Some(image), &wanted(&[(large, 4)])),
+            BTreeMap::from([(size_key(image), 1), (size_key(large), 2)])
+        );
+        assert_eq!(
+            warm_targets(1, 3, Some(image), &wanted(&[(image, 2), (large, 4)])),
+            BTreeMap::from([(size_key(image), 2), (size_key(large), 1)]),
+            "an image size job asks beyond the pre-warm guest"
+        );
+        assert_eq!(
+            warm_targets(1, 3, None, &wanted(&[(GuestSize::default(), 4)])),
+            BTreeMap::new(),
+            "an unreadable image leaves the image size without a target"
+        );
     }
 
     #[test]

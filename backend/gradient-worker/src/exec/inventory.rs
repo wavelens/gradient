@@ -5,7 +5,7 @@
  */
 
 use gradient_vm::DeviceInventory;
-use gradient_wire::types::{DeviceClass, DeviceRequest, ExecInventory, GuestCapacity, GuestSize};
+use gradient_wire::types::{DeviceClass, DeviceRequest, ExecInventory, GuestCapacity, WarmGuests};
 
 use crate::config::ExecArgs;
 
@@ -13,8 +13,7 @@ pub fn advertised(
     devices: &DeviceInventory,
     config: &ExecArgs,
     worker_id: &str,
-    warm_guests: u32,
-    warm_guest_size: GuestSize,
+    warm_guest_sizes: Vec<WarmGuests>,
     secrets: Vec<String>,
     guest_capacity: GuestCapacity,
 ) -> ExecInventory {
@@ -41,9 +40,14 @@ pub fn advertised(
         secrets,
         allow: config.allow(),
         defaults: config.defaults(),
-        warm_guests,
+        warm_guests: warm_guest_sizes.iter().map(|warm| warm.count).sum(),
         guest_capacity,
-        warm_guest_size,
+        warm_guest_size: warm_guest_sizes
+            .iter()
+            .max_by_key(|warm| warm.count)
+            .map(|warm| warm.size)
+            .unwrap_or_default(),
+        warm_guest_sizes,
     }
 }
 
@@ -57,29 +61,46 @@ pub fn device_requests(requests: &[DeviceRequest]) -> Vec<(String, u32)> {
 #[cfg(test)]
 mod tests {
     use gradient_vm::SysfsProbe;
+    use gradient_wire::types::GuestSize;
 
     use super::*;
 
     #[test]
-    fn the_worker_id_is_a_label() {
+    fn the_worker_id_is_a_label_and_the_warm_guests_add_up() {
         let devices = DeviceInventory::from_config(&[], &SysfsProbe);
         let config = ExecArgs {
             labels: vec!["gpu".into()],
             ..ExecArgs::default()
         };
+        let large = GuestSize {
+            cpus: 16,
+            memory_mb: 65_536,
+            disk_mb: 0,
+        };
+        let sizes = vec![
+            WarmGuests {
+                size: GuestSize::default_request().warm(),
+                count: 2,
+            },
+            WarmGuests {
+                size: large,
+                count: 1,
+            },
+        ];
         let inventory = advertised(
             &devices,
             &config,
             "worker-7",
-            1,
-            GuestSize::default_request(),
+            sizes.clone(),
             Vec::new(),
             GuestCapacity::default(),
         );
         assert_eq!(inventory.labels, ["gpu", "worker-7"]);
         assert_eq!(
             (inventory.warm_guests, inventory.warm_guest_size),
-            (1, GuestSize::default_request())
+            (3, GuestSize::default_request().warm()),
+            "a server before version 54 sees the most common warm size"
         );
+        assert_eq!(inventory.warm_guest_sizes, sizes);
     }
 }

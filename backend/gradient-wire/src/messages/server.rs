@@ -11,7 +11,7 @@ use crate::codec::Proto;
 use crate::types::{
     CachedPath, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
     EvalCachePullOutcome, EvalShardOutcome, GradientCapabilities, GrantTarget, GuestChannelKind,
-    ImportOutcome, InputOutcome, Job, JobCandidate, UploadOutcome,
+    ImportOutcome, InputOutcome, Job, JobCandidate, UploadOutcome, WarmGuests,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -202,6 +202,8 @@ pub enum ServerMessage {
     #[proto(43)]
     PreWarmVms {
         count: u32,
+        #[proto(54, default)]
+        sizes: Vec<WarmGuests>,
     },
 
     #[proto(44)]

@@ -100,6 +100,44 @@ impl GuestSize {
     pub fn warm_guest_takes(&self, job: GuestSize) -> bool {
         self.cpus == job.cpus && self.memory_mb == job.memory_mb
     }
+
+    pub fn warm(&self) -> GuestSize {
+        GuestSize {
+            disk_mb: 0,
+            ..*self
+        }
+    }
+}
+
+#[derive(
+    Proto,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    utoipa::ToSchema,
+)]
+pub struct WarmGuests {
+    pub size: GuestSize,
+    pub count: u32,
+}
+
+pub fn count_warm_guests(sizes: impl IntoIterator<Item = (GuestSize, u32)>) -> Vec<WarmGuests> {
+    let mut counted: Vec<WarmGuests> = Vec::new();
+    for (size, count) in sizes {
+        let size = size.warm();
+        match counted.iter_mut().find(|warm| warm.size == size) {
+            Some(warm) => warm.count += count,
+            None => counted.push(WarmGuests { size, count }),
+        }
+    }
+    counted.retain(|warm| warm.count > 0);
+    counted.sort_by_key(|warm| (warm.size.cpus, warm.size.memory_mb));
+    counted
 }
 
 #[derive(
@@ -221,6 +259,21 @@ pub struct ExecInventory {
     #[proto(53, default)]
     #[serde(default)]
     pub warm_guest_size: GuestSize,
+    #[proto(54, default)]
+    #[serde(default)]
+    pub warm_guest_sizes: Vec<WarmGuests>,
+}
+
+impl ExecInventory {
+    pub fn has_warm_guest_for(&self, job: GuestSize) -> bool {
+        match self.warm_guest_sizes.is_empty() {
+            true => self.warm_guests > 0 && self.warm_guest_size.warm_guest_takes(job),
+            false => self
+                .warm_guest_sizes
+                .iter()
+                .any(|warm| warm.count > 0 && warm.size.warm_guest_takes(job)),
+        }
+    }
 }
 
 #[derive(
@@ -433,6 +486,30 @@ pub fn exec_image_attr(attr: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn warm_guests_count_per_cpu_and_memory_whatever_the_disk() {
+        let size = |cpus, disk_mb| GuestSize {
+            cpus,
+            memory_mb: 2048,
+            disk_mb,
+        };
+        let counted = count_warm_guests([(size(8, 0), 1), (size(2, 4096), 2), (size(2, 10), 1)]);
+        assert_eq!(
+            counted,
+            [
+                WarmGuests {
+                    size: size(2, 0),
+                    count: 3
+                },
+                WarmGuests {
+                    size: size(8, 0),
+                    count: 1
+                },
+            ]
+        );
+        assert!(count_warm_guests([(size(2, 0), 0)]).is_empty());
+    }
 
     #[test]
     fn a_device_string_names_a_count_that_defaults_to_one() {

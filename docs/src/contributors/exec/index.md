@@ -69,7 +69,7 @@ flowchart LR
 | `ExecDeviceFit` | `600` times the share of the idle worker devices in the request, `600` on a worker without idle devices |
 | `ExecWaitTime` | One point per second in the queue, at most `3600` |
 
-- Usable warm guests need a job without a custom image and the same `cpus` and `memory_mb` as `ExecInventory.warm_guest_size`.
+- Usable warm guests need a job without a custom image and the same `cpus` and `memory_mb` as an entry of `ExecInventory.warm_guest_sizes`.
 - `ExecWarmGuestElsewhere` can veto a worker without a usable warm guest. The veto needs another worker with free capacity and a usable warm guest for the job.
 - Vetoes end after 2 dispatch rounds, and the cold worker can start the job then.
 
@@ -98,11 +98,11 @@ Apps with `nodes > 1` turn into one `exec_job` row per node and a single [cluste
 
 ## Pre-Warm Counts
 
-Workers get `ServerMessage::PreWarmVms { count }` as an absolute target of guests to boot ahead.
+Workers get `ServerMessage::PreWarmVms { count, sizes }` as an absolute target of guests to boot ahead. `sizes` can list a `WarmGuests` entry per `cpus` and `memory_mb` of the upcoming jobs. `count` is the sum, the only part for workers below protocol 54.
 
 - Exec entry points from a running evaluation without a job join the upcoming set. Jobs in `Created` or `Queued` belong to the same set.
 - Custom images keep their jobs out of the count. Jobs waiting for a manual start stay out of the count too.
-- Upcoming jobs add `nodes` to every worker without draining, with a fit against device totals and with access to the job's project.
+- Upcoming jobs add `nodes` to the entry of their guest size. Every worker without draining counts them. The worker needs a fit against device totals and access to the job's project.
 - The scheduler can refresh the counts after new capabilities, an exec pass, a recorded eval result and an abort.
 - Counts go out only on change. New connections start at 0.
 
@@ -232,7 +232,13 @@ flowchart LR
 ### Pre-Warm
 
 - Guests boot with `/nix/store` shared read-only over virtiofs. Workers pause a guest after the first agent answer.
-- Warm target: `max(preWarm, min(count, maxPreWarm))`, with `count` from the last `PreWarmVms`.
+- Warm guests belong to a size, by `cpus` and `memory_mb`. `warm_targets` in `gradient-vm/src/pool.rs` can turn the last `PreWarmVms` into a target per size.
+- `preWarm` guests of the image size come first. Upcoming jobs of the image size count against them.
+- The other asked guests share `maxPreWarm` minus `preWarm`. Asked sizes receive one guest each before a second round starts.
+- Sizes with more upcoming jobs come first, then the image size, then the smaller size.
+- Jobs of the image size alone lead to the target `max(preWarm, min(count, maxPreWarm))`.
+- Warm guests of a size above its target stop. Jobs short of budget can stop warm guests of any size.
+- `ExecInventory.warm_guest_sizes` can report the warm guests per size. Workers below protocol 54 report the most common size in `warm_guest_size`.
 - New connections start at count 0. Warm guests above the target stop.
 - Jobs take a warm guest, or boot a new one when none is warm. Replacement boots launch right after.
 - Server `Draining` can end new boots. Warm guests stop once no exec job is active.

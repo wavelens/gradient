@@ -278,8 +278,8 @@ impl Actor for SessionActor {
                     myself.stop(Some("write failed".into()));
                 }
             }
-            SessionMsg::Signal(SessionSignal::PreWarmVms { count }) => {
-                if send_server_msg(&st.writer, &ServerMessage::PreWarmVms { count })
+            SessionMsg::Signal(SessionSignal::PreWarmVms { count, sizes }) => {
+                if send_server_msg(&st.writer, &ServerMessage::PreWarmVms { count, sizes })
                     .await
                     .is_err()
                 {
@@ -843,7 +843,10 @@ pub(in crate::handler) mod tests {
         .unwrap();
 
         actor
-            .send_message(SessionMsg::Signal(SessionSignal::PreWarmVms { count: 2 }))
+            .send_message(SessionMsg::Signal(SessionSignal::PreWarmVms {
+                count: 2,
+                sizes: Vec::new(),
+            }))
             .unwrap();
 
         let frame = client
@@ -856,7 +859,10 @@ pub(in crate::handler) mod tests {
         };
         assert_eq!(
             from_bytes::<ServerMessage>(bytes, *PROTO_VERSIONS.end()).unwrap(),
-            ServerMessage::PreWarmVms { count: 2 }
+            ServerMessage::PreWarmVms {
+                count: 2,
+                sizes: Vec::new()
+            }
         );
     }
 

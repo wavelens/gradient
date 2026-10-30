@@ -78,8 +78,7 @@ pub fn score(job: &ExecCandidate<'_>, worker: &ExecInventory) -> ScoreBreakdown 
 pub fn has_usable_warm_guest(requirement: &ExecRequirement, worker: &ExecInventory) -> bool {
     !requirement.custom_image
         && worker.warm_guests > 0
-        && (requirement.guest.is_unset()
-            || worker.warm_guest_size.warm_guest_takes(requirement.guest))
+        && (requirement.guest.is_unset() || worker.has_warm_guest_for(requirement.guest))
 }
 
 fn warm_guest(requirement: &ExecRequirement, worker: &ExecInventory) -> f64 {
@@ -209,6 +208,18 @@ mod tests {
             !has_usable_warm_guest(&plain, &worker_with_warm_guests(1, GuestSize::default())),
             "a worker without a reported warm size offers no usable guest"
         );
+    }
+
+    #[test]
+    fn a_warm_guest_of_a_second_size_serves_a_job_of_that_size() {
+        let worker = ExecInventory {
+            warm_guest_sizes: gradient_wire::types::count_warm_guests([(small(), 1), (large(), 1)]),
+            ..worker_with_warm_guests(2, small())
+        };
+        assert!(has_usable_warm_guest(
+            &requirement(|r| r.guest = large()),
+            &worker
+        ));
     }
 
     #[test]

@@ -215,12 +215,46 @@ fn pre_warm_vms_round_trips_and_names_no_job() {
     use crate::messages::{PROTO_VERSIONS, ServerMessage};
 
     let newest = *PROTO_VERSIONS.end();
-    let msg = ServerMessage::PreWarmVms { count: 3 };
+    let msg = ServerMessage::PreWarmVms {
+        count: 3,
+        sizes: Vec::new(),
+    };
     assert_eq!(
         from_bytes::<ServerMessage>(to_bytes(&msg, newest).unwrap(), newest).unwrap(),
         msg
     );
     assert_eq!((msg.job_id(), msg.variant_name()), (None, "PreWarmVms"));
+}
+
+#[test]
+fn a_worker_before_version_54_hears_only_the_pre_warm_total() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::ServerMessage;
+    use crate::types::{GuestSize, WarmGuests};
+
+    let sizes = vec![WarmGuests {
+        size: GuestSize {
+            cpus: 8,
+            memory_mb: 16_384,
+            disk_mb: 0,
+        },
+        count: 2,
+    }];
+    let msg = ServerMessage::PreWarmVms {
+        count: 3,
+        sizes: sizes.clone(),
+    };
+    assert_eq!(
+        from_bytes::<ServerMessage>(to_bytes(&msg, 54).unwrap(), 54).unwrap(),
+        msg
+    );
+    assert_eq!(
+        from_bytes::<ServerMessage>(to_bytes(&msg, 53).unwrap(), 53).unwrap(),
+        ServerMessage::PreWarmVms {
+            count: 3,
+            sizes: Vec::new()
+        }
+    );
 }
 
 #[test]
@@ -437,6 +471,45 @@ fn an_inventory_from_before_version_53_has_no_warm_guest_size() {
         (older.warm_guests, older.warm_guest_size),
         (2, GuestSize::default())
     );
+}
+
+#[test]
+fn a_warm_guest_of_any_reported_size_fits_its_job() {
+    use crate::types::{ExecInventory, GuestSize, WarmGuests};
+
+    let size = |cpus| GuestSize {
+        cpus,
+        memory_mb: 4096,
+        disk_mb: 0,
+    };
+    let job = |cpus| GuestSize {
+        disk_mb: 10_240,
+        ..size(cpus)
+    };
+    let sized = ExecInventory {
+        warm_guests: 2,
+        warm_guest_size: size(2),
+        warm_guest_sizes: vec![
+            WarmGuests {
+                size: size(2),
+                count: 1,
+            },
+            WarmGuests {
+                size: size(8),
+                count: 1,
+            },
+        ],
+        ..ExecInventory::default()
+    };
+    assert!(sized.has_warm_guest_for(job(2)) && sized.has_warm_guest_for(job(8)));
+    assert!(!sized.has_warm_guest_for(job(4)));
+
+    let before_54 = ExecInventory {
+        warm_guest_sizes: Vec::new(),
+        ..sized
+    };
+    assert!(before_54.has_warm_guest_for(job(2)));
+    assert!(!before_54.has_warm_guest_for(job(8)));
 }
 
 #[test]
