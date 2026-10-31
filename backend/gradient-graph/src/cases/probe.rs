@@ -582,9 +582,11 @@ async fn p11_a_new_evaluation_asks_the_upstream_caches_again_about_a_miss_older_
         (chrono::Duration::minutes(10), false),
     ] {
         let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let now = chrono::Utc::now().naive_utc();
         let case = Case::start(
             shape()
                 .evaluation(e1)
+                .evaluation_option(|e| e.created_at = now - chrono::Duration::hours(3))
                 .evaluation_status(EvaluationStatus::Failed)
                 .derivation(A)
                 .walked()
@@ -605,8 +607,7 @@ async fn p11_a_new_evaluation_asks_the_upstream_caches_again_about_a_miss_older_
                 .job(),
         )
         .await;
-        let probed_at = chrono::Utc::now().naive_utc() - age;
-        case.override_sb(A, |build| build.probed_at = Some(probed_at))
+        case.override_sb(A, |build| build.probed_at = Some(now - age))
             .await;
 
         case.transition(Transition::EvalStreamCompleted { evaluation: e2 })
