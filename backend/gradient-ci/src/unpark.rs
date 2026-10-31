@@ -78,9 +78,9 @@ pub async fn unpark_storage_full_all<C: ConnectionTrait>(
     Ok(unparked)
 }
 
-/// This is unparking only the zero-workers shape that `park_if_no_workers` wrote. Other `Workers`
-/// parks belong to the build-dispatch repair pass. Callers are invoking this after any registration
-/// touch. The guard is preventing a re-queue -> re-park churn when nothing actionable changed.
+/// This unparks only the zero-workers, empty-unmet shape that `park_if_no_workers` wrote.
+/// Other `Workers` parks belong to the build-dispatch repair pass. Callers are invoking this
+/// after any registration touch. The guard prevents re-queue -> re-park churn when nothing changed.
 pub async fn unpark_no_workers_for_project<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -92,9 +92,10 @@ pub async fn unpark_no_workers_for_project<C: ConnectionTrait>(
         matches!(
             r,
             WaitingReason::Workers {
+                unmet,
                 connected_workers: 0,
                 ..
-            }
+            } if unmet.is_empty()
         )
     })
     .await
@@ -244,9 +245,10 @@ pub async fn find_approval_gated_eval(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_entity::evaluation::EvaluationKind;
     use gradient_fixtures::mock::mock_db;
     use gradient_fixtures::rows::worker_registration;
-    use sea_orm::MockExecResult;
+    use sea_orm::{Iterable, MockExecResult};
 
     fn waiting_eval(reason: WaitingReason) -> MEvaluation {
         gradient_entity::evaluation::Model {
@@ -371,10 +373,26 @@ mod tests {
         requeued.status = EvaluationStatus::Queued;
         requeued.waiting_reason = None;
 
+        let mut parked = vec![stranded.clone(), capability_mismatch];
+        parked.extend(EvaluationKind::iter().map(|kind| {
+            let mut e = waiting_eval(WaitingReason::workers(
+                vec![gradient_types::waiting_reason::UnmetRequirement {
+                    architecture: "x86_64-linux".into(),
+                    required_features: Vec::new(),
+                    build_count: 1,
+                }],
+                0,
+                Vec::new(),
+            ));
+            e.kind = kind;
+            e.task = Some(task.id);
+            e
+        }));
+
         let db = mock_db()
             .append_query_results([vec![worker_registration(true, true)]])
             .append_query_results([vec![task.clone()]])
-            .append_query_results([vec![stranded.clone(), capability_mismatch.clone()]])
+            .append_query_results([parked])
             .append_query_results([vec![requeued.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
