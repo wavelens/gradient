@@ -5,7 +5,8 @@
 ```mermaid
 flowchart LR
     start[Server start] --> f[require_upgrade_floor]
-    f --> prune[prune_removed_migrations]
+    f --> known[require_known_migrations]
+    known --> prune[prune_removed_migrations]
     prune --> up["Migrator::up"]
     up --> baseline{Database state}
     baseline -->|fresh| schema[Baseline emitting the schema]
@@ -60,6 +61,17 @@ A database behind a squash into the baseline has no migration files left to appl
 
 - **Storage:** The `storage_migration` table apply to both an S3 store and a local NAR store, and the check include both.
 - **Baseline Name:** On a squash, rename the baseline file. Databases from an earlier baseline lack the new name and stop before the floor.
+
+## Newer Database
+
+Servers exit at start on a database holding migrations unknown to the binary.
+
+- **Code:** `require_known_migrations` in `backend/gradient-db/src/connection/unknown_migrations.rs`.
+- **Cause:** A downgrade, or a database migrated by a newer release or another branch.
+- **Rule:** Rows of `seaql_migrations` sorting after the baseline need a registered migration.
+- **Squashed Rows:** Rows before the baseline belong to an earlier squash and pass the check.
+- **Order:** Ahead of `prune_removed_migrations`. Its deletes of unknown rows hide a newer schema otherwise.
+- **Fix:** Start the release that applied the listed migrations. Errors in the log name each one.
 
 ## Cancelling Pairs
 
