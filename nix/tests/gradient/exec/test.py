@@ -467,6 +467,10 @@ probe = "; ".join(f"test -e {system} && echo visible || echo hidden" for system 
 lines = server.succeed(f"printf '{probe}\\nexit\\n' | {SSH} -T '{job_login}' shell").splitlines()
 assert lines[-2:] == ["hidden", "hidden"], f"the guest sees the host store: {lines}"
 
+replaced = "echo \"replaced:$(for p in $(ls /nix/.rw-store/upper); do test -e /nix/.ro-store/nix/store/$p && echo -n \" $p\"; done)\""
+lines = server.succeed(f"printf '{replaced}\\nexit\\n' | {SSH} -T '{job_login}' shell").splitlines()
+assert lines[-1] == "replaced:", f"the program import replaced paths of the store image: {lines}"
+
 forward = f"{SSH} -o ExitOnForwardFailure=yes -N -f -L {{local}}:127.0.0.1:{{port}} '{job_login}' >/dev/null 2>&1"
 server.succeed(forward.format(local=18080, port=8080))
 served = server.succeed("curl -fsS --max-time 30 http://127.0.0.1:18080/flake.nix")

@@ -35,7 +35,9 @@
   writableStoreLabel = "writable-store";
   storeVsockPort = 7001;
   lowerStore = lib.escapeURL "local?root=/nix/.ro-store&read-only=true";
-  guestStore = "local-overlay://?lower-store=${lowerStore}&upper-layer=/nix/.rw-store/upper&check-mount=true";
+  # The initrd mounts the overlay below /sysroot, so /proc/mounts never shows the lowerdir check-mount expects.
+  guestStore = "local-overlay://?lower-store=${lowerStore}&upper-layer=/nix/.rw-store/upper&check-mount=false";
+  escapeSystemdSpecifiers = lib.replaceStrings [ "%" ] [ "%%" ];
 
   storeImage = pkgs.runCommand "gradient-guest-store.img" {
     nativeBuildInputs = [ pkgs.erofs-utils pkgs.gnutar nix ];
@@ -190,7 +192,7 @@ in {
       services = {
         "serial-getty@ttyS0".environment.TERM = "xterm-256color";
 
-        nix-daemon.environment.NIX_REMOTE = guestStore;
+        nix-daemon.environment.NIX_REMOTE = escapeSystemdSpecifiers guestStore;
 
         "gradient-guest-store@" = {
           description = "Guest Store Connection from Gradient";
