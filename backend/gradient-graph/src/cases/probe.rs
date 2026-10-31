@@ -14,8 +14,8 @@ use gradient_entity::ids::{DerivationId, EvaluationId};
 use gradient_fixtures::shape::{Shape, shape};
 
 use super::{
-    A, A_OUT, A_OUT2, B, B_OUT, Case, F_OUT, F1, F2, R, R_OUT, UNKNOWN_OUT, as_set, drv, narinfo,
-    with_output,
+    A, A_OUT, A_OUT2, B, B_OUT, C, C_OUT, Case, F_OUT, F1, F2, R, R_OUT, UNKNOWN_OUT, as_set, drv,
+    narinfo, with_output,
 };
 use crate::messages::{Transition, UpstreamHit};
 
@@ -621,4 +621,71 @@ async fn p11_a_new_evaluation_asks_the_upstream_caches_again_about_a_miss_older_
         case.zero_drift("step 1").await;
         case.finish().await;
     }
+}
+
+#[tokio::test]
+async fn p12_a_runtime_reference_asks_again_about_a_miss_older_than_the_evaluation_before_building_below_it()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .output(A_OUT)
+            .derivation(B)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(B_OUT)
+            .depends_on(C)
+            .build_status(BuildStatus::Skipped)
+            .derivation(C)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(C_OUT)
+            .build_status(BuildStatus::Skipped),
+    )
+    .await;
+    let before_e1 = gradient_fixtures::test_date() - chrono::Duration::days(1);
+    case.override_sb(B, |build| build.probed_at = Some(before_e1))
+        .await;
+
+    let gained = case
+        .upstream_hits(&[(A_OUT, narinfo(&[(A_OUT, "a"), (B_OUT, "b")]))])
+        .await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.wanted, b.probed),
+        (true, false),
+        "after 1: sb(B) wanted, probed"
+    );
+    let c = case.sb(C).await;
+    assert_eq!(
+        (c.status, c.wanted),
+        (BuildStatus::Skipped, false),
+        "after 1: sb(C) status, wanted"
+    );
+    assert!(
+        gained.is_superset(&case.ids(&[B]).await),
+        "after 1: result asks about B again: {gained:?}"
+    );
+    case.zero_drift("step 1").await;
+
+    case.upstream_probed(&[B]).await;
+
+    let c = case.sb(C).await;
+    assert_eq!(
+        (c.status, c.wanted),
+        (BuildStatus::Queued, true),
+        "after 2: sb(C) status, wanted"
+    );
+    case.zero_drift("step 2").await;
+    case.finish().await;
 }
