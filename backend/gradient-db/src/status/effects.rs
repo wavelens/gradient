@@ -443,7 +443,7 @@ mod tests {
             ))
             .append_query_results(vec![
                 Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new();
-                3
+                4
             ])
             .into_connection();
         let (ctx, _pool, mut probes) = crate::test_ctx::ctx_with_probes(db).await;

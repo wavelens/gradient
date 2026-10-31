@@ -40,13 +40,13 @@ fn thaw_wanted_sql(scope: &str) -> String {
     )
 }
 
-fn forget_misses_before_the_newest_evaluation_sql() -> String {
+fn forget_misses_from_before_its_first_evaluation_sql() -> String {
     format!(
         "UPDATE derivation_build db SET probed = false, probed_at = NULL, \
          updated_at = (now() AT TIME ZONE 'UTC') \
          WHERE db.derivation = ANY($1::uuid[]) AND db.probed AND NOT db.cache_available \
            AND db.status IN ({idle}) \
-           AND db.probed_at < (SELECT max(ev.created_at) FROM build_job bj \
+           AND db.probed_at < (SELECT min(ev.created_at) FROM build_job bj \
                                JOIN evaluation ev ON ev.id = bj.evaluation \
                                WHERE bj.derivation = db.derivation) \
          RETURNING db.derivation",
@@ -55,7 +55,7 @@ fn forget_misses_before_the_newest_evaluation_sql() -> String {
 }
 
 crate::sql_fn! {
-    FORGET_MISSES_BEFORE_THE_NEWEST_EVALUATION = forget_misses_before_the_newest_evaluation_sql,
+    FORGET_MISSES_FROM_BEFORE_ITS_FIRST_EVALUATION = forget_misses_from_before_its_first_evaluation_sql,
         params = [DerivationIds(64)];
 
     SKIP_UNWANTED = || skip_unwanted_sql(IN_CANDIDATES),
@@ -375,7 +375,7 @@ where
     let mut forgotten = Vec::new();
     for chunk in gained.chunks(crate::IN_CHUNK_SIZE) {
         forgotten.extend(returned_derivations(
-            db.query_all_raw(FORGET_MISSES_BEFORE_THE_NEWEST_EVALUATION.bind([ids(chunk)]))
+            db.query_all_raw(FORGET_MISSES_FROM_BEFORE_ITS_FIRST_EVALUATION.bind([ids(chunk)]))
                 .await?,
         ));
     }
@@ -665,7 +665,7 @@ mod tests {
         let ask_again = log
             .iter()
             .position(|s| s.contains("SET probed = false"))
-            .expect("then asked again about a miss older than its newest evaluation");
+            .expect("then asked again about a miss from before its first evaluation");
         let promote = log
             .iter()
             .position(|s| s.contains("queued_at = coalesce(db.queued_at"))
