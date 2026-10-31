@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::sql::Query;
 use anyhow::{Context, Result};
 use gradient_migration::{Migrator, UPGRADE_FLOOR, UpgradeFloor};
 use sea_orm::{ConnectionTrait, DatabaseConnection};
@@ -12,29 +11,25 @@ use sea_orm_migration::MigratorTrait;
 use std::collections::HashSet;
 
 crate::sql! {
-    APPLIED_MIGRATIONS = "SELECT version AS name FROM seaql_migrations",
-        params = [];
-
     FINISHED_STORAGE_MIGRATIONS =
         "SELECT name FROM storage_migration WHERE applied_at IS NOT NULL",
         params = [];
 }
 
-pub(super) async fn require_upgrade_floor(db: &DatabaseConnection) -> Result<()> {
-    let applied = names(db, &APPLIED_MIGRATIONS)
-        .await
-        .context("list the applied database migrations")?;
-
-    if !is_upgrade_from_an_earlier_major(&applied, &baseline()?) {
+pub(super) async fn require_upgrade_floor(
+    db: &DatabaseConnection,
+    applied: &HashSet<String>,
+) -> Result<()> {
+    if !is_upgrade_from_an_earlier_major(applied, &baseline()?) {
         return Ok(());
     }
 
-    require_last_migration(&UPGRADE_FLOOR, &applied)?;
+    require_last_migration(&UPGRADE_FLOOR, applied)?;
     if UPGRADE_FLOOR.storage_migrations.is_empty() {
         return Ok(());
     }
 
-    let finished = names(db, &FINISHED_STORAGE_MIGRATIONS)
+    let finished = finished_storage_migrations(db)
         .await
         .context("list the finished storage migrations")?;
 
@@ -48,8 +43,8 @@ fn baseline() -> Result<String> {
         .context("the migration list holds no baseline")
 }
 
-async fn names(db: &DatabaseConnection, query: &Query) -> Result<HashSet<String>> {
-    let rows = db.query_all_raw(query.stmt()).await?;
+async fn finished_storage_migrations(db: &DatabaseConnection) -> Result<HashSet<String>> {
+    let rows = db.query_all_raw(FINISHED_STORAGE_MIGRATIONS.stmt()).await?;
     let names = rows
         .iter()
         .map(|row| row.try_get::<String>("", "name"))

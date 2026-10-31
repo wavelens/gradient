@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod unknown_migrations;
 mod upgrade_floor;
 
 use anyhow::{Context, Result};
@@ -21,6 +22,7 @@ use sea_orm::{
     DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, Value,
 };
 use sea_orm_migration::prelude::*;
+use std::collections::HashSet;
 use std::time::Duration;
 use tracing::log::LevelFilter;
 
@@ -91,6 +93,9 @@ crate::sql! {
 
     MAX_LOCKS_PER_TRANSACTION = "SELECT current_setting('max_locks_per_transaction')::int4 AS v",
         params = [];
+
+    APPLIED_MIGRATIONS = "SELECT version AS name FROM seaql_migrations",
+        params = [];
 }
 
 /// This check is only warning, never failing.
@@ -135,13 +140,34 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     Migrator::install(&db)
         .await
         .context("install seaql_migrations table")?;
-    upgrade_floor::require_upgrade_floor(&db).await?;
+    let applied = applied_migrations(&db)
+        .await
+        .context("list the applied database migrations")?;
+    upgrade_floor::require_upgrade_floor(&db, &applied).await?;
+    unknown_migrations::require_known_migrations(&applied, &known_migrations())?;
     prune_removed_migrations(&db)
         .await
         .context("prune removed-migration entries from seaql_migrations")?;
     run_migrations(&db).await?;
     update_db(&db).await.context("update database")?;
     Ok(db)
+}
+
+async fn applied_migrations(db: &DatabaseConnection) -> Result<HashSet<String>> {
+    let rows = db.query_all_raw(APPLIED_MIGRATIONS.stmt()).await?;
+    let names = rows
+        .iter()
+        .map(|row| row.try_get::<String>("", "name"))
+        .collect::<Result<_, _>>()?;
+
+    Ok(names)
+}
+
+fn known_migrations() -> Vec<String> {
+    Migrator::migrations()
+        .iter()
+        .map(|migration| migration.name().to_owned())
+        .collect()
 }
 
 async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
@@ -186,10 +212,7 @@ crate::sql_fn! {
 }
 
 async fn prune_removed_migrations(db: &DatabaseConnection) -> Result<()> {
-    let known: Vec<Value> = Migrator::migrations()
-        .iter()
-        .map(|m| Value::from(m.name().to_string()))
-        .collect();
+    let known: Vec<Value> = known_migrations().into_iter().map(Value::from).collect();
     if known.is_empty() {
         return Ok(());
     }
