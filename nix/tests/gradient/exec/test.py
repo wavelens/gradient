@@ -270,11 +270,11 @@ for node in WORKERS:
 for node in WORKERS:
     wait_for(f"{node.name} holds one paused warm guest", lambda: one_paused_guest(node))
 
-banner("Phase 3: the programs wait in the upstream cache")
+banner("Phase 3: the programs and the image inputs wait in the upstream cache")
 server.succeed(
     "nix --extra-experimental-features nix-command copy "
     "--to 'file:///srv/upstream?secret-key=/etc/gradient/secrets/upstream_key' "
-    f"--no-check-sigs {PROGRAMS}"
+    f"--no-check-sigs {PROGRAMS} {TRAINER_INPUTS}"
 )
 server.succeed("chown -R nginx:nginx /srv/upstream")
 
@@ -536,12 +536,6 @@ assert status != 0, "keeper with maxPreWarm = 0 changed its warm target"
 banner("Phase 17: push the custom images into a flake directory of a second repository")
 watch_wanted_roots()
 warm_guests = active_guests(stopper)
-server.succeed(
-    "nix --extra-experimental-features nix-command copy "
-    "--to 'file:///srv/upstream?secret-key=/etc/gradient/secrets/upstream_key' "
-    f"--no-check-sigs {TRAINER_INPUTS}"
-)
-server.succeed("chown -R nginx:nginx /srv/upstream")
 server.succeed(f"{GIT} init /var/lib/git/images")
 server.succeed("install -D -m 0644 /var/lib/git/images.nix /var/lib/git/images/nix/flake.nix")
 server.succeed("install -m 0644 -t /var/lib/git/images/nix /var/lib/git/apps.nix /var/lib/git/guest.nix /var/lib/git/trainer.nix")
