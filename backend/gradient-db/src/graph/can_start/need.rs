@@ -5,7 +5,7 @@
  */
 
 use crate::graph::predicates::{builds_once_wanted_predicate, open_predicate};
-use crate::graph::promotion::returned_transitions;
+use crate::graph::promotion::{returned_derivations, returned_transitions};
 use crate::sql::StatusWrite;
 use crate::status::TransitionChange;
 
@@ -40,7 +40,24 @@ fn thaw_wanted_sql(scope: &str) -> String {
     )
 }
 
+fn forget_misses_before_the_newest_evaluation_sql() -> String {
+    format!(
+        "UPDATE derivation_build db SET probed = false, probed_at = NULL, \
+         updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE db.derivation = ANY($1::uuid[]) AND db.probed AND NOT db.cache_available \
+           AND db.status IN ({idle}) \
+           AND db.probed_at < (SELECT max(ev.created_at) FROM build_job bj \
+                               JOIN evaluation ev ON ev.id = bj.evaluation \
+                               WHERE bj.derivation = db.derivation) \
+         RETURNING db.derivation",
+        idle = crate::sql::status::build_in(&[BuildStatus::Created, BuildStatus::Skipped]),
+    )
+}
+
 crate::sql_fn! {
+    FORGET_MISSES_BEFORE_THE_NEWEST_EVALUATION = forget_misses_before_the_newest_evaluation_sql,
+        params = [DerivationIds(64)];
+
     SKIP_UNWANTED = || skip_unwanted_sql(IN_CANDIDATES),
         params = [DerivationIds(64)],
         status_write = StatusWrite::build(BuildStatus::SKIP_UNWANTED);
@@ -337,11 +354,36 @@ where
     for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
         changes.extend(thaw_wanted(db, gained).await?);
         name_below_named(db, gained).await?;
+    }
+    let asked_again = ask_again_about_earlier_misses(db, &moved.gained).await?;
+    for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
         changes.extend(promote(db, gained).await?);
     }
     changes.extend(settle_lost(db, &moved.lost).await?);
+    changes.extend(settle_lost(db, &asked_again.lost).await?);
 
     Ok(changes)
+}
+
+async fn ask_again_about_earlier_misses<C>(
+    db: &C,
+    gained: &[DerivationId],
+) -> Result<NeedMoved, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let mut forgotten = Vec::new();
+    for chunk in gained.chunks(crate::IN_CHUNK_SIZE) {
+        forgotten.extend(returned_derivations(
+            db.query_all_raw(FORGET_MISSES_BEFORE_THE_NEWEST_EVALUATION.bind([ids(chunk)]))
+                .await?,
+        ));
+    }
+    if forgotten.is_empty() {
+        return Ok(NeedMoved::default());
+    }
+
+    update_need(db, &forgotten).await
 }
 
 async fn name_below_named<C>(db: &C, gained: &[DerivationId]) -> Result<(), DbErr>
@@ -391,8 +433,10 @@ where
     below.dedup();
     let adopted = crate::graph::reachability::adopt_unnamed_below(db, &below).await?;
     crate::task_board::dep_counts::bump_graph_version(db, &adopted.evaluations()).await?;
+    let asked_again = ask_again_about_earlier_misses(db, &moved.gained).await?;
     changes.extend(promote(db, &moved.gained).await?);
     changes.extend(settle_lost(db, &moved.lost).await?);
+    changes.extend(settle_lost(db, &asked_again.lost).await?);
 
     Ok(changes)
 }
@@ -586,6 +630,7 @@ mod tests {
             .append_query_results([
                 vec![transition_row(on, 10, 0)],
                 empty.clone(),
+                empty.clone(),
                 vec![drv(on)],
             ])
             .append_query_results([empty, vec![transition_row(off, 0, 10)]])
@@ -617,11 +662,18 @@ mod tests {
             .iter()
             .position(|s| s.contains("INSERT INTO build_job"))
             .expect("then given its jobs");
+        let ask_again = log
+            .iter()
+            .position(|s| s.contains("SET probed = false"))
+            .expect("then asked again about a miss older than its newest evaluation");
         let promote = log
             .iter()
             .position(|s| s.contains("queued_at = coalesce(db.queued_at"))
             .expect("and then promoted");
-        assert!(thaw < adopt && adopt < promote, "{log:?}");
+        assert!(
+            thaw < adopt && adopt < ask_again && ask_again < promote,
+            "{log:?}"
+        );
     }
 
     #[test]
@@ -652,6 +704,7 @@ mod tests {
             .append_query_results([vec![need_row(on, true), need_row(off, false)]])
             .append_query_results([
                 vec![transition_row(on, 10, 0)],
+                empty.clone(),
                 empty.clone(),
                 vec![drv(on)],
             ])
