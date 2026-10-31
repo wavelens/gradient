@@ -121,7 +121,9 @@ def unbuilt_image_derivations(state):
     if "image build failed" not in json.dumps(state):
         return ""
     _, roots = server.execute("cat /tmp/wanted-roots.txt")
-    return f"--- builds wanting the first wanted bootstrap source that nothing else wants ---\n{roots}"
+    _, stale = server.execute("cat /tmp/wanted-stale.txt")
+    return (f"--- builds wanting the first wanted bootstrap source that nothing else wants ---\n{roots}\n"
+            f"--- builds in that chain with a miss older than the newest evaluation ---\n{stale}")
 
 
 def watch_wanted_roots():
@@ -132,12 +134,25 @@ def watch_wanted_roots():
                  "WHERE d.name LIKE 'stage0-posix%' AND db.wanted")
     wants = ("p.wanted AND NOT p.fetchable AND (e.kind IN (1, 2) OR "
              "(pw.walked AND p.probed AND NOT p.cache_available))")
-    roots = (
+    chain = (
         f"WITH RECURSIVE chain(derivation) AS ({bootstrap} UNION "
         "  SELECT e.derivation FROM chain JOIN derivation_dependency e ON e.dependency = chain.derivation "
         "  JOIN derivation_build p ON p.derivation = e.derivation JOIN derivation pw ON pw.id = p.derivation "
         f"  WHERE {wants}) "
-        "SELECT d.name, db.status, db.probed, db.cache_available, db.fetchable, db.unneeded_outputs, "
+    )
+    stale = (
+        f"{chain}SELECT d.name, db.status, db.probed, db.probed_at, db.cache_available, db.wanted, left(coalesce(("
+        "  SELECT string_agg(pd.name || '{' || e.kind || ',' || p.probed || ',' || p.cache_available || '}[' "
+        "         || coalesce(array_to_string(e.dependency_outputs, ','), 'every') || ']', ' ') "
+        "  FROM derivation_dependency e JOIN derivation_build p ON p.derivation = e.derivation "
+        "  JOIN derivation pd ON pd.id = e.derivation WHERE e.dependency = d.id AND p.wanted), ''), 1500) "
+        "FROM chain JOIN derivation d ON d.id = chain.derivation "
+        "JOIN derivation_build db ON db.derivation = chain.derivation "
+        "WHERE db.probed AND db.probed_at < (SELECT max(created_at) FROM evaluation) "
+        "ORDER BY db.probed_at, d.name LIMIT 40"
+    )
+    roots = (
+        f"{chain}SELECT d.name, db.status, db.probed, db.cache_available, db.fetchable, db.unneeded_outputs, "
         f"{outputs.format(held)} AS held, {outputs.format(f'NOT ({held})')} AS missing, "
         "EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = d.id) AS entry_point, left(coalesce(("
         "  SELECT string_agg(DISTINCT pd.name || '{' || e.kind || ',' || p.status || ',' || p.cache_available "
@@ -154,9 +169,11 @@ def watch_wanted_roots():
     psql = "runuser -u postgres -- psql -d gradient -At"
     server.succeed(f"printf %s {shlex.quote(bootstrap)} > /tmp/bootstrap-wanted.sql")
     server.succeed(f"printf %s {shlex.quote(roots)} > /tmp/wanted-roots.sql")
+    server.succeed(f"printf %s {shlex.quote(stale)} > /tmp/wanted-stale.sql")
     server.execute(
         f"(until {psql} -f /tmp/bootstrap-wanted.sql | grep -q .; do sleep 0.5; done; "
-        f"{psql} -f /tmp/wanted-roots.sql > /tmp/wanted-roots.txt 2>&1) >/dev/null 2>&1 &"
+        f"{psql} -f /tmp/wanted-roots.sql > /tmp/wanted-roots.txt 2>&1; "
+        f"{psql} -f /tmp/wanted-stale.sql > /tmp/wanted-stale.txt 2>&1) >/dev/null 2>&1 &"
     )
 
 
