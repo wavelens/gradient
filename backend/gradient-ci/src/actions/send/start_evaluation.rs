@@ -7,7 +7,7 @@
 use crate::ActionError;
 use crate::actions::ExecutorOk;
 use crate::context::CiContext;
-use crate::{park_if_no_cache, park_if_no_workers, park_if_storage_full, trigger_evaluation};
+use crate::{park_if_no_cache, park_if_no_workers, trigger_evaluation};
 use anyhow::{Context, Result, anyhow, bail};
 use gradient_db::lookup::by_id;
 use gradient_entity::evaluation::WalkMode;
@@ -110,8 +110,6 @@ async fn park_if_blocked(
     task: &MTask,
 ) -> Result<MEvaluation> {
     let db = &ctx.db.worker_db;
-    let max_storage_gb = ctx.db.config.cache.max_storage_gb;
     let evaluation = park_if_no_cache(db, evaluation, task.project).await?;
-    let evaluation = park_if_storage_full(db, evaluation, task.project, max_storage_gb).await?;
     Ok(park_if_no_workers(db, evaluation, task.project).await?)
 }

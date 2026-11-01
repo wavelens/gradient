@@ -19,6 +19,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use gradient_core::ServerState;
 use gradient_db::DbContext;
+use gradient_db::caches::capacity::project_caches_all_full;
 use gradient_db::lookup::by_id;
 use gradient_graph::Graph;
 use gradient_proto::import::{NarCommit, SignTargets};
@@ -179,6 +180,7 @@ pub(super) async fn finalize_build_request(
     for (input_name, url) in &options.input_overrides {
         check_flake_input_override(input_name, url)?;
     }
+    refuse_when_caches_full(&db.web_db, &db.config, project).await?;
 
     let mapper = db.project_mapper(project).await?;
     let stored = stored_source_path(&mapper, &nar.store_path)?;
@@ -230,6 +232,17 @@ pub(super) async fn finalize_build_request(
     tx.commit().await?;
 
     Ok(response)
+}
+
+pub(super) async fn refuse_when_caches_full<C: ConnectionTrait>(
+    db: &C,
+    config: &RuntimeConfig,
+    project: gradient_types::ids::ProjectId,
+) -> WebResult<()> {
+    if project_caches_all_full(db, project, config.cache.max_storage_gb).await? {
+        return Err(BuildRequestRefusal::CacheStorageFull.into());
+    }
+    Ok(())
 }
 
 fn stored_source_path(mapper: &StorePathMapper, store_path: &str) -> anyhow::Result<StorePath> {

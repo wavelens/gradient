@@ -6,6 +6,7 @@
 
 use super::dispatch::{
     BuildRequestSource, DispatchResponse, InputOverrideBody, parent_job, queue_build_request,
+    refuse_when_caches_full,
 };
 use super::refusal::BuildRequestRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
@@ -113,6 +114,7 @@ pub async fn post_url(
             reason: e.to_string(),
         }
     })?;
+    refuse_when_caches_full(&state.web_db, &state.0.config, project.id).await?;
 
     let tx = state.web_db.inner().begin().await?;
 

@@ -440,7 +440,6 @@ pub(super) async fn fire(
                 source_comment: None,
                 started_by: request.started_by,
                 walk_mode: request.walk_mode,
-                instance_max_storage_gb: db.config.cache.max_storage_gb,
             };
             apply_now(db, scheduler, task, input).await?
         }

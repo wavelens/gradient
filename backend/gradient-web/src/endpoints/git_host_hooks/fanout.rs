@@ -363,7 +363,6 @@ where
             source_comment: source_comment.clone(),
             started_by: None,
             walk_mode: WalkMode::Pruned,
-            instance_max_storage_gb: ci.db.config.cache.max_storage_gb,
         };
 
         apply_and_record(

@@ -10,7 +10,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::commit;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
-use gradient_entity::ids::EvaluationId;
+use gradient_entity::ids::{CacheId, EvaluationId};
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::vec_to_hex;
@@ -990,6 +990,30 @@ async fn q20_a_build_without_an_upstream_answer_waits_for_the_upstream_caches() 
         (
             EvaluationStatus::Waiting,
             Some(WaitingReason::upstream_caches(1, Vec::new())),
+        ),
+        "after 1: evaluation(E1)"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn q21_a_queued_evaluation_whose_caches_are_all_full_waits_instead_of_dispatching() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().evalq(e1).into_cache(CacheId::now_v7()).full()).await;
+    case.connect(W1, w_all(), &[]).await;
+
+    case.assign_queued_evals().await;
+    assert!(
+        !case.pending(&eval_key(e1)).await,
+        "after 1: pending(eval:E1)"
+    );
+    assert_eq!(
+        waiting_state(&case, e1).await,
+        (
+            EvaluationStatus::Waiting,
+            Some(WaitingReason::CacheStorageFull)
         ),
         "after 1: evaluation(E1)"
     );

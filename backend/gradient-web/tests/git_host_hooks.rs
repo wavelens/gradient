@@ -345,7 +345,6 @@ fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
         }])
         .append_query_results([vec![project_cache_row()]])
         .append_query_results([vec![cache_row()]])
-        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         .append_query_results([vec![worker_registration_row()]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
         .append_exec_results([MockExecResult {
