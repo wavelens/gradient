@@ -5,12 +5,13 @@
  */
 
 use gradient_entity::{
-    build_attempt, build_job, cache, cache_upstream, cached_path, cluster_attempt, cluster_job,
-    cluster_member, commit, derivation, derivation_build, derivation_dependency,
-    derivation_feature, derivation_metric, derivation_output, dispatched_job, dispatched_job_phase,
-    entry_point, eval_cache_store, eval_split, evaluation, evaluation_flake_input_override,
-    evaluation_input_update, evaluation_metric, feature, project, project_cache, task, task_action,
-    task_flake_input_override, task_trigger, user, worker_registration,
+    build_attempt, build_job, cache, cache_upstream, cached_path, cached_path_signature,
+    cluster_attempt, cluster_job, cluster_member, commit, derivation, derivation_build,
+    derivation_dependency, derivation_feature, derivation_metric, derivation_output,
+    dispatched_job, dispatched_job_phase, entry_point, eval_cache_store, eval_split, evaluation,
+    evaluation_flake_input_override, evaluation_input_update, evaluation_metric, feature, project,
+    project_cache, task, task_action, task_flake_input_override, task_trigger, user,
+    worker_registration,
 };
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{DatabaseConnection, EntityTrait, IntoActiveModel};
@@ -55,6 +56,7 @@ pub(super) async fn all(shape: Shape, db: &DatabaseConnection) {
     insert!(db, entry_point::Entity, shape.entry_points);
     insert!(db, cache::Entity, shape.caches);
     insert!(db, project_cache::Entity, shape.project_caches);
+    insert!(db, cached_path_signature::Entity, shape.signatures);
     insert!(db, cache_upstream::Entity, shape.upstreams);
     insert!(db, cluster_job::Entity, shape.clusters);
     insert!(db, cluster_member::Entity, shape.members);

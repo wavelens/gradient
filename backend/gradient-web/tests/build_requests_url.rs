@@ -67,6 +67,7 @@ async fn queues_an_evaluation_against_the_remote_url() {
     let evaluation = EvaluationId::now_v7();
 
     let db = base_db(session_id)
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         .append_query_results([vec![reserved_task()]])
         .append_query_results([vec![gradient_entity::commit::Model {
             id: commit,

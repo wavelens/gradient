@@ -16,17 +16,18 @@ use gradient_entity::derivation_dependency::EdgeKind;
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{
-    BuildAttemptId, BuildJobId, CacheId, CachedPathId, DerivationBuildId, DerivationId,
-    DerivationOutputId, DispatchedJobId, EntryPointId, EvaluationId, ProjectCacheId, ProjectId,
-    TaskId, UserId,
+    BuildAttemptId, BuildJobId, CacheId, CachedPathId, CachedPathSignatureId, DerivationBuildId,
+    DerivationId, DerivationOutputId, DispatchedJobId, EntryPointId, EvaluationId, ProjectCacheId,
+    ProjectId, TaskId, UserId,
 };
 use gradient_entity::{
-    StorePath, build_attempt, build_job, cache, cache_upstream, cached_path, cluster_attempt,
-    cluster_job, cluster_member, commit, derivation, derivation_build, derivation_dependency,
-    derivation_feature, derivation_metric, derivation_output, dispatched_job, dispatched_job_phase,
-    entry_point, eval_cache_store, eval_split, evaluation, evaluation_flake_input_override,
-    evaluation_input_update, evaluation_metric, feature, project, project_cache, task, task_action,
-    task_flake_input_override, task_trigger, user, worker_registration,
+    StorePath, build_attempt, build_job, cache, cache_upstream, cached_path, cached_path_signature,
+    cluster_attempt, cluster_job, cluster_member, commit, derivation, derivation_build,
+    derivation_dependency, derivation_feature, derivation_metric, derivation_output,
+    dispatched_job, dispatched_job_phase, entry_point, eval_cache_store, eval_split, evaluation,
+    evaluation_flake_input_override, evaluation_input_update, evaluation_metric, feature, project,
+    project_cache, task, task_action, task_flake_input_override, task_trigger, user,
+    worker_registration,
 };
 use sea_orm::DatabaseConnection;
 use uuid::Uuid;
@@ -54,6 +55,7 @@ pub struct Shape {
     pub(super) cached_paths: Vec<cached_path::Model>,
     pub(super) caches: Vec<cache::Model>,
     pub(super) project_caches: Vec<project_cache::Model>,
+    pub(super) signatures: Vec<cached_path_signature::Model>,
     pub(super) assignments: Vec<dispatched_job::Model>,
     pub(super) attempts: Vec<build_attempt::Model>,
     pub(super) triggers: Vec<task_trigger::Model>,
@@ -444,6 +446,22 @@ impl Shape {
                 ..Default::default()
             });
         }
+        self
+    }
+
+    pub fn full(mut self) -> Self {
+        const GIB: i64 = 1 << 30;
+        let at = self.cache.expect("name a cache first");
+        self.caches[at].max_storage_gb = 1;
+        let filler = self.stored_path(&"f".repeat(32), "filler");
+        self.cached_paths[filler].file_size = Some(GIB);
+        self.signatures.push(cached_path_signature::Model {
+            id: CachedPathSignatureId::now_v7(),
+            cached_path: self.cached_paths[filler].id,
+            cache: self.caches[at].id,
+            created_at: test_date(),
+            ..Default::default()
+        });
         self
     }
 

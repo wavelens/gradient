@@ -37,7 +37,8 @@ The waiting pass `refresh_waiting_state` (`gradient-scheduler/src/waiting_state.
 | `graph_stuck { pending_shared_builds }` | `Building` with a fitting worker for every blocking shared build, yet none can be handed out | To `Building` once the heal can free a shared build | Waiting pass |
 | `upstream_caches { pending_shared_builds, failing_upstream_caches }` | `Building` with a fitting worker, but a blocking shared build without an [upstream answer](upstream-substitution.md#no-answer). The list holds every upstream cache with errors in the last 5 minutes | To `Building` once every upstream cache can answer | Waiting pass |
 | `draining` | Every in-flight evaluation during an instance drain | At the end of draining or at startup (`resume_drained_evals`): to `Building` when the walk had finished (`status_after_draining`), otherwise to `Queued` | Waiting pass |
-| `approval`, `no_cache`, `cache_storage_full` | Trigger conditions | Webhook and cache hooks (`gradient-ci/src/unpark.rs`) | Never touched by the waiting pass |
+| `approval`, `no_cache` | Trigger conditions | Webhook and cache hooks (`gradient-ci/src/unpark.rs`) | Never touched by the waiting pass |
+| `cache_storage_full` | `Queued` with every writable project cache full, before the job enters the queue | To `Queued` by cache maintenance (`unpark_storage_full_all`) once one cache has room | Eval dispatch pass (`gradient-scheduler/src/full_caches.rs`) |
 
 - **Pre-build parks** can skip each shared build the evaluation already batched. A stall mid-walk can still park.
 - **Blocking builds** name the shared builds kept by `blocks_evaluation`, in a status that can still be wanted. The pass can leave out a shared build that nothing wants.

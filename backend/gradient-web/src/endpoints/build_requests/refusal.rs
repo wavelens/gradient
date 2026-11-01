@@ -54,14 +54,16 @@ pub(crate) enum BuildRequestRefusal {
     NoStagedSourceUpload { reason: String },
     #[error("empty source upload")]
     EmptySourceUpload,
+    #[error("every writable cache of the project is full")]
+    CacheStorageFull,
 }
 
 impl Refusal for BuildRequestRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
-            Self::UploadSessionAlreadyDispatched | Self::BlobsStillMissing { .. } => {
-                RefusalStatus::Conflict
-            }
+            Self::UploadSessionAlreadyDispatched
+            | Self::BlobsStillMissing { .. }
+            | Self::CacheStorageFull => RefusalStatus::Conflict,
             Self::UploadSessionExpired => RefusalStatus::Gone,
             Self::ManifestSizeOverflow
             | Self::ManifestTooLarge { .. }

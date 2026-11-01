@@ -6,10 +6,10 @@
 
 mod fixtures;
 
-use super::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, park_if_storage_full};
+use super::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, park_storage_full};
 use fixtures::{
     input, make_commit, make_eval, make_task_with_concurrency, make_task_with_last_eval,
-    one_active_per_branch_violation, with_eval_worker, with_storage_not_full, with_writable_cache,
+    one_active_per_branch_violation, with_eval_worker, with_writable_cache,
 };
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_fixtures::mock::{empty_db, mock_db};
@@ -26,7 +26,7 @@ async fn storage_gate_ignores_non_queued_eval() {
         EvaluationStatus::Waiting,
     );
     let db = empty_db();
-    let out = park_if_storage_full(&db, already_waiting.clone(), ProjectId::nil(), 0)
+    let out = park_storage_full(&db, already_waiting.clone())
         .await
         .unwrap();
     assert_eq!(out.status, EvaluationStatus::Waiting);
@@ -96,7 +96,7 @@ async fn time_trigger_bypasses_same_commit_check() {
             last_insert_id: 0,
             rows_affected: 1,
         }]);
-    let db = with_eval_worker(with_storage_not_full(with_writable_cache(db))).into_connection();
+    let db = with_eval_worker(with_writable_cache(db)).into_connection();
 
     let res = apply_trigger(&db, &task, input(trig, TriggerType::Time, same_hash, false))
         .await
@@ -196,7 +196,7 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
             last_insert_id: 0,
             rows_affected: 1,
         }]);
-    let db = with_eval_worker(with_storage_not_full(with_writable_cache(db))).into_connection();
+    let db = with_eval_worker(with_writable_cache(db)).into_connection();
 
     let res = apply_trigger(
         &db,
@@ -278,7 +278,7 @@ async fn manual_bypasses_same_commit_check() {
             last_insert_id: 0,
             rows_affected: 1,
         }]);
-    let db = with_eval_worker(with_storage_not_full(with_writable_cache(db))).into_connection();
+    let db = with_eval_worker(with_writable_cache(db)).into_connection();
 
     let res = apply_trigger(
         &db,
@@ -333,7 +333,7 @@ async fn hard_abort_populates_aborted_fields() {
             last_insert_id: 0,
             rows_affected: 1,
         }]);
-    let db = with_eval_worker(with_storage_not_full(with_writable_cache(db))).into_connection();
+    let db = with_eval_worker(with_writable_cache(db)).into_connection();
 
     let res = apply_trigger(
         &db,
@@ -423,7 +423,6 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
         source_comment: None,
         started_by: None,
         walk_mode: WalkMode::Pruned,
-        instance_max_storage_gb: 0,
     };
     let res = apply_trigger(&db, &task, applied).await.unwrap();
 
@@ -563,8 +562,7 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
             last_insert_id: 0,
             rows_affected: 1,
         }]);
-    let db = with_writable_cache(db);
-    let db = with_storage_not_full(db)
+    let db = with_writable_cache(db)
         .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
         .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
         .append_query_results([vec![parked_eval.clone()]])
@@ -657,7 +655,7 @@ async fn a_trigger_not_honoring_the_skip_marker_still_creates_the_evaluation() {
             last_insert_id: 0,
             rows_affected: 1,
         }]);
-    let db = with_eval_worker(with_storage_not_full(with_writable_cache(db))).into_connection();
+    let db = with_eval_worker(with_writable_cache(db)).into_connection();
 
     let applied = ApplyInput {
         commit_message: Some("docs: fix typo [skip ci]".into()),

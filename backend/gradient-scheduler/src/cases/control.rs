@@ -294,13 +294,7 @@ impl SchedulerCase {
             .find::<task::Entity>(row.task)
             .await
             .expect("the task of the trigger");
-        let input = aliases::trigger_input(
-            trigger,
-            row.trigger_type,
-            branch,
-            commit,
-            self.scheduler.db.config.cache.max_storage_gb,
-        );
+        let input = aliases::trigger_input(trigger, row.trigger_type, branch, commit);
         let outcome = gradient_ci::apply_trigger(&self.scheduler.db.worker_db, &task, input)
             .await
             .expect("the trigger applies");

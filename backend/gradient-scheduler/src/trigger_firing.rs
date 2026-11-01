@@ -274,7 +274,6 @@ async fn apply_to_task(
             source_comment: None,
             started_by: None,
             walk_mode: WalkMode::Pruned,
-            instance_max_storage_gb: scheduler.db.config.cache.max_storage_gb,
         },
     )
     .await;

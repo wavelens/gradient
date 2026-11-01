@@ -118,6 +118,7 @@ async fn happy_path_creates_task_commit_and_evaluation() {
         .append_query_results([vec![upload_session(upload, vec![], false, false)]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role()]])
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([vec![task_model.clone()]])
         .append_exec_results([MockExecResult {
@@ -211,6 +212,7 @@ async fn happy_path_reuses_existing_build_request_task() {
         .append_query_results([vec![upload_session(upload, vec![], false, false)]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role()]])
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         .append_query_results([vec![task_model.clone()]])
         .append_query_results([vec![commit_model.clone()]])
         .append_exec_results([MockExecResult {
@@ -285,6 +287,7 @@ async fn dispatched_parent(db: sea_orm::MockDatabase, auth: &str) -> sea_orm::Va
         .append_query_results([vec![upload_session(upload, vec![], false, false)]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role()]])
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         .append_query_results([vec![build_request_task(task_id)]])
         .append_query_results([vec![commit_model.clone()]])
         .append_exec_results([executed()])

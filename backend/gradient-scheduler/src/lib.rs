@@ -31,6 +31,7 @@ pub mod waiting_state;
 mod assign_mode;
 mod count;
 mod eval_metrics;
+mod full_caches;
 mod job_handlers;
 mod ram_shortage;
 mod realisations;

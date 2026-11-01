@@ -26,6 +26,7 @@ use tracing::{debug, error, warn};
 
 use crate::Scheduler;
 use crate::cluster::{Membership, Route};
+use crate::full_caches::park_on_full_caches;
 use crate::instance::EvalHistory;
 use crate::jobs::{PendingEvalJob, PendingJob, continuation_job_key};
 use gradient_db::exec_jobs::continuations::{self, ContinuationRow};
@@ -73,6 +74,7 @@ async fn assign_queued_evaluations(scheduler: &Scheduler) -> anyhow::Result<()> 
         .filter(Expr::exists(open_eval_dispatch()).not())
         .all(&scheduler.db.worker_db)
         .await?;
+    let evals = park_on_full_caches(scheduler, evals).await?;
     if evals.is_empty() {
         return Ok(());
     }

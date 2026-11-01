@@ -303,10 +303,7 @@ async fn evaluate_commit(
         gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
     })?;
 
-    let max_storage_gb = db.config.cache.max_storage_gb;
     let eval = gradient_ci::park_if_no_cache(&db.web_db, eval, task.project).await?;
-    let eval =
-        gradient_ci::park_if_storage_full(&db.web_db, eval, task.project, max_storage_gb).await?;
     let eval = gradient_ci::park_if_no_workers(&db.web_db, eval, task.project).await?;
     db.record_evaluation_created(&eval).await;
 

@@ -38,6 +38,7 @@ async fn source_upload_creates_queued_eval() {
     let eval_model = queued_evaluation(task_id, commit_model.id);
 
     let db = with_project_access(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([vec![task_model.clone()]])
         .append_exec_results([MockExecResult {

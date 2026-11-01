@@ -79,7 +79,6 @@ pub fn input(trig: TaskTriggerId, ttype: TriggerType, hash: Vec<u8>, manual: boo
         source_comment: None,
         started_by: None,
         walk_mode: WalkMode::Pruned,
-        instance_max_storage_gb: 0,
     }
 }
 
@@ -108,10 +107,6 @@ pub fn with_writable_cache(db: MockDatabase) -> MockDatabase {
     let cache = cache_row(true);
     db.append_query_results([vec![project_cache_row(cache.id)]])
         .append_query_results([vec![cache]])
-}
-
-pub fn with_storage_not_full(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
 }
 
 pub fn with_eval_worker(db: MockDatabase) -> MockDatabase {

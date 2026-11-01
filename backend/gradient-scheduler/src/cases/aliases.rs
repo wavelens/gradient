@@ -68,7 +68,6 @@ pub(super) fn trigger_input(
     trigger_type: TriggerType,
     branch: &str,
     commit: &[u8],
-    instance_max_storage_gb: u32,
 ) -> ApplyInput {
     ApplyInput {
         trigger_id: trigger,
@@ -85,6 +84,5 @@ pub(super) fn trigger_input(
         source_comment: None,
         started_by: None,
         walk_mode: WalkMode::Pruned,
-        instance_max_storage_gb,
     }
 }

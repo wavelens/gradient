@@ -15,7 +15,7 @@ use gradient_types::*;
 use sea_orm::ConnectionTrait;
 
 pub use gates::{
-    park_if_no_cache, park_if_no_workers, park_if_pending_approval, park_if_storage_full,
+    park_if_no_cache, park_if_no_workers, park_if_pending_approval, park_storage_full,
 };
 
 #[derive(Debug)]
@@ -59,7 +59,6 @@ pub struct ApplyInput {
     pub source_comment: Option<serde_json::Value>,
     pub started_by: Option<UserId>,
     pub walk_mode: WalkMode,
-    pub instance_max_storage_gb: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -110,14 +109,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         Err(e) => return Err(e.into()),
     };
 
-    let eval = gates::run_gates(
-        db,
-        eval,
-        input.gate_approval.as_ref(),
-        task.project,
-        input.instance_max_storage_gb,
-    )
-    .await?;
+    let eval = gates::run_gates(db, eval, input.gate_approval.as_ref(), task.project).await?;
 
     Ok(ApplyOutcome::Created {
         evaluation: eval,
