@@ -108,6 +108,7 @@
       inherit memorySize;
       diskSize = 8192;
       writableStore = true;
+      writableStoreUseTmpfs = false;
       additionalPaths = [ hostTrainer.system.build.toplevel trainerBuildInputs ];
     };
 
