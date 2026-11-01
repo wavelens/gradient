@@ -44,6 +44,8 @@ actions! {
     SshKeyCreate => "ssh_key.create",
     SshKeyDelete => "ssh_key.delete",
     SessionRevoke => "session.revoke",
+    IdentityConnect => "identity.connect",
+    IdentityDisconnect => "identity.disconnect",
     AuthDeny => "auth.deny",
     CliDeviceStart => "cli.device.start",
     CliDeviceAuthorize => "cli.device.authorize",
@@ -142,6 +144,8 @@ impl Action {
                 | SshKeyCreate
                 | SshKeyDelete
                 | SessionRevoke
+                | IdentityConnect
+                | IdentityDisconnect
                 | AuthDeny
                 | CliDeviceStart
                 | CliDeviceAuthorize
