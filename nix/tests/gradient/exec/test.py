@@ -273,7 +273,7 @@ for node in WORKERS:
 banner("Phase 3: the programs and the image inputs wait in the upstream cache")
 server.succeed(
     "nix --extra-experimental-features nix-command copy "
-    "--to 'file:///srv/upstream?secret-key=/etc/gradient/secrets/upstream_key' "
+    "--to 'file:///srv/upstream?compression=zstd&secret-key=/etc/gradient/secrets/upstream_key' "
     f"--no-check-sigs {PROGRAMS} {TRAINER_INPUTS}"
 )
 server.succeed("chown -R nginx:nginx /srv/upstream")
