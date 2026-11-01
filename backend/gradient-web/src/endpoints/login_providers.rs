@@ -175,7 +175,15 @@ pub async fn get_provider_callback(
                 user_id,
                 session_id,
             } => Ok((
-                connect(&state.web_db, user_id, session_id, &identity).await,
+                connect(
+                    &state.web_db,
+                    &audit,
+                    provider.id(),
+                    user_id,
+                    session_id,
+                    &identity,
+                )
+                .await,
                 None,
             )),
         }
@@ -244,12 +252,24 @@ async fn sign_in(
 
 async fn connect(
     db: &WebDb,
+    audit: &Audit,
+    provider: &str,
     user_id: UserId,
     session_id: SessionId,
     identity: &ExternalIdentity,
 ) -> String {
     let outcome = match connect_identity(db, user_id, session_id, identity).await {
-        Ok(()) => return "/settings/profile?connected=1".to_owned(),
+        Ok(()) => {
+            audit
+                .write_as(
+                    Some(user_id),
+                    Action::IdentityConnect,
+                    EventOwner::default(),
+                    serde_json::json!({ "provider": provider }),
+                )
+                .await;
+            return "/settings/profile?connected=1".to_owned();
+        }
         Err(e) => e,
     };
     let code = match outcome.downcast_ref::<ConnectRefusal>() {
@@ -310,6 +330,7 @@ pub async fn get_provider_connect(
 )]
 pub async fn delete_provider_identity(
     state: State<Arc<ServerState>>,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(api_key_caller): Extension<MaybeApiKey>,
     Path(provider): Path<String>,
@@ -330,5 +351,12 @@ pub async fn delete_provider_identity(
         return Err(ProviderRefusal::LastLoginMethod.into());
     }
     gradient_db::user_identities::delete(&state.web_db, user.id, provider.issuer()).await?;
+    audit
+        .write(
+            Action::IdentityDisconnect,
+            EventOwner::default(),
+            serde_json::json!({ "provider": provider.id() }),
+        )
+        .await;
     Ok(ok_json("Account disconnected".to_owned()))
 }
