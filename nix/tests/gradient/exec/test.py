@@ -123,9 +123,11 @@ def unbuilt_image_derivations(state):
     _, roots = server.execute("cat /tmp/wanted-roots.txt")
     _, stale = server.execute("cat /tmp/wanted-stale.txt")
     _, path = server.execute("cat /tmp/wanted-path.txt")
+    _, needers = server.execute("cat /tmp/wanted-needers.txt")
     return (f"--- builds wanting the first wanted bootstrap source that nothing else wants ---\n{roots}\n"
             f"--- builds in that chain with a miss older than the newest evaluation ---\n{stale}\n"
-            f"--- that chain from its roots down, first sighting of each build ---\n{path}")
+            f"--- that chain from its roots down, first sighting of each build ---\n{path}\n"
+            f"--- partly held builds in that chain and who needs their missing outputs ---\n{needers}")
 
 
 def watch_wanted_roots():
@@ -192,13 +194,44 @@ def watch_wanted_roots():
         "JOIN derivation_build db ON db.derivation = dn.derivation "
         "ORDER BY dn.derivation, dn.depth) first ORDER BY depth, name LIMIT 80"
     )
+    missing = "NOT EXISTS (SELECT 1 FROM cached_path cp WHERE cp.hash = o.hash AND cp.file_hash IS NOT NULL) AND o.external_url IS NULL"
+    partly_held = (
+        "db.probed AND NOT db.cache_available AND EXISTS (SELECT 1 FROM derivation_output h "
+        "JOIN cached_path cp ON cp.hash = h.hash WHERE h.derivation = d.id AND cp.file_hash IS NOT NULL)"
+    )
+    needers = (
+        f"{chain}SELECT d.name, o.name, n.rule, n.parent, n.kind, n.outputs, n.state FROM chain "
+        "JOIN derivation d ON d.id = chain.derivation JOIN derivation_build db ON db.derivation = d.id "
+        f"JOIN derivation_output o ON o.derivation = d.id AND {missing} "
+        "CROSS JOIN LATERAL ("
+        "  SELECT 'entry point' AS rule, '' AS parent, -1 AS kind, '' AS outputs, '' AS state "
+        "  FROM entry_point ep WHERE ep.derivation = d.id UNION ALL "
+        "  SELECT CASE WHEN e.kind IN (0, 2) AND pw.walked AND p.probed AND NOT p.cache_available "
+        "              AND (e.dependency_outputs IS NULL OR o.name = ANY(e.dependency_outputs)) THEN 'builder' "
+        "         ELSE 'runtime' END, pd.name, e.kind, coalesce(array_to_string(e.dependency_outputs, ','), 'every'), "
+        "    p.status || ',' || p.probed || ',' || p.cache_available || ',' || p.fetchable "
+        "  FROM derivation_dependency e JOIN derivation_build p ON p.derivation = e.derivation "
+        "  JOIN derivation pd ON pd.id = e.derivation JOIN derivation pw ON pw.id = e.derivation "
+        "  WHERE e.dependency = d.id AND p.wanted AND NOT p.fetchable AND p.status NOT IN (4, 6, 9, 10) AND ("
+        "    (e.kind IN (0, 2) AND pw.walked AND p.probed AND NOT p.cache_available "
+        "     AND (e.dependency_outputs IS NULL OR o.name = ANY(e.dependency_outputs))) "
+        "    OR (e.kind IN (1, 2) AND EXISTS (SELECT 1 FROM derivation_output po "
+        "        LEFT JOIN cached_path pcp ON pcp.hash = po.hash WHERE po.derivation = e.derivation "
+        "        AND (pcp.file_hash IS NOT NULL OR po.references_list IS NOT NULL) "
+        "        AND (coalesce(pcp.\"references\", po.references_list) IS NULL "
+        "             OR string_to_array(coalesce(pcp.\"references\", po.references_list), ' ') "
+        "                && ARRAY[o.hash || '-' || o.package, '/nix/store/' || o.hash || '-' || o.package]))))"
+        f") n WHERE {partly_held} ORDER BY d.name, o.name LIMIT 60"
+    )
     psql = "runuser -u postgres -- psql -d gradient -At"
+    server.succeed(f"printf %s {shlex.quote(needers)} > /tmp/wanted-needers.sql")
     server.succeed(f"printf %s {shlex.quote(bootstrap)} > /tmp/bootstrap-wanted.sql")
     server.succeed(f"printf %s {shlex.quote(roots)} > /tmp/wanted-roots.sql")
     server.succeed(f"printf %s {shlex.quote(stale)} > /tmp/wanted-stale.sql")
     server.succeed(f"printf %s {shlex.quote(path)} > /tmp/wanted-path.sql")
     server.execute(
         f"(until {psql} -f /tmp/bootstrap-wanted.sql | grep -q .; do sleep 0.5; done; "
+        f"{psql} -f /tmp/wanted-needers.sql > /tmp/wanted-needers.txt 2>&1; "
         f"{psql} -f /tmp/wanted-path.sql > /tmp/wanted-path.txt 2>&1; "
         f"{psql} -f /tmp/wanted-roots.sql > /tmp/wanted-roots.txt 2>&1; "
         f"{psql} -f /tmp/wanted-stale.sql > /tmp/wanted-stale.txt 2>&1) >/dev/null 2>&1 &"
