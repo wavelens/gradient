@@ -1267,11 +1267,27 @@ struct Substitutable {
 }
 
 impl Substitutable {
-    fn partly_only(mut self) -> Self {
+    fn partly_or_held_here(mut self, held_here: &BTreeSet<DerivationId>) -> Self {
         let partly: BTreeSet<DerivationId> = self.unneeded.iter().map(|(d, _)| *d).collect();
-        self.shared_builds.retain(|d| partly.contains(d));
+        self.shared_builds
+            .retain(|d| partly.contains(d) || held_here.contains(d));
         self
     }
+}
+
+fn held_here(
+    outputs: &[MDerivationOutput],
+    stored_here: impl Fn(&MDerivationOutput) -> bool,
+) -> BTreeSet<DerivationId> {
+    let mut every_output_stored: BTreeMap<DerivationId, bool> = BTreeMap::new();
+    for o in outputs {
+        *every_output_stored.entry(o.derivation).or_insert(true) &= stored_here(o);
+    }
+
+    every_output_stored
+        .into_iter()
+        .filter_map(|(derivation, stored)| stored.then_some(derivation))
+        .collect()
 }
 
 enum Found<'a> {
@@ -1463,8 +1479,8 @@ async fn waiting_inputs<C: ConnectionTrait>(
     Ok(inputs)
 }
 
-/// Outputs our cache held before the probe never come back as hits and a shared build missing
-/// only unneeded outputs besides them is fetched instead of built.
+/// Outputs our cache held before the probe never come back as hits, so a shared build missing only
+/// unneeded outputs besides them, or nothing our cache does not store, is fetched instead of built.
 async fn substitute_available(
     ctx: &DbContext,
     shared_builds: &[DerivationId],
@@ -1483,14 +1499,17 @@ async fn substitute_available(
     })
     .await
     .context("load every output of the shared builds")?;
-    let cached = gradient_db::derivation_outputs::cached_anywhere(db, &outputs)
+    let hashes: Vec<String> = outputs.iter().filter_map(|o| o.hash.clone()).collect();
+    let stored = gradient_db::cached_paths::stored_by_hash(db, &hashes)
         .await
-        .context("find the outputs some cache already holds")?;
+        .context("find the outputs our cache already holds")?;
+    let stored_here =
+        |o: &MDerivationOutput| o.hash.as_ref().is_some_and(|h| stored.contains_key(h));
     let hit = |o: &MDerivationOutput| match found {
         Found::UpstreamHits(hits) => o.hash.as_ref().is_some_and(|h| hits.contains_key(h)),
         Found::HeldBeforeTheProbe => false,
     };
-    let available = |o: &MDerivationOutput| hit(o) || cached.contains(&o.id);
+    let available = |o: &MDerivationOutput| hit(o) || o.external_url.is_some() || stored_here(o);
     let mut partial: Vec<DerivationId> = outputs
         .iter()
         .filter(|o| !available(o))
@@ -1501,18 +1520,20 @@ async fn substitute_available(
     let needed = gradient_db::graph::needed_outputs::needed_outputs(db, &partial)
         .await
         .context("find the outputs a wanted parent needs")?;
+    let held_here = held_here(&outputs, stored_here);
     let mut found_builds = substitutable(&outputs, available, &needed);
     if matches!(found, Found::HeldBeforeTheProbe) {
-        found_builds = found_builds.partly_only();
+        found_builds = found_builds.partly_or_held_here(&held_here);
     }
     let flipped = flip_cache_available(db, found_builds).await?;
 
-    let seeded = gradient_db::graph::runtime_can_start::seed_runtime_deps(
-        txn,
-        &flipped.partly,
-        shared_builds,
-    )
-    .await?;
+    let mut present = flipped.partly.clone();
+    present.extend(flipped.all.iter().filter(|d| held_here.contains(d)));
+    present.sort_unstable();
+    present.dedup();
+    let seeded =
+        gradient_db::graph::runtime_can_start::seed_runtime_deps(txn, &present, shared_builds)
+            .await?;
     if !seeded.complete.is_empty() {
         let lock = gradient_db::graph::can_start::lock_shared_builds(txn, &seeded.complete).await?;
         let changes = gradient_db::graph::can_start::became_fetchable(&lock).await?;
