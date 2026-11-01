@@ -39,6 +39,10 @@ export class UserService {
     return this.api.delete<string>('user', confirmation);
   }
 
+  disconnectLoginProvider(id: string): Observable<string> {
+    return this.api.delete<string>(`user/identities/${encodeURIComponent(id)}`);
+  }
+
   getSshKeys(): Observable<SshKeyInfo[]> {
     return this.api.get<SshKeyInfo[]>('user/ssh-keys');
   }

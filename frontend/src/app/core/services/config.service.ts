@@ -8,7 +8,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '@environments/environment';
-import { CreatePermission, ServerConfig } from '@core/models';
+import { CreatePermission, LoginProviderInfo, ServerConfig } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class ConfigService {
@@ -18,7 +18,8 @@ export class ConfigService {
   backendCommit: string | null = null;
   frontendVersion = environment.version;
   oidcEnabled = false;
-  oidcRequired = false;
+  loginProviders: LoginProviderInfo[] = [];
+  passwordLoginEnabled = true;
   registrationDisabled = false;
   emailVerificationEnabled = false;
   smtpEnabled = false;
@@ -55,7 +56,8 @@ export class ConfigService {
           this.backendVersion = res.message.version;
           this.backendCommit = res.message.commit ?? null;
           this.oidcEnabled = res.message.oidc_enabled;
-          this.oidcRequired = res.message.oidc_required;
+          this.loginProviders = res.message.login_providers;
+          this.passwordLoginEnabled = res.message.password_login_enabled;
           this.registrationDisabled = !res.message.registration_enabled;
           this.emailVerificationEnabled = res.message.email_verification_enabled;
           this.smtpEnabled = res.message.smtp_enabled;

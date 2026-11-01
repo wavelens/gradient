@@ -67,6 +67,48 @@
       </gr-row-list>
     </gr-settings-section>
 
+    @if (loginProviders().length > 0) {
+      <gr-settings-section title="Connected Accounts" [card]="false">
+        <gr-row-list>
+          @for (provider of loginProviders(); track provider.id) {
+            <gr-row icon="login">
+              {{ provider.label }}
+              <span slot="meta">
+                @if (!provider.connected) {
+                  Not connected
+                } @else if (provider.can_disconnect) {
+                  Connected
+                } @else {
+                  Connected. Add a password or another login before disconnecting.
+                }
+              </span>
+              @if (provider.connected) {
+                <button
+                  slot="actions"
+                  grButton
+                  label="Disconnect"
+                  icon="link_off"
+                  severity="secondary"
+                  (click)="disconnectProvider(provider.id)"
+                  [loading]="disconnecting() === provider.id"
+                  [disabled]="!provider.can_disconnect || disconnecting() !== null"
+                ></button>
+              } @else {
+                <button
+                  slot="actions"
+                  grButton
+                  label="Connect"
+                  icon="link"
+                  severity="secondary"
+                  (click)="connectProvider(provider.id)"
+                ></button>
+              }
+            </gr-row>
+          }
+        </gr-row-list>
+      </gr-settings-section>
+    }
+
     <!-- Security -->
     <gr-settings-section title="Security" [card]="false">
       <gr-row-list>
@@ -115,7 +157,7 @@
   @if (deleteError()) {
     <gr-message-banner type="error">{{ deleteError() }}</gr-message-banner>
   }
-  @if (isOidc()) {
+  @if (!hasPassword()) {
     <gr-form-field label="Type your username to confirm" for="confirm-username" [hint]="formData.username">
       <input grInput id="confirm-username" [(ngModel)]="deleteUsernameConfirm" />
     </gr-form-field>
@@ -132,7 +174,7 @@
       severity="danger"
       (click)="deleteAccount()"
       [loading]="deleting()"
-      [disabled]="deleting() || (isOidc() ? deleteUsernameConfirm !== formData.username : deletePassword.length === 0)"
+      [disabled]="deleting() || (!hasPassword() ? deleteUsernameConfirm !== formData.username : deletePassword.length === 0)"
     ></button>
   </div>
 </gr-dialog>

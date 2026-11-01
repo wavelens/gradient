@@ -12,19 +12,31 @@
       <p class="text-secondary">Sign up for Gradient</p>
     </div>
 
-    @if (oidcRequired) {
+    @if (!passwordLoginEnabled) {
       <div class="auth-blocked">
         <gr-icon name="lock" size="xl" />
-        <p>This server requires SSO sign-in. Use the button below to create or access your account.</p>
+        <p>This server signs in through an external account. Use a button below to create or access your account.</p>
       </div>
-      <button
-        grButton
-        type="button"
-        class="w-full"
-        icon="login"
-        label="Continue with SSO"
-        (click)="loginWithOIDC()"
-      ></button>
+      @if (oidcEnabled) {
+        <button
+          grButton
+          type="button"
+          class="w-full"
+          icon="login"
+          label="Continue with SSO"
+          (click)="loginWithOIDC()"
+        ></button>
+      }
+      @for (provider of loginProviders; track provider.id) {
+        <button
+          grButton
+          type="button"
+          class="w-full"
+          icon="login"
+          [label]="'Continue with ' + provider.label"
+          (click)="loginWithProvider(provider.id)"
+        ></button>
+      }
       <div class="auth-footer">
         Already have an account?
         <a routerLink="/account/login">Sign in</a>
