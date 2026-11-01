@@ -69,6 +69,7 @@ sequenceDiagram
 - Provider rows hold the issuer of the provider and the subject from its identity.
 - OIDC and login providers share `sign_in_external` in `authorization/external_login.rs`.
 - `decide` can choose between four outcomes: update, claim, new account or refusal.
+- Email matches ignore case. The slower of two racing first sign-ins can retry once and then find the user of the faster one.
 - A claim needs an account with no identity row. Passwords prevent the claim too, unless a verified email matched and password login is off.
 
 ## Related

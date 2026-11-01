@@ -7,6 +7,7 @@
 use chrono::NaiveDateTime;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::{Expr, ExprTrait, Func};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     PaginatorTrait, QueryFilter, QuerySelect, Select,
@@ -39,6 +40,19 @@ pub async fn by_username_or_email<C: ConnectionTrait>(
 
 pub async fn by_email<C: ConnectionTrait>(db: &C, email: &str) -> Result<Option<MUser>, DbErr> {
     EUser::find().filter(CUser::Email.eq(email)).one(db).await
+}
+
+pub async fn by_email_ignoring_case<C: ConnectionTrait>(
+    db: &C,
+    email: &str,
+) -> Result<Option<MUser>, DbErr> {
+    EUser::find()
+        .filter(
+            Expr::expr(Func::lower(Expr::col((EUser::default(), CUser::Email))))
+                .eq(email.to_lowercase()),
+        )
+        .one(db)
+        .await
 }
 
 pub async fn by_email_verification_token<C: ConnectionTrait>(
@@ -156,4 +170,33 @@ pub async fn update<C: ConnectionTrait>(db: &C, user: AUser) -> Result<MUser, Db
 pub async fn delete_by_id<C: ConnectionTrait>(db: &C, id: UserId) -> Result<(), DbErr> {
     EUser::delete_by_id(id).exec(db).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::mock::{mock_db, raw_statements};
+
+    #[tokio::test]
+    async fn email_lookup_for_claims_ignores_case() {
+        let db = mock_db()
+            .append_query_results([Vec::<MUser>::new()])
+            .into_connection();
+
+        by_email_ignoring_case(&db, "Alice@Example.com")
+            .await
+            .expect("query");
+
+        let statements = raw_statements(db.into_transaction_log());
+        let [select] = statements.as_slice() else {
+            panic!("expected one statement, got {statements:?}");
+        };
+        assert!(
+            select.sql.contains("LOWER(\"user\".\"email\")"),
+            "{}",
+            select.sql
+        );
+        let values = format!("{:?}", select.values);
+        assert!(values.contains("\"alice@example.com\""), "{values}");
+    }
 }
