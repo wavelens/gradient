@@ -122,8 +122,10 @@ def unbuilt_image_derivations(state):
         return ""
     _, roots = server.execute("cat /tmp/wanted-roots.txt")
     _, stale = server.execute("cat /tmp/wanted-stale.txt")
+    _, path = server.execute("cat /tmp/wanted-path.txt")
     return (f"--- builds wanting the first wanted bootstrap source that nothing else wants ---\n{roots}\n"
-            f"--- builds in that chain with a miss older than the newest evaluation ---\n{stale}")
+            f"--- builds in that chain with a miss older than the newest evaluation ---\n{stale}\n"
+            f"--- that chain from its roots down, first sighting of each build ---\n{path}")
 
 
 def watch_wanted_roots():
@@ -166,12 +168,33 @@ def watch_wanted_roots():
         f"  JOIN derivation pw ON pw.id = p.derivation WHERE e.dependency = d.id AND {wants}) "
         "ORDER BY d.name LIMIT 40"
     )
+    root_filter = (
+        "NOT EXISTS (SELECT 1 FROM derivation_dependency e JOIN derivation_build p ON p.derivation = e.derivation "
+        f"  JOIN derivation pw ON pw.id = p.derivation WHERE e.dependency = c.derivation AND {wants})"
+    )
+    path = (
+        f"{chain}, down(derivation, depth, via, kind) AS ("
+        f"  SELECT c.derivation, 0, ''::text, -1 FROM chain c WHERE {root_filter} UNION "
+        "  SELECT e.dependency, dn.depth + 1, pd.name, e.kind FROM down dn "
+        "  JOIN derivation_dependency e ON e.derivation = dn.derivation "
+        "  JOIN chain c ON c.derivation = e.dependency JOIN derivation pd ON pd.id = dn.derivation "
+        "  WHERE dn.depth < 10) "
+        "SELECT * FROM (SELECT DISTINCT ON (dn.derivation) dn.depth, dn.via, dn.kind, d.name, left(d.hash, 8), "
+        "  db.status, pw.walked, db.probed, db.probed_at, db.cache_available, db.fetchable, db.wanted, "
+        "  (SELECT min(ev.created_at) FROM build_job bj JOIN evaluation ev ON ev.id = bj.evaluation "
+        "   WHERE bj.derivation = d.id) AS first_evaluation "
+        "FROM down dn JOIN derivation d ON d.id = dn.derivation JOIN derivation pw ON pw.id = d.id "
+        "JOIN derivation_build db ON db.derivation = dn.derivation "
+        "ORDER BY dn.derivation, dn.depth) first ORDER BY depth, name LIMIT 60"
+    )
     psql = "runuser -u postgres -- psql -d gradient -At"
     server.succeed(f"printf %s {shlex.quote(bootstrap)} > /tmp/bootstrap-wanted.sql")
     server.succeed(f"printf %s {shlex.quote(roots)} > /tmp/wanted-roots.sql")
     server.succeed(f"printf %s {shlex.quote(stale)} > /tmp/wanted-stale.sql")
+    server.succeed(f"printf %s {shlex.quote(path)} > /tmp/wanted-path.sql")
     server.execute(
         f"(until {psql} -f /tmp/bootstrap-wanted.sql | grep -q .; do sleep 0.5; done; "
+        f"{psql} -f /tmp/wanted-path.sql > /tmp/wanted-path.txt 2>&1; "
         f"{psql} -f /tmp/wanted-roots.sql > /tmp/wanted-roots.txt 2>&1; "
         f"{psql} -f /tmp/wanted-stale.sql > /tmp/wanted-stale.txt 2>&1) >/dev/null 2>&1 &"
     )
