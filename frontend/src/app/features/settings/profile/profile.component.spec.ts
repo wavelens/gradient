@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
@@ -16,19 +16,34 @@ import { ConfigService } from '@core/services/config.service';
 import { ThemeService } from '@core/services/theme.service';
 
 let profileWrites: unknown[] = [];
+let disconnects: string[] = [];
 
-function settings(opts: { managed: boolean; oidc: boolean }) {
+interface SetupOptions {
+  managed: boolean;
+  oidc: boolean;
+  ssh?: boolean;
+  password?: boolean;
+  provider?: { connected: boolean; canDisconnect: boolean };
+  query?: Record<string, string>;
+}
+
+function settings(opts: SetupOptions) {
   return {
     username: 'alice',
     name: 'Alice',
     email: 'alice@example.com',
     is_oidc: opts.oidc,
+    has_password: opts.password ?? !opts.oidc,
+    login_providers: opts.provider
+      ? [{ id: 'example', label: 'Example', connected: opts.provider.connected, can_disconnect: opts.provider.canDisconnect }]
+      : [],
     managed: opts.managed,
   };
 }
 
-function setup(opts: { managed: boolean; oidc: boolean; ssh?: boolean }): ComponentFixture<ProfileComponent> {
+function setup(opts: SetupOptions): ComponentFixture<ProfileComponent> {
   profileWrites = [];
+  disconnects = [];
   localStorage.clear();
   document.documentElement.removeAttribute('data-theme');
   TestBed.configureTestingModule({
@@ -45,7 +60,15 @@ function setup(opts: { managed: boolean; oidc: boolean; ssh?: boolean }): Compon
             profileWrites.push(body);
             return of({});
           },
+          disconnectLoginProvider: (id: string) => {
+            disconnects.push(id);
+            return of('Account disconnected');
+          },
         },
+      },
+      {
+        provide: ActivatedRoute,
+        useValue: { snapshot: { queryParamMap: convertToParamMap(opts.query ?? {}) } },
       },
       { provide: AuthService, useValue: { reloadUser: () => undefined } },
       { provide: ConfigService, useValue: { sshEnabled: opts.ssh ?? false } },
@@ -166,5 +189,73 @@ describe('ProfileComponent - SSH keys row', () => {
   it('is shown when SSH is enabled', () => {
     const fixture = setup({ managed: false, oidc: false, ssh: true });
     expect(fixture.nativeElement.textContent).toContain('SSH Keys');
+  });
+});
+
+describe('ProfileComponent - connected accounts', () => {
+  it('hides the section without login providers', () => {
+    const fixture = setup({ managed: false, oidc: false });
+    expect(fixture.nativeElement.textContent).not.toContain('Connected Accounts');
+  });
+
+  it('offers Connect for an unconnected provider', () => {
+    const fixture = setup({ managed: false, oidc: false, provider: { connected: false, canDisconnect: false } });
+    expect(fixture.nativeElement.textContent).toContain('Example');
+    expect(fixture.nativeElement.textContent).toContain('Not connected');
+    expect(findByText(fixture.nativeElement, 'connect')).not.toBeNull();
+  });
+
+  it('disables Disconnect when the provider is the last way to sign in', () => {
+    const fixture = setup({ managed: false, oidc: false, password: false, provider: { connected: true, canDisconnect: false } });
+    const button = findByText(fixture.nativeElement, 'disconnect') as HTMLButtonElement | null;
+    expect(button).not.toBeNull();
+    expect(button!.disabled).toBe(true);
+  });
+
+  it('disconnects the provider on Disconnect', () => {
+    const fixture = setup({ managed: false, oidc: false, provider: { connected: true, canDisconnect: true } });
+    (findByText(fixture.nativeElement, 'disconnect') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(disconnects).toEqual(['example']);
+  });
+
+  it('shows a success banner after connecting', () => {
+    const fixture = setup({
+      managed: false,
+      oidc: false,
+      provider: { connected: true, canDisconnect: true },
+      query: { connected: '1' },
+    });
+    expect(fixture.nativeElement.textContent).toContain('Account connected.');
+  });
+
+  it('explains an account taken by another user', () => {
+    const fixture = setup({
+      managed: false,
+      oidc: false,
+      provider: { connected: false, canDisconnect: false },
+      query: { connect_error: 'taken' },
+    });
+    expect(fixture.nativeElement.textContent).toContain('already connected to another user');
+  });
+
+  it('explains a connect that outlived its session', () => {
+    const fixture = setup({
+      managed: false,
+      oidc: false,
+      provider: { connected: false, canDisconnect: false },
+      query: { connect_error: 'signed_out' },
+    });
+    expect(fixture.nativeElement.textContent).toContain('signed out');
+  });
+});
+
+describe('ProfileComponent - delete confirmation', () => {
+  it('asks for the username when the account has no password', async () => {
+    const fixture = setup({ managed: false, oidc: false, password: false, provider: { connected: true, canDisconnect: false } });
+    fixture.componentInstance.openDeleteDialog();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(document.body.querySelector('#confirm-username')).not.toBeNull();
   });
 });

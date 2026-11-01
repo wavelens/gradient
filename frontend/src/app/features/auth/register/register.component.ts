@@ -187,11 +187,17 @@ export class RegisterComponent {
     return this.registerForm.errors?.['passwordMismatch'] ? 'Passwords do not match' : '';
   }
 
-  get oidcRequired() { return this.config.oidcRequired; }
+  get oidcEnabled() { return this.config.oidcEnabled; }
+  get loginProviders() { return this.config.loginProviders; }
+  get passwordLoginEnabled() { return this.config.passwordLoginEnabled; }
   get logoUrl() { return this.config.logoUrl; }
   get registrationDisabled() { return this.config.registrationDisabled; }
 
   loginWithOIDC(): void {
     window.location.href = `${environment.apiUrl}/auth/oidc/login`;
+  }
+
+  loginWithProvider(id: string): void {
+    window.location.href = `${environment.apiUrl}/auth/providers/${encodeURIComponent(id)}/login`;
   }
 }

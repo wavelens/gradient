@@ -16,7 +16,7 @@
       <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
     }
 
-    @if (!oidcRequired) {
+    @if (passwordLoginEnabled) {
       <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="auth-form">
         <gr-form-field
           label="Username or Email"
@@ -60,12 +60,12 @@
       </form>
     }
 
+    @if (passwordLoginEnabled && (oidcEnabled || loginProviders.length > 0)) {
+      <div class="auth-divider">
+        <span>OR</span>
+      </div>
+    }
     @if (oidcEnabled) {
-      @if (!oidcRequired) {
-        <div class="auth-divider">
-          <span>OR</span>
-        </div>
-      }
       <button
         grButton
         type="button"
@@ -74,6 +74,17 @@
         icon="login"
         label="Sign in with SSO"
         (click)="loginWithOIDC()"
+      ></button>
+    }
+    @for (provider of loginProviders; track provider.id) {
+      <button
+        grButton
+        type="button"
+        class="w-full"
+        severity="secondary"
+        icon="login"
+        [label]="'Sign in with ' + provider.label"
+        (click)="loginWithProvider(provider.id)"
       ></button>
     }
 

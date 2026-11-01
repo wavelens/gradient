@@ -552,6 +552,13 @@ export interface ComparedEvaluation {
 
 export type ConcurrencyPolicy = "hard_abort" | "soft_abort" | "all" | "skip" | "auto";
 
+export interface ConnectedLoginProvider {
+  id: string;
+  label: string;
+  connected: boolean;
+  can_disconnect: boolean;
+}
+
 export type ConnectionDirection = "outbound" | "inbound";
 
 export interface ConnectionFailure {
@@ -1231,6 +1238,8 @@ export interface GetUserSettingsResponse {
   name: string;
   email: string;
   is_oidc: boolean;
+  has_password: boolean;
+  login_providers: ConnectedLoginProvider[];
   managed: boolean;
 }
 
@@ -1493,6 +1502,11 @@ export interface LogSearchHit {
   chunk_index: number;
   byte_offset: number;
   preview: string;
+}
+
+export interface LoginProviderInfo {
+  id: string;
+  label: string;
 }
 
 export interface MakeCacheRequest {
@@ -2200,7 +2214,8 @@ export interface ServerConfig {
   version: string;
   commit?: string | null;
   oidc_enabled: boolean;
-  oidc_required: boolean;
+  login_providers: LoginProviderInfo[];
+  password_login_enabled: boolean;
   registration_enabled: boolean;
   email_verification_enabled: boolean;
   smtp_enabled: boolean;

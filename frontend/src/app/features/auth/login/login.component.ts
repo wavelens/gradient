@@ -22,6 +22,15 @@ import {
   PasswordInputComponent,
 } from '@gradient/ui/ui';
 
+const LOGIN_ERRORS: Record<string, string> = {
+  deactivated: 'This account is deactivated.',
+  account_exists: 'An account already exists with this username or email.',
+  username_taken: 'The username is taken. Sign in and connect the account from your profile instead.',
+  no_verified_email: 'The account has no verified primary email.',
+  unusable_username: 'The username of the account cannot be used here.',
+  failed: 'Sign-in failed. Please try again.',
+};
+
 @Component({
   selector: 'app-login',
   standalone: true,
@@ -43,7 +52,8 @@ export class LoginComponent {
   showPassword = signal(false);
   get oidcEnabled() { return this.config.oidcEnabled; }
   get logoUrl() { return this.config.logoUrl; }
-  get oidcRequired() { return this.config.oidcRequired; }
+  get loginProviders() { return this.config.loginProviders; }
+  get passwordLoginEnabled() { return this.config.passwordLoginEnabled; }
   get registrationDisabled() { return this.config.registrationDisabled; }
 
   constructor() {
@@ -52,6 +62,11 @@ export class LoginComponent {
       password: ['', [Validators.required]],
       rememberMe: [false],
     });
+
+    const loginError = this.route.snapshot.queryParamMap.get('login_error');
+    if (loginError) {
+      this.errorMessage.set(LOGIN_ERRORS[loginError] ?? LOGIN_ERRORS['failed']);
+    }
 
     this.authService.initialized$.pipe(take(1)).subscribe(() => {
       if (this.authService.isAuthenticated()) {
@@ -90,10 +105,18 @@ export class LoginComponent {
   }
 
   loginWithOIDC(): void {
+    this.redirectTo('auth/oidc/login');
+  }
+
+  loginWithProvider(id: string): void {
+    this.redirectTo(`auth/providers/${encodeURIComponent(id)}/login`);
+  }
+
+  private redirectTo(path: string): void {
     const next = this.route.snapshot.queryParamMap.get('next');
     if (next && next.startsWith('/')) {
       sessionStorage.setItem('oidc_next', next);
     }
-    window.location.href = `${environment.apiUrl}/auth/oidc/login`;
+    window.location.href = `${environment.apiUrl}/${path}`;
   }
 }
