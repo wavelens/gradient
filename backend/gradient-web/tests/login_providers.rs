@@ -244,7 +244,7 @@ async fn connect_requires_session() {
     let res = server()
         .get("/api/v1/user/identities/example/connect")
         .await;
-    res.assert_status_unauthorized();
+    res.assert_status_forbidden();
 }
 
 #[tokio::test]
