@@ -61,6 +61,7 @@ pub mod tasks;
 pub mod teams;
 pub mod triggers;
 pub mod upload_sessions;
+pub mod user_identities;
 pub mod users;
 pub mod webhooks;
 pub mod worker_names;

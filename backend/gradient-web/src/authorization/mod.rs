@@ -5,13 +5,18 @@
  */
 
 mod api_key;
+mod external_login;
+mod identity_connect;
 mod job_scope;
 mod jwt;
 mod middleware;
 mod oidc;
+mod provider_flow;
 mod scim;
 
 pub use self::api_key::{ApiKeyContext, DecodedRequest, JobPrincipal, MaybeApiKey, Principal};
+pub use self::external_login::{PasswordLogin, sign_in_external};
+pub use self::identity_connect::{ConnectRefusal, can_disconnect, connect_identity};
 pub use self::job_scope::{JobScopeRefusal, job_mask};
 pub use self::jwt::{
     Cliams, DownloadClaims, cookie_value, create_session_and_token, decode_download_token,
@@ -19,4 +24,7 @@ pub use self::jwt::{
 };
 pub use self::middleware::{MaybeUser, authorize, authorize_optional, update_last_login};
 pub use self::oidc::{OidcAuthRequest, oidc_login_create, oidc_login_verify};
+pub use self::provider_flow::{
+    ProviderCallback, ProviderPurpose, provider_authorize, provider_callback,
+};
 pub use self::scim::authorize_scim;

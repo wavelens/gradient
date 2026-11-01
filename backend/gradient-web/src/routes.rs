@@ -292,6 +292,8 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(user::delete_session))
                 .routes(routes!(user::get_audit_log))
                 .routes(routes!(user::get_settings, user::patch_settings))
+                .routes(routes!(login_providers::get_provider_connect))
+                .routes(routes!(login_providers::delete_provider_identity))
                 .routes(routes!(user::put_seen_version))
                 .routes(routes!(auth::get_cli_device_info))
                 .routes(routes!(auth::post_cli_device_authorize))
@@ -423,6 +425,8 @@ pub(crate) fn auth_sensitive() -> OpenApiRouter<Arc<ServerState>> {
             ))
             .routes(routes!(auth::get_oidc_login))
             .routes(routes!(auth::get_oidc_callback))
+            .routes(routes!(login_providers::get_provider_login))
+            .routes(routes!(login_providers::get_provider_callback))
             .routes(routes!(auth::post_cli_device_start))
             .routes(routes!(auth::post_cli_device_poll)),
     ))

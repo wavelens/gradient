@@ -110,6 +110,11 @@ impl TestState {
         self
     }
 
+    pub fn login_provider(mut self, provider: Arc<dyn gradient_core::LoginProvider>) -> Self {
+        self.extensions.login_providers.push(provider);
+        self
+    }
+
     pub fn store_path_mapping(mut self, mapping: Arc<dyn StorePathMapping>) -> Self {
         self.extensions.store_path_mapping = mapping;
         self

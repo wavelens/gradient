@@ -3581,6 +3581,7 @@ version = "2.0.1"
 dependencies = [
  "anyhow",
  "async-stream",
+ "async-trait",
  "axum",
  "axum-streams",
  "axum-test",

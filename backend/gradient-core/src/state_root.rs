@@ -36,6 +36,7 @@ use gradient_util::member_sums::MemberSums;
 use gradient_util::shutdown::Shutdown;
 
 use crate::ServerExtensions;
+use crate::login_provider::LoginMethods;
 
 #[derive(Debug)]
 pub struct InstanceMemory {
@@ -127,6 +128,14 @@ impl AppState {
             wake: self.wake.clone(),
             memory: self.memory.db.clone(),
             store_path_mapping: Arc::clone(&self.extensions.store_path_mapping),
+        }
+    }
+
+    pub fn login_methods(&self) -> LoginMethods {
+        LoginMethods {
+            oidc: self.config.oidc.is_some(),
+            oidc_required: self.config.oidc.as_ref().is_some_and(|o| o.required),
+            providers: self.extensions.login_providers.clone(),
         }
     }
 

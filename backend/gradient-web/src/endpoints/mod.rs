@@ -27,6 +27,7 @@ pub mod gradient_ci_connections;
 pub mod invites;
 pub mod live;
 pub mod log_stream;
+pub mod login_providers;
 pub(crate) mod membership;
 pub mod metrics;
 pub mod metrics_query;
@@ -140,11 +141,18 @@ pub async fn get_health() -> WebResult<Json<BaseResponse<String>>> {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
+pub struct LoginProviderInfo {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ServerConfig {
     pub version: String,
     pub commit: Option<String>,
     pub oidc_enabled: bool,
-    pub oidc_required: bool,
+    pub login_providers: Vec<LoginProviderInfo>,
+    pub password_login_enabled: bool,
     pub registration_enabled: bool,
     pub email_verification_enabled: bool,
     pub smtp_enabled: bool,
@@ -167,7 +175,7 @@ pub struct ServerConfig {
     operation_id = "getConfig",
     tag = "general",
     summary = "Server configuration",
-    description = "Returns feature flags for the frontend (OIDC enabled, registration disabled, email verification).",
+    description = "Returns feature flags for the frontend (OIDC and login providers, password login, registration, email verification).",
     responses((status = OK, description = "Server configuration", body = ServerConfig), WebError)
 )]
 pub async fn get_config(
@@ -179,9 +187,18 @@ pub async fn get_config(
             version: env!("CARGO_PKG_VERSION").to_string(),
             commit: option_env!("GRADIENT_GIT_REV").map(str::to_owned),
             oidc_enabled: state.config.oidc.is_some(),
-            oidc_required: state.config.oidc.as_ref().is_some_and(|o| o.required),
+            login_providers: state
+                .extensions
+                .login_providers
+                .iter()
+                .map(|p| LoginProviderInfo {
+                    id: p.id().to_owned(),
+                    label: p.label().to_owned(),
+                })
+                .collect(),
+            password_login_enabled: state.login_methods().password_login(),
             registration_enabled: state.config.registration.enable
-                && !state.config.oidc.as_ref().is_some_and(|o| o.required),
+                && state.login_methods().password_login(),
             email_verification_enabled: state.config.email.is_some()
                 && state
                     .config

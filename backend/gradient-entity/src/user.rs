@@ -27,8 +27,6 @@ pub struct Model {
     pub email_verification_token_expires: Option<NaiveDateTime>,
     pub managed: bool,
     pub superuser: bool,
-    pub oidc_issuer: Option<String>,
-    pub oidc_subject: Option<String>,
     pub active: bool,
     #[sea_orm(unique, indexed)]
     pub scim_external_id: Option<String>,

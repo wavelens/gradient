@@ -6,12 +6,17 @@
 
 pub mod build_logs;
 pub mod extensions;
+pub mod login_provider;
 pub mod state_root;
 pub mod upstream;
 pub mod upstream_source;
 
 pub use extensions::ServerExtensions;
 pub use gradient_graph::Graph;
+pub use login_provider::{
+    AuthorizeRequest, CodeExchange, ExternalIdentity, LoginMethods, LoginProvider, LoginRefusal,
+    MatchRule,
+};
 pub use state_root::{
     AppState, BUILD_PROGRESS_TTL, EVAL_PROGRESS_TTL, EvalMemberThunks, InstanceMemory,
     LAST_USED_STAMP_INTERVAL, ServerState, build_progress, build_status_counts, eval_member_thunks,

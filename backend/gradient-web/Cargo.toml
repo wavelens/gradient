@@ -85,6 +85,7 @@ tower_governor       = { workspace = true }
 harmonia-file-nar = { workspace = true }
 
 [dev-dependencies]
+async-trait       = { workspace = true }
 axum-test         = { workspace = true }
 harmonia-file-nar = { workspace = true, features = ["test"] }
 hmac              = { workspace = true }
