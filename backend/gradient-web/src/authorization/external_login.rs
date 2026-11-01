@@ -85,10 +85,37 @@ pub fn decide(
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("a concurrent sign-in wrote the same user or identity first")]
+struct ConcurrentSignIn;
+
+/// A concurrent first sign-in of the same account loses the unique-index race; the retry then finds the winner's rows.
 pub async fn sign_in_external(
     db: &WebDb,
     pending: &PendingProjectMemberships,
     identity: ExternalIdentity,
+    password_login: PasswordLogin,
+) -> Result<MUser> {
+    match attempt_sign_in(db, pending, &identity, password_login).await {
+        Err(e) if e.is::<ConcurrentSignIn>() => {
+            attempt_sign_in(db, pending, &identity, password_login)
+                .await
+                .map_err(|e| {
+                    if e.is::<ConcurrentSignIn>() {
+                        LoginRefusal::AccountExists.into()
+                    } else {
+                        e
+                    }
+                })
+        }
+        outcome => outcome,
+    }
+}
+
+async fn attempt_sign_in(
+    db: &WebDb,
+    pending: &PendingProjectMemberships,
+    identity: &ExternalIdentity,
     password_login: PasswordLogin,
 ) -> Result<MUser> {
     let tx = db
@@ -109,9 +136,11 @@ pub async fn sign_in_external(
             .await
             .context("find user by username")?;
         let by_email = match &identity.email {
-            Some(email) if !email.is_empty() => gradient_db::users::by_email(&tx, email)
-                .await
-                .context("find user by email")?,
+            Some(email) if !email.is_empty() => {
+                gradient_db::users::by_email_ignoring_case(&tx, email)
+                    .await
+                    .context("find user by email")?
+            }
             _ => None,
         };
         (
@@ -120,18 +149,18 @@ pub async fn sign_in_external(
         )
     };
 
-    let user = match decide(&identity, linked, by_username, by_email, password_login) {
+    let user = match decide(identity, linked, by_username, by_email, password_login) {
         LoginDecision::Refuse(refusal) => return Err(refusal.into()),
-        LoginDecision::Update(user) => touch(&tx, user, &identity).await?,
+        LoginDecision::Update(user) => touch(&tx, user, identity).await?,
         LoginDecision::Claim(user) => {
-            bind(&tx, user.id, &identity).await?;
-            let user = touch(&tx, user, &identity).await?;
+            bind(&tx, user.id, identity).await?;
+            let user = touch(&tx, user, identity).await?;
             apply_pending(&tx, pending, &user).await;
             user
         }
         LoginDecision::Create => {
-            let user = create(&tx, &identity).await?;
-            bind(&tx, user.id, &identity).await?;
+            let user = create(&tx, identity).await?;
+            bind(&tx, user.id, identity).await?;
             apply_pending(&tx, pending, &user).await;
             user
         }
@@ -213,7 +242,7 @@ async fn bind(tx: &DatabaseTransaction, user: UserId, identity: &ExternalIdentit
 fn refuse_on_conflict(stage: &'static str) -> impl FnOnce(sea_orm::DbErr) -> anyhow::Error {
     move |e| {
         if is_unique_violation(&e) {
-            LoginRefusal::AccountExists.into()
+            ConcurrentSignIn.into()
         } else {
             anyhow::Error::new(e).context(stage)
         }
