@@ -4,19 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::external_login::{PasswordLogin, sign_in_external};
 use super::jwt::{sign_claims, verify_claims};
-use crate::error::is_unique_violation;
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
 use gradient_core::ServerState;
-use gradient_db::WebDb;
-use gradient_state::PendingProjectMemberships;
+use gradient_core::{ExternalIdentity, MatchRule};
 use gradient_types::input::load_secret;
 use gradient_types::*;
 use jsonwebtoken::{DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
 use rand::RngExt as _;
-use sea_orm::{ActiveValue::Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -52,11 +50,7 @@ struct IdTokenClaims {
     groups: Vec<String>,
 }
 
-fn is_claimable(password: &Option<String>, oidc_subject: &Option<String>) -> bool {
-    password.is_none() && oidc_subject.is_none()
-}
-
-fn random_url_safe(bytes: usize) -> String {
+pub(super) fn random_url_safe(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
     rand::rng().fill(buf.as_mut_slice());
     URL_SAFE_NO_PAD.encode(buf)
@@ -240,10 +234,11 @@ pub async fn oidc_login_verify(
         _ => bail!("OIDC nonce mismatch"),
     }
 
-    create_or_update_user(
+    sign_in_external(
         &state.web_db,
         &state.memory.pending_project_memberships,
-        claims,
+        external_identity(claims),
+        PasswordLogin::of(&state.login_methods()),
     )
     .await
 }
@@ -274,188 +269,18 @@ async fn verify_id_token(
     Ok(data.claims)
 }
 
-async fn create_or_update_user(
-    db: &WebDb,
-    pending_project_memberships: &PendingProjectMemberships,
-    claims: IdTokenClaims,
-) -> Result<MUser> {
-    let display_name = claims.name.clone().unwrap_or_else(|| claims.sub.clone());
-    let email = claims.email.clone().unwrap_or_default();
-    let login_name = claims
+fn external_identity(claims: IdTokenClaims) -> ExternalIdentity {
+    let username = claims
         .preferred_username
-        .clone()
         .unwrap_or_else(|| claims.sub.clone());
-    let groups = claims.groups.clone();
-
-    let tx = db
-        .inner()
-        .begin()
-        .await
-        .context("start OIDC user transaction")?;
-
-    let existing = gradient_db::users::by_oidc_identity(&tx, &claims.iss, &claims.sub)
-        .await
-        .context("find OIDC user")?;
-
-    if let Some(user) = existing {
-        if !user.active {
-            bail!("account is deactivated");
-        }
-
-        let email_changed = claims.email.as_ref().is_some_and(|e| e != &user.email);
-        let name_changed = claims.name.as_ref().is_some_and(|n| n != &user.name);
-
-        let mut auser: AUser = user.into();
-        auser.last_login_at = Set(gradient_types::now());
-
-        if let Some(ref new_email) = claims.email
-            && email_changed
-        {
-            auser.email = Set(new_email.clone());
-        }
-
-        if let Some(ref new_name) = claims.name
-            && name_changed
-        {
-            auser.name = Set(new_name.clone());
-        }
-
-        let user = gradient_db::rows::update::<EUser, _>(&tx, auser)
-            .await
-            .context("update OIDC user")?;
-
-        if let Err(e) =
-            gradient_db::teams::members::sync_group_memberships(&tx, user.id, &groups).await
-        {
-            tracing::warn!(error = %e, username = %user.username,
-                "Failed to sync OIDC group team memberships");
-        }
-
-        tx.commit().await.context("commit OIDC user transaction")?;
-        return Ok(user);
-    }
-
-    let collision = gradient_db::users::by_username_or_email(&tx, &login_name, &email)
-        .await
-        .context("check for OIDC username/email collision")?;
-
-    if let Some(existing) = collision {
-        if !is_claimable(&existing.password, &existing.oidc_subject) {
-            bail!("An account already exists with this username or email.");
-        }
-
-        if !existing.active {
-            bail!("account is deactivated");
-        }
-
-        let user_id = existing.id;
-        let mut auser: AUser = existing.into();
-        auser.oidc_issuer = Set(Some(claims.iss));
-        auser.oidc_subject = Set(Some(claims.sub));
-        auser.last_login_at = Set(gradient_types::now());
-
-        if let Some(ref new_email) = claims.email {
-            auser.email = Set(new_email.clone());
-        }
-
-        if let Some(ref new_name) = claims.name {
-            auser.name = Set(new_name.clone());
-        }
-
-        let user = gradient_db::rows::update::<EUser, _>(&tx, auser)
-            .await
-            .context("claim OIDC account")?;
-
-        if let Err(e) = gradient_state::apply_pending_project_memberships(
-            &tx,
-            pending_project_memberships,
-            &user.username,
-            user_id,
-        )
-        .await
-        {
-            tracing::warn!(
-                error = %e,
-                username = %user.username,
-                "Failed to apply pending state-managed project memberships for claimed OIDC user"
-            );
-        }
-
-        if let Err(e) =
-            gradient_db::teams::members::sync_group_memberships(&tx, user_id, &groups).await
-        {
-            tracing::warn!(error = %e, username = %user.username,
-                "Failed to sync OIDC group team memberships");
-        }
-
-        tx.commit().await.context("commit OIDC account claim")?;
-        return Ok(user);
-    }
-
-    let user = gradient_db::rows::insert::<EUser, _>(
-        &tx,
-        MUser {
-            id: UserId::now_v7(),
-            username: login_name,
-            name: display_name,
-            email,
-            last_login_at: gradient_types::now(),
-            created_at: gradient_types::now(),
-            email_verified: true,
-            oidc_issuer: Some(claims.iss),
-            oidc_subject: Some(claims.sub),
-            active: true,
-            ..Default::default()
-        },
-    )
-    .await
-    .map_err(|e| {
-        if is_unique_violation(&e) {
-            anyhow::anyhow!("An account already exists with this username or email.")
-        } else {
-            anyhow::Error::new(e).context("create user")
-        }
-    })?;
-
-    if let Err(e) = gradient_state::apply_pending_project_memberships(
-        &tx,
-        pending_project_memberships,
-        &user.username,
-        user.id,
-    )
-    .await
-    {
-        tracing::warn!(
-            error = %e,
-            username = %user.username,
-            "Failed to apply pending state-managed project memberships for new OIDC user"
-        );
-    }
-
-    if let Err(e) = gradient_db::teams::members::sync_group_memberships(&tx, user.id, &groups).await
-    {
-        tracing::warn!(error = %e, username = %user.username,
-            "Failed to sync OIDC group team memberships");
-    }
-
-    tx.commit().await.context("commit OIDC user transaction")?;
-
-    Ok(user)
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn claimable_only_when_passwordless_and_unbound() {
-        assert!(super::is_claimable(&None, &None));
-        assert!(!super::is_claimable(&Some("$argon2id$...".into()), &None));
-        assert!(!super::is_claimable(
-            &None,
-            &Some("existing-subject".into())
-        ));
-        assert!(!super::is_claimable(
-            &Some("$argon2id$...".into()),
-            &Some("existing-subject".into())
-        ));
+    ExternalIdentity {
+        issuer: claims.iss,
+        subject: claims.sub,
+        username,
+        email: claims.email,
+        name: claims.name,
+        groups: Some(claims.groups),
+        match_rule: MatchRule::UsernameOrEmail,
+        refresh_profile: true,
     }
 }

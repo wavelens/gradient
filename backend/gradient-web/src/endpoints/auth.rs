@@ -144,7 +144,7 @@ pub async fn post_basic_register(
     audit: Audit,
     JsonBody(body): JsonBody<MakeUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if !state.config.registration.enable || state.config.oidc.as_ref().is_some_and(|o| o.required) {
+    if !state.config.registration.enable || !state.login_methods().password_login() {
         return Err(WebError::registration_disabled());
     }
 
@@ -280,7 +280,7 @@ pub async fn post_basic_login(
     audit: Audit,
     Json(body): Json<MakeLoginRequest>,
 ) -> WebResult<Response> {
-    if state.config.oidc.as_ref().is_some_and(|o| o.required) {
+    if !state.login_methods().password_login() {
         return Err(WebError::oauth_required());
     }
 
@@ -373,20 +373,14 @@ pub async fn post_basic_login(
 
 const OIDC_CSRF_COOKIE: &str = "oidc_csrf";
 
-fn oidc_csrf_set_cookie(value: &str, use_tls: bool) -> String {
+pub(super) fn csrf_set_cookie(name: &str, value: &str, use_tls: bool) -> String {
     let secure = if use_tls { "; Secure" } else { "" };
-    format!(
-        "{}={}; HttpOnly{}; SameSite=Lax; Path=/; Max-Age=600",
-        OIDC_CSRF_COOKIE, value, secure
-    )
+    format!("{name}={value}; HttpOnly{secure}; SameSite=Lax; Path=/; Max-Age=600")
 }
 
-fn oidc_csrf_clear_cookie(use_tls: bool) -> String {
+pub(super) fn csrf_clear_cookie(name: &str, use_tls: bool) -> String {
     let secure = if use_tls { "; Secure" } else { "" };
-    format!(
-        "{}=; HttpOnly{}; SameSite=Lax; Path=/; Max-Age=0",
-        OIDC_CSRF_COOKIE, secure
-    )
+    format!("{name}=; HttpOnly{secure}; SameSite=Lax; Path=/; Max-Age=0")
 }
 
 /// The upstream IdP detail is only logged. A client probing the endpoint is seeing a generic 401.
@@ -456,7 +450,8 @@ pub async fn get_oauth_authorize(
     let mut response = Json(res).into_response();
     response.headers_mut().append(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&oidc_csrf_clear_cookie(use_tls)).context("bad cookie")?,
+        HeaderValue::from_str(&csrf_clear_cookie(OIDC_CSRF_COOKIE, use_tls))
+            .context("bad cookie")?,
     );
     Ok(response)
 }
@@ -487,8 +482,12 @@ pub async fn post_oauth_authorize(state: State<Arc<ServerState>>) -> WebResult<R
     let mut response = Json(res).into_response();
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&oidc_csrf_set_cookie(&req.cookie_value, use_tls))
-            .context("bad cookie")?,
+        HeaderValue::from_str(&csrf_set_cookie(
+            OIDC_CSRF_COOKIE,
+            &req.cookie_value,
+            use_tls,
+        ))
+        .context("bad cookie")?,
     );
     Ok(response)
 }
@@ -520,7 +519,7 @@ pub async fn get_oidc_login(
         .header("Location", req.auth_url.to_string())
         .header(
             "Set-Cookie",
-            oidc_csrf_set_cookie(&req.cookie_value, use_tls),
+            csrf_set_cookie(OIDC_CSRF_COOKIE, &req.cookie_value, use_tls),
         )
         .body(Body::empty())
         .context("build redirect response")
@@ -575,7 +574,7 @@ pub async fn get_oidc_callback(
         .await;
 
     let session_cookie = jwt_cookie(&token, false, use_tls);
-    let clear_csrf = oidc_csrf_clear_cookie(use_tls);
+    let clear_csrf = csrf_clear_cookie(OIDC_CSRF_COOKIE, use_tls);
 
     Response::builder()
         .status(StatusCode::FOUND)
@@ -638,10 +637,18 @@ pub async fn post_logout(
         axum::http::header::SET_COOKIE,
         HeaderValue::from_str(&clear_cookie).context("bad cookie")?,
     );
+    response.headers_mut().append(
+        axum::http::header::SET_COOKIE,
+        HeaderValue::from_str(&csrf_clear_cookie(
+            super::login_providers::LOGIN_CSRF_COOKIE,
+            state.config.server.use_tls,
+        ))
+        .context("bad cookie")?,
+    );
     Ok(response)
 }
 
-fn jwt_cookie(token: &str, remember_me: bool, use_tls: bool) -> String {
+pub(super) fn jwt_cookie(token: &str, remember_me: bool, use_tls: bool) -> String {
     let secure = if use_tls { "; Secure" } else { "" };
     let base = format!(
         "jwt_token={}; HttpOnly{}; SameSite=Strict; Path=/",

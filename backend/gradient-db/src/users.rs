@@ -51,18 +51,6 @@ pub async fn by_email_verification_token<C: ConnectionTrait>(
         .await
 }
 
-pub async fn by_oidc_identity<C: ConnectionTrait>(
-    db: &C,
-    issuer: &str,
-    subject: &str,
-) -> Result<Option<MUser>, DbErr> {
-    EUser::find()
-        .filter(CUser::OidcIssuer.eq(issuer))
-        .filter(CUser::OidcSubject.eq(subject))
-        .one(db)
-        .await
-}
-
 pub async fn search_by_username<C: ConnectionTrait>(
     db: &C,
     text: &str,

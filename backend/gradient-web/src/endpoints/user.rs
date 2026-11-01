@@ -6,7 +6,9 @@
 
 use crate::access::{CacheAccess, Caller, effective_cache_mask, load_cache};
 use crate::audit::Audit;
-use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key, session_claims};
+use crate::authorization::{
+    MaybeApiKey, can_disconnect, generate_api_key, hash_api_key, session_claims,
+};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::json_body::JsonBody;
@@ -21,6 +23,7 @@ use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::{Extension, Json};
+use gradient_core::LoginMethods;
 use gradient_db::lookup::{by_ids, get_any_project_by_name};
 use gradient_db::{DbContext, WebDb};
 use gradient_types::events::EventOwner;
@@ -269,19 +272,47 @@ pub struct GetUserSettingsResponse {
     pub name: String,
     pub email: String,
     pub is_oidc: bool,
+    pub has_password: bool,
+    pub login_providers: Vec<ConnectedLoginProvider>,
     pub managed: bool,
 }
 
-impl From<&MUser> for GetUserSettingsResponse {
-    fn from(user: &MUser) -> Self {
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
+pub struct ConnectedLoginProvider {
+    pub id: String,
+    pub label: String,
+    pub connected: bool,
+    pub can_disconnect: bool,
+}
+
+impl GetUserSettingsResponse {
+    fn new(user: &MUser, identities: &[MUserIdentity], methods: &LoginMethods) -> Self {
+        let has_password = user.password.is_some();
         Self {
-            is_oidc: user.password.is_none(),
+            is_oidc: has_oidc_identity(identities, methods),
+            has_password,
+            login_providers: methods
+                .providers
+                .iter()
+                .map(|p| ConnectedLoginProvider {
+                    id: p.id().to_owned(),
+                    label: p.label().to_owned(),
+                    connected: identities.iter().any(|i| i.issuer == p.issuer()),
+                    can_disconnect: can_disconnect(methods, has_password, identities, p.issuer()),
+                })
+                .collect(),
             managed: user.managed,
             username: user.username.clone(),
             name: user.name.clone(),
             email: user.email.clone(),
         }
     }
+}
+
+fn has_oidc_identity(identities: &[MUserIdentity], methods: &LoginMethods) -> bool {
+    identities
+        .iter()
+        .any(|i| !methods.providers.iter().any(|p| p.issuer() == i.issuer))
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -381,7 +412,7 @@ pub async fn put_seen_version(
     operation_id = "deleteUser",
     tag = "user",
     summary = "Delete current user",
-    description = "Permanently deletes the authenticated user and all associated data.\nRequires re-authentication: password-auth users must supply their\ncurrent password in `password`; OIDC-auth users must echo their\nusername in `confirm_username`.",
+    description = "Permanently deletes the authenticated user and all associated data.\nRequires re-authentication: password-auth users must supply their\ncurrent password in `password`; users without a password must echo\ntheir username in `confirm_username`.",
     request_body = DeleteUserRequest,
     responses((status = OK, description = "User deleted", body = String, content_type = "application/json"), WebError)
 )]
@@ -900,11 +931,13 @@ pub async fn get_audit_log(
     responses((status = OK, description = "User settings", body = GetUserSettingsResponse), WebError)
 )]
 pub async fn get_settings(
+    state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<GetUserSettingsResponse>>> {
+    let identities = gradient_db::user_identities::of_user(&state.web_db, user.id).await?;
     let res = BaseResponse {
         error: false,
-        message: GetUserSettingsResponse::from(&user),
+        message: GetUserSettingsResponse::new(&user, &identities, &state.login_methods()),
     };
 
     Ok(Json(res))
@@ -929,7 +962,8 @@ pub async fn patch_settings(
         return Err(SharedRefusal::StateManaged(Change::Modify, Resource::User).into());
     }
 
-    if user.password.is_none() {
+    let identities = gradient_db::user_identities::of_user(&state.web_db, user.id).await?;
+    if has_oidc_identity(&identities, &state.login_methods()) {
         return Err(UserRefusal::ModifyOidcUserProfile.into());
     }
 

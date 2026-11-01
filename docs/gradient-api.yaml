@@ -1163,6 +1163,63 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security: []
+  /api/v1/auth/providers/{provider}/callback:
+    get:
+      tags:
+      - auth
+      summary: Login provider callback
+      description: |-
+        Handles the provider redirect for both sign-in and connecting an account. Verifies the
+        `state` parameter against the `login_csrf` cookie and asks the provider for the identity.
+        A sign-in sets the `jwt_token` session cookie and redirects to the frontend. A connection
+        redirects to the profile settings page. Failures redirect to the login page with a
+        `login_error` code.
+      operationId: providerCallback
+      parameters:
+      - name: provider
+        in: path
+        description: Login provider ID from `GET /config`
+        required: true
+        schema:
+          type: string
+      - name: code
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '302':
+          description: Redirect to the frontend
+        default:
+          $ref: '#/components/responses/Error'
+      security: []
+  /api/v1/auth/providers/{provider}/login:
+    get:
+      tags:
+      - auth
+      summary: Login provider redirect
+      description: |-
+        Redirects the browser to the login provider (HTTP 302) using PKCE (S256) and sets a
+        short-lived `login_csrf` cookie carrying the signed `state`, the provider and the PKCE verifier.
+      operationId: providerLogin
+      parameters:
+      - name: provider
+        in: path
+        description: Login provider ID from `GET /config`
+        required: true
+        schema:
+          type: string
+      responses:
+        '302':
+          description: Redirect to the login provider
+        default:
+          $ref: '#/components/responses/Error'
+      security: []
   /api/v1/auth/resend-verification:
     post:
       tags:
@@ -5132,7 +5189,7 @@ paths:
       tags:
       - general
       summary: Server configuration
-      description: Returns feature flags for the frontend (OIDC enabled, registration disabled, email verification).
+      description: Returns feature flags for the frontend (OIDC and login providers, password login, registration, email verification).
       operationId: getConfig
       responses:
         '200':
@@ -11822,8 +11879,8 @@ paths:
       description: |-
         Permanently deletes the authenticated user and all associated data.
         Requires re-authentication: password-auth users must supply their
-        current password in `password`; OIDC-auth users must echo their
-        username in `confirm_username`.
+        current password in `password`; users without a password must echo
+        their username in `confirm_username`.
       operationId: deleteUser
       requestBody:
         content:
@@ -11889,6 +11946,65 @@ paths:
                     type: boolean
                   message:
                     $ref: '#/components/schemas/Paginated_AuditLogEntry'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/user/identities/{provider}:
+    delete:
+      tags:
+      - user
+      summary: Disconnect a login provider account
+      description: |-
+        Removes the connected account of the login provider. Refused when no other login method
+        would work under the current configuration. API keys cannot call this endpoint.
+      operationId: providerDisconnect
+      parameters:
+      - name: provider
+        in: path
+        description: Login provider ID from `GET /config`
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Account disconnected
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/user/identities/{provider}/connect:
+    get:
+      tags:
+      - user
+      summary: Connect a login provider account
+      description: |-
+        Redirects the signed-in user to the login provider (HTTP 302). The signed `login_csrf`
+        cookie carries the user and the session, and the callback attaches the account to this user
+        only while that session is still active. API keys cannot call this endpoint.
+      operationId: providerConnect
+      parameters:
+      - name: provider
+        in: path
+        description: Login provider ID from `GET /config`
+        required: true
+        schema:
+          type: string
+      responses:
+        '302':
+          description: Redirect to the login provider
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -15274,6 +15390,22 @@ components:
       - all
       - skip
       - auto
+    ConnectedLoginProvider:
+      type: object
+      required:
+      - id
+      - label
+      - connected
+      - can_disconnect
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        connected:
+          type: boolean
+        can_disconnect:
+          type: boolean
     ConnectionDirection:
       type: string
       enum:
@@ -17297,6 +17429,8 @@ components:
       - name
       - email
       - is_oidc
+      - has_password
+      - login_providers
       - managed
       properties:
         username:
@@ -17307,6 +17441,12 @@ components:
           type: string
         is_oidc:
           type: boolean
+        has_password:
+          type: boolean
+        login_providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectedLoginProvider'
         managed:
           type: boolean
     GithubAppManifestRequest:
@@ -18048,6 +18188,16 @@ components:
           format: int64
           minimum: 0
         preview:
+          type: string
+    LoginProviderInfo:
+      type: object
+      required:
+      - id
+      - label
+      properties:
+        id:
+          type: string
+        label:
           type: string
     MakeCacheRequest:
       type: object
@@ -19987,7 +20137,8 @@ components:
       required:
       - version
       - oidc_enabled
-      - oidc_required
+      - login_providers
+      - password_login_enabled
       - registration_enabled
       - email_verification_enabled
       - smtp_enabled
@@ -20009,7 +20160,11 @@ components:
           - 'null'
         oidc_enabled:
           type: boolean
-        oidc_required:
+        login_providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/LoginProviderInfo'
+        password_login_enabled:
           type: boolean
         registration_enabled:
           type: boolean
