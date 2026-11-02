@@ -49,6 +49,7 @@ mod m20261112_000952_cached_path_file_hash_index;
 mod m20261113_000000_drop_project_exec_enabled;
 mod m20261114_000000_user_identity;
 mod m20261115_000000_drop_cached_path_file_hash_index;
+mod m20261116_000000_derivation_output_verified_by_upstream;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -123,6 +124,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261113_000000_drop_project_exec_enabled::Migration),
             Box::new(m20261114_000000_user_identity::Migration),
             Box::new(m20261115_000000_drop_cached_path_file_hash_index::Migration),
+            Box::new(m20261116_000000_derivation_output_verified_by_upstream::Migration),
         ]
     }
 }

@@ -8,9 +8,10 @@ use gradient_db::lookup::by_ids;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use gradient_core::{WorkerJob, WorkerJobPolicy};
 use gradient_db::CacheDb;
 use gradient_storage::NarStore;
-use gradient_types::ids::{CacheId, CachedPathId, ProjectId};
+use gradient_types::ids::{CacheId, CacheUpstreamId, CachedPathId, ProjectId};
 use gradient_types::*;
 use gradient_wire::transport::{
     Transport, external_arity_ok, may_consult_upstream_caches, pull_transport,
@@ -290,8 +291,26 @@ fn uncached_push_entry(path: &str) -> gradient_wire::types::CachedPath {
     }
 }
 
+#[derive(Clone, Copy)]
+struct AllowedUpstreams<'a> {
+    worker: &'a str,
+    policy: &'a dyn WorkerJobPolicy,
+}
+
+impl AllowedUpstreams<'_> {
+    fn allow(&self, public_key: Option<&str>) -> bool {
+        self.policy.allows(
+            self.worker,
+            WorkerJob::Substitution {
+                verifying_keys: &[public_key.map(str::to_owned)],
+            },
+        )
+    }
+}
+
 async fn extend_with_persisted_upstream(
     db: &CacheDb,
+    allowed: AllowedUpstreams<'_>,
     uncached_pairs: &[(String, String)],
     result: &mut Vec<gradient_wire::types::CachedPath>,
 ) -> HashSet<String> {
@@ -314,8 +333,24 @@ async fn extend_with_persisted_upstream(
         }
     };
 
+    let upstream_ids: Vec<CacheUpstreamId> =
+        rows.iter().filter_map(|r| r.verified_by_upstream).collect();
+    let upstreams = match by_ids::<ECacheUpstream, _>(db, &upstream_ids).await {
+        Ok(upstreams) => upstreams,
+        Err(e) => {
+            warn!(error = %e, "Lookup of persisted upstream key failed");
+            return served;
+        }
+    };
     let by_hash: HashMap<String, gradient_entity::derivation_output::Model> = rows
         .into_iter()
+        .filter(|r| {
+            let key = r
+                .verified_by_upstream
+                .and_then(|id| upstreams.get(&id))
+                .and_then(|u| u.public_key.as_deref());
+            allowed.allow(key)
+        })
         .filter_map(|r| Some((r.hash.clone()?, r)))
         .collect();
 
@@ -347,6 +382,7 @@ async fn extend_with_persisted_upstream(
 
 async fn extend_with_upstream_results(
     db: &CacheDb,
+    allowed: AllowedUpstreams<'_>,
     upstream_query: &Arc<Semaphore>,
     project_id: ProjectId,
     mapper: &StorePathMapper,
@@ -362,7 +398,10 @@ async fn extend_with_upstream_results(
     )
     .await
     {
-        Ok(eps) => eps,
+        Ok(eps) => eps
+            .into_iter()
+            .filter(|e| allowed.allow(e.public_key.as_deref()))
+            .collect::<Vec<_>>(),
         Err(e) => {
             warn!(%project_id, error = %e, "CacheQuery upstream lookup failed");
             return;
@@ -390,12 +429,12 @@ async fn extend_with_upstream_results(
     )
     .await;
 
-    result.extend(batch.found.into_iter().map(|(hash, cp)| {
+    result.extend(batch.found.into_iter().map(|(hash, found)| {
         gradient_wire::types::CachedPath {
             path: requested
                 .get(hash.as_str())
-                .map_or(cp.path.clone(), |p| (*p).to_owned()),
-            ..cp
+                .map_or(found.path.path.clone(), |p| (*p).to_owned()),
+            ..found.path
         }
     }));
 
@@ -477,6 +516,7 @@ async fn extend_with_gradient_proto_results(
 
 async fn query(
     handles: &SessionHandles,
+    worker: &str,
     project_id: ProjectId,
     paths: &[String],
     nar_sizes: &[Option<u64>],
@@ -566,8 +606,13 @@ async fn query(
         .map(|(h, p)| (h.to_string(), p.to_string()))
         .collect();
 
+    let allowed = AllowedUpstreams {
+        worker,
+        policy: &*handles.worker_job_policy,
+    };
     let resolved =
-        extend_with_persisted_upstream(&handles.cache_db, &uncached_pairs, &mut result).await;
+        extend_with_persisted_upstream(&handles.cache_db, allowed, &uncached_pairs, &mut result)
+            .await;
     let uncached_pairs: Vec<(String, String)> = uncached_pairs
         .into_iter()
         .filter(|(h, _)| !resolved.contains(h))
@@ -579,6 +624,7 @@ async fn query(
     if let Some(mapper) = project_mapper(&handles.db, project_id).await {
         extend_with_upstream_results(
             &handles.cache_db,
+            allowed,
             &handles.upstream_query,
             project_id,
             &mapper,
@@ -586,15 +632,17 @@ async fn query(
             &mut result,
         )
         .await;
-        extend_with_gradient_proto_results(
-            &handles.cache_db,
-            &handles.db.config,
-            project_id,
-            &mapper,
-            &uncached_pairs,
-            &mut result,
-        )
-        .await;
+        if allowed.allow(None) {
+            extend_with_gradient_proto_results(
+                &handles.cache_db,
+                &handles.db.config,
+                project_id,
+                &mapper,
+                &uncached_pairs,
+                &mut result,
+            )
+            .await;
+        }
     }
 
     Ok(result)
@@ -735,13 +783,17 @@ fn parse_stored_paths(paths: &[String]) -> Vec<(StorePath, &str)> {
 
 pub(super) async fn handle_cache_query(
     handles: &SessionHandles,
+    worker: &str,
     project_id: ProjectId,
     paths: &[String],
     nar_sizes: &[Option<u64>],
     mode: gradient_wire::types::QueryMode,
     external: bool,
 ) -> Result<Vec<gradient_wire::types::CachedPath>, DbErr> {
-    query(handles, project_id, paths, nar_sizes, mode, external).await
+    query(
+        handles, worker, project_id, paths, nar_sizes, mode, external,
+    )
+    .await
 }
 
 fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
@@ -781,6 +833,98 @@ mod tests {
         cache_state_builder().build()
     }
 
+    #[derive(Debug)]
+    struct TrustedUpstreamOnly;
+
+    impl WorkerJobPolicy for TrustedUpstreamOnly {
+        fn allows(&self, worker: &str, job: WorkerJob<'_>) -> bool {
+            worker != "restricted"
+                || matches!(job, WorkerJob::Substitution { verifying_keys }
+                    if verifying_keys.iter().all(|key| key.as_deref() == Some(TRUSTED_KEY)))
+        }
+    }
+
+    const TRUSTED_KEY: &str = "trusted-1:t0t0";
+    const A_OUT: &str = "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0";
+    const B_OUT: &str = "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0";
+
+    #[tokio::test]
+    async fn a_restricted_worker_hears_only_of_upstream_hits_its_job_policy_allows() {
+        use gradient_entity::cache_upstream::CacheUpstreamKind;
+        use gradient_entity::project_cache::CacheSubscriptionMode;
+        use gradient_fixtures::shape::shape;
+
+        let (trusted, other) = (CacheUpstreamId::now_v7(), CacheUpstreamId::now_v7());
+        let db = shape()
+            .evaluation(gradient_types::ids::EvaluationId::now_v7())
+            .derivation("d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0-a.drv")
+            .cache_available()
+            .output(A_OUT)
+            .verified_by(trusted)
+            .derivation("d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1-b.drv")
+            .cache_available()
+            .output(B_OUT)
+            .verified_by(other)
+            .into_cache(CacheId::now_v7())
+            .upstream(
+                trusted,
+                "https://trusted.invalid",
+                TRUSTED_KEY,
+                CacheUpstreamKind::Http,
+                CacheSubscriptionMode::ReadWrite,
+                true,
+            )
+            .upstream(
+                other,
+                "https://other.invalid",
+                "other-1:o0o0",
+                CacheUpstreamKind::Http,
+                CacheSubscriptionMode::ReadWrite,
+                true,
+            )
+            .into_database()
+            .await;
+        let state = TestState::new()
+            .worker_db(db.connection())
+            .web_db(db.connection())
+            .cache_db(db.connection())
+            .worker_job_policy(Arc::new(TrustedUpstreamOnly))
+            .build();
+        let handles = SessionHandles::from_state(&state);
+        let mut answered = Vec::new();
+        for worker in ["restricted", "other"] {
+            for (hash, name) in [(A_OUT, "a"), (B_OUT, "b")] {
+                let path = format!("/nix/store/{hash}-{name}");
+                let found = query(
+                    &handles,
+                    worker,
+                    ProjectId::nil(),
+                    &[path],
+                    &[],
+                    QueryMode::Pull,
+                    true,
+                )
+                .await
+                .unwrap()
+                .iter()
+                .any(|c| c.cached && c.url.is_some());
+                answered.push((worker, name, found));
+            }
+        }
+
+        assert_eq!(
+            answered,
+            vec![
+                ("restricted", "a", true),
+                ("restricted", "b", false),
+                ("other", "a", true),
+                ("other", "b", true),
+            ]
+        );
+        drop((handles, state));
+        db.finish().await;
+    }
+
     #[tokio::test]
     async fn a_push_query_with_mismatched_sizes_is_an_error() {
         let state = make_state();
@@ -788,6 +932,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
+                "w1",
                 ProjectId::nil(),
                 &paths,
                 &[],
@@ -825,6 +970,7 @@ mod tests {
         let sizes = [Some(1024), Some(8 * 1024 * 1024 * 1024)];
         let result = query(
             &SessionHandles::from_state(&state),
+            "w1",
             ProjectId::nil(),
             &paths,
             &sizes,
@@ -850,6 +996,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
+                "w1",
                 ProjectId::nil(),
                 &paths,
                 &[],
@@ -867,6 +1014,7 @@ mod tests {
         let state = make_state();
         let err = handle_cache_query(
             &SessionHandles::from_state(&state),
+            "w1",
             ProjectId::nil(),
             &["/nix/store/a-a".to_owned(), "/nix/store/b-b".to_owned()],
             &[],
@@ -885,6 +1033,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
+                "w1",
                 ProjectId::nil(),
                 &[],
                 &[],
@@ -898,6 +1047,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
+                "w1",
                 ProjectId::nil(),
                 &[],
                 &[],
@@ -911,6 +1061,7 @@ mod tests {
         assert!(
             query(
                 &SessionHandles::from_state(&state),
+                "w1",
                 ProjectId::nil(),
                 &[],
                 &[],
@@ -929,6 +1080,7 @@ mod tests {
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
         let result = query(
             &SessionHandles::from_state(&state),
+            "w1",
             ProjectId::nil(),
             &paths,
             &[],
@@ -953,6 +1105,7 @@ mod tests {
 
         let result = query(
             &SessionHandles::from_state(&state),
+            "w1",
             ProjectId::nil(),
             &paths,
             &[],
@@ -977,6 +1130,7 @@ mod tests {
         ];
         let result = query(
             &SessionHandles::from_state(&state),
+            "w1",
             ProjectId::nil(),
             &paths,
             &[None; 2],

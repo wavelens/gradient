@@ -57,6 +57,7 @@ fn demoted_output(
 
     let mut active = o.into_active_model();
     active.external_url = Set(None);
+    active.verified_by_upstream = Set(None);
     active.nar_hash = Set(None);
     active.file_hash = Set(None);
     active.file_size = Set(None);

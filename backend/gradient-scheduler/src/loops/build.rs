@@ -226,6 +226,7 @@ struct BuildAssignMaps {
     direct_inputs: HashMap<DerivationId, Vec<RequiredPath>>,
     input_realisations: HashMap<DerivationId, Vec<Realisation>>,
     self_outputs: HashMap<DerivationId, Vec<DerivationOutput>>,
+    missing_output_keys: HashMap<DerivationId, HashMap<String, Option<String>>>,
     output_nar_sizes: HashMap<DerivationId, Option<u64>>,
     closure_sizes: HashMap<DerivationId, Option<i64>>,
     computed_sizes: HashMap<DerivationId, i64>,
@@ -477,14 +478,25 @@ impl BuildAssignMaps {
 
         let mut self_outputs: HashMap<DerivationId, Vec<DerivationOutput>> = HashMap::new();
         let mut output_nar_sizes: HashMap<DerivationId, Option<u64>> = HashMap::new();
-        for o in gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
+        let output_rows = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationOutput::find()
                 .filter(CDerivationOutput::Derivation.is_in(chunk))
                 .all(db)
                 .await
         })
-        .await?
-        {
+        .await?;
+        let substituted: HashSet<DerivationId> = shared_builds
+            .iter()
+            .filter(|b| b.cache_available)
+            .map(|b| b.derivation)
+            .collect();
+        let substituted_outputs: Vec<&MDerivationOutput> = output_rows
+            .iter()
+            .filter(|o| substituted.contains(&o.derivation))
+            .collect();
+        let missing_output_keys =
+            verifying_keys_of_missing_outputs(db, &substituted_outputs).await?;
+        for o in output_rows {
             let path = o.store_path().map(|p| p.full()).unwrap_or_default();
             let size = output_nar_sizes.entry(o.derivation).or_insert(Some(0));
             *size = size.zip(o.nar_size).map(|(sum, n)| sum + n.max(0) as u64);
@@ -513,6 +525,7 @@ impl BuildAssignMaps {
             direct_inputs,
             input_realisations,
             self_outputs,
+            missing_output_keys,
             output_nar_sizes,
             closure_sizes,
             computed_sizes,
@@ -558,6 +571,20 @@ impl BuildAssignMaps {
         outputs
             .into_iter()
             .filter(|o| !shared_build.unneeded_outputs.contains(&o.name))
+            .collect()
+    }
+
+    fn verifying_keys(
+        &self,
+        derivation: DerivationId,
+        outputs: &[DerivationOutput],
+    ) -> Vec<Option<String>> {
+        let Some(missing) = self.missing_output_keys.get(&derivation) else {
+            return Vec::new();
+        };
+        outputs
+            .iter()
+            .filter_map(|o| missing.get(&o.name).cloned())
             .collect()
     }
 
@@ -643,6 +670,11 @@ impl BuildAssignMaps {
             requirement,
         };
 
+        let verifying_keys = if substitute {
+            self.verifying_keys(shared_build.derivation, &build_job.build.outputs)
+        } else {
+            Vec::new()
+        };
         let required_paths = if anywhere {
             Vec::new()
         } else {
@@ -686,6 +718,7 @@ impl BuildAssignMaps {
             ifd: self.ifd_lifted.contains(&shared_build.id),
             pname: derivation.pname.clone(),
             substitute,
+            verifying_keys,
         };
 
         (job_id, pending)
@@ -695,6 +728,34 @@ impl BuildAssignMaps {
 enum AssignOutcome {
     Assign(String, Box<PendingBuildJob>),
     Skip(&'static str),
+}
+
+async fn verifying_keys_of_missing_outputs(
+    db: &WorkerDb,
+    outputs: &[&MDerivationOutput],
+) -> anyhow::Result<HashMap<DerivationId, HashMap<String, Option<String>>>> {
+    let hashes: Vec<String> = outputs.iter().filter_map(|o| o.hash.clone()).collect();
+    let stored = gradient_db::cached_paths::stored_by_hash(db, &hashes).await?;
+    let upstream_ids: Vec<CacheUpstreamId> = outputs
+        .iter()
+        .filter_map(|o| o.verified_by_upstream)
+        .collect();
+    let upstreams = by_ids::<ECacheUpstream, _>(db, &upstream_ids).await?;
+
+    let mut keys: HashMap<DerivationId, HashMap<String, Option<String>>> = HashMap::new();
+    for o in outputs
+        .iter()
+        .filter(|o| !o.hash.as_ref().is_some_and(|h| stored.contains_key(h)))
+    {
+        let key = o
+            .verified_by_upstream
+            .and_then(|id| upstreams.get(&id))
+            .and_then(|u| u.public_key.clone());
+        keys.entry(o.derivation)
+            .or_default()
+            .insert(o.name.clone(), key);
+    }
+    Ok(keys)
 }
 
 async fn input_realisations(

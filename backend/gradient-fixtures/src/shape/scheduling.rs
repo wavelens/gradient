@@ -338,6 +338,15 @@ impl Shape {
         self
     }
 
+    pub fn verified_by(mut self, upstream: CacheUpstreamId) -> Self {
+        let derivation = self.derivations[self.current_derivation()].id;
+        self.outputs
+            .iter_mut()
+            .filter(|o| o.derivation == derivation)
+            .for_each(|o| o.verified_by_upstream = Some(upstream));
+        self
+    }
+
     pub fn eval_cache(mut self, fingerprint: &str) -> Self {
         let cache = self.caches[self.cache.expect("name a cache first")].id;
         self.eval_caches.push(eval_cache_store::Model {

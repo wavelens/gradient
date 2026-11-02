@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Context, Result};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_pool::session_port::SessionSignal;
-use gradient_pool::{InputRequest, WorkerCaps, WorkerInfo};
+use gradient_pool::{InputRequest, WorkerCaps, WorkerInfo, WorkerJob};
 use gradient_types::*;
 use gradient_wire::types::InputOutcome;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -178,7 +178,10 @@ impl Scheduler {
         workers: &mut [WorkerInfo],
         load: &mut HashMap<String, usize>,
     ) -> bool {
-        for worker in fetch_workers(workers, load, fetch) {
+        for worker in fetch_workers(workers, load, fetch)
+            .into_iter()
+            .filter(|w| self.job_policy.allows(w, WorkerJob::InputFetch))
+        {
             let fetch_id = uuid::Uuid::now_v7().to_string();
             let signal = SessionSignal::FetchInput {
                 fetch_id: fetch_id.clone(),

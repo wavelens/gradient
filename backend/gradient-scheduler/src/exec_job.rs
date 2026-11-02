@@ -182,6 +182,10 @@ impl PendingExecJob {
             .is_none_or(|projects| projects.contains(&self.project_id));
         let requirement = self.requirement_with(&inventory.defaults);
         authorized
+            && peer
+                .caps
+                .allowed_jobs
+                .contains(gradient_pool::WorkerJob::Exec)
             && peer.caps.can_run_exec(&requirement)
             && exec::has_usable_warm_guest(&requirement, inventory)
     }

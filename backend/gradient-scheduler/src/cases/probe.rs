@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use gradient_entity::UnresolvableProjectMapping;
 use gradient_entity::build::BuildStatus;
-use gradient_entity::cache_upstream::CacheUpstreamKind;
+use gradient_entity::cache_upstream::{self, CacheUpstreamKind};
 use gradient_entity::derivation_build;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::evaluation_message::MessageLevel;
@@ -155,6 +155,12 @@ async fn p03_a_signed_hit_on_every_output_makes_the_build_a_passthrough() {
         ),
         (true, true, true, true, Some("")),
         "after 1: output(A, out)"
+    );
+    let upstreams = case.db.rows::<cache_upstream::Entity>().await;
+    assert_eq!(
+        output.verified_by_upstream,
+        upstreams.first().map(|u| u.id),
+        "after 1: output(A, out).verified_by_upstream"
     );
     assert_eq!(
         build_state(&case.sb(A).await),

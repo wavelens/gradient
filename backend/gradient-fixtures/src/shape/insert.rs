@@ -13,8 +13,8 @@ use gradient_entity::{
     project_cache, task, task_action, task_flake_input_override, task_trigger, user,
     worker_registration,
 };
-use sea_orm::sea_query::OnConflict;
-use sea_orm::{DatabaseConnection, EntityTrait, IntoActiveModel};
+use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter};
 
 use super::Shape;
 
@@ -49,7 +49,23 @@ pub(super) async fn all(shape: Shape, db: &DatabaseConnection) {
     insert!(db, derivation_build::Entity, shape.shared_builds);
     insert!(db, derivation_dependency::Entity, shape.edges);
     insert!(db, cached_path::Entity, shape.cached_paths);
-    insert!(db, derivation_output::Entity, shape.outputs);
+    let verified: Vec<_> = shape
+        .outputs
+        .iter()
+        .filter_map(|o| Some((o.id, o.verified_by_upstream?)))
+        .collect();
+    insert!(
+        db,
+        derivation_output::Entity,
+        shape
+            .outputs
+            .into_iter()
+            .map(|o| derivation_output::Model {
+                verified_by_upstream: None,
+                ..o
+            })
+            .collect::<Vec<_>>()
+    );
     insert!(db, feature::Entity, shape.features);
     insert!(db, derivation_feature::Entity, shape.derivation_features);
     insert!(db, build_job::Entity, shape.jobs);
@@ -58,6 +74,17 @@ pub(super) async fn all(shape: Shape, db: &DatabaseConnection) {
     insert!(db, project_cache::Entity, shape.project_caches);
     insert!(db, cached_path_signature::Entity, shape.signatures);
     insert!(db, cache_upstream::Entity, shape.upstreams);
+    for (output, upstream) in verified {
+        derivation_output::Entity::update_many()
+            .col_expr(
+                derivation_output::Column::VerifiedByUpstream,
+                Expr::value(upstream),
+            )
+            .filter(derivation_output::Column::Id.eq(output))
+            .exec(db)
+            .await
+            .unwrap_or_else(|error| panic!("derivation_output::Entity: {error}"));
+    }
     insert!(db, cluster_job::Entity, shape.clusters);
     insert!(db, cluster_member::Entity, shape.members);
     insert!(db, eval_split::Entity, shape.eval_splits);

@@ -13,6 +13,7 @@ pub mod upstream_source;
 
 pub use extensions::ServerExtensions;
 pub use gradient_graph::Graph;
+pub use gradient_pool::{WorkerJob, WorkerJobPolicy};
 pub use login_provider::{
     AuthorizeRequest, CodeExchange, ExternalIdentity, LoginMethods, LoginProvider, LoginRefusal,
     MatchRule,

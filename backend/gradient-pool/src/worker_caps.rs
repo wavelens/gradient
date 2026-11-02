@@ -62,6 +62,7 @@ pub struct WorkerCaps {
     pub zone: Option<String>,
     pub endpoint: Option<String>,
     pub exec: Option<ExecInventory>,
+    pub allowed_jobs: crate::AllowedJobs,
 }
 
 impl WorkerCaps {

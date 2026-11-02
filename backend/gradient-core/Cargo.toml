@@ -25,6 +25,7 @@ gradient-wire = { workspace = true }
 gradient-util = { workspace = true }
 gradient-storage = { workspace = true }
 gradient-notify = { workspace = true }
+gradient-pool = { workspace = true }
 gradient-db = { workspace = true }
 gradient-git-host = { workspace = true }
 gradient-sources = { workspace = true }

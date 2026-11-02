@@ -2839,6 +2839,7 @@ dependencies = [
  "gradient-graph",
  "gradient-migration",
  "gradient-notify",
+ "gradient-pool",
  "gradient-sources",
  "gradient-state",
  "gradient-storage",

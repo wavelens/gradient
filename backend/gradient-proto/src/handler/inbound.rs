@@ -1308,6 +1308,7 @@ impl RpcContext {
         trace!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, external, "CacheQuery");
         let answer = handle_cache_query(
             &self.handles,
+            &self.peer_id,
             project_id,
             &paths,
             &nar_sizes,
@@ -1492,6 +1493,7 @@ pub(in crate::handler) mod fixture {
             ifd: false,
             pname: None,
             substitute: false,
+            verifying_keys: Vec::new(),
         })
     }
 

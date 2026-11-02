@@ -13,6 +13,7 @@ use gradient_wire::types::{
     BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities, GuestSize, JobKind,
 };
 
+use crate::job_policy::{AllowedJobs, EveryJobAllowed, WorkerJobPolicy};
 use crate::peer_auth::PeerAuth;
 use crate::session_port::{SessionPort, SessionSignal};
 use crate::worker_state::{Active, AssignedJob, Draining, TypedWorker, WorkerShared};
@@ -51,14 +52,28 @@ impl std::fmt::Debug for WorkerSlot {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct WorkerPool {
     workers: HashMap<String, WorkerSlot>,
+    job_policy: Arc<dyn WorkerJobPolicy>,
+}
+
+impl Default for WorkerPool {
+    fn default() -> Self {
+        Self::with_job_policy(Arc::new(EveryJobAllowed))
+    }
 }
 
 impl WorkerPool {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_job_policy(job_policy: Arc<dyn WorkerJobPolicy>) -> Self {
+        Self {
+            workers: HashMap::new(),
+            job_policy,
+        }
     }
 
     pub fn is_connected(&self, id: &str) -> bool {
@@ -169,6 +184,7 @@ impl WorkerPool {
                 zone: s.zone.clone(),
                 endpoint: s.endpoint.clone(),
                 exec: s.exec_inventory(),
+                allowed_jobs: AllowedJobs::of(id, &self.job_policy),
             }
         })
     }
