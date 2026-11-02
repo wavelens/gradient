@@ -55,15 +55,8 @@ pub async fn check_evaluation_done(
         .await?
         || crate::exec_jobs::any_exec_job_failed(db, evaluation_id).await?;
 
-    let eval_error_messages = EEvaluationMessage::find()
-        .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
-        .filter(
-            CEvaluationMessage::Level.eq(gradient_entity::evaluation_message::MessageLevel::Error),
-        )
-        .all(&ctx.worker_db)
-        .await?;
-
-    let target = if !any_failed && eval_error_messages.is_empty() {
+    let eval_errors = eval_error_count(ctx, evaluation_id).await?;
+    let target = if !any_failed && eval_errors == 0 {
         EvaluationStatus::Completed
     } else {
         EvaluationStatus::Failed
@@ -72,12 +65,34 @@ pub async fn check_evaluation_done(
         %evaluation_id,
         ?target,
         any_failed,
-        eval_errors = eval_error_messages.len(),
+        eval_errors,
         "evaluation finished"
     );
 
     update_evaluation_status(ctx, eval, target).await?;
     Ok(())
+}
+
+pub async fn settle_without_builds(ctx: &DbContext, eval: MEvaluation) -> Result<(), DbErr> {
+    let target = if eval_error_count(ctx, eval.id).await? == 0 {
+        EvaluationStatus::Completed
+    } else {
+        EvaluationStatus::Failed
+    };
+
+    update_evaluation_status(ctx, eval, target).await?;
+    Ok(())
+}
+
+async fn eval_error_count(ctx: &DbContext, evaluation_id: EvaluationId) -> Result<usize, DbErr> {
+    Ok(EEvaluationMessage::find()
+        .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
+        .filter(
+            CEvaluationMessage::Level.eq(gradient_entity::evaluation_message::MessageLevel::Error),
+        )
+        .all(&ctx.worker_db)
+        .await?
+        .len())
 }
 
 fn in_build_phase(eval: &MEvaluation) -> bool {

@@ -1863,6 +1863,7 @@ export interface PatchTaskRequest {
   retry_failed_builds?: boolean | null;
   multi_node_evaluation?: boolean | null;
   exec_enabled?: boolean | null;
+  only_evaluate?: boolean | null;
 }
 
 export interface PatchTeamRequest {
@@ -2399,6 +2400,7 @@ export interface TaskResponse {
   retry_failed_builds: boolean;
   multi_node_evaluation: boolean;
   exec_enabled: boolean;
+  only_evaluate: boolean;
   can_edit: boolean;
   can_trigger: boolean;
 }

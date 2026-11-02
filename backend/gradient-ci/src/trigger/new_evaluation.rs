@@ -109,6 +109,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         source_comment,
         started_by,
         walk_mode,
+        only_evaluate: task.only_evaluate,
         ..Default::default()
     }
     .into_active_model();

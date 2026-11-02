@@ -414,6 +414,7 @@ fn export_task(
         retry_failed_builds: task.retry_failed_builds,
         multi_node_evaluation: task.multi_node_evaluation,
         exec_enabled: task.exec_enabled,
+        only_evaluate: task.only_evaluate,
         flake_input_overrides: HashMap::new(),
         actions: Vec::new(),
     }

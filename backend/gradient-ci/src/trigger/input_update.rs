@@ -150,6 +150,7 @@ pub async fn create_input_update_eval<C: ConnectionTrait>(
         concurrent: true,
         branch: gradient_types::branch_key::NO_BRANCH.to_owned(),
         trigger,
+        only_evaluate: task.only_evaluate,
         created_at: now,
         updated_at: now,
         ..Default::default()

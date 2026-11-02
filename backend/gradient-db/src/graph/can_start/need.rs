@@ -141,6 +141,7 @@ pub(crate) static RECOUNT_WANTED_SQL: LazyLock<String> = LazyLock::new(|| {
 pub(crate) fn wanted_by_its_evaluation(entry_point: &str) -> String {
     format!(
         "JOIN evaluation ev ON ev.id = {entry_point}.evaluation AND ev.status <> {aborted} \
+         AND NOT ev.only_evaluate \
          AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = {entry_point}.evaluation \
                          AND bj.derivation = {entry_point}.derivation AND bj.aborted)",
         aborted = crate::sql::status::eval(EvaluationStatus::Aborted),
@@ -575,7 +576,7 @@ mod tests {
                 "seeds(derivation) AS MATERIALIZED (SELECT r.derivation \
                  FROM (SELECT DISTINCT derivation FROM region) r \
                  WHERE EXISTS (SELECT 1 FROM entry_point ep JOIN evaluation ev \
-                 ON ev.id = ep.evaluation AND ev.status <> 7 \
+                 ON ev.id = ep.evaluation AND ev.status <> 7 AND NOT ev.only_evaluate \
                  AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = ep.evaluation \
                  AND bj.derivation = ep.derivation AND bj.aborted) \
                  WHERE ep.derivation = r.derivation) \

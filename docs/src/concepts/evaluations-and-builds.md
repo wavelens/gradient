@@ -25,6 +25,8 @@ flowchart LR
 
 Evaluations skip every dependency subtree that earlier evaluations already recorded. To walk the whole closure again, run **Full rewalk** from the task menu. This starts a new evaluation.
 
+Task option **Only Evaluate** (`only_evaluate`, off by default) can end each evaluation right after Evaluating. Such evaluations build nothing and start no exec jobs.
+
 The evaluation page groups builds by status, with each entry point above its dependencies. The merged live log and **Abort** appear on the same page. Right-click a build to reach **Graph**, **Show Job** (the [Job Board](../ui/job-board.md) assignment), **Artefacts** and **Download Log**.
 
 ## Summary

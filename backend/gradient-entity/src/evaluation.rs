@@ -356,6 +356,7 @@ pub struct Model {
     pub walk_mode: WalkMode,
     pub prioritized: bool,
     pub parent_exec_job: Option<ExecJobId>,
+    pub only_evaluate: bool,
 }
 
 impl Model {

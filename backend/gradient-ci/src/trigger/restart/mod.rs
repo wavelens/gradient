@@ -36,7 +36,11 @@ where
         .await?;
 
     let now = gradient_types::now();
-    let initial_status = restart_initial_status(db, &prev_entry_points).await?;
+    let initial_status = if prev_eval.only_evaluate {
+        EvaluationStatus::Completed
+    } else {
+        restart_initial_status(db, &prev_entry_points).await?
+    };
 
     let new_eval_id = EvaluationId::now_v7();
     let aevaluation = MEvaluation {
@@ -51,6 +55,7 @@ where
         created_at: now,
         updated_at: now,
         flake_source: prev_eval.flake_source.clone(),
+        only_evaluate: prev_eval.only_evaluate,
         ..Default::default()
     }
     .into_active_model();

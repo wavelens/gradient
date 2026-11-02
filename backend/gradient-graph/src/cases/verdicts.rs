@@ -60,6 +60,30 @@ async fn v01_stream_completion_moves_a_blocked_evaluation_to_building_and_queues
     case.finish().await;
 }
 
+#[tokio::test]
+async fn v01b_an_only_evaluate_evaluation_completes_without_wanting_its_entry_points() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(shape().evaluation(e1).only_evaluate()).await;
+
+    case.walk(case.tasked(e1, vec![with_attr(drv(A, &[]), "pkg.a")]).await)
+        .await;
+    stream_completed(&case, e1).await;
+
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Completed,
+        "after 2: evaluation(E1).status"
+    );
+    let a = case.sb(A).await;
+    assert_eq!(
+        (a.status, a.wanted),
+        (BuildStatus::Created, false),
+        "after 2: sb(A) is Created, wanted false"
+    );
+    case.zero_drift("step 2").await;
+    case.finish().await;
+}
+
 fn finished_entry_point(evaluation: EvaluationId) -> Shape {
     shape()
         .evaluation(evaluation)

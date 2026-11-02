@@ -87,6 +87,8 @@ pub struct StateTask {
     #[serde(default)]
     pub exec_enabled: bool,
     #[serde(default)]
+    pub only_evaluate: bool,
+    #[serde(default)]
     pub flake_input_overrides: HashMap<String, StateFlakeInputOverride>,
     #[serde(default)]
     pub actions: Vec<StateAction>,

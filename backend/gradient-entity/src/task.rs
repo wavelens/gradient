@@ -70,6 +70,7 @@ pub struct Model {
     pub retry_failed_builds: bool,
     pub multi_node_evaluation: bool,
     pub exec_enabled: bool,
+    pub only_evaluate: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

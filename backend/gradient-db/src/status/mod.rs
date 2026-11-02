@@ -20,7 +20,9 @@ pub use derivation_build_status::{
     update_derivation_build_status,
 };
 pub use effects::{TransitionChange, collapse_transitions, emit_transition_effects};
-pub use eval_finalize::{check_evaluation_done, finalize_evals_for_derivations};
+pub use eval_finalize::{
+    check_evaluation_done, finalize_evals_for_derivations, settle_without_builds,
+};
 pub use evaluation_build::{
     BuildRefusal, abort_build_for_all_evaluations, abort_evaluation_build, retry_evaluation_build,
     wanted_again,

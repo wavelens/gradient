@@ -108,6 +108,7 @@ export class TaskSettingsComponent implements OnInit {
     retry_failed_builds: boolean;
     multi_node_evaluation: boolean;
     exec_enabled: boolean;
+    only_evaluate: boolean;
   } = {
     display_name: '',
     description: '',
@@ -120,6 +121,7 @@ export class TaskSettingsComponent implements OnInit {
     retry_failed_builds: true,
     multi_node_evaluation: false,
     exec_enabled: false,
+    only_evaluate: false,
   };
 
   concurrencyOptions: { label: string; value: ConcurrencyPolicy; disabled?: boolean }[] = [
@@ -162,6 +164,7 @@ export class TaskSettingsComponent implements OnInit {
           retry_failed_builds: task.retry_failed_builds,
           multi_node_evaluation: task.multi_node_evaluation,
           exec_enabled: task.exec_enabled,
+          only_evaluate: task.only_evaluate,
         };
         this.loading.set(false);
       },
