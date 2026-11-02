@@ -6,7 +6,7 @@
 
 <gr-page-layout title="Caches" subtitle="Manage your build caches">
   @if (canCreateCache) {
-    <button slot="actions" grButton label="Create Cache" icon="add" (click)="openCreateDialog()"></button>
+    <app-create-cache-button slot="actions" (create)="openCreateDialog()" />
   }
   @if (loading()) {
     <gr-loading-spinner message="Loading caches..." />
@@ -64,9 +64,11 @@
         icon="storage"
         title="No caches yet"
         [message]="canCreateCache ? 'Create your first cache to store build artifacts' : 'No caches have been created yet'"
-        [actionLabel]="canCreateCache ? 'Create Cache' : ''"
-        (actionClick)="canCreateCache && openCreateDialog()"
-      />
+      >
+        @if (canCreateCache) {
+          <app-create-cache-button slot="action" (create)="openCreateDialog()" />
+        }
+      </gr-empty-state>
     }
   }
 

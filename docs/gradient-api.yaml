@@ -21339,6 +21339,7 @@ components:
       - name
       - email
       - superuser
+      - can_create_cache
       properties:
         id:
           type: string
@@ -21354,6 +21355,8 @@ components:
           type:
           - string
           - 'null'
+        can_create_cache:
+          type: boolean
     UserRequest:
       type: object
       required:

@@ -6,15 +6,12 @@
 
 <gr-page-layout [breadcrumb]="breadcrumb()" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
   @if (canCreateCache()) {
-    <button slot="actions"
+    <app-create-cache-button slot="actions"
         *appWritable="access()"
-        grButton
-        label="Create Cache"
-        icon="add"
         severity="secondary"
-        [appManagedDisable]="access()"
-        (click)="showCreateDialog.set(true)"
-      ></button>
+        [access]="access()"
+        (create)="showCreateDialog.set(true)"
+      />
   }
   <button slot="actions"
       *appWritable="access()"
@@ -38,15 +35,12 @@
           (click)="openSubscribeDialog()"
           ></button>
         @if (canCreateCache()) {
-          <button slot="action"
+          <app-create-cache-button slot="action"
             *appWritable="access()"
-            grButton
-            label="Create Cache"
-            icon="add"
             severity="secondary"
-            [appManagedDisable]="access()"
-            (click)="showCreateDialog.set(true)"
-            ></button>
+            [access]="access()"
+            (create)="showCreateDialog.set(true)"
+          />
         }
       </gr-empty-state>
     } @else {

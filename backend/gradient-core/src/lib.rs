@@ -5,12 +5,14 @@
  */
 
 pub mod build_logs;
+pub mod cache_creation_limit;
 pub mod extensions;
 pub mod login_provider;
 pub mod state_root;
 pub mod upstream;
 pub mod upstream_source;
 
+pub use cache_creation_limit::{CacheCreationLimit, NoCacheCreationLimit};
 pub use extensions::ServerExtensions;
 pub use gradient_graph::Graph;
 pub use gradient_pool::{WorkerJob, WorkerJobPolicy};

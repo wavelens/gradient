@@ -46,6 +46,7 @@ impl ErrorCode {
     pub const SUPERUSER_REQUIRED: Self = Self("superuser_required");
     pub const CREATION_DISABLED: Self = Self("creation_disabled");
     pub const FORBIDDEN_SOURCE_IP: Self = Self("forbidden_source_ip");
+    pub const CACHE_LIMIT_REACHED: Self = Self("cache_limit_reached");
 
     pub const INVALID_ALLOWED_IP: Self = Self("invalid_allowed_ip");
 
