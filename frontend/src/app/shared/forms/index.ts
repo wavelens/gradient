@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+export * from './create-cache-button.component';
 export * from './create-cache-dialog.component';
 export * from './ip-network';
 export * from './name-availability';

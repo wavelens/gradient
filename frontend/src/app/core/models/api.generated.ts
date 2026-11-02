@@ -2655,6 +2655,7 @@ export interface UserInfoResponse {
   email: string;
   superuser: boolean;
   last_seen_version?: string | null;
+  can_create_cache: boolean;
 }
 
 export interface UserRequest {

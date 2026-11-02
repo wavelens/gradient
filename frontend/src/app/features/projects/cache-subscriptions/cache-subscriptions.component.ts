@@ -30,7 +30,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
-import { CreateCacheDialogComponent } from '@shared/forms';
+import { CreateCacheButtonComponent, CreateCacheDialogComponent } from '@shared/forms';
 import { AccessState, CacheSubscriptionItem } from '@core/models';
 
 @Component({
@@ -55,6 +55,7 @@ import { AccessState, CacheSubscriptionItem } from '@core/models';
     RowListComponent,
     RowComponent,
     TooltipDirective,
+    CreateCacheButtonComponent,
     CreateCacheDialogComponent,
   ],
   templateUrl: './cache-subscriptions.component.html',

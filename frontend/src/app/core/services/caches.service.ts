@@ -5,8 +5,9 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, tap } from 'rxjs';
 import { ApiService } from './api.service';
+import { AuthService } from './auth.service';
 import {
   Paginated,
   MemberItem,
@@ -43,6 +44,7 @@ export interface NarListQuery {
 @Injectable({ providedIn: 'root' })
 export class CachesService {
   private api = inject(ApiService);
+  private auth = inject(AuthService);
 
   checkCacheNameAvailable(name: string): Observable<boolean> {
     return this.api.get<boolean>(`caches/available?name=${encodeURIComponent(name)}`);
@@ -61,7 +63,7 @@ export class CachesService {
   }
 
   createCache(data: MakeCacheRequest): Observable<string> {
-    return this.api.put<string>('caches', data);
+    return this.api.put<string>('caches', data).pipe(tap(() => this.auth.reloadUser()));
   }
 
   setCachePublic(cache: string): Observable<string> {
@@ -77,7 +79,7 @@ export class CachesService {
   }
 
   deleteCache(cache: string): Observable<void> {
-    return this.api.delete<void>(`caches/${cache}`);
+    return this.api.delete<void>(`caches/${cache}`).pipe(tap(() => this.auth.reloadUser()));
   }
 
   activateCache(cache: string): Observable<void> {

@@ -95,10 +95,11 @@ pub struct UserInfoResponse {
     pub email: String,
     pub superuser: bool,
     pub last_seen_version: Option<String>,
+    pub can_create_cache: bool,
 }
 
-impl From<&MUser> for UserInfoResponse {
-    fn from(user: &MUser) -> Self {
+impl UserInfoResponse {
+    fn new(user: &MUser, can_create_cache: bool) -> Self {
         Self {
             id: user.id.to_string(),
             username: user.username.clone(),
@@ -106,6 +107,7 @@ impl From<&MUser> for UserInfoResponse {
             email: user.email.clone(),
             superuser: user.superuser,
             last_seen_version: user.last_seen_version.clone(),
+            can_create_cache,
         }
     }
 }
@@ -365,9 +367,15 @@ pub async fn get_search(
     responses((status = OK, description = "User info", body = UserInfoResponse), WebError)
 )]
 pub async fn get(
+    state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<UserInfoResponse>>> {
-    let user_info = UserInfoResponse::from(&user);
+    let can_create_cache = state
+        .extensions
+        .cache_creation_limit
+        .allows_another_cache(&user)
+        .await?;
+    let user_info = UserInfoResponse::new(&user, can_create_cache);
 
     let res = BaseResponse {
         error: false,

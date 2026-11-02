@@ -65,13 +65,17 @@ pub(crate) enum CacheRefusal {
     NarTooLarge { max: u64 },
     #[error("invalid store hash")]
     InvalidStoreHash,
+    #[error(
+        "This account reached the maximum number of caches. Ask an administrator to raise the limit."
+    )]
+    CacheLimitReached,
 }
 
 impl Refusal for CacheRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
             Self::AuthenticationRequired => RefusalStatus::Unauthorized,
-            Self::AnonymousAccessDisabled => RefusalStatus::Forbidden,
+            Self::AnonymousAccessDisabled | Self::CacheLimitReached => RefusalStatus::Forbidden,
             Self::SignaturePending | Self::NotRecorded(_) => RefusalStatus::NotFound,
             Self::NarTooLarge { .. } => RefusalStatus::PayloadTooLarge,
             Self::ConnectionCapacityReached | Self::TooManyConnectionsFromIp => {
@@ -109,6 +113,7 @@ impl Refusal for CacheRefusal {
             | Self::StagedNarSizeMismatch { .. }
             | Self::NarVerificationFailed { .. }
             | Self::InvalidStoreHash => ErrorCode::INPUT_VALIDATION,
+            Self::CacheLimitReached => ErrorCode::CACHE_LIMIT_REACHED,
             other => other.status().default_code(),
         }
     }

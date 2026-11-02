@@ -37,16 +37,16 @@ export class ManagedDisableDirective implements OnInit {
     this.renderer.setProperty(node, 'disabled', disable);
     if (disable) {
       this.renderer.setAttribute(node, 'aria-disabled', 'true');
-      this.renderer.setAttribute(node, 'title', this.tooltip(this.state!));
+      this.renderer.setAttribute(node, 'title', accessDisabledReason(this.state!));
     } else {
       this.renderer.removeAttribute(node, 'aria-disabled');
       this.renderer.removeAttribute(node, 'title');
     }
     this.ngControl?.valueAccessor?.setDisabledState?.(disable);
   }
+}
 
-  private tooltip(state: AccessState): string {
-    if (state.managed) return 'Managed by Nix - edit via declarative config';
-    return 'You have read-only access';
-  }
+export function accessDisabledReason(state: AccessState): string {
+  if (state.managed) return 'Managed by Nix - edit via declarative config';
+  return 'You have read-only access';
 }

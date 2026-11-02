@@ -175,6 +175,14 @@ pub async fn put(
     JsonBody(body): JsonBody<MakeCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     require_create_permission(state.config.permissions.create_cache, &user)?;
+    if !state
+        .extensions
+        .cache_creation_limit
+        .allows_another_cache(&user)
+        .await?
+    {
+        return Err(CacheRefusal::CacheLimitReached.into());
+    }
 
     let max_storage_gb = body.max_storage_gb.unwrap_or(0);
     validate_max_storage_gb(max_storage_gb)?;

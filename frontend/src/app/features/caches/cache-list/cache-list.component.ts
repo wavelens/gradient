@@ -12,7 +12,6 @@ import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import {
   BadgeComponent,
-  ButtonComponent,
   CardGridComponent,
   EmptyStateComponent,
   IconComponent,
@@ -20,7 +19,7 @@ import {
   NavCardComponent,
   PageLayoutComponent,
 } from '@gradient/ui/ui';
-import { CreateCacheDialogComponent } from '@shared/forms';
+import { CreateCacheButtonComponent, CreateCacheDialogComponent } from '@shared/forms';
 import { Cache } from '@core/models';
 
 @Component({
@@ -29,7 +28,6 @@ import { Cache } from '@core/models';
   imports: [
     CommonModule,
     RouterModule,
-    ButtonComponent,
     LoadingSpinnerComponent,
     EmptyStateComponent,
     IconComponent,
@@ -37,6 +35,7 @@ import { Cache } from '@core/models';
     NavCardComponent,
     CardGridComponent,
     BadgeComponent,
+    CreateCacheButtonComponent,
     CreateCacheDialogComponent,
   ],
   templateUrl: './cache-list.component.html',

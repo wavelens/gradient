@@ -125,6 +125,14 @@ impl TestState {
         self
     }
 
+    pub fn cache_creation_limit(
+        mut self,
+        limit: Arc<dyn gradient_core::CacheCreationLimit>,
+    ) -> Self {
+        self.extensions.cache_creation_limit = limit;
+        self
+    }
+
     pub fn build(self) -> Arc<ServerState> {
         let mut config = RuntimeConfig::from_cli(&self.cli).expect("valid test config");
         for change in self.config_changes {

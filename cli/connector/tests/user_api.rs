@@ -12,7 +12,8 @@ async fn get_user_returns_info() {
     Mock::given(method("GET"))
         .and(path("/api/v1/user"))
         .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-            "id": "u1", "username": "alice", "name": "Alice", "email": "alice@example.com", "superuser": false
+            "id": "u1", "username": "alice", "name": "Alice", "email": "alice@example.com", "superuser": false,
+            "can_create_cache": true
         }))))
         .mount(&server)
         .await;

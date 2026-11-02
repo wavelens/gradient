@@ -34,7 +34,7 @@ function setup(lastSeen: string | null) {
     ],
   });
   const service = TestBed.inject(WhatsNewService);
-  user.set({ id: 'u1', username: 'alice', name: 'Alice', email: 'a@x', superuser: false, last_seen_version: lastSeen });
+  user.set({ id: 'u1', username: 'alice', name: 'Alice', email: 'a@x', superuser: false, last_seen_version: lastSeen, can_create_cache: true });
   TestBed.tick();
   return { service, put };
 }
