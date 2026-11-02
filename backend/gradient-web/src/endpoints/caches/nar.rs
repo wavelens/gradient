@@ -26,7 +26,6 @@ use gradient_sources::get_hash_from_url;
 use gradient_types::events::cache::NarFetched;
 use gradient_types::*;
 use gradient_util::shutdown::Shutdown;
-use sea_orm::ConnectionTrait;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -65,8 +64,7 @@ pub async fn nar(
     .await?;
 
     let mapper = state.cache_mapper(ctx.cache.id);
-    let effective_hash =
-        resolve_effective_hash_db(&state.web_db, &mapper, ctx.cache.id, &path_hash).await?;
+    let effective_hash = stored_hash(&mapper, &path_hash)?;
     let (size, stream) = super::helpers::fetch_nar_stream(
         &state.web_db,
         &state.nar_storage,
@@ -169,21 +167,6 @@ fn named_first(sources: Vec<UpstreamSource>, named: Uuid) -> Vec<UpstreamSource>
     ordered
 }
 
-pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
-    db: &C,
-    mapper: &StorePathMapper,
-    cache: CacheId,
-    path_hash: &str,
-) -> WebResult<String> {
-    if let Some(hash) =
-        gradient_db::cached_paths::store_hash_served_by_file_hash(db, cache, path_hash).await?
-    {
-        return Ok(hash);
-    }
-
-    stored_hash(mapper, path_hash)
-}
-
 fn spawn_fetch_stamp(shutdown: &Shutdown, worker_db: &WorkerDb, cache_id: CacheId, hash: String) {
     let worker_db = worker_db.clone();
     shutdown.spawn(async move {
@@ -203,7 +186,6 @@ fn upstream_nar_path(path: &str, query: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::mock_db;
 
     fn upstream_row(id: u128, url: Option<&str>) -> MCacheUpstream {
         MCacheUpstream {
@@ -285,59 +267,6 @@ mod tests {
             upstream_bases(&rows, uuid::Uuid::from_u128(1)),
             vec!["https://a.example"]
         );
-    }
-
-    const FILE_HASH_NIX32: &str = "0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73";
-
-    fn no_served_path() -> Vec<std::collections::BTreeMap<&'static str, sea_orm::Value>> {
-        Vec::new()
-    }
-
-    fn identity() -> StorePathMapper {
-        StorePathMapper::for_cache(Arc::new(IdentityMapping), CacheId::nil())
-    }
-
-    fn runtime() -> tokio::runtime::Runtime {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-    }
-
-    #[test]
-    fn an_unknown_file_hash_is_not_found() {
-        let db = mock_db()
-            .append_query_results([no_served_path()])
-            .into_connection();
-
-        let result = runtime().block_on(resolve_effective_hash_db(
-            &db,
-            &identity(),
-            CacheId::nil(),
-            FILE_HASH_NIX32,
-        ));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn a_store_hash_in_a_nar_url_is_mapped_inbound() {
-        let db = mock_db()
-            .append_query_results([no_served_path()])
-            .into_connection();
-        let mapper = StorePathMapper::for_cache(
-            Arc::new(gradient_entity::RotatedHashMapping),
-            CacheId::nil(),
-        );
-
-        let effective = runtime()
-            .block_on(resolve_effective_hash_db(
-                &db,
-                &mapper,
-                CacheId::nil(),
-                gradient_entity::EXAMPLE_ORIGINAL_HASH,
-            ))
-            .expect("resolve should succeed");
-        assert_eq!(effective, gradient_entity::EXAMPLE_STORED_HASH);
     }
 
     #[test]

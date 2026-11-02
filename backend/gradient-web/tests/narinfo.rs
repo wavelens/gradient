@@ -252,6 +252,10 @@ async fn a_narinfo_names_the_path_the_client_asked_for() {
         "{body}"
     );
     assert!(
+        body.contains(&format!("URL: nar/{original}.nar.zst\n")),
+        "{body}"
+    );
+    assert!(
         body.contains(&format!("References: {original}-hello\n")),
         "{body}"
     );

@@ -15,7 +15,7 @@ pub fn get_hash_from_url(url: String) -> Result<String, SourceError> {
         return Err(SourceError::InvalidPath);
     }
 
-    if path_split[0].len() != 32 && path_split[0].len() != 52 {
+    if path_split[0].len() != 32 {
         return Err(SourceError::InvalidPath);
     }
 

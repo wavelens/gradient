@@ -17,7 +17,7 @@ const DEBUG_OUTPUT_SUFFIX: &str = "-debug";
 crate::sql! {
     /// The `cached_path_signature` join is the access gate.
     /// Its row is proving that the caller's authorised cache is holding the path.
-    LOOKUP_SQL = "SELECT cp.file_hash AS file_hash, d.member AS member \
+    LOOKUP_SQL = "SELECT cp.hash AS hash, d.member AS member \
      FROM debug_info d \
      JOIN cached_path cp ON cp.id = d.cached_path \
      JOIN cached_path_signature s ON s.cached_path = cp.id AND s.cache = $1 \
@@ -39,7 +39,7 @@ crate::sql! {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DebugInfoTarget {
-    pub file_hash: String,
+    pub hash: String,
     pub member: String,
 }
 
@@ -57,7 +57,7 @@ pub async fn lookup_for_cache<C: ConnectionTrait>(
     };
 
     Ok(Some(DebugInfoTarget {
-        file_hash: row.try_get("", "file_hash")?,
+        hash: row.try_get("", "hash")?,
         member: row.try_get("", "member")?,
     }))
 }
